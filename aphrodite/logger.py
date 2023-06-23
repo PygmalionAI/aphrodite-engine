@@ -45,6 +45,5 @@ def _setup_logger():
 # guaranteed by the Python GIL.
 _setup_logger()
 
-
 def init_logger(name: str):
     return logging.getLogger(name)
