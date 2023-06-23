@@ -196,7 +196,7 @@ def _get_and_verify_dtype(
     dtype = dtype.lower()
     if dtype == "auto":
         if config_dtype == torch.float32:
-            if torch.cuda_is_bf16_supported():
+            if torch.cuda.is_bf16_supported():
                 torch_dtype = torch.bfloat16
             else:
                 torch_dtype = torch.float16
