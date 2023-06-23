@@ -92,7 +92,7 @@ class Scheduler:
         blocks_to_swap_out: Dict[int, int] = {}
         blocks_to_copy: Dict[int, List[int]] = {}
 
-        now time.time()
+        now = time.time()
 
         """
         NOTE: We prioritize the sequence groups in the RUNNING state in order to
@@ -184,4 +184,190 @@ class Scheduler:
         )
         if not self.log_stats:
             return scheduler_outputs, prompt_group_ids
-            """WORK IN PROGRESS"""
+            
+        now = time.time()
+        if num_batched_tokens > 0:
+            self.num_input_tokens.append((now, num_batched_tokens))
+        elapsed_time = now - self.last_logging_time
+        if elapsed_time > __LOGGING_INTERVAL_SEC:
+            self.last_logging_time = now
+            self.num_input_tokens = [
+                (t, n) for t, n in self.num_input_tokens
+                if now - t < __LOGGING_INTERVAL_SEC
+            ]
+            if len(self.num_input_tokens) > 1:
+                total_num_tokens = sum(n for _, n in self.num_input_tokens[:-1])
+                window = now - self.num_input_tokens[0][0]
+                avg_throughput = total_num_tokens / window
+            else:
+                avg_throughput = 0.0
+
+            total_num_gpu_blocks = self.cache_config.num_gpu_blocks
+            num_free_gpu_blocks = self.block_manager.get_num_free_gpu_blocks()
+            num_used_gpu_blocks = total_num_gpu_blocks - num_free_gpu_blocks
+            gpu_cache_usage = num_used_gpu_blocks / total_num_gpu_blocks
+
+            total_num_cpu_blocks = self.cache_config.num_cpu_blocks
+            if total_num_cpu_blocks > 0:
+                num_free_cpu_blocks = self.block_manager.get_num_free_cpu_blocks()
+                num_used_cpu_blocks = total_num_cpu_blocks - num_free_cpu_blocks
+                cpu_cache_usage = num_used_cpu_blocks / total_num_cpu_blocks
+            else:
+                cpu_cache_usage = 0.0
+
+            logger.info(
+                f"Throughput: {avg_throughput:.1f} tokens/s "
+                f"Running: {len(self.running)} reqs, "
+                f"Swapped: {len(self.swapped)} reqs, "
+                f"Pending: {len(self.waiting)} reqs, "
+                f"GPU KV cache usage: {gpu_cache_usage * 100:.1f}%, "
+                f"CPU KV cache usage: {cpu_cache_usage * 100:.1f}%, ")
+        return scheduler_outputs, prompt_group_ids
+
+    def schedule(self) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs]:
+        """
+        NOTE: Schedule sequence groups. This function should call changes the internal states of the scheduler
+        like self.running, self.swapped, and self.waiting.
+        """
+        scheduler_outputs, prompt_group_ids = self._schedule()
+
+        seq_group_metadata_list: List[SequenceGroupMetadata] = []
+        for seq_group in self.running:
+            is_promot = seq_group.request_id in prompt_group_ids
+
+            seq_data: Dict[int, List[SequenceData]] = {}
+            block_tables: Dict[int, List[int]] = {}
+            for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
+                seq_id = seq.seq_id
+                seq_data[seq_id] = seq.data
+                block_tables[seq_id] = self.block_manager.get_block_table(seq)
+
+            seq_group_metadata = SequenceGroupMetadata(
+                request_id=seq_group.request_id,
+                is_prompt=is_prompt,
+                seq_data=seq_data,
+                sampling_params=seq_group.sampling_params,
+                block_tables=block_tables,
+            )
+            seq_group_metadata_list.append(seq_group_metadata)
+        return seq_group_metadata_list, scheduler_outputs
+
+    def update(
+        self,
+        seq_outputs: Dict[int, SequenceOutputs],
+    ) -> List[SequenceGroup]:
+        for seq_group in self.running:
+            for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
+                output = seq_outputs[seq.seq_id]
+                if seq.seq_id != output.parent_seq_id:
+                    self.block_manager.free(seq)
+                    parent_seq = seq_group.find(output.parent_seq_id)
+                    parent_seq.fork(seq)
+                    self.block_manager.fork(parent_seq, seq)
+            
+            for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
+                output = seq_outputs[seq.seq_id]
+                seq.append_token_id(output.output_token, output.logprobs)
+        return self.running.copy()
+
+    def free_seq(self, seq: Sequence, finish_status: SequenceStatus) -> None:
+        seq.status = finish_status
+        self.block_manager.free(seq)
+
+    def free_finished_seq_groups(self) -> None:
+        self.running = [
+            seq_group for seq_group in self.running
+            if not seq_group.is_finished()
+        ]
+
+    def _allocate(self, seq_group: SequenceGroup) -> None:
+        self.block_manager.allocate(seq_group)
+        for seq in seq_group.get_seqs():
+            seq.status = SequenceStatus.RUNNING
+
+    def _append_slot(
+        self,
+        seq_group: SequenceGroup,
+        blocks_to_copy: Dict[int, List[int]],
+    ) -> None:
+        for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
+            ret = self.block_manager.append_slot(seq)
+            if ret is not None:
+                src_block, dst_block = ret
+                if src_block in blocks_to_copy:
+                    blocks_to_copy[src_block].append(dst_block)
+                else:
+                    blocks_to_copy[src_block] = [dst_block]
+    
+    def _preempt(
+        self,
+        seq_group: SequenceGroup,
+        blocks_to_swap_out: Dict[int, int],
+        preemption_mode: Optional[PreemptionMode] = None,
+    ) -> None:
+        """
+        If preemption mode is not specified, we determine the mode as follows:
+        We use recomputation by default since it incurs lower overhead than
+        swapping. However, when the sequence group has multiple sequences
+        (e.g. beam search), recomputation is not supported. In a case like this,
+        we use swapping instead.
+        """
+        if preemption_mode is None:
+            seqs = seq_group.get_seqs(status=SequenceStatus.RUNNING)
+            if len(seqs) == 1:
+                preemption_mode = PreemptionMode.RECOMPUTE
+            else:
+                preemption_mode = PreemptionMode.SWAP
+        if preemption_mode == PreemptionMode.RECOMPUTE:
+            self._preempt_by_recompute(seq_group)
+        elif preemption_mode == PreemptionMode.SWAP:
+            self._preempt_by_swap(seq_group, blocks_to_swap_out)
+        else:
+            assert False, 'Invalid preemption mode.'
+
+    def _preempt_by_recompute(
+        self,
+        seq_group: SequenceGroup,
+    ) -> None:
+        seqs = seq_group.get_seqs(status=SequenceStatus.RUNNING)
+        assert len(seqs) == 1
+        for seq in seqs:
+            seq.status = SequenceStatus.WAITING
+            self.block_manager.free(seq)
+        self.waiting.insert(0, seq_group)
+
+    def _preempt_by_swap(
+        self,
+        seq_group: SequenceGroup,
+        blocks_to_swap_out: Dict[int, int],
+    ) -> None:
+        seqs = seq_group.get_seqs(status=SequenceStatus.RUNNING)
+        for seq in seqs:
+            seq.status = SequenceStatus.SWAPPED
+        self._swap_out(seq_group, blocks_to_swap_out)
+        self.swapped.append(seq_group)
+
+    def _swap_in(
+        self,
+        seq_group: SequenceGroup,
+        blocks_to_swap_in.update(mapping)
+        for seq in seq_group.get_seqs(status=SequenceStatus.SWAPPED):
+            seq.status = SequenceStatus.RUNNING
+    )
+
+    def _swap_out(
+        self,
+        seq_group: SequenceGroup,
+        blocks_to_swap_out: Dict[int, int],
+    ) -> None:
+        if not self.block_manager.can_swap_out(seq_group):
+            """
+            FIXME: Abort the sequence group instead of aborting the entire engine.
+            """
+            raise RuntimeError(
+                "Aborted due to the lack of CPU swap space. Please increase "
+                "the swap space to avoid this error. https://wiki.archlinux.org/title/Swap")
+        mapping = self.block_manager.swap_out(seq_group)
+        blocks_to_swap_out.update(mapping)
+        for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
+            seq.status = SequenceStatus.SWAPPED
