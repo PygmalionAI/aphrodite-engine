@@ -1,7 +1,7 @@
 """Sequence."""
 import copy
 import enum
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 
 from aphrodite.block import LogicalTokenBlock
 from aphrodite.sampling_params import SamplingParams
@@ -23,7 +23,7 @@ class SequenceStatus(enum.Enum):
         ]
 
     @staticmethod
-    def get_finished_reason(status: "SequenceStatus") -> Union[str, None]:
+    def get_finished_reason(status: "SequenceStatus") -> Optional[str]:
         if status == SequenceStatus.FINISHED_STOPPED:
             finish_reason = "stop"
         elif status == SequenceStatus.FINISHED_LENGTH_CAPPED:
@@ -150,7 +150,7 @@ class SequenceGroup:
         self.request_id = request_id
         self.seqs = seqs
         self.sampling_params = sampling_params
-        self.arrival_time = arrival_time
+        # self.arrival_time = arrival_time
 
     def get_seqs(
         self,

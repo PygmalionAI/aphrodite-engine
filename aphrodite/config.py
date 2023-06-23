@@ -12,7 +12,7 @@ logger = init_logger(__name__)
 _GiB = 1 << 30
 
 class ModelConfig:
-    """Configuration for the mode,.
+    """Configuration for the model.
 
     Args:
         model: Name or path of the HF model to use.
@@ -49,7 +49,7 @@ class ModelConfig:
         self,
         parallel_config: "ParallelConfig",
     ) -> None:
-        total_num_attention_heads = self.hf_config.total_num_attention_heads
+        total_num_attention_heads = self.hf_config.num_attention_heads
         tensor_parallel_size = parallel_config.tensor_parallel_size
         if total_num_attention_heads % tensor_parallel_size != 0:
             raise ValueError(
@@ -57,7 +57,7 @@ class ModelConfig:
                 " must be divisible by tensor parallel size "
                 f"({tensor_parallel_size}).")
 
-        total_num_hidden_layers = self.hf_config.total_num_hidden_layers
+        total_num_hidden_layers = self.hf_config.num_hidden_layers
         pipeline_parallel_size = parallel_config.pipeline_parallel_size
         if total_num_hidden_layers % pipeline_parallel_size != 0:
             raise ValueError(
@@ -65,7 +65,7 @@ class ModelConfig:
                 "must be divisible by pipeline parallel size "
                 f"({pipeline_parallel_size}).")
 
-    def get_hidden_size (self) -> int:
+    def get_hidden_size(self) -> int:
         return self.hf_config.hidden_size
 
     def get_head_size(self) -> int:
@@ -83,8 +83,7 @@ class CacheConfig:
     """Configuration for the KV cache.
     Args:
         block_size: Size of a cache block in number of tokens.
-        gpu_memory_utilization: Fraction of GPU memory to use for the
-            Aphrodite execution.
+        gpu_memory_utilization: Fraction of GPU memory to use for the Aphrodite execution.
         swap_space: Size of the CPU swap space per GPU (in GiB).
     """
 
@@ -105,7 +104,7 @@ class CacheConfig:
     def _verify_args(self) -> None:
         if self.gpu_memory_utilization > 1.0:
             raise ValueError(
-                "GPU memory utilization myust be less than 1.0. You passed "
+                "GPU memory utilization must be less than 1.0. You passed "
                 f"{self.gpu_memory_utilization} instead.")
 
     def _verify_with_parallel_config(
@@ -157,8 +156,6 @@ class ParallelConfig:
             raise NotImplementedError(
                 "Pipeline parallelism is not supported yet.")
 
-
-
 class SchedulerConfig:
     """Scheduler Configuration:
     Args:
@@ -185,7 +182,7 @@ _STR_DTYPE_TO_TORCH_DTYPE = {
 
 def _get_and_verify_dtype(
     config: PretrainedConfig,
-    dtype = str,
+    dtype: str,
 ) -> torch.dtype:
     """Note: getattr(confiog, "torch_dtype", torch.float32) is incorrect
     because config.torch_dtype can be None"""
@@ -194,35 +191,19 @@ def _get_and_verify_dtype(
         config_dtype = torch.float32
 
     dtype = dtype.lower()
+    # Check to see if dtype is a valid dtype *or* if it's auto
+    if dtype not in [*_STR_DTYPE_TO_TORCH_DTYPE.values(), "auto"]:
+        raise ValueError(f"Unknown dtype: {dtype}")
+    
+    # Obtain torch_dtype
     if dtype == "auto":
         if config_dtype == torch.float32:
-            if torch.cuda.is_bf16_supported():
-                torch_dtype = torch.bfloat16
-            else:
-                torch_dtype = torch.float16
+            # Cast to 16-bit precision, BF16 if available
+            torch_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+            logger.warning(f"Casting {config_dtype} to {torch_dtype}. Not recommended.")
         else:
             torch_dtype = config_dtype
-
     else:
-        if dtype not in _STR_DTYPE_TO_TORCH_DTYPE:
-            raise ValueError(f"Unknown dtype: {dtype}")
-        torch_dtype = _STR_DTYPE_TO_TORCH_DTYPE
+        torch_dtype = _STR_DTYPE_TO_TORCH_DTYPE[dtype]
 
-    if torch_dtype != config_dtype:
-        if torch_dtype == torch.float32:
-            pass
-        elif config_dtype == torch.float32:
-            pass
-        else:
-            logger.warning(f"Casting {config_dtype} to {torch_dtype}. Not recommended.")
-
-    if torch_dtype == torch.bfloat16:
-        bfloat16_support = torch.cuda.is_bf16_supported()
-        if bfloat16_support:
-            pass
-        else:
-            gpu_name = torch.cuda.get_device_name()
-            raise ValueError(
-                "Bfloat16 is only supported on Ampere+ GPUs with a compute capability "
-                f"of at least 8.0. Your {gpu_name} GPU does not support bfloat16.")
     return torch_dtype

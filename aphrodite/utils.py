@@ -10,7 +10,7 @@ class Device(enum.Enum):
     CPU = enum.auto()
 
 class Counter:
-    
+    '''A basic counter.'''
     def __init__(self, start: int = 0) -> None:
         self.counter = start
 
