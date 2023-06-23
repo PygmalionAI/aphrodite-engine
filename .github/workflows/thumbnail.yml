@@ -1,0 +1,20 @@
+name: Embed Thumbnail
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Embed Thumbnail
+        uses: JamesIves/github-pages-deploy-action@4.4.2
+        with:
+          branch: main
+          folder: "./assets"
+          file: "aphrodite.png"
