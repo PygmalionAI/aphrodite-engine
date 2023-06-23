@@ -1,5 +1,5 @@
 """A block manager that manages token blocks."""
-from typing import Dict, List, Optional, Set, Tuple, Any
+from typing import Dict, List, Optional, Set, Tuple
 from aphrodite.block import PhysicalTokenBlock
 from aphrodite.sequence import Sequence, SequenceGroup, SequenceStatus
 from aphrodite.utils import Device
