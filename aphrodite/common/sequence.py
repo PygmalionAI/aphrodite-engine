@@ -3,8 +3,8 @@ import copy
 import enum
 from typing import Dict, List, Optional
 
-from aphrodite.block import LogicalTokenBlock
-from aphrodite.sampling_params import SamplingParams
+from aphrodite.common.block import LogicalTokenBlock
+from aphrodite.common.sampling_params import SamplingParams
 
 class SequenceStatus(enum.Enum):
     WAITING = enum.auto()

@@ -1,8 +1,8 @@
 """A block manager that manages token blocks."""
 from typing import Dict, List, Optional, Set, Tuple
-from aphrodite.block import PhysicalTokenBlock
-from aphrodite.sequence import Sequence, SequenceGroup, SequenceStatus
-from aphrodite.utils import Device
+from aphrodite.common.block import PhysicalTokenBlock
+from aphrodite.common.sequence import Sequence, SequenceGroup, SequenceStatus
+from aphrodite.common.utils import Device
 
 class BlockAllocator:
     """Manages free physical token blocks for a device.

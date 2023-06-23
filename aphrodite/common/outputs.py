@@ -1,7 +1,7 @@
 """Generation outputs by the model."""
 from typing import Dict, List, Optional
 
-from aphrodite.sequence import SequenceGroup, SequenceStatus
+from aphrodite.common.sequence import SequenceGroup, SequenceStatus
 
 
 class ChatCompletionOutput:

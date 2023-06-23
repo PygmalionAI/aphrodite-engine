@@ -2,11 +2,11 @@ import enum
 import time
 from typing import Dict, List, Optional, Tuple
 
-from aphrodite.config import CacheConfig, SchedulerConfig
+from aphrodite.common.config import CacheConfig, SchedulerConfig
 from aphrodite.processing.block_manager import BlockSpaceManager
 from aphrodite.processing.policy import PolicyFactory
-from aphrodite.logger import init_logger
-from aphrodite.sequence import (Sequence, SequenceData, SequenceGroup,
+from aphrodite.common.logger import init_logger
+from aphrodite.common.sequence import (Sequence, SequenceData, SequenceGroup,
                                 SequenceGroupMetadata, SequenceOutputs, SequenceStatus)
 
 logger = init_logger(__name__)

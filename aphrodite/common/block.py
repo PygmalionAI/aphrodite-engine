@@ -1,7 +1,7 @@
 """Token blocks."""
 from typing import List
 
-from aphrodite.utils import Device
+from aphrodite.common.utils import Device
 
 _BLANK_TOKEN_ID = -1
 

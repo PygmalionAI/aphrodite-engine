@@ -4,8 +4,8 @@ from typing import Optional
 import torch
 from transformers import AutoConfig, PretrainedConfig
 
-from aphrodite.logger import init_logger
-from aphrodite.utils import get_cpu_memory
+from aphrodite.common.logger import init_logger
+from aphrodite.common.utils import get_cpu_memory
 
 logger = init_logger(__name__)
 

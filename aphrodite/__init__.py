@@ -1,5 +1,5 @@
-from aphrodite.outputs import ChatCompletionOutput, RequestOutput
-from aphrodite.sampling_params import SamplingParams
+from aphrodite.common.outputs import ChatCompletionOutput, RequestOutput
+from aphrodite.common.sampling_params import SamplingParams
 
 __version__ = "0.0"
 

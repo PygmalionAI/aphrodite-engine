@@ -1,6 +1,6 @@
 from typing import List
 
-from aphrodite.sequence import SequenceGroup
+from aphrodite.common.sequence import SequenceGroup
 
 class Policy:
 
