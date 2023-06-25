@@ -1,1 +1,1 @@
-The files here are from the NVIDIA [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) repository, but only with inference-related code.
+The files here are from the NVIDIA [Megatron-LM](https://github.com/NVIDIA/Megatron-LM/tree/main/megatron/core) repository, but only with inference-related code.
