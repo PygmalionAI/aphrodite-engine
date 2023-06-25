@@ -7,7 +7,7 @@ try:
 except ImportError:
     ray = None
 
-from aphrodite.common.config ParallelConfig
+from aphrodite.common.config import ParallelConfig
 
 DeviceID = Tuple[int, Optional[str], int] # rank, node resource (node IP), device id
 
