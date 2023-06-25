@@ -1,0 +1,1 @@
+The attention code here is adapted from NVIDIA's [FasterTransformer](https://github.com/NVIDIA/FasterTransformer). All rights reserved.
