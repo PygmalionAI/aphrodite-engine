@@ -20,7 +20,7 @@
 #pragma once
 #include "attention_generic.cuh"
 #include <cstdint>
-#inlcude "dtype_float32.cuh"
+#include "dtype_float32.cuh"
 
 #include <stdint.h>
 
