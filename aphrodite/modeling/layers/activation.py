@@ -22,7 +22,7 @@ class SiluAndMul(nn.Module):
     """An activation function for SwiGLU.
 
     The function computes x -> silu(x[:d]) * x[d:] where d = x.shape[1] // 2.
-    TODO(alpin): Add more activation functions, i.e. Sophia and Lion.
+    TODO(alpin): Add more activation functions.
     """
 
     def __init__(self):
