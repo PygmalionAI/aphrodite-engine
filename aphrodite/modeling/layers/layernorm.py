@@ -14,7 +14,7 @@ class RMSNorm(nn.Module):
     def __init__(
         self,
         hidden_size: int,
-        eps: float = 1e-6,
+        eps: float = 1e-8, # Refer to https://github.com/bzhangGo/rmsnorm/blob/2e726f1a3f106bb719056422f4f9b6aca03d3ce6/rmsnorm_torch.py#L13
     ) -> None:
         super().__init__()
         self.weight = nn.Parameter(torch.ones(hidden_size))

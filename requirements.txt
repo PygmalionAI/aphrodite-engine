@@ -1,6 +1,10 @@
+ninja
 psutil
+ray
+sentencepiece
 numpy
 torch >= 2.0.0
 transformers >= 4.28.0
+xformers >= 0.0.19
 mypy
 pytest
