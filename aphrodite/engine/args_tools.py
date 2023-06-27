@@ -78,7 +78,7 @@ class AsyncEngineArgs(EngineArgs):
         parser: argparse.ArgumentParser,
     ) -> argparse.ArgumentParser:
         parser = EngineArgs.add_cli_args(parser)
-        parser.add_argument('--engine-use-ray' action='store_true', help='use Ray to start the Aphrodite Engine in a separate process as the server process.')
+        parser.add_argument('--engine-use-ray', action='store_true', help='use Ray to start the Aphrodite Engine in a separate process as the server process.')
         parser.add_argument('--disable-log-requests', action='store_true', help='disable logging requests')
         return parser
 
