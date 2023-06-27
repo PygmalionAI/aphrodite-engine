@@ -25,7 +25,7 @@ Aphrodite builds upon and integrates the exceptional work from various projects,
 - Efficient K/V management with [PagedAttention](./aphrodite/modeling/layers/attention.py)
 - Optimized CUDA kernels for improved inference
 - Distributed inference
-- Multiple decoding algorithsm (e.g. parallel sampling, beam search)
+- Multiple decoding algorithms (e.g. parallel sampling, beam search)
 
 
 ## Requirements
