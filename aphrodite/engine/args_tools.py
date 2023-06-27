@@ -67,3 +67,18 @@ class EngineArgs:
         scheduler_config = SchedulerConfig(self.max_num_batched_tokens, self.max_num_seqs)
         return model_config, cache_config, parallel_config, scheduler_config
 
+
+@dataclass
+class AsyncEngineArgs(EngineArgs):
+    engine_use_ray: bool = False
+    disable_log_requests: bool = False
+
+    @staticmethod
+    def add_cli_args(
+        parser: argparse.ArgumentParser,
+    ) -> argparse.ArgumentParser:
+        parser = EngineArgs.add_cli_args(parser)
+        parser.add_argument('--engine-use-ray' action='store_true', help='use Ray to start the Aphrodite Engine in a separate process as the server process.')
+        parser.add_argument('--disable-log-requests', action='store_true', help='disable logging requests')
+        return parser
+
