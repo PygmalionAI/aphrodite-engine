@@ -19,13 +19,13 @@ def get_tokenizer(
         kwargs["use_fast"] = False
         logger.info(
             "OpenLLaMA models do not support the fast tokenizer. Using the slow tokenizer instead.")
-    elif config.model_type == "llama" and getattr(kwargs, "use_fast", True):
+    elif config.model_type == "llama" and kwargs.get( "use_fast", True):
         # Note: We're gonna use this since it doesn't throw errors with fast tokenizer.
         model_name = "hf-internal-testing/llama-tokenizer"
         logger.info(
             f"Using the LLaMA fast tokenizer in '{model_name}' to avoid potential protobuf errors.")
     elif config.model_type in _MODEL_TYPES_WITH_SLOW_TOKENIZER:
-        if getattr(kwargs, "use_fast", False) == True:
+        if kwargs.get("use_fast", False) == True:
             raise ValueError(
                 f"Cannot use the fast tokenizer for {config.model_type} due to bugs in the fast tokenizer.")
         logger.info(
