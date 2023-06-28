@@ -1,7 +1,6 @@
 from typing import Dict, List, Tuple
 import torch
 from xformers.ops.fmha.attn_bias import BlockDiagonalCausalMask
-
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import SequenceData
 
