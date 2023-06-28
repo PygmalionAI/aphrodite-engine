@@ -59,6 +59,11 @@ class LLM:
         self,
     ) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
         return self.aphrodite.tokenizer
+    
+    def set_tokenizer(
+        self,
+        tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast],
+    ) -> None: self.aphrodite.tokenizer = tokenizer
 
     def generate(
         self,
