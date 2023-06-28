@@ -2,7 +2,7 @@ import argparse
 import dataclasses
 from dataclasses import dataclass
 from typing import Optional, Tuple
-from aphrodite.common.config import CacheConfig, ModelConfig, PretrainedConfig, SchedulerConfig
+from aphrodite.common.config import CacheConfig, ModelConfig, PretrainedConfig, SchedulerConfig, ParallelConfig
 
 
 @dataclass

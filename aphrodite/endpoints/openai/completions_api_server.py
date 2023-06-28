@@ -305,7 +305,7 @@ if __name__ == "__main__":
     served_model = args.served_model_name or args.model
 
     engine_args = AsyncEngineArgs.from_cli_args(args)
-    engine = AsyncLLMEngine.from_engine_args(engine_args)
+    engine = AsyncAphrodite.from_engine_args(engine_args)
 
     # A separate tokenizer to map token IDs to strings.
     tokenizer = get_tokenizer(args.model)

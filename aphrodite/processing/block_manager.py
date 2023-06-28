@@ -64,8 +64,8 @@ class BlockSpaceManager:
         assert watermark >= 0.0
 
         self.watermark_blocks = int(watermark * num_gpu_blocks)
-        self.gpu_allocator = BlockAllocator(DEVICE.GPU, block_size, num_gpu_blocks)
-        self.cpu_allocator = BlockAllocator(DEVICE.CPU, block_size, num_cpu_blocks)
+        self.gpu_allocator = BlockAllocator(Device.GPU, block_size, num_gpu_blocks)
+        self.cpu_allocator = BlockAllocator(Device.CPU, block_size, num_cpu_blocks)
 
         self.block_tables: Dict[int, BlockTable] = {}
 
@@ -97,10 +97,10 @@ class BlockSpaceManager:
         for each sequence, we can append.
         """
         num_free_gpu_blocks = self.gpu_allocator.get_num_free_blocks()
-        num_seq = seq_group.num_seqs(status=SequenceStatus.RUNNING)
+        num_seqs = seq_group.num_seqs(status=SequenceStatus.RUNNING)
         return num_seqs <= num_free_gpu_blocks
 
-    def append_slot(self, req: Sequence) -> Optional[Tuple[int, int]]:
+    def append_slot(self, seq: Sequence) -> Optional[Tuple[int, int]]:
         """Allocate a physical slot for a new token"""
         logical_blocks = seq.logical_token_blocks
         block_table = self.block_tables[seq.seq_id]
@@ -188,12 +188,12 @@ class BlockSpaceManager:
                     cpu_block.ref_count += 1
                 else:
                     cpu_block = self.cpu_allocator.allocate
-                    maping[gpu_block] = cpu_block
+                    mapping[gpu_block] = cpu_block
                 new_block_table.append(cpu_block)
                 self.gpu_allocator.free(gpu_block)
             self.block_tables[seq.seq_id] = new_block_table
 
-        block_table_mapping = {
+        block_number_mapping = {
             gpu_block.block_number: cpu_block.block_number
             for gpu_block, cpu_block in mapping.items()
         }
@@ -201,7 +201,7 @@ class BlockSpaceManager:
 
     def _free_block_table(self, block_table: BlockTable) -> None:
         for block in block_table:
-            if block.device == DEVICE.GPU:
+            if block.device == Device.GPU:
                 self.gpu_allocator.free(block)
             else:
                 self.cpu_allocator.free(block)

@@ -62,7 +62,7 @@ class AsyncAphrodite:
         self.is_engine_running = False
         self.kicking_request_id = None
 
-        for request_outputs in request_outputs:
+        for request_output in request_outputs:
             request_id = request_output.request_id
             self.request_outputs[request_id] = request_output
             self.request_events[request_id].set()
@@ -122,7 +122,7 @@ class AsyncAphrodite:
                 continue
             request_event.clear()
 
-            request_event = self.request_outputs[request_id]
+            request_output = self.request_outputs[request_id]
             yield request_output
 
             if request_output.finished:

@@ -54,7 +54,7 @@ class Scheduler:
         self.log_stats = log_stats
 
         self.policy = PolicyFactory.get_policy(policy_name='fcfs')
-        self.block_manager = BlockingSpaceManager(
+        self.block_manager = BlockSpaceManager(
             block_size=self.cache_config.block_size,
             num_gpu_blocks=self.cache_config.num_gpu_blocks,
             num_cpu_blocks=self.cache_config.num_cpu_blocks,
@@ -237,7 +237,7 @@ class Scheduler:
 
         seq_group_metadata_list: List[SequenceGroupMetadata] = []
         for seq_group in self.running:
-            is_promot = seq_group.request_id in prompt_group_ids
+            is_prompt = seq_group.request_id in prompt_group_ids
 
             seq_data: Dict[int, List[SequenceData]] = {}
             block_tables: Dict[int, List[int]] = {}
@@ -354,10 +354,12 @@ class Scheduler:
     def _swap_in(
         self,
         seq_group: SequenceGroup,
+        blocks_to_swap_in: Dict[int, int],
+    ) -> None:
+        mapping = self.block_manager.swap_in(seq_group)
         blocks_to_swap_in.update(mapping)
         for seq in seq_group.get_seqs(status=SequenceStatus.SWAPPED):
             seq.status = SequenceStatus.RUNNING
-    )
 
     def _swap_out(
         self,

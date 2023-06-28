@@ -1,5 +1,5 @@
 """HuggingFace model downloader, uses `aria2c` by default"""
-import fileblock
+import filelock
 import glob
 import json
 import os

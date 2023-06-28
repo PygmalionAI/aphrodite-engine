@@ -59,7 +59,7 @@ class AphroditeEngine:
         self.tokenizer = get_tokenizer(model_config.model)
         self.seq_counter = Counter()
 
-        self.workers: List[Workers] = []
+        self.workers: List[Worker] = []
         assert len(stage_devices) == 1, "Only support one stage for now"
         for rank, node_resource, _ in stage_devices[0]:
             worker_cls = Worker
