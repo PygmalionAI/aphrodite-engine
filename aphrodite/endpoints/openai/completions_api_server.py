@@ -13,7 +13,7 @@ import uvicorn
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
-from aphrodite.engine.tokenizer_tools import get_tokenizer
+from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.endpoints.openai.protocol import *
 from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput

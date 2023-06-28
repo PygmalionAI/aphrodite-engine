@@ -9,6 +9,7 @@ from aphrodite.common.config import CacheConfig, ModelConfig, PretrainedConfig, 
 class EngineArgs:
     """Arguments and flags for the Aphrodite Engine"""
     model: str
+    tokenizer: Optional[str] = None
     download_dir: Optional[str] = None
     use_np_weights: bool = False
     use_dummy_weights: bool = False
@@ -25,6 +26,8 @@ class EngineArgs:
     disable_log_stats: bool = False
 
     def __post_init__(self):
+        if self.tokenizer is None:
+            self.tokenizer = self.model
         self.max_num_seqs = min(self.max_num_seqs, self.max_num_batched_tokens)
 
     @staticmethod
@@ -33,6 +36,7 @@ class EngineArgs:
     ) -> argparse.ArgumentParser:
         # Model arguments
         parser.add_argument('--model', type=str, default='PygmalionAI/pygmalion-6b', help='name or path of the huggingface model.')
+        parser.add_argument('--tokenizer', type=str, default=EngineArgs.tokenizer, help='name or path of the HF tokenizer to use')
         parser.add_argument('--download-dir', type=str, default=EngineArgs.download_dir, help='directory to download the model to. Default is HF cache directory.')
         parser.add_argument('--use-np-weights', action='store_true', help='save a numpy copy of the model for faster loading. Increases disk space usage.')
         parser.add_argument('--use-dummy-weights', action='store_true', help='use dummy values for model weights.')
@@ -61,7 +65,7 @@ class EngineArgs:
         self,
     ) -> Tuple[ModelConfig, CacheConfig, ParallelConfig, SchedulerConfig]:
         model_config = ModelConfig(
-            self.model, self.download_dir, self.use_np_weights, self.use_dummy_weights, self.dtype, self.seed)
+            self.model, self.tokenizer, self.download_dir, self.use_np_weights, self.use_dummy_weights, self.dtype, self.seed)
         cache_config = CacheConfig(self.block_size, self.gpu_memory_utilization, self.swap_space)
         parallel_config = ParallelConfig(self.pipeline_parallel_size, self.tensor_parallel_size, self.worker_use_ray)
         scheduler_config = SchedulerConfig(self.max_num_batched_tokens, self.max_num_seqs)

@@ -2,3 +2,4 @@ wip*
 __pycache__
 repos
 .vscode
+*.env

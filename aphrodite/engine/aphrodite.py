@@ -5,13 +5,14 @@ from aphrodite.common.config import CacheConfig, ModelConfig, ParallelConfig, Sc
 from aphrodite.processing.scheduler import Scheduler
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.ray_tools import DeviceID, initialize_cluster, ray
-from aphrodite.engine.tokenizer_tools import detokenize_incrementally, get_tokenizer
 from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import Sequence, SequenceGroup, SequenceStatus
+from aphrodite.transformers_utils.tokenizer import detokenize_incrementally, get_tokenizer
 from aphrodite.common.utils import Counter
 from aphrodite.task_handler.worker import Worker
+
 
 logger = init_logger(__name__)
 
@@ -41,6 +42,7 @@ class AphroditeEngine:
         logger.info(
             "Initializing Aphrodite Engine with config: "
             f"model={model_config.model!r}, "
+            f"tokenizer={model_config.tokenizer!r}, "
             f"dtype={model_config.dtype}, "
             f"use_dummy_weights={model_config.use_dummy_weights}, "
             f"download_dir={model_config.download_dir!r}, "
@@ -56,7 +58,7 @@ class AphroditeEngine:
         self.log_stats = log_stats
         self._verify_args()
 
-        self.tokenizer = get_tokenizer(model_config.model)
+        self.tokenizer = get_tokenizer(model_config.tokenizer)
         self.seq_counter = Counter()
 
         self.workers: List[Worker] = []
