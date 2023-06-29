@@ -45,7 +45,6 @@ Basically, anything with a compute capability of 7.0 or higher. Here's a full li
 | 3070 Ti | 8.6 | 3080      | 8.6 | 3080 Ti | 8.6 |
 | 3090    | 8.6 | 3090 Ti   | 8.6 | 4070 Ti | 8.9 |
 | 4080    | 8.9 | 4090      | 8.9 |         |     |
-|         |     |           |     |         |     |
 
 > `*` `CC`: Compute Capability
 
