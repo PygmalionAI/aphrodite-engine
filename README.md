@@ -51,13 +51,14 @@ Basically, anything with a compute capability of 7.0 or higher. Here's a full li
 If your GPU isn't listed here, you won't be able to run Aphrodite.
 
 ## Usage
-***Might not be usable yet.***
+***Currently not working, but this is how you'd run it once it's fixed.**
 - Clone the repository:
   ```sh
   git clone https://github.com/PygmalionAI/aphrodite-engine && cd aphrodite-engine
   ```
 - Install the package:
   ```
+  pip install -r requirements.txt
   pip install -e .
   ```
 - Example usage:
