@@ -30,9 +30,56 @@ Aphrodite builds upon and integrates the exceptional work from various projects,
 
 ## Requirements
 
-You will likely need a CUDA version of at least 11.0, and a Compute Capability of at least `7, 0`. CUDA 12.0 is unsupported, so please switch to 11.8!
+- Operating System: Linux
+- Python: at least 3.8
 
-**Linux-only**
+## Supported GPUs
+
+Basically, anything with a compute capability of 7.0 or higher. Here's a full list of supported consumer GPUs:
+
+| GPU     | CC  | GPU       | CC  | GPU     | CC  |
+| ------- | --- | --------- | --- | ------- | --- |
+| 2060    | 7.5 | 2070      | 7.5 | 2080    | 7.5 |
+| 2080 Ti | 7.5 | Titan RTX | 7.5 | 1650 Ti | 7.5 |
+| 3060    | 8.6 | 3060 Ti   | 8.6 | 3070    | 8.6 |
+| 3070 Ti | 8.6 | 3080      | 8.6 | 3080 Ti | 8.6 |
+| 3090    | 8.6 | 3090 Ti   | 8.6 | 4070 Ti | 8.9 |
+| 4080    | 8.9 | 4090      | 8.9 |         |     |
+|         |     |           |     |         |     |
+
+> `*` `CC`: Compute Capability
+
+If your GPU isn't listed here, you won't be able to run Aphrodite.
+
+## Usage
+***Might not be usable yet.***
+- Clone the repository:
+  ```sh
+  git clone https://github.com/PygmalionAI/aphrodite-engine && cd aphrodite-engine
+  ```
+- Install the package:
+  ```
+  pip install -e .
+  ```
+- Example usage:
+  ```py
+  from aphrodite import LLM, SamplingParams
+
+  prompts = [
+    "What is a man? A",
+    "The sun is a wondrous body, like a magnificent",
+    "All flesh is grass and all the comeliness thereof",
+  ]
+  sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
+
+  llm = LLM(model="PygmalionAI/pygmalion-350m")
+  outputs = llm.generate(prompts, sampling_params)
+  for output in outputs:
+    prompt = output.prompt
+    generated_text = output.outputs[0].text
+    print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
+  ```
+
 
 ## Contributing
 We accept PRs! There will likely be a few typos or other errors we've failed to catch, so please let us know either via an issue or make a Pull Request.
