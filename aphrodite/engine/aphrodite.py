@@ -58,7 +58,7 @@ class AphroditeEngine:
         self.log_stats = log_stats
         self._verify_args()
 
-        self.tokenizer = get_tokenizer(model_config.tokenizer)
+        self.tokenizer = get_tokenizer(model_config.tokenizer, model_config.tokenizer_mode)
         self.seq_counter = Counter()
 
         self.workers: List[Worker] = []
