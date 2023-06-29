@@ -144,7 +144,7 @@ def get_requirements() -> List[str]:
 
 setuptools.setup(
     name="aphrodite-engine",
-    version=find_version(get_path("vllm", "__init__.py")),
+    version=find_version(get_path("aphrodite", "__init__.py")),
     author="PygmalionAI",
     license="AGPL 3.0",
     description="The inference engine for PygmalionAI models",
