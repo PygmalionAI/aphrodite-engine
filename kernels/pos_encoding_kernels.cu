@@ -1,7 +1,6 @@
 /*
 GPT-NeoX rotary embedding. Credits to EleutherAI.
 */
-#include <cstdint>
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 
@@ -17,6 +16,7 @@ __global__ void rotary_embedding_kernel(
     const int stride,
     const int num_heads,
     const int head_size) {
+    // Each thread block is responsible for one token
     const int token_idx = blockIdx.x;
     int64_t pos = positions[token_idx];
     const scalar_t* cache_ptr = cos_sin_cache + pos * rot_dim;
@@ -29,7 +29,7 @@ __global__ void rotary_embedding_kernel(
 
         const int rot_offset = i % embed_dim;
         const int x_index = rot_offset;
-        const int y_index - embed_dim + rot_offset;
+        const int y_index = embed_dim + rot_offset;
         
         const int out_x = token_idx * stride + head_idx * head_size + x_index;
         const int out_y = token_idx * stride + head_idx * head_size + y_index;
@@ -49,7 +49,7 @@ __global__ void rotary_embedding_kernel(
     }
 }
 
-}
+} // namespace aphrodite
 
 void rotary_embedding(
     torch::Tensor& positions,

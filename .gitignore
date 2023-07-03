@@ -3,3 +3,4 @@ __pycache__
 repos
 .vscode
 *.env
+c_cpp_properties.json

@@ -1,7 +1,3 @@
-#include <cstdint>
-#include <pstl/glue_execution_defs.h>
-#include <sched.h>
-#include <sys/cdefs.h>
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 
@@ -35,6 +31,7 @@ void swap_blocks(
 
   const int64_t block_size_in_bytes = src.element_size() * src[0].numel();
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  // NOTE: This can be slow if the number of blocks is large.
   for (const auto& pair : block_mapping) {
     int64_t src_block_number = pair.first;
     int64_t dst_block_number = pair.second;
@@ -46,13 +43,12 @@ void swap_blocks(
         block_size_in_bytes,
         memcpy_type,
         stream);
-    }
+  }
 }
 
 namespace aphrodite {
 
 // Grid: (num_layers, num_pairs)
-
 template<typename scalar_t>
 __global__ void copy_blocks_kernel(
     int64_t* key_cache_ptrs,
@@ -70,68 +66,75 @@ __global__ void copy_blocks_kernel(
     const int src_block_offset = src_block_number * numel_per_block;
     const int dst_block_offset = dst_block_number * numel_per_block;
     for (int i = threadIdx.x; i < numel_per_block; i += blockdim.x) {
-        int src_offset = src_block_offset + i;
-        int dst_offset = dst_block_number + 1;
-        value_cache[dst_offset] = value_cache[src_offset];
-    }
+      int src_offset = src_block_offset + i;
+      int dst_offset = dst_block_number + i;
+      key_cache[dst_offset] = key_cache[src_offset];
+  }
+    for (int i = threadIdx.x; i < numel_per_block; i += blockDim.x) {
+      int src_offset = src_block_offset + i;
+      int dst_offset = dst_block_number + i;
+      value_cache[dst_offset] = value_cache[src_offset];
+  }
 }
 
-}
+} // namespace aphrodite
 
 void copy_blocks(
-    std::vector<torch::Tensor>& key_caches,
-    std::vector<torch::Tensor>& value_caches,
-    const std::map<int64_t, std::vector<int64_t>>& block_mapping) {
-    int num_layers = key_caches.size();
-    TORCH_CHECK(num_layers == value_caches.size());
-    if (num_layers == 0) {
-        return;
-    }
-    torch::Device cache_device = key_caches[0].device();
-    TORCH_CHECK(cache_device.is_cuda());
+  std::vector<torch::Tensor>& key_caches,
+  std::vector<torch::Tensor>& value_caches,
+  const std::map<int64_t, std::vector<int64_t>>& block_mapping) {
+  int num_layers = key_caches.size();
+  TORCH_CHECK(num_layers == value_caches.size());
+  if (num_layers == 0) {
+      return;
+  }
+  torch::Device cache_device = key_caches[0].device();
+  TORCH_CHECK(cache_device.is_cuda());
 
-    // Create data structures for the kernel.
-    // Create an array of pointers to the key/value caches
-    int64_t key_cache_ptrs[num_layers];
-    int64_t value_cache_ptrs[num_layers];
-    for (int layer_idx = 0; layer_idx < num_layers; ++layer_idx) {
-        key_cache_ptrs[layer_idx] = reinterpret_cast<int64_t>(key_caches[layer_idx].data_ptr());
-        value_cache_ptrs[layer_idx] = reinterpret_cast<int64_t>(value_caches[layer_idx].data_ptr());
+  // Create data structures for the kernel.
+  // Create an array of pointers to the key/value caches
+  int64_t key_cache_ptrs[num_layers];
+  int64_t value_cache_ptrs[num_layers];
+  for (int layer_idx = 0; layer_idx < num_layers; ++layer_idx) {
+    key_cache_ptrs[layer_idx] = reinterpret_cast<int64_t>(key_caches[layer_idx].data_ptr());
+    value_cache_ptrs[layer_idx] = reinterpret_cast<int64_t>(value_caches[layer_idx].data_ptr());
+  }
+  // Create a block mapping array
+  std::vector<int> block_mapping_vec;
+  for (const auto& pair : block_mapping) {
+    int src_block_number = pair.first;
+    for (int dst_block_number : pair.second) {
+      block_mapping_vec.push_back(src_block_number);
+      block_mapping_vec.push_back(dst_block_number);
     }
-    // Create a block mapping array
-    std::vector<int> block_mapping_vec;
-    for (const auto& pair : block_mapping) {
-      int src_block_number = pair.first;
-      for (int dst_block_number : pair.second) {
-        block_mapping_vec.push_back(src_block_number);
-        block_mapping_vec.push_back(dst_block_number);
-      }
-    }
-    int* block_mapping_array = block_mapping_vec.data();
-    int num_pairs = block_mapping_vec.size() / 2;
+  }
+  int* block_mapping_array = block_mapping_vec.data();
+  int num_pairs = block_mapping_vec.size() / 2;
 
-    // move the data structures to the GPU and have it synchronize the CPU and GPU
-    torch::Tensor key_cache_ptrs_tensor = torch::from_blob(
-      key_cache_ptrs, {num_layers}, torch::kInt64).to(cache_device);
-    torch::Tensor value_cache_ptrs = torch::from_blob(
-      value_cache_ptrs, {num_layers} = torch::kInt64).to(cache_device);
-    torch::Tensor block_mapping_tensor = torch::from_blob(
-      block_mapping_array, {2 * num_pairs}, torch::kInt).to(cache_device);
+  // move the data structures to the GPU and 
+  // have it synchronize the CPU and GPU
+  torch::Tensor key_cache_ptrs_tensor = torch::from_blob(
+    key_cache_ptrs, {num_layers}, torch::kInt64).to(cache_device);
+  torch::Tensor value_cache_ptrs = torch::from_blob(
+    value_cache_ptrs, {num_layers} = torch::kInt64).to(cache_device);
+  torch::Tensor block_mapping_tensor = torch::from_blob(
+    block_mapping_array, {2 * num_pairs}, torch::kInt).to(cache_device);
 
-    const int numel_per_block = key_caches[0][0].numel();
-    dim3 grid(num_layers, num_pairs);
-    dim3 block(std::min(1024, numel_per_block));
-    const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::BFloat16,
-      key_caches[0].scalar_types(), "copy_blocks_kernel", ([&] {
-        aphrodite::copy_blocks_kernel<scalar_t><<<grid, block, 0, stream>>>(
-          key_cache_ptrs_tensor.data_ptr<int64_t>(),
-          value_cache_ptrs_tensor.data_ptr<int64_t>(),
-          block_mapping_tensor.data_ptr<int>(),
-          numel_per_block)
-      }));
+  // launch the kernel
+  const int numel_per_block = key_caches[0][0].numel();
+  dim3 grid(num_layers, num_pairs);
+  dim3 block(std::min(1024, numel_per_block));
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    at::ScalarType::Half,
+    at::ScalarType::BFloat16,
+    key_caches[0].scalar_types(), "copy_blocks_kernel", ([&] {
+      aphrodite::copy_blocks_kernel<scalar_t><<<grid, block, 0, stream>>>(
+        key_cache_ptrs_tensor.data_ptr<int64_t>(),
+        value_cache_ptrs_tensor.data_ptr<int64_t>(),
+        block_mapping_tensor.data_ptr<int>(),
+        numel_per_block)
+    }));
 }
 
 namespace aphrodite{
@@ -176,15 +179,16 @@ __global__ void reshape_and_cache_kernel(
     key_cache[tgt_key_idx] = __ldg(&value[src_key_idx]);
     value_cache[tgt_value_idx] = __ldg(&value[src_value_idx]);
     }
-  }
 }
 
+} // namespace aphrodite
+
 void reshape_and_cache(
-  torch::Tensor& key,
-  torch::Tensor& value,
-  torch::Tensor& key_cache,
-  torch::Tensor& value_cache,
-  torch::Tensor& slot_mapping)
+  torch::Tensor& key,             // [num_tokens, num_heads, head_size]
+  torch::Tensor& value,           // [num_tokens, num_heads, head_size]
+  torch::Tensor& key_cache,       // [num_blocks, num_heads, head_size/x, block_size, x]
+  torch::Tensor& value_cache,     // [num_blocks, num_heads, head_size, block_size]
+  torch::Tensor& slot_mapping)    // [num_heads]
 {
   int num_tokens = key.size(0);
   int num_heads = key.size(1);
@@ -221,6 +225,7 @@ void reshape_and_cache(
 
 namespace aphrodite {
 
+// Grid: (num_blocks, block_size)
 template<typename scalar_t>
 __global__ void gather_cached_kv_kernel(
 scalar_t* __restrict__ key,     // [num_tokens, [stride], num_heads, head_size]
@@ -234,42 +239,43 @@ const int* __restrict__ slot_mapping, // [num_tokens]
   const int head_size,
   const int block_size,
   const int x) {
-  const int token_idx = blockIdx.x;
-  const int slot_idx = slot_mapping[token_idx];
-  const int block_idx = slot_idx / block_size;
-  const int block_offset = slot_idx % block_size;
+    const int token_idx = blockIdx.x;
+    const int slot_idx = slot_mapping[token_idx];
+    const int block_idx = slot_idx / block_size;
+    const int block_offset = slot_idx % block_size;
 
-  const int num_tokens = num_heads * num_size;
-  for (int i = threadIdx.x; i < num_tokens; i += blockDim.x) {
-    const int tgt_key_idx = token_idx * key_stride + i;
-    const int tgt_value_idx = token_idx * value_stride + i;
+    const int num_tokens = num_heads * num_size;
+    for (int i = threadIdx.x; i < num_tokens; i += blockDim.x) {
+      const int tgt_key_idx = token_idx * key_stride + i;
+      const int tgt_value_idx = token_idx * value_stride + i;
 
-    const int head_idx = i / head_size;
-    const int head_offset = i % head_size;
-    const int x_idx = head_offset / x;    // the offset of the [head_size/x] dimension
-    const int x_offset = head_offset % x;
+      const int head_idx = i / head_size;
+      const int head_offset = i % head_size;
+      const int x_idx = head_offset / x;    // the offset of the [head_size/x] dimension
+      const int x_offset = head_offset % x;
 
-    const int src_key_idx = block_idx * num_heads * (head_size / x ) * block_size * x
-                            + head_idx * (head_size / x) * block_size * x 
-                            + x_idx * block_size * x
-                            + block_offset * x
-                            + x_offset;
-    const int src_value_idx = block_idx * num_heads * head_size * block_size
-                            + head_idx * head_size * block_size
-                            + head_offset * block_size
-                            + block_offset;
-    key_cache[tgt_key_idx] = __ldg(&value[src_key_idx]);
-    value_cache[tgt_value_idx] = __ldg(&value[src_value_idx]);
+      const int src_key_idx = block_idx * num_heads * (head_size / x ) * block_size * x
+                              + head_idx * (head_size / x) * block_size * x 
+                              + x_idx * block_size * x
+                              + block_offset * x
+                              + x_offset;
+      const int src_value_idx = block_idx * num_heads * head_size * block_size
+                              + head_idx * head_size * block_size
+                              + head_offset * block_size
+                              + block_offset;
+                              
+      key_cache[tgt_key_idx] = __ldg(&value[src_key_idx]);
+      value_cache[tgt_value_idx] = __ldg(&value[src_value_idx]);
     }
-  }
+}
 
 template <typename scalar_t>
 __global__ void gather_cached_kv_kernel_optimized(
-    scalar_t* __restrict__ key,     // [num_tokens, [stride], num_heads, head_size]
-    scalar_t* __restrict__ value,   // [num_tokens, [stride], num_heads, head_size]
+    scalar_t* __restrict__ key,                 // [num_tokens, [stride], num_heads, head_size]
+    scalar_t* __restrict__ value,               // [num_tokens, [stride], num_heads, head_size]
     const scalar_t* __restrict__ key_cache,     // [num_blocks, num_heads, head_size/x, block_size, x]
     const scalar_t* __restrict__ value_cache,   // [num_blocks, num_heads, head_size, block_size]
-    const int* __restrict__ slot_mapping, // [num_tokens]
+    const int* __restrict__ slot_mapping,       // [num_tokens]
     const int key_stride,
     const int value_stride,
     const int num_heads,
@@ -277,66 +283,67 @@ __global__ void gather_cached_kv_kernel_optimized(
     const int block_size,
     const int x)
 {
-  const int token_idx = blockIdx.x;
-  const int slot_idx = slot_mapping[token_idx];
-  const int block_idx = slot_idx / block_size;
-  const int block_offset = slot_idx % block_size;
+    const int token_idx = blockIdx.x;
+    const int slot_idx = slot_mapping[token_idx];
+    const int block_idx = slot_idx / block_size;
+    const int block_offset = slot_idx % block_size;
 
-  const int dim = num_heads * head_size;
-  assert(dim % 4 == 0);   // true for known use cases
-  const int unroll_factor = 4;
-  const int unroll_dim = dim / unroll_factor;
+    const int dim = num_heads * head_size;
+    assert(dim % 4 == 0);   // true for known use cases
+    const int unroll_factor = 4;
+    const int unrolled_dim = dim / unroll_factor;
 
-  for (int i = threadIdx.x; i < unroll_dim; i += blockDim.x)
-  {
-    int tgt_key_indices[unroll_factor];
-    int tgt_value_indices[unroll_factor];
-    int src_key_indices[unroll_factor];
-    int src_value_indices[unroll_factor];
-    scalar_t key_to_store[unroll_factor];
-    scalar_t values_to_store[unroll_factor];
-
-    #pragma unroll
-    for (int j = 0; j < unroll_factor; ++j)
+    for (int i = threadIdx.x; i < unrolled_dim; i += blockDim.x)
     {
-        int index = i + j * unroll_dim;
-        
-        const int tgt_key_idx = token_idx * key_stride + index;
-        const int tgt_value_idx = token_idx * value_stride + index;
+        int tgt_key_indices[unroll_factor];
+        int tgt_value_indices[unroll_factor];
+        int src_key_indices[unroll_factor];
+        int src_value_indices[unroll_factor];
+        scalar_t key_to_store[unroll_factor];
+        scalar_t values_to_store[unroll_factor];
 
-        const int head_idx = index / head_size;
-        const int head_offset = index % head_size;
-        const int x_idx = head_offset / x;
-        const int x_offset = head_offset % x;
+        #pragma unroll
+        for (int j = 0; j < unroll_factor; ++j)
+        {
+            int index = i + j * unrolled_dim;
+            
+            const int tgt_key_idx = token_idx * key_stride + index;
+            const int tgt_value_idx = token_idx * value_stride + index;
 
-        const int src_key_idx = block_idx * num_heads * (head_size / x) * block_size * x
-                                + head_idx * (head_size / x) * block_size * x
-                                + x_idx * block_idx * x
-                                + block_offset * x
-                                + x_offset
-        const int src_value_idx = block_idx * num_heads * head_size * block_size
-                                + head_idx * head_size * block_size
-                                + head_offset * block_size
-                                + block_offset;
-        tgt_key_indices[j] = tgt_key_idx;
-        tgt_value_indices[j] = tgt_value_idx;
-        src_key_indices[j] = src_key_idx;
-        src_value_indices[j] = src_value_idx;
+            const int head_idx = index / head_size;
+            const int head_offset = index % head_size;
+            const int x_idx = head_offset / x;
+            const int x_offset = head_offset % x;
 
-        keys_to_store[j] = __ldg(&key_cache[src_key_idx]);
-        values_to_store[j] = __ldg(&value_cache[src_value_idx]);
+            const int src_key_idx = block_idx * num_heads * (head_size / x) * block_size * x
+                                    + head_idx * (head_size / x) * block_size * x
+                                    + x_idx * block_idx * x
+                                    + block_offset * x
+                                    + x_offset
+            const int src_value_idx = block_idx * num_heads * head_size * block_size
+                                    + head_idx * head_size * block_size
+                                    + head_offset * block_size
+                                    + block_offset;
+
+            tgt_key_indices[j] = tgt_key_idx;
+            tgt_value_indices[j] = tgt_value_idx;
+            src_key_indices[j] = src_key_idx;
+            src_value_indices[j] = src_value_idx;
+
+            keys_to_store[j] = __ldg(&key_cache[src_key_idx]);
+            values_to_store[j] = __ldg(&value_cache[src_value_idx]);
+        }
+
+        #pragma unroll
+        for (int j = 0; j < unroll_factor; ++j)
+        {
+          key[tgt_key_indices[j]] = key_to_store[j];
+          value[tgt_value_indices[j]] = values_to_store[j];
+        }
     }
-
-    #pragma unroll
-    for (int j = 0; j < unroll_factor; ++j)
-    {
-      key[tgt_key_indices[j]] = key_to_store[j];
-      value[tgt_value_indices[j]] = values_to_store[j];
-
-    }
-  }
 }
-}
+
+} // namespace aphrodite
 
 void gather_cached_kv(
   torch::Tensor& key,

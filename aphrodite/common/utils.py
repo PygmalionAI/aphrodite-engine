@@ -1,5 +1,6 @@
 """Utils."""
 import enum
+from platform import uname
 import uuid
 
 import psutil
@@ -33,3 +34,6 @@ def get_cpu_memory() -> int:
 
 def random_uuid() -> str:
     return str(uuid.uuid4().hex)
+
+def in_wsl() -> bool:
+    return "microsoft" in " ".join(uname()).lower()

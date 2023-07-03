@@ -1,14 +1,16 @@
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 
-#include "reduction_utils.cuh"
+#include "reduction.cuh"
 
 namespace aphrodite {
+
+// TODO: Further optimize this kernel
 template<typename scalar_t>
 __global__ void rms_norm_kernel(
-    scalar_t* __restrict__ out,
-    const scalar_t* __restrict__ input,
-    const scalar_t* __restrict__ weight,
+    scalar_t* __restrict__ out,             // [num_tokens, hidden_size]
+    const scalar_t* __restrict__ input,     // [num_tokens, hidden_size]
+    const scalar_t* __restrict__ weight,    // [hidden_size]
     const float epsilon,
     const int num_tokens,
     const int hidden_size) {
@@ -30,12 +32,13 @@ __global__ void rms_norm_kernel(
         out[blockIdx.x * hidden_size + idx] = ((scalar_t) (x * s_variance)) * weight[idx];
     }
 }
-}
+
+} // namespace aphrodite
 
 void rms_norm(
-    torch::Tensor& out,
-    torch::Tensor& input,
-    torch::Tensor& weight,
+    torch::Tensor& out,         // [num_tokens, hidden_size]
+    torch::Tensor& input,       // [num_tokens, hidden_size]
+    torch::Tensor& weight,      // [hidden_size]
     float epsilon) {
     int num_tokens = input.size(0);
     int hidden_size = input.size(1);
