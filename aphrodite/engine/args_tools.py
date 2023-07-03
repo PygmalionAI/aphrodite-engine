@@ -70,7 +70,8 @@ class EngineArgs:
             self.model, self.tokenizer, self.tokenizer_mode, self.download_dir, self.use_np_weights, self.use_dummy_weights, self.dtype, self.seed)
         cache_config = CacheConfig(self.block_size, self.gpu_memory_utilization, self.swap_space)
         parallel_config = ParallelConfig(self.pipeline_parallel_size, self.tensor_parallel_size, self.worker_use_ray)
-        scheduler_config = SchedulerConfig(self.max_num_batched_tokens, self.max_num_seqs)
+        max_seq_len = min(self.max_num_batched_tokens, getattr(model_config.hf_config, "max_position_embeddings", float("inf")))
+        scheduler_config = SchedulerConfig(self.max_num_batched_tokens, self.max_num_seqs, max_seq_len)
         return model_config, cache_config, parallel_config, scheduler_config
 
 
