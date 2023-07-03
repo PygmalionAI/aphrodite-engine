@@ -46,7 +46,7 @@ Basically, anything with a compute capability of 7.0 or higher. Here's a full li
 | 3090    | 8.6 | 3090 Ti   | 8.6 | 4070 Ti | 8.9 |
 | 4080    | 8.9 | 4090      | 8.9 |         |     |
 
-> `*` `CC`: Compute Capability
+> * `CC`: Compute Capability
 
 If your GPU isn't listed here, you won't be able to run Aphrodite.
 
