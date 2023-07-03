@@ -113,7 +113,11 @@ class AsyncAphrodite:
                 return
 
             if not self.is_engine_running:
-                await self.engine_step(request_id)
+                try:
+                    await self.engine_step(request_id)
+                except RuntimeError as e:
+                    await self.abort(request_id)
+                    raise e
 
             try:
                 await asyncio.wait_for(request_event.wait(),
