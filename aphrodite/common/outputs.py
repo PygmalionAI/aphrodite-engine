@@ -4,8 +4,8 @@ from typing import Dict, List, Optional
 from aphrodite.common.sequence import SequenceGroup, SequenceStatus
 
 
-class ChatCompletionOutput:
-    """The output data of one chat completion output of a request.
+class CompletionOutput:
+    """The output data of one completion output of a request.
     Args:
         index: The index of the output in the request.
         text: The generated output text.
@@ -36,7 +36,7 @@ class ChatCompletionOutput:
         return self.finish_reason is not None
 
     def __repr__(self) -> str:
-        return (f"ChatCompletionOutput(index={self.index}, "
+        return (f"CompletionOutput(index={self.index}, "
                 f"text={self.text!r}, "
                 f"token_ids={self.token_ids}, "
                 f"cumulative_logprob={self.cumulative_logprob}, "
@@ -59,7 +59,7 @@ class RequestOutput:
         request_id: str,
         prompt: str,
         prompt_token_ids: List[int],
-        outputs: List[ChatCompletionOutput],
+        outputs: List[CompletionOutput],
         finished: bool,
     ) -> None:
         self.request_id = request_id
@@ -77,13 +77,13 @@ class RequestOutput:
             seqs, key=lambda seq: seq.get_cumulative_logprob(), reverse=True)
         top_n_seqs = sorted_seqs[:n]
 
-        outputs: List[ChatCompletionOutput] = []
+        outputs: List[CompletionOutput] = []
         for seq in top_n_seqs:
             logprob = seq.output_logprobs
             if seq_group.sampling_params.logprobs is None:
                 logprobs = {}
             finished_reason = SequenceStatus.get_finished_reason(seq.status)
-            output = ChatCompletionOutput(seqs.index(seq), seq.output_text, seq.get_output_token_ids(), seq.get_cumulative_logprob(), logprobs, finished_reason)
+            output = CompletionOutput(seqs.index(seq), seq.output_text, seq.get_output_token_ids(), seq.get_cumulative_logprob(), logprobs, finished_reason)
             outputs.append(output)
 
         prompt = top_n_seqs[0].prompt
