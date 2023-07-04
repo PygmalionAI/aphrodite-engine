@@ -5,10 +5,9 @@ sentencepiece
 numpy
 torch >= 2.0.0
 transformers >= 4.28.0
-fastapi
+fastchat
 uvicorn
 openai # for fastapi's openai proxy emulation
 xformers >= 0.0.19
 mypy
 pytest
-fastchat
