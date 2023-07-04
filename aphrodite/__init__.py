@@ -2,7 +2,7 @@ from aphrodite.engine.args_tools import AsyncEngineArgs, EngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.engine.aphrodite import AphroditeEngine
 from aphrodite.engine.ray_tools import initialize_cluster
-from aphrodite.common.outputs import ChatCompletionOutput, RequestOutput
+from aphrodite.common.outputs import CompletionOutput, RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 
 __version__ = "0.0"
@@ -15,5 +15,5 @@ __all__ = [
     "initialize_cluster",
     "SamplingParams",
     "RequestOutput",
-    "ChatCompletionOutput",
+    "CompletionOutput",
 ]
