@@ -1,6 +1,7 @@
 /*
  * Adapted from https://github.com/NVIDIA/FasterTransformer/blob/release/v5.3_tag/src/fastertransformer/kernels/reduce_kernel_utils.cuh
- * Copyright (c) 2023 The PygmalionAI team.
+ * Copyright (c) 2023, The PygmalionAI team.
+ * Copyright (c) 2023, The vLLM team.
  * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,7 +16,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 #pragma once
 
 namespace aphrodite {
@@ -23,27 +23,30 @@ namespace aphrodite {
 template<typename T>
 __inline__ __device__ T warpReduceSum(T val) {
 #pragma unroll
-    for (int mask = 16; mask > 0; mask >>= 1)
-        val += __shfl_xor_sync(0xffffffff, val, mask, 32);
-    return val;
+  for (int mask = 16; mask > 0; mask >>= 1)
+    val += __shfl_xor_sync(0xffffffff, val, mask, 32);
+  return val;
 }
 
+/* Calculate the sum of all elements in a block */
 template<typename T>
 __inline__ __device__ T blockReduceSum(T val) {
-    static __shared__ T shared[32];
-    int lane = threadIdx.x & 0x1f;
-    int wid = threadIdx.x >> 5;
+  static __shared__ T shared[32];
+  int lane = threadIdx.x & 0x1f;
+  int wid = threadIdx.x >> 5;
 
-    val warpReduceSum<T>(val);
+  val = warpReduceSum<T>(val);
 
-    if (lane == 0)
-        shared[wid] = val;
-    
-    __syncthreads();
+  if (lane == 0)
+    shared[wid] = val;
 
-    val = (threadIdx.x < (blockDim.x / 32.f)) ? shared[lane] : (T)(0.0f);
-    val = warpReduceSum<T>(val);
-    return val;
+  __syncthreads();
+
+  // Modify from blockDim.x << 5 to blockDim.x / 32. to prevent
+  // blockDim.x is not divided by 32
+  val = (threadIdx.x < (blockDim.x / 32.f)) ? shared[lane] : (T)(0.0f);
+  val = warpReduceSum<T>(val);
+  return val;
 }
 
 } // namespace aphrodite

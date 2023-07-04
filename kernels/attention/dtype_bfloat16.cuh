@@ -421,4 +421,4 @@ inline __device__ void from_float(bf16_8_t& dst, Float8_ src) {
 #endif
 }
 
-}
+} // namespace aphrodite
