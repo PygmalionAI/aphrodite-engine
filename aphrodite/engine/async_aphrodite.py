@@ -3,7 +3,7 @@ import time
 from typing import Dict, List, Optional
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
-from aphrodite.engine.aphrodite import AphroditeEngine
+from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.engine.ray_tools import initialize_cluster, ray
 from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput

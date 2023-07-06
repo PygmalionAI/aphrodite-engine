@@ -4,7 +4,7 @@ from tqdm import tqdm
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
 from aphrodite.engine.args_tools import EngineArgs
-from aphrodite.engine.aphrodite import AphroditeEngine
+from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.utils import Counter
