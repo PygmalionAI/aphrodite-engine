@@ -2,6 +2,7 @@ import asyncio
 import time
 from typing import Dict, List, Optional
 
+from aphrodite.common.config import ModelConfig
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.engine.ray_tools import initialize_cluster, ray
@@ -161,6 +162,14 @@ class AsyncAphrodite:
         if self.kicking_request_id == request_id:
             self.is_engine_running = False
             self.self.kicking_request_id = None
+
+    async def get_model_config(self) -> ModelConfig:
+        """"Get the model configuration of the Aphrodite Engine."""
+        if self.engine_use_ray:
+            return await self.engine.get_model_config.remote()
+        else:
+            return self.engine.get_model_config()
+
 
     @classmethod
     def from_engine_args(cls, engine_args: AsyncEngineArgs) -> "AsyncAphrodite":

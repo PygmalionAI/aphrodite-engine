@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 from http import HTTPStatus
 import json
 import time
@@ -88,15 +89,17 @@ async def get_gen_prompt(request) -> str:
         conv.append_message(conv.roles[1], None)
         prompt = conv.get_prompt()
 
-async def check_length(request, prompt, engine):
-    if hasattr(engine.engine.model_config.hf_config, "max_sequence_length"):
-        context_len = engine.engine.model_config.hf_config.max_sequence_length
-    elif hasattr(engine.engine.model_config.hf_config, "seq_length"):
-        context_len = engine.engine.model_config.hf_config.seq_length
-    elif hasattr(engine.engine.model_config.hf_config, "max_position_embeddings"):
-        context_len = engine.engine.model_config.hf_config.max_position_embeddings
-    elif hasattr(engine.engine.model_config.hf_config, "seq_length"):
-        context_len = engine.engine.model_config.hf_config.seq_length
+    return prompt
+
+async def check_length(request, prompt, model_config):
+    if hasattr(model_config.hf_config, "max_sequence_length"):
+        context_len = model_config.hf_config.max_sequence_length
+    elif hasattr(model_config.hf_config, "seq_length"):
+        context_len = model_config.hf_config.seq_length
+    elif hasattr(model_config.hf_config, "max_position_embeddings"):
+        context_len = model_config.hf_config.max_position_embeddings
+    elif hasattr(model_config.hf_config, "seq_length"):
+        context_len = model_config.hf_config.seq_length
     else:
         context_len = 2048
     
@@ -167,7 +170,7 @@ async def create_chat_completion(raw_request: Request):
         return create_error_response(HTTPStatus.BAD_REQUEST, "logit_bias is not currently supported")
     
     prompt = await get_gen_prompt(request)
-    error_check_ret = await check_length(request, prompt, engine)
+    error_check_ret = await check_length(request, prompt, engine_model_config)
     if error_check_ret is not None:
         return error_check_ret
     
@@ -221,10 +224,11 @@ async def create_chat_completion(raw_request: Request):
                 delta=DeltaMessage(role="assistant"),
                 finish_reason=None,
             )
-            chunk = ChatCompletionStreamResponse(
-                id=request_id, choices=[choice_data], model=model_name
-            )
-            yield f"data: {chunk.json(exclude_unset=True, ensure_ascii=False)}\n\n"
+            chunk = ChatCompletionStreamResponse(id=request_id,
+                                                 choices=[choice_data],
+                                                 model=model_name)
+            data = chunk.json(exclude_unset=True, ensure_ascii=False)
+            yield f"data: {data}\n\n"
         
         previous_texts = [""] * request.n
         previous_num_tokens = [0] * request.n
@@ -528,6 +532,7 @@ if __name__ == "__main__":
 
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = AsyncAphrodite.from_engine_args(engine_args)
+    engine_model_config = asyncio.run(engine.get_model_config())
 
     # A separate tokenizer to map token IDs to strings.
     tokenizer = get_tokenizer(engine_args.tokenizer, engine_args.tokenizer_mode)

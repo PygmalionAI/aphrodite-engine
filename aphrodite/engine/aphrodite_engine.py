@@ -151,6 +151,10 @@ class AphroditeEngine:
         """
         self.scheduler.abort_seq_group(request_id)
 
+    def get_model_config(self) -> ModelConfig:
+        """Gets the model configuration."""
+        return self.model_config
+
     def get_num_unfinished_requests(self) -> int:
         """Gets the number of unfinished requests."""
         return self.scheduler.get_num_unfinished_seq_groups()

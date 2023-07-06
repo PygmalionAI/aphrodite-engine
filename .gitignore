@@ -5,3 +5,4 @@ repos
 *.env
 *egg-info
 *.so
+.conda
