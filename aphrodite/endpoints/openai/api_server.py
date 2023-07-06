@@ -32,6 +32,7 @@ TIMEOUT_KEEP_ALIVE = 5 # seconds
 
 logger = init_logger(__name__)
 served_model = None
+chat_template = None
 app = fastapi.FastAPI()
 
 
@@ -58,7 +59,7 @@ async def check_model(request) -> Optional[JSONResponse]:
     return ret
 
 async def get_gen_prompt(request) -> str:
-    conv = get_conv_template(request.model)
+    conv = get_conv_template(chat_template)
     conv = Conversation(
         name=conv.name,
         system=conv.system,
@@ -515,6 +516,15 @@ if __name__ == "__main__":
                         help="The model name used in the API. If not specified, "
                              "the model name will be the same as the "
                              "huggingface name.")
+    parser.add_argument(
+        "--chat-template",
+        type=str,
+        default=None,
+        help="The chat template name used in the ChatCompletion endpoint. "
+        "If not specified, we use the API model name as the template name. "
+        "See https://github.com/lm-sys/FastChat/blob/main/fastchat/conversation.py "
+        "for the list of available templates."
+    )
     parser = AsyncEngineArgs.add_cli_args(parser)
     args = parser.parse_args()
 
@@ -528,7 +538,15 @@ if __name__ == "__main__":
 
     logger.info(f"args: {args}")
 
-    served_model = args.served_model_name or args.model
+    if args.served_model_name is not None:
+        served_model = args.served_model_name
+    else:
+        served_model = args.model
+    
+    if args.chat_template is not None:
+        chat_template = args.chat_template
+    else:
+        chat_template = served_model
 
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = AsyncAphrodite.from_engine_args(engine_args)
