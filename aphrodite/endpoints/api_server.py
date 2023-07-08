@@ -3,7 +3,7 @@ import json
 from typing import AsyncGenerator
 
 from fastapi import BackgroundTasks, FastAPI, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 import uvicorn
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
@@ -64,7 +64,7 @@ async def generate(request: Request) -> Response:
         for output in final_output.outputs
     ]
     ret = {"text": text_outputs}
-    return Response(content=json.dumps(ret))
+    return JSONResponse(ret)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
