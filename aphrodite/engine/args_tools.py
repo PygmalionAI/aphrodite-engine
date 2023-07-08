@@ -11,6 +11,7 @@ class EngineArgs:
     model: str
     tokenizer: Optional[str] = None
     tokenizer_mode: str = "auto"
+    trust_remote_code: bool = False
     download_dir: Optional[str] = None
     use_np_weights: bool = False
     use_dummy_weights: bool = False
@@ -39,6 +40,7 @@ class EngineArgs:
         parser.add_argument('--model', type=str, default='PygmalionAI/pygmalion-6b', help='name or path of the huggingface model.')
         parser.add_argument('--tokenizer', type=str, default=EngineArgs.tokenizer, help='name or path of the HF tokenizer to use')
         parser.add_argument('--tokenizer-mode', type=str, default=EngineArgs.tokenizer_mode, choices=['auto', 'slow'], help='tokenizer mode. "auto" will use the fast tokenizer if available, "slow" will use the slow tokenizer.')
+        parser.add_argument('--trust-remote-code', action='store_true', help='trust remote code from external sources')
         parser.add_argument('--download-dir', type=str, default=EngineArgs.download_dir, help='directory to download the model to. Default is HF cache directory.')
         parser.add_argument('--use-np-weights', action='store_true', help='save a numpy copy of the model for faster loading. Increases disk space usage.')
         parser.add_argument('--use-dummy-weights', action='store_true', help='use dummy values for model weights.')
@@ -67,7 +69,7 @@ class EngineArgs:
         self,
     ) -> Tuple[ModelConfig, CacheConfig, ParallelConfig, SchedulerConfig]:
         model_config = ModelConfig(
-            self.model, self.tokenizer, self.tokenizer_mode, self.download_dir, self.use_np_weights, self.use_dummy_weights, self.dtype, self.seed)
+            self.model, self.tokenizer, self.tokenizer_mode, self.trust_remote_code, self.download_dir, self.use_np_weights, self.use_dummy_weights, self.dtype, self.seed)
         cache_config = CacheConfig(self.block_size, self.gpu_memory_utilization, self.swap_space)
         parallel_config = ParallelConfig(self.pipeline_parallel_size, self.tensor_parallel_size, self.worker_use_ray)
         max_seq_len = min(self.max_num_batched_tokens, getattr(model_config.hf_config, "max_position_embeddings", float("inf")))

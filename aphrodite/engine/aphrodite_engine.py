@@ -43,6 +43,7 @@ class AphroditeEngine:
             "Initializing Aphrodite Engine with config: "
             f"model={model_config.model!r}, "
             f"tokenizer={model_config.tokenizer!r}, "
+            f"trust_remote_code={model_config.trust_remote_code}, "
             f"dtype={model_config.dtype}, "
             f"use_dummy_weights={model_config.use_dummy_weights}, "
             f"download_dir={model_config.download_dir!r}, "
@@ -58,7 +59,7 @@ class AphroditeEngine:
         self.log_stats = log_stats
         self._verify_args()
 
-        self.tokenizer = get_tokenizer(model_config.tokenizer, model_config.tokenizer_mode)
+        self.tokenizer = get_tokenizer(model_config.tokenizer, model_config.tokenizer_mode, trust_remote_code=model_config.trust_remote_code)
         self.seq_counter = Counter()
 
         self.workers: List[Worker] = []
