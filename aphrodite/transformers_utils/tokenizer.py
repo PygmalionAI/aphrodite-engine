@@ -14,8 +14,8 @@ _FAST_LLAMA_TOKENIZER = "hf-internal-testing/llama-tokenizer"
 def get_tokenizer(
     tokenizer_name: str,
     tokenizer_mode: str = "auto",
-    trust_remote_code: bool = False,
     *args,
+    trust_remote_code: bool = False,
     **kwargs,
 ) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
     """Gets a tokenizer for the given model name via Huggingface."""
@@ -41,7 +41,7 @@ def get_tokenizer(
             "tokenizer.")
         raise RuntimeError(err_msg) from e
     except ValueError as e:
-        if (e is not None and
+        if (not trust_remote_code and
             ("does not exit or is not currently imported." in str(e)
              or "requires you to execute the tokenizer file" in str(e))):
             err_msg = (
