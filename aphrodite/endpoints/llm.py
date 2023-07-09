@@ -148,5 +148,8 @@ class LLM:
 
         if use_tqdm:
             pbar.close()
+            # Sort the outputs by request ID. Necessary because some outputs
+            # may be finished earlier than previous requests.
+            outputs = sorted(outputs, key=lambda x: int(x.request_id))
         return outputs
     
