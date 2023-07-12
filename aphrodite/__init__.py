@@ -8,12 +8,13 @@ from aphrodite.common.sampling_params import SamplingParams
 __version__ = "0.0"
 
 __all__ = [
-    "AsyncEngineArgs",
-    "EngineArgs",
-    "AsyncAphrodite",
-    "AphroditeEngine",
-    "initialize_cluster",
+    "LLM",
     "SamplingParams",
     "RequestOutput",
     "CompletionOutput",
+    "AphroditeEngine",
+    "EngineArgs",
+    "AsyncAphrodite",
+    "AsyncEngineArgs",
+    "initialize_cluster",
 ]
