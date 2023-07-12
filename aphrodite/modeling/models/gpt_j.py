@@ -118,7 +118,7 @@ class GPTJBlock(nn.Module):
             inner_dim = config.n_inner
         self.ln_1 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
         self.attn = GPTJAttention(config)
-        self.mlp = GPTJMLP(config)
+        self.mlp = GPTJMLP(inner_dim, config)
 
     def forward(
             self,
