@@ -4,12 +4,13 @@ import torch.nn as nn
 from transformers import PretrainedConfig
 
 from aphrodite.common.config import ModelConfig
-from aphrodite.modeling.models import LlamaForCausalLM
+from aphrodite.modeling.models import *
 from aphrodite.modeling.hf_downloader import initialize_dummy_weights
 
 _MODEL_REGISTRY = {
     "LlamaForCausalLM": LlamaForCausalLM,
     "LLaMAForCausalLM": LlamaForCausalLM,
+    "GPTJForCausalLM": GPTJForCausalLM,
 }
 
 def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
