@@ -36,17 +36,17 @@ async def generate(request: Request) -> Response:
         async for request_output in results_generator:
             prompt = request_output.prompt
             text_outputs = [
-                prompt + output.text
-                for output in request_output.outputs
+                prompt + output.text for output in request_output.outputs
             ]
             ret = {"text": text_outputs}
             yield (json.dumps(ret) + "\0").encode("utf-8")
-    
+
     async def abort_request() -> None:
         await engine.abort(request_id)
 
     if stream:
         background_tasks = BackgroundTasks()
+        # Abort the request if the client disconnects.
         background_tasks.add_task(abort_request)
         return StreamingResponse(stream_results(), background=background_tasks)
 
