@@ -63,18 +63,18 @@ class LLM:
             seed=seed,
             **kwargs,
         )
-        self.aphrodite = AphroditeEngine.from_engine_args(engine_args)
+        self.aphrodite_engine = AphroditeEngine.from_engine_args(engine_args)
         self.request_counter = Counter()
-
+    
     def get_tokenizer(
-        self,
-    ) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
-        return self.aphrodite.tokenizer
+            self) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
+        return self.aphrodite_engine.tokenizer
     
     def set_tokenizer(
         self,
         tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast],
-    ) -> None: self.aphrodite.tokenizer = tokenizer
+    ) -> None:
+        self.aphrodite_engine.tokenizer = tokenizer    
 
     def generate(
         self,
@@ -102,12 +102,14 @@ class LLM:
             in the same order as the input prompts.
         """
         if prompts is None and prompt_token_ids is None:
-            raise ValueError("Either prompts or prompt_token_ids must be provided.")
+            raise ValueError("Either prompts or prompt_token_ids must be "
+                             "provided.")
         if isinstance(prompts, str):
             prompts = [prompts]
         if prompts is not None and prompt_token_ids is not None:
             if len(prompts) != len(prompt_token_ids):
-                raise ValueError("The lenghts of prompts and prompt_token_ids must be the same.")
+                raise ValueError("The lengths of prompts and prompt_token_ids "
+                                 "must be the same.")
         if sampling_params is None:
             sampling_params = SamplingParams()
 
@@ -131,15 +133,15 @@ class LLM:
         prompt_token_ids: Optional[List[int]],
     ) -> None:
         request_id = str(next(self.request_counter))
-        self.aphrodite.add_request(request_id, prompt, sampling_params, prompt_token_ids)
+        self.aphrodite_engine.add_request(request_id, prompt, sampling_params, prompt_token_ids)
 
     def _run_engine(self, use_tqdm: bool) -> List[RequestOutput]:
         if use_tqdm:
-            num_requests = self.aphrodite.get_num_unfinished_requests()
+            num_requests = self.aphrodite_engine.get_num_unfinished_requests()
             pbar = tqdm(total=num_requests, desc="Processed prompts")
         outputs: List[RequestOutput] = []
-        while self.aphrodite.has_unfinished_requests():
-            step_outputs = self.aphrodite.step()
+        while self.aphrodite_engine.has_unfinished_requests():
+            step_outputs = self.aphrodite_engine.step()
             for output in step_outputs:
                 if output.finished:
                     outputs.append(output)
@@ -150,6 +152,6 @@ class LLM:
             pbar.close()
             # Sort the outputs by request ID. Necessary because some outputs
             # may be finished earlier than previous requests.
-            outputs = sorted(outputs, key=lambda x: int(x.request_id))
+        outputs = sorted(outputs, key=lambda x: int(x.request_id))
         return outputs
     
