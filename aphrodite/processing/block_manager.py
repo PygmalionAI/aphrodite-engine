@@ -25,7 +25,7 @@ class BlockAllocator:
         self.free_blocks: List[PhysicalTokenBlock] = []
         for i in range(num_blocks):
             block = PhysicalTokenBlock(
-                device=device, block_number=1, block_size=block_size)
+                device=device, block_number=i, block_size=block_size)
             self.free_blocks.append(block)
 
     def allocate(self) -> PhysicalTokenBlock:
@@ -121,7 +121,8 @@ class BlockSpaceManager:
             return last_block.block_number, new_block.block_number
     
     def fork(self, parent_seq: Sequence, child_seq: Sequence) -> None:
-        src_block_table = self.block_size[parent_seq.seq_id]
+        # NOTE: forking doesn't allocate a new physical block, thus no risk of OOM.
+        src_block_table = self.block_tables[parent_seq.seq_id]
         self.block_tables[child_seq.seq_id] = src_block_table.copy()
         for block in src_block_table:
             block.ref_count += 1
@@ -131,7 +132,7 @@ class BlockSpaceManager:
         for seq in seq_group.get_seqs():
             if seq.is_finished():
                 continue
-            block_table = self.block_size[seq.seq_id]
+            block_table = self.block_tables[seq.seq_id]
             for block in block_table:
                 blocks.add(block)
         return list(blocks)
@@ -142,9 +143,10 @@ class BlockSpaceManager:
         num_swapped_seqs = seq_group.num_seqs(status=SequenceStatus.SWAPPED)
         num_free_blocks = self.gpu_allocator.get_num_free_blocks()
         num_required_blocks = len(blocks) + num_swapped_seqs
-        return num_free_blocks - num_free_blocks >= self.watermark_blocks
+        return num_free_blocks - num_required_blocks >= self.watermark_blocks
 
     def swap_in(self, seq_group: SequenceGroup) -> Dict[int, int]:
+        # CPU block -> GPU block
         mapping: Dict[PhysicalTokenBlock, PhysicalTokenBlock] = {}
         for seq in seq_group.get_seqs():
             if seq.is_finished():
