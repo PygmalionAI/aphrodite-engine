@@ -35,7 +35,12 @@ class AsyncAphrodite:
         *args, **kwargs: Arguments for AphroditeEngine. 
     """
     
-    def __init__(self, worker_use_ray: bool, engine_use_ray: bool, log_requests: bool = True, *args, **kwargs) -> None:
+    def __init__(self,
+                 worker_use_ray: bool,
+                 engine_use_ray: bool,
+                 *args,
+                 log_requests: bool = True,
+                 **kwargs) -> None:
         self.worker_use_ray = worker_use_ray
         self.engine_use_ray = engine_use_ray
         self.log_requests = log_requests
@@ -46,7 +51,9 @@ class AsyncAphrodite:
         else:
             engine_class = ray.remote(num_gpus=1)(AphroditeEngine).remote
         self.engine = engine_class(*args, **kwargs)
+        # Request id -> request output.
         self.request_outputs: Dict[str, RequestOutput] = {}
+        # Request id -> event to notify that there is new output.
         self.request_events: Dict[str, asyncio.Event] = {}
         self.is_engine_running = False
         self.kicking_request_id: Optional[str] = None
@@ -104,11 +111,18 @@ class AsyncAphrodite:
 
         if self.engine_use_ray:
             await self.engine.add_request.remote(
-                request_id, prompt, sampling_params, prompt_token_ids=prompt_token_ids, arrival_time=arrival_time)
+                request_id,
+                prompt,
+                sampling_params,
+                prompt_token_ids=prompt_token_ids,
+                arrival_time=arrival_time)
         else:
-            self.engine.add_request(
-                request_id, prompt, sampling_params, prompt_token_ids=prompt_token_ids, arrival_time=arrival_time)
-        
+            self.engine.add_request(request_id,
+                                    prompt,
+                                    sampling_params,
+                                    prompt_token_ids=prompt_token_ids,
+                                    arrival_time=arrival_time)
+            
         while True:
             if request_id not in self.request_events:
                 return
@@ -134,7 +148,7 @@ class AsyncAphrodite:
                 if self.log_requests:
                     logger.info(f"Finished request {request_id}.")
 
-                del self.request_outputs[request_event]
+                del self.request_outputs[request_id]
                 del self.request_events[request_id]
 
                 if not self.is_engine_running:
@@ -142,8 +156,16 @@ class AsyncAphrodite:
                 break
 
     async def abort(self, request_id: str) -> None:
+        """Abort a request.
 
-        if request_id not in self.request_outputs:
+        Abort a submitted request. If the request is finished or not found,
+        this method will be a no-op.
+
+        Args:
+            request_id: The unique id of the request.
+        """
+
+        if request_id not in self.request_events:
             return
 
         if self.log_requests:
@@ -161,7 +183,7 @@ class AsyncAphrodite:
 
         if self.kicking_request_id == request_id:
             self.is_engine_running = False
-            self.self.kicking_request_id = None
+            self.kicking_request_id = None
 
     async def get_model_config(self) -> ModelConfig:
         """"Get the model configuration of the Aphrodite Engine."""
@@ -177,5 +199,11 @@ class AsyncAphrodite:
         parallel_config = engine_configs[2]
         distributed_init_method, devices = initialize_cluster(
             parallel_config, engine_args.engine_use_ray)
-        engine = cls(engine_args.worker_use_ray, engine_args.engine_use_ray, not engine_args.disable_log_requests, *engine_configs, distributed_init_method, devices, log_stats=not engine_args.disable_log_stats)
+        engine = cls(engine_args.worker_use_ray,
+                     engine_args.engine_use_ray,
+                     *engine_configs,
+                     distributed_init_method,
+                     devices,
+                     log_requests=not engine_args.disable_log_requests,
+                     log_stats=not engine_args.disable_log_stats)
         return engine
