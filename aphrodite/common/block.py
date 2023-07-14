@@ -12,6 +12,7 @@ class LogicalTokenBlock:
     Logical blocks are used to represent the states of the corresponding physical
     blocks in the KV cache.
     """
+
     def __init__(
         self,
         block_number: int,
@@ -19,7 +20,7 @@ class LogicalTokenBlock:
     ) -> None:
         self.block_number = block_number
         self.block_size = block_size
-        
+
         self.token_ids = [_BLANK_TOKEN_ID] * block_size
         self.num_tokens = 0
 
@@ -34,7 +35,8 @@ class LogicalTokenBlock:
 
     def append_tokens(self, token_ids: List[int]) -> None:
         assert len(token_ids) <= self.get_num_empty_slots()
-        self.token_ids[self.num_tokens:self.num_tokens + len(token_ids)] = token_ids
+        curr_idx = self.num_tokens
+        self.token_ids[curr_idx:curr_idx + len(token_ids)] = token_ids
         self.num_tokens += len(token_ids)
 
     def get_token_ids(self) -> List[int]:
@@ -46,9 +48,7 @@ class LogicalTokenBlock:
 
 
 class PhysicalTokenBlock:
-    """Represents the state of a block in the KV cache.
-    Needs to be double checked.
-    """
+    """Represents the state of a block in the KV cache."""
     def __init__(
         self,
         device: Device,
@@ -63,5 +63,5 @@ class PhysicalTokenBlock:
 
     def __repr__(self) -> str:
         return (f'PhysicalTokenBlock(device={self.device}, '
-        f'block_number={self.block_number}, '
-        f'ref_count={self.ref_count})')
+                f'block_number={self.block_number}, '
+                f'ref_count={self.ref_count})')
