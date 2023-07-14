@@ -2,14 +2,15 @@
 from typing import Optional
 
 import torch
-from transformers import AutoConfig, PretrainedConfig
+from transformers import PretrainedConfig
 
 from aphrodite.common.logger import init_logger
+from aphrodite.transformers_utils.config import get_config
 from aphrodite.common.utils import get_cpu_memory
 
 logger = init_logger(__name__)
 
-_GiB = 1 << 30
+_GB = 1 << 30
 
 class ModelConfig:
     """Configuration for the model.
@@ -53,7 +54,7 @@ class ModelConfig:
         self.use_dummy_weights = use_dummy_weights
         self.seed = seed
 
-        self.hf_config: PretrainedConfig = AutoConfig.from_pretrained(model, trust_remote_code)
+        self.hf_config = get_config(model, trust_remote_code)
         self.dtype = _get_and_verify_dtype(self.hf_config, dtype)
         self._verify_tokenizer_mode()
 
@@ -61,10 +62,11 @@ class ModelConfig:
         tokenizer_mode = self.tokenizer_mode.lower()
         if tokenizer_mode not in ["auto", "slow"]:
             raise ValueError(
-                f"Unknown tokenizer mode: {self.tokenizer_mode}. Must be either 'auto' or 'slow'.")
+                f"Unknown tokenizer mode: {self.tokenizer_mode}. Must be "
+                "either 'auto' or 'slow'.")
         self.tokenizer_mode = tokenizer_mode
 
-    def _verify_with_parallel_config(
+    def verify_with_parallel_config(
         self,
         parallel_config: "ParallelConfig",
     ) -> None:
@@ -114,7 +116,7 @@ class CacheConfig:
     ) -> None:
         self.block_size = block_size
         self.gpu_memory_utilization = gpu_memory_utilization
-        self.swap_space_bytes = swap_space * _GiB
+        self.swap_space_bytes = swap_space * _GB
         self._verify_args()
 
         self.num_gpu_blocks = None
@@ -123,25 +125,26 @@ class CacheConfig:
     def _verify_args(self) -> None:
         if self.gpu_memory_utilization > 1.0:
             raise ValueError(
-                "GPU memory utilization must be less than 1.0. You passed "
-                f"{self.gpu_memory_utilization} instead.")
+                "GPU memory utilization must be less than 1.0. Got "
+                f"{self.gpu_memory_utilization}.")
 
-    def _verify_with_parallel_config(
+    def verify_with_parallel_config(
         self,
         parallel_config: "ParallelConfig",
     ) -> None:
         total_cpu_memory = get_cpu_memory()
-        num_gpu_per_node = parallel_config.tensor_parallel_size
-        cpu_memory_usage = self.swap_space_bytes * num_gpu_per_node
+        # FIXME: Here, it is assumed that the GPUs in a tensor parallel
+        # group are in the same node. However, the GPUs may span multiple nodes.
+        num_gpus_per_node = parallel_config.tensor_parallel_size
+        cpu_memory_usage = self.swap_space_bytes * num_gpus_per_node
 
-        msg = (
-            f"{cpu_memory_usage / _GiB:.2f} GiB out of "
-            f"the {total_cpu_memory / _GiB:.2f} GiB total CPU memory is "
-            "allocated for the swap space.")
+        msg = (f"{cpu_memory_usage / _GB:.2f} GiB out of "
+               f"the {total_cpu_memory / _GB:.2f} GiB total CPU memory is "
+               "allocated for the swap space.")
         if cpu_memory_usage > 0.7 * total_cpu_memory:
             raise ValueError("Too large swap space. " + msg)
         elif cpu_memory_usage > 0.4 * total_cpu_memory:
-            logger.warn("Possibly too large swap space. " + msg)
+            logger.warning("Possibly too large swap space. " + msg)
 
 
 class ParallelConfig:
