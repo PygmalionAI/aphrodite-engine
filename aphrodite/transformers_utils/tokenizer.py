@@ -13,16 +13,18 @@ _FAST_LLAMA_TOKENIZER = "hf-internal-testing/llama-tokenizer"
 
 def get_tokenizer(
     tokenizer_name: str,
-    tokenizer_mode: str = "auto",
     *args,
+    tokenizer_mode: str = "auto",
     trust_remote_code: bool = False,
     **kwargs,
 ) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
     """Gets a tokenizer for the given model name via Huggingface."""
     if tokenizer_mode == "slow":
         if kwargs.get("use_fast", False):
-            raise ValueError("Cannot use the fast tokenizer in slow tokenizer mode.")
+            raise ValueError(
+                "Cannot use the fast tokenizer in slow tokenizer mode.")
         kwargs["use_fast"] = False
+
     if "llama" in tokenizer_name.lower() and kwargs.get("use_fast", True):
         logger.info(
             "For some LLaMA-based models, initializing the fast tokenizer may "
@@ -30,9 +32,11 @@ def get_tokenizer(
             f"using '{_FAST_LLAMA_TOKENIZER}' instead of the original "
             "tokenizer.")
     try:
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=trust_remote_code,
-                                                  *args,
-                                                  **kwargs)
+        tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_name,
+            *args,
+            trust_remote_code=trust_remote_code,
+            **kwargs)
     except TypeError as e:
         # The LLaMA tokenizer causes a protobuf error in some environments.
         err_msg = (
@@ -41,13 +45,16 @@ def get_tokenizer(
             "tokenizer.")
         raise RuntimeError(err_msg) from e
     except ValueError as e:
+        # If the error pertains to the tokenizer class not existing or not
+        # currently being imported, suggest using the --trust-remote-code flag.
         if (not trust_remote_code and
-            ("does not exit or is not currently imported." in str(e)
+            ("does not exist or is not currently imported." in str(e)
              or "requires you to execute the tokenizer file" in str(e))):
             err_msg = (
                 "Failed to load the tokenizer. If the tokenizer is a custom "
-                "tokenzier not yet available in the HuggingFace transformers "
-                "library, consider using the --trust-remote-code flag.")
+                "tokenizer not yet available in the HuggingFace transformers "
+                "library, consider setting `trust_remote_code=True` in LLM "
+                "or using the `--trust-remote-code` flag in the CLI.")
             raise RuntimeError(err_msg) from e
         else:
             raise e
@@ -73,6 +80,8 @@ def detokenize_incrementally(
         new_token: The new token as a string.
         output_text: The new output text as a string.
     """
+    if skip_special_tokens and (new_token_id in tokenizer.all_special_ids):
+        return None, prev_output_tokens
     new_token = tokenizer.convert_ids_to_tokens(
         new_token_id, skip_special_tokens=skip_special_tokens)
     output_tokens = prev_output_tokens + [new_token]
@@ -84,7 +93,8 @@ def detokenize_incrementally(
         output_text = tokenizer.convert_tokens_to_string(output_tokens)
         return new_token, output_text
 
-    # Adapted from https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/tokenization_utils.py#L921
+    # Adapted from
+    # https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/tokenization_utils.py#L921
     # NOTE: The following code is slow because it runs a for loop over
     # the output_tokens. In Python, running a for loop over a list can be slow
     # even when the loop body is very simple.
