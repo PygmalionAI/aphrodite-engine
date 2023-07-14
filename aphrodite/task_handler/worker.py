@@ -11,7 +11,13 @@ from aphrodite.common.utils import get_gpu_memory
 
 
 class Worker:
+    """A worker class that executes (a partition of) the model on a GPU.
 
+    Each worker is associated with a single GPU. The worker is responsible for
+    maintaining the KV cache and executing the model on the GPU. In case of
+    distributed inference, each worker is assigned a partition of the model.
+    """
+    
     def __init__(
         self,
         model_config: ModelConfig,
@@ -50,17 +56,23 @@ class Worker:
         gpu_memory_utilization: float,
         cpu_swap_space: int,
     ) -> Tuple[int, int]:
+        # Profile the memory usage of the model and get the maximum number of
+        # cache blocks that can be allocated with the remaining free memory.
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
 
-        sampling_params = SamplingParams(top_p=0.99,
-                                        top_k=self.model.config.vocab_size - 1)
+        # Profile memory usage with max_num_sequences sequences and the total
+        # number of tokens equal to max_num_batched_tokens.
+
+        # Enable top-k sampling to reflect the accurate memory usage.
+        vocab_size = self.model.config.vocab_size
+        sampling_params = SamplingParams(top_p=0.99, top_k=vocab_size - 1)
         max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens
         max_num_seqs = self.scheduler_config.max_num_seqs
         seqs = []
         for group_id in range(max_num_seqs):
-            seq_len = (max_num_batched_tokens // max_num_seqs + 
-                        (group_id < max_num_batched_tokens % max_num_seqs))
+            seq_len = (max_num_batched_tokens // max_num_seqs +
+                       (group_id < max_num_batched_tokens % max_num_seqs))
             seq_data = SequenceData([0] * seq_len)
             seq = SequenceGroupMetadata(
                 request_id=str(group_id),
@@ -93,6 +105,7 @@ class Worker:
         num_cpu_blocks = max(num_cpu_blocks, 0)
         torch.cuda.empty_cache()
 
+        # Reset the seed here
         set_random_seed(self.model_config.seed)
         return num_gpu_blocks, num_cpu_blocks
 
@@ -100,8 +113,8 @@ class Worker:
     def init_cache_engine(self, cache_config: CacheConfig) -> None:
         self.cache_config = cache_config
         self.block_size = cache_config.block_size
-        self.cache_engine = CacheEngine(
-            self.cache_config, self.model_config, self.parallel_config)
+        self.cache_engine = CacheEngine(self.cache_config, self.model_config,   # basic refactor
+                                        self.parallel_config)
         self.cache_events = self.cache_engine.events
         self.gpu_cache = self.cache_engine.gpu_cache
 
@@ -134,6 +147,8 @@ class Worker:
             input_positions.extend(range(len(prompt_tokens))) # assuming the first token in the prompt is always the first token in the sequence
 
             if seq_group_metadata.block_tables is None:
+                # Using dummy slot mapping here, since block tables aren't initialized
+                # yet during memory profiling.
                 slot_mapping.extend([0] * prompt_len)
                 continue
 
@@ -169,8 +184,8 @@ class Worker:
                 generation_block_tables.append(block_table)
 
                 max_context_len = max(max_context_len, context_len)
-                max_num_blocks_per_seq = max(
-                    max_num_blocks_per_seq, len(block_table))
+                max_num_blocks_per_seq = max(max_num_blocks_per_seq,
+                                             len(block_table))
                 context_lens.append(context_len)
 
                 block_number = block_table[position // self.block_size]
@@ -189,7 +204,8 @@ class Worker:
         context_lens_tensor = torch.cuda.IntTensor(context_lens)
         padded_block_tables = [
             _pad_to_max(block_table, max_num_blocks_per_seq)
-            for block_table in generation_block_tables]
+            for block_table in generation_block_tables
+        ]
         block_tables_tensor = torch.cuda.IntTensor(padded_block_tables)
 
         seq_data: Dict[int, SequenceData] = {}
@@ -215,18 +231,18 @@ class Worker:
         blocks_to_swap_out: Dict[int, int],
         blocks_to_copy: Dict[int, List[int]],
     ) -> Dict[int, SequenceOutputs]:
-        issued_cached_op = False
+        issued_cache_op = False
         if blocks_to_swap_in:
             self.cache_engine.swap_in(blocks_to_swap_in)
-            issued_cached_op = True
+            issued_cache_op = True
         if blocks_to_swap_out:
             self.cache_engine.swap_out(blocks_to_swap_out)
-            issued_cached_op = True
+            issued_cache_op = True
         if blocks_to_copy:
             self.cache_engine.copy(blocks_to_copy)
-            issued_cached_op = True
+            issued_cache_op = True
 
-        if issued_cached_op:
+        if issued_cache_op:
             cache_events = self.cache_events
         else:
             cache_events = None
@@ -240,6 +256,7 @@ class Worker:
         input_tokens, input_positions, input_metadata = self._prepare_inputs(
             seq_group_metadata_list)
 
+        # Model execution
         output = self.model(
             input_ids=input_tokens,
             positions=input_positions,
@@ -255,6 +272,7 @@ def _init_distributed_environment(
     rank: int,
     distributed_init_method: str,
 ) -> None:
+    """Initialize the distributed environment."""
     torch.distributed.init_process_group(
         backend="nccl",
         world_size=parallel_config.world_size,
@@ -262,10 +280,13 @@ def _init_distributed_environment(
         init_method=distributed_init_method,
     )
     torch.distributed.all_reduce(torch.zeros(1).cuda())
-    initialize_model_parallel(parallel_config.tensor_parallel_size, parallel_config.pipeline_parallel_size)
+    initialize_model_parallel(parallel_config.tensor_parallel_size,
+                              parallel_config.pipeline_parallel_size)
+
 
 def _pad_to_alignment(x: List[int], multiple_of: int) -> List[int]:
     return x + [0] * ((-len(x)) % multiple_of)
+
 
 def _pad_to_max(x: List[int], max_len: int) -> List[int]:
     return x + [0] * (max_len - len(x))
