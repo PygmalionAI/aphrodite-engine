@@ -27,6 +27,18 @@ class AphroditeEngine:
 
     NOTE: The config arguments are derived from the `EngineArgs` class. For the comprehensive list
     of arguments, see `EngineArgs`.
+
+    Args:
+        model_config: The configuration related to the LLM model.
+        cache_config: The configuration related to the KV cache memory
+            management.
+        parallel_config: The configuration related to distributed execution.
+        scheduler_config: The configuration related to the request scheduler.
+        distributed_init_method: The initialization method for distributed
+            execution. See `torch.distributed.init_process_group` for details.
+        stage_devices: The list of devices for each stage. Each stage is a list
+            of (rank, node_resource, device) tuples.
+        log_stats: Whether to log statistics.    
     """
 
     def __init__(
@@ -49,17 +61,19 @@ class AphroditeEngine:
             f"download_dir={model_config.download_dir!r}, "
             f"use_np_weights={model_config.use_np_weights}, "
             f"tensor_parallel_size={parallel_config.tensor_parallel_size}, "
-            f"seed={model_config.seed})"
-        )
+            f"seed={model_config.seed})")
 
         self.model_config = model_config
         self.cache_config = cache_config
         self.parallel_config = parallel_config
-        self.scheduler_config = parallel_config
+        self.scheduler_config = scheduler_config
         self.log_stats = log_stats
         self._verify_args()
 
-        self.tokenizer = get_tokenizer(model_config.tokenizer, model_config.tokenizer_mode, trust_remote_code=model_config.trust_remote_code)
+        self.tokenizer = get_tokenizer(
+            model_config.tokenizer,
+            tokenizer_mode=model_config.tokenizer_mode,
+            trust_remote_code=model_config.trust_remote_code)
         self.seq_counter = Counter()
 
         self.workers: List[Worker] = []
@@ -84,6 +98,7 @@ class AphroditeEngine:
         self._init_cache()
 
         self.scheduler = Scheduler(scheduler_config, cache_config, log_stats)
+        
     def _verify_args(self) -> None:
         self.model_config.verify_with_parallel_config(self.parallel_config)
         self.cache_config.verify_with_parallel_config(self.parallel_config)
@@ -99,11 +114,14 @@ class AphroditeEngine:
 
         num_gpu_blocks = min(b[0] for b in num_blocks)
         num_cpu_blocks = min(b[1] for b in num_blocks)
+        # TODO: Change to debug log.
         logger.info(f"# GPU blocks: {num_gpu_blocks}, "
                     f"# CPU blocks: {num_cpu_blocks}")
         
         if num_gpu_blocks <= 0:
-            raise ValueError("No available memory for the cache blocks. Try increasing the `gpu_memory_utilization` when initializing Aphrodite.")
+            raise ValueError("No available memory for the cache blocks. "
+                             "Try increasing the `gpu_memory_utilization` "
+                             "when initializing Aphrodite.")
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
@@ -112,11 +130,16 @@ class AphroditeEngine:
 
     @classmethod
     def from_engine_args(cls, engine_args: EngineArgs) -> "AphroditeEngine":
+        # Create the engine configs.
         engine_configs = engine_args.create_engine_configs()
         parallel_config = engine_configs[2]
-        # Cluster intialization
+        # Initialize the cluster.
         distributed_init_method, devices = initialize_cluster(parallel_config)
-        engine = cls(*engine_configs, distributed_init_method, devices, log_stats=not engine_args.disable_log_stats)
+        # Create the engine.
+        engine = cls(*engine_configs,
+                     distributed_init_method,
+                     devices,
+                     log_stats=not engine_args.disable_log_stats)
         return engine
 
     def add_request(
@@ -127,7 +150,22 @@ class AphroditeEngine:
         prompt_token_ids: Optional[List[int]] = None,
         arrival_time: Optional[float] = None,
     ) -> None:
+        """Add a request to the engine's request pool.
 
+        The request is added to the request pool and will be processed by the
+        scheduler as `engine.step()` is called. The exact scheduling policy is
+        determined by the scheduler.
+
+        Args:
+            request_id: The unique ID of the request.
+            prompt: The prompt string. Can be None if prompt_token_ids is
+                provided.
+            sampling_params: The sampling parameters for text generation.
+            prompt_token_ids: The token IDs of the prompt. If None, we
+                use the tokenizer to convert the prompts to token IDs.
+            arrival_time: The arrival time of the request. If None, we use
+                the current time.
+        """
         if arrival_time is None:
             arrival_time = time.time()
         if prompt_token_ids is None:
@@ -139,7 +177,7 @@ class AphroditeEngine:
         for _ in range(sampling_params.best_of):
             seq_id = next(self.seq_counter)
             seq = Sequence(seq_id, prompt, prompt_token_ids, block_size)
-            seq.append(seq)
+            seqs.append(seq)
 
         seq_group = SequenceGroup(request_id, seqs, sampling_params, arrival_time)
 
@@ -173,8 +211,11 @@ class AphroditeEngine:
         and updates the scheduler with the model outputs. Finally, it decodes
         the sequences and returns the newly generated results.
         """
-        seq_group_metadata_list, scheduler_outputs, ignored_seq_groups = self.scheduler.schedule()
-        if (not seq_group_metadata_list) and scheduler_outputs.is_empty() and (not ignored_seq_groups):
+        (seq_group_metadata_list, scheduler_outputs,
+         ignored_seq_groups) = self.scheduler.schedule()
+        if ((not seq_group_metadata_list) and scheduler_outputs.is_empty()
+                and (not ignored_seq_groups)):
+            # Nothing to do.
             return []
 
         output = self._run_workers(
@@ -196,7 +237,7 @@ class AphroditeEngine:
             request_outputs.append(request_output)
         return request_outputs
 
-    def _decode_sequence(self, seq_groups: List[SequenceGroup]) -> None:
+    def _decode_sequences(self, seq_groups: List[SequenceGroup]) -> None:
         for seq_group in seq_groups:
             for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
                 new_token, new_output_text = detokenize_incrementally(
@@ -225,7 +266,7 @@ class AphroditeEngine:
                     continue
                 
                 if (seq.get_len() >=
-                    self.scheduler.scheduler_config.max_seq_len):
+                        self.scheduler.scheduler_config.max_seq_len):
                     self.scheduler.free_seq(
                         seq, SequenceStatus.FINISHED_LENGTH_CAPPED)
                     continue
@@ -235,16 +276,18 @@ class AphroditeEngine:
                     continue
                 if not sampling_params.ignore_eos:
                     if seq.get_last_token_id() == self.tokenizer.eos_token_id:
-                        self.scheduler.free_seq(seq, SequenceStatus.FINISHED_STOPPED)
+                        self.scheduler.free_seq(
+                            seq, SequenceStatus.FINISHED_STOPPED)
                         continue
 
     def _run_workers(
         self,
         method: str,
-        get_all_outputs: bool = False,
         *args,
+        get_all_outputs: bool = False,
         **kwargs,
     ) -> Any:
+        """Runs the given method on all workers."""
         all_outputs = []
         for worker in self.workers:
             executor = getattr(worker, method)
