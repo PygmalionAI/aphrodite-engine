@@ -1,7 +1,7 @@
 """Sequence."""
 import copy
 import enum
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from aphrodite.common.block import LogicalTokenBlock
 from aphrodite.common.sampling_params import SamplingParams
@@ -25,7 +25,7 @@ class SequenceStatus(enum.Enum):
         ]
 
     @staticmethod
-    def get_finished_reason(status: "SequenceStatus") -> Optional[str]:
+    def get_finished_reason(status: "SequenceStatus") -> Union[str, None]:
         if status == SequenceStatus.FINISHED_STOPPED:
             finish_reason = "stop"
         elif status == SequenceStatus.FINISHED_LENGTH_CAPPED:
@@ -39,7 +39,18 @@ class SequenceStatus(enum.Enum):
         return finish_reason
 
 class SequenceData:
+    """Data associated with a sequence.
 
+
+    Args:
+        prompt_token_ids: The token IDs of the prompt.
+
+    Attributes:
+        prompt_token_ids: The token IDs of the prompt.
+        output_token_ids: The token IDs of the output.
+        cumulative_logprob: The cumulative log probability of the output.
+    """
+    
     def __init__(
         self,
         prompt_token_ids: List[int],
@@ -58,7 +69,10 @@ class SequenceData:
     def get_output_len(self) -> int:
         return len(self.output_token_ids)
 
-    def get_token_ids(self) -> int:
+    def get_token_ids(self) -> List[int]:
+        return self.prompt_token_ids + self.output_token_ids
+
+    def get_last_token_id(self) -> int:
         if not self.output_token_ids:
             return self.prompt_token_ids[-1]
         return self.output_token_ids[-1]
@@ -71,7 +85,16 @@ class SequenceData:
 
 
 class Sequence:
+    """Stores the data, status, and block information of a sequence.
 
+    Args:
+        seq_id: The ID of the sequence.
+        prompt: The prompt of the sequence.
+        prompt_token_ids: The token IDs of the prompt.
+        block_size: The block size of the sequence. Should be the same as the
+            block size used by the block manager and cache engine.
+    """
+    
     def __init__(
         self,
         seq_id: int,
@@ -91,6 +114,13 @@ class Sequence:
         self.logical_token_blocks: List[LogicalTokenBlock] = []
         self._append_tokens_to_blocks(prompt_token_ids)
         self.status = SequenceStatus.WAITING
+
+    def _append_logical_block(self) -> None:
+        block = LogicalTokenBlock(
+            block_number=len(self.logical_token_blocks),
+            block_size=self.block_size,
+        )
+        self.logical_token_blocks.append(block)    
 
     def _append_tokens_to_blocks(self, token_ids: List[int]) -> None:
         cursor = 0
@@ -126,36 +156,51 @@ class Sequence:
     def get_token_ids(self) -> List[int]:
         return self.data.get_token_ids()
 
-    def get_last_token_id(self) -> float:
+    def get_last_token_id(self) -> int:
+        return self.data.get_last_token_id()
+
+    def get_output_token_ids(self) -> List[int]:
+        return self.data.output_token_ids
+
+    def get_cumulative_logprob(self) -> float:
         return self.data.cumulative_logprob
 
     def is_finished(self) -> bool:
         return SequenceStatus.is_finished(self.status)
 
-    def fork(self, child_seq: 'Sequence') -> None:
-        child_seq.logical_token_blocks = copy.deepcopy(self.logical_token_blocks)
+    def fork(self, child_seq: "Sequence") -> None:
+        child_seq.logical_token_blocks = copy.deepcopy(
+            self.logical_token_blocks)
         child_seq.output_logprobs = copy.deepcopy(self.output_logprobs)
         child_seq.data = copy.deepcopy(self.data)
-        return None
 
     def __repr__(self) -> str:
         return (f"Sequence(seq_id={self.seq_id}, "
-                f"Status={self.status.name}, "
+                f"status={self.status.name}, "
                 f"num_blocks={len(self.logical_token_blocks)})")
 
 
 class SequenceGroup:
+    """A group of sequences that are generated from the same prompt.
+
+    Args:
+        request_id: The ID of the request.
+        seqs: The list of sequences.
+        sampling_params: The sampling parameters used to generate the outputs.
+        arrival_time: The arrival time of the request.
+    """
 
     def __init__(
         self,
         request_id: str,
         seqs: List[Sequence],
-        sampling_params: float,
+        sampling_params: SamplingParams,
+        arrival_time: float,
     ) -> None:
         self.request_id = request_id
         self.seqs = seqs
         self.sampling_params = sampling_params
-        # self.arrival_time = arrival_time
+        self.arrival_time = arrival_time
 
     def get_seqs(
         self,
@@ -164,33 +209,38 @@ class SequenceGroup:
         if status is None:
             return self.seqs
         else:
-            return [seq for seq in self.reqs if seq.status == status]
+            return [seq for seq in self.seqs if seq.status == status]
 
-    def num_seqs(self, status: Optional[SequenceData] = None) -> int:
+    def num_seqs(self, status: Optional[SequenceStatus] = None) -> int:
         return len(self.get_seqs(status))
 
     def find(self, seq_id: int) -> Sequence:
         for seq in self.seqs:
             if seq.seq_id == seq_id:
                 return seq
-        raise ValueError(f'Sequence {seq_id} not found.')
-
-    def find(self, seq_id: int) -> Sequence:
-        for seq in self.seqs:
-            if seq.seq_id == seq_id:
-                return seq
-        raise ValueError(f'Sequence {seq_id} not found.')
+        raise ValueError(f"Sequence {seq_id} not found.")
 
     def is_finished(self) -> bool:
         return all(seq.is_finished() for seq in self.seqs)
 
     def __repr__(self) -> str:
-        return (f"SequenceGroup(request_id={self.request_id}, " 
+        return (f"SequenceGroup(request_id={self.request_id}, "
                 f"sampling_params={self.sampling_params}, "
                 f"num_seqs={len(self.seqs)})")
 
 
 class SequenceGroupMetadata:
+    """Metadata for a sequence group. Used to create `InputMetadata`.
+
+
+    Args:
+        request_id: The ID of the request.
+        is_prompt: Whether the request is at prompt stage.
+        seq_data: The sequence data. (Seq id -> sequence data)
+        sampling_params: The sampling parameters used to generate the outputs.
+        block_tables: The block tables. (Seq id -> list of physical block
+            numbers)
+    """
 
     def __init__(
         self,
@@ -208,6 +258,16 @@ class SequenceGroupMetadata:
 
 
 class SequenceOutputs:
+    """The model output associated with a sequence.
+
+    Args:
+        seq_id: The ID of the sequence.
+        parent_seq_id: The ID of the parent sequence (for forking in beam
+            search).
+        output_token: The output token ID.
+        logprobs: The logprobs of the output token.
+            (Token id -> logP(x_i+1 | x_0, ..., x_i))
+    """
 
     def __init__(
         self,
@@ -224,13 +284,13 @@ class SequenceOutputs:
     def __repr__(self) -> str:
         return (f'SequenceOutputs(seq_id={self.seq_id}, '
                 f'parent_seq_id={self.parent_seq_id}, '
-                f'output_token={self.output_token}, '
-                f'logprobs={self.logprobs})')
+                f'output_token={self.output_token}), '
+                f'logprobs={self.logprobs}')
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SequenceOutputs):
             return NotImplemented
-        return (self.seq_id == other.seq_id and
-                self.parent_seq_id == other.parent_seq_id and
-                self.output_token == other.output_token and
-                self.logprobs == other.logprobs)
+        return (self.seq_id == other.seq_id
+                and self.parent_seq_id == other.parent_seq_id
+                and self.output_token == other.output_token
+                and self.logprobs == other.logprobs)
