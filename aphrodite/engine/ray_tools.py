@@ -17,6 +17,21 @@ def initialize_cluster(
     engine_use_ray: bool = False,
     ray_address: Optional[str] = None,
 ) -> Tuple[str, List[List[DeviceID]]]:
+    """Initialize the distributed cluster probably with Ray.
+
+    Args:
+        parallel_config: The configurations for parallel execution.
+        engine_use_ray: Whether to use Ray for async engine.
+        ray_address: The address of the Ray cluster. If None, uses
+            the default Ray cluster address.
+
+    Returns:
+        A tuple of (`distributed_init_method`, `all_stage_devices`). The
+        `distributed_init_method` is the address for initializing the
+        distributed backend. `all_stage_devices` includes device IDs for
+        each worker in each pipeline stage. Each device ID is a tuple of
+        (rank, node resource, device id).
+    """
     if parallel_config.worker_use_ray or engine_use_ray:
         if ray is None:
             raise ImportError("Ray is not installed. Please install Ray to use distributed inference.")
@@ -28,6 +43,7 @@ def initialize_cluster(
         all_stage_devices = [[(0, None, 0)]]
         return distributed_init_method, all_stage_devices
 
+    # NOTE: We assume each node has the same number of GPUs.
     valid_node_resources = []
     num_devices_per_node = None
     for node in ray.nodes():
@@ -45,16 +61,19 @@ def initialize_cluster(
     num_nodes = len(valid_node_resources)
     if parallel_config.world_size > num_nodes * num_devices_per_node:
         raise ValueError(
-            "The number of required GPUs exceeds the total number of available GPUs.")
+            "The number of required GPUs exceeds the total number of "
+            "available GPUs.")
     if parallel_config.tensor_parallel_size >= num_devices_per_node:
         if parallel_config.tensor_parallel_size % num_devices_per_node != 0:
             raise ValueError(
-                "The number of tensor parallelism is not divisible by the number of GPUs per node.")
+                "The number of tensor parallelism is not divisible by the "
+                "number of GPUs per node.")
     else:
         if num_devices_per_node % parallel_config.tensor_parallel_size != 0:
             raise ValueError(
-                "The number of GPUs per node is not divisible by the number of tensor parallelsim.")
-    
+                "The number of GPUs per node is not divisible by the number "
+                "of tensor parallelism.")
+        
     # Let's assign the GPUs to pipeline stages
     rank = 0
     current_node_id = 0
@@ -77,5 +96,5 @@ def initialize_cluster(
                 current_node_id += 1
                 current_device_id = 0
         all_stage_devices.append(stage_devices)
-    
+
     return distributed_init_method, all_stage_devices
