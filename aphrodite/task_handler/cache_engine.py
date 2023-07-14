@@ -8,20 +8,29 @@ from aphrodite.common.config import CacheConfig, ModelConfig, ParallelConfig
 from aphrodite.common.logger import init_logger
 from aphrodite.common.utils import in_wsl
 
+logger = init_logger(__name__)
+
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
+
 class CacheEngine:
+    """Manages the KV cache.
+
+    This class is responsible for initializing and managing the GPU and CPU KV
+    caches. It also provides methods for performing KV cache operations, such
+    as swapping and copying.
+    """
 
     def __init__(
         self,
         cache_config: CacheConfig,
         model_config: ModelConfig,
-        parallel_config: ParallelConfig
+        parallel_config: ParallelConfig,
     ) -> None:
         self.cache_config = cache_config
         self.model_config = model_config
         self.parallel_config = parallel_config
-        
+
         self.head_size = model_config.get_head_size()
         self.num_layers = model_config.get_num_layers(parallel_config)
         self.num_heads = model_config.get_num_heads(parallel_config)
@@ -54,12 +63,12 @@ class CacheEngine:
             self.head_size,
             self.block_size,
         )
-    
+
     def allocate_gpu_cache(self) -> List[KVCache]:
         gpu_cache: List[KVCache] = []
         key_block_shape = self.get_key_block_shape()
-        value_block_shape = self.get_key_block_shape()
-        for _ in range(self.num_cpu_blocks):
+        value_block_shape = self.get_value_block_shape()
+        for _ in range(self.num_layers):
             key_blocks = torch.empty(
                 size=(self.num_gpu_blocks, *key_block_shape),
                 dtype=self.dtype,
@@ -72,14 +81,17 @@ class CacheEngine:
             )
             gpu_cache.append((key_blocks, value_blocks))
         return gpu_cache
-    
+
     def allocate_cpu_cache(self) -> List[KVCache]:
         cpu_cache: List[KVCache] = []
         key_block_shape = self.get_key_block_shape()
-        value_block_shape = self.get_key_block_shape()
+        value_block_shape = self.get_value_block_shape()
         pin_memory = not in_wsl()
         if not pin_memory:
-            logger.warn("Using 'pin_memory=False' as WSL is detected. This may slow down the performance.")
+            # Pinning memory in WSL is not supported.
+            # https://docs.nvidia.com/cuda/wsl-user-guide/index.html#known-limitations-for-linux-cuda-applications
+            logger.warning("Using 'pin_memory=False' as WSL is detected. "
+                           "This may slow down the performance.")
         for _ in range(self.num_layers):
             key_blocks = torch.empty(
                 size=(self.num_cpu_blocks, *key_block_shape),
@@ -104,10 +116,9 @@ class CacheEngine:
             for i in range(self.num_layers):
                 src_key_cache, src_value_cache = src[i]
                 dst_key_cache, dst_value_cache = dst[i]
-                cache_ops.swap_blocks(
-                    src_key_cache, dst_key_cache, src_to_dst)
-                cache_ops.swap_blocks(
-                    src_value_cache, dst_value_cache, src_to_dst)
+                cache_ops.swap_blocks(src_key_cache, dst_key_cache, src_to_dst)
+                cache_ops.swap_blocks(src_value_cache, dst_value_cache,
+                                      src_to_dst)
                 event = self.events[i]
                 event.record(stream=self.cache_stream)
 
