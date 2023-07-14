@@ -5,8 +5,9 @@ Logging utility. Adapted from https://github.com/skypilot-org/skypilot/blob/mast
 import logging
 import sys
 
-_FORMAT = "%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s"
-_DATE_FORMAT = '%m-%d %H:%M:%S'
+_FORMAT = "%(levelname)s %(asctime)s %(filename)s:%(lineno)d] %(message)s"
+_DATE_FORMAT = "%m-%d %H:%M:%S"
+
 
 class NewLineFormatter(logging.Formatter):
     """Adds logging prefix to newlines to align multi-line messages."""
@@ -16,7 +17,7 @@ class NewLineFormatter(logging.Formatter):
 
     def format(self, record):
         msg = logging.Formatter.format(self, record)
-        if record.message != '':
+        if record.message != "":
             parts = msg.split(record.message)
             msg = msg.replace('\n', '\r\n' + parts[0])
         return msg
@@ -24,6 +25,7 @@ class NewLineFormatter(logging.Formatter):
 
 _root_logger = logging.getLogger('aphrodite')
 _default_handler = None
+
 
 def _setup_logger():
     _root_logger.setLevel(logging.DEBUG)
@@ -35,8 +37,8 @@ def _setup_logger():
         _root_logger.addHandler(_default_handler)
     fmt = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT)
     _default_handler.setFormatter(fmt)
-    """Setting this will avoid the message
-    being propagated to the parent logger"""
+    # Setting this will avoid the message
+    # being propagated to the parent logger.
     _root_logger.propagate = False
 
 
@@ -44,6 +46,7 @@ def _setup_logger():
 # This is thread-safe as the module is only imported once,
 # guaranteed by the Python GIL.
 _setup_logger()
+
 
 def init_logger(name: str):
     return logging.getLogger(name)
