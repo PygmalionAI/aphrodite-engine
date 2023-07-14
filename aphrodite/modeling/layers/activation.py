@@ -22,6 +22,11 @@ class SiluAndMul(nn.Module):
     """An activation function for SwiGLU.
 
     The function computes x -> silu(x[:d]) * x[d:] where d = x.shape[1] // 2.
+
+    Shapes:
+        x: (num_tokens, 2 * d)
+        return: (num_tokens, d)
+        
     TODO(alpin): Add more activation functions.
     """
 
