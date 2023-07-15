@@ -62,7 +62,7 @@ If your GPU is not listed here or you do not meet the minimum CC, you will not b
 
 ## Setting up the environment
 
-Aphrodite will require a slightly specialized environment to run, as the latest CUDA and GCC versions are not supported. You can either Conda to easily configure your environment.
+Aphrodite will require a slightly specialized environment to run, as the latest CUDA and GCC versions are not supported. You can use Conda to easily configure your environment.
 
 ### Install miniconda3
 ```sh
@@ -97,7 +97,7 @@ Whenever you want to launch Aphrodite later on, make sure you run `conda activat
 
 **If you receive an error for CUDA version mismatch**, run `which nvcc` and note down the output. For example, if your output is `/home/anon/miniconda3/envs/aphrodite/bin/nvcc`, run this command:
 ```sh
-$ export CUDA_HOME=/home/anon/miniconda3/envs/aphrodite`
+$ export CUDA_HOME=/home/anon/miniconda3/envs/aphrodite
 ```
 Then run the installation command again.
 
