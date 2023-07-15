@@ -30,8 +30,9 @@ Aphrodite builds upon and integrates the exceptional work from various projects,
 
 ## Requirements
 
-- Operating System: Linux
+- Operating System: Linux (or WSL for Windows)
 - Python: at least 3.8
+- CUDA 11.7 (recommended, supports 11.0-11.8)
 
 ## Supported GPUs
 
@@ -46,22 +47,62 @@ Basically, anything with a compute capability of 7.0 or higher. Here's a full li
 | 3090    | 8.6 | 3090 Ti   | 8.6 | 4070 Ti | 8.9 |
 | 4080    | 8.9 | 4090      | 8.9 |         |     |
 
-> * `CC`: Compute Capability
+> \* CC: Compute Capability
 
-If your GPU isn't listed here, you won't be able to run Aphrodite.
+Most datacenter/workstation GPUs are supported, so long as they have a compute capability of 7.0 or higher.
 
-## Usage
-***Currently not working, but this is how you'd run it once it's fixed.**
+If you're unsure, you can find out by opening a Python interpreter and running:
+```py
+>>> import torch
+>>> print(torch.cuda.get_device_capability())
+```
+This should print something like this: `(7, 5)`, which would indicate a CC of 7.5
+
+If your GPU is not listed here or you do not meet the minimum CC, you will not be able to run Aphrodite.
+
+## Setting up the environment
+
+Aphrodite will require a slightly specialized environment to run, as the latest CUDA and GCC versions are not supported. You can either Conda to easily configure your environment.
+
+### Install miniconda3
+```sh
+$ wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+$ bash ./Miniconda3*
+```
+You can follow the on-screen instructions, though you may want to set the installation directory to somewhere with a large empty storage space.
+
+You can either source your shell script (`. ~/.bashrc` or `. ~/.zshrc`) or restart your terminal instance to begin using conda.
+
+### Configuring the env for Aphrodite-engine
+```sh
+$ conda config --set auto_activate_base false
+$ conda create -n aphrodite python=3.9
+$ conda activate aphrodite
+$ conda install -c conda-forge cudatoolkit-dev gcc=11.3 gxx=11.3
+```
+The last command will take a long time, depending on your internet speed.
+
+Whenever you want to launch Aphrodite later on, make sure you run `conda activate aphrodite` first. The other steps outlined above are one-time only.
+
+## Insallation
 - Clone the repository:
   ```sh
   git clone https://github.com/PygmalionAI/aphrodite-engine && cd aphrodite-engine
   ```
 - Install the package:
   ```
-  pip install -r requirements.txt
   pip install -e .
   ```
-- Example usage:
+  > If you receive any import errors here, try running `pip install -r requirements.txt` first.
+
+**If you receive an error for CUDA version mismatch**, run `which nvcc` and note down the output. For example, if your output is `/home/anon/miniconda3/envs/aphrodite/bin/nvcc`, run this command:
+```sh
+$ export CUDA_HOME=/home/anon/miniconda3/envs/aphrodite`
+```
+Then run the installation command again.
+
+## Example usage
+**Currently not working, but this is how you'd run it once it's fixed.**
   ```py
   from aphrodite import LLM, SamplingParams
 
@@ -72,7 +113,7 @@ If your GPU isn't listed here, you won't be able to run Aphrodite.
   ]
   sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
 
-  llm = LLM(model="PygmalionAI/pygmalion-350m")
+  llm = LLM(model="EleutherAI/pythia-70m")
   outputs = llm.generate(prompts, sampling_params)
   for output in outputs:
     prompt = output.prompt
