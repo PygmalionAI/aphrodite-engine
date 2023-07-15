@@ -39,12 +39,13 @@ from aphrodite.common.sequence import SequenceOutputs
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
+
 class GPTJAttention(nn.Module):
 
     def __init__(self, config: GPTJConfig):
         super().__init__()
         self.total_num_heads = config.num_attention_heads
-        self.hidden_size = config.cross_attention_hidden_size
+        self.hidden_size = config.hidden_size
         self.head_size = self.hidden_size // self.total_num_heads
 
         self.qkv_proj = ColumnParallelLinear(config.hidden_size,
@@ -57,7 +58,6 @@ class GPTJAttention(nn.Module):
                                           bias=False,
                                           input_is_parallel=True,
                                           perform_initialization=False)
-        
         tp_world_size = get_tensor_model_parallel_world_size()
         assert self.total_num_heads % tp_world_size == 0
         self.num_heads = self.total_num_heads // tp_world_size
@@ -70,12 +70,12 @@ class GPTJAttention(nn.Module):
         self.warmup = False
 
     def forward(
-            self,
-            position_ids: torch.Tensor,
-            hidden_states: torch.Tensor,
-            kv_cache: KVCache,
-            input_metadata: InputMetadata,
-            cache_event: Optional[torch.cuda.Event],
+        self,
+        position_ids: torch.Tensor,
+        hidden_states: torch.Tensor,
+        kv_cache: KVCache,
+        input_metadata: InputMetadata,
+        cache_event: Optional[torch.cuda.Event],
     ) -> torch.Tensor:
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.chunk(chunks=3, dim=-1)
@@ -84,7 +84,7 @@ class GPTJAttention(nn.Module):
                                 input_metadata, cache_event)
         attn_output, _ = self.out_proj(attn_output)
         return attn_output
-    
+
 
 class GPTJMLP(nn.Module):
 
@@ -106,8 +106,6 @@ class GPTJMLP(nn.Module):
         hidden_states = self.act(hidden_states)
         hidden_states, _ = self.fc_out(hidden_states)
         return hidden_states
-    
-
 class GPTJBlock(nn.Module):
 
     def __init__(self, config: GPTJConfig):
@@ -121,12 +119,12 @@ class GPTJBlock(nn.Module):
         self.mlp = GPTJMLP(inner_dim, config)
 
     def forward(
-            self,
-            position_ids: torch.Tensor,
-            hidden_states: torch.Tensor,
-            kv_cache: KVCache,
-            input_metadata: InputMetadata,
-            cache_event: Optional[torch.cuda.Event],
+        self,
+        position_ids: torch.Tensor,
+        hidden_states: torch.Tensor,
+        kv_cache: KVCache,
+        input_metadata: InputMetadata,
+        cache_event: Optional[torch.cuda.Event],
     ) -> torch.Tensor:
         residual = hidden_states
         hidden_states = self.ln_1(hidden_states)
@@ -140,8 +138,6 @@ class GPTJBlock(nn.Module):
         mlp_output = self.mlp(hidden_states)
         hidden_states = attn_output + mlp_output + residual
         return hidden_states
-    
-
 class GPTJModel(nn.Module):
 
     def __init__(self, config: GPTJConfig):
@@ -156,12 +152,12 @@ class GPTJModel(nn.Module):
         self.ln_f = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
 
     def forward(
-            self,
-            input_ids: torch.Tensor,
-            position_ids: torch.Tensor,
-            kv_caches: List[KVCache],
-            input_metadata: InputMetadata,
-            cache_events: Optional[List[torch.cuda.Event]],
+        self,
+        input_ids: torch.Tensor,
+        position_ids: torch.Tensor,
+        kv_caches: List[KVCache],
+        input_metadata: InputMetadata,
+        cache_events: Optional[List[torch.cuda.Event]],
     ) -> torch.Tensor:
         hidden_states = self.wte(input_ids)
         for i in range(len(self.h)):
@@ -179,7 +175,7 @@ class GPTJModel(nn.Module):
             )
         hidden_states = self.ln_f(hidden_states)
         return hidden_states
-    
+
 
 class GPTJForCausalLM(nn.Module):
 
@@ -195,21 +191,23 @@ class GPTJForCausalLM(nn.Module):
         self.sampler = Sampler(config.vocab_size)
 
     def forward(
-            self,
-            input_ids: torch.Tensor,
-            positions: torch.Tensor,
-            kv_caches: List[KVCache],
-            input_metadata: InputMetadata,
-            cache_events: Optional[List[torch.cuda.Event]], 
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        kv_caches: List[KVCache],
+        input_metadata: InputMetadata,
+        cache_events: Optional[List[torch.cuda.Event]],
     ) -> Dict[int, SequenceOutputs]:
         hidden_states = self.transformer(input_ids, positions, kv_caches,
                                          input_metadata, cache_events)
         next_tokens = self.sampler(self.lm_head.weight, hidden_states,
                                    input_metadata, self.lm_head.bias)
         return next_tokens
-    
+
     _column_parallel_weights = [
-        "wte.weight", "fc_in.weight", "fc_in.bias", "lm_head.weight", "lm_head.bias"]
+        "wte.weight", "fc_in.weight", "fc_in.bias", "lm_head.weight",
+        "lm_head.bias"
+    ]
     _row_parallel_weights = ["out_proj.weight", "fc_out.weight"]
 
     def load_weights(self,
@@ -218,7 +216,8 @@ class GPTJForCausalLM(nn.Module):
                      use_np_cache: bool = False):
         tp_rank = get_tensor_model_parallel_rank()
         state_dict = self.state_dict()
-        for name, loaded_weight in hf_model_weights_iterator(model_name_or_path, cache_dir, use_np_cache):
+        for name, loaded_weight in hf_model_weights_iterator(
+                model_name_or_path, cache_dir, use_np_cache):
             if "attn.bias" in name or "attn.masked_bias" in name:
                 continue
 
@@ -241,4 +240,6 @@ class GPTJForCausalLM(nn.Module):
                 continue
 
             param = state_dict[name]
-            load_tensor_parallel_weights(param, loaded_weight, name, self._column_parallel_weights, self._row_parallel_weights, tp_rank)
+            load_tensor_parallel_weights(param, loaded_weight, name,
+                                         self._column_parallel_weights,
+                                         self._row_parallel_weights, tp_rank)
