@@ -227,7 +227,7 @@ class AphroditeEngine:
         )
         seq_groups = self.scheduler.update(output)
 
-        self._decode_sequence(seq_groups)              # Decode the sequence
+        self._decode_sequences(seq_groups)              # Decode the sequence
         self._stop_sequences(seq_groups)                # Stop the sequences that meet the stopping criteria
         self.scheduler.free_finished_seq_groups()       # Free the finished sequence groups.
 
