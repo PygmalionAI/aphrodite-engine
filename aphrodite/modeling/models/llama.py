@@ -41,7 +41,9 @@ from aphrodite.common.sequence import SequenceOutputs
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
+
 class LlamaMLP(nn.Module):
+
     def __init__(
         self,
         hidden_size: int,
@@ -79,7 +81,7 @@ class LlamaAttention(nn.Module):
         assert self.total_num_heads % tensor_model_parallel_world_size == 0
         self.num_heads = self.total_num_heads // tensor_model_parallel_world_size
         self.head_dim = hidden_size // self.total_num_heads
-        self.scaling = self.head_dim ** -0.5
+        self.scaling = self.head_dim**-0.5
 
         self.qkv_proj = ColumnParallelLinear(
             hidden_size,
@@ -198,19 +200,17 @@ class LlamaModel(nn.Module):
 
 
 class LlamaForCausalLM(nn.Module):
-    
     def __init__(self, config):
         super().__init__()
         self.config = config
         self.model = LlamaModel(config)
-        vocab_size = ((config.vocab_size + 63)  // 64) * 64
+        vocab_size = ((config.vocab_size + 63) // 64) * 64
         self.lm_head = ColumnParallelLinear(config.hidden_size,
                                             vocab_size,
                                             bias=False,
                                             gather_output=False,
                                             perform_initialization=False)
         self.sampler = Sampler(config.vocab_size)
-
 
     def forward(
         self,
@@ -231,35 +231,42 @@ class LlamaForCausalLM(nn.Module):
                                 "up_proj.weight"]
     _row_parallel_weights = ["o_proj.weight", "down_proj.weight"]
 
-    def load_weights(self, model_name_or_path: str, cache_dir: Optional[str] = None, use_np_cache: bool = False):
-        get_tensor_model_parallel_world_size = (get_tensor_model_parallel_world_size())
+    def load_weights(self,
+                     model_name_or_path: str,
+                     cache_dir: Optional[str] = None,
+                     use_np_cache: bool = False):
+        tensor_model_parallel_world_size = (
+            get_tensor_model_parallel_world_size())
         tensor_model_parallel_rank = get_tensor_model_parallel_rank()
         state_dict = self.state_dict()
 
         for name, loaded_weight in hf_model_weights_iterator(
-            model_name_or_path, cache_dir, use_np_cache):
+                model_name_or_path, cache_dir, use_np_cache):
             if "rotary_emb.inv_freq" in name:
                 continue
 
             if "embed_tokens" in name or "lm_head" in name:
                 param = state_dict[name]
-                padded_vocab_size = (param.shape[0] * get_tensor_model_parallel_world_size)
+                padded_vocab_size = (param.shape[0] *
+                                     tensor_model_parallel_world_size)
                 num_extra_rows = padded_vocab_size - self.config.vocab_size
-                extra_rows = torch.empty(num_extra_rows, loaded_weight.shape[1])
+                extra_rows = torch.empty(num_extra_rows,
+                                         loaded_weight.shape[1])
                 extra_rows = extra_rows.to(loaded_weight)
                 loaded_weight = torch.cat([loaded_weight, extra_rows], dim=0)
-            
+
             is_attention_weight = False
-            for stride_id, att_weight_name in enumerate(["q_proj", "k_proj", "v_proj"]):
+            for stride_id, att_weight_name in enumerate(
+                ["q_proj", "k_proj", "v_proj"]):
                 if att_weight_name not in name:
                     continue
                 param = state_dict[name.replace(att_weight_name, "qkv_proj")]
                 shard_size = param.shape[0] // 3
                 loaded_weight = loaded_weight[
-                    shard_size * tensor_model_parallel_rank
-                    :shard_size * (tensor_model_parallel_rank + 1)]
-                param_slice = param.data[shard_size * stride_id
-                                        :shard_size * (stride_id + 1)]
+                    shard_size * tensor_model_parallel_rank:shard_size *
+                    (tensor_model_parallel_rank + 1)]
+                param_slice = param.data[shard_size * stride_id:shard_size *
+                                         (stride_id + 1)]
                 assert param_slice.shape == loaded_weight.shape
                 param_slice.copy_(loaded_weight)
                 is_attention_weight = True
@@ -274,10 +281,10 @@ class LlamaForCausalLM(nn.Module):
                 param = state_dict[name.replace(weight_name, "gate_up_proj")]
                 shard_size = param.shape[0] // 2
                 loaded_weight = loaded_weight[
-                    shard_size * tensor_model_parallel_rank
-                    :shard_size * (tensor_model_parallel_rank + 1)]
-                param_slice = param.data[shard_size * stride_id
-                                        :shard_size * (stride_id + 1)]
+                    shard_size * tensor_model_parallel_rank:shard_size *
+                    (tensor_model_parallel_rank + 1)]
+                param_slice = param.data[shard_size * stride_id:shard_size *
+                                         (stride_id + 1)]
                 assert param_slice.shape == loaded_weight.shape
                 param_slice.copy_(loaded_weight)
                 is_gate_up_weight = True
@@ -285,10 +292,9 @@ class LlamaForCausalLM(nn.Module):
             if is_gate_up_weight:
                 continue
 
-
             param = state_dict[name]
             load_tensor_parallel_weights(param, loaded_weight, name,
-                                        self._column_parallel_weights,
-                                        self._row_parallel_weights,
-                                        tensor_model_parallel_rank)
+                                         self._column_parallel_weights,
+                                         self._row_parallel_weights,
+                                         tensor_model_parallel_rank)
 
