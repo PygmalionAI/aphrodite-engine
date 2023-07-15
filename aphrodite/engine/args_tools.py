@@ -62,8 +62,9 @@ class EngineArgs:
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "EngineArgs":
         attrs = [attr.name for attr in dataclasses.fields(cls)]
-        engine_args = cls(**{attr: getattr(args, attrs) for attr in attrs})
+        engine_args = cls(**{attr: getattr(args, attr) for attr in attrs})
         return engine_args
+
 
     def create_engine_configs(
         self,
