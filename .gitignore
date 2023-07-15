@@ -6,3 +6,5 @@ repos
 *egg-info
 *.so
 .conda
+build
+
