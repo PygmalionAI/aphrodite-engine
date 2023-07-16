@@ -102,7 +102,8 @@ $ export CUDA_HOME=/home/anon/miniconda3/envs/aphrodite
 Then run the installation command again.
 
 ## Example usage
-**Currently not working, but this is how you'd run it once it's fixed.**
+
+### Inference with `LLM`
   ```py
   from aphrodite import LLM, SamplingParams
 
@@ -113,13 +114,28 @@ Then run the installation command again.
   ]
   sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
 
-  llm = LLM(model="EleutherAI/pythia-70m")
+  llm = LLM(model="EleutherAI/pythia-70m")        # you can also use a local directory path
   outputs = llm.generate(prompts, sampling_params)
   for output in outputs:
     prompt = output.prompt
     generated_text = output.outputs[0].text
     print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
   ```
+
+### Continuous inference with API
+```sh
+$ python -m python -m aphrodite.endpoints.openai.api_server --model EleutherAI/pythia-70m
+$ curl http://localhost:8000/v1/completions \
+    -H "Content-Type: application/json" \
+    -d '{
+        "model": "EleutherAI/pythia-70m",
+        "prompt": "What is a man? A",
+        "max_tokens": 512,
+        "n": 2048,
+        "temperature": 0.8
+    }'
+```
+For the full list of request parameters, see [OpenAI Completions API reference](https://platform.openai.com/docs/api-reference/completions).
 
 
 ## Contributing
