@@ -212,7 +212,7 @@ class BlockSpaceManager:
         if seq.seq_id not in self.block_tables:
             return
         block_table = self.block_tables[seq.seq_id]
-        self._free_block_table[block_table]
+        self._free_block_table(block_table)
         del self.block_tables[seq.seq_id]
 
     def reset(self) -> None:
