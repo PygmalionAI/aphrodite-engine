@@ -7,4 +7,5 @@ repos
 *.so
 .conda
 build
+tests
 
