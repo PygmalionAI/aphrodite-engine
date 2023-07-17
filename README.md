@@ -124,14 +124,13 @@ Then run the installation command again.
 
 ### Continuous inference with API
 ```sh
-$ python -m python -m aphrodite.endpoints.openai.api_server --model EleutherAI/pythia-70m
+$ python -m aphrodite.endpoints.openai.api_server --model EleutherAI/pythia-70m
 $ curl http://localhost:8000/v1/completions \
     -H "Content-Type: application/json" \
     -d '{
         "model": "EleutherAI/pythia-70m",
         "prompt": "What is a man? A",
         "max_tokens": 512,
-        "n": 2048,
         "temperature": 0.8
     }'
 ```

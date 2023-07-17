@@ -8,4 +8,5 @@ repos
 .conda
 build
 tests
+dist/
 
