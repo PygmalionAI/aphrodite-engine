@@ -7,6 +7,6 @@ repos
 *.so
 .conda
 build
-tests
+*.json
 dist/
 
