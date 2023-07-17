@@ -17,7 +17,7 @@ Aphrodite builds upon and integrates the exceptional work from various projects,
 - [SkyPilot](https://github.com/skypilot-org/skypilot)
 - [OpenAI Python Library](https://github.com/openai/openai-python)
 
-<h2>Please note that Aphrodite is currently in active development and not yet fully functional.</h2>
+<h2>Please note that Aphrodite only supports 16-bit HuggingFace models (no GGML or GPTQ). Please refer to the notes below for important information.</h2>
 
 ## Features
 
@@ -84,7 +84,7 @@ The last command will take a long time, depending on your internet speed.
 
 Whenever you want to launch Aphrodite later on, make sure you run `conda activate aphrodite` first. The other steps outlined above are one-time only.
 
-## Insallation
+## Installation
 - Clone the repository:
   ```sh
   git clone https://github.com/PygmalionAI/aphrodite-engine && cd aphrodite-engine
@@ -136,6 +136,13 @@ $ curl http://localhost:8000/v1/completions \
 ```
 For the full list of request parameters, see [OpenAI Completions API reference](https://platform.openai.com/docs/api-reference/completions).
 
+### Notes
+
+1. Currently, only FP16/BF16 precision HuggingFace models are supported. These are the default model types you might find on a HuggingFace upload. GPTQ and GGML are **not** supported.
+
+2. By design, Aphrodite takes up 88% of your GPU's VRAM. If you're not serving an LLM at scale, you may want to limit the amount of memory it takes up. You can do this in the API example by launching the server with the `--gpu-memory-utilization 0.6` (0.6 means 60%).
+
+3. You can view the full list of commands by running `python -m aphrodite.endpoints.openai.api_server --help`.
 
 ## Contributing
 We accept PRs! There will likely be a few typos or other errors we've failed to catch, so please let us know either via an issue or make a Pull Request.
