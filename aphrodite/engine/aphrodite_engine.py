@@ -266,7 +266,7 @@ class AphroditeEngine:
                     continue
                 
                 if (seq.get_len() >=
-                        self.scheduler.scheduler_config.max_seq_len):
+                        self.scheduler_config.max_model_len):
                     self.scheduler.free_seq(
                         seq, SequenceStatus.FINISHED_LENGTH_CAPPED)
                     continue
