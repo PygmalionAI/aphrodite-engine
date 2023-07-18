@@ -1,5 +1,5 @@
 """Ray for distributed multi-node inference: https://github.com/ray-project/ray"""
-import random
+import socket
 from typing import List, Optional, Tuple
 
 try:
@@ -11,6 +11,11 @@ from aphrodite.common.config import ParallelConfig
 
 DeviceID = Tuple[int, Optional[str], int] # rank, node resource (node IP), device id
 
+def get_open_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+    
 
 def initialize_cluster(
     parallel_config: ParallelConfig,
@@ -38,7 +43,7 @@ def initialize_cluster(
         ray.init(address=ray_address)
 
     if not parallel_config.worker_use_ray:
-        port = random.randint(10000, 20000)
+        port = get_open_port()
         distributed_init_method = f"tcp://localhost:{port}"
         all_stage_devices = [[(0, None, 0)]]
         return distributed_init_method, all_stage_devices
@@ -88,7 +93,7 @@ def initialize_cluster(
             stage_devices.append((rank, node_resource, current_device_id))
             if distributed_init_method is None:
                 ip = node_resource.split("node:")[-1]
-                port = random.randint(10000, 20000)
+                port = get_open_port()
                 distributed_init_method = f"tcp://{ip}:{port}"
             rank += 1
             current_device_id += 1
