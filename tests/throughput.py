@@ -84,7 +84,7 @@ def run_aphrodite(
             ignore_eos=True,
             max_tokens=output_len,
         )
-        # FIXME(woosuk): Do not use internal method.
+        # FIXME: Do not use internal method.
         llm._add_request(
             prompt=prompt,
             prompt_token_ids=None,
@@ -92,7 +92,7 @@ def run_aphrodite(
         )
 
     start = time.time()
-    # FIXME(woosuk): Do use internal method.
+    # FIXME: Do use internal method.
     llm._run_engine(use_tqdm=True)
     end = time.time()
     return end - start

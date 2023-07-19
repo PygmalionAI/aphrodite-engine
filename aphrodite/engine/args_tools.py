@@ -16,7 +16,7 @@ class EngineArgs:
     use_np_weights: bool = False
     use_dummy_weights: bool = False
     dtype: str = "auto"
-    seed: int = 42
+    seed: int = 0
     worker_use_ray: bool = False
     pipeline_parallel_size: int = 1
     tensor_parallel_size: int = 1

@@ -93,7 +93,7 @@ class PagedAttention(nn.Module):
                                             self.num_queries_per_kv,
                                             dim=1)
 
-        # TODO(woosuk): The unsqueeze op may incur some CPU overhead. Optimize.
+        # TODO: The unsqueeze op may incur some CPU overhead. Optimize.
         out = xops.memory_efficient_attention_forward(
             query.unsqueeze(0),
             key.unsqueeze(0),
@@ -103,7 +103,7 @@ class PagedAttention(nn.Module):
             scale=self.scale,
             op=self.attn_op,
         )
-        # TODO(woosuk): Unnecessary copy. Optimize.
+        # TODO: Unnecessary copy. Optimize.
         output.copy_(out.squeeze(0))
         return output
 
@@ -358,7 +358,7 @@ class PagedAttentionWithALiBi(PagedAttention):
             value: shape = [num_prompt_tokens, num_heads, head_size]
             input_metadata: metadata for paged attention.
         """
-        # FIXME(woosuk): Because xformers does not support dynamic sequence
+        # FIXME: Because xformers does not support dynamic sequence
         # lengths with custom attention bias, we process each prompt one by
         # one. This is inefficient, especially when we have many short prompts.
         start = 0
@@ -373,7 +373,7 @@ class PagedAttentionWithALiBi(PagedAttention):
                 scale=self.scale,
                 op=self.attn_op,
             )
-            # TODO(woosuk): Unnecessary copy. Optimize.
+            # TODO: Unnecessary copy. Optimize.
             output[start:end].copy_(out.squeeze(0))
             start += prompt_len
         return output
