@@ -65,6 +65,8 @@ If your GPU is not listed here or you do not meet the minimum CC, you will not b
 Aphrodite will require a slightly specialized environment to run, as the latest CUDA and GCC versions are not supported. You can use Conda to easily configure your environment.
 
 ### Install miniconda3
+If you run into any problems, please refer the common [Common Issues](#common-issues) section, or open an [Issue](https://github.com/PygmalionAI/aphrodite-engine/issues) if you can't find the answer there.
+
 ```sh
 $ wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
 $ bash ./Miniconda3*
@@ -95,11 +97,6 @@ Whenever you want to launch Aphrodite later on, make sure you run `conda activat
   ```
   > If you receive any import errors here, try running `pip install -r requirements.txt` first.
 
-**If you receive an error for CUDA version mismatch**, run `which nvcc` and note down the output. For example, if your output is `/home/anon/miniconda3/envs/aphrodite/bin/nvcc`, run this command:
-```sh
-$ export CUDA_HOME=/home/anon/miniconda3/envs/aphrodite
-```
-Then run the installation command again.
 
 ## Example usage
 
@@ -136,6 +133,30 @@ $ curl http://localhost:8000/v1/completions \
 ```
 For the full list of request parameters, see [OpenAI Completions API reference](https://platform.openai.com/docs/api-reference/completions).
 
+### Common Issues
+- `The detected CUDA version (12.1) mismatches the version that was used to compile
+      PyTorch (11.7). Please make sure to use the same CUDA versions.`
+
+This is normally due to your environment referring to the global installation of CUDA and not the one in your current env. Run `which nvcc` and note down the output. For example, if your output is `/home/anon/miniconda3/envs/aphrodite/bin/nvcc`, run this command:
+```sh
+$ export CUDA_HOME=/home/anon/miniconda3/envs/aphrodite
+```
+
+Then run the installation command again.
+
+- `Cuda failure 'peer access is not supported between these two devices' [repeated 15x across cluster`
+  
+This would be the last line in a very long error message. This happens if you're using a cluster of NVLinked GPUs and (possibly) using more than 2 of them at once. To fix this, run these two before starting the engine:
+
+```sh
+$ export NCCL_IGNORE_DISABLED_P2P=1
+$ export NCCL_P2P_DISABLE=1
+```
+
+- `Aborted due to the lack of CPU swap space. Please increase "
+                "the swap space to avoid this error.`
+
+You've run out of swap space! Please pass the `--swap-space` followed by the amount of swap (in GBs) to allocate. Make sure you leave enough RAM for the model loading process.
 ### Notes
 
 1. Currently, only FP16/BF16 precision HuggingFace models are supported. These are the default model types you might find on a HuggingFace upload. GPTQ and GGML are **not** supported.
