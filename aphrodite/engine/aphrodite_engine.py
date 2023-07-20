@@ -240,15 +240,18 @@ class AphroditeEngine:
     def _decode_sequences(self, seq_groups: List[SequenceGroup]) -> None:
         for seq_group in seq_groups:
             for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
-                new_token, new_output_text = detokenize_incrementally(
-                    self.tokenizer,
-                    seq.output_tokens,
-                    seq.get_last_token_id(),
-                    skip_special_tokens=True,
-                )
-                if new_token is not None:
-                    seq.output_tokens.append(new_token)
-                    seq.output_text = new_output_text
+                last_token_id = seq.get_last_token_id()
+                if last_token_id is not None:
+                    new_token, new_output_text = detokenize_incrementally(
+                        self.tokenizer,
+                        seq.output_tokens,
+                        last_token_id,
+                        skip_special_tokens=True,
+                    )
+                    if new_token is not None:
+                        seq.output_tokens.append(new_token)
+                        seq.output_text = new_output_text
+
 
     def _stop_sequences(self, seq_groups: List[SequenceGroup]) -> None:
         """Stop the finished sequences."""

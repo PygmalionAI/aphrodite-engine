@@ -12,3 +12,4 @@ mypy
 pytest
 fschat
 pydantic < 2
+fastchat
