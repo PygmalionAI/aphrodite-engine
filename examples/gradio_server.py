@@ -10,7 +10,7 @@ def http_bot(prompt):
     pload = {
         "prompt": prompt,
         "stream": True,
-        "max_tokens": 128,
+        "max_tokens": 512,
     }
     response = requests.post(args.model_url, headers=headers, json=pload, stream=True)
 
@@ -41,4 +41,4 @@ if __name__ == "__main__":
     demo = build_demo()
     demo.queue(concurrency_count=100).launch(server_name=args.host,
                                              server_port=args.port,
-                                             share=True)    
+                                             share=False)    
