@@ -43,13 +43,13 @@ device_count = torch.cuda.device_count()
 compute_capabilities: Set[int] = set()
 for i in range(device_count):
     major, minor = torch.cuda.get_device_capability(i)
-    if major < 7:
+    if major < 6:
         raise RuntimeError(
-            "GPUs with compute capability less than 7.0 are not supported.")
+            "GPUs with compute capability less than 6.0 are not supported.")
     compute_capabilities.add(major * 10 + minor)
 # If no GPU is available, add all supported compute capabilities.
 if not compute_capabilities:
-    compute_capabilities = {70, 75, 80, 86, 90}
+    compute_capabilities = {60, 61, 65, 70, 75, 80, 86, 89, 90}
 # Add target compute capabilities to NVCC flags.
 for capability in compute_capabilities:
     NVCC_FLAGS += ["-gencode", f"arch=compute_{capability},code=sm_{capability}"]
