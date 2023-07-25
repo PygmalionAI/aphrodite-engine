@@ -197,13 +197,13 @@ class AsyncAphrodite:
     def from_engine_args(cls, engine_args: AsyncEngineArgs) -> "AsyncAphrodite":
         engine_configs = engine_args.create_engine_configs()
         parallel_config = engine_configs[2]
-        distributed_init_method, devices = initialize_cluster(
+        distributed_init_method, placement_group = initialize_cluster(
             parallel_config, engine_args.engine_use_ray)
         engine = cls(engine_args.worker_use_ray,
                      engine_args.engine_use_ray,
                      *engine_configs,
                      distributed_init_method,
-                     devices,
+                     placement_group,
                      log_requests=not engine_args.disable_log_requests,
                      log_stats=not engine_args.disable_log_stats)
         return engine

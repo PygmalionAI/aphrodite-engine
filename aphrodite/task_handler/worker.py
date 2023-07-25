@@ -1,5 +1,7 @@
+import os
+from typing import Dict, List, Tuple, Optional
 import torch
-from typing import Dict, List, Tuple, Any
+import torch.distributed
 
 from aphrodite.common.config import CacheConfig, ModelConfig, ParallelConfig, SchedulerConfig
 from aphrodite.modeling import get_model, InputMetadata, set_random_seed
@@ -23,8 +25,8 @@ class Worker:
         model_config: ModelConfig,
         parallel_config: ParallelConfig,
         scheduler_config: SchedulerConfig,
-        rank: int,
-        distributed_init_method: str,
+        rank: Optional[int] = None,
+        distributed_init_method: Optional[str] = None,
     ) -> None:
         self.model_config = model_config
         self.parallel_config = parallel_config
@@ -32,22 +34,32 @@ class Worker:
         self.rank = rank
         self.distributed_init_method = distributed_init_method
 
-        _init_distributed_environment(parallel_config, rank, distributed_init_method)
+        self.cache_config = None
+        self.block_size = None
+        self.cache_engine = None
+        self.cache_events = None
+        self.gpu_cache = None
+
+    def init_model(self):
+        os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
+        self.rank = self.rank if self.rank is not None else int(
+            os.getenv("RANK", "-1"))
+        local_rank = int(os.getenv("LOCAL_RANK", "0"))
+        self.device = torch.device(f"cuda:{local_rank}")
+        if self.rank < 0:
+            raise ValueError("Invalid or unspecified rank.")
+        torch.cuda.set_device(self.device)
+
+        _init_distributed_environment(self.parallel_config, self.rank, self.distributed_init_method)
 
         set_random_seed(self.model_config.seed)
-        self.model = get_model(model_config)
+        self.model = get_model(self.model_config)
         initialize_all_reduce_launcher(
             self.scheduler_config.max_num_batched_tokens,
             self.model_config.get_hidden_size(),
             self.model_config.dtype,
         )
 
-        # These will be initialize by self.init_cache_engine()
-        self.cache_config = None
-        self.block_size = None
-        self.cache_engine = None
-        self.cache_events = None
-        self.gpu_cache = None
 
     @torch.inference_mode()
     def profile_num_available_blocks(
@@ -269,16 +281,30 @@ class Worker:
 
 def _init_distributed_environment(
     parallel_config: ParallelConfig,
-    rank: int,
-    distributed_init_method: str,
+    rank: int, # TODO: this too?
+    distributed_init_method: Optional[str] = None,
 ) -> None:
     """Initialize the distributed environment."""
-    torch.distributed.init_process_group(
-        backend="nccl",
-        world_size=parallel_config.world_size,
-        rank=rank,
-        init_method=distributed_init_method,
-    )
+    if torch.distributed.is_initialized():
+        torch_world_size = torch.distributed.get_world_size()
+        if torch_world_size != parallel_config.world_size:
+            raise RuntimeError(
+                "torch.distributed is already initialized but the "
+                "torch world size doesn't match parallel_config.world_size "
+                f"({torch_world_size} vs. {parallel_config.world_size})")
+    elif not distributed_init_method:
+        raise ValueError(
+            "distributed_init_method must be set if torch.distributed "
+            "is not already initialized."
+        )
+    else:
+        torch.distributed.init_process_group(
+            backend="nccl",
+            world_size=parallel_config.world_size,
+            rank=rank,
+            init_method=distributed_init_method,
+        )
+
     torch.distributed.all_reduce(torch.zeros(1).cuda())
     initialize_model_parallel(parallel_config.tensor_parallel_size,
                               parallel_config.pipeline_parallel_size)
