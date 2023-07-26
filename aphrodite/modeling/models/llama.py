@@ -254,10 +254,10 @@ class LlamaForCausalLM(nn.Module):
                               self.config.num_attention_heads *
                               self.config.num_key_value_heads // tp_size)
         attention_weight_specs = [
-            ("q_proj", q_proj_shard_size, 0)
-            ("k_proj", kv_proj_shard_size, q_proj_shard_size)
+            ("q_proj", q_proj_shard_size, 0),
+            ("k_proj", kv_proj_shard_size, q_proj_shard_size),
             ("v_proj", kv_proj_shard_size,
-             q_proj_shard_size + kv_proj_shard_size)
+             q_proj_shard_size + kv_proj_shard_size),
         ]
         state_dict = self.state_dict()
 
