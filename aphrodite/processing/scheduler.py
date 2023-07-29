@@ -419,7 +419,7 @@ class Scheduler:
             """
             raise RuntimeError(
                 "Aborted due to the lack of CPU swap space. Please increase "
-                "the swap space to avoid this error. https://wiki.archlinux.org/title/Swap")
+                "the swap size with `--swap-space 4`")
         mapping = self.block_manager.swap_out(seq_group)
         blocks_to_swap_out.update(mapping)
         for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
