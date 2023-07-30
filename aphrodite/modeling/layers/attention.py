@@ -23,6 +23,10 @@ class PagedAttention(nn.Module):
     This class takes flattened 1D query, key, and value tensors as input. The input 1D tensors
     can be split into three parts: the prompt tokens, the generation tokens, and the paddings.
 
+    |<------------------------------------------num_valid_tokens------------------------------------------------>|
+    |<-------------num_prompt_tokens---------------->|<--------------num_generation_tokens (M)------------------>|
+    |<--prompt_0-->|<--prompt_1-->|...|<--prompt_N-1-->|<--generation_0-->|...|<--generation_M-1-->|<--padding-->|
+
     The prompts might have different lengths, while the generation tokens always have length 1.
     The paddings are appended to make the input length a multiple of 8, which is desirable for
     Tensor cores.
@@ -93,7 +97,7 @@ class PagedAttention(nn.Module):
                                             self.num_queries_per_kv,
                                             dim=1)
 
-        # TODO(woosuk): The unsqueeze op may incur some CPU overhead. Optimize.
+        # TODO: The unsqueeze op may incur some CPU overhead. Optimize.
         out = xops.memory_efficient_attention_forward(
             query.unsqueeze(0),
             key.unsqueeze(0),
@@ -103,7 +107,7 @@ class PagedAttention(nn.Module):
             scale=self.scale,
             op=self.attn_op,
         )
-        # TODO(woosuk): Unnecessary copy. Optimize.
+        # TODO: Unnecessary copy. Optimize.
         output.copy_(out.squeeze(0))
         return output
 
@@ -235,8 +239,9 @@ class PagedAttentionWithRoPE(PagedAttention):
         rotary_dim: int,
         max_position: int = 8192,
         base: int = 10000,
+        num_kv_heads: Optional[int] = None,
     ) -> None:
-        super().__init__(num_heads, head_size, scale)
+        super().__init__(num_heads, head_size, scale, num_kv_heads)
 
         # Create the cos and sin cache.
         inv_freq = 1.0 / (base**(torch.arange(0, rotary_dim, 2) / rotary_dim))
@@ -269,12 +274,12 @@ class PagedAttentionWithRoPE(PagedAttention):
 
         Args:
             positions: shape = [num_tokens]
-                        query: shape = [num_tokens, num_heads * head_size]
-            key: shape = [num_tokens, num_heads * head_size]
-            value: shape = [num_tokens, num_heads * head_size]
-            key_cache: shape = [num_blocks, num_heads, head_size/x,
+            query: shape = [num_tokens, num_heads * head_size]
+            key: shape = [num_tokens, num_kv_heads * head_size]
+            value: shape = [num_tokens, num_kv_heads * head_size]
+            key_cache: shape = [num_blocks, num_kv_heads, head_size/x,
                 block_size, x]
-            value_cache: shape = [num_blocks, num_heads, head_size, block_size]
+            value_cache: shape = [num_blocks, num_kv_heads, head_size, block_size]
             input_metadata: metadata for paged attention.
             cache_event: event to wait for the cache operations to finish.
 
@@ -358,7 +363,7 @@ class PagedAttentionWithALiBi(PagedAttention):
             value: shape = [num_prompt_tokens, num_heads, head_size]
             input_metadata: metadata for paged attention.
         """
-        # FIXME(woosuk): Because xformers does not support dynamic sequence
+        # FIXME: Because xformers does not support dynamic sequence
         # lengths with custom attention bias, we process each prompt one by
         # one. This is inefficient, especially when we have many short prompts.
         start = 0
@@ -373,7 +378,7 @@ class PagedAttentionWithALiBi(PagedAttention):
                 scale=self.scale,
                 op=self.attn_op,
             )
-            # TODO(woosuk): Unnecessary copy. Optimize.
+            # TODO: Unnecessary copy. Optimize.
             output[start:end].copy_(out.squeeze(0))
             start += prompt_len
         return output
@@ -402,6 +407,7 @@ class PagedAttentionWithALiBi(PagedAttention):
             query,
             key_cache,
             value_cache,
+            self.head_mapping,
             self.scale,
             input_metadata.block_tables,
             input_metadata.context_lens,

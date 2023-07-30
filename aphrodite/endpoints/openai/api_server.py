@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastchat.conversation import Conversation, SeparatorStyle
-from fastchat.model.model_adapter import get_conversation_template
+#from fastchat.model.model_adapter import get_conversation_template
 
 import uvicorn
 
@@ -29,6 +29,7 @@ from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.utils import random_uuid
+from aphrodite.common.logits import BiasLogitsProcessor
 
 TIMEOUT_KEEP_ALIVE = 5 # seconds
 
@@ -60,7 +61,7 @@ async def check_model(request) -> Optional[JSONResponse]:
 
 
 async def get_gen_prompt(request) -> str:
-    conv = get_conversation_template(request.model)
+    #conv = get_conversation_template(request.model)
     conv = Conversation(
         name=conv.name,
         system=conv.system,
@@ -95,25 +96,26 @@ async def get_gen_prompt(request) -> str:
     return prompt
 
 
-async def check_length(request, prompt, model_config):
-    if hasattr(model_config.hf_config, "max_sequence_length"):
-        context_len = model_config.hf_config.max_sequence_length
-    elif hasattr(model_config.hf_config, "seq_length"):
-        context_len = model_config.hf_config.seq_length
-    elif hasattr(model_config.hf_config, "max_position_embeddings"):
-        context_len = model_config.hf_config.max_position_embeddings
-    elif hasattr(model_config.hf_config, "seq_length"):
-        context_len = model_config.hf_config.seq_length
-    else:
-        context_len = 2048
+async def check_length(request, prompt):
+    # if hasattr(model_config.hf_config, "max_sequence_length"):
+    #     context_len = model_config.hf_config.max_sequence_length
+    # elif hasattr(model_config.hf_config, "seq_length"):
+    #     context_len = model_config.hf_config.seq_length
+    # elif hasattr(model_config.hf_config, "max_position_embeddings"):
+    #     context_len = model_config.hf_config.max_position_embeddings
+    # elif hasattr(model_config.hf_config, "seq_length"):
+    #     context_len = model_config.hf_config.seq_length
+    # else:
+    #     context_len = 2048
+
 
     input_ids = tokenizer(prompt).input_ids
     token_num = len(input_ids)
 
-    if token_num + request.max_tokens > context_len:
+    if token_num + request.max_tokens > max_model_len:
         return create_error_response(
             HTTPStatus.BAD_REQUEST,
-            f"This model's maximum context length is {context_len} tokens. "
+            f"This model's maximum context length is {max_model_len} tokens. "
             f"However, you requested {request.max_tokens + token_num} tokens "
             f"({token_num} in the messages, "
             f"{request.max_tokens} in the completion). "
@@ -167,7 +169,6 @@ async def create_chat_completion(raw_request: Request):
 
     NOTE: Currently we do not support the following features:
         - function_call (Users should implement this by themselves)
-        - logit_bias (to be supported by Aphrodite engine)
     """
     request = ChatCompletionRequest(**await raw_request.json())
     logger.info(f"Received chat completion request: {request}")
@@ -176,15 +177,18 @@ async def create_chat_completion(raw_request: Request):
     if error_check_ret is not None:
         return error_check_ret
 
-    if request.logit_bias is not None:
-        # TODO: support logit_bias in Aphrodite engine.
-        return create_error_response(HTTPStatus.BAD_REQUEST,
-                                     "logit_bias is not currently supported")
-
     prompt = await get_gen_prompt(request)
-    error_check_ret = await check_length(request, prompt, engine_model_config)
+    error_check_ret = await check_length(request, prompt)
     if error_check_ret is not None:
         return error_check_ret
+
+    if not request.logit_bias:
+        logit_processors = []
+    else:
+        biases = dict(
+            map(lambda bias: (int(bias[0]), bias[1]),
+                request.logit_bias.items()))
+        logit_processors = [BiasLogitsProcessor(biases)]
 
     model_name = request.model
     request_id = f"cmpl-{random_uuid()}"
@@ -202,6 +206,7 @@ async def create_chat_completion(raw_request: Request):
             top_k=request.top_k,
             ignore_eos=request.ignore_eos,
             use_beam_search=request.use_beam_search,
+            logits_processors=logit_processors,
         )
     except ValueError as e:
         return create_error_response(HTTPStatus.BAD_REQUEST, str(e))
@@ -359,10 +364,13 @@ async def create_completion(raw_request: Request):
         return create_error_response(HTTPStatus.BAD_REQUEST,
                                      "suffix is not currently supported")
 
-    if request.logit_bias is not None:
-        # TODO: support logit_bias in Aphrodite engine.
-        return create_error_response(HTTPStatus.BAD_REQUEST,
-                                     "logit_bias is not currently supported")
+    if not request.logit_bias:
+        logit_processors = []
+    else:
+        logit_bias = dict(
+            map(lambda logit: (int(logit[0]), logit[1]),
+                request.logit_bias.items()))
+        logit_processors = [BiasLogitsProcessor(logit_bias)]
 
     model_name = request.model
     request_id = f"cmpl-{random_uuid()}"
@@ -392,6 +400,7 @@ async def create_completion(raw_request: Request):
             max_tokens=request.max_tokens,
             logprobs=request.logprobs,
             use_beam_search=request.use_beam_search,
+            logits_processors=logit_processors,
         )
     except ValueError as e:
         return create_error_response(HTTPStatus.BAD_REQUEST, str(e))
@@ -579,10 +588,12 @@ if __name__ == "__main__":
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = AsyncAphrodite.from_engine_args(engine_args)
     engine_model_config = asyncio.run(engine.get_model_config())
+    max_model_len = engine_model_config.get_max_model_len()
 
     # A separate tokenizer to map token IDs to strings.
     tokenizer = get_tokenizer(engine_args.tokenizer,
-                              tokenizer_mode=engine_args.tokenizer_mode)
+                              tokenizer_mode=engine_args.tokenizer_mode,
+                              trust_remote_code=engine_args.trust_remote_code)
 
     uvicorn.run(app,
                 host=args.host,

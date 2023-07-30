@@ -1,14 +1,14 @@
 ninja
 psutil
-ray
+ray >= 2.5.1
 sentencepiece
 numpy
 torch >= 2.0.0
-transformers >= 4.28.0
+transformers >= 4.31.0
 uvicorn
 openai # for fastapi's openai proxy emulation
 xformers >= 0.0.19
 mypy
 pytest
-fschat
+fschat >= 0.2.18
 pydantic < 2

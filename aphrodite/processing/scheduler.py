@@ -182,11 +182,13 @@ class Scheduler:
                     break
 
                 num_prompt_tokens = seq_group.get_seqs()[0].get_len()
-                if num_prompt_tokens >= self.scheduler_config.max_seq_len:
+                if num_prompt_tokens > min(
+                    self.scheduler_config.max_model_len,
+                    self.scheduler_config.max_num_batched_tokens):
                     logger.warning(
                         f"Input prompt ({num_prompt_tokens} tokens) is too long"
                         " and exceeds limit of "
-                        f"{self.scheduler_config.max_seq_len}")
+                        f"{self.scheduler_config.max_model_len}")
                     for seq in seq_group.get_seqs():
                         seq.status = SequenceStatus.FINISHED_IGNORED
                     ignored_seq_groups.append(seq_group)
@@ -417,7 +419,7 @@ class Scheduler:
             """
             raise RuntimeError(
                 "Aborted due to the lack of CPU swap space. Please increase "
-                "the swap space to avoid this error. https://wiki.archlinux.org/title/Swap")
+                "the swap size with `--swap-space 4`")
         mapping = self.block_manager.swap_out(seq_group)
         blocks_to_swap_out.update(mapping)
         for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):

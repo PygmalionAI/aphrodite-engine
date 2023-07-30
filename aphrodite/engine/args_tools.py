@@ -16,13 +16,13 @@ class EngineArgs:
     use_np_weights: bool = False
     use_dummy_weights: bool = False
     dtype: str = "auto"
-    seed: int = 42
+    seed: int = 0
     worker_use_ray: bool = False
     pipeline_parallel_size: int = 1
     tensor_parallel_size: int = 1
     block_size: int = 16
-    swap_space: int = 4 # in GiB
-    gpu_memory_utilization: float = 0.88
+    swap_space: int = 5 # in GiB
+    gpu_memory_utilization: float = 0.95
     max_num_batched_tokens: int = 2560
     max_num_seqs: int = 256
     disable_log_stats: bool = False
@@ -81,11 +81,10 @@ class EngineArgs:
         parallel_config = ParallelConfig(self.pipeline_parallel_size,
                                          self.tensor_parallel_size,
                                          self.worker_use_ray)
-        model_max_len = getattr(model_config.hf_config,
+        max_model_len = getattr(model_config.hf_config,
                                 'max_position_embeddings', float('inf'))
-        max_seq_len = min(self.max_num_batched_tokens, model_max_len)
         scheduler_config = SchedulerConfig(self.max_num_batched_tokens,
-                                           self.max_num_seqs, max_seq_len)
+                                           self.max_num_seqs, model_config.get_max_model_len())
         return model_config, cache_config, parallel_config, scheduler_config
 
 
@@ -102,4 +101,3 @@ class AsyncEngineArgs(EngineArgs):
         parser.add_argument('--engine-use-ray', action='store_true', help='use Ray to start the Aphrodite Engine in a separate process as the server process.')
         parser.add_argument('--disable-log-requests', action='store_true', help='disable logging requests')
         return parser
-

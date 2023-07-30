@@ -9,4 +9,5 @@ repos
 build
 *.json
 dist/
+.VSCodeCounter
 

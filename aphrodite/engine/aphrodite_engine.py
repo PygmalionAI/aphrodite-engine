@@ -1,17 +1,24 @@
 import time
-from typing import Any, List, Optional
+from functools import partial
+from typing import Any, List, Optional, TYPE_CHECKING
 
 from aphrodite.common.config import CacheConfig, ModelConfig, ParallelConfig, SchedulerConfig
 from aphrodite.processing.scheduler import Scheduler
 from aphrodite.engine.args_tools import EngineArgs
-from aphrodite.engine.ray_tools import DeviceID, initialize_cluster, ray
+from aphrodite.engine.ray_tools import initialize_cluster, ray, RayWorker
 from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import Sequence, SequenceGroup, SequenceStatus
 from aphrodite.transformers_utils.tokenizer import detokenize_incrementally, get_tokenizer
 from aphrodite.common.utils import Counter
-from aphrodite.task_handler.worker import Worker
+
+if ray:
+    from ray.air.util.torch_dist import init_torch_dist_process_group
+    from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
+
+if TYPE_CHECKING:
+    from ray.util.placement_group import PlacementGroup
 
 
 logger = init_logger(__name__)
@@ -48,7 +55,7 @@ class AphroditeEngine:
         parallel_config: ParallelConfig,
         scheduler_config: SchedulerConfig,
         distributed_init_method: str,
-        stage_devices: List[List[DeviceID]],
+        placement_group: Optional["PlacementGroup"],
         log_stats: bool,
     ) -> None:
         logger.info(
@@ -76,28 +83,65 @@ class AphroditeEngine:
             trust_remote_code=model_config.trust_remote_code)
         self.seq_counter = Counter()
 
-        self.workers: List[Worker] = []
-        assert len(stage_devices) == 1, "Only support one stage for now"
-        for rank, node_resource, _ in stage_devices[0]:
-            worker_cls = Worker
-            if self.parallel_config.worker_use_ray:
-                worker_cls = ray.remote(
-                    num_cpus=0,
-                    num_gpus=1,
-                    resources={node_resource: 1e-3},
-                )(worker_cls).remote
-            
-            worker = worker_cls(
-                model_config,
-                parallel_config,
-                scheduler_config,
-                rank,
-                distributed_init_method,
-            )
-            self.workers.append(worker)
+        if self.parallel_config.worker_use_ray:
+            self._init_workers_ray(placement_group)
+        else:
+            self._init_workers(distributed_init_method)
+
         self._init_cache()
 
         self.scheduler = Scheduler(scheduler_config, cache_config, log_stats)
+
+    def _init_workers(self, distributed_init_method: str):
+        from aphrodite.task_handler.worker import Worker
+
+        assert self.parallel_config.world_size == 1, (
+            "Ray is required if parallel_config.world_size > 1.")
+        
+        self.workers : List[Worker] = []
+        worker = Worker(
+            self.model_config,
+            self.parallel_config,
+            self.scheduler_config,
+            0,
+            distributed_init_method,
+        )
+        self.workers.append(worker)
+        self._run_workers(
+            "init_model",
+            get_all_outputs=True,
+        )
+
+    def _init_workers_ray(self, placement_group: "PlacementGroup"):
+        from aphrodite.task_handler.worker import Worker
+
+        self.workers: List[Worker] = []
+        for bundle in placement_group.bundle_specs:
+            if not bundle.get("GPU", 0):
+                continue
+            worker = ray.remote(
+                num_cpus=0,
+                num_gpus=1,
+                scheduling_strategy=PlacementGroupSchedulingStrategy(
+                placement_group=placement_group,
+                placement_group_capture_child_tasks=True),
+            )(RayWorker).remote()
+            self.workers.append(worker)
+        
+        init_torch_dist_process_group(self.workers, backend="nccl")
+        self._run_workers("init_worker",
+                          get_all_outputs=True,
+                          worker_init_fn=lambda: Worker(
+                                self.model_config,
+                                self.parallel_config,
+                                self.scheduler_config,
+                                None,
+                                None,
+                          ))
+        self._run_workers(
+            "init_model",
+            get_all_outputs=True,
+        )
         
     def _verify_args(self) -> None:
         self.model_config.verify_with_parallel_config(self.parallel_config)
@@ -134,11 +178,11 @@ class AphroditeEngine:
         engine_configs = engine_args.create_engine_configs()
         parallel_config = engine_configs[2]
         # Initialize the cluster.
-        distributed_init_method, devices = initialize_cluster(parallel_config)
+        distributed_init_method, placement_group = initialize_cluster(parallel_config)
         # Create the engine.
         engine = cls(*engine_configs,
                      distributed_init_method,
-                     devices,
+                     placement_group,
                      log_stats=not engine_args.disable_log_stats)
         return engine
 
@@ -240,15 +284,18 @@ class AphroditeEngine:
     def _decode_sequences(self, seq_groups: List[SequenceGroup]) -> None:
         for seq_group in seq_groups:
             for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
-                new_token, new_output_text = detokenize_incrementally(
-                    self.tokenizer,
-                    seq.output_tokens,
-                    seq.get_last_token_id(),
-                    skip_special_tokens=True,
-                )
-                if new_token is not None:
-                    seq.output_tokens.append(new_token)
-                    seq.output_text = new_output_text
+                last_token_id = seq.get_last_token_id()
+                if last_token_id is not None:
+                    new_token, new_output_text = detokenize_incrementally(
+                        self.tokenizer,
+                        seq.output_tokens,
+                        last_token_id,
+                        skip_special_tokens=True,
+                    )
+                    if new_token is not None:
+                        seq.output_tokens.append(new_token)
+                        seq.output_text = new_output_text
+
 
     def _stop_sequences(self, seq_groups: List[SequenceGroup]) -> None:
         """Stop the finished sequences."""
@@ -266,7 +313,7 @@ class AphroditeEngine:
                     continue
                 
                 if (seq.get_len() >=
-                        self.scheduler.scheduler_config.max_seq_len):
+                        self.scheduler_config.max_model_len):
                     self.scheduler.free_seq(
                         seq, SequenceStatus.FINISHED_LENGTH_CAPPED)
                     continue
@@ -290,9 +337,11 @@ class AphroditeEngine:
         """Runs the given method on all workers."""
         all_outputs = []
         for worker in self.workers:
-            executor = getattr(worker, method)
+            # executor = getattr(worker, method)
             if self.parallel_config.worker_use_ray:
-                executor = executor.remote
+                executor = partial(worker.execute_method.remote, method)    # FIXME: will this break us?
+            else:
+                executor = getattr(worker, method)
 
             output = executor(*args, **kwargs)
             all_outputs.append(output)
