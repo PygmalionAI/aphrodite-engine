@@ -1,0 +1,72 @@
+"filename", "language", "C++", "CUDA C++", "Markdown", "Python", "comment", "blank", "total"
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/__init__.py", "Python", 0, 0, 0, -19, 0, -3, -22
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/common/__init__.py", "Python", 0, 0, 0, 0, 0, -1, -1
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/common/block.py", "Python", 0, 0, 0, -44, -7, -17, -68
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/common/config.py", "Python", 0, 0, 0, -171, -51, -33, -255
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/common/logger.py", "Python", 0, 0, 0, -29, -9, -15, -53
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/common/outputs.py", "Python", 0, 0, 0, -72, -23, -14, -109
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/common/sampling_params.py", "Python", 0, 0, 0, -97, -37, -10, -144
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/common/sequence.py", "Python", 0, 0, 0, -199, -50, -48, -297
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/common/utils.py", "Python", 0, 0, 0, -26, -3, -10, -39
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/endpoints/__init__.py", "Python", 0, 0, 0, 0, 0, -1, -1
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/endpoints/api_server.py", "Python", 0, 0, 0, -58, -8, -13, -79
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/endpoints/llm.py", "Python", 0, 0, 0, -96, -48, -13, -157
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/endpoints/openai/__init__.py", "Python", 0, 0, 0, 0, 0, -1, -1
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/endpoints/openai/api_server.py", "Python", 0, 0, 0, -465, -55, -74, -594
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/endpoints/openai/protocol.py", "Python", 0, 0, 0, -130, -1, -30, -161
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/engine/__init__.py", "Python", 0, 0, 0, 0, 0, -1, -1
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/engine/aphrodite_engine.py", "Python", 0, 0, 0, -250, -62, -50, -362
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/engine/args_tools.py", "Python", 0, 0, 0, -88, -5, -12, -105
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/engine/async_aphrodite.py", "Python", 0, 0, 0, -135, -45, -29, -209
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/engine/ray_tools.py", "Python", 0, 0, 0, -62, -21, -14, -97
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/__init__.py", "Python", 0, 0, 0, -8, 0, -1, -9
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/hf_downloader.py", "Python", 0, 0, 0, -94, -13, -16, -123
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/layers/__init__.py", "Python", 0, 0, 0, 0, 0, -1, -1
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/layers/activation.py", "Python", 0, 0, 0, -27, -11, -7, -45
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/layers/attention.py", "Python", 0, 0, 0, -250, -132, -35, -417
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/layers/layernorm.py", "Python", 0, 0, 0, -21, -6, -4, -31
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/layers/sampler.py", "Python", 0, 0, 0, -306, -42, -56, -404
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/loader.py", "Python", 0, 0, 0, -35, -2, -5, -42
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/megatron/README.md", "Markdown", 0, 0, -1, 0, 0, 0, -1
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/megatron/__init__.py", "Python", 0, 0, 0, -6, 0, -2, -8
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/megatron/parallel_state.py", "Python", 0, 0, 0, -369, -100, -103, -572
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/megatron/tensor_parallel/__init__.py", "Python", 0, 0, 0, -40, -5, -5, -50
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/megatron/tensor_parallel/layers.py", "Python", 0, 0, 0, -265, -135, -50, -450
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/megatron/tensor_parallel/mappings.py", "Python", 0, 0, 0, -156, -38, -89, -283
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/megatron/tensor_parallel/random.py", "Python", 0, 0, 0, -73, -67, -26, -166
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/megatron/tensor_parallel/utils.py", "Python", 0, 0, 0, -34, -26, -12, -72
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/metadata.py", "Python", 0, 0, 0, -46, -13, -6, -65
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/models/__init__.py", "Python", 0, 0, 0, -8, 0, -1, -9
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/models/gpt_j.py", "Python", 0, 0, 0, -197, -22, -31, -250
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/models/gpt_neox.py", "Python", 0, 0, 0, -202, -6, -30, -238
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/models/llama.py", "Python", 0, 0, 0, -261, -25, -35, -321
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/modeling/utils.py", "Python", 0, 0, 0, -13, -1, -3, -17
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/processing/__init__.py", "Python", 0, 0, 0, 0, 0, -1, -1
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/processing/block_manager.py", "Python", 0, 0, 0, -175, -21, -36, -232
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/processing/policy.py", "Python", 0, 0, 0, -33, 0, -9, -42
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/processing/scheduler.py", "Python", 0, 0, 0, -316, -60, -51, -427
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/task_handler/__init__.py", "Python", 0, 0, 0, 0, 0, -1, -1
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/task_handler/cache_engine.py", "Python", 0, 0, 0, -122, -9, -24, -155
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/task_handler/worker.py", "Python", 0, 0, 0, -251, -17, -51, -319
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/transformers_utils/__init__.py", "Python", 0, 0, 0, 0, 0, -1, -1
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/transformers_utils/config.py", "Python", 0, 0, 0, -17, 0, -1, -18
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/aphrodite/transformers_utils/tokenizer.py", "Python", 0, 0, 0, -85, -21, -12, -118
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/activation.cpp", "C++", 10, 0, 0, 0, 0, 3, 13
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/activation_kernels.cu", "CUDA C++", 0, 41, 0, 0, 1, 7, 49
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention.cpp", "C++", 20, 0, 0, 0, 0, 3, 23
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention/README.md", "Markdown", 0, 0, 11, 0, 0, 4, 15
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention/attention_dtypes.h", "C++", 5, 0, 0, 0, 0, 2, 7
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention/attention_generic.cuh", "CUDA C++", 0, 33, 0, 0, 21, 12, 66
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention/attention_kernels.cu", "CUDA C++", 0, 364, 0, 0, 90, 51, 505
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention/attention_utils.cuh", "CUDA C++", 0, 28, 0, 0, 21, 8, 57
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention/dtype_bfloat16.cuh", "CUDA C++", 0, 344, 0, 0, 28, 53, 425
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention/dtype_float16.cuh", "CUDA C++", 0, 357, 0, 0, 29, 60, 446
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention/dtype_float32.cuh", "CUDA C++", 0, 200, 0, 0, 29, 41, 270
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/cache.cpp", "C++", 41, 0, 0, 0, 0, 7, 48
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/cache_kernels.cu", "CUDA C++", 0, 335, 0, 0, 9, 43, 387
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/layernorm.cpp", "C++", 12, 0, 0, 0, 0, 3, 15
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/layernorm_kernels.cu", "CUDA C++", 0, 54, 0, 0, 1, 9, 64
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/pos_encoding.cpp", "C++", 13, 0, 0, 0, 0, 3, 16
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/pos_encoding_kernels.cu", "CUDA C++", 0, 76, 0, 0, 1, 12, 89
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/reduction.cuh", "CUDA C++", 0, 23, 0, 0, 21, 9, 53
+"Total", "-", 101, 1855, 10, -5351, -946, -764, -5095

@@ -52,6 +52,7 @@ class Sampler(nn.Module):
         assert len(frequency_penalties) == logits.shape[0]
         logits = _apply_penalties(logits, output_tokens, presence_penalties,
                                   frequency_penalties, self.vocab_size)
+        logits = _apply_logits_processors(input_metadata, logits, output_tokens)
 
         temperatures = _get_temperatures(input_metadata)
         assert len(temperatures) == logits.shape[0]
@@ -123,6 +124,20 @@ def _get_output_tokens(input_metadata: InputMetadata) -> List[List[int]]:
                 output_tokens.append(seq_data.output_token_ids)
     return output_tokens
 
+def _apply_logits_processors(
+    input_metadata: InputMetadata,
+    logits: torch.Tensor,
+    output_tokens: List[List[int]]
+) -> torch.Tensor:
+    for _, seq_group in enumerate(input_metadata.seq_groups):
+        _, sampling_params = seq_group
+        logits_processors = sampling_params.logits_processors
+
+        if logits_processors is not None:
+            for logits_processor in logits_processors:
+                logits = logits_processor(logits, output_tokens)
+
+    return logits
 
 def _apply_penalties(
     logits: torch.Tensor,

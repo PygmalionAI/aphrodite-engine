@@ -1,0 +1,20 @@
+"filename", "language", "C++", "CUDA C++", "Markdown", "comment", "blank", "total"
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/activation.cpp", "C++", 10, 0, 0, 0, 3, 13
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/activation_kernels.cu", "CUDA C++", 0, 41, 0, 1, 7, 49
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention.cpp", "C++", 20, 0, 0, 0, 3, 23
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention/README.md", "Markdown", 0, 0, 11, 0, 4, 15
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention/attention_dtypes.h", "C++", 5, 0, 0, 0, 2, 7
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention/attention_generic.cuh", "CUDA C++", 0, 33, 0, 21, 12, 66
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention/attention_kernels.cu", "CUDA C++", 0, 364, 0, 90, 51, 505
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention/attention_utils.cuh", "CUDA C++", 0, 28, 0, 21, 8, 57
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention/dtype_bfloat16.cuh", "CUDA C++", 0, 344, 0, 28, 53, 425
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention/dtype_float16.cuh", "CUDA C++", 0, 357, 0, 29, 60, 446
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/attention/dtype_float32.cuh", "CUDA C++", 0, 200, 0, 29, 41, 270
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/cache.cpp", "C++", 41, 0, 0, 0, 7, 48
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/cache_kernels.cu", "CUDA C++", 0, 335, 0, 9, 43, 387
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/layernorm.cpp", "C++", 12, 0, 0, 0, 3, 15
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/layernorm_kernels.cu", "CUDA C++", 0, 54, 0, 1, 9, 64
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/pos_encoding.cpp", "C++", 13, 0, 0, 0, 3, 16
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/pos_encoding_kernels.cu", "CUDA C++", 0, 76, 0, 1, 12, 89
+"/home/alpindale/AI-Stuff/projects/aphrodite-engine/kernels/reduction.cuh", "CUDA C++", 0, 23, 0, 21, 9, 53
+"Total", "-", 101, 1855, 11, 251, 330, 2548

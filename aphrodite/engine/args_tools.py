@@ -84,7 +84,7 @@ class EngineArgs:
         max_model_len = getattr(model_config.hf_config,
                                 'max_position_embeddings', float('inf'))
         scheduler_config = SchedulerConfig(self.max_num_batched_tokens,
-                                           self.max_num_seqs, max_model_len)
+                                           self.max_num_seqs, model_config.get_max_model_len())
         return model_config, cache_config, parallel_config, scheduler_config
 
 
