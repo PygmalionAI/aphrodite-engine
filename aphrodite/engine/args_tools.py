@@ -21,7 +21,7 @@ class EngineArgs:
     pipeline_parallel_size: int = 1
     tensor_parallel_size: int = 1
     block_size: int = 16
-    swap_space: int = 30 # in GiB
+    swap_space: int = 5 # in GiB
     gpu_memory_utilization: float = 0.95
     max_num_batched_tokens: int = 2560
     max_num_seqs: int = 256
@@ -101,4 +101,3 @@ class AsyncEngineArgs(EngineArgs):
         parser.add_argument('--engine-use-ray', action='store_true', help='use Ray to start the Aphrodite Engine in a separate process as the server process.')
         parser.add_argument('--disable-log-requests', action='store_true', help='disable logging requests')
         return parser
-
