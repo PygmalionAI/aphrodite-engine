@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastchat.conversation import Conversation, SeparatorStyle
-from fastchat.model.model_adapter import get_conversation_template
+#from fastchat.model.model_adapter import get_conversation_template
 
 import uvicorn
 
@@ -61,7 +61,7 @@ async def check_model(request) -> Optional[JSONResponse]:
 
 
 async def get_gen_prompt(request) -> str:
-    conv = get_conversation_template(request.model)
+    #conv = get_conversation_template(request.model)
     conv = Conversation(
         name=conv.name,
         system=conv.system,
@@ -181,7 +181,7 @@ async def create_chat_completion(raw_request: Request):
     error_check_ret = await check_length(request, prompt)
     if error_check_ret is not None:
         return error_check_ret
-    
+
     if not request.logit_bias:
         logit_processors = []
     else:
