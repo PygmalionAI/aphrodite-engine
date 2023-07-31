@@ -40,9 +40,6 @@ TIMEOUT_KEEP_ALIVE = 5 # seconds
 
 logger = init_logger(__name__)
 
-class AppSettings(BaseSettings):
-    api_
-
 served_model = None
 app = fastapi.FastAPI()
 
