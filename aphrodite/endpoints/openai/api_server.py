@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastchat.conversation import Conversation, SeparatorStyle
-#from fastchat.model.model_adapter import get_conversation_template
+from fastchat.model.model_adapter import get_conversation_template
 
 import uvicorn
 
@@ -30,10 +30,19 @@ from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.utils import random_uuid
 from aphrodite.common.logits import BiasLogitsProcessor
+from aphrodite.endpoints.openai.protocol import (
+    TokenCheckRequest,
+    TokenCheckResponse,
+    TokenCheckResponseItem
+)
 
 TIMEOUT_KEEP_ALIVE = 5 # seconds
 
 logger = init_logger(__name__)
+
+class AppSettings(BaseSettings):
+    api_
+
 served_model = None
 app = fastapi.FastAPI()
 
@@ -61,7 +70,7 @@ async def check_model(request) -> Optional[JSONResponse]:
 
 
 async def get_gen_prompt(request) -> str:
-    #conv = get_conversation_template(request.model)
+    conv = get_conversation_template(request.model)
     conv = Conversation(
         name=conv.name,
         system=conv.system,
