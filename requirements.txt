@@ -10,6 +10,6 @@ openai # for fastapi's openai proxy emulation
 xformers >= 0.0.19
 mypy
 pytest
-fschat >= 0.2.21
+fschat >= 0.2.23
 pydantic < 2
 pyarrow # needed for ray
