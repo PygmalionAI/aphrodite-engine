@@ -123,13 +123,13 @@ __global__ void single_query_cached_kv_attention_kernel(
   // th vectors of the query, and so on.
   // NOTE: Because q is split from a qkv tensor, it may not be contiguous.
   const scalar_t* q_ptr = q + seq_idx * q_stride + head_idx * HEAD_SIZE;
-  __shared__Q_vec q_vecs[THREAD_GROUP_SIZE][NUM_VECS_PER_THREAD];
+  __shared__ Q_vec q_vecs[THREAD_GROUP_SIZE][NUM_VECS_PER_THREAD];
 #pragma unroll
   for (int i = thread_group_idx; i < NUM_VECS_PER_THREAD; i += NUM_THREAD_GROUPS) {
     const int vec_idx = thread_group_offset + i * THREAD_GROUP_SIZE;
     q_vecs[thread_group_offset][i] = *reinterpret_cast<const Q_vec*>(q_ptr + vec_idx * VEC_SIZE);
   }
-  __syncthreads(); // TODO: replace this with a memory wall right before we use q_vecs
+  __syncthreads(); // TODO: possible speedup if this is replaced with a memory wall right before we use q_vecs
 
   // Memory planning.
   extern __shared__ char shared_mem[];
@@ -396,7 +396,7 @@ void single_query_cached_kv_attention_launcher(
   dim3 block(NUM_THREADS);
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   switch (head_size) {
-    // NOTE: To reduce the compilation time, we're omitting head sizes
+    // NOTE: To reduce the compilation time, we omitted head sizes
     // 32, 160, 192.
     // case 32:
     //   LAUNCH_ATTENTION_KERNEL(T, 32, BLOCK_SIZE, NUM_THREADS);
@@ -444,7 +444,7 @@ void single_query_cached_kv_attention_launcher(
     max_context_len,                                                \
     alibi_slopes);
 
-// NOTE: To reduce the compilation time, we're omitting block sizes
+// NOTE: To reduce the compilation time, we omitted block sizes
 // 1, 2, 4, 64, 128, 256.
 #define CALL_KERNEL_LAUNCHER_BLOCK_SIZE(T)                          \
   switch (block_size) {                                             \
