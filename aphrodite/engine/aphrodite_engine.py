@@ -1,7 +1,7 @@
 import time
 import copy
 from functools import partial
-from typing import Any, List, Optional, TYPE_CHECKING
+from typing import Any, List, Optional, TYPE_CHECKING, Tuple
 
 from aphrodite.common.config import CacheConfig, ModelConfig, ParallelConfig, SchedulerConfig
 from aphrodite.processing.scheduler import Scheduler
@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 
 
 logger = init_logger(__name__)
+
+_LOGGING_INTERVAL_SEC = 5 
 
 class AphroditeEngine:
     """An engine that receives requests and generates text!
@@ -91,7 +93,11 @@ class AphroditeEngine:
 
         self._init_cache()
 
-        self.scheduler = Scheduler(scheduler_config, cache_config, log_stats)
+        self.scheduler = Scheduler(scheduler_config, cache_config)
+
+        self.last_logging_time = 0.0
+        self.num_prompt_tokens: List[Tuple[float, int]] = []
+        self.num_generation_tokens: List[Tuple[float, int]] = []
 
     def _init_workers(self, distributed_init_method: str):
         from aphrodite.task_handler.worker import Worker
@@ -259,12 +265,22 @@ class AphroditeEngine:
         and updates the scheduler with the model outputs. Finally, it decodes
         the sequences and returns the newly generated results.
         """
-        (seq_group_metadata_list, scheduler_outputs,
-         ignored_seq_groups) = self.scheduler.schedule()
-        if ((not seq_group_metadata_list) and scheduler_outputs.is_empty()
-                and (not ignored_seq_groups)):
-            # Nothing to do.
-            return []
+        # (seq_group_metadata_list, scheduler_outputs,
+        #  ignored_seq_groups) = self.scheduler.schedule()
+        # if ((not seq_group_metadata_list) and scheduler_outputs.is_empty()
+        #         and (not ignored_seq_groups)):
+        #     # Nothing to do.
+        #     return []
+
+        seq_grup_metadata_list, scheduler_outputs = self.scheduler.schedule()
+        if scheduler_outputs.is_empty():
+            if not scheduler_outputs.ignored_seq_groups:
+                return []
+            return [
+                RequestOutput.from_seq_group(seq_group)
+                for seq_group in scheduler_outputs.ignored_seq_groups
+            ]
+
 
         output = self._run_workers(
             "execute_model",
@@ -280,10 +296,74 @@ class AphroditeEngine:
         self.scheduler.free_finished_seq_groups()       # Free the finished sequence groups.
 
         request_outputs: List[RequestOutput] = []
-        for seq_group in seq_groups + ignored_seq_groups:
+        for seq_group in seq_groups + scheduler_outputs.ignored_seq_groups:
             request_output = RequestOutput.from_seq_group(seq_group)
             request_outputs.append(request_output)
+        if self.log_stats:
+            self._log_system_stats(scheduler_outputs.prompt_run,
+                                   scheduler_outputs.num_batched_tokens)
         return request_outputs
+    
+    def _log_system_stats(
+            self,
+            prompt_run: bool,
+            num_batched_tokens: int,
+    ) -> None:
+        now = time.time()
+        if prompt_run:
+            self.num_prompt_tokens.append((now, num_batched_tokens))
+        else:
+            self.num_generation_tokens.append((now, num_batched_tokens))
+
+        elapsed_time = now - self.last_logging_time
+        if elapsed_time < _LOGGING_INTERVAL_SEC:
+            return
+        
+        self.num_prompt_tokens = [(t, n) for t, n in self.num_prompt_tokens
+                                  if now - t < _LOGGING_INTERVAL_SEC]
+        self.num_generation_tokens = [(t, n)
+                                      for t, n in self.num_generation_tokens
+                                      if now - t < _LOGGING_INTERVAL_SEC]
+        
+        if len(self.num_prompt_tokens) > 1:
+            total_num_tokens = sum(n for _, n in self.num_prompt_tokens[:-1])
+            window = now - self.num_prompt_tokens[0][0]
+            avg_prompt_throughput = total_num_tokens / window
+        else:
+            avg_prompt_throughput = 0.0
+        if len(self.num_generation_tokens) > 1:
+            total_num_tokens = sum(n
+                                   for _, n in self.num_generation_tokens[:-1])
+            window = now - self.num_generation_tokens[0][0]
+            avg_generation_throughput = total_num_tokens / window
+        else:
+            avg_generation_throughput = 0.0
+
+        total_num_gpu_blocks = self.cache_config.num_gpu_blocks
+        num_free_gpu_blocks = (
+            self.scheduler.block_manager.get_num_free_gpu_blocks())
+        num_used_gpu_blocks = total_num_gpu_blocks - num_free_gpu_blocks
+        gpu_cache_usage = num_used_gpu_blocks / total_num_gpu_blocks
+
+        total_num_cpu_blocks = self.cache_config.num_cpu_blocks
+        if total_num_cpu_blocks > 0:
+            num_free_cpu_blocks = (
+                self.scheduler.block_manager.get_num_free_cpu_blocks())
+            num_used_cpu_blocks = total_num_cpu_blocks = num_free_cpu_blocks
+            cpu_cache_usage = num_used_cpu_blocks / total_num_cpu_blocks
+        else:
+            cpu_cache_usage = 0.0
+
+        logger.info("Avg prompt throughput: "
+                    f"{avg_prompt_throughput:.1f} tokens/s, "
+                    "Avg generation throughput: "
+                    f"{avg_generation_throughput:.1f} tokens/s, "
+                    f"Running: {len(self.scheduler.running)} reqs, "
+                    f"Swapped: {len(self.scheduler.swapped)} reqs, "
+                    f"Pending {len(self.scheduler.waiting)} reqs, "
+                    f"GPU KV cache usage: {gpu_cache_usage * 100:.1f}%, "
+                    f"CPU KV cache usage: {cpu_cache_usage * 100:.1f}%")
+        self.last_logging_time = now
 
     def _decode_sequences(self, seq_groups: List[SequenceGroup]) -> None:
         for seq_group in seq_groups:
