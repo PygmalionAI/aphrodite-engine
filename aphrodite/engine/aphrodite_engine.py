@@ -272,7 +272,7 @@ class AphroditeEngine:
         #     # Nothing to do.
         #     return []
 
-        seq_grup_metadata_list, scheduler_outputs = self.scheduler.schedule()
+        seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
         if scheduler_outputs.is_empty():
             if not scheduler_outputs.ignored_seq_groups:
                 return []
