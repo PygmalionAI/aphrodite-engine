@@ -28,6 +28,7 @@ import torch
 from torch import nn
 from transformers import LlamaConfig
 
+from aphrodite.common.config import QuantConfig
 from aphrodite.common.sequence import SequenceOutputs
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import SiluAndMul
@@ -38,6 +39,7 @@ from aphrodite.modeling.hf_downloader import load_tensor_parallel_weights, load_
 from aphrodite.modeling.megatron.parallel_state import get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size
 from aphrodite.modeling.megatron.tensor_parallel import VocabParallelEmbedding, ColumnParallelLinear, RowParallelLinear
 from aphrodite.common.sequence import SequenceOutputs
+from aphrodite.quant import qmo
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
