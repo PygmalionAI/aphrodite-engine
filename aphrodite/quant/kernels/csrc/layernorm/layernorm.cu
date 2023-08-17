@@ -1,3 +1,10 @@
+/*
+
+Adapted from NVIDIA FasterTransformer:
+https://github.com/NVIDIA/FasterTransformer/blob/main/src/fastertransformer/kernels/layernorm_kernels.cu
+
+*/
+
 #include <torch/extension.h>
 #include <cuda_fp16.h>
 #include "reduction.cuh"
@@ -19,10 +26,11 @@ template<typename T>
 __global__ void generalT5LayerNorm(
     const T* __restrict input, const T* __restrict gamma, T* output, const float layernorm_eps, int m, int n)
 {
+    // layernorm module in the T5 style No bias and no subtraction of mean.
     const int tid = threadIdx.x;
 
     __shared__ float s_variance;
-    float variance = 0.0f;
+    float            variance = 0.0f;
 
     float local_var_sum = 0.0f;
     for (int i = tid; i < n; i += blockDim.x) {
@@ -38,7 +46,7 @@ __global__ void generalT5LayerNorm(
 
     for (int i = tid; i < n; i += blockDim.x) {
         output[blockIdx.x * n + i] =
-            clamp_inf_for_half<T> ((to_float(input[blockIdx.x * n + i]) * s_variance) * to_float(__ldg(&gamma[i])));
+            clamp_inf_for_half<T>((to_float(input[blockIdx.x * n + i]) * s_variance) * to_float(__ldg(&gamma[i])));
     }
 }
 
@@ -47,37 +55,46 @@ template<typename T>
 void invokeGeneralT5LayerNorm(T*           out,
                               const T*     input,
                               const T*     gamma,
+                              // const T*     beta,
                               const float  layernorm_eps,
                               const int    m,
-                              const int    n);
+                              const int    n)
 {
     dim3 grid(m);
     dim3 block(min(n, 1024));
 
+    /* For general cases, n is equal to hidden_units, e.g., 512/1024.
+        Since we have warp shuffle inside the code, block.x % 32 should be 0.
+    */
     if (n % 32 != 0) {
         block.x = 1024;
     }
 
-    block.x = block.x / (4 / sizeof(T));
+    block.x = block.x / (4 / sizeof(T));  // if using half, only need half of block.x
 
-    generalT5LayerNorm<T><<grid, block>>>(input, gamma, out, layernorm_eps, m, n);
+    /* should pay attention to the rsqrt precision*/
+    generalT5LayerNorm<T><<<grid, block>>>(input, gamma, out, layernorm_eps, m, n);  // For gpt-3
 }
 
-
-void invokeGeneralT5LayerNorm(half*           out,
+template void invokeGeneralT5LayerNorm(half*           out,
                               const half*     input,
                               const half*     gamma,
+                              // const half*     beta,
                               const float  layernorm_eps,
                               const int    m,
                               const int    n);
 
-void invokeGeneralT5LayerNorm(float*           out,
+template void invokeGeneralT5LayerNorm(float*           out,
                               const float*     input,
                               const float*     gamma,
+                              // const half*     beta,
                               const float  layernorm_eps,
                               const int    m,
                               const int    n);
 
+
+
+// input b, n, c
 void layernorm_forward_cuda(
     torch::Tensor _input,
     torch::Tensor _gamma,
@@ -93,4 +110,4 @@ void layernorm_forward_cuda(
     auto out = reinterpret_cast<half*>(_out.data_ptr<at::Half>());
 
     invokeGeneralT5LayerNorm(out, input, gamma, eps, m, n);
-}                   
+}

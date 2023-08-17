@@ -1,3 +1,10 @@
+/*
+
+Adapted from the VLLM project:
+https://github.com/vllm-project/vllm/blob/main/csrc/pos_encoding_kernels.cu
+
+*/
+
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 #include "pos_encoding.h"
@@ -6,7 +13,7 @@ template<typename scalar_t>
 __global__ void rotary_embedding_neox_kernel(
   const int64_t* __restrict__ positions,        // [num_tokens]
   scalar_t* __restrict__ query,                 // [num_tokens, num_heads, head_size]
-  scalar_t* __restrict__ key,                   // [num_tokens, num_kv_heads, head_size]
+  scalar_t* __restrict__ key,                   // [num_tokens, num_heads, head_size]
   const scalar_t* __restrict__ cos_sin_cache,   // [max_position, 2, rot_dim // 2]
   const int rot_dim,
   const int stride,
@@ -43,22 +50,20 @@ __global__ void rotary_embedding_neox_kernel(
     key[out_x] = k_x * cos - k_y * sin;
     key[out_y] = k_y * cos + k_x * sin;
   }
-
 }
 
 void rotary_embedding_neox(
-  torch::Tensor& positions,         // [num_tokens]
-  torch::Tensor& query,             // [num_tokens, num_heads * head_size]
-  torch::Tensor& key,               // [num_tokens, num_kv_heads * head_size]
+  torch::Tensor& positions,         // [b, num_tokens]
+  torch::Tensor& query,             // [b, num_tokens, 1, num_heads, head_size]
+  torch::Tensor& key,               // [b, num_tokens, 1, num_heads, head_size]
   int head_size,
   torch::Tensor& cos_sin_cache)     // [max_position, rot_dim]
 {
   int num_tokens = query.size(0) * query.size(1);
   int rot_dim = cos_sin_cache.size(1);
   int num_heads = query.size(-2);
-//  int num_kv_heads = key.size(1) / head_size;
   int stride = num_heads * head_size;
-//  TORCH_CHECK(stride == key.stride(0));
+  // TORCH_CHECK(stride == key.stride(0));
 
   dim3 grid(num_tokens);
   dim3 block(std::min(num_heads * rot_dim / 2, 512));

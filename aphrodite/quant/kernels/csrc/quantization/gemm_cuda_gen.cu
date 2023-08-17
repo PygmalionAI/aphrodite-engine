@@ -1,42 +1,54 @@
+/*
+
+@article{lin2023awq,
+  title={AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration},
+  author={Lin, Ji and Tang, Jiaming and Tang, Haotian and Yang, Shang and Dang, Xingyu and Han, Song},
+  journal={arXiv},
+  year={2023}
+}
+
+ */
+
+
 #include <torch/extension.h>
 #include "gemm_cuda.h"
 #include "dequantize.cuh"
 #include <cuda_fp16.h>
 #include <c10/cuda/CUDAGuard.h>
 
+
+// Pack two half values.
 static inline __device__ __host__ unsigned
 __pack_half2(const half x, const half y) {
-    unsigned v0 = *((unsigned short *)&x);
-    unsigned v1 = *((unsigned short *)&y);
-    return (v1 << 16) | v0;
+  unsigned v0 = *((unsigned short *)&x);
+  unsigned v1 = *((unsigned short *)&y);
+  return (v1 << 16) | v0;
 }
 
-__global__ void __launch_bounds__(64) gemm_forward_4bit_cuda_m16n128k32(int G, int split_k_iters,
-    half* __restrict__ A, int* __restrict__ B, half* __restrict__ scaling_factors, int* __restrict__ zeros,
-    int M, int IC, int OC, half* __restrict__ C)
+__global__ void __launch_bounds__(64) gemm_forward_4bit_cuda_m16n128k32(int G, int split_k_iters, half* __restrict__ A, int* __restrict__ B, half* __restrict__ scaling_factors, int* __restrict__ zeros, int M, int IC, int OC, half* __restrict__ C) 
 {
-    static constexpr uint32_t ZERO = 0x0;
-    float C_warp[32];
-    __shared__ half A_shared[16 * (32 + 8)];
-    __shared__ half B_shared[32 * (128 + 8)];
+  static constexpr uint32_t ZERO = 0x0;
+  float C_warp[32];
+  __shared__ half A_shared[16 * (32 + 8)];
+  __shared__ half B_shared[32 * (128 + 8)];
+  
+  __shared__ half scaling_factors_shared[128];
+  __shared__ half zeros_shared[128];
 
-    __shared__ half scaling_factors_shared[128];
-    __shared__ half zeros_shared[128];
+  int j_factors1 = ((OC + 128 - 1) / 128);
+  int blockIdx_x = 0;
+  int blockIdx_y = blockIdx.x % ((M + 16 - 1) / 16 * j_factors1);
+  int blockIdx_z = blockIdx.x / ((M + 16 - 1) / 16 * j_factors1);
 
-    int j_factors1 = ((OC + 128 - 1) / 128);
-    int blockIdx_x = 0;
-    int blockIdx_y = blockIdx.x % ((M + 16 - 1) / 16 * j_factors1);
-    int blockIdx_z = blockIdx.x / ((M + 16 - 1) / 16 * j_factors1);
-
-    half A_shared_warp[8];
-    half B_shared_warp[32];
-    for (int j_0_4_init = 0; j_0_4_init < 4; ++j_0_4_init) {
-        for (int i = 0; i < 8; ++i) {
-            C_warp[(j_0_4_init * 8) + i] = 0.0;
-        }
+  half A_shared_warp[8];
+  half B_shared_warp[32];
+  for (int j_0_4_init = 0; j_0_4_init < 4; ++j_0_4_init) {
+    for (int i = 0; i < 8; ++i) {
+      C_warp[(j_0_4_init * 8) + i] = 0.0;
     }
+  }
 
-    static constexpr int row_stride_warp = 32 * 8 / 32;
+  static constexpr int row_stride_warp = 32 * 8 / 32;
   static constexpr int row_stride = 2 * 32 * 8 / 128;
   bool ld_zero_flag = (threadIdx.y * 32 + threadIdx.x) * 8 < 128;
   // TODO: Haotian: blockIdx_y / j_factors1 in A loading to support bsz > 16
