@@ -24,12 +24,20 @@ def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
         f"Supported architecture(s): {list(_MODEL_REGISTRY.keys())}"
     )
 
+def _supports_quantization(model_class):
+    return model_class is LlamaForCausalLM
+
 def get_model(model_config: ModelConfig) -> nn.Module:
     model_class = _get_model_architecture(model_config.hf_config)
     torch.set_default_dtype(model_config.dtype)
 
-    # Initialize model weights as empty tensors
-    model = model_class(model_config.hf_config)
+    if _supports_quantization(model_class):
+        model = model_class(
+            model_config.hf_config,
+            model_config.quant_config)
+    else:
+        model = model_class(model_config.hf_config)
+    
     if model_config.use_dummy_weights:
         model = model.cuda()
         initialize_dummy_weights(model)
