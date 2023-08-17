@@ -13,10 +13,10 @@ setup(
         CUDAExtension(
             name="awq_inference_engine",
             sources=[
-                "pybind.cpp",
-                "quantization/gemm_cuda_gen.cu",
-                "layernorm/layernorm.cu",
-                "pos_embed/pos_encoding_kernels.cu"
+                "csrc/pybind.cpp",
+                "csrc/quantization/gemm_cuda_gen.cu",
+                "csrc/layernorm/layernorm.cu",
+                "csrc/pos_embed/pos_encoding_kernels.cu"
             ],
             extra_compile_args=extra_compile_args,
         ),
