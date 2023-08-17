@@ -12,6 +12,21 @@ logger = init_logger(__name__)
 
 _GB = 1 << 30
 
+class QuantConfig:
+    def __init__(self, method: str, bits: Optional[int] = 4,
+                 group_size: Optional[int] = 128) -> None:
+        self.method = method
+        self.bits = bits
+        self.group_size = group_size
+        self._verify()
+
+    def _verify(self) -> None:
+        allowed_methods = ["awq"]
+        if self.method not in allowed_methods:
+            raise ValueError(
+                f"Unknown or unsupported quantization method ({self.method}), "
+                f"please select from one of these: {allowed_methods}")
+        
 class ModelConfig:
     """Configuration for the model.
 
@@ -45,6 +60,7 @@ class ModelConfig:
         use_dummy_weights: bool,
         dtype: str,
         seed: int,
+        quant_config: Optional[QuantConfig] = None,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -54,6 +70,7 @@ class ModelConfig:
         self.use_np_weights = use_np_weights
         self.use_dummy_weights = use_dummy_weights
         self.seed = seed
+        self.quant_config = quant_config
 
         self.hf_config = get_config(model, trust_remote_code)
         self.dtype = _get_and_verify_dtype(self.hf_config, dtype)
@@ -86,6 +103,11 @@ class ModelConfig:
                 f"Total number of hidden layers ({total_num_hidden_layers}) "
                 "must be divisible by pipeline parallel size "
                 f"({pipeline_parallel_size}).")
+
+        if self.quant_config and tensor_parallel_size > 1:
+            raise NotImplemented("Quantization support is single GPU only. Please do not "
+                                 "use tensor parallelism.")
+
 
     def get_hidden_size(self) -> int:
         return self.hf_config.hidden_size
@@ -121,21 +143,13 @@ class ModelConfig:
         total_num_hidden_layers = self.hf_config.num_hidden_layers
         return total_num_hidden_layers // parallel_config.pipeline_parallel_size
 
-class QuantConfig:
-    def __init__(self, method: str, bits: Optional[int] = 4,
-                 group_size: Optional[int] = 128) -> None:
-        self.method = method
-        self.bits = bits
-        self.group_size = group_size
-        self._verify()
 
-    def _verify(self) -> None:
-        allowed_methods = ["awq"]
-        if self.method not in allowed_methods:
-            raise ValueError(
-                f"Unknown or unsupported quantization method ({self.method}), "
-                f"please select from one of these: {allowed_methods}")
-
+    def get_quant_method(self):
+        if self.quant_config is None:
+            method = None
+        else:
+            method = self.quant_config.method
+        return method
 
 class CacheConfig:
     """Configuration for the KV cache.
