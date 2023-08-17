@@ -91,7 +91,7 @@ class AphroditeEngine:
 
         self._init_cache()
 
-        self.scheduler = Scheduler(scheduler_config, cache_config, log_stats)
+        self.scheduler = Scheduler(scheduler_config, cache_config)
 
     def _init_workers(self, distributed_init_method: str):
         from aphrodite.task_handler.worker import Worker
