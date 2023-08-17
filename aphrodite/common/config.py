@@ -31,6 +31,7 @@ class ModelConfig:
         dtype: Datatype for model weights and activations. The "auto" option will
             use FP16 precision for FP32/FP16 models, and BF16 precision for BF16.
         seed: Random seed for consistent reproducibility.
+        quant_config: Optional quantization settings.
     """
 
     def __init__(
@@ -119,6 +120,22 @@ class ModelConfig:
     def get_num_layers(self, parallel_config: "ParallelConfig") -> int:
         total_num_hidden_layers = self.hf_config.num_hidden_layers
         return total_num_hidden_layers // parallel_config.pipeline_parallel_size
+
+class QuantConfig:
+    def __init__(self, method: str, bits: Optional[int] = 4,
+                 group_size: Optional[int] = 128) -> None:
+        self.method = method
+        self.bits = bits
+        self.group_size = group_size
+        self._verify()
+
+    def _verify(self) -> None:
+        allowed_methods = ["awq"]
+        if self.method not in allowed_methods:
+            raise ValueError(
+                f"Unknown or unsupported quantization method ({self.method}), "
+                f"please select from one of these: {allowed_methods}")
+
 
 class CacheConfig:
     """Configuration for the KV cache.
