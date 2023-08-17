@@ -145,32 +145,26 @@ class QuantLlamaAttention(nn.Module):
             quant_config: QuantConfig
     ):
         super().__init__()
-            self.hidden_size = hidden_size
-            tp_size = get_tensor_model_parallel_world_size()
-            assert tp_size == 1, "quantization does not currently support tensor parallelism."
-            self.total_num_heads = num_heads
-            assert self.total_num_heads % tp_size == 0
-            self.num_heads = self.total_num_heads // tp_size
-            self.total_num_kv_heads = num_kv_heads
-            assert self.total_num_kv_heads % tp_size == 0
-            self.num_kv_heads = self.total_num_kv_heads // tp_size
-            self.head_dim = hidden_size // self.total_num_heads
-            self.q_size = self.num_heads * self.head_dim
-            self.kv_size = self.num_kv_heads * self.head_dim
-            self.scaling = self.head_dim**-0.5
-            self.qkv_proj = get_quantized_layer(
-                hidden_size,
-                self.q_size + 2 * self.kv_size,
-                quant_config
-            )
-            self.o_proj = get_quantized_layer(
-                self.total_num_heads * self.head_dim,
-                hidden_size,
-                quant_config
-            )
-            self.attn = PagedAttentionWithRoPE(self.num_heads, self.head_dim,
-                                               self.scaling, rotary_dim=self.head_dim,
-                                               num_kv_heads=self.num_kv_heads)
+        self.hidden_size = hidden_size
+        tp_size = get_tensor_model_parallel_world_size()
+        assert tp_size == 1, "quantization does not support TP"
+        self.total_num_heads = num_heads
+        assert self.total_num_heads % tp_size == 0
+        self.num_heads = self.total_num_heads // tp_size
+        self.total_num_kv_heads = num_kv_heads
+        assert self.total_num_kv_heads % tp_size == 0
+        self.num_kv_heads = self.total_num_kv_heads // tp_size
+        self.head_dim = hidden_size // self.total_num_heads
+        self.q_size = self.num_heads * self.head_dim
+        self.kv_size = self.num_kv_heads * self.head_dim
+        self.scaling = self.head_dim**-0.5
+
+        self.qkv_proj = get_quantized_layer(
+            hidden_size,
+            self.q_size + 2 * self.kv_size,
+            quant_config
+        )
+
     def forward(
             self,
             positions: torch.Tensor,
