@@ -77,7 +77,7 @@ private:
     uint32_t cache_max_size = 500000;
     uint32_t cache_word_max_length = 30;
     std::string unicode_letter_expr =
-        "\\u0041-\\u005A\\u0061-\\u007A\\u00AA-\\u00AA\\u00B5-\\u00B5"
+      "\\u0041-\\u005A\\u0061-\\u007A\\u00AA-\\u00AA\\u00B5-\\u00B5"
       "\\u00BA-\\u00BA\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02C1"
       "\\u02C6-\\u02D1\\u02E0-\\u02E4\\u02EC-\\u02EC\\u02EE-\\u02EE"
       "\\u0370-\\u0374\\u0376-\\u0377\\u037A-\\u037D\\u037F-\\u037F"
