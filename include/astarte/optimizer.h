@@ -60,6 +60,48 @@ public:
     std::map<Legion::LogicalRegion, ParallelTensor> v_values;
 };
 
+class AdamOptimizer : public Optimizer {
+public:
+    AdamOptimizer(CAModel const *_model,
+                  double _alpha = 0.001f,
+                  double _beta1 = 0.9f,
+                  double _beta2 = 0.999f,
+                  double _weight_decay = 0.0f,
+                  double _epsilon = 1e-6);
+    void init(void);
+    void next(void);
+    void update(const ParallelTensor p);
+    void set_weight_decay(double _weight_decay);
+    static void ps_update_task(Legion::Task const *task,
+                               std::vector<Legion::PhysicalRegion> const &regions,
+                               Legion::Context ctx,
+                               Legion::Runtime *runtime);
+    static void ps_update_task_gpu(AdamOptimizer const *op,
+                                   float const *w_grad_ptr,
+                                   size_t size,
+                                   int num_replicas,
+                                   float *w_ptr,
+                                   float *v_ptr,
+                                   float *m_ptr);
+
+#ifdef CA_USE_NCCL
+    static void
+        nccl_update_task(Legion::Task const *task,
+                         std::vector<Legion::PhysicalRegion> const &regions,
+                         Legion::Context ctx,
+                         Legion::Runtime *runtime);
+    static void nccl_update_task_gpu(AdamOptimizer const *op,
+                                     OpMeta const *meta,
+                                     float const *w_grad_ptr,
+                                     size_t size,
+                                     float *w_ptr,
+                                     float *v_ptr,
+                                     float *m_ptr);
+#endif
+    double alpha, beta1, beta2, weight_decay, epsilon;
+    double alpha_t, beta1_t, beta2_t;
+    std::map<Legion::LogicalRegion, ParallelTensor> v_values, m_values;
+};
 
 }; // namespace astarte
 
