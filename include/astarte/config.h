@@ -29,8 +29,8 @@ namespace astarte {
 #define MAX_NUM_TRANSFORMER_LAYERS 100
 #define MAX_SAMPLES_PER_LOAD 64
 #define MAX_FILE_LENGTH 128
-#define MAP_TO_FB_MEMORY        // for later
-#define MAP_TO_ZC_MEMORY        // for later
+#define MAP_TO_FB_MEMORY 0xABCD0000
+#define MAP_TO_ZC_MEMORY 0xABCE0000
 
 // distributed
 #ifdef CA_USE_NCCL
