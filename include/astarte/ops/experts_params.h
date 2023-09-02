@@ -1,0 +1,31 @@
+#pragma once
+
+#include "astarte/operator.h"
+#include "astarte/parallel_tensor.h"
+
+namespace astarte {
+
+struct ExpertsParams {
+  LayerID layer_guid;
+  int num_experts;
+  int experts_start_idx;
+  int experts_output_dim_size;
+  float alpha;
+  int experts_num_layers;
+  int experts_internal_dim_size;
+  bool use_bias;
+  ActiMode activation;
+
+  bool is_valid(std::vector<ParallelTensorShape> const &) const;
+};
+
+bool operator==(ExpertsParams const &, ExpertsParams const &);
+
+} // namespace astarte
+
+namespace std {
+template <>
+struct hash<astarte::ExpertsParams> {
+  size_t operator()(astarte::ExpertsParams const &) const;
+};
+} // namespace std
