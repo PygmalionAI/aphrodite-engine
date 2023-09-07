@@ -297,7 +297,8 @@ def _sample_from_prompt(
         # Sample `best_of` tokens for the prompt.
         num_seqs = sampling_params.best_of
         next_token_ids = torch.multinomial(prob,
-                                           num_samples=num_seqs,)
+                                           num_samples=num_seqs,
+                                           replacement=True)
         next_token_ids = next_token_ids.tolist()
     return next_token_ids
 
