@@ -7,7 +7,7 @@ torch >= 2.0.0
 transformers >= 4.31.0
 uvicorn
 openai # for fastapi's openai proxy emulation
-xformers >= 0.0.19
+xformers >= 0.0.21
 mypy
 pytest
 fschat >= 0.2.23

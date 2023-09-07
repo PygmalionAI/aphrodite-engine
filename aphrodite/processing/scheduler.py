@@ -374,9 +374,9 @@ class Scheduler:
         seq_group: SequenceGroup,
         blocks_to_swap_out: Dict[int, int],
     ) -> None:
-        seqs = seq_group.get_seqs(status=SequenceStatus.RUNNING)
-        for seq in seqs:
-            seq.status = SequenceStatus.SWAPPED
+        # seqs = seq_group.get_seqs(status=SequenceStatus.RUNNING)
+        # for seq in seqs:
+        #     seq.status = SequenceStatus.SWAPPED
         self._swap_out(seq_group, blocks_to_swap_out)
         self.swapped.append(seq_group)
 
