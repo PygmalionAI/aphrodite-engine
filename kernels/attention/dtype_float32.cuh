@@ -1,7 +1,6 @@
 /*
  * Adapted from https://github.com/NVIDIA/FasterTransformer/blob/release/v5.3_tag/src/fastertransformer/kernels/decoder_masked_multihead_attention/decoder_masked_multihead_attention_template.hpp
  * and https://github.com/NVIDIA/FasterTransformer/blob/release/v5.3_tag/src/fastertransformer/kernels/decoder_masked_multihead_attention_utils.h
- * Copyright (c) 2023, The PygmalionAI team.
  * Copyright (c) 2023, The vLLM team.
  * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
  *
@@ -264,6 +263,11 @@ inline __device__ Float4_ to_float(Float4_ u) {
 
 inline __device__ Float8_ to_float(Float8_ u) {
   return u;
+}
+
+// Zero-out a variable.
+inline __device__ void zero(float& dst) {
+  dst = 0.f;
 }
 
 } // namespace aphrodite
