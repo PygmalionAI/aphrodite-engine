@@ -41,4 +41,4 @@ if __name__ == "__main__":
     demo = build_demo()
     demo.queue(concurrency_count=100).launch(server_name=args.host,
                                              server_port=args.port,
-                                             share=False)    
+                                             share=True)    
