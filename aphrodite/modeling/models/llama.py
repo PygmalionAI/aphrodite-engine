@@ -241,16 +241,15 @@ class LlamaForCausalLM(nn.Module):
             self.lm_head.weight, hidden_states, input_metadata)
         return next_tokens
     
-    _column_parallel_weights = ["embed_tokens.weight", "lm_head.weight",
-                                "qkv_proj.weight", "gate_proj.weight",
-                                "up_proj.weight"]
+    _column_parallel_weights = [
+        "qkv_proj.weight", "gate_proj.weight", "up_proj.weight"]
     _row_parallel_weights = ["o_proj.weight", "down_proj.weight"]
 
     def load_weights(self,
                      model_name_or_path: str,
                      cache_dir: Optional[str] = None,
                      use_np_cache: bool = False,
-                     allow_patterns: str = "*.safetensors"):
+                     use_safetensor: bool = True):
         tp_size = get_tensor_model_parallel_world_size()
         tensor_model_parallel_rank = get_tensor_model_parallel_rank()
         q_proj_shard_size = (self.config.hidden_size // tp_size)
@@ -266,7 +265,7 @@ class LlamaForCausalLM(nn.Module):
         state_dict = self.state_dict()
 
         for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, use_np_cache, allow_patterns):
+                model_name_or_path, cache_dir, use_np_cache, use_safetensor):
             if "rotary_emb.inv_freq" in name:
                 continue
 
@@ -319,14 +318,9 @@ class LlamaForCausalLM(nn.Module):
             param = state_dict[name]
 
             if "embed_tokens" in name or "lm_head" in name:
-                param = state_dict[name]
-                padded_vocab_size = param.shape[0] * tp_size
-                if padded_vocab_size > self.config.vocab_size:
-                    load_padded_tensor_parallel_vocab(param, loaded_weight, name,
-                                                      self._column_parallel_weights,
-                                                      self._row_parallel_weights,
-                                                      tensor_model_parallel_rank)
-                    continue
+                load_padded_tensor_parallel_vocab(param, loaded_weight,
+                                                  tensor_model_parallel_rank)
+                continue
                 
 
             load_tensor_parallel_weights(param, loaded_weight, name,

@@ -4,13 +4,17 @@ import glob
 import json
 import os
 from collections import defaultdict
-from typing import Iterator, List, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple, Any
 
 from huggingface_hub import snapshot_download
 from safetensors.torch import load_file, save_file, safe_open
 import numpy as np
 import torch
 from tqdm.auto import tqdm
+
+from aphrodite.common.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 class Disabledtqdm(tqdm):
@@ -37,7 +41,7 @@ def _shared_pointers(tensors):
     for k, v in tensors.items():
         ptrs[v.data_ptr()].append(k)
     failing = []
-    for ptr, names in ptrs.items():
+    for _, names in ptrs.items():
         if len(names) > 1:
             failing.append(names)
     return failing
@@ -77,10 +81,11 @@ def convert_bin_to_safetensor(pt_filename: str, sf_filename: str):
 def prepare_hf_model_weights(
         model_name_or_path: str,
         cache_dir: Optional[str] = None,
-        allow_patterns: str = "*.bin",
+        use_safetensor: bool = False,
 ):
     # Download model weights from huggingface.
     is_local = os.path.isdir(model_name_or_path)
+    allow_patterns = "*.safetensors" if use_safetensor else "*.bin"
     if not is_local:
         with get_lock(model_name_or_path, cache_dir):
             hf_folder = snapshot_download(model_name_or_path,
@@ -90,23 +95,18 @@ def prepare_hf_model_weights(
     else:
         hf_folder = model_name_or_path
     hf_weights_files = glob.glob(os.path.join(hf_folder, allow_patterns))
-    if allow_patterns == "*.bin":
-        hf_weights_files = [x for x in hf_weights_files if not x.endswith("training_args.bin")]
+    if not use_safetensor:
+        hf_weights_files = [
+            x for x in hf_weights_files if not x.endswith("training_args.bin")
+        ]
 
-    if len(hf_weights_files) == 0 and allow_patterns == "*.safetensors":
-        if not is_local:
-            with get_lock(model_name_or_path, cache_dir):
-                hf_folder = snapshot_download(model_name_or_path, allow_patterns="*.bin", cache_dir=cache_dir, tqdm_class=Disabledtqdm)
-        hf_weights_files = glob.glob(os.path.join(hf_folder, "*.bin"))
-        hf_weights_files = [x for x in hf_weights_files if not x.endswith("training_args.bin")]
-        with get_lock(model_name_or_path, cache_dir):
-            for bin_file in hf_weights_files:
-                sf_file = bin_file.replace('.bin', '.safetensors')
-                if not os.path.exists(sf_file):
-                    print(f"Converting {bin_file} to {sf_file}")
-                    convert_bin_to_safetensor(bin_file, sf_file)
-        hf_weights_files = glob.glob(os.path.join(hf_folder, allow_patterns))
-    return hf_folder, hf_weights_files
+    if len(hf_weights_files) == 0 and use_safetensor:
+        logger.warning("No *.safetensors files found, "
+                       "fall back to *.bin files")
+        return prepare_hf_model_weights(model_name_or_path,
+                                        cache_dir=cache_dir,
+                                        use_safetensor=False)
+    return hf_folder, hf_weights_files, use_safetensor
 
 
     # hf_bin_files = [
@@ -115,16 +115,17 @@ def prepare_hf_model_weights(
     # ]
 
 def hf_model_weights_iterator(
-        model_name_or_path: str,
-        cache_dir: Optional[str] = None,
-        use_np_cache: bool = False,
-        allow_patterns: str = "*.bin",
+    model_name_or_path: str,
+    cache_dir: Optional[str] = None,
+    use_np_cache: bool = False,
+    use_safetensor: bool = False,
 ) -> Iterator[Tuple[str, torch.Tensor]]:
-    hf_folder, hf_weights_files = prepare_hf_model_weights(model_name_or_path, cache_dir=cache_dir, allow_patterns=allow_patterns)
+    hf_folder, hf_weights_files, use_safetensor = prepare_hf_model_weights(
+        model_name_or_path, cache_dir=cache_dir, use_safetensor=use_safetensor)
 
 
     if use_np_cache:
-        assert allow_patterns == "*.bin"
+        assert use_safetensor is False
         # Convert the model weights from torch tensors to numpy arrays for
         # faster loading.
         np_folder = os.path.join(hf_folder, "np")
@@ -151,7 +152,7 @@ def hf_model_weights_iterator(
             with open(param_path, "rb") as f:
                 param = np.load(f)
             yield name, torch.from_numpy(param)
-    elif allow_patterns == "*.safetensors":
+    elif use_safetensor:
         for st_file in hf_weights_files:
             with safe_open(st_file, framework="pt") as f:
                 for name in f.keys():
@@ -167,28 +168,25 @@ def hf_model_weights_iterator(
             torch.cuda.empty_cache()
     
 def load_padded_tensor_parallel_vocab(
-        param: torch.Tensor,
-        loaded_weight: torch.Tensor or object,
-        param_name: str,
-        column_parallel_weight_names: List[str],
-        row_parallel_weight_names: List[str],
-        tensor_model_parallel_rank: int,
+    param: torch.Tensor,
+    loaded_weight: Any,  # `torch.Tensor` or `PySafeSlice`
+    tensor_model_parallel_rank: int,
 ) -> None:
-    for p in column_parallel_weight_names:
-        if p in param_name:
-            shard_size = param.shape[0]
-            start_idx = tensor_model_parallel_rank * shard_size
-            end_idx = (tensor_model_parallel_rank + 1) * shard_size
-            loaded_weight = loaded_weight[start_idx:end_idx]
-            break
+    shard_size = param.shape[0]
+    start_idx = tensor_model_parallel_rank * shard_size
+    end_idx = (tensor_model_parallel_rank + 1) * shard_size
+    loaded_weight = loaded_weight[start_idx:end_idx]
+
+    # convert PySafeSlice object to torch.Tensor
     if not isinstance(loaded_weight, torch.Tensor):
         loaded_weight = loaded_weight[:]
+
     param[:loaded_weight.shape[0]].copy_(loaded_weight)
 
 
 def load_tensor_parallel_weights(
     param: torch.Tensor,
-    loaded_weight: torch.Tensor or object,
+    loaded_weight: Any, # `torch.Tensor` or `PySafeSlice`
     param_name: str,
     column_parallel_weight_names: List[str],
     row_parallel_weight_names: List[str],
