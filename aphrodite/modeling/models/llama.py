@@ -1,8 +1,8 @@
 # coding=utf-8
-# Adapted from https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/modeling_llama.py
-#  Copyright 2023 The PygmalionAI team. 
-#  Copyright 2023 The vLLM team.
-#  Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
+# Adapted from
+# https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/models/llama/modeling_llama.py
+# Copyright 2023 The vLLM team.
+# Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
 #
 # This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
 # and OPT implementations in this library. It has been modified from its
@@ -20,15 +20,17 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch LLaMA model."""
+"""Inference-only LLaMA model compatible with HuggingFace weights.
 
-from typing import Dict, List, Optional, Tuple
+The input of the model is flattened to a 1D tensor of tokens. The model uses
+InputMetadata to extract the original 2D shape of the input.
+"""
+from typing import List, Optional, Tuple
 
 import torch
 from torch import nn
 from transformers import LlamaConfig
 
-from aphrodite.common.sequence import SequenceOutputs
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.modeling.layers.layernorm import RMSNorm
@@ -37,7 +39,8 @@ from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.hf_downloader import load_tensor_parallel_weights, load_padded_tensor_parallel_vocab, hf_model_weights_iterator
 from aphrodite.modeling.megatron.parallel_state import get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size
 from aphrodite.modeling.megatron.tensor_parallel import VocabParallelEmbedding, ColumnParallelLinear, RowParallelLinear
-from aphrodite.common.sequence import SequenceOutputs
+from aphrodite.common.sequence import SamplerOutput
+
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
@@ -51,14 +54,19 @@ class LlamaMLP(nn.Module):
         hidden_act: str,
     ):
         super().__init__()
-        self.gate_up_proj = ColumnParallelLinear(hidden_size, 2 * intermediate_size,
-                                                bias=False, gather_output=False,
-                                                perform_initialization=False)
-        self.down_proj = RowParallelLinear(intermediate_size, hidden_size,
-                                            bias=False, input_is_parallel=True,
-                                            perform_initialization=False)
-        if hidden_act != 'silu':
-            raise ValueError(f'Unsupported activation: {hidden_act}. Only silu is currently supported for LLaMA.')
+        self.gate_up_proj = ColumnParallelLinear(hidden_size,
+                                                 2 * intermediate_size,
+                                                 bias=False,
+                                                 gather_output=False,
+                                                 perform_initialization=False)
+        self.down_proj = RowParallelLinear(intermediate_size,
+                                           hidden_size,
+                                           bias=False,
+                                           input_is_parallel=True,
+                                           perform_initialization=False)
+        if hidden_act != "silu":
+            raise ValueError(f"Unsupported activation: {hidden_act}. "
+                             "Only silu is supported for now.")
         self.act_fn = SiluAndMul()
 
     def forward(self, x):
@@ -66,6 +74,7 @@ class LlamaMLP(nn.Module):
         x = self.act_fn(gate_up)
         x, _ = self.down_proj(x)
         return x
+
 
 class LlamaAttention(nn.Module):
 
@@ -106,8 +115,12 @@ class LlamaAttention(nn.Module):
             input_is_parallel=True,
             perform_initialization=False,
         )
-        self.attn = PagedAttentionWithRoPE(self.num_heads, self.head_dim, self.scaling, 
-                                           rotary_dim=self.head_dim, num_kv_heads=self.num_kv_heads)
+        self.attn = PagedAttentionWithRoPE(self.num_heads,
+                                           self.head_dim,
+                                           self.scaling,
+                                           base=self.rope_theta,
+                                           rotary_dim=self.head_dim,
+                                           num_kv_heads=self.num_kv_heads)
 
     def forward(
         self,
@@ -120,8 +133,8 @@ class LlamaAttention(nn.Module):
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         k_cache, v_cache = kv_cache
-        attn_output = self.attn(
-            positions, q, k, v, k_cache, v_cache, input_metadata, cache_event)
+        attn_output = self.attn(positions, q, k, v, k_cache, v_cache,
+                                input_metadata, cache_event)
         output, _ = self.o_proj(attn_output)
         return output
 
@@ -131,19 +144,23 @@ class LlamaDecoderLayer(nn.Module):
     def __init__(self, config: LlamaConfig):
         super().__init__()
         self.hidden_size = config.hidden_size
+        # Requires transformers > 4.32.0
         rope_theta = getattr(config, "rope_theta", 10000)
         self.self_attn = LlamaAttention(
             hidden_size=self.hidden_size,
             num_heads=config.num_attention_heads,
             num_kv_heads=config.num_key_value_heads,
+            rope_theta=rope_theta,
         )
         self.mlp = LlamaMLP(
             hidden_size=self.hidden_size,
             intermediate_size=config.intermediate_size,
             hidden_act=config.hidden_act,
         )
-        self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.input_layernorm = RMSNorm(config.hidden_size,
+                                       eps=config.rms_norm_eps)
+        self.post_attention_layernorm = RMSNorm(config.hidden_size,
+                                                eps=config.rms_norm_eps)
 
     def forward(
         self,
@@ -172,6 +189,7 @@ class LlamaDecoderLayer(nn.Module):
         hidden_states = residual + hidden_states
         return hidden_states
 
+
 class LlamaModel(nn.Module):
 
     def __init__(self, config: LlamaConfig):
@@ -181,8 +199,8 @@ class LlamaModel(nn.Module):
         self.vocab_size = config.vocab_size
 
         vocab_size = ((config.vocab_size + 63) // 64) * 64
-        self.embed_tokens = VocabParallelEmbedding(vocab_size, config.hidden_size,
-                                                   perform_initialization=False)
+        self.embed_tokens = VocabParallelEmbedding(
+            vocab_size, config.hidden_size, perform_initialization=False)
         self.layers = nn.ModuleList([
             LlamaDecoderLayer(config) for _ in range(config.num_hidden_layers)
         ])
@@ -215,6 +233,7 @@ class LlamaModel(nn.Module):
 
 
 class LlamaForCausalLM(nn.Module):
+
     def __init__(self, config):
         super().__init__()
         self.config = config
@@ -234,22 +253,22 @@ class LlamaForCausalLM(nn.Module):
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
         cache_events: Optional[List[torch.cuda.Event]],
-    ) -> Dict[int, SequenceOutputs]:
-        hidden_states = self.model(
-            input_ids, positions, kv_caches, input_metadata, cache_events)
-        next_tokens = self.sampler(
-            self.lm_head.weight, hidden_states, input_metadata)
+    ) -> SamplerOutput:
+        hidden_states = self.model(input_ids, positions, kv_caches,
+                                   input_metadata, cache_events)
+        next_tokens = self.sampler(self.lm_head.weight, hidden_states,
+                                   input_metadata)
         return next_tokens
-    
+
     _column_parallel_weights = [
-        "qkv_proj.weight", "gate_proj.weight", "up_proj.weight"]
+        "qkv_proj.weight", "gate_proj.weight", "up_proj.weight"
+    ]
     _row_parallel_weights = ["o_proj.weight", "down_proj.weight"]
 
     def load_weights(self,
                      model_name_or_path: str,
                      cache_dir: Optional[str] = None,
-                     use_np_cache: bool = False,
-                     use_safetensor: bool = True):
+                     load_format: str = "auto"):
         tp_size = get_tensor_model_parallel_world_size()
         tensor_model_parallel_rank = get_tensor_model_parallel_rank()
         q_proj_shard_size = (self.config.hidden_size // tp_size)
@@ -257,6 +276,7 @@ class LlamaForCausalLM(nn.Module):
                               self.config.num_attention_heads *
                               self.config.num_key_value_heads // tp_size)
         attention_weight_specs = [
+            # (weight_name, shard_size, offset)
             ("q_proj", q_proj_shard_size, 0),
             ("k_proj", kv_proj_shard_size, q_proj_shard_size),
             ("v_proj", kv_proj_shard_size,
@@ -265,19 +285,9 @@ class LlamaForCausalLM(nn.Module):
         state_dict = self.state_dict()
 
         for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, use_np_cache, use_safetensor):
+                model_name_or_path, cache_dir, load_format):
             if "rotary_emb.inv_freq" in name:
                 continue
-
-            # if "embed_tokens" in name or "lm_head" in name:
-            #     param = state_dict[name]
-            #     padded_vocab_size = (param.shape[0] *
-            #                          tp_size)
-            #     num_extra_rows = padded_vocab_size - self.config.vocab_size
-            #     extra_rows = torch.empty(num_extra_rows,
-            #                              loaded_weight.shape[1])
-            #     extra_rows = extra_rows.to(loaded_weight)
-            #     loaded_weight = torch.cat([loaded_weight, extra_rows], dim=0)
 
             is_attention_weight = False
             for weight_name, shard_size, offset in attention_weight_specs:
@@ -287,7 +297,7 @@ class LlamaForCausalLM(nn.Module):
 
                 loaded_weight = loaded_weight[
                     shard_size * tensor_model_parallel_rank:shard_size *
-                                        (tensor_model_parallel_rank + 1)]
+                    (tensor_model_parallel_rank + 1)]
                 param_slice = param.data[offset:offset + shard_size]
                 assert param_slice.shape == loaded_weight.shape
 
@@ -321,10 +331,8 @@ class LlamaForCausalLM(nn.Module):
                 load_padded_tensor_parallel_vocab(param, loaded_weight,
                                                   tensor_model_parallel_rank)
                 continue
-                
 
             load_tensor_parallel_weights(param, loaded_weight, name,
                                          self._column_parallel_weights,
                                          self._row_parallel_weights,
                                          tensor_model_parallel_rank)
-

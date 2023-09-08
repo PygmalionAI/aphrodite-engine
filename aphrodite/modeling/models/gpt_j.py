@@ -1,5 +1,6 @@
 # coding=utf-8
-# Adapted from https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/models/gptj/modeling_gptj.py
+# Adapted from
+# https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/models/gptj/modeling_gptj.py
 # Copyright 2023 The PygmalionAI team.
 # Copyright 2023 The vLLM team.
 # Copyright 2021 The EleutherAI and HuggingFace Teams. All rights reserved.
@@ -15,12 +16,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Inference-only GPT-J model compatible with HuggingFace PyTorch weights.
+"""Inference-only GPT-J model compatible with HuggingFace weights.
 
 The input of the model is flattened to a 1D tensor of tokens. The model uses
 InputMetadata to extract the original 2D shape of the input.
 """
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import torch
 from torch import nn
@@ -30,12 +31,13 @@ from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.attention import PagedAttentionWithRoPE
 from aphrodite.modeling.layers.sampler import Sampler
-from aphrodite.modeling.hf_downloader import hf_model_weights_iterator, load_tensor_parallel_weights
+from aphrodite.modeling.hf_downloader import (hf_model_weights_iterator,
+                                              load_tensor_parallel_weights)
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from aphrodite.modeling.megatron.tensor_parallel import (
     VocabParallelEmbedding, ColumnParallelLinear, RowParallelLinear)
-from aphrodite.common.sequence import SequenceOutputs
+from aphrodite.common.sequence import SamplerOutput
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
@@ -64,9 +66,13 @@ class GPTJAttention(nn.Module):
         self.num_heads = self.total_num_heads // tp_world_size
 
         scaling = self.head_size**-0.5
+        assert getattr(config, "rotary", True)
         assert config.rotary_dim % 2 == 0
-        self.attn = PagedAttentionWithRoPE(self.num_heads, self.head_size,
-                                           scaling, config.rotary_dim)
+        self.attn = PagedAttentionWithRoPE(self.num_heads,
+                                           self.head_size,
+                                           scaling,
+                                           config.rotary_dim,
+                                           is_neox_style=False)
         self.warmup = False
 
     def forward(
@@ -201,7 +207,7 @@ class GPTJForCausalLM(nn.Module):
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
         cache_events: Optional[List[torch.cuda.Event]],
-    ) -> Dict[int, SequenceOutputs]:
+    ) -> SamplerOutput:
         hidden_states = self.transformer(input_ids, positions, kv_caches,
                                          input_metadata, cache_events)
         next_tokens = self.sampler(self.lm_head.weight, hidden_states,
@@ -217,11 +223,11 @@ class GPTJForCausalLM(nn.Module):
     def load_weights(self,
                      model_name_or_path: str,
                      cache_dir: Optional[str] = None,
-                     use_np_cache: bool = False):
+                     load_format: str = "auto"):
         tp_rank = get_tensor_model_parallel_rank()
         state_dict = self.state_dict()
         for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, use_np_cache):
+                model_name_or_path, cache_dir, load_format):
             if "attn.bias" in name or "attn.masked_bias" in name:
                 continue
 

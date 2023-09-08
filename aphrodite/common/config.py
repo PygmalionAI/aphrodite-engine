@@ -1,4 +1,3 @@
-"""Configuration"""
 from typing import Optional
 
 import torch
@@ -12,25 +11,33 @@ logger = init_logger(__name__)
 
 _GB = 1 << 30
 
+
 class ModelConfig:
     """Configuration for the model.
 
     Args:
-        model: Name or path of the HF model to use.
-        tokenizer: Name or path of the HF tokenizer to use.
+        model: Name or path of the huggingface model to use.
+        tokenizer: Name or path of the huggingface tokenizer to use.
         tokenizer_mode: Tokenizer mode. "auto" will use the fast tokenizer if
             available, and "slow" will always use the slow tokenizer.
         trust_remote_code: Trust remote code (e.g., from HuggingFace) when
             downloading the model and tokenizer.
-        download_dir: Directory to download and load the weights, defaults to
-            default HF cache directory.
-        use_np_weights: Save a numpy copy of model weights for faster loading.
-            This can increase the disk usage by up to 2x, and the model will be
-            loaded into CPU memory first.
-        use_dummy_weights: Use dummy values for model weights (for profiling).
-        dtype: Datatype for model weights and activations. The "auto" option will
-            use FP16 precision for FP32/FP16 models, and BF16 precision for BF16.
-        seed: Random seed for consistent reproducibility.
+        download_dir: Directory to download and load the weights, default to the
+            default cache directory of huggingface.
+        load_format: The format of the model weights to load:
+            "auto" will try to load the weights in the safetensors format and
+                fall back to the pytorch bin format if safetensors format is
+                not available.
+            "pt" will load the weights in the pytorch bin format.
+            "safetensors" will load the weights in the safetensors format.
+            "npcache" will load the weights in pytorch format and store
+                a numpy cache to speed up the loading.
+            "dummy" will initialize the weights with random values, which is
+                mainly for profiling.
+        dtype: Data type for model weights and activations. The "auto" option
+            will use FP16 precision for FP32 and FP16 models, and BF16 precision
+            for BF16 models.
+        seed: Random seed for reproducibility.
     """
 
     def __init__(
@@ -40,8 +47,7 @@ class ModelConfig:
         tokenizer_mode: str,
         trust_remote_code: bool,
         download_dir: Optional[str],
-        use_np_weights: bool,
-        use_dummy_weights: bool,
+        load_format: str,
         dtype: str,
         seed: int,
     ) -> None:
@@ -50,13 +56,23 @@ class ModelConfig:
         self.tokenizer_mode = tokenizer_mode
         self.trust_remote_code = trust_remote_code
         self.download_dir = download_dir
-        self.use_np_weights = use_np_weights
-        self.use_dummy_weights = use_dummy_weights
+        self.load_format = load_format
         self.seed = seed
 
         self.hf_config = get_config(model, trust_remote_code)
         self.dtype = _get_and_verify_dtype(self.hf_config, dtype)
+        self._verify_load_format()
         self._verify_tokenizer_mode()
+
+    def _verify_load_format(self) -> None:
+        load_format = self.load_format.lower()
+        if load_format not in [
+                "auto", "pt", "safetensors", "npcache", "dummy"
+        ]:
+            raise ValueError(
+                f"Unknown load format: {self.load_format}. Must be one of "
+                "'auto', 'pt', 'safetensors', 'npcache', or 'dummy'.")
+        self.load_format = load_format
 
     def _verify_tokenizer_mode(self) -> None:
         tokenizer_mode = self.tokenizer_mode.lower()
@@ -90,22 +106,32 @@ class ModelConfig:
         return self.hf_config.hidden_size
 
     def get_head_size(self) -> int:
-        # TODO: Probably not true for all models, but seems to be true for Llama and NeoX.
+        # FIXME: This may not be true for all models.
         return self.hf_config.hidden_size // self.hf_config.num_attention_heads
 
     def get_num_heads(self, parallel_config: "ParallelConfig") -> int:
-        if getattr(self.hf_config, "multi_query", False):
+        new_decoder_arch_falcon = (
+            self.hf_config.model_type == "falcon"
+            and getattr(self.hf_config, "new_decoder_architecture", False))
+        if not new_decoder_arch_falcon and getattr(self.hf_config,
+                                                   "multi_query", False):
+            # Multi-query attention, only one KV head.
             return 1
         if getattr(self.hf_config, "n_head_kv", None) is not None:
-            return self.hf_config.n_head_kv // parallel_config.tensor_parallel_size
+            return (self.hf_config.n_head_kv //
+                    parallel_config.tensor_parallel_size)
         if getattr(self.hf_config, "num_key_value_heads", None) is not None:
-            return self.hf_config.num_key_value_heads // parallel_config.tensor_parallel_size
+            return (self.hf_config.num_key_value_heads //
+                    parallel_config.tensor_parallel_size)
         total_num_attention_heads = self.hf_config.num_attention_heads
         return total_num_attention_heads // parallel_config.tensor_parallel_size
-    
+
     def get_max_model_len(self) -> int:
         max_model_len = float("inf")
         possible_keys = [
+            "max_position_embeddings",
+            "n_positions",
+            "max_seq_len",
             "max_sequence_length",
             "max_seq_length",
             "seq_len",
@@ -113,18 +139,21 @@ class ModelConfig:
         for key in possible_keys:
             max_len_key = getattr(self.hf_config, key, None)
             if max_len_key is not None:
-                max_model_len = min(max_model_len, max_model_len)
+                max_model_len = min(max_model_len, max_len_key)
         return max_model_len
 
     def get_num_layers(self, parallel_config: "ParallelConfig") -> int:
         total_num_hidden_layers = self.hf_config.num_hidden_layers
         return total_num_hidden_layers // parallel_config.pipeline_parallel_size
 
+
 class CacheConfig:
     """Configuration for the KV cache.
+
     Args:
         block_size: Size of a cache block in number of tokens.
-        gpu_memory_utilization: Fraction of GPU memory to use for the Aphrodite execution.
+        gpu_memory_utilization: Fraction of GPU memory to use for the
+            Aphrodite execution.
         swap_space: Size of the CPU swap space per GPU (in GiB).
     """
 
@@ -139,6 +168,7 @@ class CacheConfig:
         self.swap_space_bytes = swap_space * _GB
         self._verify_args()
 
+        # Will be set after profiling.
         self.num_gpu_blocks = None
         self.num_cpu_blocks = None
 
@@ -168,13 +198,14 @@ class CacheConfig:
 
 
 class ParallelConfig:
-    """Configuration for the distributed inference.
+    """Configuration for the distributed execution.
+
     Args:
         pipeline_parallel_size: Number of pipeline parallel groups.
         tensor_parallel_size: Number of tensor parallel groups.
-        worker_use_ray: Whether to use Ray for model workers. Will be
-            set to `True` if either pipeline_parallel_size or
-            tensor_parallel_size is greater than 1.
+        worker_use_ray: Whether to use Ray for model workers. Will be set to
+            True if either pipeline_parallel_size or tensor_parallel_size is
+            greater than 1.
     """
 
     def __init__(
@@ -192,30 +223,30 @@ class ParallelConfig:
             self.worker_use_ray = True
         self._verify_args()
 
-    """TODO(alpin): Implement pipeline parallelism."""
     def _verify_args(self) -> None:
         if self.pipeline_parallel_size > 1:
             raise NotImplementedError(
                 "Pipeline parallelism is not supported yet.")
 
+
 class SchedulerConfig:
-    """Scheduler Configuration:
+    """Scheduler configuration.
+
     Args:
         max_num_batched_tokens: Maximum number of tokens to be processed in
             a single iteration.
         max_num_seqs: Maximum number of sequences to be processed in a single
             iteration.
-        max_model_len: Maximum length of a sequence (including prompt and generated text).
+        max_model_len: Maximum length of a sequence (including prompt
+            and generated text).
     """
-    def __init__(
-        self,
-        max_num_batched_tokens: int,
-        max_num_seqs: int,
-        max_model_len: int,
-    ) -> None:
+
+    def __init__(self, max_num_batched_tokens: int, max_num_seqs: int,
+                 max_model_len: int) -> None:
         self.max_num_batched_tokens = max_num_batched_tokens
         self.max_num_seqs = max_num_seqs
         self.max_model_len = max_model_len
+
 
 _STR_DTYPE_TO_TORCH_DTYPE = {
     "half": torch.float16,
@@ -225,30 +256,48 @@ _STR_DTYPE_TO_TORCH_DTYPE = {
     "bfloat16": torch.bfloat16,
 }
 
+
 def _get_and_verify_dtype(
     config: PretrainedConfig,
     dtype: str,
 ) -> torch.dtype:
-    """Note: getattr(config, "torch_dtype", torch.float32) is incorrect
-    because config.torch_dtype can be None"""
+    # NOTE: getattr(config, "torch_dtype", torch.float32) is not correct
+    # because config.torch_dtype can be None.
     config_dtype = getattr(config, "torch_dtype", None)
     if config_dtype is None:
         config_dtype = torch.float32
 
     dtype = dtype.lower()
-    # Check to see if dtype is a valid dtype *or* if it's auto
-    if dtype not in [*_STR_DTYPE_TO_TORCH_DTYPE.values(), "auto"]:
-        raise ValueError(f"Unknown dtype: {dtype}")
-    
-    # Obtain torch_dtype
     if dtype == "auto":
         if config_dtype == torch.float32:
-            # Cast to 16-bit precision, BF16 if available
-            torch_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-            logger.warning(f"Casting {config_dtype} to {torch_dtype}. Not recommended.")
+            # Following the common practice, we use float16 for float32 models.
+            torch_dtype = torch.float16
         else:
             torch_dtype = config_dtype
     else:
+        if dtype not in _STR_DTYPE_TO_TORCH_DTYPE:
+            raise ValueError(f"Unknown dtype: {dtype}")
         torch_dtype = _STR_DTYPE_TO_TORCH_DTYPE[dtype]
 
+    # Verify the dtype.
+    if torch_dtype != config_dtype:
+        if torch_dtype == torch.float32:
+            # Upcasting to float32 is allowed.
+            pass
+        elif config_dtype == torch.float32:
+            # Downcasting from float32 to float16 or bfloat16 is allowed.
+            pass
+        else:
+            # Casting between float16 and bfloat16 is allowed with a warning.
+            logger.warning(f"Casting {config_dtype} to {torch_dtype}.")
+
+    # Check if the GPU supports the dtype.
+    if torch_dtype == torch.bfloat16:
+        compute_capability = torch.cuda.get_device_capability()
+        if compute_capability[0] < 8:
+            gpu_name = torch.cuda.get_device_name()
+            raise ValueError(
+                "Bfloat16 is only supported on GPUs with compute capability "
+                f"of at least 8.0. Your {gpu_name} GPU has compute capability "
+                f"{compute_capability[0]}.{compute_capability[1]}.")
     return torch_dtype
