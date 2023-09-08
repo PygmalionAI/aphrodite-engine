@@ -1,4 +1,3 @@
-"""Generation outputs by the model."""
 from typing import Dict, List, Optional
 
 from aphrodite.common.sequence import SequenceGroup, SequenceStatus
@@ -6,13 +5,15 @@ from aphrodite.common.sequence import SequenceGroup, SequenceStatus
 
 class CompletionOutput:
     """The output data of one completion output of a request.
+
     Args:
         index: The index of the output in the request.
         text: The generated output text.
         token_ids: The token IDs of the generated output text.
-        cumulative_logprob: The cumulative log probability of the generated output text.
-        logprobs: The log probabilities of the top probability words at each position
-            if the logprobs are requested.
+        cumulative_logprob: The cumulative log probability of the generated
+            output text.
+        logprobs: The log probabilities of the top probability words at each
+            position if the logprobs are requested.
         finish_reason: The reason why the sequence is finished.
     """
 
@@ -46,6 +47,7 @@ class CompletionOutput:
 
 class RequestOutput:
     """The output data of a request to the LLM.
+
     Args:
         request_id: The unique ID of the request.
         prompt: The prompt string of the request.
@@ -70,14 +72,18 @@ class RequestOutput:
 
     @classmethod
     def from_seq_group(cls, seq_group: SequenceGroup) -> "RequestOutput":
+        # Get the top-n sequences.
         n = seq_group.sampling_params.n
         seqs = seq_group.get_seqs()
-        assert n <= len(seqs)
-        sorted_seqs = sorted(seqs,
-                             key=lambda seq: seq.get_cumulative_logprob(),
-                             reverse=True)
+        if seq_group.sampling_params.use_beam_search:
+            sorting_key = lambda seq: seq.get_beam_search_score(
+                seq_group.sampling_params.length_penalty)
+        else:
+            sorting_key = lambda seq: seq.get_cumulative_logprob()
+        sorted_seqs = sorted(seqs, key=sorting_key, reverse=True)
         top_n_seqs = sorted_seqs[:n]
 
+        # Create the outputs.
         outputs: List[CompletionOutput] = []
         for seq in top_n_seqs:
             logprobs = seq.output_logprobs

@@ -1,13 +1,17 @@
+"""A GPU worker class."""
 import os
 from typing import Dict, List, Tuple, Optional
+
 import torch
 import torch.distributed
 
-from aphrodite.common.config import CacheConfig, ModelConfig, ParallelConfig, SchedulerConfig
+from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
+                         SchedulerConfig)
 from aphrodite.modeling import get_model, InputMetadata, set_random_seed
-from aphrodite.modeling.megatron.parallel_state import initialize_model_parallel, initialize_all_reduce_launcher
+from aphrodite.modeling.megatron.parallel_state import (
+    initialize_model_parallel)
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.common.sequence import SequenceData, SequenceGroupMetadata, SequenceOutputs
+from aphrodite.common.sequence import SamplerOutput, SequenceData, SequenceGroupMetadata
 from aphrodite.task_handler.cache_engine import CacheEngine
 from aphrodite.common.utils import get_gpu_memory
 
@@ -19,7 +23,7 @@ class Worker:
     maintaining the KV cache and executing the model on the GPU. In case of
     distributed inference, each worker is assigned a partition of the model.
     """
-    
+
     def __init__(
         self,
         model_config: ModelConfig,
@@ -34,6 +38,8 @@ class Worker:
         self.rank = rank
         self.distributed_init_method = distributed_init_method
 
+        # Uninitialized cache engine. Will be initialized by
+        # self.init_cache_engine().
         self.cache_config = None
         self.block_size = None
         self.cache_engine = None
@@ -41,7 +47,9 @@ class Worker:
         self.gpu_cache = None
 
     def init_model(self):
+        # This env var set by Ray causes exceptions with graph building.
         os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
+        # Env vars will be set by Ray.
         self.rank = self.rank if self.rank is not None else int(
             os.getenv("RANK", "-1"))
         local_rank = int(os.getenv("LOCAL_RANK", "0"))
@@ -50,16 +58,13 @@ class Worker:
             raise ValueError("Invalid or unspecified rank.")
         torch.cuda.set_device(self.device)
 
-        _init_distributed_environment(self.parallel_config, self.rank, self.distributed_init_method)
+        # Initialize the distributed environment.
+        _init_distributed_environment(self.parallel_config, self.rank,
+                                      self.distributed_init_method)
 
+        # Initialize the model.
         set_random_seed(self.model_config.seed)
         self.model = get_model(self.model_config)
-        initialize_all_reduce_launcher(
-            self.scheduler_config.max_num_batched_tokens,
-            self.model_config.get_hidden_size(),
-            self.model_config.dtype,
-        )
-
 
     @torch.inference_mode()
     def profile_num_available_blocks(
@@ -95,8 +100,10 @@ class Worker:
             )
             seqs.append(seq)
 
-        input_tokens, input_positions, input_metadata = self._prepare_inputs(seqs)
+        input_tokens, input_positions, input_metadata = self._prepare_inputs(
+            seqs)
 
+        # Execute the model.
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         self.model(
             input_ids=input_tokens,
@@ -106,26 +113,30 @@ class Worker:
             cache_events=None,
         )
 
+        # Calculate the number of blocks that can be allocated with the
+        # profiled peak memory.
         torch.cuda.synchronize()
         peak_memory = torch.cuda.max_memory_allocated()
         total_gpu_memory = get_gpu_memory()
         cache_block_size = CacheEngine.get_cache_block_size(
             block_size, self.model_config, self.parallel_config)
-        num_gpu_blocks = int((total_gpu_memory * gpu_memory_utilization - peak_memory) // cache_block_size)
+        num_gpu_blocks = int(
+            (total_gpu_memory * gpu_memory_utilization - peak_memory) //
+            cache_block_size)
         num_cpu_blocks = int(cpu_swap_space // cache_block_size)
         num_gpu_blocks = max(num_gpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
         torch.cuda.empty_cache()
 
-        # Reset the seed here
+        # Reset the seed to ensure that the random state is not affected by
+        # the model initialization and profiling.
         set_random_seed(self.model_config.seed)
         return num_gpu_blocks, num_cpu_blocks
-
 
     def init_cache_engine(self, cache_config: CacheConfig) -> None:
         self.cache_config = cache_config
         self.block_size = cache_config.block_size
-        self.cache_engine = CacheEngine(self.cache_config, self.model_config,   # basic refactor
+        self.cache_engine = CacheEngine(self.cache_config, self.model_config,
                                         self.parallel_config)
         self.cache_events = self.cache_engine.events
         self.gpu_cache = self.cache_engine.gpu_cache
@@ -139,6 +150,7 @@ class Worker:
         input_positions: List[int] = []
         slot_mapping: List[int] = []
 
+        # Add prompt tokens.
         prompt_lens: List[int] = []
         for seq_group_metadata in seq_group_metadata_list:
             if not seq_group_metadata.is_prompt:
@@ -148,7 +160,8 @@ class Worker:
             sampling_params = seq_group_metadata.sampling_params
             seq_groups.append((seq_ids, sampling_params))
 
-            seq_id = seq_ids[0] # Use any sequence in the group
+            # Use any sequence in the group.
+            seq_id = seq_ids[0]
 
             seq_data = seq_group_metadata.seq_data[seq_id]
             prompt_tokens = seq_data.get_token_ids()
@@ -156,14 +169,17 @@ class Worker:
             prompt_lens.append(prompt_len)
 
             input_tokens.extend(prompt_tokens)
-            input_positions.extend(range(len(prompt_tokens))) # assuming the first token in the prompt is always the first token in the sequence
+            # NOTE: Here we assume that the first token in the prompt
+            # is always the first token in the sequence.
+            input_positions.extend(range(len(prompt_tokens)))
 
             if seq_group_metadata.block_tables is None:
-                # Using dummy slot mapping here, since block tables aren't initialized
-                # yet during memory profiling.
+                # During memory profiling, the block tables are not initialized
+                # yet. In this case, we just use a dummy slot mapping.
                 slot_mapping.extend([0] * prompt_len)
                 continue
 
+            # Compute the slot mapping.
             block_table = seq_group_metadata.block_tables[seq_id]
             for i in range(prompt_len):
                 block_number = block_table[i // self.block_size]
@@ -171,6 +187,7 @@ class Worker:
                 slot = block_number * self.block_size + block_offset
                 slot_mapping.append(slot)
 
+        # Add generation tokens.
         max_context_len = 0
         max_num_blocks_per_seq = 0
         context_lens: List[int] = []
@@ -205,11 +222,12 @@ class Worker:
                 slot = block_number * self.block_size + block_offset
                 slot_mapping.append(slot)
 
-
-        # Using Tensor Cores in NVIDIA requires the input length to be a multiple of 8
+        # Optimization: Pad the input length to be a multiple of 8.
+        # This is required for utilizing the Tensor Cores in NVIDIA GPUs.
         input_tokens = _pad_to_alignment(input_tokens, multiple_of=8)
         input_positions = _pad_to_alignment(input_positions, multiple_of=8)
 
+        # Convert to tensors.
         tokens_tensor = torch.cuda.LongTensor(input_tokens)
         positions_tensor = torch.cuda.LongTensor(input_positions)
         slot_mapping_tensor = torch.cuda.IntTensor(slot_mapping)
@@ -242,7 +260,8 @@ class Worker:
         blocks_to_swap_in: Dict[int, int],
         blocks_to_swap_out: Dict[int, int],
         blocks_to_copy: Dict[int, List[int]],
-    ) -> Dict[int, SequenceOutputs]:
+    ) -> SamplerOutput:
+        # Issue cache operations.
         issued_cache_op = False
         if blocks_to_swap_in:
             self.cache_engine.swap_in(blocks_to_swap_in)
@@ -259,16 +278,18 @@ class Worker:
         else:
             cache_events = None
 
+        # If there is no input, we don't need to execute the model.
         if not seq_group_metadata_list:
             if cache_events is not None:
                 for event in cache_events:
                     event.wait()
             return {}
 
+        # Prepare input tensors.
         input_tokens, input_positions, input_metadata = self._prepare_inputs(
             seq_group_metadata_list)
 
-        # Model execution
+        # Execute the model.
         output = self.model(
             input_ids=input_tokens,
             positions=input_positions,
@@ -281,7 +302,7 @@ class Worker:
 
 def _init_distributed_environment(
     parallel_config: ParallelConfig,
-    rank: int, # TODO: this too?
+    rank: int,
     distributed_init_method: Optional[str] = None,
 ) -> None:
     """Initialize the distributed environment."""
@@ -289,14 +310,13 @@ def _init_distributed_environment(
         torch_world_size = torch.distributed.get_world_size()
         if torch_world_size != parallel_config.world_size:
             raise RuntimeError(
-                "torch.distributed is already initialized but the "
-                "torch world size doesn't match parallel_config.world_size "
-                f"({torch_world_size} vs. {parallel_config.world_size})")
+                "torch.distributed is already initialized but the torch world "
+                "size does not match parallel_config.world_size "
+                f"({torch_world_size} vs. {parallel_config.world_size}).")
     elif not distributed_init_method:
         raise ValueError(
             "distributed_init_method must be set if torch.distributed "
-            "is not already initialized."
-        )
+            "is not already initialized")
     else:
         torch.distributed.init_process_group(
             backend="nccl",
@@ -305,6 +325,7 @@ def _init_distributed_environment(
             init_method=distributed_init_method,
         )
 
+    # A small all_reduce for warmup.
     torch.distributed.all_reduce(torch.zeros(1).cuda())
     initialize_model_parallel(parallel_config.tensor_parallel_size,
                               parallel_config.pipeline_parallel_size)
