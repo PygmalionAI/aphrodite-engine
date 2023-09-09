@@ -1,5 +1,6 @@
 """Sampling parameters for text generation."""
 from typing import List, Optional, Union
+from aphrodite.common.logits import LogitsProcessor
 
 _SAMPLING_EPS = 1e-5
 
@@ -49,6 +50,8 @@ class SamplingParams:
             tokens after the EOS token is generated.
         max_tokens: Maximum number of tokens to generate per output sequence.
         logprobs: Number of log probabilities to return per output token.
+        logits_processors: List of LogitsProcessors to change the probability
+            of token prediction at runtime.
     """
 
     def __init__(
@@ -67,7 +70,8 @@ class SamplingParams:
         ignore_eos: bool = False,
         max_tokens: int = 16,
         logprobs: Optional[int] = None,
-    ) -> None:
+        logits_processors: List[LogitsProcessor] = None
+) -> None:
         self.n = n
         self.best_of = best_of if best_of is not None else n
         self.presence_penalty = presence_penalty
@@ -78,6 +82,7 @@ class SamplingParams:
         self.use_beam_search = use_beam_search
         self.length_penalty = length_penalty
         self.early_stopping = early_stopping
+        self.logits_processors = logits_processors
         if stop is None:
             self.stop = []
         elif isinstance(stop, str):
