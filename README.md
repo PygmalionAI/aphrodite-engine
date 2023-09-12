@@ -76,11 +76,12 @@ $ conda install -c conda-forge cudatoolkit-dev gcc=11.3 gxx=11.3
 ```
 :warning: If you're using an NVIDIA H100 card, please run these install commands instead:
 ```sh
+$ sudo apt-get install ninja-build -y
 $ conda install -c "nvidia/label/cuda-11.8.0" cuda-nvcc=11.8
 $ pip install git+https://github.com/facebookresearch/xformers.git
 ```
 
-The last command will take a long time, depending on your internet speed.
+The last command will take a long time, depending on your internet speed and processor count.
 
 Whenever you want to launch Aphrodite later on, make sure you run `conda activate aphrodite` first. The other steps outlined above are one-time only.
 
