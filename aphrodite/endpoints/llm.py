@@ -38,6 +38,8 @@ class LLM:
             config file. However, if the `torch_dtype` in the config is `float32`,
             we will use `bfloat16` if your GPU supports it, otherwise `float16`.
         seed: The seed to initialize the RNG for sampling.
+        revision: The specific model version to use. It can be a branch name,
+            a tag name, or a commit ID.
     """
 
     def __init__(

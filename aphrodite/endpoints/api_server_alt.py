@@ -6,8 +6,9 @@ from typing import AsyncGenerator, Dict
 from fastapi import BackgroundTasks, Depends, Header, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 import uvicorn
+from pydantic import parse_obj_as
 
-from aphrodite.engine.args_tools import AsyncEngineArgs, EngineArgs
+from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.utils import random_uuid
@@ -15,23 +16,31 @@ from aphrodite.common.utils import random_uuid
 TIMEOUT_KEEP_ALIVE = 5  # seconds.
 TIMEOUT_TO_PREVENT_DEADLOCK = 1  # seconds.
 
-user_tokens: Dict[str, str] = {}
-
-SECRET_TOKEN = "EMPTY"
-
 app = FastAPI()
 engine = None
 
-def get_token(authorization: str = Header(None)):
-    if authorization is None or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Unauthorized access.")
-    token = authorization.replace("Bearer ", "")
-    if token != SECRET_TOKEN:
-        raise HTTPException(status_code=401, detail="Unauthorized access.")
-    return True
+# user_tokens: Dict[str, str] = {}
+
+# def get_token(authorization: str = Header(None)):
+#     if authorization is None or not authorization.startswith("Bearer "):
+#         raise HTTPException(status_code=401, detail="Unauthorized access.")
+#     token = authorization.replace("Bearer ", "")
+    
+#     # Check if the token exists in the user_tokens dictionary
+#     if token not in user_tokens:
+#         raise HTTPException(status_code=401, detail="Unauthorized access.")
+    
+#     return True
+
+
+# def generate_user_token(user_id: str) -> str:
+#     token = random_uuid()
+#     user_tokens[token] = user_id
+#     return token
 
 @app.post("/api/v1/generate")
-async def generate(request: Request, token: bool = Depends(get_token)) -> Response:
+# async def generate(request: Request, token: bool = Depends(get_token), params: SamplingParams) -> Response:
+async def generate(request: Request) -> Response:
     """Generate completion for the request.
 
     The request should be a JSON object with the following fields:
@@ -42,7 +51,45 @@ async def generate(request: Request, token: bool = Depends(get_token)) -> Respon
     request_dict = await request.json()
     prompt = request_dict.pop("prompt")
     stream = request_dict.pop("stream", False)
-    sampling_params = SamplingParams(**request_dict)
+
+    sampling_params = SamplingParams()
+    
+    if 'stop_sequence' in request_dict:
+        request_dict['stop'] = request_dict.pop('stop_sequence')
+    if 'max_length' in request_dict:
+        request_dict['max_tokens'] = request_dict.pop('max_length')
+    if 'rep_pen' in request_dict:
+        request_dict['frequency_penalty'] = request_dict.pop('rep_pen')
+
+    for key, value in request_dict.items():
+        if hasattr(sampling_params, key):
+            setattr(sampling_params, key, value)
+
+    # sampling_params = SamplingParams(**sampling_params_data)
+
+    # param_aliases = {
+    #     'stop_sequence': 'stop',
+    #     'max_length': 'max_tokens',
+    #     'rep_pen': 'frequency_penalty',
+    #     'use_story': None,
+    #     'use_memory': None,
+    #     'use_authors_note': None,
+    #     'use_world_info': None,
+    #     'max_context_length': None,
+    #     'rep_pen_range': None,
+    #     'rep_pen_slope': None,
+    #     'tfs': None,
+    #     'top_a': None,
+    #     'typical': None,
+    #     'sampler_order': None,
+    #     'singleline': None,
+    #     'use_default_badwordsids': None,
+    #     'mirostat': None,
+    #     'mirostat_eta': None,
+    #     'mirostat_tau': None,
+    # }
+
+    # sampling_params = SamplingParams(**request_dict)
     request_id = random_uuid()
 
     results_generator = engine.generate(prompt, sampling_params, request_id)
@@ -82,7 +129,8 @@ async def generate(request: Request, token: bool = Depends(get_token)) -> Respon
     return JSONResponse(ret)
 
 @app.get("/api/v1/model")
-async def get_model_name(token: bool = Depends(get_token)) -> JSONResponse:
+# async def get_model_name(token: bool = Depends(get_token)) -> JSONResponse:
+async def get_model_name() -> JSONResponse:
     """Return the model name based on the EngineArgs configuration."""
     if engine is not None:
         model_name = engine_args.model
@@ -91,6 +139,10 @@ async def get_model_name(token: bool = Depends(get_token)) -> JSONResponse:
     else:
         return JSONResponse(content={"result": "Read Only"}, status_code=500)
 
+# @app.post("/api/v1/get-token")
+# async def get_user_token(user_id: str) -> JSONResponse:
+#     token = generate_user_token(user_id)
+#     return JSONResponse(content={"token": token})
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

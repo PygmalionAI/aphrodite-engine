@@ -122,6 +122,12 @@ class Sequence:
         self._append_tokens_to_blocks(prompt_token_ids)
         self.status = SequenceStatus.WAITING
 
+        # used for incremental detokization
+        self.prefix_offset = 0
+        self.read_offset = 0
+        # input + output tokens
+        self.tokens: Optional[List[str]] = None
+
     def _append_logical_block(self) -> None:
         block = LogicalTokenBlock(
             block_number=len(self.logical_token_blocks),
@@ -345,7 +351,7 @@ class SequenceOutputs:
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SequenceOutputs):
-            return NotImplementedError()
+            raise NotImplementedError()
         return (self.parent_seq_id == other.parent_seq_id
                 and self.output_token == other.output_token
                 and self.logprobs == other.logprobs)

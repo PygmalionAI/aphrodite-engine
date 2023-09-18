@@ -10,7 +10,10 @@ try:
     """Ray wrapper for aphrodite.task_handler.worker, allowing
     worker to be lazily initialized after Ray sets CUDA_VISIBLE_DEVICES."""
     class RayWorker(TorchDistributedWorker):
-        def __init__(self) -> None:
+        def __init__(self, init_cached_hf_modules=False) -> None:
+            if init_cached_hf_modules:
+                from transformers.dynamic_module_utils import init_hf_modules
+                init_hf_modules()
             self.worker = None
         
         def init_worker(self, worker_init_fn):
