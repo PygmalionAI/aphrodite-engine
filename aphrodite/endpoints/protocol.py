@@ -13,7 +13,7 @@ class SamplingParams(BaseModel):
     length_penalty: float = Field(1.0, alias="length_penalty")
     early_stopping: Union[bool, str] = Field(False, alias="early_stopping")
     stop: Union[None, str, List[str]] = Field(None, alias="stop_sequence")
-    ignore_eos: bool Field(False, alias="ignore_eos")
+    ignore_eos: bool = Field(False, alias="ignore_eos")
     max_tokens: int = Field(16, alias="max_length")
     logprobs: Optional[int] = Field(None, alias="logprobs")
 
