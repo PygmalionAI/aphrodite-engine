@@ -10,4 +10,4 @@ build
 *.json
 dist/
 .VSCodeCounter
-
+.venv
