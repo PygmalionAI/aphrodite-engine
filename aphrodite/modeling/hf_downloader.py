@@ -13,8 +13,6 @@ import torch
 from tqdm.auto import tqdm
 
 from aphrodite.common.logger import init_logger
-from aphrodite.modeling.quantization_utils import get_quant_class
-from aphrodite.modeling.quantization_utils.base import QuantizationConfig
 
 logger = init_logger(__name__)
 
@@ -46,7 +44,7 @@ def _shared_pointers(tensors):
 def convert_bin_to_safetensor_file(
     pt_filename: str,
     sf_filename: str,
-) -> None:
+):
     loaded = torch.load(pt_filename, map_location="cpu")
     if "state_dict" in loaded:
         loaded = loaded["state_dict"]
@@ -79,52 +77,16 @@ def convert_bin_to_safetensor_file(
         if not torch.equal(pt_tensor, sf_tensor):
             raise RuntimeError(f"The output tensors do not match for key {k}")
 
-def get_quant_config(
-        quantization: str,
-        model_name_or_path: str,
-        cache_dir: Optional[str] = None,
-) -> QuantizationConfig:
-    is_local = os.path.isdir(model_name_or_path)
-    if not is_local:
-        with get_lock(model_name_or_path, cache_dir):
-            hf_folder = snapshot_download(model_name_or_path,
-                                          allow_patterns="*.json",
-                                          cache_dir=cache_dir,
-                                          tqdm_class=Disabledtqdm)
-    else:
-        hf_folder = model_name_or_path
-    config_files = glob.glob(os.path.join(hf_folder, "*.json"))
-
-    quant_cls = get_quant_class(quantization)
-    quant_config_files = [
-        f for f in config_files if any(
-            f.endswith(x) for x in quant_cls.get_config_filenames())
-    ]
-    if len(quant_config_files) == 0:
-        raise ValueError(f"Cannot find the config file for {quantization}")
-    if len(quant_config_files) > 1:
-        raise ValueError(f"Found multiple config files for {quantization}: "
-                         f"{quant_config_files}")
-    
-    quant_config_file = quant_config_files[0]
-    with open(quant_config_file, "r") as f:
-        config = json.load(f)
-    return quant_cls.from_config(config)
-
 
 def prepare_hf_model_weights(
     model_name_or_path: str,
     cache_dir: Optional[str] = None,
     use_safetensors: bool = False,
     fall_back_to_pt: bool = True,
-    revision: Optional[str] = None,
-) -> Tuple[str, List[str], bool]:
+):
     # Download model weights from huggingface.
     is_local = os.path.isdir(model_name_or_path)
-    if use_safetensors:
-        allow_patterns = ["*.safetensors"]
-    else:
-        allow_patterns = ["*.bin", "*.pt"]
+    allow_patterns = "*.safetensors" if use_safetensors else "*.bin"
     if not is_local:
         # Use file lock to prevent multiple processes from
         # downloading the same model weights at the same time.
@@ -132,13 +94,10 @@ def prepare_hf_model_weights(
             hf_folder = snapshot_download(model_name_or_path,
                                           allow_patterns=allow_patterns,
                                           cache_dir=cache_dir,
-                                          tqdm_class=Disabledtqdm,
-                                          revision=revision)
+                                          tqdm_class=Disabledtqdm)
     else:
         hf_folder = model_name_or_path
-    hf_weights_files: List[str] = []
-    for pattern in allow_patterns:
-        hf_weights_files += glob.glob(os.path.join(hf_folder, pattern))
+    hf_weights_files = glob.glob(os.path.join(hf_folder, allow_patterns))
     if not use_safetensors:
         hf_weights_files = [
             x for x in hf_weights_files if not x.endswith("training_args.bin")
