@@ -6,7 +6,7 @@ import fire
 import torch
 from transformers import GenerationConfig, PreTrainedModel
 
-from models import init_adapter
+from base import init_adapter
 from dist import get_local_rank, get_rank, get_world_size
 from model import accel_model, init_model
 from session import BasicSessionManagerWithHistory
