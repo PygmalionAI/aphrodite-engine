@@ -16,6 +16,9 @@ def sample_requests(
     dataset_path: str,
     num_requests: int,
     tokenizer: PreTrainedTokenizerBase,
+    min_size: int,
+    max_size: int,
+    tgt_output_len: int,
 ) -> List[Tuple[str, int, int]]:
     # Load the dataset.
     with open(dataset_path) as f:
@@ -45,17 +48,15 @@ def sample_requests(
     filtered_dataset: List[Tuple[str, int, int]] = []
     for prompt, prompt_token_ids, output_len in tokenized_dataset:
         prompt_len = len(prompt_token_ids)
-        if prompt_len < 4 or output_len < 4:
-            # Prune too short sequences.
+        if prompt_len < min_size or prompt_len+tgt_output_len > max_size:
+            # Prune too short or too long sequences.
             continue
-        if prompt_len > 1024 or prompt_len + output_len > 2048:
-            # Prune too long sequences.
-            continue
-        filtered_dataset.append((prompt, prompt_len, output_len))
+        filtered_dataset.append((prompt, prompt_len, tgt_output_len, prompt_token_ids))
 
     # Sample the requests.
-    sampled_requests = random.sample(filtered_dataset, num_requests)
-    return sampled_requests
+    # sampled_requests = random.sample(filtered_dataset, num_requests)
+    print(f"{len(filtered_dataset)} appropriate requests")
+    return filtered_dataset[:num_requests]
 
 
 def run_aphrodite(
@@ -66,16 +67,23 @@ def run_aphrodite(
     seed: int,
     n: int,
     use_beam_search: bool,
+    max_num_batched_tokens:int = 4096,
+    swap_space:int = 2,
+    block_size:int = 16,
 ) -> float:
     llm = LLM(
         model=model,
         tokenizer=tokenizer,
         tensor_parallel_size=tensor_parallel_size,
         seed=seed,
+        gpu_memory_utilization=0.95,
+        max_num_batched_tokens=max_num_batched_tokens,
+        swap_space=swap_space,
+        block_size=block_size,
     )
 
     # Add the requests to the engine.
-    for prompt, _, output_len in requests:
+    for prompt, _, output_len, tok_ids in requests:
         sampling_params = SamplingParams(
             n=n,
             temperature=0.0 if use_beam_search else 1.0,
@@ -86,8 +94,8 @@ def run_aphrodite(
         )
         # FIXME: Do not use internal method.
         llm._add_request(
-            prompt=prompt,
-            prompt_token_ids=None,
+            prompt=None,
+            prompt_token_ids=tok_ids,
             sampling_params=sampling_params,
         )
 
@@ -161,24 +169,24 @@ def main(args: argparse.Namespace):
 
     # Sample the requests.
     tokenizer = get_tokenizer(args.tokenizer)
-    requests = sample_requests(args.dataset, args.num_prompts, tokenizer)
+    requests = sample_requests(args.dataset, args.num_prompts, tokenizer, 3072, 4096, 150)
 
     if args.backend == "aphrodite":
         elapsed_time = run_aphrodite(
             requests, args.model, args.tokenizer, args.tensor_parallel_size,
-            args.seed, args.n, args.use_beam_search)
+            args.seed, args.n, args.use_beam_search, args.max_num_batched_tokens, args.swap_space, args.block_size)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
                               args.use_beam_search, args.hf_max_batch_size)
     else:
         raise ValueError(f"Unknown backend: {args.backend}")
-    total_num_tokens = sum(
-        prompt_len + output_len
-        for _, prompt_len, output_len in requests
-    )
+
+    intoks = sum(x[1] for x in requests)
+    outtoks = sum(x[2] for x in requests)
     print(f"Throughput: {len(requests) / elapsed_time:.2f} requests/s, "
-          f"{total_num_tokens / elapsed_time:.2f} tokens/s")
+          f"{intoks / elapsed_time:.2f} input/s, {outtoks / elapsed_time:.2f} output/s")
+
 
 
 if __name__ == "__main__":
@@ -198,6 +206,11 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hf-max-batch-size", type=int, default=None,
                         help="Maximum batch size for HF backend.")
+
+    parser.add_argument("--max_num_batched_tokens", type=int, default=4096)
+    parser.add_argument("--swap_space", type=int, default=2)
+    parser.add_argument("--block_size", type=int, default=16)
+
     args = parser.parse_args()
 
     if args.backend == "aphrodite":
