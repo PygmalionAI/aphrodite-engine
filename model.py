@@ -6,7 +6,7 @@ from typing import Optional
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from .dist import get_local_rank
+from dist import get_local_rank
 
 logger = logging.getLogger(__name__)
 

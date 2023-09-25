@@ -3,7 +3,7 @@ import re
 
 from transformers import PreTrainedTokenizerBase, PreTrainedTokenizerFast
 
-from .base import BasicAdapterFast
+from base import BasicAdapterFast
 
 logger = logging.getLogger(__name__)
 

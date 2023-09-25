@@ -2,7 +2,7 @@ import logging
 
 from transformers.generation.streamers import BaseStreamer
 
-from .dist import get_rank, master_only, master_only_and_broadcast_general
+from dist import get_rank, master_only, master_only_and_broadcast_general
 
 try:
     import readline

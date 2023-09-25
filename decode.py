@@ -10,7 +10,7 @@ import torch.multiprocessing as mp
 from torch.nn.utils.rnn import pad_sequence
 from transformers import AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
-from .model import accel_model, init_model
+from model import accel_model, init_model
 
 
 def safe_numel(free_mem, model_size, max_intermediate):
