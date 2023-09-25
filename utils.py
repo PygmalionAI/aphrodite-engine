@@ -4,6 +4,7 @@ from transformers.generation.streamers import BaseStreamer
 import torch.nn as nn
 from dist import get_rank, master_only, master_only_and_broadcast_general
 from llama import LlamaAdapter
+from base import BasicAdapterFast, BasicAdapter
 
 try:
     import readline
