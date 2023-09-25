@@ -33,6 +33,17 @@ class BaseModel:
         self.capability = capability
 
     def get_prompt(self, prompt, sequence_start=True):
+        """Return the prompt that's concatenated with other elements 
+        in the chat template.
+        
+        Args:
+            prompt (str): user's input prompt.
+            sequence_start (bool): indicator for the first round of
+                the chat session.
+        
+        Returns:
+            str: the concatenated prompt.
+        """
         if self.capability == 'completion':
             return prompt
         else:
@@ -44,6 +55,14 @@ class BaseModel:
     
     @staticmethod
     def _translate_messages(messages: List):
+        """Translate messages into system, user speaking list, and
+            assistant speaking lists.
+        
+        Args:
+            messages (List): chat history
+        Returns:
+            Tuple: consists of system (str), users (List[str]),
+                and assistants (List[str])"""
         system = None
         users = []
         assistants = []
@@ -63,8 +82,19 @@ class BaseModel:
         
     @abstractmethod
     def messages2prompt(self, messages, sequence_start=True):
+        """Return the prompt that's concatenated with other elements
+        in the chat template. When message arg is a string, return
+        self.get_prompt(messages). When message arg is a chat history,
+        return translated prompt from chat history.
+        
+        Args:
+            messages (str | list): user's input prompt.
+        Returns:
+            str: the concatenated prompt.
+        """
         if isinstance(messages, str):
             return self.get_prompt(messages)
+        # chat histroy processing in derived classes
         
     @property
     def stop_words(self):
@@ -94,6 +124,15 @@ class Metharme(BaseModel):
         self.assistant = assistant
 
     def decorate_prompt(self, prompt, sequence_start=True):
+        """Return the prompt that's concatenated with other elements in the chat template.
+        
+        Args:
+            prompt (str): user's input prompt
+            sequence_start (bool): indicator for the first round of a chat session.
+        
+        Returns:
+            str: the concatenated prompt.
+        """
         assert self.capability == 'chat', \
             f'{type(self).__name__} has no capability of {self.capability}'
         if sequence_start:
@@ -117,6 +156,7 @@ class Metharme(BaseModel):
 @MODELS.register_module(name='pygmalion-2-13b')
 @MODELS.register_module(name='mythalion-13b')
 class Pygmalion(Metharme):
+    """Chat template for the Pyg models, uses templates from the Metharme class above."""
     def __init__(self, session_len=4096, **kwargs):
         super(Pygmalion, self).__init__(**kwargs)
         self.session_len = session_len
