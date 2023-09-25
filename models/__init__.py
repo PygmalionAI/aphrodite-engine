@@ -2,8 +2,8 @@ import logging
 
 import torch.nn as nn
 
-from base import BasicAdapter, BasicAdapterFast
-from llama import LlamaAdapter
+from .base import BasicAdapter, BasicAdapterFast
+from .llama import LlamaAdapter
 
 logger = logging.getLogger(__name__)
 
