@@ -11,7 +11,7 @@ from aphrodite.modeling.megatron.tensor_parallel import (
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import SamplerOutput, SequenceOutputs, SequenceData
 
-__SAMPLING_EPS = 1e-5
+_SAMPLING_EPS = 1e-5
 
 
 class Sampler(nn.Module):
