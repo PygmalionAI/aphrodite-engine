@@ -75,7 +75,7 @@ class ModelConfig:
         self.dtype = _get_and_verify_dtype(self.hf_config, dtype)
         self._verify_load_format()
         self._verify_tokenizer_mode()
-        self._verify_quantization_mode()
+        self._verify_quantization()
         self.max_model_len = None
         if max_model_len is not None:
             derived_max_model_len = self.get_max_model_len()
