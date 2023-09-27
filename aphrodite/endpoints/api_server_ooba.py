@@ -19,9 +19,10 @@ TIMEOUT_TO_PREVENT_DEADLOCK = 1  # seconds.
 app = FastAPI()
 engine = None
 
+valid_api_key = 'EMPTY'
 
 @app.post("/api/v1/generate")
-async def generate(request: Request) -> Response:
+async def generate(request: Request, x_api_key: str = Header(None)) -> Response:
     """Generate completion for the request.
 
     The request should be a JSON object with the following fields:
@@ -29,6 +30,9 @@ async def generate(request: Request) -> Response:
     - stream: whether to stream the results or not.
     - other fields: the sampling parameters (See `SamplingParams` for details).
     """
+    if x_api_key is None or x_api_key != valid_api_key:
+        raise HTTPException(status_code=401, detail="Unauthorized. Please acquire an API key.")
+
     request_dict = await request.json()
     prompt = request_dict.pop("prompt")
     stream = request_dict.pop("stream", False)
