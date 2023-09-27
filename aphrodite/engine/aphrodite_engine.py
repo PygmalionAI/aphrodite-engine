@@ -294,14 +294,12 @@ class AphroditeEngine:
     def _schedule(
         self
     ) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs,
-               Optional[List[RequestOutput]]]:
+               List[RequestOutput]]:
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
-        if scheduler_outputs.is_empty():
-            return seq_group_metadata_list, scheduler_outputs, [
-                RequestOutput.from_seq_group(seq_group)
-                for seq_group in scheduler_outputs.ignored_seq_groups
-            ]
-        return seq_group_metadata_list, scheduler_outputs, None
+        return seq_group_metadata_list, scheduler_outputs, [
+            RequestOutput.from_seq_group(seq_group)
+            for seq_group in scheduler_outputs.ignored_seq_groups
+        ]
 
     def _check_beam_search_early_stopping(
         self,
@@ -545,10 +543,9 @@ class AphroditeEngine:
         and updates the scheduler with the model outputs. Finally, it decodes
         the sequences and returns the newly generated results.
         """
-        (seq_group_metadata_list, scheduler_outputs,
-         early_return) = self._schedule()
-        if early_return is not None:
-            return early_return
+        seq_group_metadata_list, scheduler_outputs, ignored = self._schedule()
+        if scheduler_outputs.is_empty():
+            return ignored
 
         # Execute the model.
         output = self._run_workers(
@@ -559,7 +556,7 @@ class AphroditeEngine:
             blocks_to_copy=scheduler_outputs.blocks_to_copy,
         )
 
-        return self._process_model_outputs(output, scheduler_outputs)
+        return self._process_model_outputs(output, scheduler_outputs) + ignored
 
     def _log_system_stats(
         self,
@@ -626,23 +623,15 @@ class AphroditeEngine:
 
     def _decode_sequence(self, seq: Sequence) -> None:
         """Decodes the new token for a sequence."""
-        # new_token, new_output_text = detokenize_incrementally(
-        #     self.tokenizer,
-        #     seq.output_tokens,
-        #     seq.get_last_token_id(),
-        #     skip_special_tokens=True,
-        # )
-        # if new_token is not None:
-        #     seq.output_tokens.append(new_token)
-        #     seq.output_text = new_output_text
-        (new_tokens, new_output_text, prefix_offset, read_offset) = detokenize_incrementally(
-            self.tokenizer,
-            all_input_ids=seq.get_token_ids(),
-            prev_tokens=seq.tokens,
-            prefix_offset=seq.prefix_offset,
-            read_offset=seq.read_offset,
-            skip_special_tokens=True,
-        )
+        (new_tokens, new_output_text, prefix_offset,
+         read_offset) = detokenize_incrementally(
+             self.tokenizer,
+             all_input_ids=seq.get_token_ids(),
+             prev_tokens=seq.tokens,
+             prefix_offset=seq.prefix_offset,
+             read_offset=seq.read_offset,
+             skip_special_tokens=True,
+         )
         if seq.tokens is None:
             seq.tokens = new_tokens
         else:
@@ -661,6 +650,9 @@ class AphroditeEngine:
                 seq.output_text = seq.output_text[:-len(stop_str)]
                 seq.status = SequenceStatus.FINISHED_STOPPED
                 return
+        if seq.get_last_token_id() in sampling_params.stop_token_ids:
+            seq.status = SequenceStatus.FINISHED_STOPPED
+            return
 
         # Check if the sequence has reached max_model_len.
         if seq.get_len() > self.scheduler_config.max_model_len:

@@ -41,6 +41,8 @@ def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
 
 def get_model(model_config: ModelConfig) -> nn.Module:
     model_class = _get_model_architecture(model_config.hf_config)
+
+    # Get the quantization config.
     quant_config = None
     if model_config.quantization is not None:
         if model_class not in _QUANT_REGISTRY:
@@ -49,11 +51,20 @@ def get_model(model_config: ModelConfig) -> nn.Module:
         quant_config = get_quant_config(model_config.quantization,
                                         model_config.model,
                                         model_config.download_dir)
+        capability = torch.cuda.get_device_capability()
+        capability = capability[0] * 10 + capability[1]
+        if capability < quant_config.get_min_capability():
+            raise ValueError(
+                f"The quantization method {model_config.quantization} is not "
+                "supported for the current GPU. "
+                f"Minimum capability: {quant_config.get_min_capability()}. "
+                f"Current capability: {capability}.")
         supported_dtypes = quant_config.get_supported_act_dtypes()
         if model_config.dtype not in supported_dtypes:
             raise ValueError(
-                f"{model_config.dtype} is not supported for quantization method {model_config.quantization}. "
-                f"Supported datatypes: {supported_dtypes}")
+                f"{model_config.dtype} is not supported for quantization "
+                f"method {model_config.quantization}. Supported dtypes: "
+                f"{supported_dtypes}")
 
     with _set_default_torch_dtype(model_config.dtype):
         # Create a model instance.
@@ -64,7 +75,7 @@ def get_model(model_config: ModelConfig) -> nn.Module:
             model = model_class(model_config.hf_config)
         if model_config.load_format == "dummy":
             model = model.cuda()
-            # NOTE: For accurate performance evaluation, we assign
+            # NOTE(woosuk): For accurate performance evaluation, we assign
             # random values to the weights.
             initialize_dummy_weights(model)
         else:

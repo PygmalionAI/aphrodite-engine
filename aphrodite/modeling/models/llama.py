@@ -25,7 +25,7 @@
 The input of the model is flattened to a 1D tensor of tokens. The model uses
 InputMetadata to extract the original 2D shape of the input.
 """
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from torch import nn
@@ -89,6 +89,8 @@ class LlamaAttention(nn.Module):
         num_heads: int,
         num_kv_heads: int,
         rope_theta: float = 10000,
+        rope_scaling: Optional[Dict[str, Any]] = None,
+        max_position_embeddings: int = 8192,
         quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
         super().__init__()
@@ -105,6 +107,7 @@ class LlamaAttention(nn.Module):
         self.kv_size = self.num_kv_heads * self.head_dim
         self.scaling = self.head_dim**-0.5
         self.rope_theta = rope_theta
+        self.max_position_embeddings = max_position_embeddings
 
         self.qkv_proj = ParallelLinear.column(
             hidden_size,
@@ -123,12 +126,15 @@ class LlamaAttention(nn.Module):
             perform_initialization=False,
             quant_config=quant_config,
         )
-        self.attn = PagedAttentionWithRoPE(self.num_heads,
-                                           self.head_dim,
-                                           self.scaling,
-                                           base=self.rope_theta,
-                                           rotary_dim=self.head_dim,
-                                           num_kv_heads=self.num_kv_heads)
+        self.attn = PagedAttentionWithRoPE(
+            self.num_heads,
+            self.head_dim,
+            self.scaling,
+            base=self.rope_theta,
+            max_position=self.max_position_embeddings,
+            rotary_dim=self.head_dim,
+            num_kv_heads=self.num_kv_heads,
+            rope_scaling=rope_scaling)
 
     def forward(
         self,
@@ -158,11 +164,16 @@ class LlamaDecoderLayer(nn.Module):
         self.hidden_size = config.hidden_size
         # Requires transformers > 4.32.0
         rope_theta = getattr(config, "rope_theta", 10000)
+        rope_scaling = getattr(config, "rope_scaling", None)
+        max_position_embeddings = getattr(config, "max_position_embeddings",
+                                          8192)
         self.self_attn = LlamaAttention(
             hidden_size=self.hidden_size,
             num_heads=config.num_attention_heads,
             num_kv_heads=config.num_key_value_heads,
             rope_theta=rope_theta,
+            rope_scaling=rope_scaling,
+            max_position_embeddings=max_position_embeddings,
             quant_config=quant_config,
         )
         self.mlp = LlamaMLP(
@@ -334,6 +345,7 @@ class LlamaForCausalLM(nn.Module):
                 is_packed = self.quant_config.is_packed(name)
                 is_transposed = self.quant_config.is_transposed(name)
             if is_transposed:
+                loaded_weight = convert_pyslice_to_tensor(loaded_weight)
                 loaded_weight = loaded_weight.T
 
             is_attention_weight = False

@@ -14,6 +14,9 @@ from aphrodite import attention_ops
 from aphrodite import cache_ops
 from aphrodite import pos_encoding_ops
 from aphrodite.modeling.metadata import InputMetadata
+from aphrodite.modeling.layers.rotary_embedding import (
+    DynamicNTKScalingRotaryEmbedding, LinearScalingRotaryEmbedding,
+    RotaryEmbedding)
 
 _SUPPORTED_HEAD_SIZES = [64, 80, 96, 112, 128, 256]
 
@@ -76,8 +79,12 @@ class PagedAttention(nn.Module):
             raise ValueError(f"head_size ({self.head_size}) is not supported. "
                              f"Supported head sizes: {_SUPPORTED_HEAD_SIZES}.")
 
-    def set_attn_bias(self, input_metadata: InputMetadata, dtype: torch.dtype) -> None:
-        del dtype
+    def set_attn_bias(
+        self,
+        input_metadata: InputMetadata,
+        dtype: torch.dtype,
+    ) -> None:
+        del dtype  # Unused.
         if input_metadata.attn_bias:
             # Already set by a previous layer.
             return
@@ -246,7 +253,7 @@ class PagedAttention(nn.Module):
 
 
 class PagedAttentionWithRoPE(PagedAttention):
-    """PagedAttention with rotary embedding."""
+    """PagedAttention with rotary positional embedding."""
 
     def __init__(
         self,
@@ -258,30 +265,26 @@ class PagedAttentionWithRoPE(PagedAttention):
         base: int = 10000,
         num_kv_heads: Optional[int] = None,
         is_neox_style: bool = True,
+        rope_scaling: Optional[Dict[str, Any]] = None,
     ) -> None:
         super().__init__(num_heads, head_size, scale, num_kv_heads)
-        self.is_neox_style = is_neox_style
-
-        # Create the cos and sin cache.
-        # inv_freq = 1.0 / (base**(
-        #     torch.arange(0, rotary_dim, 2, device="cuda") / rotary_dim))
-        # t = torch.arange(max_position, device="cuda").float()
-        # freqs = torch.einsum("i,j -> ij", t, inv_freq.float())
-        inv_freq = 1.0 / (base**(torch.arange(
-            0, rotary_dim, 2, dtype=torch.float, device="cuda") / rotary_dim))
-        t = torch.arange(max_position, dtype=torch.float, device="cuda")
-        freqs = torch.einsum("i,j -> ij", t, inv_freq)
-        cos = freqs.cos()
-        sin = freqs.sin()
-        cache = torch.cat((cos, sin), dim=-1)
-
-        # FIXME: This assumes that we configure the default dtype when
-        # initializing the model.
-        # TODO: Make it more robust.
-        torch_dtype = torch.get_default_dtype()
-        cache = cache.to(torch_dtype)
-        # Embedding size: [max_position, rotary_dim]
-        self.register_buffer("cos_sin_cache", cache, persistent=False)
+        if rope_scaling is None:
+            self.rotary_emb = RotaryEmbedding(head_size, rotary_dim,
+                                              max_position, base,
+                                              is_neox_style)
+        else:
+            scaling_type = rope_scaling["type"]
+            scaling_factor = rope_scaling["factor"]
+            if scaling_type == "linear":
+                self.rotary_emb = LinearScalingRotaryEmbedding(
+                    head_size, rotary_dim, max_position, base, is_neox_style,
+                    scaling_factor)
+            elif scaling_type == "dynamic":
+                self.rotary_emb = DynamicNTKScalingRotaryEmbedding(
+                    head_size, rotary_dim, max_position, base, is_neox_style,
+                    scaling_factor)
+            else:
+                raise ValueError(f"Unknown RoPE scaling type {scaling_type}")
 
     def forward(
         self,
@@ -298,7 +301,7 @@ class PagedAttentionWithRoPE(PagedAttention):
 
         Args:
             positions: shape = [num_tokens]
-                        query: shape = [num_tokens, num_heads * head_size]
+            query: shape = [num_tokens, num_heads * head_size]
             key: shape = [num_tokens, num_kv_heads * head_size]
             value: shape = [num_tokens, num_kv_heads * head_size]
             key_cache: shape = [num_blocks, num_kv_heads, head_size/x,
@@ -314,14 +317,7 @@ class PagedAttentionWithRoPE(PagedAttention):
 
         # Apply rotary embedding to the query and key before passing them
         # to the attention op.
-        pos_encoding_ops.rotary_embedding(
-            positions,
-            query,
-            key,
-            self.head_size,
-            self.cos_sin_cache,
-            self.is_neox_style,
-        )
+        query, key = self.rotary_emb(positions, query, key)
         return super().forward(
             query,
             key,
@@ -348,7 +344,8 @@ class PagedAttentionWithALiBi(PagedAttention):
         slopes = torch.tensor(slopes, dtype=torch.float32)
         self.register_buffer("alibi_slopes", slopes, persistent=False)
 
-    def set_attn_bias(self, input_metadata: InputMetadata, dtype: torch.dtype) -> None:
+    def set_attn_bias(self, input_metadata: InputMetadata,
+                      dtype: torch.dtype) -> None:
         if input_metadata.attn_bias:
             # Already set by a previous layer.
             return
