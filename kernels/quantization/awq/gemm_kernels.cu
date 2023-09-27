@@ -1,20 +1,20 @@
 /*
-
+Adapted from https://github.com/mit-han-lab/llm-awq
 @article{lin2023awq,
   title={AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration},
   author={Lin, Ji and Tang, Jiaming and Tang, Haotian and Yang, Shang and Dang, Xingyu and Han, Song},
   journal={arXiv},
   year={2023}
 }
-
  */
 
 
 #include <torch/extension.h>
-#include "dequantize.cuh"
-#include <cuda_fp16.h>
 #include <c10/cuda/CUDAGuard.h>
 
+#include "dequantize.cuh"
+
+#include <cuda_fp16.h>
 
 // Pack two half values.
 static inline __device__ __host__ unsigned
@@ -420,7 +420,7 @@ __global__ void __launch_bounds__(64) gemm_forward_4bit_cuda_m16n64k32(int G, in
 // zeros: IC // G, OC // 8 [int32] -> cast to IC // G, OC [uint4b]
 // assume that batch_size < 16 for now
 
-torch::Tensor gemm_forward_cuda(
+torch::Tensor awq_gemm(
     torch::Tensor _in_feats,
     torch::Tensor _kernel,
     torch::Tensor _scaling_factors,
