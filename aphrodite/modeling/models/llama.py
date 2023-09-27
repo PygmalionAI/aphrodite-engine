@@ -37,11 +37,12 @@ from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.attention import PagedAttentionWithRoPE
 from aphrodite.modeling.layers.sampler import Sampler 
 from aphrodite.modeling.layers.quantized_linear import ParallelLinear
-from aphrodite.modeling.hf_downloader import load_tensor_parallel_weights, load_padded_tensor_parallel_vocab, hf_model_weights_iterator
 from aphrodite.modeling.megatron.parallel_state import get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size
-from aphrodite.modeling.megatron.tensor_parallel import VocabParallelEmbedding, ColumnParallelLinear, RowParallelLinear
+from aphrodite.modeling.megatron.tensor_parallel import VocabParallelEmbedding
+from aphrodite.modeling.hf_downloader import (
+    load_tensor_parallel_weights, load_padded_tensor_parallel_vocab, hf_model_weights_iterator)
 from aphrodite.common.sequence import SamplerOutput
-
+from aphrodite.modeling.quantization_utils import QuantizationConfig
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
