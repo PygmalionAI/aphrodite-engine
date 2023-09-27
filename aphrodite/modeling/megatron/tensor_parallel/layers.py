@@ -15,16 +15,13 @@ from torch.nn.parameter import Parameter
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_rank,
     get_tensor_model_parallel_world_size,
-    get_all_reduce_launcher,
 )
 from .mappings import (
-    copy_to_tensor_model_parallel_region,
     gather_from_tensor_model_parallel_region,
     reduce_from_tensor_model_parallel_region,
     scatter_to_tensor_model_parallel_region,
 )
 
-from .random import get_cuda_rng_tracker
 from .utils import (
     divide,
     VocabUtility,
@@ -67,59 +64,6 @@ def copy_tensor_model_parallel_attributes(destination_tensor, source_tensor):
         maybe_copy(attribute)
 
 
-def _initialize_affine_weight_gpu(weight, init_method,
-                                  partition_dim, stride=1):
-    """Initialize affine weight for model parallel on GPU."""
-
-    set_tensor_model_parallel_attributes(tensor=weight,
-                                         is_parallel=True,
-                                         dim=partition_dim,
-                                         stride=stride)
-
-    with get_cuda_rng_tracker().fork():
-        init_method(weight)
-
-
-def _initialize_affine_weight_cpu(weight, output_size, input_size,
-                                  per_partition_size, partition_dim,
-                                  init_method, stride=1,
-                                  return_master_weight=False,
-                                  *, params_dtype=None):
-    """Initialize affine weight for model parallel.
-
-    Build the master weight on all processes and scatter
-    the relevant chunk."""
-
-    set_tensor_model_parallel_attributes(tensor=weight,
-                                         is_parallel=True,
-                                         dim=partition_dim,
-                                         stride=stride)
-
-    if params_dtype is None:
-        params_dtype = torch.get_default_dtype()
-
-    # Initialize master weight
-    master_weight = torch.empty(output_size, input_size,
-                                dtype=torch.float,
-                                requires_grad=False)
-    init_method(master_weight)
-    master_weight = master_weight.to(dtype=params_dtype)
-
-    # Split and copy
-    per_partition_per_stride_size = divide(per_partition_size, stride)
-    weight_list = torch.split(master_weight, per_partition_per_stride_size,
-                              dim=partition_dim)
-    rank = get_tensor_model_parallel_rank()
-    world_size = get_tensor_model_parallel_world_size()
-    my_weight_list = weight_list[rank::world_size]
-
-    with torch.no_grad():
-        torch.cat(my_weight_list, dim=partition_dim, out=weight)
-    if return_master_weight:
-        return master_weight
-    return None
-
-
 class VocabParallelEmbedding(torch.nn.Module):
     """Embedding parallelized in the vocabulary dimension.
 
@@ -142,6 +86,9 @@ class VocabParallelEmbedding(torch.nn.Module):
                  use_cpu_initialization: bool=False,
                  perform_initialization: bool=True):
         super(VocabParallelEmbedding, self).__init__()
+        assert not perform_initialization
+        assert not use_cpu_initialization
+
         # Keep the input dimensions.
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -164,24 +111,10 @@ class VocabParallelEmbedding(torch.nn.Module):
         self.num_embeddings_per_partition = self.vocab_end_index - \
             self.vocab_start_index
 
-        # Allocate weights and initialize.
-        if use_cpu_initialization:
-            self.weight = Parameter(torch.empty(
-                self.num_embeddings_per_partition, self.embedding_dim,
-                dtype=params_dtype))
-            if perform_initialization:
-                _initialize_affine_weight_cpu(
-                    self.weight, self.num_embeddings, self.embedding_dim,
-                    self.num_embeddings_per_partition, 0, init_method,
-                    params_dtype=params_dtype)
-        else:
-            self.weight = Parameter(torch.empty(
-                self.num_embeddings_per_partition, self.embedding_dim,
-                device=torch.cuda.current_device(), dtype=params_dtype))
-            if perform_initialization:
-                _initialize_affine_weight_gpu(self.weight, init_method,
-                                              partition_dim=0, stride=1)
-
+        self.weight = Parameter(torch.empty(
+            self.num_embeddings_per_partition, self.embedding_dim,
+            device=torch.cuda.current_device(), dtype=params_dtype))
+ 
     def forward(self, input_):
         if self.tensor_model_parallel_size > 1:
             # Build the mask.
@@ -241,17 +174,21 @@ class ColumnParallelLinear(torch.nn.Module):
                  params_dtype=None,
                  use_cpu_initialization=False,
                  perform_initialization=True,
+                 quant_config=None,
                  ):
         super(ColumnParallelLinear, self).__init__()
+        assert not perform_initialization
+        assert not use_cpu_initialization
 
         # Keep input parameters
         self.input_size = input_size
         self.output_size = output_size
         self.gather_output = gather_output
         # Divide the weight matrix along the last dimension.
-        world_size = get_tensor_model_parallel_world_size()
-        self.output_size_per_partition = divide(output_size, world_size)
+        self.world_size = get_tensor_model_parallel_world_size()
+        self.output_size_per_partition = divide(output_size, self.world_size)
         self.skip_bias_add = skip_bias_add
+        self.quant_config = quant_config
 
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
@@ -259,33 +196,13 @@ class ColumnParallelLinear(torch.nn.Module):
         # Parameters.
         # Note: torch.nn.functional.linear performs XA^T + b and as a result
         # we allocate the transpose.
-        # Initialize weight.
-        if use_cpu_initialization:
-            self.weight = Parameter(torch.empty(self.output_size_per_partition,
-                                                self.input_size,
-                                                dtype=params_dtype))
-            if perform_initialization:
-                self.master_weight = _initialize_affine_weight_cpu(
-                    self.weight, self.output_size, self.input_size,
-                    self.output_size_per_partition, 0, init_method,
-                    stride=stride, return_master_weight=keep_master_weight_for_test)
-        else:
-            self.weight = Parameter(torch.empty(
-                self.output_size_per_partition, self.input_size,
-                device=torch.cuda.current_device(), dtype=params_dtype))
-            if perform_initialization:
-                _initialize_affine_weight_gpu(self.weight, init_method,
-                                              partition_dim=0, stride=stride)
+        self.create_weights(params_dtype)
 
         if bias:
-            if use_cpu_initialization:
-                self.bias = Parameter(torch.empty(
-                    self.output_size_per_partition, dtype=params_dtype))
-            else:
-                self.bias = Parameter(torch.empty(
-                    self.output_size_per_partition,
-                    device=torch.cuda.current_device(),
-                    dtype=params_dtype))
+            self.bias = Parameter(torch.empty(
+                self.output_size_per_partition,
+                device=torch.cuda.current_device(),
+                dtype=params_dtype))
             set_tensor_model_parallel_attributes(self.bias, True, 0, stride)
             # Always initialize bias to zero.
             with torch.no_grad():
@@ -293,6 +210,17 @@ class ColumnParallelLinear(torch.nn.Module):
         else:
             self.register_parameter('bias', None)
 
+    def create_weights(self, dtype: torch.dtype) -> None:
+        self.weight = Parameter(torch.empty(
+            self.output_size_per_partition, self.input_size,
+            device=torch.cuda.current_device(), dtype=dtype))
+
+    def apply_weights(
+        self,
+        x: torch.Tensor,
+        bias: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        return F.linear(x, self.weight, bias)
 
     def forward(self, input_):
         """Forward of ColumnParallelLinear
@@ -308,7 +236,7 @@ class ColumnParallelLinear(torch.nn.Module):
 
         input_parallel = input_
         # Matrix multiply.
-        output_parallel = F.linear(input_parallel, self.weight, bias)
+        output_parallel = self.apply_weights(input_parallel, bias)
         if self.gather_output:
             # All-gather across the partitions.
             output = gather_from_tensor_model_parallel_region(output_parallel)
@@ -351,6 +279,7 @@ class RowParallelLinear(torch.nn.Module):
         params_dtype:
         use_cpu_initialization:
         perform_initialization:
+        reduce_results:
     """
 
     def __init__(self, input_size, output_size, *,
@@ -361,57 +290,51 @@ class RowParallelLinear(torch.nn.Module):
                  params_dtype=None,
                  use_cpu_initialization=False,
                  perform_initialization=True,
+                 reduce_results=True,
+                 quant_config=None,
                  ):
         super(RowParallelLinear, self).__init__()
+        assert not perform_initialization
+        assert not use_cpu_initialization
 
         # Keep input parameters
         self.input_size = input_size
         self.output_size = output_size
         self.input_is_parallel = input_is_parallel
+        self.reduce_results = reduce_results
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
 
         # Divide the weight matrix along the last dimension.
-        world_size = get_tensor_model_parallel_world_size()
-        self.input_size_per_partition = divide(input_size, world_size)
+        self.world_size = get_tensor_model_parallel_world_size()
+        self.input_size_per_partition = divide(input_size, self.world_size)
         self.skip_bias_add = skip_bias_add
+        self.quant_config = quant_config
 
-        # Parameters.
-        # Note: torch.nn.functional.linear performs XA^T + b and as a result
-        # we allocate the transpose.
-        # Initialize weight.
-        if use_cpu_initialization:
-            self.weight = Parameter(torch.empty(self.output_size,
-                                                self.input_size_per_partition,
-                                                dtype=params_dtype))
-            if perform_initialization:
-                self.master_weight = _initialize_affine_weight_cpu(
-                    self.weight, self.output_size, self.input_size,
-                    self.input_size_per_partition, 1, init_method,
-                    stride=stride, return_master_weight=keep_master_weight_for_test,
-                    params_dtype=params_dtype)
-        else:
-            self.weight = Parameter(torch.empty(
-                self.output_size, self.input_size_per_partition,
-                device=torch.cuda.current_device(), dtype=params_dtype))
-            if perform_initialization:
-                _initialize_affine_weight_gpu(self.weight, init_method,
-                                              partition_dim=1, stride=stride)
+        self.create_weights(params_dtype)
+
+        if not reduce_results and (bias and not skip_bias_add):
+            raise ValueError("When not reduce the results, adding bias to the "
+                             "results can lead to incorrect results")
+
         if bias:
-            if use_cpu_initialization:
-                self.bias = Parameter(torch.empty(self.output_size,
-                                                  dtype=params_dtype))
-            else:
-                self.bias = Parameter(torch.empty(
-                    self.output_size, device=torch.cuda.current_device(),
-                    dtype=params_dtype))
+            self.bias = Parameter(torch.empty(
+                self.output_size, device=torch.cuda.current_device(),
+                dtype=params_dtype))
 
             # Always initialize bias to zero.
             with torch.no_grad():
                 self.bias.zero_()
         else:
             self.register_parameter('bias', None)
-        self.weight_t = self.weight.t()
+
+    def create_weights(self, dtype: torch.dtype) -> None:
+        self.weight = Parameter(torch.empty(
+                self.output_size, self.input_size_per_partition,
+                device=torch.cuda.current_device(), dtype=dtype))
+
+    def apply_weights(self, x: torch.Tensor) -> torch.Tensor:
+        return F.linear(x, self.weight)
 
     def forward(self, input_):
         """Forward of RowParallelLinear
@@ -428,17 +351,12 @@ class RowParallelLinear(torch.nn.Module):
             input_parallel = input_
         else:
             input_parallel = scatter_to_tensor_model_parallel_region(input_)
-        if get_tensor_model_parallel_world_size() == 1:
-            # Matrix multiply.
-            output_ = F.linear(input_parallel, self.weight)
+        # Matrix multiply.
+        output_parallel = self.apply_weights(input_parallel)
+        if self.reduce_results and self.world_size > 1:
+            output_ = reduce_from_tensor_model_parallel_region(output_parallel)
         else:
-            # Matrix multiply.
-            all_reduce_launcher = get_all_reduce_launcher()
-            num_tokens = input_parallel.shape[0]
-            output_buffer = all_reduce_launcher.buffer[:num_tokens]
-            torch.matmul(input_parallel, self.weight_t, out=output_buffer)
-            # All-reduce across all the partitions.
-            output_ = all_reduce_launcher.launch(output_buffer)
+            output_ = output_parallel
 
         if not self.skip_bias_add:
             output = output_ + self.bias if self.bias is not None else output_
