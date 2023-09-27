@@ -394,8 +394,8 @@ class AsyncAphrodite:
 
             async for request_output in stream:
                 yield request_output
-        except Exception as e:
-            # If there is an exception, abort the request.
+        except (Exception, asyncio.CancelledError) as e:
+            # If there's an exception or co-routine is cancelled, abort the request.
             self._abort(request_id)
             raise e
 
