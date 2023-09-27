@@ -126,9 +126,10 @@ async def generate(request: Request) -> Response:
 
     assert final_output is not None
     prompt = final_output.prompt
-    text_outputs = [prompt + output.text for output in final_output.outputs]
-    ret = {"text": text_outputs}
-    return JSONResponse(ret)
+    text_outputs = [{"text": output.text} for output in final_output.outputs]
+    response_data = {"results": text_outputs}
+    return JSONResponse(response_data)
+
 
 @app.get("/api/v1/model")
 # async def get_model_name(token: bool = Depends(get_token)) -> JSONResponse:
