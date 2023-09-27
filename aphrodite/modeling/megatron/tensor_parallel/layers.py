@@ -5,7 +5,7 @@
 
 # Parts of the code here are adapted from PyTorch
 # repo: https://github.com/pytorch/pytorch
-
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
