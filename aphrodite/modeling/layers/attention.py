@@ -2,7 +2,7 @@
 Multi-head Paged Attention by Woosuk et al. (vLLM) Copyright (c) 2023.
 https://vllm.ai/
 """
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 import torch
 import torch.nn as nn
