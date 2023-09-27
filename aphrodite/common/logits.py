@@ -6,7 +6,7 @@ from typing import Dict
 class LogitsProcessor(ABC):
 
     @abstractmethod
-    def __call__(self, logits: torch.tensor) -> torch.tensor:
+    def __call__(self, logits: torch.tensor, output_tokens: list[list[int]]) -> torch.tensor:
         pass
 
 
@@ -30,7 +30,7 @@ class BiasLogitsProcessor(LogitsProcessor):
         self.values = torch.tensor(list(self.biases.values()),
                                    dtype=torch.long)
 
-    def __call__(self, logits):
+    def __call__(self, logits, output_tokens):
         if not self.biases:
             return logits
 
@@ -41,4 +41,16 @@ class BiasLogitsProcessor(LogitsProcessor):
                                      1 / (1 - (values / 100)))
         logits[0, keys] *= update_factors
 
+        return logits
+    
+class BanEOSUntil(LogitsProcessor):
+    """Bans the EOS token until a certain condition is met."""
+    def __init__(self, min_tokens:int, eos_token_id:int):
+        self._min_tokens = min_tokens
+        self._eos_token_id = eos_token_id
+
+    def __call__(self, logits, output_tokens):
+        for i in range(len(output_tokens)):
+            if len(output_tokens[i]) < self._min_tokens:
+                logits[i][self._eos_token_id] = -float("inf")
         return logits
