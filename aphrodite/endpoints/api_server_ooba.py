@@ -19,7 +19,7 @@ TIMEOUT_TO_PREVENT_DEADLOCK = 1  # seconds.
 app = FastAPI()
 engine = None
 
-valid_api_key = 'EMPTY'
+valid_api_key = os.getenv("X_API_KEY")
 
 @app.post("/api/v1/generate")
 async def generate(request: Request, x_api_key: str = Header(None)) -> Response:
