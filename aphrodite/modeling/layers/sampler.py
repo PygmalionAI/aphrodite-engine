@@ -52,14 +52,14 @@ class Sampler(nn.Module):
         logits = logits[:, :self.vocab_size]
 
         # Apply presence and frequency penalties.
-        output_tokens = _get_output_tokens(input_metadata)
+        output_tokens, prompt_tokens = _get_prior_tokens(input_metadata)
         assert len(output_tokens) == logits.shape[0]
-        presence_penalties, frequency_penalties = _get_penalties(
-            input_metadata)
+        presence_penalties, frequency_penalties, repetition_penalties = _get_penalties(input_metadata)
         assert len(presence_penalties) == logits.shape[0]
         assert len(frequency_penalties) == logits.shape[0]
-        logits = _apply_penalties(logits, output_tokens, presence_penalties,
-                                  frequency_penalties, self.vocab_size)
+        logits = _apply_penalties(logits, output_tokens, prompt_tokens,
+                                  presence_penalties,frequency_penalties, repetition_penalties,
+                                  self.vocab_size)
 
         logits = _apply_logits_processors(input_metadata, logits, output_tokens)
 
@@ -116,38 +116,31 @@ def _get_penalties(
     # Collect the presence and frequency penalties.
     presence_penalties: List[float] = []
     frequency_penalties: List[float] = []
+    repetition_penalties: List[float] = []
     for i, seq_group in enumerate(input_metadata.seq_groups):
         seq_ids, sampling_params = seq_group
-        p = sampling_params.presence_penalty
-        f = sampling_params.frequency_penalty
-        if i < input_metadata.num_prompts:
-            # A prompt input.
-            presence_penalties.append(p)
-            frequency_penalties.append(f)
-        else:
-            # A generation token.
-            presence_penalties += [p] * len(seq_ids)
-            frequency_penalties += [f] * len(seq_ids)
-    return presence_penalties, frequency_penalties
+        # Prompt inputs repeat once, generation tokens can repeat N times
+        repeats = 1 if i < input_metadata.num_prompts else len(seq_ids)
+        presence_penalties += [sampling_params.presence_penalty] * repeats
+        frequency_penalties += [sampling_params.frequency_penalty] * repeats
+        repetition_penalties += [sampling_params.repetition_penalty] * repeats
+    return presence_penalties, frequency_penalties, repetition_penalties
 
 
-def _get_output_tokens(input_metadata: InputMetadata) -> List[List[int]]:
+def _get_prior_tokens(input_metadata: InputMetadata) -> Tuple[List[List[int]], List[List[int]]]:
     output_tokens: List[List[int]] = []
+    prompt_tokens: List[List[int]] = []
     for i, seq_group in enumerate(input_metadata.seq_groups):
         seq_ids, _ = seq_group
-        if i < input_metadata.num_prompts:
-            # A prompt input.
-            # NOTE: While the prompt input usually has no output tokens,
-            # it may have output tokens in the case of recomputation.
-            seq_id = seq_ids[0]
+        # NOTE: While the prompt input usually has no output tokens,
+        # it may have output tokens in the case of recomputation.
+        seq_ids = seq_ids[:1] if i < input_metadata.num_prompts else seq_ids
+        for seq_id in seq_ids:
             seq_data = input_metadata.seq_data[seq_id]
             output_tokens.append(seq_data.output_token_ids)
-        else:
-            # A generation token.
-            for seq_id in seq_ids:
-                seq_data = input_metadata.seq_data[seq_id]
-                output_tokens.append(seq_data.output_token_ids)
-    return output_tokens
+            prompt_tokens.append(seq_data.prompt_token_ids)
+
+    return output_tokens, prompt_tokens
 
 def _apply_logits_processors(
         input_metadata: InputMetadata,
@@ -166,19 +159,21 @@ def _apply_logits_processors(
 def _apply_penalties(
     logits: torch.Tensor,
     output_tokens: List[List[int]],
+    prompt_tokens: List[List[int]],
     presence_penalties: List[float],
     frequency_penalties: List[float],
+    repetition_penalties: List[float],
     vocab_size: int,
 ) -> torch.Tensor:
     num_seqs = logits.shape[0]
     # Collect the indices of sequences that have non-zero penalties.
     indices = []
     for i in range(num_seqs):
-        if not output_tokens[i]:
+        if not output_tokens[i] and not prompt_tokens[i]:
             continue
-        p = presence_penalties[i]
-        f = frequency_penalties[i]
-        if abs(p) < _SAMPLING_EPS and abs(f) < _SAMPLING_EPS:
+        if (abs(presence_penalties[i]) < _SAMPLING_EPS and
+            abs(frequency_penalties[i]) < _SAMPLING_EPS and
+            repetition_penalties[i] < _SAMPLING_EPS):
             continue
         indices.append(i)
 
@@ -188,7 +183,7 @@ def _apply_penalties(
 
     bin_counts = []
     for i in indices:
-        bin_counts.append(np.bincount(output_tokens[i], minlength=vocab_size))
+        bin_counts.append(np.bincount(prompt_tokens[i] + output_tokens[i], minlength=vocab_size))
     bin_counts = np.stack(bin_counts, axis=0)
     bin_counts = torch.from_numpy(bin_counts).to(dtype=logits.dtype,
                                                  device=logits.device)
@@ -201,12 +196,25 @@ def _apply_penalties(
     presence_penalties = torch.tensor(presence_penalties,
                                       dtype=logits.dtype,
                                       device=logits.device)
+    
+    repetition_penalties = [repetition_penalties[i] for i in indices]
+    repetition_penalties = torch.tensor(repetition_penalties,
+                                      dtype=logits.dtype,
+                                      device=logits.device)
 
     # We follow the definition in OpenAI API.
     # Refer to https://platform.openai.com/docs/api-reference/parameter-details
     logits[indices] -= frequency_penalties.unsqueeze(dim=1) * bin_counts
     presence_mask = (bin_counts > 0.0).to(dtype=logits.dtype)
     logits[indices] -= presence_penalties.unsqueeze(dim=1) * presence_mask
+
+    # Repetition Penalty is multiplicative, not additive, so we must take offsets into account.
+    # 1.0 no change
+    # 1.5 BE SMALLER
+
+    logit_floors = logits[indices].min()
+    logits[indices] = logit_floors + (logits[indices] - logit_floors) / repetition_penalties.unsqueeze(dim=1)
+
     return logits
 
 
@@ -275,15 +283,20 @@ def _apply_top_ap_top_k(
 
     # Apply top-a and top-p.
     probs_sort = logits_sort.softmax(dim=-1)
+    
+    # topx = ', '.join(f"{logits_sort[0][x].item(): >6.03f}" for x in range(5)) + f" [{logits_sort[0][19].item()}] [{logits_sort[0][20].item()}]"
+    # topxp = ', '.join(f"{probs_sort[0][x].item(): >6.03f}" for x in range(5))
+
     probs_sum = probs_sort.cumsum(dim=-1)
     top_a_thresholds = torch.pow(probs_sort[:, 0], 2) * ts_a
     top_ap_mask = (probs_sort < top_a_thresholds.unsqueeze(1)) # Cull logits below the top-a threshold
     top_ap_mask.logical_or_(probs_sum > ts_p.unsqueeze(dim=1)) # Cull logits above the top-p summation threshold
     top_ap_mask.scatter_(0, torch.tensor([0], device=logits.device).unsqueeze(1), False) # Guarantee at least one token is pickable
     logits_sort[top_ap_mask] = -float("inf")
-
-    # print("ROW", ts_p[0].item(), ts_a[0].item(), probs_sort[0][0].item(), (logits.shape[1] - top_ap_mask.long().sum(dim=1)[0].item()))
     
+
+    # print(f"ROW {((logits_sort != -float('inf')).long().sum(dim=1)[0].item()):>3} p:{ts_p[0].item():.02f} a:{ts_a[0].item():.02f} ({top_a_thresholds[0].item():.03f}) m:{probs_sort[0][0].item():.03f}/({topx})")
+    # print(f"                                       {topxp}")
 
     # Re-sort the probabilities.
     logits = torch.gather(logits_sort,
