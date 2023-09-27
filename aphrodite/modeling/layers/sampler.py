@@ -8,7 +8,7 @@ import torch.nn as nn
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.megatron.tensor_parallel import (
     gather_from_tensor_model_parallel_region)
-from aphrodite.common.sampling_params import SamplingParams
+from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import SamplerOutput, SequenceOutputs, SequenceData
 
 __SAMPLING_EPS = 1e-5

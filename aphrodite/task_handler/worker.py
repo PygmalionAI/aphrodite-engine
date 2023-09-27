@@ -365,7 +365,7 @@ def _check_if_can_support_max_seq_len(max_seq_len: int,
     required_shared_mem = (padded_max_seq_len + 512) * float32_bytes
     if padded_max_seq_len * float32_bytes > max_shared_mem:
         raise RuntimeError(
-            f"vLLM cannot currently support max_model_len={max_seq_len} "
+            f"Aphrodite cannot currently support max_model_len={max_seq_len} "
             f"with block_size={block_size} on GPU with compute "
             f"capability {torch.cuda.get_device_capability()} "
             f"(required shared memory {required_shared_mem} > "
