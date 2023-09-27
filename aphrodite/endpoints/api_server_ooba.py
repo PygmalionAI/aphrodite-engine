@@ -38,7 +38,7 @@ engine = None
 #     user_tokens[token] = user_id
 #     return token
 
-@app.post("/api")
+@app.post("/api/v1/generate")
 # async def generate(request: Request, token: bool = Depends(get_token), params: SamplingParams) -> Response:
 async def generate(request: Request) -> Response:
     """Generate completion for the request.
