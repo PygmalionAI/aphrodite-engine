@@ -130,7 +130,7 @@ async def generate(request: Request) -> Response:
     ret = {"text": text_outputs}
     return JSONResponse(ret)
 
-@app.get("/api/model")
+@app.get("/api/v1/model")
 # async def get_model_name(token: bool = Depends(get_token)) -> JSONResponse:
 async def get_model_name() -> JSONResponse:
     """Return the model name based on the EngineArgs configuration."""
