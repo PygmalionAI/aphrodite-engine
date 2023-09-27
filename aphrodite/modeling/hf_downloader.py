@@ -14,7 +14,7 @@ from tqdm.auto import tqdm
 
 from aphrodite.common.logger import init_logger
 from aphrodite.modeling.quantization_utils import get_quant_class
-from aphrodite.modeling.quantization_utils import QuantizationConfig
+from aphrodite.modeling.quantization_utils.base import QuantizationConfig
 
 
 logger = init_logger(__name__)
@@ -309,4 +309,4 @@ def initialize_dummy_weights(
     values between -1e-3 and 1e-3 works well for most models.
     """
     for param in model.state_dict().values():
-
+        param.data.uniform_(low, high)
