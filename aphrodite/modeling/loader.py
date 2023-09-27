@@ -16,9 +16,9 @@ _MODEL_REGISTRY = {
     "GPTNeoXForCausalLM": GPTNeoXForCausalLM,
 }
 
-_QUANT_REGISTRY = {
-    "LlamaForCausalLM",
-}
+_QUANT_REGISTRY = [
+    LlamaForCausalLM,
+]
 
 @contextlib.contextmanager
 def _set_default_torch_dtype(dtype: torch.dtype):
