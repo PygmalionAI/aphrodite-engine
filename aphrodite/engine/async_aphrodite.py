@@ -78,14 +78,24 @@ class RequestTracker:
         self._finished_requests: asyncio.Queue[str] = asyncio.Queue()
         self._new_requests: asyncio.Queue[Tuple[AsyncStream,
                                                 dict]] = asyncio.Queue()
+        self.new_requests_event = None
 
     def __contains__(self, item):
         return item in self._request_streams
 
-    def propagate_exception(self, exc: Exception) -> None:
-        """Propagate an exception to all request streams."""
-        for stream in self._request_streams.values():
-            stream.put(exc)
+    def init_event(self):
+        self.new_requests_event = asyncio.Event()
+
+    def propagate_exception(self,
+                            exc: Exception,
+                            request_id: Optional[str] = None) -> None:
+        """Propagate an exception to request streams
+        (all if request_id is None)."""
+        if request_id is not None:
+            self._request_streams[request_id].put(exc)
+        else:
+            for stream in self._request_streams.values():
+                stream.put(exc)
 
     def process_request_output(self,
                                request_output: RequestOutput,
@@ -112,6 +122,9 @@ class RequestTracker:
             "request_id": request_id,
             **engine_add_request_kwargs
         }))
+
+        self.new_requests_event.set()
+
         return stream
 
     def abort_request(self, request_id: str, *, verbose: bool = False) -> None:
@@ -148,8 +161,12 @@ class RequestTracker:
             self._request_streams[stream.request_id] = stream
             new_requests.append(new_request)
 
+        self.new_requests_event.clear()
+
         return new_requests, finished_requests
 
+    async def wait_for_new_requests(self):
+        await self.new_requests_event.wait()
 
 class _AsyncAphrodite(AphroditeEngine):
     """Extension of AphroditeEngine to add async methods."""
@@ -164,10 +181,9 @@ class _AsyncAphrodite(AphroditeEngine):
         and updates the scheduler with the model outputs. Finally, it decodes
         the sequences and returns the newly generated results.
         """
-        (seq_group_metadata_list, scheduler_outputs,
-         early_return) = self._schedule()
-        if early_return is not None:
-            return early_return
+        seq_group_metadata_list, scheduler_outputs, ignored = self._schedule()
+        if scheduler_outputs.is_empty():
+            return ignored
 
         # Execute the model.
         output = await self._run_workers_async(
@@ -178,7 +194,7 @@ class _AsyncAphrodite(AphroditeEngine):
             blocks_to_copy=scheduler_outputs.blocks_to_copy,
         )
 
-        return self._process_model_outputs(output, scheduler_outputs)
+        return self._process_model_outputs(output, scheduler_outputs) + ignored
 
     async def _run_workers_async(
         self,
@@ -251,9 +267,13 @@ class AsyncAphrodite:
         self.max_log_len = max_log_len
         self.engine = self._init_engine(*args, **kwargs)
 
-        self.request_tracker: RequestTracker = RequestTracker()
         self.background_loop = None
+        # We need to keep a reference to unshielded
+        # task as well to prevent it from being garbage
+        # collected
+        self._background_loop_unshielded = None
         self.start_engine_loop = start_engine_loop
+        self._request_tracker = RequestTracker()
 
     @property
     def is_running(self) -> bool:
@@ -264,11 +284,14 @@ class AsyncAphrodite:
         """Start the background loop."""
         if self.is_running:
             raise RuntimeError("Background loop is already running.")
-        self.background_loop = asyncio.get_event_loop().create_task(
-            self.run_engine_loop())
-        self.background_loop.add_done_callback(
+        self._request_tracker.init_event()
+
+        self._background_loop_unshielded = asyncio.get_event_loop(
+        ).create_task(self.run_engine_loop())
+        self._background_loop_unshielded.add_done_callback(
             partial(_raise_exception_on_finish,
-                    request_tracker=self.request_tracker))
+                    request_tracker=self._request_tracker))
+        self.background_loop = asyncio.shield(self._background_loop_unshielded)
 
     def _init_engine(self, *args,
                      **kwargs) -> Union[_AsyncAphrodite, "ray.ObjectRef"]:
@@ -280,11 +303,13 @@ class AsyncAphrodite:
             engine_class = ray.remote(num_gpus=1)(self._engine_class).remote
         return engine_class(*args, **kwargs)
 
-    async def engine_step(self):
-        """Kick the engine to process the waiting requests."""
+    async def engine_step(self) -> bool:
+        """Kick the engine to process the waiting requests.
+
+        Returns True if there are in-progress requests."""
 
         new_requests, finished_requests = (
-            self.request_tracker.get_new_and_finished_requests())
+            self._request_tracker.get_new_and_finished_requests())
 
         for new_request in new_requests:
             # Add the request into the Aphrodite engine's waiting queue.
@@ -304,8 +329,10 @@ class AsyncAphrodite:
 
         # Put the outputs into the corresponding streams.
         for request_output in request_outputs:
-            self.request_tracker.process_request_output(
+            self._request_tracker.process_request_output(
                 request_output, verbose=self.log_requests)
+
+        return len(request_outputs) > 0
 
     async def _engine_abort(self, request_ids: Iterable[str]):
         if self.engine_use_ray:
@@ -314,8 +341,12 @@ class AsyncAphrodite:
             self.engine.abort_request(request_ids)
 
     async def run_engine_loop(self):
+        # Initialize the RequestTracker here so it uses the right event loop.
+        has_requests_in_progress = False
         while True:
-            await self.engine_step()
+            if not has_requests_in_progress:
+                await self._request_tracker.wait_for_new_requests()
+            has_requests_in_progress = await self.engine_step()
             await asyncio.sleep(0)
 
     async def add_request(
@@ -333,7 +364,8 @@ class AsyncAphrodite:
                 if shortened_prompt is not None:
                     shortened_prompt = shortened_prompt[:self.max_log_len]
                 if shortened_token_ids is not None:
-                    shortened_token_ids = shortened_token_ids[:self.max_log_len]
+                    shortened_token_ids = shortened_token_ids[:self.
+                                                              max_log_len]
             logger.info(f"Received request {request_id}: "
                         f"prompt: {shortened_prompt!r}, "
                         f"sampling params: {sampling_params}, "
@@ -347,9 +379,9 @@ class AsyncAphrodite:
                     "Background loop is not running. If it was running, "
                     "inspect the output to find the stacktrace of the "
                     "error that caused the background loop to stop "
-                    "(AsyncAphroditeDeadError).")
+                    "(AsyncEngineDeadError).")
 
-        stream = self.request_tracker.add_request(
+        stream = self._request_tracker.add_request(
             request_id,
             prompt=prompt,
             sampling_params=sampling_params,
@@ -367,8 +399,8 @@ class AsyncAphrodite:
         """Generate outputs for a request.
 
         Generate outputs for a request. This method is a coroutine. It adds the
-        request into the waiting queue of the LLMEngine and streams the outputs
-        from the LLMEngine to the caller.
+        request into the waiting queue of the AphroditeEngine and streams the outputs
+        from the AphroditeEngine to the caller.
 
         Args:
             prompt: The prompt string. Can be None if prompt_token_ids is
@@ -379,7 +411,7 @@ class AsyncAphrodite:
                 use the tokenizer to convert the prompts to token IDs.
 
         Yields:
-            The output `RequestOutput` objects from the LLMEngine for the
+            The output `RequestOutput` objects from the AphroditeEngine for the
             request.
         """
         # Preprocess the request.
@@ -395,7 +427,8 @@ class AsyncAphrodite:
             async for request_output in stream:
                 yield request_output
         except (Exception, asyncio.CancelledError) as e:
-            # If there's an exception or co-routine is cancelled, abort the request.
+            # If there is an exception or coroutine is cancelled, abort the
+            # request.
             self._abort(request_id)
             raise e
 
@@ -426,8 +459,8 @@ class AsyncAphrodite:
         Args:
             request_id: The unique id of the request.
         """
-        self.request_tracker.abort_request(request_id,
-                                           verbose=self.log_requests)
+        self._request_tracker.abort_request(request_id,
+                                            verbose=self.log_requests)
 
     async def get_model_config(self) -> ModelConfig:
         """Get the model configuration of the Aphrodite engine."""
