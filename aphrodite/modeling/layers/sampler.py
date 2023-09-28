@@ -14,6 +14,22 @@ from aphrodite.common.sequence import SamplerOutput, SequenceOutputs
 _SAMPLING_EPS = 1e-5
 
 
+# import json
+# def push_logit_hist(name, logit_hist, logit_matrix:torch.Tensor):
+#     ltop, ltopidx = logit_matrix.sort(descending=True)
+#     maxidxs = (ltop != -float("inf")).long().count_nonzero(dim=-1)
+#     for seq in range(len(logit_matrix)):
+#         maxidx = maxidxs[seq].item()
+#         logit_hist[seq].append({
+#             "name": name,
+#             "top_logs": [ltop[seq][i].item() for i in range(10)],
+#             "top_toks": [ltopidx[seq][i].item() for i in range(10)],
+#             "min_log": ltop[seq][maxidx-1].item(),
+#             "count": maxidx
+#         })
+
+
+
 class Sampler(nn.Module):
     """Samples the next tokens from the model's outputs.
 
@@ -44,12 +60,17 @@ class Sampler(nn.Module):
         hidden_states = _prune_hidden_states(hidden_states, input_metadata)
 
         # Get the logits for the next tokens.
+        logits:torch.Tensor
         logits = torch.matmul(hidden_states, embedding.t())
         if embedding_bias is not None:
             logits += embedding_bias
         logits = gather_from_tensor_model_parallel_region(logits)
         # Remove paddings in vocab (if any).
         logits = logits[:, :self.vocab_size]
+
+        # logits_at = [[] for _ in logits]
+
+        # push_logit_hist("new", logits_at, logits)
 
         # Apply presence and frequency penalties.
         output_tokens, prompt_tokens = _get_prior_tokens(input_metadata)
@@ -60,8 +81,12 @@ class Sampler(nn.Module):
         logits = _apply_penalties(logits, output_tokens, prompt_tokens,
                                   presence_penalties,frequency_penalties, repetition_penalties,
                                   self.vocab_size)
+        
+        # push_logit_hist("rep_pen", logits_at, logits)
 
         logits = _apply_logits_processors(input_metadata, logits, output_tokens)
+
+        # push_logit_hist("logitprocs", logits_at, logits)
 
         # Apply temperature scaling.
         temperatures = _get_temperatures(input_metadata)
@@ -73,6 +98,8 @@ class Sampler(nn.Module):
             # Use in-place division to avoid creating a new tensor.
             logits.div_(t.unsqueeze(dim=1))
 
+        # push_logit_hist("temps", logits_at, logits)
+
         # Apply top-p, top-k, and top-a truncation.
         top_ps, top_ks, top_as = _get_top_p_top_k_top_a(input_metadata, self.vocab_size)
         assert len(top_ps) == len(top_ks) == logits.shape[0]
@@ -82,8 +109,7 @@ class Sampler(nn.Module):
         if do_top_p or do_top_k or do_top_a:
             logits = _apply_top_ap_top_k(logits, top_ps, top_ks, top_as)
 
-        # input_metadata.context_lens # is current token index. or something like that.
-        # print("InputMetadata", input_metadata)
+        # push_logit_hist("top_x", logits_at, logits)
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
@@ -91,6 +117,8 @@ class Sampler(nn.Module):
         # Compute the log probabilities (before applying top-p and top-k).
         # Use log_softmax to ensure numerical stability
         logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
+
+        # print(json.dumps(logits_at, indent=2))
 
         # Sample the next tokens.
         return _sample(probs, logprobs, input_metadata)
@@ -209,11 +237,17 @@ def _apply_penalties(
     logits[indices] -= presence_penalties.unsqueeze(dim=1) * presence_mask
 
     # Repetition Penalty is multiplicative, not additive, so we must take offsets into account.
+    # However, if we do that, Rep Pen is sensitive to the actual logit range, which is... also odd.
     # 1.0 no change
     # 1.5 BE SMALLER
 
     logit_floors = logits[indices].min()
-    logits[indices] = logit_floors + (logits[indices] - logit_floors) / repetition_penalties.unsqueeze(dim=1)
+    # logits[indices] = logit_floors + (logits[indices] - logit_floors) / repetition_penalties.unsqueeze(dim=1)
+    # logits[indices] += presence_mask * ((logits[indices] - logit_floors) * repetition_penalties.unsqueeze(dim=1) - logits[indices])
+    # Effectively: If token is present and logit is positive, divide logit by rep_pen.
+    #              If token is present and logit is negative, multiply logit by rep_pen.
+    logits[indices] += logits[indices] * (1 / repetition_penalties.unsqueeze(dim=1) - 1) * presence_mask * (logits[indices] > 0).to(dtype=logits.dtype)
+    logits[indices] += logits[indices] * (repetition_penalties.unsqueeze(dim=1) - 1) * presence_mask * (logits[indices] < 0).to(dtype=logits.dtype)
 
     return logits
 
@@ -283,9 +317,13 @@ def _apply_top_ap_top_k(
 
     # Apply top-a and top-p.
     probs_sort = logits_sort.softmax(dim=-1)
+    # probs_sort = logits_sort.float()
+    # probs_sort[probs_sort == -float("inf")] = 0
+    # probs_sort.pow_(2).div_(probs_sort.sum(dim=-1).unsqueeze(dim=1))
     
-    # topx = ', '.join(f"{logits_sort[0][x].item(): >6.03f}" for x in range(5)) + f" [{logits_sort[0][19].item()}] [{logits_sort[0][20].item()}]"
-    # topxp = ', '.join(f"{probs_sort[0][x].item(): >6.03f}" for x in range(5))
+    # topx = (','.join(f"{logits_idx[0][x].item()}" for x in range(10)) + "," + 
+    #         ','.join(f"{logits_sort[0][x].item():.02f}" for x in range(20)) + "," + f"{logits_sort[0][-1].item():.02f}," + 
+    #         ','.join(f"{probs_sort[0][x].item():.03f}" for x in range(20)))
 
     probs_sum = probs_sort.cumsum(dim=-1)
     top_a_thresholds = torch.pow(probs_sort[:, 0], 2) * ts_a
@@ -294,9 +332,10 @@ def _apply_top_ap_top_k(
     top_ap_mask.scatter_(0, torch.tensor([0], device=logits.device).unsqueeze(1), False) # Guarantee at least one token is pickable
     logits_sort[top_ap_mask] = -float("inf")
     
-
-    # print(f"ROW {((logits_sort != -float('inf')).long().sum(dim=1)[0].item()):>3} p:{ts_p[0].item():.02f} a:{ts_a[0].item():.02f} ({top_a_thresholds[0].item():.03f}) m:{probs_sort[0][0].item():.03f}/({topx})")
-    # print(f"                                       {topxp}")
+    # row = f"{ts_p[0].item():.02f},{probs_sort[0][0].item():.03f},{ts_a[0].item():.02f},{top_a_thresholds[0].item():.02f},{((logits_sort != -float('inf')).long().sum(dim=1)[0].item())},{topx}"
+    # with open("./samples.csv", 'at') as f:
+    #     f.write(row + '\n')
+    # print(row)
 
     # Re-sort the probabilities.
     logits = torch.gather(logits_sort,
@@ -422,8 +461,7 @@ def _sample(
             # Sample the next tokens.
             next_token_ids = _sample_from_prompt(prob, sampling_params)
             # Get top-k log probabilities for the next tokens.
-            next_logprobs = _get_topk_logprobs(logprob,
-                                               sampling_params.logprobs)
+            next_logprobs = _get_topk_logprobs(logprob, sampling_params.logprobs)
 
             # Build the output.
             for next_token_id in next_token_ids:
