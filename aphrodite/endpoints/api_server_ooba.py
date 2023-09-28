@@ -64,9 +64,9 @@ async def generate(request: Request, x_api_key: str = Header(None)) -> Response:
         async for request_output in results_generator:
             prompt = request_output.prompt
             text_outputs = [
-                prompt + output.text for output in request_output.outputs
+                {"text": output.text} for output in request_output.outputs
             ]
-            ret = {"text": text_outputs}
+            ret = {"results": text_outputs}
             yield (json.dumps(ret) + "\0").encode("utf-8")
 
     async def abort_request() -> None:
