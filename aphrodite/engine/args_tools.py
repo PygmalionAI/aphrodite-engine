@@ -38,7 +38,7 @@ class EngineArgs:
     @staticmethod
     def add_cli_args(
             parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
-        """Shared CLI arguments for vLLM engine."""
+        """Shared CLI arguments for the Aphrodite engine."""
         # Model arguments
         parser.add_argument(
             '--model',
