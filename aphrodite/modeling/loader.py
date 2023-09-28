@@ -16,9 +16,10 @@ _MODEL_REGISTRY = {
     "GPTNeoXForCausalLM": GPTNeoXForCausalLM,
 }
 
-_QUANT_REGISTRY = [
+_MODEL_CLASSES_SUPPORT_QUANTIZATION = [
     LlamaForCausalLM,
 ]
+
 
 @contextlib.contextmanager
 def _set_default_torch_dtype(dtype: torch.dtype):
@@ -45,7 +46,7 @@ def get_model(model_config: ModelConfig) -> nn.Module:
     # Get the quantization config.
     quant_config = None
     if model_config.quantization is not None:
-        if model_class not in _QUANT_REGISTRY:
+        if model_class not in _MODEL_CLASSES_SUPPORT_QUANTIZATION:
             raise ValueError(
                 f"Quantization is not supported for {model_class}.")
         quant_config = get_quant_config(model_config.quantization,
@@ -69,7 +70,7 @@ def get_model(model_config: ModelConfig) -> nn.Module:
     with _set_default_torch_dtype(model_config.dtype):
         # Create a model instance.
         # The weights will be initialized as empty tensors.
-        if model_class in _QUANT_REGISTRY:
+        if model_class in _MODEL_CLASSES_SUPPORT_QUANTIZATION:
             model = model_class(model_config.hf_config, quant_config)
         else:
             model = model_class(model_config.hf_config)

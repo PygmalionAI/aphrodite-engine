@@ -12,12 +12,24 @@ class AWQColumnParallelLinear(ColumnParallelLinear):
 
     def create_weights(self, dtype: torch.dtype) -> None:
         assert self.input_size % self.quant_config.weight_bits == 0
-        assert self.output_size_per_partition % self.quant_config.pack_factor == 0
+        assert (self.output_size_per_partition %
+                self.quant_config.pack_factor == 0)
         self.qweight = Parameter(
             torch.empty(
                 self.input_size,
-                self.output_size_per_partition // self.quant_config.pack_factor,
-                device = "cuda",
+                self.output_size_per_partition //
+                self.quant_config.pack_factor,
+                device="cuda",
+                dtype=torch.int32,
+            ),
+            requires_grad=False,
+        )
+        self.qzeros = Parameter(
+            torch.empty(
+                self.input_size // self.quant_config.group_size,
+                self.output_size_per_partition //
+                self.quant_config.pack_factor,
+                device="cuda",
                 dtype=torch.int32,
             ),
             requires_grad=False,
@@ -36,19 +48,22 @@ class AWQColumnParallelLinear(ColumnParallelLinear):
         self,
         x: torch.Tensor,
         bias: Optional[torch.Tensor],
-        ) -> torch.Tensor:
-            pack_factor = self.quant_config.pack_factor
-            out_shape = (x.shape[-2], self.qweight.shape[-1] * pack_factor)
-            reshaped_x = x.reshape(-1, x.reshape[-1])
-            out = quantization_ops.awq_gemm(reshaped_x, self.qweight, self.scales, self.qzeros, pack_factor)
-            
-            if bias is not None:
-                out = out + bias
-            return out.reshape(out_shape)
+    ) -> torch.Tensor:
+        pack_factor = self.quant_config.pack_factor
+        out_shape = (x.shape[-2], self.qweight.shape[-1] * pack_factor)
+        reshaped_x = x.reshape(-1, x.shape[-1])
+        out = quantization_ops.awq_gemm(reshaped_x, self.qweight, self.scales,
+                                        self.qzeros, pack_factor)
+        if bias is not None:
+            out = out + bias
+        return out.reshape(out_shape)
+
 
 class AWQRowParallelLinear(RowParallelLinear):
+
     def create_weights(self, dtype: torch.dtype) -> None:
-        assert self.input_size_per_partition % self.quant_config.weight_bits == 0
+        assert (self.input_size_per_partition %
+                self.quant_config.weight_bits == 0)
         assert self.output_size % self.quant_config.pack_factor == 0
         self.qweight = Parameter(
             torch.empty(
@@ -82,6 +97,6 @@ class AWQRowParallelLinear(RowParallelLinear):
         pack_factor = self.quant_config.pack_factor
         out_shape = (x.shape[-2], self.qweight.shape[-1] * pack_factor)
         reshaped_x = x.reshape(-1, x.shape[-1])
-        out = quantization_ops.awq_gemm(reshaped_x, self.qweight, self.scales, self.qzeros, pack_factor)
+        out = quantization_ops.awq_gemm(reshaped_x, self.qweight, self.scales,
+                                        self.qzeros, pack_factor)
         return out.reshape(out_shape)
-
