@@ -67,7 +67,7 @@ async def generate(request: Request, x_api_key: str = Header(None)) -> Response:
                 {"text": output.text} for output in request_output.outputs
             ]
             ret = {"results": text_outputs}
-            yield (json.dumps(ret) + "\0").encode("utf-8")
+            yield (json.dumps(ret) + "\n\n").encode("utf-8")
 
     async def abort_request() -> None:
         await engine.abort(request_id)
