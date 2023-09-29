@@ -73,6 +73,7 @@ class Scheduler:
             block_size=self.cache_config.block_size,
             num_gpu_blocks=self.cache_config.num_gpu_blocks,
             num_cpu_blocks=self.cache_config.num_cpu_blocks,
+            sliding_window=self.cache_config.sliding_window,
         )
 
         # TODO: Use deque instead of list for better performance.

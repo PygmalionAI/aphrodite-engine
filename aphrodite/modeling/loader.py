@@ -6,7 +6,7 @@ import torch.nn as nn
 from transformers import PretrainedConfig
 
 from aphrodite.common.config import ModelConfig
-from aphrodite.modeling.models import LlamaForCausalLM, GPTJForCausalLM, GPTNeoXForCausalLM
+from aphrodite.modeling.models import LlamaForCausalLM, GPTJForCausalLM, GPTNeoXForCausalLM, MistralForCausalLM
 from aphrodite.modeling.hf_downloader import initialize_dummy_weights, get_quant_config
 
 _MODEL_REGISTRY = {
@@ -14,6 +14,7 @@ _MODEL_REGISTRY = {
     "LLaMAForCausalLM": LlamaForCausalLM,
     "GPTJForCausalLM": GPTJForCausalLM,
     "GPTNeoXForCausalLM": GPTNeoXForCausalLM,
+    "MistralForCausalLM": MistralForCausalLM,
 }
 
 _MODEL_CLASSES_SUPPORT_QUANTIZATION = [
