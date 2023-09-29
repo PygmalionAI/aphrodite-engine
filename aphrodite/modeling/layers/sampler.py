@@ -201,7 +201,7 @@ def _apply_penalties(
             continue
         if (abs(presence_penalties[i]) < _SAMPLING_EPS and
             abs(frequency_penalties[i]) < _SAMPLING_EPS and
-            repetition_penalties[i] < _SAMPLING_EPS):
+            repetition_penalties[i] > 1.0):
             continue
         indices.append(i)
 
