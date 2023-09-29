@@ -107,7 +107,7 @@ class BlockSpaceManager:
         # Allocate new physical token blocks that will store the prompt tokens.
         block_table: BlockTable = []
         for logical_idx in range(len(seq.logical_token_blocks)):
-            if (self.block_sliding_window is not None:
+            if (self.block_sliding_window is not None
                     and logical_idx >= self.block_sliding_window):
                 block = block_table[logical_idx % self.block_sliding_window]
             else:
