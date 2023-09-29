@@ -74,7 +74,7 @@ class Sampler(nn.Module):
         assert len(presence_penalties) == logits.shape[0]
         assert len(frequency_penalties) == logits.shape[0]
         logits = _apply_penalties(logits, output_tokens, prompt_tokens,
-                                  presence_penalties,frequency_penalties, repetition_penalties,
+                                  presence_penalties, frequency_penalties, repetition_penalties,
                                   self.vocab_size)
         
         # push_logit_hist("rep_pen", logits_at, logits)
@@ -249,8 +249,6 @@ def _apply_penalties(
     presence_penalties = torch.tensor(presence_penalties,
                                       dtype=logits.dtype,
                                       device=logits.device)
-    
-    repetition_penalties = [repetition_penalties[i] for i in indices]
     repetition_penalties = torch.tensor(repetition_penalties,
                                       dtype=logits.dtype,
                                       device=logits.device)
@@ -271,8 +269,8 @@ def _apply_penalties(
     # logits[indices] += presence_mask * ((logits[indices] - logit_floors) * repetition_penalties.unsqueeze(dim=1) - logits[indices])
     # Effectively: If token is present and logit is positive, divide logit by rep_pen.
     #              If token is present and logit is negative, multiply logit by rep_pen.
-    logits += logits * (1 / repetition_penalties.unsqueeze(dim=1) - 1) * presence_mask * (logits > 0).to(dtype=logits.dtype)
-    logits += logits * (repetition_penalties.unsqueeze(dim=1) - 1) * presence_mask * (logits < 0).to(dtype=logits.dtype)
+    logits += logits * (1 / repetition_penalties.unsqueeze(dim=1) - 1) * presence_mask * (logits > 0)
+    logits += logits * (repetition_penalties.unsqueeze(dim=1) - 1) * presence_mask * (logits < 0)
 
     return logits
 
