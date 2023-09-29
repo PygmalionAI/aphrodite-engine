@@ -5,39 +5,47 @@ Breathing Life into Language
 
 ![aphrodite](./assets/aphrodite.png)
 
-Aphrodite is the official backend engine for PygmalionAI. It is designed to serve as the inference endpoint for the PygmalionAI website, and to allow serving the [Pygmalion](https://huggingface.co/PygmalionAI) models to a large number of users with blazing fast speeds (thanks to FasterTransformer). 
+Aphrodite is the official backend engine for PygmalionAI. It is designed to serve as the inference endpoint for the PygmalionAI website, and to allow serving the [Pygmalion](https://huggingface.co/PygmalionAI) models to a large number of users with blazing fast speeds (thanks to FasterTransformer and vLLM). 
 
 Aphrodite builds upon and integrates the exceptional work from various projects, including:
 
 
 - [vLLM](https://github.com/vllm-project/vllm) (CacheFlow)
 - [FasterTransformer](https://github.com/NVIDIA/FasterTransformer)
+- [xFormers](https://github.com/facebookresearch/xformers)
+- [AWQ](https://github.com/mit-han-lab/llm-awq/)
 - [Megatron-LM](https://github.com/NVIDIA/Megatron-LM)
 - [FastChat](https://github.com/lm-sys/FastChat)
 - [SkyPilot](https://github.com/skypilot-org/skypilot)
 - [OpenAI Python Library](https://github.com/openai/openai-python)
 
-:warning:
-**Please note that Aphrodite only supports 16-bit HuggingFace models (no GGML or GPTQ). Please refer to the notes below for important information.**
 
 ## Features
 
 - Continuous Batching
 - Efficient K/V management with [PagedAttention](./aphrodite/modeling/layers/attention.py)
 - Optimized CUDA kernels for improved inference
+- Quantization support via AWQ
 - Distributed inference
 - Multiple decoding algorithms (e.g. parallel sampling, beam search)
 
+
+## Quickstart
+
+```sh
+$ pip install aphrodite-engine
+$ python -m aphrodite.endpoints.api_server_ooba --model PygmalionAI/pygmalion-2-13b
+```
 
 ## Requirements
 
 - Operating System: Linux (or WSL for Windows)
 - Python: at least 3.8
-- CUDA 11.7 (recommended, supports 11.0-11.8)
+- CUDA 11.8 (recommended, supports 11.0-11.8)
 
 ## Supported GPUs
 
-Basically, anything with a compute capability of 6.0 or higher. Refer to this page for a full list of CUDA GPUs:
+Any NVIDIA GPU with a compute capability of 6.0 or higher. Refer to this page for a full list of CUDA GPUs:
 
 [https://developer.nvidia.com/cuda-gpus](https://developer.nvidia.com/cuda-gpus).
 
@@ -52,7 +60,6 @@ This should print something like this: `(7, 5)`, which would indicate a CC of 7.
 If you do not meet the minimum CC, you will not be able to run Aphrodite.
 
 ## Setting up the environment
-:grey_exclamation:
 **If you run into any problems, please refer to the common [Common Issues](#common-issues) section, or open an [Issue](https://github.com/PygmalionAI/aphrodite-engine/issues) if you can't find the answer there.**
 
 Aphrodite will require a slightly specialized environment to run, as the latest CUDA and GCC versions are not supported. You can use Conda to easily configure your environment.
@@ -72,89 +79,63 @@ You can either source your shell script (`. ~/.bashrc` or `. ~/.zshrc`) or resta
 $ conda config --set auto_activate_base false
 $ conda create -n aphrodite python=3.10
 $ conda activate aphrodite
-$ conda install -c conda-forge cudatoolkit-dev gcc=11.3 gxx=11.3
+$ conda install -c "nvidia/label/cuda-11.8.0" cuda
 ```
-:warning: If you're using an NVIDIA H100 card, please run these install commands instead:
-```sh
-$ conda install -c "nvidia/label/cuda-11.8.0" cuda-nvcc=11.8
-$ pip install git+https://github.com/facebookresearch/xformers.git
-```
-
-The last command will take a long time, depending on your internet speed.
-
-Whenever you want to launch Aphrodite later on, make sure you run `conda activate aphrodite` first. The other steps outlined above are one-time only.
 
 ## Installation
-- Clone the repository:
-  ```sh
+
+```sh
+$ pip install aphrodite-engine
+```
+
+### Install from source
+  <details>
+
+  <summary>Click to Expand</summary>
+
+  ```bash
   git clone https://github.com/PygmalionAI/aphrodite-engine && cd aphrodite-engine
+  pip install -e .  # this will take a while
   ```
-- Install the package:
-  ```
-  pip install -e .
-  ```
-  > If you receive any import errors here, try running `pip install -r requirements.txt` first.
+  </details>
 
+## Usage
 
-## Example usage
+You can spawn a [text-generation-webui](https://github.com/oobabooga/text-generation-webui)-compatible API server to use with [SillyTavern](https://github.com/SillyTavern/SillyTavern):
 
-### Inference with `LLM`
-  ```py
-  from aphrodite import LLM, SamplingParams
-
-  prompts = [
-    "What is a man? A",
-    "The sun is a wondrous body, like a magnificent",
-    "All flesh is grass and all the comeliness thereof",
-  ]
-  sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
-
-  llm = LLM(model="EleutherAI/pythia-70m")        # you can also use a local directory path
-  outputs = llm.generate(prompts, sampling_params)
-  for output in outputs:
-    prompt = output.prompt
-    generated_text = output.outputs[0].text
-    print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
-  ```
-
-### Continuous inference with API
 ```sh
-$ python -m aphrodite.endpoints.openai.api_server --model EleutherAI/pythia-70m
-$ curl http://localhost:8000/v1/completions \
-    -H "Content-Type: application/json" \
-    -d '{
-        "model": "EleutherAI/pythia-70m",
-        "prompt": "What is a man? A",
-        "max_tokens": 512,
-        "temperature": 0.8
-    }'
+$ python -m aphrodite.endpoints.api_server_ooba --model PygmalionAI/pygmalion-2-13b --max-model-len 4096 --max-num-batched-tokens 4096
 ```
 
-#### Chat API
+This will create a server which runs on port `8000` of your machine. You can navigate to SillyTavern's API menu, select TextGen WebUI, and set the API Type to Aphrodite. The default API key is `EMPTY`, but you can change it as necessary. Use `http://localhost:8000/api` as the API URL.
+
+To run a quantized model, use the `--quantization awq` flag. Make sure your model is in AWQ format, and not GPTQ/GGUF. Run with only the `--help` flag for a full list of arguments.
+
+To manually query the API, run:
+
 ```sh
-$ curl -X POST "http://localhost:8000/v1/chat/completions" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "messages": [
-      {
-        "role": "system",
-        "content": "Act out the scenario below in a fictional setting."
-      },
-      { "role": "assistant", "content": "[First Message]" },
-      { "role": "user", "content": "---user input---" },
-    ],
-    "model": "EleutherAI/pythia-70m",
-    "temperature": 0.9,
-    "max_tokens": 500,
-    "stream": false,
-    "presence_penalty": 0.7,
-    "frequency_penalty": 0.7,
-    "top_p": 1,
-    "top_k": -1,
-    "logit_bias": {}
-  }'
+$ curl -X POST "http://localhost:8000/api/v1/generate" \
+-H "Content-Type: application/json" \
+-H "x-api-key: EMPTY" \
+-d '{
+  "prompt": "<|system|>Enter chat mode.<|user|>Hello!",
+  "stream": false,
+  "temperature": 0.8,
+  "top_p": 0.90
+}'
+
 ```
-For the full list of request parameters, see [OpenAI Completions API reference](https://platform.openai.com/docs/api-reference/completions).
+For the full list of Sampling parameters, please refer to [SamplingParams](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/common/sampling_params.py):
+
+https://github.com/PygmalionAI/aphrodite-engine/blob/99657d444bc2bab5e4293e9ee96e154dd7d3de44/aphrodite/common/sampling_params.py#L22-L62
+
+### OpenAI-compatible server
+An OpenAI-compatible server is also provided. You can launch the server with:
+```sh
+$ python -m aphrodite.endpoints.openai.api_server --model PygmalionAI/pygmalion-2-13b
+```
+
+You can query the server the same as any other OpenAI Completion/Chat Completion endpoint, though without an API key.
 
 ### Common Issues
 - `The detected CUDA version (12.1) mismatches the version that was used to compile
@@ -167,27 +148,15 @@ $ export CUDA_HOME=/home/anon/miniconda3/envs/aphrodite
 
 Then run the installation command again.
 
-- `Cuda failure 'peer access is not supported between these two devices' [repeated 15x across cluster]`
 
-  
-This would be the last line in a very long error message. This happens if you're using a cluster of NVLinked GPUs and (possibly) using more than 2 of them at once. To fix this, run these two before starting the engine:
-
-```sh
-$ export NCCL_IGNORE_DISABLED_P2P=1
-$ export NCCL_P2P_DISABLE=1
-```
-
-- `Aborted due to the lack of CPU swap space. Please increase "
-                "the swap space to avoid this error.`
+- `Aborted due to the lack of CPU swap space. Please increase the swap space to avoid this error.`
 
 You've run out of swap space! Please pass the `--swap-space` followed by the amount of swap (in GBs) to allocate. Make sure you leave enough RAM for the model loading process.
 ### Notes
 
-1. Currently, only FP16/BF16 precision HuggingFace models are supported. These are the default model types you might find on a HuggingFace upload. GPTQ and GGML are **not** supported.
+1. By design, Aphrodite takes up 90% of your GPU's VRAM. If you're not serving an LLM at scale, you may want to limit the amount of memory it takes up. You can do this in the API example by launching the server with the `--gpu-memory-utilization 0.6` (0.6 means 60%).
 
-2. By design, Aphrodite takes up 88% of your GPU's VRAM. If you're not serving an LLM at scale, you may want to limit the amount of memory it takes up. You can do this in the API example by launching the server with the `--gpu-memory-utilization 0.6` (0.6 means 60%).
-
-3. You can view the full list of commands by running `python -m aphrodite.endpoints.openai.api_server --help`.
+2. You can view the full list of commands by running `python -m aphrodite.endpoints.api_server_ooba --help`.
 
 ## Contributing
 We accept PRs! There will likely be a few typos or other errors we've failed to catch, so please let us know either via an issue or by making a Pull Request.

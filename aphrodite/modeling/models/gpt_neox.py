@@ -39,6 +39,7 @@ from aphrodite.modeling.megatron.tensor_parallel import (
     VocabParallelEmbedding, ColumnParallelLinear, RowParallelLinear)
 from aphrodite.common.sequence import SamplerOutput
 
+
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 
@@ -69,8 +70,16 @@ class GPTNeoXAttention(nn.Module):
         scaling = self.head_size**-0.5
         rotary_dim = int(self.head_size * config.rotary_pct)
         assert rotary_dim % 2 == 0
-        self.attn = PagedAttentionWithRoPE(self.num_heads, self.head_size,
-                                           scaling, rotary_dim)
+        rope_theta = getattr(config, "rope_theta", 10000)
+        max_position_embeddings = getattr(config, "max_position_embeddings",
+                                          8192)
+        self.attn = PagedAttentionWithRoPE(
+            self.num_heads,
+            self.head_size,
+            scaling,
+            rotary_dim,
+            base=rope_theta,
+            max_position=max_position_embeddings)
 
     def forward(
         self,

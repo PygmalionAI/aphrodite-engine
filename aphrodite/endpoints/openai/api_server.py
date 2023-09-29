@@ -131,6 +131,8 @@ async def check_length(
         input_ids = tokenizer(prompt).input_ids
     token_num = len(input_ids)
 
+    if request.max_tokens is None:
+        request.max_tokens = max_model_len - token_num
     if token_num + request.max_tokens > max_model_len:
         return input_ids, create_error_response(
             HTTPStatus.BAD_REQUEST,
@@ -196,12 +198,6 @@ async def create_chat_completion(request: ChatCompletionRequest,
     if error_check_ret is not None:
         return error_check_ret
 
-
-    prompt = await get_gen_prompt(request)
-    token_ids, error_check_ret = await check_length(request, prompt=prompt)
-    if error_check_ret is not None:
-        return error_check_ret
-
     if not request.logit_bias:
         logit_processors = []
     else:
@@ -209,6 +205,11 @@ async def create_chat_completion(request: ChatCompletionRequest,
             map(lambda bias: (int(bias[0]), bias[1]),
                 request.logit_bias.items()))
         logit_processors = [BiasLogitsProcessor(biases)]
+
+    prompt = await get_gen_prompt(request)
+    token_ids, error_check_ret = await check_length(request, prompt=prompt)
+    if error_check_ret is not None:
+        return error_check_ret
 
     model_name = request.model
     request_id = f"cmpl-{random_uuid()}"
@@ -221,11 +222,13 @@ async def create_chat_completion(request: ChatCompletionRequest,
             temperature=request.temperature,
             top_p=request.top_p,
             stop=request.stop,
+            stop_token_ids=request.stop_token_ids,
             max_tokens=request.max_tokens,
             best_of=request.best_of,
             top_k=request.top_k,
             ignore_eos=request.ignore_eos,
             use_beam_search=request.use_beam_search,
+            skip_special_tokens=request.skip_special_tokens,
             logits_processors=logit_processors,
         )
     except ValueError as e:
@@ -233,9 +236,6 @@ async def create_chat_completion(request: ChatCompletionRequest,
 
     result_generator = engine.generate(prompt, sampling_params, request_id,
                                        token_ids)
-
-    async def abort_request() -> None:
-        await engine.abort(request_id)
 
     def create_stream_response_json(
         index: int,
@@ -296,19 +296,15 @@ async def create_chat_completion(request: ChatCompletionRequest,
 
     # Streaming response
     if request.stream:
-        background_tasks = BackgroundTasks()
-        # Abort the request if the client disconnects.
-        background_tasks.add_task(abort_request)
         return StreamingResponse(completion_stream_generator(),
-                                 media_type="text/event-stream",
-                                 background=background_tasks)
+                                 media_type="text/event-stream")
 
     # Non-streaming response
     final_res: RequestOutput = None
     async for res in result_generator:
         if await raw_request.is_disconnected():
             # Abort the request if the client disconnects.
-            await abort_request()
+            await engine.abort(request_id)
             return create_error_response(HTTPStatus.BAD_REQUEST,
                                          "Client disconnected")
         final_res = res
@@ -361,7 +357,7 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
     for the API specification. This API mimics the OpenAI Completion API.
 
     NOTE: Currently we do not support the following features:
-        - echo (since the engine does not currently support
+        - echo (since the Aphrodite engine does not currently support
           getting the logprobs of prompt tokens)
         - suffix (the language models we currently support do not support
           suffix)
@@ -373,7 +369,7 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
         return error_check_ret
 
     if request.echo:
-        # We do not support echo since the engine does not
+        # We do not support echo since the Aphrodite engine does not
         # currently support getting the logprobs of prompt tokens.
         return create_error_response(HTTPStatus.BAD_REQUEST,
                                      "echo is not currently supported")
@@ -432,10 +428,12 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
             top_p=request.top_p,
             top_k=request.top_k,
             stop=request.stop,
+            stop_token_ids=request.stop_token_ids,
             ignore_eos=request.ignore_eos,
             max_tokens=request.max_tokens,
             logprobs=request.logprobs,
             use_beam_search=request.use_beam_search,
+            skip_special_tokens=request.skip_special_tokens,
             logits_processors=logit_processors,
         )
     except ValueError as e:
@@ -455,9 +453,6 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
     stream = (request.stream
               and (request.best_of is None or request.n == request.best_of)
               and not request.use_beam_search)
-
-    async def abort_request() -> None:
-        await engine.abort(request_id)
 
     def create_stream_response_json(
         index: int,
@@ -518,19 +513,15 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
 
     # Streaming response
     if stream:
-        background_tasks = BackgroundTasks()
-        # Abort the request if the client disconnects.
-        background_tasks.add_task(abort_request)
         return StreamingResponse(completion_stream_generator(),
-                                 media_type="text/event-stream",
-                                 background=background_tasks)
+                                 media_type="text/event-stream")
 
     # Non-streaming response
     final_res: RequestOutput = None
     async for res in result_generator:
         if await raw_request.is_disconnected():
             # Abort the request if the client disconnects.
-            await abort_request()
+            await engine.abort(request_id)
             return create_error_response(HTTPStatus.BAD_REQUEST,
                                          "Client disconnected")
         final_res = res
