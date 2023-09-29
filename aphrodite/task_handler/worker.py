@@ -42,6 +42,7 @@ class Worker:
         # self.init_cache_engine().
         self.cache_config = None
         self.block_size = None
+        self.sliding_window = None
         self.cache_engine = None
         self.cache_events = None
         self.gpu_cache = None
@@ -136,9 +137,13 @@ class Worker:
     def init_cache_engine(self, cache_config: CacheConfig) -> None:
         self.cache_config = cache_config
         self.block_size = cache_config.block_size
+        self.sliding_window = cache_config.sliding_window
 
-        max_seq_len = min(self.scheduler_config.max_model_len,
-                          cache_config.sliding_window or float("inf"))
+        if self.sliding_window is None:
+            max_seq_len = self.scheduler_config.max_model_len
+        else:
+            max_seq_len = min(self.scheduler_config.max_model_len,
+                              self.sliding_window)
         
         _check_if_can_support_max_seq_len(max_seq_len, self.block_size)
 
@@ -151,6 +156,7 @@ class Worker:
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[torch.Tensor, torch.Tensor, InputMetadata]:
+        assert self.block_size is not None
         seq_groups: List[Tuple[List[int], SamplingParams]] = []
         input_tokens: List[int] = []
         input_positions: List[int] = []
@@ -213,8 +219,8 @@ class Worker:
 
                 context_len = seq_data.get_len()
                 position = context_len - 1
-                if sliding_window:
-                    context_len = min(context_len, sliding_window)
+                if self.sliding_window is not None:
+                    context_len = min(context_len, self.sliding_window)
                 input_positions.append(position)
 
                 block_table = seq_group_metadata.block_tables[seq_id]
@@ -229,10 +235,10 @@ class Worker:
                 slot = block_number * self.block_size + block_offset
                 slot_mapping.append(slot)
 
-                if sliding_window:
+                if self.sliding_window:
                     assert self.cache_config is not None
-                    sliding_window_blocks = (sliding_window //
-                                             self.cache_config.block_size)
+                    sliding_window_blocks = (self.sliding_window //
+                                             self.block_size)
                     block_table = block_table[-sliding_window_blocks:]
                 generation_block_tables.append(block_table)
 
@@ -274,7 +280,7 @@ class Worker:
             context_lens=context_lens_tensor,
             max_context_len=max_context_len,
             block_tables=block_tables_tensor,
-            sliding_window=sliding_window,
+            sliding_window=self.sliding_window,
         )
         return tokens_tensor, positions_tensor, input_metadata
 
