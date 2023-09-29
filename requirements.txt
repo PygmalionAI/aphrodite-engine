@@ -4,10 +4,10 @@ ray >= 2.5.1
 sentencepiece
 numpy
 torch >= 2.0.0
-transformers >= 4.33.1
+transformers >= 4.33.3
 uvicorn
 openai # for fastapi's openai proxy emulation
-xformers >= 0.0.21
+xformers >= 0.0.22
 mypy
 pytest
 fschat >= 0.2.23
