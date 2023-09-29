@@ -27,11 +27,11 @@ KVCache = Tuple[torch.Tensor, torch.Tensor]
 class MistralMLP(nn.Module):
 
     def __init__(
-            self,
-            hidden_size: int,
-            intermediate_size: int,
-            hidden_act: str,
-            quant_config: Optional[QuantizationConfig] = None,
+        self,
+        hidden_size: int,
+        intermediate_size: int,
+        hidden_act: str,
+        quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
         super().__init__()
         self.gate_up_proj = ParallelLinear.column(hidden_size,
@@ -47,7 +47,8 @@ class MistralMLP(nn.Module):
                                             perform_initialization=False,
                                             quant_config=quant_config)
         if hidden_act != "silu":
-            raise ValueError(f"Unsupported activation: {hidden_act}. Only silu is supported.")
+            raise ValueError(f"Unsupported activation: {hidden_act}. "
+                             "Only silu is supported for now.")
         self.act_fn = SiluAndMul()
 
     def forward(self, x):
@@ -55,7 +56,7 @@ class MistralMLP(nn.Module):
         x = self.act_fn(gate_up)
         x, _ = self.down_proj(x)
         return x
-    
+
 
 class MistralAttention(nn.Module):
 
@@ -108,15 +109,14 @@ class MistralAttention(nn.Module):
                                            rotary_dim=self.head_dim,
                                            num_kv_heads=self.num_kv_heads,
                                            sliding_window=self.sliding_window)
-    
-    
+
     def forward(
-            self,
-            positions: torch.Tensor,
-            hidden_states: torch.Tensor,
-            kv_cache: KVCache,
-            input_metadata: InputMetadata,
-            cache_event: Optional[torch.cuda.Event],
+        self,
+        positions: torch.Tensor,
+        hidden_states: torch.Tensor,
+        kv_cache: KVCache,
+        input_metadata: InputMetadata,
+        cache_event: Optional[torch.cuda.Event],
     ) -> torch.Tensor:
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
@@ -125,17 +125,18 @@ class MistralAttention(nn.Module):
                                 input_metadata, cache_event)
         output, _ = self.o_proj(attn_output)
         return output
-    
+
 
 class MistralDecoderLayer(nn.Module):
 
     def __init__(
-            self,
-            config: MistralConfig,
-            quant_config: Optional[QuantizationConfig] = None,
+        self,
+        config: MistralConfig,
+        quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
         super().__init__()
         self.hidden_size = config.hidden_size
+        # Requires transformers > 4.32.0
         rope_theta = getattr(config, "rope_theta", 10000)
         self.self_attn = MistralAttention(
             hidden_size=self.hidden_size,
@@ -149,19 +150,20 @@ class MistralDecoderLayer(nn.Module):
             hidden_size=self.hidden_size,
             intermediate_size=config.intermediate_size,
             hidden_act=config.hidden_act,
-            quant_config=quant_config)
+            quant_config=quant_config,
+        )
         self.input_layernorm = RMSNorm(config.hidden_size,
                                        eps=config.rms_norm_eps)
-        self.post_attention_layers = RMSNorm(config.hidden_size,
-                                             eps=config.rms_norm_eps)
-        
+        self.post_attention_layernorm = RMSNorm(config.hidden_size,
+                                                eps=config.rms_norm_eps)
+
     def forward(
-            self,
-            positions: torch.Tensor,
-            hidden_states: torch.Tensor,
-            kv_cache: KVCache,
-            input_metadata: InputMetadata,
-            cache_event: Optional[torch.cuda.Event],
+        self,
+        positions: torch.Tensor,
+        hidden_states: torch.Tensor,
+        kv_cache: KVCache,
+        input_metadata: InputMetadata,
+        cache_event: Optional[torch.cuda.Event],
     ) -> torch.Tensor:
         # Self Attention
         residual = hidden_states
@@ -171,23 +173,24 @@ class MistralDecoderLayer(nn.Module):
             hidden_states=hidden_states,
             kv_cache=kv_cache,
             input_metadata=input_metadata,
-            cache_event=cache_event)
+            cache_event=cache_event,
+        )
         hidden_states = residual + hidden_states
 
-        # Fully connected
+        # Fully Connected
         residual = hidden_states
-        hidden_states = self.post_attention_layers(hidden_states)
+        hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
         return hidden_states
-    
+
 
 class MistralModel(nn.Module):
 
     def __init__(
-            self,
-            config: MistralConfig,
-            quant_config: Optional[QuantizationConfig] = None,
+        self,
+        config: MistralConfig,
+        quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
         super().__init__()
         self.config = config
@@ -204,29 +207,31 @@ class MistralModel(nn.Module):
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
-            self,
-            input_ids: torch.Tensor,
-            positions: torch.Tensor,
-            kv_cache: List[KVCache],
-            input_metadata: InputMetadata,
-            cache_events: Optional[List[torch.cuda.Event]],
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        kv_caches: List[KVCache],
+        input_metadata: InputMetadata,
+        cache_events: Optional[List[torch.cuda.Event]],
     ) -> torch.Tensor:
         hidden_states = self.embed_tokens(input_ids)
         for i in range(len(self.layers)):
             if cache_events is None:
                 cache_event = None
             else:
-                cache_events = cache_events[i]
+                cache_event = cache_events[i]
             layer = self.layers[i]
             hidden_states = layer(
                 positions,
                 hidden_states,
                 kv_caches[i],
                 input_metadata,
-                cache_event)
-            hidden_states = self.norm(hidden_states)
-            return hidden_states
-        
+                cache_event,
+            )
+        hidden_states = self.norm(hidden_states)
+        return hidden_states
+
+
 class MistralForCausalLM(nn.Module):
 
     def __init__(
