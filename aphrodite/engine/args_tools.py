@@ -33,7 +33,6 @@ class EngineArgs:
     def __post_init__(self):
         if self.tokenizer is None:
             self.tokenizer = self.model
-        self.max_num_seqs = min(self.max_num_seqs, self.max_num_batched_tokens)
 
     @staticmethod
     def add_cli_args(
