@@ -44,7 +44,8 @@ from aphrodite.modeling.megatron.tensor_parallel import (
 from aphrodite.modeling.quantization_utils import QuantizationConfig
 from aphrodite.modeling.hf_downloader import (
     convert_pyslice_to_tensor, hf_model_weights_iterator,
-    load_tensor_parallel_weights, load_padded_tensor_parallel_vocab)
+    load_tensor_parallel_weights, load_padded_tensor_parallel_vocab,
+    get_parallel_weight)
 from aphrodite.common.sequence import SamplerOutput
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
@@ -92,7 +93,6 @@ class LlamaAttention(nn.Module):
         num_heads: int,
         num_kv_heads: int,
         rope_theta: float = 10000,
-        rope_scaling: Optional[Dict[str, Any]] = None,
         max_position_embeddings: int = 8192,
         quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
@@ -136,8 +136,7 @@ class LlamaAttention(nn.Module):
             base=self.rope_theta,
             max_position=self.max_position_embeddings,
             rotary_dim=self.head_dim,
-            num_kv_heads=self.num_kv_heads,
-            rope_scaling=rope_scaling)
+            num_kv_heads=self.num_kv_heads)
 
     def forward(
         self,
@@ -167,7 +166,6 @@ class LlamaDecoderLayer(nn.Module):
         self.hidden_size = config.hidden_size
         # Requires transformers > 4.32.0
         rope_theta = getattr(config, "rope_theta", 10000)
-        rope_scaling = getattr(config, "rope_scaling", None)
         max_position_embeddings = getattr(config, "max_position_embeddings",
                                           8192)
         self.self_attn = LlamaAttention(
@@ -175,7 +173,6 @@ class LlamaDecoderLayer(nn.Module):
             num_heads=config.num_attention_heads,
             num_kv_heads=config.num_key_value_heads,
             rope_theta=rope_theta,
-            rope_scaling=rope_scaling,
             max_position_embeddings=max_position_embeddings,
             quant_config=quant_config,
         )
@@ -300,28 +297,16 @@ class LlamaForCausalLM(nn.Module):
                                    input_metadata)
         return next_tokens
 
-    _column_parallel_layers = []
-    _row_parallel_layers = ["o_proj", "down_proj"]
+    column_parallel_layers = []
+    row_parallel_layers = ["o_proj", "down_proj"]
 
     def load_weights(self,
                      model_name_or_path: str,
                      cache_dir: Optional[str] = None,
                      load_format: str = "auto",
                      revision: Optional[str] = None):
-        if self.quant_config is None:
-            weight_suffixes = ["weight"]
-        else:
-            weight_suffixes = self.quant_config.get_tp_tensor_names()
-
-        column_parallel_weights: List[str] = []
-        for layer in self._column_parallel_layers:
-            for suffix in weight_suffixes:
-                column_parallel_weights.append(f"{layer}.{suffix}")
-        row_parallel_weights: List[str] = []
-        for layer in self._row_parallel_layers:
-            for suffix in weight_suffixes:
-                row_parallel_weights.append(f"{layer}.{suffix}")
-
+        (column_parallel_weights, row_parallel_weights,
+         ignore_weight_suffixes) = get_parallel_weight(self)
         tp_size = get_tensor_model_parallel_world_size()
         tensor_model_parallel_rank = get_tensor_model_parallel_rank()
         q_proj_shard_size = (self.config.hidden_size // tp_size)
@@ -341,6 +326,8 @@ class LlamaForCausalLM(nn.Module):
                 model_name_or_path, cache_dir, load_format, revision):
             if "rotary_emb.inv_freq" in name:
                 continue
+            if any(name.endswith(suffix) for suffix in ignore_weight_suffixes):
+                continue
 
             is_packed = False
             is_transposed = False
@@ -355,7 +342,10 @@ class LlamaForCausalLM(nn.Module):
             for weight_name, shard_size, offset in attention_weight_specs:
                 if weight_name not in name:
                     continue
-                param = state_dict[name.replace(weight_name, "qkv_proj")]
+                name = name.replace(weight_name, "qkv_proj")
+                if name not in state_dict or "g_idx" in name:
+                    break
+                param = state_dict[name]
                 if is_transposed:
                     param = param.T
 
@@ -379,7 +369,10 @@ class LlamaForCausalLM(nn.Module):
             for stride_id, weight_name in enumerate(["gate_proj", "up_proj"]):
                 if weight_name not in name:
                     continue
-                param = state_dict[name.replace(weight_name, "gate_up_proj")]
+                name = name.replace(weight_name, "gate_up_proj")
+                if "g_idx" in name or name not in state_dict:
+                    break
+                param = state_dict[name]
                 if is_transposed:
                     param = param.T
 
@@ -396,6 +389,8 @@ class LlamaForCausalLM(nn.Module):
             if is_gate_up_weight:
                 continue
 
+            if name not in state_dict:
+                continue
             param = state_dict[name]
             if is_transposed:
                 param = param.T

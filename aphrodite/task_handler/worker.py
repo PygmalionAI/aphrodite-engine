@@ -65,7 +65,7 @@ class Worker:
 
         # Initialize the model.
         set_random_seed(self.model_config.seed)
-        self.model = get_model(self.model_config)
+        self.model = get_model(self.model_config, self.scheduler_config.max_num_batched_tokens)
 
     @torch.inference_mode()
     def profile_num_available_blocks(
@@ -243,8 +243,9 @@ class Worker:
 
         # Optimization: Pad the input length to be a multiple of 8.
         # This is required for utilizing the Tensor Cores in NVIDIA GPUs.
-        input_tokens = _pad_to_alignment(input_tokens, multiple_of=8)
-        input_positions = _pad_to_alignment(input_positions, multiple_of=8)
+        if self.model_config.quantization is None:
+            input_tokens = _pad_to_alignment(input_tokens, multiple_of=8)
+            input_positions = _pad_to_alignment(input_positions, multiple_of=8)
 
         # Convert to tensors.
         tokens_tensor = torch.tensor(input_tokens,

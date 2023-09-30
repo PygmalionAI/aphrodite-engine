@@ -67,6 +67,8 @@ class AWQConfig(QuantizationConfig):
     def get_transposed_tensor_names(cls) -> List[str]:
         return ["qweight", "qzeros", "scales"]
 
-    @classmethod
-    def get_tp_tensor_names(cls) -> List[str]:
+    def get_row_tp_tensor_names(self) -> List[str]:
         return ["qweight", "qzeros", "scales"]
+    
+    def get_column_tp_tensor_names(self) -> List[str]:
+        return ["qweight", "qzeros", "scales", "bias"]
