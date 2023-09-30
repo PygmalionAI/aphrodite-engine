@@ -59,6 +59,12 @@ class Sampler(nn.Module):
         
         logits = _apply_logits_processors(input_metadata, logits, output_tokens)
 
+        # Apply Tail Free Sampling, as described in https://www.trentonbricken.com/Tail-Free-Sampling/
+        tfs_zs = _get_tfs_z(input_metadata)
+        assert len(tfs_zs) == logits.shape[0]
+        if any(z < 1.0 - _SAMPLING_EPS for z in tfs_zs):
+            logits = _apply_tfs(logits, tfs_zs)
+
         # Apply temperature scaling.
         temperatures = _get_temperatures(input_metadata)
         assert len(temperatures) == logits.shape[0]
@@ -253,6 +259,15 @@ def _get_top_p_top_k(
     return top_ps, top_ks
 
 
+def _get_tfs_z(input_metadata: InputMetadata) -> List[float]:
+    tfs_zs: List[float] = []
+    for seq_group in input_metadata.seq_groups:
+        seq_ids, sampling_params = seq_group
+        tfs_z = sampling_params.tfs_z
+        tfs_zs += [tfs_z] * len(seq_ids)
+    return tfs_zs
+
+
 def _apply_top_p_top_k(
     logits: torch.Tensor,
     top_ps: List[float],
@@ -279,6 +294,35 @@ def _apply_top_p_top_k(
     logits = torch.gather(logits_sort,
                           dim=-1,
                           index=torch.argsort(logits_idx, dim=-1))
+    return logits
+
+def _apply_tfs(
+    logits: torch.Tensor,
+    tfs_zs: List[float],
+) -> torch.Tensor:
+    z = torch.tensor(tfs_zs, dtype=logits.dtype, device=logits.device)
+    logits_sort, logits_idx = logits.sort(dim=-1, descending=True)
+    d2 = logits_sort.diff().diff().abs()
+    normalized_d2 = d2 / torch.sum(d2, dim=-1)
+    curvature_cdf = torch.cumsum(normalized_d2, dim=-1)
+
+    tfs_mask = curvature_cdf > z.unsqueeze(dim=1)
+
+    tfs_mask = torch.cat(
+            (
+                torch.zeros(logits.shape[0], 1, dtype=torch.bool, device=logits.device),
+                tfs_mask,
+                torch.ones(logits.shape[0], 1, dtype=torch.bool, device=logits.device),
+            ),
+            dim=-1,
+        )
+    
+    logits_sort[tfs_mask] = -float("inf")
+
+    logits = torch.gather(logits_sort,
+                          dim=-1,
+                          index=torch.argsort(logits_idx, dim=-1))
+
     return logits
 
 
