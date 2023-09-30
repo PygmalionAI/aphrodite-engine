@@ -64,7 +64,6 @@ class Sampler(nn.Module):
                              self.vocab_size)
 
         # logits_at = [[] for _ in logits]
-
         # push_logit_hist("new", logits_at, logits)
 
         # Apply presence and frequency penalties.
@@ -317,9 +316,9 @@ def _apply_top_ap_top_k(
     top_ks: List[int],      # [n_samples]
     top_as: List[float],    # [n_samples]
 ) -> torch.Tensor:
-    ts_a = torch.tensor(top_as, dtype=logits.dtype, device=logits.device)
     ts_p = torch.tensor(top_ps, dtype=logits.dtype, device=logits.device)
     ts_k = torch.tensor(top_ks, dtype=torch.int, device=logits.device)
+    ts_a = torch.tensor(top_as, dtype=logits.dtype, device=logits.device)
     logits_sort:torch.Tensor
     logits_sort, logits_idx = logits.sort(dim=-1, descending=True)
 
@@ -344,7 +343,7 @@ def _apply_top_ap_top_k(
     top_a_thresholds = torch.pow(probs_sort[:, 0], 2) * ts_a
     top_ap_mask = (probs_sort < top_a_thresholds.unsqueeze(1)) # Cull logits below the top-a threshold
     top_ap_mask.logical_or_(probs_sum > ts_p.unsqueeze(dim=1)) # Cull logits above the top-p summation threshold
-    top_ap_mask.scatter_(0, torch.tensor([0], device=logits.device).unsqueeze(1), False) # Guarantee at least one token is pickable
+    top_ap_mask[:, 0] = False # Guarantee at least one token is pickable
     logits_sort[top_ap_mask] = -float("inf")
     
     # row = f"{ts_p[0].item():.02f},{probs_sort[0][0].item():.03f},{ts_a[0].item():.02f},{top_a_thresholds[0].item():.02f},{((logits_sort != -float('inf')).long().sum(dim=1)[0].item())},{topx}"
