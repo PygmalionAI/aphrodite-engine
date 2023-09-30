@@ -1,69 +1,52 @@
 import argparse
 import json
-from typing import Iterable, List
+
+import gradio as gr
 import requests
 
-def clear_line(n: int = 1) -> None:
-    LINE_UP = '\033[1A'
-    LINE_CLEAR = '\x1b[2K'
-    for _ in range(n):
-        print(LINE_UP, end=LINE_CLEAR, flush=True)
 
-
-def post_http_request(prompt: str, api_url: str, n: int = 1,
-                       stream: bool = False) -> requests.Response:
-    headers = {"User-Agent": "Test Client"}
+def http_bot(prompt):
+    headers = {"User-Agent": "Aphrodite Client"}
     pload = {
         "prompt": prompt,
-        "n": n,
-        "use_beam_search": True,
-        "temperature": 0.0,
-        "max_tokens": 28,
-        "stream": stream,
+        "stream": True,
+        "max_tokens": 128,
     }
-    response = requests.post(api_url, headers=headers, json=pload, stream=True)
-    return response
+    response = requests.post(args.model_url,
+                             headers=headers,
+                             json=pload,
+                             stream=True)
 
-
-def get_streaming_response(response: requests.Response) -> Iterable[List[str]]:
-    for chunk in response.iter_lines(chunk_size=8192, decode_unicode=False, delimiter=b"\0"):
+    for chunk in response.iter_lines(chunk_size=8192,
+                                     decode_unicode=False,
+                                     delimiter=b"\0"):
         if chunk:
             data = json.loads(chunk.decode("utf-8"))
-            output = data["text"]
+            output = data["text"][0]
             yield output
 
 
-def get_response(response: requests.Response) -> List[str]:
-    data = json.loads(response.content)
-    output = data["text"]
-    return output
+def build_demo():
+    with gr.Blocks() as demo:
+        gr.Markdown("# Aphrodite text completion demo\n")
+        inputbox = gr.Textbox(label="Input",
+                              placeholder="Enter text and press ENTER")
+        outputbox = gr.Textbox(label="Output",
+                               placeholder="Generated result from the model")
+        inputbox.submit(http_bot, [inputbox], [outputbox])
+    return demo
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", type=str, default="localhost")
-    parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--n", type=int, default=4)
-    parser.add_argument("--prompt", type=str, default="What is a man? A")
-    parser.add_argument("--stream", action="store_true")
+    parser.add_argument("--port", type=int, default=8001)
+    parser.add_argument("--model-url",
+                        type=str,
+                        default="http://localhost:8000/generate")
     args = parser.parse_args()
-    prompt = args.prompt
-    api_url = f"http://{args.host}:{args.port}/generate"
-    n = args
-    stream = args.stream
 
-    print(f"Prompt: {prompt!r}\n", flush=True)
-    response = post_http_request(prompt, api_url, n, stream)
-
-    if stream:
-        num_printed_lines = 0
-        for h in get_streaming_response(response):
-            clear_line(num_printed_lines)
-            num_printed_lines = 0
-            for i, line in enumerate(h):
-                num_printed_lines += 1
-                print(f"Beam candidate {i}: {line!r}", flush=True)
-    else:
-        output = get_response(response)
-        for i, line in enumerate(output):
-            print(f"Beam candidate {i}: {line!r}", flush=True)
+    demo = build_demo()
+    demo.queue(concurrency_count=100).launch(server_name=args.host,
+                                             server_port=args.port,
+                                             share=True)
