@@ -302,11 +302,11 @@ def _apply_tfs(
 ) -> torch.Tensor:
     z = torch.tensor(tfss, dtype=logits.dtype, device=logits.device)
     logits_sort, logits_idx = logits.sort(dim=-1, descending=True)
-    d2 = logits_sort.diff().diff().abs()
+    d2 = logits_sort.softmax(dim=-1).diff().diff().abs()
     normalized_d2 = d2 / torch.sum(d2, dim=-1)
     curvature_cdf = torch.cumsum(normalized_d2, dim=-1)
 
-    tfs_mask = curvature_cdf > z.unsqueeze(dim=1)
+    tfs_mask = curvature_cdf > z.unsqueeze(dim=-1)
 
     tfs_mask = torch.cat(
             (
@@ -318,7 +318,6 @@ def _apply_tfs(
         )
     
     logits_sort[tfs_mask] = -float("inf")
-
     logits = torch.gather(logits_sort,
                           dim=-1,
                           index=torch.argsort(logits_idx, dim=-1))
