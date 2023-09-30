@@ -93,7 +93,6 @@ class LlamaAttention(nn.Module):
         num_heads: int,
         num_kv_heads: int,
         rope_theta: float = 10000,
-        rope_scaling: Optional[Dict[str, Any]] = None,
         max_position_embeddings: int = 8192,
         quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
@@ -137,8 +136,7 @@ class LlamaAttention(nn.Module):
             base=self.rope_theta,
             max_position=self.max_position_embeddings,
             rotary_dim=self.head_dim,
-            num_kv_heads=self.num_kv_heads,
-            rope_scaling=rope_scaling)
+            num_kv_heads=self.num_kv_heads)
 
     def forward(
         self,
@@ -168,7 +166,6 @@ class LlamaDecoderLayer(nn.Module):
         self.hidden_size = config.hidden_size
         # Requires transformers > 4.32.0
         rope_theta = getattr(config, "rope_theta", 10000)
-        rope_scaling = getattr(config, "rope_scaling", None)
         max_position_embeddings = getattr(config, "max_position_embeddings",
                                           8192)
         self.self_attn = LlamaAttention(
@@ -176,7 +173,6 @@ class LlamaDecoderLayer(nn.Module):
             num_heads=config.num_attention_heads,
             num_kv_heads=config.num_key_value_heads,
             rope_theta=rope_theta,
-            rope_scaling=rope_scaling,
             max_position_embeddings=max_position_embeddings,
             quant_config=quant_config,
         )
@@ -311,7 +307,6 @@ class LlamaForCausalLM(nn.Module):
                      revision: Optional[str] = None):
         (column_parallel_weights, row_parallel_weights,
          ignore_weight_suffixes) = get_parallel_weight(self)
-
         tp_size = get_tensor_model_parallel_world_size()
         tensor_model_parallel_rank = get_tensor_model_parallel_rank()
         q_proj_shard_size = (self.config.hidden_size // tp_size)
@@ -393,9 +388,9 @@ class LlamaForCausalLM(nn.Module):
                 break
             if is_gate_up_weight:
                 continue
+
             if name not in state_dict:
                 continue
-
             param = state_dict[name]
             if is_transposed:
                 param = param.T
