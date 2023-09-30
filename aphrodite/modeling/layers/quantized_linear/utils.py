@@ -39,12 +39,12 @@ def quant_post_init(model, max_input_length: Optional[int] = None):
     
     if model_uses_exllama:
         device_to_buffers = {}
-        max_input_length = max_input_length if use_act_order else 1
+        max_input_len = max_input_length if use_act_order else 1
         for device, buffers_size in device_to_buffers_size.items():
             device_to_buffers[device] = {
                 "temp_state":
                 torch.zeros(
-                    (max_input_length, buffers_size["max_inner_outer_dim"]),
+                    (max_input_len, buffers_size["max_inner_outer_dim"]),
                     dtype=torch.float16,
                     device=device),
                 "temp_dq":
@@ -80,5 +80,4 @@ def quant_post_init(model, max_input_length: Optional[int] = None):
                 submodule.post_init()
 
         torch.cuda.empty_cache()
-    
     return model
