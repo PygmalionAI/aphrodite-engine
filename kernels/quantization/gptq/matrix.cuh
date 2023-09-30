@@ -1,9 +1,10 @@
+// Adapted from turboderp exllama: https://github.com/turboderp/exllama
+
 #ifndef _matrix_cuh
 #define _matrix_cuh
 
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
-
 
 class MatrixView_half
 {
@@ -88,7 +89,7 @@ __device__ __forceinline__ half2 dot_product_8
     const half2 acc,
     MatrixView_half& h_,
     const int h_row,
-    const int h_column,
+    const int h_column,                 // divisible by 8
     MatrixView_q4_column& v_,
     const int v_row,                    // divisible by 8
     const int v_column,
@@ -119,6 +120,11 @@ __device__ __forceinline__ half2 dot_product_8
         half2 v_45 = __halves2half2(v_4, v_5);
         half2 v_67 = __halves2half2(v_6, v_7);
 
+//         half2 v_01 = q4_table[v_zero - 1][(v_read      ) & 0xff]; // (constant memory is too slow apparently)
+//         half2 v_23 = q4_table[v_zero - 1][(v_read >>  8) & 0xff];
+//         half2 v_45 = q4_table[v_zero - 1][(v_read >> 16) & 0xff];
+//         half2 v_67 = q4_table[v_zero - 1][(v_read >> 24)       ];
+
         half2 tmp = __hmul2(*h_ptr++, v_01);
         tmp = __hfma2(*h_ptr++, v_23, tmp);
         tmp = __hfma2(*h_ptr++, v_45, tmp);
@@ -134,7 +140,7 @@ __device__ __forceinline__ half dot_product_8_h
     const half acc,
     MatrixView_half& h_,
     const int h_row,
-    const int h_column,
+    const int h_column,                 // divisible by 8
     MatrixView_q4_column& v_,
     const int v_row,                    // divisible by 8
     const int v_column,

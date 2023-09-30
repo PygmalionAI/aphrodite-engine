@@ -1,3 +1,5 @@
+// Adapted from turboderp exllama: https://github.com/turboderp/exllama
+
 #include <torch/extension.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -5,10 +7,8 @@
 #include <cuda_fp16.h>
 #include <cstdint>
 #include <cstdio>
-
 #include "util.cuh"
 #include "tuning.h"
-
 #include "cuda_buffers.cuh"
 #include "cuda_func/q4_matrix.cuh"
 #include "cuda_func/q4_matmul.cuh"
@@ -82,7 +82,7 @@ void gptq_set_tuning_params
 (
     int matmul_recons_thd,
     bool matmul_fused_remap,
-    bool matmul_no_half2,
+    bool matmul_no_half2
 )
 {
     tuningParams.matmul_recons_thd = matmul_recons_thd;
@@ -93,7 +93,7 @@ void gptq_set_tuning_params
 
 // Release all unmanaged objects allocated by the extension
 
-void cleanup()
+void gptq_cleanup()
 {
     cleanup_buffers_cuda();
     g_q4_free_matrices();
@@ -119,7 +119,7 @@ void gptq_prepare_buffers
         // buffer size used for sanity checks
         temp_state.numel(),
         (half*) temp_state.data_ptr(),
-        (half*) temp_dq.data_ptr(),
+        (half*) temp_dq.data_ptr()
     );
 }
 
@@ -210,6 +210,7 @@ void gptq_q4_matmul
         );
     }
 }
+
 
 // Remap columns in half tensor
 

@@ -1,19 +1,24 @@
+// Adapted from turboderp exllama: https://github.com/turboderp/exllama
+
 #define _cuda_buffers_cu
 #include "cuda_buffers.cuh"
 
 CudaBuffers* g_buffers[CUDA_MAX_DEVICES] = {NULL};
+// __constant__ half2 q4_table[16][256];
+// half2 q4_table_host[16][256];
+// bool q4_table_init = false;
 
 CudaBuffers::CudaBuffers
 (
     int _device,
-    half* _temp_state,
     int _temp_state_size,
-    half* _temp_dq,
+    half* _temp_state,
+    half* _temp_dq
 ) :
     device(_device),
-    temp_state(_temp_state),
     temp_state_size(_temp_state_size),
-    temp_dq(_temp_dq),
+    temp_state(_temp_state),
+    temp_dq(_temp_dq)
 {
     cudaSetDevice(_device);
 
@@ -43,17 +48,17 @@ CudaBuffers* get_buffers(const int device_index)
 void prepare_buffers_cuda
 (
     int _device,
-    half* _temp_state,
     int _temp_state_size,
-    half* _temp_dq,
+    half* _temp_state,
+    half* _temp_dq
 )
 {
     CudaBuffers* buffers = new CudaBuffers
     (
         _device,
-        _temp_state,
         _temp_state_size,
-        _temp_dq,
+        _temp_state,
+        _temp_dq
     );
 
     g_buffers[_device] = buffers;

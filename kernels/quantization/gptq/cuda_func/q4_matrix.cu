@@ -1,3 +1,5 @@
+// Adapted from turboderp exllama: https://github.com/turboderp/exllama
+
 #include "q4_matrix.cuh"
 #include <vector>
 #include "../util.cuh"
@@ -79,7 +81,6 @@ __global__ void make_sequential_kernel
     int x_map_idx = w_new2_row << 3;
 
     uint64_t dst = 0;
-
 
     #pragma unroll
     for (int i = 0; i < 8; i++)
@@ -183,7 +184,7 @@ __global__ void reconstruct_kernel
     int column = RECONS_THREADS_X * blockIdx.x + threadIdx.x;
     int row = (RECONS_THREADS_Y * blockIdx.y + threadIdx.y) * 8;
     if (column >= width) return;
-
+    
     // Views
 
     MatrixView_q4_column w_(w, height, width);

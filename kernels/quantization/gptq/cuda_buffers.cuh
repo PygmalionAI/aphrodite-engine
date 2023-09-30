@@ -1,3 +1,5 @@
+// Adapted from turboderp exllama: https://github.com/turboderp/exllama
+
 #ifndef _cuda_buffers_cuh
 #define _cuda_buffers_cuh
 
@@ -21,9 +23,6 @@ public:
     int temp_state_size;
     half* temp_dq;              // size of largest quant tensor * 8
 
-    int current_zeros_float;
-    int max_zeros_float;
-
     cudaStream_t alt_stream_1;
     cudaStream_t alt_stream_2;
     cudaStream_t alt_stream_3;
@@ -34,13 +33,11 @@ public:
     CudaBuffers
     (
         int _device,
-        half* _temp_state,
         int _temp_state_size,
-        half* _temp_dq,
+        half* _temp_state,
+        half* _temp_dq
     );
     ~CudaBuffers();
-
-    float* get_zeros_float(const int num_zeros);
 };
 
 CudaBuffers* get_buffers(const int device_index);
@@ -48,9 +45,9 @@ CudaBuffers* get_buffers(const int device_index);
 void prepare_buffers_cuda
 (
     int _device,
-    half* _temp_state,
     int _temp_state_size,
-    half* _temp_dq,
+    half* _temp_state,
+    half* _temp_dq
 );
 
 void cleanup_buffers_cuda();

@@ -8,17 +8,18 @@ void vecquant4matmul_cuda(
     torch::Tensor mul,
     torch::Tensor scales,
     torch::Tensor zeros,
-    torch::Tensor g_idx);
+    torch::Tensor g_idx
+);
 
 void gptq_descact_matmul(
-    torch::Tensor vec,
-    torch::Tensor mat,
-    torch::Tensor mul,
-    torch::Tensor scales,
-    torch::Tensor zeros,
-    torch::Tensor g_idx);
-
+  torch::Tensor vec,
+  torch::Tensor mat,
+  torch::Tensor mul,
+  torch::Tensor scales,
+  torch::Tensor zeros,
+  torch::Tensor g_idx
+)
 {
-    const at::cuda::OptionalCUDAGuard device_guard(device_of(vec));
-    vecquant4matmul_cuda(vec, mat, mul, scales, zeros, g_idx);
+  const at::cuda::OptionalCUDAGuard device_guard(device_of(vec));
+  vecquant4matmul_cuda(vec, mat, mul, scales, zeros, g_idx);
 }

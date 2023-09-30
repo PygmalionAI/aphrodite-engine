@@ -22,7 +22,7 @@ uintptr_t gptq_make_q4(
   torch::Tensor qweight,
   torch::Tensor qzeros,
   torch::Tensor scales,
-  torch::Tensor g_idx.
+  torch::Tensor g_idx,
   int device);
 
 void gptq_q4_matmul(
@@ -63,5 +63,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def(
     "gptq_descact_matmul",
     &gptq_descact_matmul,
-    "Quantized GEMM for GPTQ for parallelized desc_act layer.")
+    "Quantized GEMM for GPTQ for parallelized desc_act layer.");
 }

@@ -1,5 +1,9 @@
+// Adapted from turboderp exllama: https://github.com/turboderp/exllama
+
 #ifndef _cuda_compat_cuh
 #define _cuda_compat_cuh
+
+// atomicAdd for half types, to support CC < 7.x
 
 __device__ __forceinline__ void atomicAdd_half(half* address, half val)
 {

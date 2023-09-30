@@ -5,34 +5,34 @@
 #include <cuda_fp16.h>
 #include "cu_compat.cuh"
 
-const int BLOCKWIDTH = 256;
-const int BLOCKHEIGHT = 32;
+const int BLOCKWIDTH  = 256;
+const int BLOCKHEIGHT =  32;
 
 __device__ inline unsigned int as_unsigned(int i) {
-    return *reinterpret_cast<unsigned int*>(&i);
+  return *reinterpret_cast<unsigned int*>(&i);
 }
 
 __device__ inline int as_int(int i) {
-    return *reinterpret_cast<int*>(&i);
+  return *reinterpret_cast<int*>(&i);
 }
 
 template <typename scalar_t>
 __global__ void VecQuant4MatMulKernel(
-    const scalar_t* __restrict__ vec,
-    const      int* __restrict__ mat,
-          scalar_t* __restrict__ mul,
-    const scalar_t* __restrict__ scales,
-    const    int* __restrict__ zeros,
-    const    int* __restrict__ g_idx,
+    const  scalar_t* __restrict__ vec,
+    const       int* __restrict__ mat,
+           scalar_t* __restrict__ mul,
+    const  scalar_t* __restrict__ scales,
+    const       int* __restrict__ zeros,
+    const   	int* __restrict__ g_idx,
     int batch,
     int vec_height,
     int height,
     int width,
-    int zero_width
+	int zero_width
 ) {
     int h = BLOCKHEIGHT * blockIdx.x;
     int w = BLOCKWIDTH * blockIdx.y + threadIdx.x;
-    int h_end = min(h + BLOCKHEIGHT, height)
+    int h_end = min(h + BLOCKHEIGHT, height);
 
     __shared__ scalar_t blockvec[BLOCKWIDTH];
     int i = width * h + w;
@@ -42,6 +42,7 @@ __global__ void VecQuant4MatMulKernel(
     unsigned int g;
     scalar_t w_tmp;
 
+
     int z_w = w / 8;
     int z_mod = (w % 8) * 4;
 
@@ -49,9 +50,9 @@ __global__ void VecQuant4MatMulKernel(
 
     if (w < width) {
         for (k = 0; k < h_range; ++k) {
-            int k_w = (k / 8);
-                int k_bit = (k % 8) * 4;
-            
+    	      int k_w = (k / 8);
+	          int k_bit = (k % 8) * 4;
+
             g = as_int(g_idx[g_h + k]);
             scalar_t scale = scales[g * width + w];
             scalar_t zero = scalar_t(((as_unsigned(zeros[g * zero_width + z_w]) >> z_mod) & 0xF) + 1);
@@ -62,23 +63,21 @@ __global__ void VecQuant4MatMulKernel(
 
     scalar_t res;
     for (int b = 0; b < batch; ++b) {
-            res = 0;
+	    res = 0;
 
         if (threadIdx.x < h_range) {
             blockvec[threadIdx.x] = vec[b * vec_height + blockIdx.x * BLOCKWIDTH + threadIdx.x];
         }
-        __syncthreads()
+        __syncthreads();
         if (w < width) {
-                for (k = 0; k < h_range; ++k){
-                    res += weight[k] * blockvec[k];
+	        for (k = 0; k < h_range; ++k){
+	            res += weight[k] * blockvec[k];
             }
             atomicAdd(&mul[b * width + w], res);
         }
-        __syncthreads()
-        
+        __syncthreads();
     }
 }
-
 
 void vecquant4matmul_cuda(
     torch::Tensor vec,
@@ -95,7 +94,7 @@ void vecquant4matmul_cuda(
     int zero_width = zeros.size(1);
 
     dim3 blocks(
-        (height + BLOCKHEIGHT -1) / BLOCKHEIGHT,
+        (height + BLOCKHEIGHT - 1) / BLOCKHEIGHT,
         (width + BLOCKWIDTH - 1) / BLOCKWIDTH
     );
     dim3 threads(BLOCKWIDTH);
