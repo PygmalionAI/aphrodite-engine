@@ -418,7 +418,7 @@ def _apply_typical_sampling(
     neg_entropy = (probs * shifted_logits).nansum(dim=-1, keepdim=True)
 
     surprisal_deviations = (neg_entropy - shifted_logits).abs()
-    _, indices = torch.sort(entropy_deviation)
+    _, indices = torch.sort(surprisal_deviation)
     reordered_probs = probs.gather(-1, sorted_indices)
     typ_mask_sorted = reordered_probs.cumsum(dim=-1) >= typical_ps
     
