@@ -104,7 +104,6 @@ class ModelConfig:
                    ) and self.hf_config.quantization_config.get(
                        "quant_method") == QuantizationMethod.GPTQ:
             self.quantization = "gptq"
-            "
         if self.quantization is None:
             return
         quantization = self.quantization.lower()
