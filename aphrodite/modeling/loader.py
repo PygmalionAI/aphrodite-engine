@@ -18,12 +18,12 @@ _MODEL_REGISTRY = {
     "MistralForCausalLM": MistralForCausalLM,
 }
 
-_MODEL_CLASSES_SUPPORT_QUANTIZATION = [
+_MODEL_CLASSES_SUPPORT_QUANTIZATION = {
     "awq": [LlamaForCausalLM],
     "gptq": [
         LlamaForCausalLM, GPTJForCausalLM, GPTNeoXForCausalLM
     ]
-]
+}
 
 
 @contextlib.contextmanager
