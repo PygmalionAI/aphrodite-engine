@@ -60,10 +60,10 @@ class Sampler(nn.Module):
         logits = _apply_logits_processors(input_metadata, logits, output_tokens)
 
         # Apply Tail Free Sampling, as described in https://www.trentonbricken.com/Tail-Free-Sampling/
-        tfs_zs = _get_tfs_z(input_metadata)
-        assert len(tfs_zs) == logits.shape[0]
-        if any(z < 1.0 - _SAMPLING_EPS for z in tfs_zs):
-            logits = _apply_tfs(logits, tfs_zs)
+        tfss = _get_tfs(input_metadata)
+        assert len(tfss) == logits.shape[0]
+        if any(z < 1.0 - _SAMPLING_EPS for z in tfss):
+            logits = _apply_tfs(logits, tfss)
 
         # Apply temperature scaling.
         temperatures = _get_temperatures(input_metadata)
@@ -259,13 +259,13 @@ def _get_top_p_top_k(
     return top_ps, top_ks
 
 
-def _get_tfs_z(input_metadata: InputMetadata) -> List[float]:
-    tfs_zs: List[float] = []
+def _get_tfs(input_metadata: InputMetadata) -> List[float]:
+    tfss: List[float] = []
     for seq_group in input_metadata.seq_groups:
         seq_ids, sampling_params = seq_group
-        tfs_z = sampling_params.tfs_z
-        tfs_zs += [tfs_z] * len(seq_ids)
-    return tfs_zs
+        z = sampling_params.tfs
+        tfss += [z] * len(seq_ids)
+    return tfss
 
 
 def _apply_top_p_top_k(
@@ -298,9 +298,9 @@ def _apply_top_p_top_k(
 
 def _apply_tfs(
     logits: torch.Tensor,
-    tfs_zs: List[float],
+    tfss: List[float],
 ) -> torch.Tensor:
-    z = torch.tensor(tfs_zs, dtype=logits.dtype, device=logits.device)
+    z = torch.tensor(tfss, dtype=logits.dtype, device=logits.device)
     logits_sort, logits_idx = logits.sort(dim=-1, descending=True)
     d2 = logits_sort.diff().diff().abs()
     normalized_d2 = d2 / torch.sum(d2, dim=-1)

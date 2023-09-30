@@ -9,7 +9,7 @@ class SamplingParams(BaseModel):
     temperature: float = Field(1.0, alias="temperature")
     top_p: float = Field(1.0, alias="top_p")
     top_k: float = Field(-1, alias="top_k")
-    tfs_z: float = Field(1.0, alias="tfs_z")
+    tfs: float = Field(1.0, alias="tfs")
     use_beam_search: bool = Field(False, alias="use_beam_search")
     length_penalty: float = Field(1.0, alias="length_penalty")
     early_stopping: Union[bool, str] = Field(False, alias="early_stopping")
