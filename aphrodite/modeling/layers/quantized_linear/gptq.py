@@ -147,7 +147,7 @@ class GPTQColumnParallelLinear(ColumnParallelLinear):
             g_idx = torch.empty((1, 1), device="meta")
         else:
             g_idx = self.g_idx.to("cpu")
-            self.q4 = quantization_ops.gptq_make_q4(self.qweight, self.qzeros,
+        self.q4 = quantization_ops.gptq_make_q4(self.qweight, self.qzeros,
                                                     self.scales, g_idx,
                                                     self.qweight.device.index)
             
