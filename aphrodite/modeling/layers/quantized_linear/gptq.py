@@ -78,7 +78,7 @@ class GPTQLinear(torch.nn.Module):
         self.q4 = quantization_ops.gptq_make_q4(self.qweight, self.qzeros,
                                                 self.scales, g_idx,
                                                 self.qweight.device.index)
-        
+
     def forward(self, input_):
         out_shape = input_.shape[:-1] + (self.qweight.shape[-1], )
         reshaped_x = input_.reshape(-1, input_.shape[-1])
@@ -90,7 +90,7 @@ class GPTQLinear(torch.nn.Module):
 
         output = output + self.bias if self.bias is not None else output
         return output
-    
+
 
 class GPTQColumnParallelLinear(ColumnParallelLinear):
 
@@ -114,7 +114,7 @@ class GPTQColumnParallelLinear(ColumnParallelLinear):
         self.qzeros = Parameter(
             torch.empty(
                 self.input_size // group_size,
-                self.output_size_per_partition,
+                self.output_size_per_partition //
                 self.quant_config.pack_factor,
                 device="cuda",
                 dtype=torch.int32,
@@ -131,7 +131,7 @@ class GPTQColumnParallelLinear(ColumnParallelLinear):
             requires_grad=False,
         )
         self.g_idx = Parameter(
-            torch.Tensor(
+            torch.tensor(
                 [i // group_size for i in range(self.input_size)],
                 device="cuda",
                 dtype=torch.int32,
@@ -147,7 +147,6 @@ class GPTQColumnParallelLinear(ColumnParallelLinear):
             g_idx = torch.empty((1, 1), device="meta")
         else:
             g_idx = self.g_idx.to("cpu")
-
             self.q4 = quantization_ops.gptq_make_q4(self.qweight, self.qzeros,
                                                     self.scales, g_idx,
                                                     self.qweight.device.index)
@@ -162,7 +161,7 @@ class GPTQColumnParallelLinear(ColumnParallelLinear):
         if bias is not None:
             output = output + bias
         return output.reshape(out_shape)
-    
+
 
 class GPTQRowParallelLinear(RowParallelLinear):
 
@@ -232,7 +231,7 @@ class GPTQRowParallelLinear(RowParallelLinear):
         self.q4 = quantization_ops.gptq_make_q4(self.qweight, self.qzeros,
                                                 self.scales, g_idx,
                                                 self.qweight.device.index)
-        
+
     def apply_weights(self, x: torch.Tensor) -> torch.Tensor:
         out_shape = x.shape[:-1] + (self.qweight.shape[-1], )
         reshaped_x = x.reshape(-1, x.shape[-1])
@@ -252,4 +251,3 @@ class GPTQRowParallelLinear(RowParallelLinear):
                                                  self.qzeros, self.g_idx)
             output = output.half()
         return output.reshape(out_shape)
-    

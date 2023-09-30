@@ -22,7 +22,7 @@ _MODEL_CLASSES_SUPPORT_QUANTIZATION = {
     "awq": [LlamaForCausalLM],
     "gptq": [
         LlamaForCausalLM, GPTJForCausalLM, GPTNeoXForCausalLM
-    ]
+    ],
 }
 
 
