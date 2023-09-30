@@ -51,15 +51,15 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def(
     "gptq_prepare_buffers",
     &gptq_prepare_buffers,
-    "Prepare buffers for GPTQ.")
+    "Prepare buffers for GPTQ.");
   m.def(
     "gptq_make_q4",
     &gptq_make_q4,
-    "Preprocess weight for GPTQ.")
+    "Preprocess weight for GPTQ.");
   m.def(
     "gptq_q4_matmul",
     &gptq_q4_matmul,
-    "Quantized GEMM for GPTQ.")
+    "Quantized GEMM for GPTQ.");
   m.def(
     "gptq_descact_matmul",
     &gptq_descact_matmul,
