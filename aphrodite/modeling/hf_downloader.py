@@ -11,6 +11,7 @@ from safetensors.torch import load_file, save_file, safe_open
 import numpy as np
 import torch
 from tqdm.auto import tqdm
+from transformers import PretrainedConfig
 
 from aphrodite.common.logger import init_logger
 from aphrodite.modeling.quantization_utils import get_quant_class
@@ -85,8 +86,13 @@ def convert_bin_to_safetensor_file(
 def get_quant_config(
     quantization: str,
     model_name_or_path: str,
+    hf_config: PretrainedConfig,
     cache_dir: Optional[str] = None,
 ) -> QuantizationConfig:
+    if quantization == "gptq" and hasattr(hf_config, "quantization_config"):
+        config = hf_config.quantization_config
+        return get_quant_class(quantization).from_config(config)
+    
     is_local = os.path.isdir(model_name_or_path)
     if not is_local:
         # Download the config files.
@@ -263,7 +269,7 @@ def load_padded_tensor_parallel_vocab(
     end_idx = (tensor_model_parallel_rank + 1) * shard_size
     loaded_weight = loaded_weight[start_idx:end_idx]
     loaded_weight = convert_pyslice_to_tensor(loaded_weight)
-    param[:loaded_weight.shape[0]].copy_(loaded_weight)
+    param.data[:loaded_weight.shape[0]].copy_(loaded_weight)
 
 
 def load_tensor_parallel_weights(
@@ -283,10 +289,15 @@ def load_tensor_parallel_weights(
             break
     for p in row_parallel_weight_names:
         if p in param_name:
-            shard_size = param.shape[1]
+            shard_size = param.shape[-1]
             start_idx = tensor_model_parallel_rank * shard_size
             end_idx = (tensor_model_parallel_rank + 1) * shard_size
-            loaded_weight = loaded_weight[:, start_idx:end_idx]
+            if isinstance(loaded_weight, torch.Tensor):
+                loaded_weight = loaded_weight[..., start_idx:end_idx]
+            else:
+                index = [slice(None)] * (len(loaded_weight.get_shape()) -
+                                         1) + [slice(start_idx, end_idx)]
+                loaded_weight = loaded_weight[index] 
             break
 
     loaded_weight = convert_pyslice_to_tensor(loaded_weight)
@@ -309,4 +320,31 @@ def initialize_dummy_weights(
     values between -1e-3 and 1e-3 works well for most models.
     """
     for param in model.state_dict().values():
-        param.data.uniform_(low, high)
+        if torch.is_floating_point(param):
+            param.data.uniform_(low, high)
+
+
+def get_parallel_weight(model: torch.nn.Module):
+    if model.quant_config is None:
+        column_weight_suffixes = ["weight", "bias"]
+        row_weight_suffixes = ["weight"]
+        ignore_weight_suffixes = []
+    else:
+        column_weight_suffixes = model.quant_config.get_column_tp_tensor_names()
+        row_weight_suffixes = model.quant_config.get_row_tp_tensor_names()
+        ignore_weight_suffixes = model.quant_config.get_ignore_tensor_names()
+
+    column_parallel_weights: List[str] = []
+    for layer in model.column_parallel_layers:
+        for suffix in column_weight_suffixes:
+            column_parallel_weights.append(f"{layer}.{suffix}")
+    row_parallel_weights: List[str] = []
+    for layer in model.row_parallel_layers:
+        for suffix in row_weight_suffixes:
+            row_parallel_weights.append(f"{layer}.{suffix}")
+
+    if hasattr(model, "parallel_vocab_layers"):
+        for layer in model.parallel_vocab_layers:
+            for suffix in ["weight", "bias"]:
+                column_parallel_weights.append(f"{layer}.{suffix}")
+    return column_parallel_weights, row_parallel_weights, ignore_weight_suffixes

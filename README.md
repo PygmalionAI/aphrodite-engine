@@ -14,6 +14,8 @@ Aphrodite builds upon and integrates the exceptional work from various projects,
 - [FasterTransformer](https://github.com/NVIDIA/FasterTransformer)
 - [xFormers](https://github.com/facebookresearch/xformers)
 - [AWQ](https://github.com/mit-han-lab/llm-awq/)
+- [GPTQ](https://github.com/IST-DASLab/gptq)
+- [ExLlama](https://github.com/turboderp/exllama)
 - [Megatron-LM](https://github.com/NVIDIA/Megatron-LM)
 - [FastChat](https://github.com/lm-sys/FastChat)
 - [SkyPilot](https://github.com/skypilot-org/skypilot)
@@ -25,7 +27,7 @@ Aphrodite builds upon and integrates the exceptional work from various projects,
 - Continuous Batching
 - Efficient K/V management with [PagedAttention](./aphrodite/modeling/layers/attention.py)
 - Optimized CUDA kernels for improved inference
-- Quantization support via AWQ
+- Quantization support via AWQ and GPTQ
 - Distributed inference
 - Multiple decoding algorithms (e.g. parallel sampling, beam search)
 
@@ -34,7 +36,7 @@ Aphrodite builds upon and integrates the exceptional work from various projects,
 
 ```sh
 $ pip install aphrodite-engine
-$ python -m aphrodite.endpoints.api_server_ooba --model PygmalionAI/pygmalion-2-13b
+$ python -m aphrodite.endpoints.api_server_ooba --model PygmalionAI/pygmalion-2-7b
 ```
 
 ## Requirements
@@ -109,7 +111,7 @@ $ python -m aphrodite.endpoints.api_server_ooba --model PygmalionAI/pygmalion-2-
 
 This will create a server which runs on port `8000` of your machine. You can navigate to SillyTavern's API menu, select TextGen WebUI, and set the API Type to Aphrodite. The default API key is `EMPTY`, but you can change it as necessary. Use `http://localhost:8000/api` as the API URL.
 
-To run a quantized model, use the `--quantization awq` flag. Make sure your model is in AWQ format, and not GPTQ/GGUF. Run with only the `--help` flag for a full list of arguments.
+To run a quantized model, use the `--quantization` flag with either `gptq` or `awq`. Make sure your model is in AWQ/GPTQ format and not GGUF. Run with only the `--help` flag for a full list of arguments.
 
 To manually query the API, run:
 

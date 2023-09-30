@@ -185,8 +185,14 @@ ext_modules.append(activation_extension)
 quantization_extension = CUDAExtension(
     name="aphrodite.quantization_ops",
     sources=[
-        "kernels/quantization.cpp",
-        "kernels/quantization/awq/gemm_kernels.cu",
+        "kernels/quantization.cpp", "kernels/quantization/awq/gemm_kernels.cu",
+        "kernels/quantization/gptq/exllama_ext.cpp",
+        "kernels/quantization/gptq/cuda_buffers.cu",
+        "kernels/quantization/gptq/cuda_func/column_remap.cu",
+        "kernels/quantization/gptq/cuda_func/q4_matmul.cu",
+        "kernels/quantization/gptq/cuda_func/q4_matrix.cu",
+        "kernels/quantization/gptq/alt_matmul_kernel.cu",
+        "kernels/quantization/gptq/alt_matmul.cpp"
     ],
     extra_compile_args={
         "cxx": CXX_FLAGS,
@@ -260,7 +266,7 @@ setuptools.setup(
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
     packages=setuptools.find_packages(
-        exclude=("assets", "kernels","examples", "tests")),
+        exclude=("kernels","examples", "tests")),
     python_requires=">=3.8",
     install_requires=get_requirements(),
     ext_modules=ext_modules,
