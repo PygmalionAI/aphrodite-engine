@@ -1,5 +1,5 @@
 """Ray for distributed multi-node inference: https://github.com/ray-project/ray"""
-import socket
+import socket, os
 from typing import Optional, Tuple, TYPE_CHECKING
 
 from aphrodite.common.config import ParallelConfig
@@ -76,6 +76,7 @@ def initialize_cluster(
                 "Ray is not installed. Please install Ray to use distributed "
                 "serving.")
         # Connect to a ray cluster.
+        os.environ["RAY_DEDUP_LOGS"] = "0"
         ray.init(address=ray_address, ignore_reinit_error=True)
 
     if not parallel_config.worker_use_ray:
