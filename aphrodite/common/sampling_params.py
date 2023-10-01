@@ -50,7 +50,18 @@ class SamplingParams:
         top_a: Float that controls the cutoff for Top-A sampling.
             Exact cutoff is top_a*max_prob**2. Must be in [0,inf], 0 to disable.
         tfs: Float that controls the cummulative approximate curvature of the
-            distribution to retain for Tail Free Sampling
+            distribution to retain for Tail Free Sampling.
+            Must be in (0, 1]. Set to 1 to disable
+        eta_cutoff: Float that controls the cutoff treshold for Eta sampling
+            (a form of entropy adaptive truncation sampling)
+            treshold is computed as min(eta, sqrt(eta)*entropy(probs)).
+            Specified in units of 1e-4. Set to 0 to disable
+        epsilon_cutoff: Float that controls the cutoff treshold for Epsilon sampling
+            (simple probability treshold truncation).
+            Specified in units of 1e-4. Set to 0 to disable.
+        typical_p: Float that controls the cumulative probability of tokens
+            closest in surprise to the expected surprise to consider.
+            Must be in (0, 1]. Set to 1 to disable.
         use_beam_search: Whether to use beam search instead of sampling.
         length_penalty: Float that penalizes sequences based on their length.
             Used in beam search.
@@ -88,6 +99,9 @@ class SamplingParams:
         top_k: int = -1,
         top_a: float = 0.0,
         tfs: float = 1.0,
+        eta_cutoff: float = 0.0,
+        epsilon_cutoff: float = 0.0,
+        typical_p: float = 1.0,
         use_beam_search: bool = False,
         length_penalty: float = 1.0,
         early_stopping: Union[bool, str] = False,
@@ -109,6 +123,9 @@ class SamplingParams:
         self.top_k = top_k
         self.top_a = top_a
         self.tfs = tfs
+        self.eta_cutoff = eta_cutoff
+        self.epsilon_cutoff = epsilon_cutoff
+        self.typical_p = typical_p
         self.use_beam_search = use_beam_search
         self.length_penalty = length_penalty
         self.early_stopping = early_stopping
@@ -164,6 +181,12 @@ class SamplingParams:
             raise ValueError(f"top_a must be in [0, 1], got {self.top_a}.")
         if not 0.0 < self.tfs <= 1.0:
             raise ValueError(f"tfs must be in (0, 1], got {self.tfs}.")
+        if not 0.0 <= self.epsilon_cutoff <= 1000.0:
+            raise ValueError(f"epsilon_cutoff must be in [0, 1000], got {self.epsilon_cutoff}.")
+        if not self.eta_cutoff >= 0:
+            raise ValueError(f"eta_cutoff must be non negative, got {self.eta_cutoff}.")
+        if not 0.0 <= self.typical_p <= 1.0:
+            raise ValueError(f"typical_p must be in (0, 1], got {self.typical_p}.")
         if self.max_tokens < 1:
             raise ValueError(
                 f"max_tokens must be at least 1, got {self.max_tokens}.")
@@ -224,6 +247,9 @@ class SamplingParams:
                 f"top_k={self.top_k}, "
                 f"top_a={self.top_a}, "
                 f"tfs={self.tfs}, "
+                f"eta_cutoff={self.eta_cutoff}, "
+                f"epsilon_cutoff={self.epsilon_cutoff}, "
+                f"typical_p={self.typical_p}, "
                 f"use_beam_search={self.use_beam_search}, "
                 f"length_penalty={self.length_penalty}, "
                 f"early_stopping={self.early_stopping}, "
