@@ -72,9 +72,10 @@ class Sampler(nn.Module):
         presence_penalties, frequency_penalties, repetition_penalties = _get_penalties(input_metadata)
         assert len(presence_penalties) == logits.shape[0]
         assert len(frequency_penalties) == logits.shape[0]
+        immune_tokens = [params.immune_tokens for _,params in input_metadata.seq_groups]
         logits = _apply_penalties(logits, output_tokens, prompt_tokens,
                                   presence_penalties, frequency_penalties, repetition_penalties,
-                                  self.vocab_size)
+                                  self.vocab_size, immune_tokens)
         
         # push_logit_hist("rep_pen", logits_at, logits)
 
@@ -210,6 +211,7 @@ def _apply_penalties(
     frequency_penalties: List[float],
     repetition_penalties: List[float],
     vocab_size: int,
+    immune_tokens: List[List[int]],
 ) -> torch.Tensor:
     num_seqs, vocab_size = logits.shape
     for i in range(num_seqs):
@@ -241,6 +243,7 @@ def _apply_penalties(
     bin_counts.scatter_add_(1, output_tokens_tensor,
                             torch.ones_like(output_tokens_tensor))
     bin_counts = bin_counts[:, :vocab_size]  # Remove the padding bin.
+    bin_counts.scatter_(1, torch.tensor(immune_tokens, device=bin_counts.device), 0)
 
     frequency_penalties = torch.tensor(frequency_penalties,
                                        dtype=logits.dtype,
@@ -258,14 +261,6 @@ def _apply_penalties(
     presence_mask = (bin_counts > 0)
     logits -= presence_penalties.unsqueeze(dim=1) * presence_mask
 
-    # Repetition Penalty is multiplicative, not additive, so we must take offsets into account.
-    # However, if we do that, Rep Pen is sensitive to the actual logit range, which is... also odd.
-    # 1.0 no change
-    # 1.5 BE SMALLER
-
-    # logit_floors = logits[indices].min()
-    # logits[indices] = logit_floors + (logits[indices] - logit_floors) / repetition_penalties.unsqueeze(dim=1)
-    # logits[indices] += presence_mask * ((logits[indices] - logit_floors) * repetition_penalties.unsqueeze(dim=1) - logits[indices])
     # Effectively: If token is present and logit is positive, divide logit by rep_pen.
     #              If token is present and logit is negative, multiply logit by rep_pen.
     logits += logits * (1 / repetition_penalties.unsqueeze(dim=1) - 1) * presence_mask * (logits > 0)

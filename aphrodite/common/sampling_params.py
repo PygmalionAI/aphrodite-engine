@@ -74,6 +74,7 @@ class SamplingParams:
         presence_penalty: float = 0.0,
         frequency_penalty: float = 0.0,
         repetition_penalty: float = 1.0,
+        immune_token_ids: Optional[List[int]] = None,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = -1,
@@ -94,6 +95,7 @@ class SamplingParams:
         self.presence_penalty = presence_penalty
         self.frequency_penalty = frequency_penalty
         self.repetition_penalty = repetition_penalty
+        self.immune_tokens = immune_token_ids
         self.temperature = temperature
         self.top_p = top_p
         self.top_k = top_k
