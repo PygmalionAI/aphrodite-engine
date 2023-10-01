@@ -134,7 +134,7 @@ curl -X POST "http://localhost:8000/api/v1/generate" \
 ```
 For the full list of Sampling parameters, please refer to [SamplingParams](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/common/sampling_params.py):
 
-https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/common/sampling_params.py#L24-L87
+https://github.com/PygmalionAI/aphrodite-engine/blob/56161a9674f1f9e8927aaa77e5d339498bb6eeee/aphrodite/common/sampling_params.py#L24-L87
 
 ### OpenAI-compatible server
 An OpenAI-compatible server is also provided. You can launch the server with:
