@@ -75,9 +75,11 @@ class SamplingParams:
         best_of: Optional[int] = None,
         presence_penalty: float = 0.0,
         frequency_penalty: float = 0.0,
+        repetition_penalty: float = 1.0,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = -1,
+        top_a: float = 0.0,
         tfs: float = 1.0,
         use_beam_search: bool = False,
         length_penalty: float = 1.0,
@@ -94,9 +96,11 @@ class SamplingParams:
         self.best_of = best_of if best_of is not None else n
         self.presence_penalty = presence_penalty
         self.frequency_penalty = frequency_penalty
+        self.repetition_penalty = repetition_penalty
         self.temperature = temperature
         self.top_p = top_p
         self.top_k = top_k
+        self.top_a = top_a
         self.tfs = tfs
         self.use_beam_search = use_beam_search
         self.length_penalty = length_penalty
@@ -138,6 +142,9 @@ class SamplingParams:
         if not -2.0 <= self.frequency_penalty <= 2.0:
             raise ValueError("frequency_penalty must be in [-2, 2], got "
                              f"{self.frequency_penalty}.")
+        if not 1.0 <= self.repetition_penalty:
+            raise ValueError("repetition_penalty must be in [1, inf), got "
+                             f"{self.repetition_penalty}.")
         if self.temperature < 0.0:
             raise ValueError(
                 f"temperature must be non-negative, got {self.temperature}.")
@@ -146,6 +153,8 @@ class SamplingParams:
         if self.top_k < -1 or self.top_k == 0:
             raise ValueError(f"top_k must be -1 (disable), or at least 1, "
                              f"got {self.top_k}.")
+        if not 0.0 <= self.top_a <= 1.0:
+            raise ValueError(f"top_a must be in [0, 1], got {self.top_a}.")
         if not 0.0 < self.tfs <= 1.0:
             raise ValueError(f"tfs must be in (0, 1], got {self.tfs}.")
         if self.max_tokens < 1:
@@ -202,9 +211,11 @@ class SamplingParams:
                 f"best_of={self.best_of}, "
                 f"presence_penalty={self.presence_penalty}, "
                 f"frequency_penalty={self.frequency_penalty}, "
+                f"repetition_penalty={self.repetition_penalty}, "
                 f"temperature={self.temperature}, "
                 f"top_p={self.top_p}, "
                 f"top_k={self.top_k}, "
+                f"top_a={self.top_a}, "
                 f"tfs={self.tfs}, "
                 f"use_beam_search={self.use_beam_search}, "
                 f"length_penalty={self.length_penalty}, "
