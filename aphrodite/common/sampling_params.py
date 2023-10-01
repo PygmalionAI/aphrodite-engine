@@ -35,6 +35,11 @@ class SamplingParams:
             frequency in the generated text so far. Values > 0 encourage the
             model to use new tokens, while values < 0 encourage the model to
             repeat tokens.
+        repetition_penalty: Float that penalizes new tokens based on their
+            frequency in the generated text so far.
+            freq_pen is applied additively while
+            rep_pen is applied multiplicatively. 
+            Must be in [1, inf). Set to 1 to disable the effect.
         temperature: Float that controls the randomness of the sampling. Lower
             values make the model more deterministic, while higher values make
             the model more random. Zero means greedy sampling.
@@ -42,6 +47,8 @@ class SamplingParams:
             to consider. Must be in (0, 1]. Set to 1 to consider all tokens.
         top_k: Integer that controls the number of top tokens to consider. Set
             to -1 to consider all tokens.
+        top_a: Float that controls the cutoff for Top-A sampling.
+            Exact cutoff is top_a*max_prob**2. Must be in [0,inf], 0 to disable.
         tfs: Float that controls the cummulative approximate curvature of the
             distribution to retain for Tail Free Sampling
         use_beam_search: Whether to use beam search instead of sampling.
