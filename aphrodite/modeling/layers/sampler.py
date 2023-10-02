@@ -67,13 +67,13 @@ class Sampler(nn.Module):
         # push_logit_hist("new", logits_at, logits)
 
         # Apply presence and frequency penalties.
-        output_tokens, prompt_tokens = _get_prior_tokens(input_metadata)
+        output_tokens = _get_output_tokens(input_metadata)
         assert len(output_tokens) == logits.shape[0]
         presence_penalties, frequency_penalties, repetition_penalties = _get_penalties(input_metadata)
         assert len(presence_penalties) == logits.shape[0]
         assert len(frequency_penalties) == logits.shape[0]
         immune_tokens = [params.immune_tokens for _,params in input_metadata.seq_groups]
-        logits = _apply_penalties(logits, output_tokens, prompt_tokens,
+        logits = _apply_penalties(logits, output_tokens,
                                   presence_penalties, frequency_penalties, repetition_penalties,
                                   self.vocab_size, immune_tokens)
         
@@ -199,17 +199,15 @@ def _get_penalties(
     return presence_penalties, frequency_penalties, repetition_penalties
 
 
-def _get_prior_tokens(input_metadata: InputMetadata) -> Tuple[List[List[int]], List[List[int]]]:
+def _get_output_tokens(input_metadata: InputMetadata) -> Tuple[List[List[int]], List[List[int]]]:
     output_tokens: List[List[int]] = []
-    prompt_tokens: List[List[int]] = []
     for seq_group in input_metadata.seq_groups:
         seq_ids, _ = seq_group
         for seq_id in seq_ids:
             seq_data = input_metadata.seq_data[seq_id]
             output_tokens.append(seq_data.output_token_ids)
-            prompt_tokens.append(seq_data.prompt_token_ids)
 
-    return output_tokens, prompt_tokens
+    return output_tokens
 
 def _apply_logits_processors(
     input_metadata: InputMetadata,
@@ -229,7 +227,6 @@ def _apply_logits_processors(
 def _apply_penalties(
     logits: torch.Tensor,
     output_tokens: List[List[int]],
-    prompt_tokens: List[List[int]],
     presence_penalties: List[float],
     frequency_penalties: List[float],
     repetition_penalties: List[float],
@@ -238,7 +235,7 @@ def _apply_penalties(
 ) -> torch.Tensor:
     num_seqs, vocab_size = logits.shape
     for i in range(num_seqs):
-        if not output_tokens[i] and not prompt_tokens[i]:
+        if not output_tokens[i]:
             continue
         if (abs(presence_penalties[i]) < _SAMPLING_EPS and
             abs(frequency_penalties[i]) < _SAMPLING_EPS and
@@ -249,10 +246,10 @@ def _apply_penalties(
         # Return early if all sequences have zero penalties.
         return logits
 
-    max_output_len = max(len(out)+len(prompt) for out,prompt in zip(output_tokens, prompt_tokens))
+    max_output_len = max(len(out) for out in output_tokens)
     padded_output_tokens = [
-        prompt + out + [vocab_size] * (max_output_len - len(out) - len(prompt))
-        for out,prompt in zip(output_tokens, prompt_tokens)
+        out + [vocab_size] * (max_output_len - len(out))
+        for out in output_tokens
     ]
     output_tokens_tensor = torch.tensor(padded_output_tokens,
                                         dtype=torch.long,
