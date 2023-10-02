@@ -122,7 +122,7 @@ async def get_version():
 @kai_api.get("/model")
 async def get_model():
     """ Get current model """
-    return JSONResponse({"result": served_model})
+    return JSONResponse({"result": f"aphrodite/{served_model}"})
 
 @kai_api.get("/config/soft_prompts_list")
 async def get_available_softprompts():
