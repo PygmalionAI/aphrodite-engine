@@ -5,7 +5,7 @@ import asyncio
 import json
 
 from http import HTTPStatus
-from typing import List, Tuple, Iterator
+from typing import List, Tuple, AsyncGenerator
 
 import uvicorn
 from fastapi import FastAPI, APIRouter, Request
@@ -98,21 +98,24 @@ async def generate(kai_payload: KAIGenerationInputSchema, raw_request: Request) 
 
 
 @extra_api.post("/generate/stream")
-async def generate_stream(kai_payload: KAIGenerationInputSchema, raw_request: Request) -> StreamingResponse:
-    raise NotImplementedError()
+async def generate_stream(kai_payload: KAIGenerationInputSchema) -> StreamingResponse:
+    """ Generate text SSE streaming """
 
-def stream_kobold(iter_tokens: Iterator[str]) -> Iterator[bytes]:
-    """ Produce Kobold SSE byte stream from strings """
+    req_id = f"kai-{random_uuid()}"
+    sampling_params, input_tokens = prepare_engine_payload(kai_payload)
+    results_generator = engine.generate(None, sampling_params, req_id, input_tokens)
 
-    generated_text = ""
-    for token in iter_tokens:
-        if len(token) == 0:
-            continue
-        yield b"event: message\n"
-        yield f"data: {json.dumps({'token': token})}\n\n".encode()
-        generated_text += token
+    async def stream_kobold() -> AsyncGenerator[bytes, None]:
+        previous_output = ""
+        async for res in results_generator:
+            new_chunk = res.outputs[0].text[len(previous_output):]
+            previous_output += new_chunk
+            yield b"event: message\n"
+            yield f"data: {json.dumps({'token': new_chunk})}\n\n".encode()
 
-    return generated_text
+    return StreamingResponse(stream_kobold(),
+                             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+                             media_type='text/event-stream')
 
 @kai_api.get("/info/version")
 async def get_version():
