@@ -20,9 +20,6 @@ from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.common.utils import random_uuid
 from aphrodite.endpoints.protocol import KAIGenerationInputSchema
 
-from fastapi import FastAPI, APIRouter
-from fastapi.responses import JSONResponse, StreamingResponse
-
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
 logger = init_logger(__name__)
@@ -42,7 +39,7 @@ def validation_exception_handler(request, exc):  # pylint: disable=unused-argume
     return create_error_response(HTTPStatus.UNPROCESSABLE_ENTITY, str(exc))
 
 def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[SamplingParams, List[int]]:
-    """ Create SamplingParams and truncated input tokens for AsyncEngine from Kobold GenerationInput """
+    """Create SamplingParams and truncated input tokens for AsyncEngine"""
 
     if kai_payload.max_context_length > max_model_len:
         raise ValueError(
