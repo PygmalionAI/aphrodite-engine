@@ -243,7 +243,10 @@ def _apply_penalties(
     bin_counts.scatter_add_(1, output_tokens_tensor,
                             torch.ones_like(output_tokens_tensor))
     bin_counts = bin_counts[:, :vocab_size]  # Remove the padding bin.
-    bin_counts.scatter_(1, torch.tensor(immune_tokens, device=bin_counts.device), 0)
+    for i,imms in enumerate(immune_tokens):
+        for t in imms:
+            bin_counts[i][t] = 0
+    # bin_counts.scatter_(1, torch.tensor(immune_tokens, device=bin_counts.device), 0)
 
     frequency_penalties = torch.tensor(frequency_penalties,
                                        dtype=logits.dtype,
