@@ -9,7 +9,6 @@ from typing import List, Tuple, Iterator
 
 import uvicorn
 from fastapi import FastAPI, APIRouter, Request
-from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
@@ -38,11 +37,9 @@ def create_error_response(status_code: HTTPStatus, message: str) -> JSONResponse
     return JSONResponse({"msg": message, "type": "invalid_request_error"},
                         status_code=status_code.value)
 
-@app.exception_handler(RequestValidationError)
 @app.exception_handler(ValueError)
-@app.exception_handler(AssertionError)
 def validation_exception_handler(request, exc):  # pylint: disable=unused-argument
-    return create_error_response(HTTPStatus.BAD_REQUEST, str(exc))
+    return create_error_response(HTTPStatus.UNPROCESSABLE_ENTITY, str(exc))
 
 def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[SamplingParams, List[int]]:
     """ Create SamplingParams and truncated input tokens for AsyncEngine from Kobold GenerationInput """
@@ -50,35 +47,31 @@ def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[Sampl
     if kai_payload.max_context_length > max_model_len:
         raise ValueError(
             f"max_context_length ({kai_payload.max_context_length}) must be less than or equal to "
-            f"max_model_length ({max_model_len})"
+            f"max_model_len ({max_model_len})"
         )
 
     sampling_params = SamplingParams(max_tokens=kai_payload.max_length)
 
-    n = kai_payload.n if kai_payload.n is not None else 1
-    temp = kai_payload.temperature if kai_payload.temperature is not None else 1.0
-    top_p = kai_payload.top_p if kai_payload.top_p is not None else 1.0
-    top_k = kai_payload.top_k if kai_payload.top_k not in [None, 0.0] else -1
-    top_a = kai_payload.top_a if kai_payload.top_a is not None else 0.0
-    tfs = kai_payload.tfs if kai_payload.tfs is not None else 1.0
-    rep_pen = kai_payload.rep_pen if kai_payload.rep_pen is not None else 1.0
-    max_tokens = kai_payload.max_length if kai_payload.max_length is not None else 80
+    # KAI spec: top_k == 0 means disabled, aphrodite: top_k == -1 means disabled
+    # https://github.com/KoboldAI/KoboldAI-Client/wiki/Settings
+    top_k = kai_payload.top_k if kai_payload.top_k != 0.0 else -1
 
     sampling_params = SamplingParams(
-        n=n,
-        best_of=n,
-        repetition_penalty=rep_pen,
-        temperature=temp,
-        tfs=tfs,
-        top_p=top_p,
+        n=kai_payload.n,
+        best_of=kai_payload.n,
+        repetition_penalty=kai_payload.rep_pen,
+        temperature=kai_payload.temperature,
+        tfs=kai_payload.tfs,
+        top_p=kai_payload.top_p,
         top_k=top_k,
-        top_a=top_a,
+        top_a=kai_payload.top_a,
+        typical_p=kai_payload.typical,
         stop=kai_payload.stop_sequence,
-        ignore_eos=bool(kai_payload.use_default_badwordsids), # TODO ban instead
-        max_tokens=max_tokens,
+        ignore_eos=kai_payload.use_default_badwordsids, # TODO ban instead
+        max_tokens=kai_payload.max_length,
     )
 
-    max_input_tokens = kai_payload.max_context_length - kai_payload.max_length
+    max_input_tokens = max(1, kai_payload.max_context_length - kai_payload.max_length)
     input_tokens = tokenizer(kai_payload.prompt).input_ids[-max_input_tokens:]
 
     return sampling_params, input_tokens
@@ -101,7 +94,7 @@ async def generate(kai_payload: KAIGenerationInputSchema, raw_request: Request) 
         final_res = res
     assert final_res is not None
 
-    return JSONResponse({"results": final_res.outputs})
+    return JSONResponse({"results": list(map(lambda completion_output: {"text": completion_output.text}, final_res.outputs))})
 
 
 @extra_api.post("/generate/stream")
