@@ -137,17 +137,17 @@ async def get_current_softprompt():
 @kai_api.put("/config/soft_prompt")
 async def set_current_softprompt():
     """ stub for compatibility """
-    return JSONResponse()
+    return JSONResponse({})
 
 @extra_api.post("/abort")
 async def abort_generation():
     """ stub for compatibility """
-    return JSONResponse()
+    return JSONResponse({})
 
 @extra_api.get("/version")
 async def get_extra_version():
     """ Impersonate KoboldCpp with streaming support """
-    return {"result": "KoboldCpp", "version": "1.30"}
+    return JSONResponse({"result": "KoboldCpp", "version": "1.30"})
 
 app.include_router(kai_api, prefix="/api/v1")
 app.include_router(kai_api, prefix="/api/latest", include_in_schema=False)
