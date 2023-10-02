@@ -35,8 +35,9 @@ Aphrodite builds upon and integrates the exceptional work from various projects,
 ## Quickstart
 
 ```sh
-$ pip install aphrodite-engine
-$ python -m aphrodite.endpoints.api_server_ooba --model PygmalionAI/pygmalion-2-7b
+pip install aphrodite-engine
+
+python -m aphrodite.endpoints.api_server_ooba --model PygmalionAI/pygmalion-2-7b
 ```
 
 ## Requirements
@@ -64,13 +65,17 @@ If you do not meet the minimum CC, you will not be able to run Aphrodite.
 ## Setting up the environment
 **If you run into any problems, please refer to the common [Common Issues](#common-issues) section, or open an [Issue](https://github.com/PygmalionAI/aphrodite-engine/issues) if you can't find the answer there.**
 
-Aphrodite will require a slightly specialized environment to run, as the latest CUDA and GCC versions are not supported. You can use Conda to easily configure your environment.
+Aphrodite will require a slightly specialized environment to run, as the latest CUDA and GCC versions are not supported. You can use Conda to easily configure your environment. If you're on windows, make sure you have [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) installed. You can do this by opening Windows PowerShell and running:
+```sh
+wsl --install
+```
 
 ### Install miniconda3
 
 ```sh
-$ wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-$ bash ./Miniconda3*
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+
+bash ./Miniconda3*
 ```
 You can follow the on-screen instructions, though you may want to set the installation directory to somewhere with a large empty storage space.
 
@@ -78,16 +83,16 @@ You can either source your shell script (`. ~/.bashrc` or `. ~/.zshrc`) or resta
 
 ### Configuring the env for Aphrodite-engine
 ```sh
-$ conda config --set auto_activate_base false
-$ conda create -n aphrodite python=3.10
-$ conda activate aphrodite
-$ conda install -c "nvidia/label/cuda-11.8.0" cuda
+conda config --set auto_activate_base false
+conda create -n aphrodite python=3.10
+conda activate aphrodite
+conda install -c "nvidia/label/cuda-11.8.0" cuda
 ```
 
 ## Installation
 
 ```sh
-$ pip install aphrodite-engine
+pip install aphrodite-engine
 ```
 
 ### Install from source
@@ -106,7 +111,7 @@ $ pip install aphrodite-engine
 You can spawn a [text-generation-webui](https://github.com/oobabooga/text-generation-webui)-compatible API server to use with [SillyTavern](https://github.com/SillyTavern/SillyTavern):
 
 ```sh
-$ python -m aphrodite.endpoints.api_server_ooba --model PygmalionAI/pygmalion-2-13b --max-model-len 4096 --max-num-batched-tokens 4096
+python -m aphrodite.endpoints.api_server_ooba --model PygmalionAI/pygmalion-2-13b --max-model-len 4096 --max-num-batched-tokens 4096
 ```
 
 This will create a server which runs on port `8000` of your machine. You can navigate to SillyTavern's API menu, select TextGen WebUI, and set the API Type to Aphrodite. The default API key is `EMPTY`, but you can change it as necessary. Use `http://localhost:8000/api` as the API URL.
@@ -116,7 +121,7 @@ To run a quantized model, use the `--quantization` flag with either `gptq` or `a
 To manually query the API, run:
 
 ```sh
-$ curl -X POST "http://localhost:8000/api/v1/generate" \
+curl -X POST "http://localhost:8000/api/v1/generate" \
 -H "Content-Type: application/json" \
 -H "x-api-key: EMPTY" \
 -d '{
@@ -129,12 +134,12 @@ $ curl -X POST "http://localhost:8000/api/v1/generate" \
 ```
 For the full list of Sampling parameters, please refer to [SamplingParams](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/common/sampling_params.py):
 
-https://github.com/PygmalionAI/aphrodite-engine/blob/99657d444bc2bab5e4293e9ee96e154dd7d3de44/aphrodite/common/sampling_params.py#L22-L62
+https://github.com/PygmalionAI/aphrodite-engine/blob/56161a9674f1f9e8927aaa77e5d339498bb6eeee/aphrodite/common/sampling_params.py#L24-L87
 
 ### OpenAI-compatible server
 An OpenAI-compatible server is also provided. You can launch the server with:
 ```sh
-$ python -m aphrodite.endpoints.openai.api_server --model PygmalionAI/pygmalion-2-13b
+python -m aphrodite.endpoints.openai.api_server --model PygmalionAI/pygmalion-2-13b
 ```
 
 You can query the server the same as any other OpenAI Completion/Chat Completion endpoint, though without an API key.
@@ -145,7 +150,7 @@ You can query the server the same as any other OpenAI Completion/Chat Completion
 
 This is normally due to your environment referring to the global installation of CUDA and not the one in your current env. Run `which nvcc` and note down the output. For example, if your output is `/home/anon/miniconda3/envs/aphrodite/bin/nvcc`, run this command:
 ```sh
-$ export CUDA_HOME=/home/anon/miniconda3/envs/aphrodite
+export CUDA_HOME=/home/anon/miniconda3/envs/aphrodite
 ```
 
 Then run the installation command again.

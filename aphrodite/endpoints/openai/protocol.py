@@ -57,6 +57,10 @@ class ChatCompletionRequest(BaseModel):
     messages: Union[str, List[Dict[str, str]]]
     temperature: Optional[float] = 0.7
     top_p: Optional[float] = 1.0
+    tfs: Optional[float] = 1.0
+    eta_cutoff: Optional[float] = 0.0
+    epsilon_cutoff: Optional[float] = 0.0
+    typical_p: Optional[float] = 1.0
     n: Optional[int] = 1
     max_tokens: Optional[int] = None
     stop: Optional[Union[str, List[str]]] = Field(default_factory=list)
@@ -81,6 +85,10 @@ class CompletionRequest(BaseModel):
     max_tokens: Optional[int] = 16
     temperature: Optional[float] = 1.0
     top_p: Optional[float] = 1.0
+    tfs: Optional[float] = 1.0
+    eta_cutoff: Optional[float] = 0.0
+    epsilon_cutoff: Optional[float] = 0.0
+    typical_p: Optional[float] = 1.0
     n: Optional[int] = 1
     stream: Optional[bool] = False
     logprobs: Optional[int] = None
