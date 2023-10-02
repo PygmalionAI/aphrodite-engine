@@ -94,7 +94,7 @@ async def generate(kai_payload: KAIGenerationInputSchema, raw_request: Request) 
         final_res = res
     assert final_res is not None
 
-    return JSONResponse({"results": list(map(lambda completion_output: {"text": completion_output.text}, final_res.outputs))})
+    return JSONResponse({"results": [{"text": output.text} for output in final_res.outputs]})
 
 
 @extra_api.post("/generate/stream")
