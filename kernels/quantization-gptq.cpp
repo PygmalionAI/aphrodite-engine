@@ -1,13 +1,6 @@
 #include <cstdint>
 #include <torch/extension.h>
 
-torch::Tensor awq_gemm(
-  torch::Tensor _in_feats,
-  torch::Tensor _kernel,
-  torch::Tensor _scaling_factors,
-  torch::Tensor _zeros,
-  int split_k_iters);
-
 void gptq_set_tuning_params(
   int matmul_recons_thd,
   bool matmul_fused_remap,
@@ -40,10 +33,6 @@ void gptq_descact_matmul(
 
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def(
-    "awq_gemm",
-    &awq_gemm,
-    "Quantized GEMM for AWQ");
   m.def(
     "gptq_set_tuning_params",
     &gptq_set_tuning_params,

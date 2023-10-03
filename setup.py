@@ -181,11 +181,13 @@ activation_extension = CUDAExtension(
 )
 ext_modules.append(activation_extension)
 
+
 # Quantization kernels.
-quantization_extension = CUDAExtension(
-    name="aphrodite.quantization_ops",
-    sources=[
-        "kernels/quantization.cpp", "kernels/quantization/awq/gemm_kernels.cu",
+exclude_modules = os.getenv('EXCLUDE_MODULES', '').split(',')
+quantization_sources = [
+        "kernels/quantization-awq.cpp",
+        "kernels/quantization/awq/gemm_kernels.cu",
+        "kernels/quantization-gptq.cpp",
         "kernels/quantization/gptq/exllama_ext.cpp",
         "kernels/quantization/gptq/cuda_buffers.cu",
         "kernels/quantization/gptq/cuda_func/column_remap.cu",
@@ -193,7 +195,15 @@ quantization_extension = CUDAExtension(
         "kernels/quantization/gptq/cuda_func/q4_matrix.cu",
         "kernels/quantization/gptq/alt_matmul_kernel.cu",
         "kernels/quantization/gptq/alt_matmul.cpp"
-    ],
+]
+
+if 'awq' in exclude_modules:
+    quantization_sources.remove("kernels/quantization-awq.cpp")
+    quantization_sources.remove("kernels/quantization/awq/gemm_kernels.cu")
+
+quantization_extension = CUDAExtension(
+    name="aphrodite.quantization_ops",
+    sources=quantization_sources,
     extra_compile_args={
         "cxx": CXX_FLAGS,
         "nvcc": NVCC_FLAGS,
