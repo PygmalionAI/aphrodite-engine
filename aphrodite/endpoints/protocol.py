@@ -41,6 +41,8 @@ class KAIGenerationInputSchema(BaseModel):
     top_a: Optional[NonNegativeFloat] = 0.0
     top_p: Optional[confloat(ge=0, le=1)] = 1.0
     tfs: Optional[confloat(ge=0, le=1)] = 1.0
+    eps_cutoff: Optional[confloat(ge=0,le=1000)] = 0.0
+    eta_cutoff: Optional[NonNegativeFloat] = 0.0
     typical: Optional[confloat(ge=0, le=1)] = 1.0
     temperature: Optional[PositiveFloat] = 1.0
     use_memory: Optional[bool]

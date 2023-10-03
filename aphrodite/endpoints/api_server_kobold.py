@@ -63,6 +63,8 @@ def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[Sampl
         top_k=top_k,
         top_a=kai_payload.top_a,
         typical_p=kai_payload.typical,
+        eta_cutoff=kai_payload.eta_cutoff,
+        epsilon_cutoff=kai_payload.eps_cutoff,
         stop=kai_payload.stop_sequence,
         # ignore_eos=kai_payload.use_default_badwordsids, # TODO ban instead
         max_tokens=kai_payload.max_length,
