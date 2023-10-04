@@ -114,14 +114,14 @@ You can spawn a [text-generation-webui](https://github.com/oobabooga/text-genera
 python -m aphrodite.endpoints.api_server_ooba --model PygmalionAI/pygmalion-2-13b --max-model-len 4096 --max-num-batched-tokens 4096
 ```
 
-This will create a server which runs on port `8000` of your machine. You can navigate to SillyTavern's API menu, select TextGen WebUI, and set the API Type to Aphrodite. The default API key is `EMPTY`, but you can change it as necessary. Use `http://localhost:8000/api` as the API URL.
+This will create a server which runs on port `2242` of your machine. You can navigate to SillyTavern's API menu, select TextGen WebUI, and set the API Type to Aphrodite. The default API key is `EMPTY`, but you can change it as necessary. Use `http://localhost:2242/api` as the API URL.
 
 To run a quantized model, use the `--quantization` flag with either `gptq` or `awq`. Make sure your model is in AWQ/GPTQ format and not GGUF. Run with only the `--help` flag for a full list of arguments.
 
 To manually query the API, run:
 
 ```sh
-curl -X POST "http://localhost:8000/api/v1/generate" \
+curl -X POST "http://localhost:2242/api/v1/generate" \
 -H "Content-Type: application/json" \
 -H "x-api-key: EMPTY" \
 -d '{
