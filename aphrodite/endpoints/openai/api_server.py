@@ -222,6 +222,9 @@ async def create_chat_completion(request: ChatCompletionRequest,
             temperature=request.temperature,
             top_p=request.top_p,
             tfs=request.tfs,
+            eta_cutoff=request.eta_cutoff,
+            epsilon_cutoff=request.epsilon_cutoff,
+            typical_p=request.typical_p,
             stop=request.stop,
             stop_token_ids=request.stop_token_ids,
             max_tokens=request.max_tokens,
@@ -580,7 +583,7 @@ if __name__ == "__main__":
                         type=str,
                         default="localhost",
                         help="host name")
-    parser.add_argument("--port", type=int, default=8000, help="port number")
+    parser.add_argument("--port", type=int, default=2242, help="port number")
     parser.add_argument("--allow-credentials",
                         action="store_true",
                         help="allow credentials")

@@ -191,7 +191,7 @@ if __name__ == "__main__":
     parser.add_argument("--backend", type=str, default="aphrodite",
                         choices=["aphrodite", "tgi"])
     parser.add_argument("--host", type=str, default="localhost")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=2242)
     parser.add_argument("--dataset", type=str, required=True,
                         help="Path to the dataset.")
     parser.add_argument("--tokenizer", type=str, required=True,

@@ -114,14 +114,14 @@ You can spawn a [text-generation-webui](https://github.com/oobabooga/text-genera
 python -m aphrodite.endpoints.api_server_ooba --model PygmalionAI/pygmalion-2-13b --max-model-len 4096 --max-num-batched-tokens 4096
 ```
 
-This will create a server which runs on port `8000` of your machine. You can navigate to SillyTavern's API menu, select TextGen WebUI, and set the API Type to Aphrodite. The default API key is `EMPTY`, but you can change it as necessary. Use `http://localhost:8000/api` as the API URL.
+This will create a server which runs on port `2242` of your machine. You can navigate to SillyTavern's API menu, select TextGen WebUI, and set the API Type to Aphrodite. The default API key is `EMPTY`, but you can change it as necessary. Use `http://localhost:2242/api` as the API URL.
 
 To run a quantized model, use the `--quantization` flag with either `gptq` or `awq`. Make sure your model is in AWQ/GPTQ format and not GGUF. Run with only the `--help` flag for a full list of arguments.
 
 To manually query the API, run:
 
 ```sh
-curl -X POST "http://localhost:8000/api/v1/generate" \
+curl -X POST "http://localhost:2242/api/v1/generate" \
 -H "Content-Type: application/json" \
 -H "x-api-key: EMPTY" \
 -d '{
@@ -134,7 +134,7 @@ curl -X POST "http://localhost:8000/api/v1/generate" \
 ```
 For the full list of Sampling parameters, please refer to [SamplingParams](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/common/sampling_params.py):
 
-https://github.com/PygmalionAI/aphrodite-engine/blob/99657d444bc2bab5e4293e9ee96e154dd7d3de44/aphrodite/common/sampling_params.py#L22-L62
+https://github.com/PygmalionAI/aphrodite-engine/blob/56161a9674f1f9e8927aaa77e5d339498bb6eeee/aphrodite/common/sampling_params.py#L24-L87
 
 ### OpenAI-compatible server
 An OpenAI-compatible server is also provided. You can launch the server with:
