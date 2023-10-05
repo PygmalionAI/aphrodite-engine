@@ -102,7 +102,7 @@ pip install aphrodite-engine
 
   ```bash
   git clone https://github.com/PygmalionAI/aphrodite-engine && cd aphrodite-engine
-  pip install -e .  # this will take a while
+  pip install -e . --extra-index-url https://download.pytorch.org/whl/cu118  # this will take a while
   ```
   </details>
 
