@@ -583,7 +583,7 @@ if __name__ == "__main__":
                         type=str,
                         default="localhost",
                         help="host name")
-    parser.add_argument("--port", type=int, default=8000, help="port number")
+    parser.add_argument("--port", type=int, default=2242, help="port number")
     parser.add_argument("--allow-credentials",
                         action="store_true",
                         help="allow credentials")

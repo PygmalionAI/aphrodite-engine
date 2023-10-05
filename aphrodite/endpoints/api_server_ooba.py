@@ -3,7 +3,7 @@ import json
 import os
 from typing import AsyncGenerator, Dict
 
-from fastapi import BackgroundTasks, Depends, Header, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, Header, FastAPI, HTTPException, Request, APIRouter
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 import uvicorn
 from pydantic import parse_obj_as
@@ -20,6 +20,15 @@ app = FastAPI()
 engine = None
 
 valid_api_key = 'EMPTY'
+
+
+@app.get("/api/latest/config/max_context_length")
+async def get_extra_version():
+    """ Impersonate KoboldCpp with streaming support """
+    if engine is not None:
+        max_len = A
+        result = {"result": model_name}
+        return JSONResponse(content=result)
 
 @app.post("/api/v1/generate")
 async def generate(request: Request, x_api_key: str = Header(None)) -> Response:
@@ -105,7 +114,7 @@ async def get_model_name() -> JSONResponse:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", type=str, default="localhost")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=2242)
     parser = AsyncEngineArgs.add_cli_args(parser)
     args = parser.parse_args()
 
