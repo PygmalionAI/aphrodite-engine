@@ -1,5 +1,5 @@
 from typing import List, Optional, Union
-from pydantic import BaseModel, Field, root_validator, conint, confloat, conlist, NonNegativeFloat, NonNegativeInt, PositiveFloat, PositiveInt
+from pydantic import BaseModel, Field, root_validator, conint, confloat, conlist, NonNegativeFloat, NonNegativeInt, PositiveInt
 
 class SamplingParams(BaseModel):
     n: int = Field(1, alias="n")
@@ -44,7 +44,7 @@ class KAIGenerationInputSchema(BaseModel):
     eps_cutoff: Optional[confloat(ge=0,le=1000)] = 0.0
     eta_cutoff: Optional[NonNegativeFloat] = 0.0
     typical: Optional[confloat(ge=0, le=1)] = 1.0
-    temperature: Optional[PositiveFloat] = 1.0
+    temperature: Optional[NonNegativeFloat] = 1.0
     use_memory: Optional[bool]
     use_story: Optional[bool]
     use_authors_note: Optional[bool]
