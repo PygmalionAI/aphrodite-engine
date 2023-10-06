@@ -150,7 +150,7 @@ async def get_max_context_length() -> JSONResponse:
 @app.get("/api/latest/config/max_length")
 async def get_max_length() -> JSONResponse:
     """Why do we need this twice?"""
-    max_length = engine_model_config.max_model_len
+    max_length = args.max_length
     return JSONResponse({"value": max_length})
 
 @extra_api.post("/abort")
@@ -182,8 +182,14 @@ if __name__ == "__main__":
                         help="The model name used in the API. If not "
                         "specified, the model name will be the same as "
                         "the huggingface name.")
+    parser.add_argument("--max-length",
+                    type=int,
+                    default=256,
+                    help="The maximum length of the generated text. "
+                    "For use with Kobold Horde.")
 
     parser = AsyncEngineArgs.add_cli_args(parser)
+    global args
     args = parser.parse_args()
 
     logger.info(f"args: {args}")
