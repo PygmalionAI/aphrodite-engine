@@ -16,7 +16,7 @@ from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
-from aphrodite.common.sampling_params import SamplingParams
+from aphrodite.common.sampling_params import SamplingParams, _SAMPLING_EPS
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.common.utils import random_uuid
 from aphrodite.endpoints.protocol import KAIGenerationInputSchema
@@ -53,7 +53,14 @@ def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[Sampl
 
     # KAI spec: top_k == 0 means disabled, aphrodite: top_k == -1 means disabled
     # https://github.com/KoboldAI/KoboldAI-Client/wiki/Settings
-    top_k = kai_payload.top_k if kai_payload.top_k != 0.0 else -1
+    kai_payload.top_k = kai_payload.top_k if kai_payload.top_k != 0.0 else -1
+    kai_payload.tfs = max(_SAMPLING_EPS, kai_payload.tfs)
+    if kai_payload.temperature < _SAMPLING_EPS:
+        # temp < _SAMPLING_EPS: greedy sampling
+        kai_payload.n = 1
+        kai_payload.top_p = 1.0
+        kai_payload.top_k = -1
+
 
     sampling_params = SamplingParams(
         n=kai_payload.n,
@@ -62,7 +69,7 @@ def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[Sampl
         temperature=kai_payload.temperature,
         tfs=kai_payload.tfs,
         top_p=kai_payload.top_p,
-        top_k=top_k,
+        top_k=kai_payload.top_k,
         top_a=kai_payload.top_a,
         typical_p=kai_payload.typical,
         eta_cutoff=kai_payload.eta_cutoff,
