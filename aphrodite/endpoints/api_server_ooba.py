@@ -4,6 +4,7 @@ import os
 from typing import AsyncGenerator, Dict
 
 from fastapi import BackgroundTasks, Depends, Header, FastAPI, HTTPException, Request, APIRouter
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 import uvicorn
 from pydantic import parse_obj_as
@@ -21,6 +22,13 @@ engine = None
 
 valid_api_key = 'EMPTY'
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/api/latest/config/max_context_length")
 async def get_extra_version():
