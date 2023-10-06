@@ -1,0 +1,23 @@
+services:
+  aphrodite-engine:
+    build:
+      context: .
+    restart: on-failure:5
+    environment:
+      - NUM_GPUS=${NUM_GPUS}
+      - MODEL_NAME=${MODEL_NAME}
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+      - QUANTIZATION=${QUANTIZATION}
+      - DATATYPE=${DATATYPE}
+    volumes:
+      - ${HOME}/.cache:/root/.cache/
+    shm_size: 1g
+    ports:
+      - "2242:2242"
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
