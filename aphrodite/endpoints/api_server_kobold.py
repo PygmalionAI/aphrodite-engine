@@ -141,6 +141,18 @@ async def set_current_softprompt():
     """ stub for compatibility """
     return JSONResponse({})
 
+@app.get("/api/latest/config/max_context_length")
+async def get_max_context_length() -> JSONResponse:
+    """Return the max context length based on the EngineArgs configuration."""
+    max_context_length = engine_model_config.max_model_len
+    return JSONResponse({"value": max_context_length })
+
+@app.get("/api/latest/config/max_length")
+async def get_max_length() -> JSONResponse:
+    """Why do we need this twice?"""
+    max_length = engine_model_config.max_model_len
+    return JSONResponse({"value": max_length})
+
 @extra_api.post("/abort")
 async def abort_generation():
     """ stub for compatibility """
