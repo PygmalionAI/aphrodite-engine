@@ -11,6 +11,7 @@ from typing import List, Tuple, AsyncGenerator
 import uvicorn
 from fastapi import FastAPI, APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
@@ -31,6 +32,14 @@ app = FastAPI()
 kai_api = APIRouter()
 extra_api = APIRouter()
 kobold_lite_ui = ""
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def create_error_response(status_code: HTTPStatus, message: str) -> JSONResponse:
     return JSONResponse({"msg": message, "type": "invalid_request_error"},
