@@ -174,7 +174,7 @@ class SamplingParams:
                 f"temperature must be non-negative, got {self.temperature}.")
         if not 0.0 < self.top_p <= 1.0:
             raise ValueError(f"top_p must be in (0, 1], got {self.top_p}.")
-        if self.top_k < -1 or self.top_k == 0:
+        if self.top_k < 1 and self.top_k != -1:
             raise ValueError(f"top_k must be -1 (disable), or at least 1, "
                              f"got {self.top_k}.")
         if not 0.0 <= self.top_a <= 1.0:
