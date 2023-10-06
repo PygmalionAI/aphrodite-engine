@@ -118,6 +118,11 @@ async def generate_stream(kai_payload: KAIGenerationInputSchema) -> StreamingRes
                              headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
                              media_type='text/event-stream')
 
+@extra_api.post("/generate/check")
+async def check_generation():
+    """ stub for compatibility """
+    return JSONResponse({"results": [{"text": ""}]})
+
 @kai_api.get("/info/version")
 async def get_version():
     """ Impersonate KAI """
