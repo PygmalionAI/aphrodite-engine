@@ -3,13 +3,14 @@
 import argparse
 import asyncio
 import json
+import os
 
 from http import HTTPStatus
 from typing import List, Tuple, AsyncGenerator
 
 import uvicorn
 from fastapi import FastAPI, APIRouter, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
@@ -29,6 +30,7 @@ engine: AsyncAphrodite = None
 app = FastAPI()
 kai_api = APIRouter()
 extra_api = APIRouter()
+kobold_lite_ui = ""
 
 def create_error_response(status_code: HTTPStatus, message: str) -> JSONResponse:
     return JSONResponse({"msg": message, "type": "invalid_request_error"},
@@ -163,10 +165,24 @@ async def get_extra_version():
     """ Impersonate KoboldCpp with streaming support """
     return JSONResponse({"result": "KoboldCpp", "version": "1.30"})
 
+@app.get("/")
+async def get_kobold_lite_ui():
+    """Serves a cached copy of the Kobold Lite UI, loading it from disk on demand if needed."""
+    #read and return embedded kobold lite
+    global kobold_lite_ui
+    if kobold_lite_ui=="":
+        scriptpath = os.path.dirname(os.path.abspath(__file__))
+        klitepath = os.path.join(scriptpath, "klite.embd")
+        if os.path.exists(klitepath):
+            with open(klitepath, "r") as f:
+                kobold_lite_ui = f.read()
+        else:
+            print("Embedded Kobold Lite not found")
+    return HTMLResponse(content=kobold_lite_ui)
+
 app.include_router(kai_api, prefix="/api/v1")
 app.include_router(kai_api, prefix="/api/latest", include_in_schema=False)
 app.include_router(extra_api, prefix="/api/extra")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
