@@ -3,19 +3,21 @@
 import argparse
 import asyncio
 import json
+import os
 
 from http import HTTPStatus
 from typing import List, Tuple, AsyncGenerator
 
 import uvicorn
 from fastapi import FastAPI, APIRouter, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
-from aphrodite.common.sampling_params import SamplingParams
+from aphrodite.common.sampling_params import SamplingParams, _SAMPLING_EPS
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.common.utils import random_uuid
 from aphrodite.endpoints.protocol import KAIGenerationInputSchema
@@ -29,6 +31,15 @@ engine: AsyncAphrodite = None
 app = FastAPI()
 kai_api = APIRouter()
 extra_api = APIRouter()
+kobold_lite_ui = ""
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def create_error_response(status_code: HTTPStatus, message: str) -> JSONResponse:
     return JSONResponse({"msg": message, "type": "invalid_request_error"},
@@ -51,7 +62,14 @@ def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[Sampl
 
     # KAI spec: top_k == 0 means disabled, aphrodite: top_k == -1 means disabled
     # https://github.com/KoboldAI/KoboldAI-Client/wiki/Settings
-    top_k = kai_payload.top_k if kai_payload.top_k != 0.0 else -1
+    kai_payload.top_k = kai_payload.top_k if kai_payload.top_k != 0.0 else -1
+    kai_payload.tfs = max(_SAMPLING_EPS, kai_payload.tfs)
+    if kai_payload.temperature < _SAMPLING_EPS:
+        # temp < _SAMPLING_EPS: greedy sampling
+        kai_payload.n = 1
+        kai_payload.top_p = 1.0
+        kai_payload.top_k = -1
+
 
     sampling_params = SamplingParams(
         n=kai_payload.n,
@@ -60,7 +78,7 @@ def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[Sampl
         temperature=kai_payload.temperature,
         tfs=kai_payload.tfs,
         top_p=kai_payload.top_p,
-        top_k=top_k,
+        top_k=kai_payload.top_k,
         top_a=kai_payload.top_a,
         typical_p=kai_payload.typical,
         eta_cutoff=kai_payload.eta_cutoff,
@@ -116,6 +134,11 @@ async def generate_stream(kai_payload: KAIGenerationInputSchema) -> StreamingRes
                              headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
                              media_type='text/event-stream')
 
+@extra_api.post("/generate/check")
+async def check_generation():
+    """ stub for compatibility """
+    return JSONResponse({"results": [{"text": ""}]})
+
 @kai_api.get("/info/version")
 async def get_version():
     """ Impersonate KAI """
@@ -141,6 +164,18 @@ async def set_current_softprompt():
     """ stub for compatibility """
     return JSONResponse({})
 
+@app.get("/api/latest/config/max_context_length")
+async def get_max_context_length() -> JSONResponse:
+    """Return the max context length based on the EngineArgs configuration."""
+    max_context_length = engine_model_config.max_model_len
+    return JSONResponse({"value": max_context_length })
+
+@app.get("/api/latest/config/max_length")
+async def get_max_length() -> JSONResponse:
+    """Why do we need this twice?"""
+    max_length = args.max_length
+    return JSONResponse({"value": max_length})
+
 @extra_api.post("/abort")
 async def abort_generation():
     """ stub for compatibility """
@@ -151,10 +186,24 @@ async def get_extra_version():
     """ Impersonate KoboldCpp with streaming support """
     return JSONResponse({"result": "KoboldCpp", "version": "1.30"})
 
+@app.get("/")
+async def get_kobold_lite_ui():
+    """Serves a cached copy of the Kobold Lite UI, loading it from disk on demand if needed."""
+    #read and return embedded kobold lite
+    global kobold_lite_ui
+    if kobold_lite_ui=="":
+        scriptpath = os.path.dirname(os.path.abspath(__file__))
+        klitepath = os.path.join(scriptpath, "klite.embd")
+        if os.path.exists(klitepath):
+            with open(klitepath, "r") as f:
+                kobold_lite_ui = f.read()
+        else:
+            print("Embedded Kobold Lite not found")
+    return HTMLResponse(content=kobold_lite_ui)
+
 app.include_router(kai_api, prefix="/api/v1")
 app.include_router(kai_api, prefix="/api/latest", include_in_schema=False)
 app.include_router(extra_api, prefix="/api/extra")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -170,8 +219,14 @@ if __name__ == "__main__":
                         help="The model name used in the API. If not "
                         "specified, the model name will be the same as "
                         "the huggingface name.")
+    parser.add_argument("--max-length",
+                    type=int,
+                    default=256,
+                    help="The maximum length of the generated text. "
+                    "For use with Kobold Horde.")
 
     parser = AsyncEngineArgs.add_cli_args(parser)
+    global args
     args = parser.parse_args()
 
     logger.info(f"args: {args}")
