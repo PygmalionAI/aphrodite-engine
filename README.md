@@ -150,7 +150,6 @@ You've run out of swap space! Please pass the `--swap-space` followed by the amo
 ```json
   "rope_scaling": {
     "factor": 2.0,
-    "original_max_position_embeddings": 4096,
     "type": "dynamic"
   },
 ```
