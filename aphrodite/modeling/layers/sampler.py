@@ -11,6 +11,7 @@ from aphrodite.modeling.megatron.communication_op import (
 )
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import SamplerOutput, SequenceOutputs, SequenceData
+from aphrodite.modeling.layers.mirostat import mirostat_get_mu_hook, mirostat_update_mu_hook
 
 _SAMPLING_EPS = 1e-5
 
@@ -61,9 +62,14 @@ class Sampler(nn.Module):
         logits = _apply_logits_processors(input_metadata, logits, output_tokens)
 
         # Apply Mirostat
+        # Note that we apply mirostat before temperature, not after like it maybe should be
+        # To be fixed by implementing customizable sampling order
         taus, etas, mus = _get_mirostat_args(input_metadata)
-        logits = _apply_mirostat_v2(logits, taus, etas, mus)
-        _repack_mirostat_mus(input_metadata, mus)
+        assert len(taus) == len(etas) == len(mus) == logits.shape[0]
+        if any(tau > _SAMPLING_EPS for tau in taus):
+            logits = _apply_mirostat_v2(logits, taus, etas, mus) # mus is an inout param, :vomit:
+            mirostat_update_mu_hook(input_metadata, mus)
+        
         
         # Apply Eta sampling, as described in https://arxiv.org/abs/2210.15191
         eta_cutoffs = _get_eta_cutoffs(input_metadata)
@@ -184,20 +190,14 @@ def _get_mirostat_args(
 ) -> Tuple[List[float], List[float], List[float]]:
     taus: List[float] = []
     etas: List[float] = []
-    mus: List[float] = []
+    
     for seq_ids, params in input_metadata.seq_groups:
-        taus += [params.mirostat_tau] * len(seq_ids)  # AKA the unlikeliness objective
+        taus += [params.mirostat_tau] * len(seq_ids)  # AKA the targeted surprise
         etas += [params.mirostat_eta] * len(seq_ids)  # AKA the learning rate
-        mus += _FETCH_MUS_FOR_SEQUENCES(seq_ids)  # However this is fetched, it must persist between iterations.
+
+    mus: List[float] = mirostat_get_mu_hook(input_metadata) # Hide global state behind a function
 
     return taus, etas, mus
-
-def _repack_mirostat_mus(
-    input_metadata: InputMetadata,
-    mus: List[float]
-) -> None:
-    for seq_ids,_ in input_metadata.seq_groups:
-        _STORE_MUS_FOR_SEQUENCES(seq_ids, mus)  # This is the value we need to keep for later.
 
 
 def _apply_mirostat_v2(
@@ -210,20 +210,22 @@ def _apply_mirostat_v2(
     tetas = torch.tensor(etas, dtype=logits.dtype, device=logits.device)
     tmus = torch.tensor(mus, dtype=logits.dtype, device=logits.device)
 
-    miro2_probs = torch.softmax(logits, dim=-1, dtype=logits.dtype) # Miro operates on probabilities, not logits
-    miro2_surprise = torch.neg_(torch.log2(miro2_probs)) # Calculate "surprise" value per token
+    log_probs = torch.neg_(torch.log2_(torch.softmax(logits, dim=-1))) # Calculate surprise value per token
+    # For compatibility with ooba, done in unit of bits(log base 2) not nats(ln)
+    # Ideally this would be a log_softmax, for numerical stability and elegance purposes, but eh
 
-    miro_mask = miro2_surprise > tmus.unsqueeze(dim=1) # Mask out "too-surprising" tokens (above mu)
-    mininds = torch.argmin(miro2_surprise, dim=1)
-    miro_mask.scatter_(1, mininds.unsqueeze(dim=1), False) # Force at least one outcome to be possible, ideally the most likely one
+    miro_mask = log_probs > tmus.unsqueeze(dim=-1) # Mask out "too-surprising" tokens (above mu)
+    mininds = torch.argmin(log_probs, dim=-1)
+    miro_mask.scatter_(1, mininds.unsqueeze(dim=-1), False) # Force at least one outcome to be possible, ideally the most likely one
 
-    miro2_probs[miro_mask] = -float("inf")
+    log_probs[miro_mask] = -float("inf")
 
-    miro2_probs = torch.softmax(miro2_probs, dim=-1, dtype=logits.dtype) # Renormalize
+    probs = torch.softmax(log_probs, dim=-1, dtype=logits.dtype) # Get probs
     
     # NOTE: Mirostat updates its `mu` values based on the sample chosen.
     #       The silly approach here is to just sample it and make the logits one-hot.
-    next_token_ids = torch.multinomial(miro2_probs,
+    #       This breaks fine grained seeding, but we don't have that yet. TODO: FIX when it gets added
+    next_token_ids = torch.multinomial(probs,
                                         num_samples=1,
                                         replacement=True)
     
@@ -231,13 +233,13 @@ def _apply_mirostat_v2(
     # NOTE: If we can know the logit values of the PREVIOUS iteration, it should be
     # possible to update `mu` before applying mirostat each iteration, thus letting us
     # keep _sample as the last thing that happens.
-    picked_surprises = torch.gather(miro2_surprise, dim=-1, index=next_token_ids)
+    picked_surprises = torch.gather(log_probs, dim=-1, index=next_token_ids)
     eps = picked_surprises.squeeze() - ttaus
     tmus = tmus - tetas * eps
 
     mus[:] = tmus.tolist()
     logits.fill_(-float("inf"))
-    logits.scatter_(1, next_token_ids, 1.0) # This value doesn't actually matter, so long as it's nonzero. Vectors are now one-hot, after all.
+    logits.scatter_(1, next_token_ids, 1.0) # This value doesn't actually matter, so long as it's not -inf. Vectors are now one-hot, after all.
     return logits
 
 
