@@ -49,6 +49,8 @@ def sample_requests(
         prompt_len = len(prompt_token_ids)
         if prompt_len < 4 or output_len < 4:
             # Prune too short sequences.
+            # This is because TGI causes errors when the input or output length
+            # is too short.
             continue
         if prompt_len > 1024 or prompt_len + output_len > 2048:
             # Prune too long sequences.
@@ -86,7 +88,7 @@ async def send_request(
     best_of: int,
     use_beam_search: bool,
 ) -> None:
-    request_start_time = time.time()
+    request_start_time = time.perf_counter()
 
     headers = {"User-Agent": "Benchmark Client"}
     if backend == "aphrodite":
@@ -129,7 +131,7 @@ async def send_request(
             if "error" not in output:
                 break
 
-    request_end_time = time.time()
+    request_end_time = time.perf_counter()
     request_latency = request_end_time - request_start_time
     REQUEST_LATENCY.append((prompt_len, output_len, request_latency))
 
@@ -161,10 +163,10 @@ def main(args: argparse.Namespace):
     tokenizer = get_tokenizer(args.tokenizer, trust_remote_code=args.trust_remote_code)
     input_requests = sample_requests(args.dataset, args.num_prompts, tokenizer)
 
-    benchmark_start_time = time.time()
+    benchmark_start_time = time.perf_counter()
     asyncio.run(benchmark(args.backend, api_url, input_requests, args.best_of,
                           args.use_beam_search, args.request_rate))
-    benchmark_end_time = time.time()
+    benchmark_end_time = time.perf_counter()
     benchmark_time = benchmark_end_time - benchmark_start_time
     print(f"Total time: {benchmark_time:.2f} s")
     print(f"Throughput: {args.num_prompts / benchmark_time:.2f} requests/s")
