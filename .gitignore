@@ -12,3 +12,4 @@ dist/
 .VSCodeCounter
 conda/
 umamba.exe
+bin/
