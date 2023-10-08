@@ -16,5 +16,6 @@ umamba create --no-shortcuts -r conda -n windows -f environment.yaml -y
 :WORKAROUND_END
 umamba create --no-shortcuts -r conda -n windows -f environment.yaml -y
 umamba run -r conda -n windows pip install -r requirements.txt
+umamba run -r conda -n windows pip install -e .
 
 echo If there are no errors above everything should be correctly installed (If not, try running update_runtime.cmd as admin).
