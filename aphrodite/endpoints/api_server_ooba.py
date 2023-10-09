@@ -30,14 +30,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/api/latest/config/max_context_length")
-async def get_extra_version():
-    """ Impersonate KoboldCpp with streaming support """
-    if engine is not None:
-        max_len = A
-        result = {"result": model_name}
-        return JSONResponse(content=result)
-
 @app.post("/api/v1/generate")
 async def generate(request: Request, x_api_key: str = Header(None)) -> Response:
     """Generate completion for the request.

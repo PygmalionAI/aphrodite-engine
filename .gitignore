@@ -11,3 +11,6 @@ build
 dist/
 .VSCodeCounter
 .venv
+conda/
+umamba.exe
+bin/
