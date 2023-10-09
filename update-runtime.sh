@@ -7,4 +7,12 @@ fi
 bin/micromamba create --no-shortcuts -r conda -n linux -f environment.yaml -y
 bin/micromamba install -r conda -n linux gxx=10 -c conda-forge -y
 bin/micromamba run -r conda -n linux pip install -r requirements.txt
-bin/micromamba run -r conda -n linux pip install -e .
+read -p "Do you want to install aphrodite from source? (y/n): " answer
+case ${answer:0:1} in
+    y|Y )
+        bin/micromamba run -r conda -n linux pip install -e .
+    ;;
+    * )
+        bin/micromamba run -r conda -n linux pip install aphrodite-engine
+    ;;
+esac
