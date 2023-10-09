@@ -8,8 +8,10 @@ repos
 .conda
 build
 *.json
-dist/
+dist*
 .VSCodeCounter
 conda/
 umamba.exe
 bin/
+models/
+*.whl

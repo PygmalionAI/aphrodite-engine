@@ -4,7 +4,6 @@
 # Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
 
 import torch
-from typing import List, Sequence
 
 def ensure_divisibility(numerator, denominator):
     """Ensure that numerator is divisible by the denominator."""
@@ -57,7 +56,7 @@ class VocabUtility:
 
     @staticmethod
     def vocab_range_from_per_partition_vocab_size(
-        per_partition_vocab_size: int, rank, world_size: int
+        per_partition_vocab_size: int, rank: int
     ) -> Sequence[int]:
         index_f = rank * per_partition_vocab_size
         index_l = index_f + per_partition_vocab_size
@@ -67,5 +66,4 @@ class VocabUtility:
     def vocab_range_from_global_vocab_size(global_vocab_size: int, rank: int, world_size: int) -> Sequence[int]:
         per_partition_vocab_size = divide(global_vocab_size, world_size)
         return VocabUtility.vocab_range_from_per_partition_vocab_size(
-            per_partition_vocab_size, rank, world_size
-        )
+            per_partition_vocab_size, rank)
