@@ -6,8 +6,9 @@ import torch
 import torch.nn as nn
 
 from aphrodite.modeling.metadata import InputMetadata
-from aphrodite.modeling.megatron.tensor_parallel import (
-    gather_from_tensor_model_parallel_region)
+from aphrodite.modeling.megatron.communication_op import (
+    tensor_model_parallel_all_gather
+)
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import SamplerOutput, SequenceOutputs, SequenceData
 
@@ -119,7 +120,7 @@ def _get_logits(hidden_states: torch.Tensor, embedding: torch.Tensor,
     logits = torch.matmul(hidden_states, embedding.t())
     if embedding_bias is not None:
         logits += embedding_bias
-    logits = gather_from_tensor_model_parallel_region(logits)
+    logits = tensor_model_parallel_all_gather(logits)
     # Remove paddings in vocab (if any).
     logits = logits[:, :vocab_size]
     return logits

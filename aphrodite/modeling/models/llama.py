@@ -102,19 +102,27 @@ class LlamaAttention(nn.Module):
         assert self.total_num_heads % tp_size == 0
         self.num_heads = self.total_num_heads // tp_size
         self.total_num_kv_heads = num_kv_heads
-        assert self.total_num_kv_heads % tp_size == 0
-        self.num_kv_heads = self.total_num_kv_heads // tp_size
+        if self.total_num_kv_heads >= tp_size:
+            # Number of KV heads is greater than TP size, so we partition
+            # the KV heads across multiple tensor parallel GPUs.
+            assert self.total_num_kv_heads % tp_size == 0
+        else:
+            # Number of KV heads is less than TP size, so we replicate
+            # the KV heads across multiple tensor parallel GPUs.
+            assert tp_size % self.total_num_kv_heads == 0
+        self.num_kv_heads = max(1, self.total_num_kv_heads // tp_size)
+        num_kv_heads_replicas = max(1, tp_size // self.total_num_kv_heads)
         self.head_dim = hidden_size // self.total_num_heads
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
         self.scaling = self.head_dim**-0.5
         self.rope_theta = rope_theta
-        self.rope_scaling = rope_scaling
         self.max_position_embeddings = max_position_embeddings
 
         self.qkv_proj = ParallelLinear.column(
             hidden_size,
-            (self.total_num_heads + 2 * self.total_num_kv_heads) *
+            (self.total_num_heads +
+             2 * self.total_num_kv_heads * num_kv_heads_replicas) *
             self.head_dim,
             bias=False,
             gather_output=False,
@@ -132,10 +140,10 @@ class LlamaAttention(nn.Module):
             self.head_dim,
             self.scaling,
             base=self.rope_theta,
-            rope_scaling = self.rope_scaling,
             max_position=self.max_position_embeddings,
             rotary_dim=self.head_dim,
-            num_kv_heads=self.num_kv_heads)
+            num_kv_heads=self.num_kv_heads,
+            rope_scaling=rope_scaling)
 
     def forward(
         self,
@@ -230,7 +238,9 @@ class LlamaModel(nn.Module):
 
         vocab_size = ((config.vocab_size + 63) // 64) * 64
         self.embed_tokens = VocabParallelEmbedding(
-            vocab_size, config.hidden_size)
+            vocab_size,
+            config.hidden_size,
+        )
         self.layers = nn.ModuleList([
             LlamaDecoderLayer(config, quant_config)
             for _ in range(config.num_hidden_layers)
@@ -297,22 +307,38 @@ class LlamaForCausalLM(nn.Module):
                                    input_metadata)
         return next_tokens
 
-    column_parallel_layers = []
-    row_parallel_layers = ["o_proj", "down_proj"]
+    _column_parallel_layers = []
+    _row_parallel_layers = ["o_proj", "down_proj"]
 
     def load_weights(self,
                      model_name_or_path: str,
                      cache_dir: Optional[str] = None,
                      load_format: str = "auto",
                      revision: Optional[str] = None):
-        (column_parallel_weights, row_parallel_weights,
-         ignore_weight_suffixes) = get_parallel_weight(self)
+        if self.quant_config is None:
+            weight_suffixes = ["weight"]
+        else:
+            weight_suffixes = self.quant_config.get_tp_tensor_names()
+
+        column_parallel_weights: List[str] = []
+        for layer in self._column_parallel_layers:
+            for suffix in weight_suffixes:
+                column_parallel_weights.append(f"{layer}.{suffix}")
+        row_parallel_weights: List[str] = []
+        for layer in self._row_parallel_layers:
+            for suffix in weight_suffixes:
+                row_parallel_weights.append(f"{layer}.{suffix}")
+
         tp_size = get_tensor_model_parallel_world_size()
-        tensor_model_parallel_rank = get_tensor_model_parallel_rank()
+        tp_rank = get_tensor_model_parallel_rank()
         q_proj_shard_size = (self.config.hidden_size // tp_size)
+        num_kv_heads_replicas = max(1,
+                                    tp_size // self.config.num_key_value_heads)
+        num_kv_heads_per_gpu = max(1,
+                                   self.config.num_key_value_heads // tp_size)
         kv_proj_shard_size = (self.config.hidden_size //
                               self.config.num_attention_heads *
-                              self.config.num_key_value_heads // tp_size)
+                              num_kv_heads_per_gpu)
         attention_weight_specs = [
             # (weight_name, shard_size, offset)
             ("q_proj", q_proj_shard_size, 0),
@@ -325,8 +351,6 @@ class LlamaForCausalLM(nn.Module):
         for name, loaded_weight in hf_model_weights_iterator(
                 model_name_or_path, cache_dir, load_format, revision):
             if "rotary_emb.inv_freq" in name:
-                continue
-            if any(name.endswith(suffix) for suffix in ignore_weight_suffixes):
                 continue
 
             is_packed = False
@@ -342,10 +366,7 @@ class LlamaForCausalLM(nn.Module):
             for weight_name, shard_size, offset in attention_weight_specs:
                 if weight_name not in name:
                     continue
-                name = name.replace(weight_name, "qkv_proj")
-                if name not in state_dict or "g_idx" in name:
-                    break
-                param = state_dict[name]
+                param = state_dict[name.replace(weight_name, "qkv_proj")]
                 if is_transposed:
                     param = param.T
 
@@ -353,9 +374,13 @@ class LlamaForCausalLM(nn.Module):
                     shard_size //= self.quant_config.pack_factor
                     offset //= self.quant_config.pack_factor
 
-                loaded_weight = loaded_weight[
-                    shard_size * tensor_model_parallel_rank:shard_size *
-                    (tensor_model_parallel_rank + 1)]
+                if weight_name in ["k_proj", "v_proj"]:
+                    shard_id = tp_rank // num_kv_heads_replicas
+                else:
+                    shard_id = tp_rank
+                loaded_weight = loaded_weight[shard_size *
+                                              shard_id:shard_size *
+                                              (shard_id + 1)]
                 param_slice = param.data[offset:offset + shard_size]
                 assert param_slice.shape == loaded_weight.shape
 
@@ -369,17 +394,13 @@ class LlamaForCausalLM(nn.Module):
             for stride_id, weight_name in enumerate(["gate_proj", "up_proj"]):
                 if weight_name not in name:
                     continue
-                name = name.replace(weight_name, "gate_up_proj")
-                if "g_idx" in name or name not in state_dict:
-                    break
-                param = state_dict[name]
+                param = state_dict[name.replace(weight_name, "gate_up_proj")]
                 if is_transposed:
                     param = param.T
 
                 shard_size = param.shape[0] // 2
-                loaded_weight = loaded_weight[
-                    shard_size * tensor_model_parallel_rank:shard_size *
-                    (tensor_model_parallel_rank + 1)]
+                loaded_weight = loaded_weight[shard_size * tp_rank:shard_size *
+                                              (tp_rank + 1)]
                 param_slice = param.data[shard_size * stride_id:shard_size *
                                          (stride_id + 1)]
                 assert param_slice.shape == loaded_weight.shape
@@ -389,18 +410,15 @@ class LlamaForCausalLM(nn.Module):
             if is_gate_up_weight:
                 continue
 
-            if name not in state_dict:
-                continue
             param = state_dict[name]
             if is_transposed:
                 param = param.T
 
             if "embed_tokens" in name or "lm_head" in name:
                 load_padded_tensor_parallel_vocab(param, loaded_weight,
-                                                  tensor_model_parallel_rank)
+                                                  tp_rank)
                 continue
 
             load_tensor_parallel_weights(param, loaded_weight, name,
                                          column_parallel_weights,
-                                         row_parallel_weights,
-                                         tensor_model_parallel_rank)
+                                         row_parallel_weights, tp_rank)

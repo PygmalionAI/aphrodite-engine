@@ -4,7 +4,7 @@ from aphrodite.modeling.layers.quantized_linear.awq import (
     AWQColumnParallelLinear, AWQRowParallelLinear)
 from aphrodite.modeling.layers.quantized_linear.gptq import(
     GPTQColumnParallelLinear, GPTQRowParallelLinear, GPTQLinear)
-from aphrodite.modeling.megatron.tensor_parallel import (
+from aphrodite.modeling.megatron.layers import (
     ColumnParallelLinear, RowParallelLinear)
 
 _QUANTIZED_LINEAR_REGISTRY = {

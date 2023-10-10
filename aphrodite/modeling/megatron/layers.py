@@ -19,74 +19,81 @@ from aphrodite.modeling.megatron.utils import (
 
 class VocabParallelEmbedding(torch.nn.Module):
     """Embedding parallelized in the vocabulary dimension.
-    
-    This is mainly adapted from torch.nn.Embedding and all
-    the default values are kept.
+    This is mainly adapted from torch.nn.Embedding and all the default
+    values are kept.
     Arguments:
-        num_embeddings: vocabulary size
-        embedding_dim: size of hidden states
-        params_dtype: type of the parameters
+        num_embeddings: vocabulary size.
+        embedding_dim: size of hidden state.
+        params_dtype: type of the parameters.
     """
+
     def __init__(self,
                  num_embeddings: int,
                  embedding_dim: int,
                  params_dtype: Optional[torch.dtype] = None):
         super().__init__()
 
-        # keep the input dimensions
+        # Keep the input dimensions.
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
-        
+
         self.tp_size = get_tensor_model_parallel_world_size()
         # TODO: Handle vocab padding here.
-        # Divide the weight matrix along the vocab dimension.
-        self.vocab_start_index, self.vocab_end_index = (VocabUtility.vocab_range_from_global_vocab_size(
-            self.num_embeddings, get_tensor_model_parallel_rank(), self.tp_size))
-        self.num_embeddings_per_partition = self.vocab_end_index - self.vocab_start_index
+        # Divide the weight matrix along the vocaburaly dimension.
+        self.vocab_start_index, self.vocab_end_index = (
+            VocabUtility.vocab_range_from_global_vocab_size(
+                self.num_embeddings, get_tensor_model_parallel_rank(),
+                self.tp_size))
+        self.num_embeddings_per_partition = (self.vocab_end_index -
+                                             self.vocab_start_index)
+
         self.weight = Parameter(
-            torch.empty(self.num_embeddings_per_partition, self.embedding_dim,
-                        device=torch.cuda.current_device(), dtype=params_dtype))
-        
+            torch.empty(self.num_embeddings_per_partition,
+                        self.embedding_dim,
+                        device=torch.cuda.current_device(),
+                        dtype=params_dtype))
+
     def forward(self, input_):
         if self.tp_size > 1:
-            # build the mask
+            # Build the mask.
             input_mask = ((input_ < self.vocab_start_index) |
                           (input_ >= self.vocab_end_index))
-            # mask the input
+            # Mask the input.
             masked_input = input_.clone() - self.vocab_start_index
             masked_input[input_mask] = 0
         else:
             masked_input = input_
+            # Get the embeddings.
         output_parallel = F.embedding(masked_input, self.weight)
+        # Mask the output embedding.
         if self.tp_size > 1:
             output_parallel[input_mask, :] = 0.0
+        # Reduce across all the model parallel GPUs.
         output = tensor_model_parallel_all_reduce(output_parallel)
         return output
-    
+
 
 class ColumnParallelLinear(torch.nn.Module):
     """Linear layer with column parallelism.
-    
-    The linear layer is defined as Y = XA + b is parallelized along
-    its second dimension as A = [A_1, ...., A_p].
-    
+    The linear layer is defined as Y = XA + b. A is parallelized along
+    its second dimension as A = [A_1, ..., A_p].
     Arguments:
-        input_size: first dimension of matrix A
-        output_size: second dimension of matrix A
-    
+        input_size: first dimension of matrix A.
+        output_size: second dimension of matrix A.
     Keyword Arguments
         bias: If true, add bias
-        gather_output: If True, call all-gather on output and make
-            Y available to all GPUs, otherwise, every GPU will have
-            its output which is Y_i = XA_i
-        skip_bias_add: This was added to enable performance optimizations
-            where bias can be fused with other element-wise operations. We
-            skip adding bias but instead return it.
+        gather_output: If true, call all-gather on output and make Y available
+                       to all GPUs, otherwise, every GPU will have its output
+                       which is Y_i = XA_i
+        skip_bias_add: This was added to enable performance optimizations where
+                       bias can be fused with other element-wise operations. we
+                       skip adding bias but instead return it.
         params_dtype: Data type for the parameters.
-        quant_config: Quantization configuration file.
+        quant_config: Quantization configuration.
     """
+
     def __init__(
         self,
         input_size: int,
@@ -99,11 +106,11 @@ class ColumnParallelLinear(torch.nn.Module):
     ):
         super().__init__()
 
-        # keep input parameters
+        # Keep input parameters
         self.input_size = input_size
         self.output_size = output_size
         self.gather_output = gather_output
-        # divide the weight matrix along the last dimension
+        # Divide the weight matrix along the last dimension.
         self.tp_size = get_tensor_model_parallel_world_size()
         self.output_size_per_partition = divide(output_size, self.tp_size)
         self.skip_bias_add = skip_bias_add
@@ -112,9 +119,9 @@ class ColumnParallelLinear(torch.nn.Module):
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
 
-        # parameters.
+        # Parameters.
         # NOTE: torch.nn.functional.linear performs XA^T + b and as a result
-        # we allocate the transpose
+        # we allocate the transpose.
         self.create_weights(params_dtype)
 
         if bias:
@@ -131,19 +138,18 @@ class ColumnParallelLinear(torch.nn.Module):
                         self.input_size,
                         device=torch.cuda.current_device(),
                         dtype=dtype))
+
     def apply_weights(
-            self,
-            x: torch.Tensor,
-            bias: Optional[torch.Tensor],
+        self,
+        x: torch.Tensor,
+        bias: Optional[torch.Tensor],
     ) -> torch.Tensor:
         return F.linear(x, self.weight, bias)
 
     def forward(self, input_):
         """Forward of ColumnParallelLinear
-        
         Args:
-            input_: Tensor whose last dimension is `input_size`
-        
+            input_: Tensor whose last dimension is `input_size`.
         Returns:
             - output
             - bias
@@ -151,9 +157,10 @@ class ColumnParallelLinear(torch.nn.Module):
         bias = self.bias if not self.skip_bias_add else None
 
         input_parallel = input_
-        # matmul
-        output_parallel = self.apply_weights(input_parallel, bias)        
+        # Matrix multiply.
+        output_parallel = self.apply_weights(input_parallel, bias)
         if self.gather_output:
+            # All-gather across the partitions.
             output = tensor_model_parallel_all_gather(output_parallel)
         else:
             output = output_parallel
