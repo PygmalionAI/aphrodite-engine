@@ -44,8 +44,7 @@ from aphrodite.modeling.megatron.layers import (
 from aphrodite.modeling.quantization_utils import QuantizationConfig
 from aphrodite.modeling.hf_downloader import (
     convert_pyslice_to_tensor, hf_model_weights_iterator,
-    load_tensor_parallel_weights, load_padded_tensor_parallel_vocab,
-    get_parallel_weight)
+    load_tensor_parallel_weights, load_padded_tensor_parallel_vocab)
 from aphrodite.common.sequence import SamplerOutput
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]

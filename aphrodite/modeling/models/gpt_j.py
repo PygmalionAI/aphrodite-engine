@@ -35,7 +35,7 @@ from aphrodite.modeling.hf_downloader import (hf_model_weights_iterator,
                                               load_tensor_parallel_weights)
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
-from aphrodite.modeling.megatron.tensor_parallel import (
+from aphrodite.modeling.megatron.layers import (
     VocabParallelEmbedding)
 from aphrodite.common.sequence import SamplerOutput
 

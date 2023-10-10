@@ -12,7 +12,7 @@ from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.quantized_linear import ParallelLinear
 from aphrodite.modeling.megatron.parallel_state import (get_tensor_model_parallel_rank,
                                                         get_tensor_model_parallel_world_size)
-from aphrodite.modeling.megatron.tensor_parallel import VocabParallelEmbedding
+from aphrodite.modeling.megatron.layers import VocabParallelEmbedding
 from aphrodite.modeling.quantization_utils import QuantizationConfig
 from aphrodite.modeling.hf_downloader import (
     convert_pyslice_to_tensor, hf_model_weights_iterator,
