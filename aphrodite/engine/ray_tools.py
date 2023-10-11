@@ -77,6 +77,7 @@ def initialize_cluster(
                 "serving.")
         # Connect to a ray cluster.
         os.environ["RAY_DEDUP_LOGS"] = "0"
+        os.environ["RAY_memory_monitor_refresh_ms"] = "0"
         ray.init(address=ray_address, ignore_reinit_error=True)
 
     if not parallel_config.worker_use_ray:
