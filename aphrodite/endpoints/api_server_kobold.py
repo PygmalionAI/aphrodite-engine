@@ -9,7 +9,7 @@ from http import HTTPStatus
 from typing import List, Tuple, AsyncGenerator
 
 import uvicorn
-from fastapi import FastAPI, APIRouter, Request
+from fastapi import FastAPI, APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -94,7 +94,7 @@ def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[Sampl
     return sampling_params, input_tokens
 
 @kai_api.post("/generate")
-async def generate(kai_payload: KAIGenerationInputSchema, raw_request: Request) -> JSONResponse:
+async def generate(kai_payload: KAIGenerationInputSchema) -> JSONResponse:
     """ Generate text """
 
     req_id = f"kai-{random_uuid()}"
@@ -103,11 +103,6 @@ async def generate(kai_payload: KAIGenerationInputSchema, raw_request: Request) 
 
     final_res: RequestOutput = None
     async for res in result_generator:
-        if await raw_request.is_disconnected():
-            # Abort the request if the client disconnects.
-            await engine.abort(req_id)
-            return create_error_response(HTTPStatus.BAD_REQUEST,
-                                         "Client disconnected")
         final_res = res
     assert final_res is not None
 
