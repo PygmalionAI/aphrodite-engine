@@ -4,7 +4,7 @@ import torch
 from torch.nn.parameter import Parameter
 
 from aphrodite import quantization_ops
-from aphrodite.modeling.megatron.tensor_parallel.layers import (
+from aphrodite.modeling.megatron.layers import (
     ColumnParallelLinear, RowParallelLinear)
 
 class GPTQLinear(torch.nn.Module):
