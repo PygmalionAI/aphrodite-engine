@@ -31,18 +31,14 @@ from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.attention import PagedAttentionWithRoPE
 from aphrodite.modeling.layers.sampler import Sampler
-from aphrodite.modeling.layers.quantized_linear import ParallelLinear
-from aphrodite.modeling.quantization_utils import QuantizationConfig
 from aphrodite.modeling.hf_downloader import (hf_model_weights_iterator,
-                                              load_tensor_parallel_weights,
-                                              convert_pyslice_to_tensor,
-                                              get_parallel_weight)
+                                              load_tensor_parallel_weights)
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
-from aphrodite.modeling.megatron.layers import (
-    VocabParallelEmbedding)
+from aphrodite.modeling.megatron.layers import (VocabParallelEmbedding,
+                                                       ColumnParallelLinear,
+                                                       RowParallelLinear)
 from aphrodite.common.sequence import SamplerOutput
-
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
