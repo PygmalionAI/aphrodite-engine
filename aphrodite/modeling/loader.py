@@ -19,7 +19,9 @@ _MODEL_REGISTRY = {
 }
 
 _MODEL_CLASSES_SUPPORT_QUANTIZATION = {
-    "awq": [LlamaForCausalLM],
+    "awq": [
+        LlamaForCausalLM, MistralForCausalLM
+    ],
     "gptq": [
         LlamaForCausalLM, GPTJForCausalLM, GPTNeoXForCausalLM
     ],

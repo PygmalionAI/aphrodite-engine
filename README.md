@@ -50,7 +50,7 @@ Or, you can manually find out your GPU's Compute Capability by opening a Python 
 ```
 This should print something like this: `(7, 5)`, which would indicate a CC of 7.5
 
-If you do not meet the minimum CC, you will not be able to run Aphrodite. At the moment, compute capability of 8.0 or higher is required for AWQ quantization scheme; you can use GPTQ if your GPU does not support it.
+If you do not meet the minimum CC, you will not be able to run Aphrodite. At the moment, compute capability of 7.5 or higher is required for AWQ quantization scheme; you can use GPTQ if your GPU does not support it.
 
 ## Setting up the environment
 **If you run into any problems, please refer to the common [Common Issues](#common-issues) section, or open an [Issue](https://github.com/PygmalionAI/aphrodite-engine/issues) if you can't find the answer there.**
@@ -60,43 +60,25 @@ Aphrodite will require a slightly specialized environment to run, as the latest 
 wsl --install
 ```
 
-### Install miniconda3
+Aphrodite provides an easy-to-use install script, which helps with both setting up a suitable environment for installing via the pip package and/or building from source.
+
+The requirements is `git`, `wget`, `bzip2`, and `tar` - all of which are available on the majority of Linux distributions, including WSL.
 
 ```sh
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-
-bash ./Miniconda3*
-```
-You can follow the on-screen instructions, though you may want to set the installation directory to somewhere with a large empty storage space (you can press `q` to exit out of the license agreement page).
-
-You should either source your shell script (`. ~/.bashrc` or `. ~/.zshrc`) or restart your terminal instance to begin using conda.
-
-### Configuring the env for Aphrodite-engine
-```sh
-conda config --set auto_activate_base false # optional
-conda create -n aphrodite python=3.10
-conda activate aphrodite
-conda install -c "nvidia/label/cuda-11.8.0" cuda # optional if you have CUDA 11.0-11.8 installed. Confirm with `nvcc --version`
+git clone https://github.com/PygmalionAI/aphrodite-engine && cd aphrodite-engine
 ```
 
-## Installation
+Then you can simply run:
 
 ```sh
-pip install aphrodite-engine
+./runtime.sh python -m aphrodite.endpoints.api_server_kobold --help
 ```
 
-If the build failed for any reason, or if you wish to install the bleeding edge version, please build from source instead:
+The `./runtime.sh` prefix will need to be appended to every command you run that involves Aphrodite, as it launches your commands within the created environment. If you prefer not doing that, you can run `./runtime.sh` by itself to enter the environment and execute commands as normal.
 
-### Install from source
-  <details>
+For updating the engine, run `git pull` and then `./update-runtime.sh` to update the environment.
 
-  <summary>Click to Expand</summary>
 
-  ```bash
-  git clone https://github.com/PygmalionAI/aphrodite-engine && cd aphrodite-engine
-  pip install -e .  # this will take a while
-  ```
-  </details>
 
 ## Usage
 

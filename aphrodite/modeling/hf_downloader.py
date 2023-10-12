@@ -151,8 +151,18 @@ def prepare_hf_model_weights(
     for pattern in allow_patterns:
         hf_weights_files += glob.glob(os.path.join(hf_folder, pattern))
     if not use_safetensors:
+        # exclude unneeded files
+        blacklist = [
+            "training_args.bin",
+            "optimizer.bin",
+            "optimizer.pt",
+            "scheduler.pt",
+            "scaler.pt",
+            "trainer_state.json",
+        ]
         hf_weights_files = [
-            x for x in hf_weights_files if not x.endswith("training_args.bin")
+            f for f in hf_weights_files
+            if not any(f.endswith(x) for x in blacklist)
         ]
 
     if len(hf_weights_files) == 0 and use_safetensors and fall_back_to_pt:

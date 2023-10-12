@@ -12,11 +12,10 @@ from xformers.ops.fmha.attn_bias import (BlockDiagonalCausalMask,
 
 from aphrodite import attention_ops
 from aphrodite import cache_ops
-from aphrodite import pos_encoding_ops
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.rotary_embedding import (
     DynamicNTKScalingRotaryEmbedding, LinearScalingRotaryEmbedding,
-    RotaryEmbedding)
+    RotaryEmbedding, YaRNScalingRotaryEmbedding)
 
 _SUPPORTED_HEAD_SIZES = [64, 80, 96, 112, 128, 256]
 
@@ -297,6 +296,19 @@ class PagedAttentionWithRoPE(PagedAttention):
                 self.rotary_emb = DynamicNTKScalingRotaryEmbedding(
                     head_size, rotary_dim, max_position, base, is_neox_style,
                     scaling_factor)
+            elif scaling_type == "yarn":
+                new_max_position = rope_scaling[
+                    "original_max_position_embeddings"]
+                assert max_position == new_max_position * scaling_factor
+                extra_kwargs = {
+                    k: v
+                    for k, v in rope_scaling.items()
+                    if k in ("extrapolation_factor", "attn_factor",
+                             "beta_fast", "beta_slow")
+                }
+                self.rotary_emb = YaRNScalingRotaryEmbedding(
+                    head_size, rotary_dim, new_max_position, base,
+                    is_neox_style, scaling_factor, **extra_kwargs)
             else:
                 raise ValueError(f"Unknown RoPE scaling type {scaling_type}")
 
