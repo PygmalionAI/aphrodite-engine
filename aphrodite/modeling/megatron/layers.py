@@ -1,3 +1,10 @@
+# Copyright 2023 The vLLM team.
+# Adapted from
+# https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/tensor_parallel/layers.py
+# Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
+
+# Parts of the code here are adapted from PyTorch
+# repo: https://github.com/pytorch/pytorch
 from typing import Optional
 
 import torch
@@ -6,16 +13,18 @@ from torch.nn.parameter import Parameter
 
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_rank,
-    get_tensor_model_parallel_world_size)
+    get_tensor_model_parallel_world_size,
+)
 from aphrodite.modeling.quantization_utils import QuantizationConfig
 from aphrodite.modeling.megatron.communication_op import (
-    tensor_model_parallel_all_reduce,
-    tensor_model_parallel_all_gather)
+    tensor_model_parallel_all_reduce, tensor_model_parallel_all_gather)
+
 from aphrodite.modeling.megatron.utils import (
     divide,
     VocabUtility,
     split_tensor_along_last_dim,
 )
+
 
 class VocabParallelEmbedding(torch.nn.Module):
     """Embedding parallelized in the vocabulary dimension.
@@ -170,7 +179,6 @@ class ColumnParallelLinear(torch.nn.Module):
 
 class RowParallelLinear(torch.nn.Module):
     """Linear layer with row parallelism.
-
     The linear layer is defined as Y = XA + b. A is parallelized along
     its first dimension and X along its second dimension as:
                -   -
@@ -183,7 +191,6 @@ class RowParallelLinear(torch.nn.Module):
     Arguments:
         input_size: first dimension of matrix A.
         output_size: second dimension of matrix A.
-
     Keyword Arguments:
         bias: If true, add bias. Note that bias is not parallelized.
         input_is_parallel: If true, we assume that the input is already
@@ -252,12 +259,10 @@ class RowParallelLinear(torch.nn.Module):
 
     def forward(self, input_):
         """Forward of RowParallelLinear
-
         Args:
             input_: tensor whose last dimension is `input_size`. If
                     `input_is_parallel` is set, then the last dimension
                     is `input_size // tp_size`.
-
         Returns:
             - output
             - bias
