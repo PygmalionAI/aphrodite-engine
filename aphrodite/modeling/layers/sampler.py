@@ -611,7 +611,7 @@ def _sample(
 ) -> SamplerOutput:
     categorized_seq_group_ids = {t: [] for t in SamplingType}
     start_idx = 0
-    categorized_seq_ids = {t: [] for t in SamplingParams}
+    categorized_seq_ids = {t: [] for t in SamplingType}
     for i, seq_group in enumerate(input_metadata.seq_groups):
         seq_ids, sampling_params = seq_group
         sampling_type = sampling_params.sampling_type
