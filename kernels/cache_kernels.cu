@@ -2,6 +2,7 @@
 #include <ATen/cuda/CUDAContext.h>
 
 #include "dispatch_utils.h"
+#include "quant_utils.cuh"
 
 #include <algorithm>
 #include <cassert>
@@ -127,7 +128,7 @@ void copy_blocks(
   dim3 grid(num_layers, num_pairs);
   dim3 block(std::min(1024, numel_per_block));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  APHRODITE_DISPATCH_FLOATING_TYPES(
+  APHRODITE_DISPATCH_QUANT_TYPES(
     key_caches[0].scalar_type(), "copy_blocks_kernel", ([&] {
       aphrodite::copy_blocks_kernel<scalar_t><<<grid, block, 0, stream>>>(
         key_cache_ptrs_tensor.data_ptr<int64_t>(),
@@ -181,6 +182,55 @@ __global__ void reshape_and_cache_kernel(
   }
 }
 
+template<typename attn_dtype, typename cache_dtype> // cache_dtype can only be int8_t (for now)
+__global__ void reshape_and_cache_quantized_kernel(
+  const attn_dtype* __restrict__ key,
+  const attn_dtype* __restrict__ value,
+  cache_dtype* __restrict__ key_cache,
+  cache_dtype* __restrict__ value_cache,
+  const int* __restrict__ slot_mapping,
+  const int key_stride,
+  const int value_stride,
+  const int num_heads,
+  const int head_size,
+  const int block_size,
+  const int x,
+  const int k_scale,
+  const int k_zp,
+  const int v_scale,
+  const int v_zp) {
+  const int token_idx = blockIdx.x;
+  const int slot_idx = slot_mapping[token_idx];
+  const int block_idx = slot_idx / block_size;
+  const int block_offset = slot_idx % block_size;
+
+  const int n = num_heads * head_size;
+  for (int i = threadIdx.x; i < n; i += blockDim.x) {
+    const int src_key_idx = token_idx * key_stride + i;
+    const int src_value_idx = token_idx * value_stride + i;
+
+    const int head_idx = i / head_size;
+    const int head_offset = i % head_size;
+    const int x_idx = head_offset / x;
+    const int x_offset = head_offset % x;
+
+    const int tgt_key_idx = block_idx * num_heads * (head_size / x) * block_size * x
+                          + head_idx * (head_size / x) * block_size * x
+                          + x_idx * block_size * x
+                          + x_offset;
+    const int tgt_value_idx = block_idx * num_heads * head_size * block_size
+                            + head_idx * head_size * block_size
+                            + head_offset * block_size
+                            + block_offset;
+    
+    attn_dtype tgt_key = __ldg(&key[src_key_idx]);
+    key_cache[tgt_key_idx] = quant(tgt_key, k_scale, k_zp);
+    attn_dtype tgt_value = __ldg(&value[src_value_idx]);
+    value_cache[tgt_value_idx] = quant(tgt_value, v_scale, v_zp);
+
+  }
+}
+
 } // namespace aphrodite
 
 void reshape_and_cache(
@@ -220,6 +270,53 @@ void reshape_and_cache(
         x);
     });
 }
+
+void reshape_and_cache_quantized(
+  torch::Tensor& key,           // [num_tokens, num_heads, head_size]
+  torch::Tensor& value,         // [num_tokens, num_heads, head_size]
+  torch::Tensor& key_cache,     // [num_blocks, num_heads, head_size/x, block_size, x]
+  torch::Tensor& value_cache,   // [num_blocks, num_heads, head_size, block_size]
+  torch::Tensor& slot_mapping,  // [num_tokens]
+  const float k_scale,
+  const float k_zp,
+  const float v_scale,
+  const float v_zp)
+{
+  int num_tokens = key.size(0);
+  int num_heads = key.size(1);
+  int head_size = key.size(2);
+  int block_size = key_cache.size(3);
+  int x = key_cache.size(4);
+
+  int key_stride = key.stride(0);
+  int value_stride = value.stride(0);
+
+  dim3 grid(num_tokens);
+  dim3 block(std::min(num_heads * head_size, 512));
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  APHRODITE_DISPATCH_FLOATING_TYPES(
+    key.scalar_type(),
+    "reshape_and_cache_quantized_kernel",
+    [&] {
+      aphrodite::reshape_and_cache_quantized_kernel<scalar_t, int8_t><<<grid, block, 0, stream>>>(
+        key.data_ptr<scalar_t>(),
+        value.data_ptr<scalar_t>(),
+        key_cache.data_ptr<int8_t>(),
+        value_cache.data_ptr<int8_t>(),
+        slot_mapping.data_ptr<int>(),
+        key_stride,
+        value_stride,
+        num_heads,
+        head_size,
+        block_size,
+        x,
+        k_scale,
+        k_zp,
+        v_scale,
+        v_zp);
+    });
+}
+
 
 namespace aphrodite {
 

@@ -86,6 +86,13 @@ inline __device__ float4 add(float4 a, float4 b) {
   return c;
 }
 
+inline __device__ Float4 add(Float4 a, Float4_ b) {
+  Float4_ c;
+  c.x = add(a.x, b.x);
+  c.y = add(a.y, b.y);
+  return c;
+}
+
 // Vector multiplication.
 template<>
 inline __device__ float mul<float, float>(float a, float b) {
