@@ -143,7 +143,7 @@ class SamplingParams:
         self.max_tokens = max_tokens
         self.logprobs = logprobs
         self.skip_special_tokens = skip_special_tokens
-        self.logits_processors = logits_processors
+        self.logits_processors = logits_processors or []
 
         self._verify_args()
         if self.use_beam_search:
