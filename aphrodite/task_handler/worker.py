@@ -9,7 +9,7 @@ from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
                          SchedulerConfig)
 from aphrodite.modeling import get_model, InputMetadata, set_random_seed
 from aphrodite.modeling.megatron.parallel_state import (
-    initialize_model_parallel, initialize_all_reduce_launcher)
+    initialize_model_parallel)
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import SamplerOutput, SequenceData, SequenceGroupMetadata
 from aphrodite.task_handler.cache_engine import CacheEngine
@@ -68,11 +68,6 @@ class Worker:
         # Initialize the model.
         set_random_seed(self.model_config.seed)
         self.model = get_model(self.model_config, self.scheduler_config.max_num_batched_tokens)
-        initialize_all_reduce_launcher(
-            self.scheduler_config.max_num_batched_tokens,
-            self.model_config.get_hidden_size(),
-            self.model_config.dtype,
-        )
 
     @torch.inference_mode()
     def profile_num_available_blocks(
