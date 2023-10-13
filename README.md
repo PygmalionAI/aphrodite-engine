@@ -3,7 +3,7 @@ Breathing Life into Language
 </h1>
 
 
-![aphrodite](./assets/aphrodite.png)
+![aphrodite](https://raw.githubusercontent.com/PygmalionAI/aphrodite-engine/main/assets/aphrodite.png)
 
 Aphrodite is the official backend engine for PygmalionAI. It is designed to serve as the inference endpoint for the PygmalionAI website, and to allow serving the [Pygmalion](https://huggingface.co/PygmalionAI) models to a large number of users with blazing fast speeds (thanks to FasterTransformer and vLLM). 
 
@@ -130,10 +130,7 @@ You've run out of swap space! Please pass the `--swap-space` followed by the amo
 
 3. Context Length extension via the RoPE method is supported for Llama models. Edit the `config.json` with the following values:
 ```json
-  "rope_scaling": {
-    "factor": 2.0,
-    "type": "dynamic"
-  },
+  "rope_scaling": { "factor": 2.0, "type": "dynamic"},
 ```
 
 ## Acknowledgements
@@ -152,4 +149,4 @@ Aphrodite Engine would have not been possible without the phenomenal work of oth
 - [OpenAI Python Library](https://github.com/openai/openai-python)
 
 ## Contributing
-We accept PRs! There will likely be a few typos or other errors we've failed to catch, so please let us know either via an issue or by making a Pull Request.
+Everyone is welcome to contribute. You can support the project by opening Pull Requests for new features, fixes, or general UX improvements.
