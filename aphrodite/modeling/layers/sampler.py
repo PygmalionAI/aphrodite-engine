@@ -178,13 +178,15 @@ def _apply_logits_processors(
     logits: torch.Tensor,
     output_tokens: List[List[int]]
 ) -> torch.Tensor:
-    for _, seq_group in enumerate(input_metadata.seq_groups):
-        _, sampling_params = seq_group
-        logits_processors = sampling_params.logits_processors
+    seq_offset = 0
 
-        if logits_processors is not None:
-            for logits_processor in logits_processors:
-                logits = logits_processor(logits, output_tokens)
+    for seq_ids,sampling_params in input_metadata.seq_groups:
+        seq_end = seq_offset + len(seq_ids)
+
+        for proc in sampling_params.logits_processors:
+            proc(logits[seq_offset:seq_end], output_tokens[seq_offset:seq_end])
+
+        seq_offset = seq_end
 
     return logits
 
