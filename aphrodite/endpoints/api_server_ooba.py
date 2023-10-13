@@ -51,6 +51,8 @@ async def generate(request: Request, x_api_key: str = Header(None)) -> Response:
         request_dict['stop'] = request_dict.pop('stopping_strings')
     if 'max_new_tokens' in request_dict:
         request_dict['max_tokens'] = request_dict.pop('max_new_tokens')
+    if 'min_length' in request_dict:
+        request_dict['min_tokens'] = request_dict.pop('min_length')
     if 'ban_eos_token' in request_dict:
         request_dict['ignore_eos'] = request_dict.pop('ban_eos_token')
     if 'top_k' in request_dict and request_dict['top_k'] == 0:
