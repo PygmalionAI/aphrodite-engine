@@ -130,25 +130,7 @@ def _prune_hidden_states(
     hidden_states: torch.Tensor,
     input_metadata: InputMetadata,
 ) -> torch.Tensor:
-    last_token_indices = []
-    start_idx = 0
-    for i, seq_group in enumerate(input_metadata.seq_groups):
-        seq_ids, _ = seq_group
-        if i < input_metadata.num_prompts:
-            assert len(seq_ids) == 1, "Prompt input should have only one seq."
-            prompt_len = input_metadata.prompt_lens[i]
-            last_token_indices.append(start_idx + prompt_len - 1)
-            start_idx += prompt_len
-        else:
-            num_seqs = len(seq_ids)
-            last_token_indices.extend(range(start_idx, start_idx + num_seqs))
-            start_idx += num_seqs
-
-    last_token_indices = torch.tensor(last_token_indices,
-                                      dtype=torch.long,
-                                      device=hidden_states.device)
-    return hidden_states.index_select(0, last_token_indices)
-
+    return hidden_states.index_select(0, input_metadata.last_token_indices)
 
 def _get_penalties(
         input_metadata: InputMetadata) -> Tuple[List[float], List[float]]:
@@ -610,16 +592,15 @@ def _sample(
     input_metadata: InputMetadata,
 ) -> SamplerOutput:
     categorized_seq_group_ids = {t: [] for t in SamplingType}
-    start_idx = 0
-    categorized_seq_ids = {t: [] for t in SamplingType}
+    categorized_seq_ids = input_metadata.categorized_seq_ids
     for i, seq_group in enumerate(input_metadata.seq_groups):
         seq_ids, sampling_params = seq_group
         sampling_type = sampling_params.sampling_type
         categorized_seq_group_ids[sampling_type].append(i)
-        num_seqs = len(seq_ids)
-        categorized_seq_ids[sampling_type].extend(
-            range(start_idx, start_idx + num_seqs))
-        start_idx += num_seqs
+        # num_seqs = len(seq_ids)
+        # categorized_seq_ids[sampling_type].extend(
+        #     range(start_idx, start_idx + num_seqs))
+        # start_idx += num_seqs
 
     seq_outputs_dict: Dict[int, List[SequenceOutputs]] = {}
     for sampling_type in SamplingType:
