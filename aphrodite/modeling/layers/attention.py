@@ -62,12 +62,16 @@ class PagedAttention(nn.Module):
                  head_size: int,
                  scale: float,
                  num_kv_heads: Optional[int] = None,
+                 quant_kv_cache: bool = False,
+                 kv_quant_params: List[float] = None,
                  sliding_window: Optional[int] = None) -> None:
         super().__init__()
         self.num_heads = num_heads
         self.head_size = head_size
         self.scale = float(scale)
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
+        self.quant_kv_cache = quant_kv_cache
+        self.kv_quant_params = kv_quant_params    
         self.sliding_window = sliding_window
 
         assert self.num_heads % self.num_kv_heads == 0
@@ -153,19 +157,35 @@ class PagedAttention(nn.Module):
             input_metadata: metadata for paged attention.
         """
         block_size = value_cache.shape[3]
-        attention_ops.single_query_cached_kv_attention(
-            output,
-            query,
-            key_cache,
-            value_cache,
-            self.head_mapping,
-            self.scale,
-            input_metadata.block_tables,
-            input_metadata.context_lens,
-            block_size,
-            input_metadata.max_context_len,
-            None,  # alibi_slopes
-        )
+        if self.quant_kv_cache:
+            attention_ops.single_query_cached_kv_quantized_attention(
+                output,
+                query,
+                key_cache,
+                value_cache,
+                self.head_mapping,
+                self.scale,
+                input_metadata.block_tables,
+                input_metadata.context_lens,
+                block_size,
+                input_metadata.max_context_len,
+                None,  # alibi_slopes
+                *self.kv_quant_params,
+            )
+        else:
+            attention_ops.single_query_cached_kv_attention(
+                output,
+                query,
+                key_cache,
+                value_cache,
+                self.head_mapping,
+                self.scale,
+                input_metadata.block_tables,
+                input_metadata.context_lens,
+                block_size,
+                input_metadata.max_context_len,
+                None,  # alibi_slopes
+            )
 
     def forward(
         self,
@@ -238,13 +258,23 @@ class PagedAttention(nn.Module):
                 value_to_cache = value_to_cache[input_metadata.to_cache]
                 slot_mapping = slot_mapping[input_metadata.to_cache]
 
-            cache_ops.reshape_and_cache(
-                key_to_cache,
-                value_to_cache,
-                key_cache,
-                value_cache,
-                slot_mapping,
-            )
+            if self.quant_kv_cache:
+                cache_ops.reshape_and_cache_quantized(
+                    key_to_cache,
+                    value_to_cache,
+                    key_cache,
+                    value_cache,
+                    slot_mapping,
+                    *self.kv_quant_params,
+                )
+            else:
+                cache_ops.reshape_and_cache(
+                    key_to_cache,
+                    value_to_cache,
+                    key_cache,
+                    value_cache,
+                    slot_mapping,
+                )
 
         if input_metadata.num_generation_tokens > 0:
             # Decoding run.
@@ -278,9 +308,15 @@ class PagedAttentionWithRoPE(PagedAttention):
         is_neox_style: bool = True,
         rope_scaling: Optional[Dict[str, Any]] = None,
         sliding_window: Optional[int] = None,
+        quant_kv_cache: bool = False,
+        kv_quant_params: torch.Tensor = None,
     ) -> None:
         super().__init__(num_heads, head_size, scale,
-                         num_kv_heads, sliding_window=sliding_window)
+                         num_kv_heads,
+                         quant_kv_cache: bool = False,
+                         kv_quant_params: torch.Tensor = None,                         
+                         sliding_window=sliding_window,
+)
         if rope_scaling is None:
             self.rotary_emb = RotaryEmbedding(head_size, rotary_dim,
                                               max_position, base,

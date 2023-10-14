@@ -70,7 +70,7 @@ class AphroditeEngine:
         log_stats: bool,
     ) -> None:
         logger.info(
-            "Initializing an LLM engine with config: "
+            "Initializing the Aphrodite engine with config: "
             f"model={model_config.model!r}, "
             f"tokenizer={model_config.tokenizer!r}, "
             f"tokenizer_mode={model_config.tokenizer_mode}, "
@@ -81,7 +81,9 @@ class AphroditeEngine:
             f"load_format={model_config.load_format}, "
             f"tensor_parallel_size={parallel_config.tensor_parallel_size}, "
             f"quantization={model_config.quantization}, "
-            f"seed={model_config.seed})")
+            f"seed={model_config.seed}, "
+            f"kv_cache_type={model_config.kv_cache_dtype}, "
+            f"use kv_cache quantization: {model_config.quant_kv_cache}")
         # TODO: Print more configs in debug mode.
 
         self.model_config = model_config

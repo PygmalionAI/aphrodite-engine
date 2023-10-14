@@ -29,6 +29,8 @@ class EngineArgs:
     disable_log_stats: bool = False
     revision: Optional[str] = None
     quantization: Optional[str] = None
+    kv_cache_dtype: str = "float16"
+    kv_quant_params_path: str = None
 
     def __post_init__(self):
         if self.tokenizer is None:
@@ -103,6 +105,17 @@ class EngineArgs:
                             default=None,
                             help='model context length. If unspecified, '
                             'will be automatically derived from the model.')
+        parser.add_argument(
+            '--kv-cache-dtype',
+            type=str,
+            default=EngineArgs.kv_cache_dtype,
+            help='data type for kv cache')
+        parser.add_argument(
+            '--kv-quant-params-path',
+            type=str,
+            default=EngineArgs.kv_quant_params_path,
+            help="path to kv scales and zero points"
+        )        
         # Parallel arguments
         parser.add_argument('--worker-use-ray',
                             action='store_true',
@@ -154,7 +167,7 @@ class EngineArgs:
         parser.add_argument('--quantization',
                             '-q',
                             type=str,
-                            choices=['awq', 'gptq', None],
+                            choices=['awq', 'gptq', 'smoothquant', None],
                             default=None,
                             help='Method used to quantize the weights')
         return parser
@@ -174,7 +187,8 @@ class EngineArgs:
                                    self.tokenizer_mode, self.trust_remote_code,
                                    self.download_dir, self.load_format,
                                    self.dtype, self.seed, self.revision,
-                                   self.max_model_len, self.quantization)
+                                   self.max_model_len, self.quantization,
+                                   self.kv_cache_dtype, self.kv_quant_params_path)
         cache_config = CacheConfig(self.block_size,
                                    self.gpu_memory_utilization,
                                    self.swap_space, getattr(model_config.hf_config,

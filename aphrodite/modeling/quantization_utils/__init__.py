@@ -2,11 +2,14 @@ from typing import Type
 
 from aphrodite.modeling.quantization_utils.awq import AWQConfig
 from aphrodite.modeling.quantization_utils.gptq import GPTQConfig
+from aphrodite.modeling.quantization_utils.smoothquant import (
+    SmoothQuantConfig)
 from aphrodite.modeling.quantization_utils.base import QuantizationConfig
 
 _QUANTIZATION_REGISTRY = {
     "awq": AWQConfig,
     "gptq": GPTQConfig,
+    "smoothquant": SmoothQuantConfig,
 }
 
 

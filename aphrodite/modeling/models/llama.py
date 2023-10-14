@@ -33,10 +33,13 @@ from transformers import LlamaConfig
 
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import SiluAndMul
-from aphrodite.modeling.layers.layernorm import RMSNorm
+from aphrodite.modeling.layers.layernorm import RMSNorm, I8RMSNorm
 from aphrodite.modeling.layers.attention import PagedAttentionWithRoPE
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.quantized_linear import ParallelLinear
+from aphrodite.modeling.layers.int8_linear.w8a8linear import (
+    W8A8OFP32LinearWithSFactorCublas,
+    W8A8O32LinearCublas)
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from aphrodite.modeling.megatron.layers import (
@@ -61,16 +64,24 @@ class LlamaMLP(nn.Module):
         quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
         super().__init__()
-        self.gate_up_proj = ParallelLinear.column(hidden_size,
-                                                  2 * intermediate_size,
-                                                  bias=False,
-                                                  gather_output=False,
-                                                  quant_config=quant_config)
-        self.down_proj = ParallelLinear.row(intermediate_size,
-                                            hidden_size,
-                                            bias=False,
-                                            input_is_parallel=True,
-                                            quant_config=quant_config)
+        self.use_int8 = quant_config is not None and quant_config.get_name() == "smoothquant"
+
+        if self.use_int8:
+            self.gate_up_proj = W8A8O32LinearCublas(hidden_size,
+                                                    2 * intermediate_size)
+            self.down_proj = W8A8OFP32LinearWithSFactorCublas(intermediate_size,
+                                                              hidden_size)
+        else:
+            self.gate_up_proj = ParallelLinear.column(hidden_size,
+                                                    2 * intermediate_size,
+                                                    bias=False,
+                                                    gather_output=False,
+                                                    quant_config=quant_config)
+            self.down_proj = ParallelLinear.row(intermediate_size,
+                                                hidden_size,
+                                                bias=False,
+                                                input_is_parallel=True,
+                                                quant_config=quant_config)
         if hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {hidden_act}. "
                              "Only silu is supported for now.")
@@ -78,8 +89,11 @@ class LlamaMLP(nn.Module):
 
     def forward(self, x):
         gate_up, _ = self.gate_up_proj(x)
+        #FIXME: Currently gate up shares the same scale,
+        # use separate scales down the line
         x = self.act_fn(gate_up)
         x, _ = self.down_proj(x)
+        x = x.half()
         return x
 
 
@@ -94,6 +108,8 @@ class LlamaAttention(nn.Module):
         rope_scaling: Optional[Dict[str, Any]] = None,
         max_position_embeddings: int = 8192,
         quant_config: Optional[QuantizationConfig] = None,
+        quant_kv_cache: bool = False,
+        kv_quant_params: List[Float] = None
     ) -> None:
         super().__init__()
         self.hidden_size = hidden_size
@@ -112,21 +128,29 @@ class LlamaAttention(nn.Module):
         self.rope_scaling = rope_scaling
         self.max_position_embeddings = max_position_embeddings
 
-        self.qkv_proj = ParallelLinear.column(
-            hidden_size,
-            (self.total_num_heads + 2 * self.total_num_kv_heads) *
-            self.head_dim,
-            bias=False,
-            gather_output=False,
-            quant_config=quant_config,
-        )
-        self.o_proj = ParallelLinear.row(
-            self.total_num_heads * self.head_dim,
-            hidden_size,
-            bias=False,
-            input_is_parallel=True,
-            quant_config=quant_config,
-        )
+        if self.use_int8:
+            self.qkv_proj = W8A8O32LinearCublas(
+                hidden_size,
+                (self.total_num_heads + 2 * self.total_num_kv_heads) * self.head_dim)
+            self.o_proj = W8A8OFP32LinearWithSFactorCublas(
+                self.total_num_heads * self.head_dim,
+                hidden_size)
+        else:
+            self.qkv_proj = ParallelLinear.column(
+                hidden_size,
+                (self.total_num_heads + 2 * self.total_num_kv_heads) *
+                self.head_dim,
+                bias=False,
+                gather_output=False,
+                quant_config=quant_config,
+            )
+            self.o_proj = ParallelLinear.row(
+                self.total_num_heads * self.head_dim,
+                hidden_size,
+                bias=False,
+                input_is_parallel=True,
+                quant_config=quant_config,
+            )
         self.attn = PagedAttentionWithRoPE(
             self.num_heads,
             self.head_dim,
@@ -135,7 +159,9 @@ class LlamaAttention(nn.Module):
             rope_scaling = self.rope_scaling,
             max_position=self.max_position_embeddings,
             rotary_dim=self.head_dim,
-            num_kv_heads=self.num_kv_heads)
+            num_kv_heads=self.num_kv_heads,
+            quant_kv_cache=quant_kv_cache,
+            kv_quant_params=kv_quant_params)
 
     def forward(
         self,
@@ -146,11 +172,13 @@ class LlamaAttention(nn.Module):
         cache_event: Optional[torch.cuda.Event],
     ) -> torch.Tensor:
         qkv, _ = self.qkv_proj(hidden_states)
+        qkv = qkv.half()
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         k_cache, v_cache = kv_cache
         attn_output = self.attn(positions, q, k, v, k_cache, v_cache,
                                 input_metadata, cache_event)
         output, _ = self.o_proj(attn_output)
+        output = output.half()
         return output
 
 
@@ -160,6 +188,8 @@ class LlamaDecoderLayer(nn.Module):
         self,
         config: LlamaConfig,
         quant_config: Optional[QuantizationConfig] = None,
+        quant_kv_cache: bool = False,
+        kv_quant_params: List[float] = None
     ) -> None:
         super().__init__()
         self.hidden_size = config.hidden_size
@@ -176,6 +206,8 @@ class LlamaDecoderLayer(nn.Module):
             rope_scaling=rope_scaling,
             max_position_embeddings=max_position_embeddings,
             quant_config=quant_config,
+            quant_kv_cache=quant_kv_cache,
+            kv_quant_params=kv_quant_params
         )
         self.mlp = LlamaMLP(
             hidden_size=self.hidden_size,
@@ -183,10 +215,16 @@ class LlamaDecoderLayer(nn.Module):
             hidden_act=config.hidden_act,
             quant_config=quant_config,
         )
-        self.input_layernorm = RMSNorm(config.hidden_size,
-                                       eps=config.rms_norm_eps)
-        self.post_attention_layernorm = RMSNorm(config.hidden_size,
-                                                eps=config.rms_norm_eps)
+        if quant_config is not None and quant_config.get_name() == "smoothquant":
+            self.input_layernorm = I8RMSNorm(config.hidden_size,
+                                        eps=config.rms_norm_eps)
+            self.post_attention_layernorm = I8RMSNorm(config.hidden_size,
+                                                    eps=config.rms_norm_eps)
+        else:
+            self.input_layernorm = RMSNorm(config.hidden_size,
+                                        eps=config.rms_norm_eps)
+            self.post_attention_layernorm = RMSNorm(config.hidden_size,
+                                                    eps=config.rms_norm_eps)
 
     def forward(
         self,
@@ -222,6 +260,8 @@ class LlamaModel(nn.Module):
         self,
         config: LlamaConfig,
         quant_config: Optional[QuantizationConfig] = None,
+        quant_kv_cache: bool = False,
+        kv_quant_params_list: List[List[float]] = None
     ) -> None:
         super().__init__()
         self.config = config
@@ -232,8 +272,9 @@ class LlamaModel(nn.Module):
         self.embed_tokens = VocabParallelEmbedding(
             vocab_size, config.hidden_size)
         self.layers = nn.ModuleList([
-            LlamaDecoderLayer(config, quant_config)
-            for _ in range(config.num_hidden_layers)
+            LlamaDecoderLayer(config, quant_config, quant_kv_cache,
+                              kv_quant_params_list[i] if quant_kv_cache else None)
+            for i in range(config.num_hidden_layers)
         ])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
@@ -269,11 +310,14 @@ class LlamaForCausalLM(nn.Module):
         self,
         config: LlamaConfig,
         quant_config: Optional[QuantizationConfig] = None,
+        quant_kv_cache: bool = False,
+        kv_quant_params_list: List[List[float]] = None
     ) -> None:
         super().__init__()
         self.config = config
         self.quant_config = quant_config
-        self.model = LlamaModel(config, quant_config)
+        self.model = LlamaModel(config, quant_config, quant_kv_cache,
+                                kv_quant_params_list)
         vocab_size = ((config.vocab_size + 63) // 64) * 64
         # NOTE: The LM head is not quantized.
         self.lm_head = ParallelLinear.column(config.hidden_size,
@@ -305,8 +349,27 @@ class LlamaForCausalLM(nn.Module):
                      cache_dir: Optional[str] = None,
                      load_format: str = "auto",
                      revision: Optional[str] = None):
-        (column_parallel_weights, row_parallel_weights,
-         ignore_weight_suffixes) = get_parallel_weight(self)
+        if self.quant_config is not None and self.quant_config.get_name() == "smoothquant":
+            return self._load_int8_weights(
+                model_name_or_path,
+                cache_dir,
+                load_format,
+                revision
+            )
+        
+        if self.quant_config is None:
+            weight_suffixes = ["weight"]
+        else:
+            weight_suffixes = self.quant_config.get_row_tp_tensor_names()
+
+        column_parallel_weights: List[str] = []
+        for layer in self._column_parallel_layers:
+            for suffix in weight_suffixes:
+                column_parallel_weights.append(f"{layer}.{suffix}")
+        row_parallel_weights: List[str] = []
+        for layer in self._row_parallel_layers:
+            for suffix in weight_suffixes:
+                row_parallel_weights.append(f"{layer}.{suffix}")
         tp_size = get_tensor_model_parallel_world_size()
         tensor_model_parallel_rank = get_tensor_model_parallel_rank()
         q_proj_shard_size = (self.config.hidden_size // tp_size)
@@ -404,3 +467,127 @@ class LlamaForCausalLM(nn.Module):
                                          column_parallel_weights,
                                          row_parallel_weights,
                                          tensor_model_parallel_rank)
+    def _load_int8_weights(self,
+                           model_name_or_path: str,
+                           cache_dir: Optional[str] = None,
+                           load_format: str = "auto",
+                           revision: Optional[str] = None):
+        # TODO: support tp in intlinear
+        tp_size = 1
+        tensor_model_parallel_rank = 0
+        q_proj_shard_size = (self.config.hidden_size // tp_size)
+        kv_proj_shard_size = (self.config.hidden_size //
+                              self.config.num_attention_heads *
+                              self.config.num_key_value_heads // tp_size)
+
+        if self.quant_config is None:
+            weight_suffixes = ["weight"]
+        else:
+            weight_suffixes = self.quant_config.get_row_tp_tensor_names()
+
+        column_parallel_weights: List[str] = []
+        for layer in self._column_parallel_layers:
+            for suffix in weight_suffixes:
+                column_parallel_weights.append(f"{layer}.{suffix}")
+
+        row_parallel_weights: List[str] = []
+        for layer in self._row_parallel_layers:
+            for suffix in weight_suffixes:
+                row_parallel_weights.append(f"{layer}.{suffix}")
+
+        attention_weight_specs = [
+            # (weight_name, shard_size, offset)
+            ("q_proj", q_proj_shard_size, 0),
+            ("k_proj", kv_proj_shard_size, q_proj_shard_size),
+            ("v_proj", kv_proj_shard_size,
+             q_proj_shard_size + kv_proj_shard_size),
+        ]
+        state_dict = self.state_dict()
+
+        for name, loaded_weight in hf_model_weights_iterator(
+                model_name_or_path, cache_dir, load_format, revision):
+            if "rotary_emb.inv_freq" in name:
+                continue
+            # bias is useless for llama
+            if "bias" in name:
+                continue
+
+            is_packed = False
+            is_transposed = False
+            if self.quant_config is not None:
+                is_packed = self.quant_config.is_packed(name)
+                is_transposed = self.quant_config.is_transposed(name)
+            if is_transposed:
+                loaded_weight = convert_pyslice_to_tensor(loaded_weight)
+                loaded_weight = loaded_weight.T
+
+            is_attention_weight = False
+            for weight_name, shard_size, offset in attention_weight_specs:
+                if weight_name not in name:
+                    continue
+                param = state_dict[name.replace(weight_name, "qkv_proj")]
+                if is_transposed:
+                    param = param.T
+
+                if is_packed:
+                    shard_size //= self.quant_config.pack_factor
+                    offset //= self.quant_config.pack_factor
+
+                # share use same scale in quantizatin
+                if "proj.a" in name or "proj.inscale" in name:
+                    param.copy_(loaded_weight)
+                    is_attention_weight = True
+                    continue
+
+                loaded_weight = loaded_weight[
+                    shard_size * tensor_model_parallel_rank:shard_size *
+                    (tensor_model_parallel_rank + 1)]
+                param_slice = param.data[offset:offset + shard_size]
+                assert param_slice.shape == loaded_weight.shape
+
+                param_slice.copy_(loaded_weight)
+                is_attention_weight = True
+                break
+            if is_attention_weight:
+                continue
+
+            is_gate_up_weight = False
+            for stride_id, weight_name in enumerate(["gate_proj", "up_proj"]):
+                if weight_name not in name:
+                    continue
+                param = state_dict[name.replace(weight_name, "gate_up_proj")]
+                if is_transposed:
+                    loaded_weight = loaded_weight.T
+
+                # share use same scale in quantizatin
+                if "proj.a" in name or "proj.inscale" in name:
+                    param.copy_(loaded_weight)
+                    is_gate_up_weight = True
+                    continue
+
+                shard_size = param.shape[0] // 2
+                loaded_weight = loaded_weight[
+                    shard_size * tensor_model_parallel_rank:shard_size *
+                    (tensor_model_parallel_rank + 1)]
+                param_slice = param.data[shard_size * stride_id:shard_size *
+                                         (stride_id + 1)]
+                assert param_slice.shape == loaded_weight.shape
+                param_slice.copy_(loaded_weight)
+                is_gate_up_weight = True
+                break
+            if is_gate_up_weight:
+                continue
+
+            param = state_dict[name]
+            if is_transposed:
+                param = param.T
+
+            if "embed_tokens" in name or "lm_head" in name:
+                load_padded_tensor_parallel_vocab(param, loaded_weight,
+                                                  tensor_model_parallel_rank)
+                continue
+
+            load_tensor_parallel_weights(param, loaded_weight, name,
+                                         column_parallel_weights,
+                                         row_parallel_weights,
+                                         tensor_model_parallel_rank)                

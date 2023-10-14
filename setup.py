@@ -126,6 +126,42 @@ if nvcc_cuda_version >= Version("11.2"):
 
 ext_modules = []
 
+# Int8GEMM(cutlass required)
+i8gemm_extension = CUDAExtension(
+    name='aphrodite.i8gemm',
+    sources=[
+        'kernels/int8gemm/cutlass/linear.cu',
+        'kernels/int8gemm/cutlass/bmm.cu',
+        'kernels/int8gemm/cutlass/fused.cu',
+        'kernels/int8gemm/cutlass/bindings.cpp',
+    ],
+    include_dirs=['kernels/int8gemm/cutlass/include'],
+    extra_link_args=['-lcublas_static', '-lcublasLt_static',
+                        '-lculibos', '-lcudart', '-lcudart_static',
+                        '-lrt', '-lpthread', '-ldl', '-L/usr/lib/x86_64-linux-gnu/'],
+    extra_compile_args={'cxx': ['-std=c++14', '-O3'],
+                        'nvcc': ['-O3', '-std=c++14', '-U__CUDA_NO_HALF_OPERATORS__', '-U__CUDA_NO_HALF_CONVERSIONS__', '-U__CUDA_NO_HALF2_OPERATORS__']},
+)
+ext_modules.append(i8gemm_extension)
+
+# int8gemm(cutlass required)
+i8cugemm_extension = CUDAExtension(
+    name='aphrodite.i8cugemm',
+    sources=[
+        'kernels/int8gemm/cublas/bindings.cpp',
+        'kernels/int8gemm/cublas/cublasAlgoMap.cc',
+        'kernels/int8gemm/cublas/cublasINT8MMWrapper.cc',
+        'kernels/int8gemm/cublas/cublasMMWrapper.cc',
+        'kernels/int8gemm/cublas/cuda_utils.cc',
+        'kernels/int8gemm/cublas/transform_layout.cu'
+    ],
+    extra_compile_args={
+        "cxx": CXX_FLAGS,
+        "nvcc": NVCC_FLAGS,
+    },
+)
+ext_modules.append(i8cugemm_extension)
+
 # Cache operations.
 cache_extension = CUDAExtension(
     name="aphrodite.cache_ops",

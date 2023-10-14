@@ -61,6 +61,8 @@ class ModelConfig:
         revision: Optional[str] = None,
         max_model_len: Optional[int] = None,
         quantization: Optional[str] = None,
+        kv_cache_dtype: str = None, # for kv-cache quantization, only int8 for now
+        kv_quant_params_path: str = None, # path for kv scales and zero points
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -77,6 +79,10 @@ class ModelConfig:
         self.max_model_len = _get_and_verify_max_len(self.hf_config,
                                                      max_model_len)
         self._verify_load_format()
+        # kv cache quantization
+        self.kv_cache_dtype = _STR_DTYPE_TO_TORCH_DTYPE[kv_cache_dtype] if kv_cache_dtype else self.dtype
+        self.quant_kv_cache = not self.kv_cache_dtype == self.dtype
+        self.kv_quant_params_path = kv_quant_params_path
         self._verify_tokenizer_mode()
         self._verify_quantization()
 
@@ -99,7 +105,7 @@ class ModelConfig:
         self.tokenizer_mode = tokenizer_mode
 
     def _verify_quantization(self) -> None:
-        supported_quantization = ["awq", "gptq"]
+        supported_quantization = ["awq", "gptq", "smoothquant"]
         if hasattr(self.hf_config, "quantization_config"
                    ) and self.hf_config.quantization_config.get(
                        "quant_method") == QuantizationMethod.GPTQ:
@@ -289,6 +295,7 @@ class SchedulerConfig:
 
 
 _STR_DTYPE_TO_TORCH_DTYPE = {
+    "int8": torch.int8,
     "half": torch.float16,
     "float16": torch.float16,
     "float": torch.float32,
