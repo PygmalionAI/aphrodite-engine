@@ -13,6 +13,9 @@ class SamplingParams(BaseModel):
     eta_cutoff: float = Field(0.0, alias="eta_cutoff")
     epsilon_cutoff: float = Field(0.0, alias="epsilon_cutoff")
     typical_p: float = Field(1.0, alias="typical_p")
+    mirostat_mode: int = Field(0, alias="mirostat_mode")
+    mirostat_tau: float = Field(0.0, alias="mirostat_tau")
+    mirostat_eta: float = Field(0.0, alias="mirostat_eta")
     use_beam_search: bool = Field(False, alias="use_beam_search")
     length_penalty: float = Field(1.0, alias="length_penalty")
     early_stopping: Union[bool, str] = Field(False, alias="early_stopping")
@@ -43,6 +46,9 @@ class KAIGenerationInputSchema(BaseModel):
     tfs: Optional[confloat(ge=0, le=1)] = 1.0
     eps_cutoff: Optional[confloat(ge=0,le=1000)] = 0.0
     eta_cutoff: Optional[NonNegativeFloat] = 0.0
+    mirostat: Optional[NonNegativeInt] = 0
+    mirostat_tau: Optional[NonNegativeFloat] = 0.0
+    mirostat_eta: Optional[NonNegativeFloat] = 0.0
     typical: Optional[confloat(ge=0, le=1)] = 1.0
     temperature: Optional[NonNegativeFloat] = 1.0
     use_memory: Optional[bool]
