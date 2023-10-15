@@ -70,7 +70,6 @@ def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[Sampl
         kai_payload.top_p = 1.0
         kai_payload.top_k = -1
 
-    print("MYDEBUG:", kai_payload)
 
 
     sampling_params = SamplingParams(
@@ -93,7 +92,6 @@ def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[Sampl
         max_tokens=kai_payload.max_length,
     )
 
-    print("MYDEBUG:", sampling_params)
 
     max_input_tokens = max(1, kai_payload.max_context_length - kai_payload.max_length)
     input_tokens = tokenizer(kai_payload.prompt).input_ids[-max_input_tokens:]
