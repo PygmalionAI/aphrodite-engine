@@ -8,6 +8,7 @@ from aphrodite.processing.policy import PolicyFactory
 from aphrodite.common.logger import init_logger
 from aphrodite.common.sequence import (Sequence, SequenceData, SequenceGroup,
                            SequenceGroupMetadata, SequenceStatus)
+from aphrodite.modeling.layers.mirostat import mirostat_delete_seq_hook
 
 logger = init_logger(__name__)
 
@@ -290,6 +291,7 @@ class Scheduler:
         self.block_manager.fork(parent_seq, child_seq)
 
     def free_seq(self, seq: Sequence) -> None:
+        mirostat_delete_seq_hook(seq)
         self.block_manager.free(seq)
 
     def free_finished_seq_groups(self) -> None:
