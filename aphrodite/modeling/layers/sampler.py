@@ -192,17 +192,17 @@ def _apply_mirostat_v2(
     tetas = torch.tensor(etas, dtype=logits.dtype, device=logits.device)
     tmus = torch.tensor(mus, dtype=logits.dtype, device=logits.device)
 
-    log_probs = torch.neg_(torch.log2_(torch.softmax(logits, dim=-1))) # Calculate surprise value per token
+    logit_surprise = torch.neg_(torch.log2_(torch.softmax(logits, dim=-1))) # Calculate surprise value per token
     # For compatibility with ooba, done in unit of bits(log base 2) not nats(ln)
     # Ideally this would be a log_softmax, for numerical stability and elegance purposes, but eh
 
-    miro_mask = log_probs > tmus.unsqueeze(dim=-1) # Mask out "too-surprising" tokens (above mu)
-    mininds = torch.argmin(log_probs, dim=-1)
+    miro_mask = logit_surprise > tmus.unsqueeze(dim=-1) # Mask out "too-surprising" tokens (above mu)
+    mininds = torch.argmin(logit_surprise, dim=-1)
     miro_mask.scatter_(1, mininds.unsqueeze(dim=-1), False) # Force at least one outcome to be possible, ideally the most likely one
 
-    log_probs[miro_mask] = -float("inf")
+    logits[miro_mask] = -float("inf")
 
-    probs = torch.softmax(log_probs, dim=-1, dtype=logits.dtype) # Get probs
+    probs = torch.softmax(logits, dim=-1, dtype=logits.dtype) # Get probs
     
     # NOTE: Mirostat updates its `mu` values based on the sample chosen.
     #       The silly approach here is to just sample it and make the logits one-hot.
@@ -215,7 +215,7 @@ def _apply_mirostat_v2(
     # NOTE: If we can know the logit values of the PREVIOUS iteration, it should be
     # possible to update `mu` before applying mirostat each iteration, thus letting us
     # keep _sample as the last thing that happens.
-    picked_surprises = torch.gather(log_probs, dim=-1, index=next_token_ids)
+    picked_surprises = torch.gather(logit_surprise, dim=-1, index=next_token_ids)
     eps = picked_surprises.squeeze() - ttaus
     tmus = tmus - tetas * eps
 
