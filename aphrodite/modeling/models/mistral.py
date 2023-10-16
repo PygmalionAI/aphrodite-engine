@@ -2,7 +2,7 @@ from typing import List, Optional, Tuple
 
 import torch
 from torch import nn
-
+from transformers import MistralConfig
 
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import SiluAndMul
@@ -10,16 +10,14 @@ from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.attention import PagedAttentionWithRoPE
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.quantized_linear import ParallelLinear
-from aphrodite.modeling.megatron.parallel_state import (get_tensor_model_parallel_rank,
-                                                        get_tensor_model_parallel_world_size)
+from aphrodite.modeling.megatron.parallel_state import (
+    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from aphrodite.modeling.megatron.layers import VocabParallelEmbedding
 from aphrodite.modeling.quantization_utils import QuantizationConfig
 from aphrodite.modeling.hf_downloader import (
     convert_pyslice_to_tensor, hf_model_weights_iterator,
     load_tensor_parallel_weights, load_padded_tensor_parallel_vocab)
 from aphrodite.common.sequence import SamplerOutput
-from aphrodite.transformers_utils.configs import MistralConfig
-
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
@@ -275,7 +273,7 @@ class MistralForCausalLM(nn.Module):
         if self.quant_config is None:
             weight_suffixes = ["weight"]
         else:
-            weight_suffixes = self.quant_config.get_tp_tensor_names()
+            weight_suffixes = self.quant_config.get_row_tp_tensor_names()
 
         column_parallel_weights: List[str] = []
         for layer in self._column_parallel_layers:
@@ -373,4 +371,3 @@ class MistralForCausalLM(nn.Module):
                                          column_parallel_weights,
                                          row_parallel_weights,
                                          tensor_model_parallel_rank)
-        
