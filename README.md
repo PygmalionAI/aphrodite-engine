@@ -104,7 +104,7 @@ To run a quantized model, use the `--quantization` flag with either `gptq` or `a
 
 For the full list of Sampling parameters, please refer to [SamplingParams](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/common/sampling_params.py):
 
-https://github.com/PygmalionAI/aphrodite-engine/blob/56161a9674f1f9e8927aaa77e5d339498bb6eeee/aphrodite/common/sampling_params.py#L24-L87
+https://github.com/PygmalionAI/aphrodite-engine/blob/5acc27adebc2186f4353c02d17aebfeb449a9443/aphrodite/common/sampling_params.py#L24-L94
 
 
 ## Common Issues
