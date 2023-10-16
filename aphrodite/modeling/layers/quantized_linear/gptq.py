@@ -4,8 +4,9 @@ import torch
 from torch.nn.parameter import Parameter
 
 from aphrodite import quantization_ops
-from aphrodite.modeling.megatron.layers import (
-    ColumnParallelLinear, RowParallelLinear)
+from aphrodite.modeling.megatron.layers import (ColumnParallelLinear,
+                                                       RowParallelLinear)
+
 
 class GPTQLinear(torch.nn.Module):
 
@@ -62,6 +63,7 @@ class GPTQLinear(torch.nn.Module):
                 torch.empty(self.output_size,
                             device="cuda",
                             dtype=torch.float16))
+            # Always initialize bias to zero.
             with torch.no_grad():
                 self.bias.zero_()
         else:
@@ -71,6 +73,8 @@ class GPTQLinear(torch.nn.Module):
         assert self.qweight.device.type == "cuda"
         assert self.qweight.device.index is not None
 
+        # make_q4 segfaults if g_idx is not on cpu in the act-order case.
+        # In the non act-order case, None needs to be passed for g_idx.
         if not self.quant_config.desc_act:
             g_idx = torch.empty((1, 1), device="meta")
         else:
@@ -101,7 +105,7 @@ class GPTQColumnParallelLinear(ColumnParallelLinear):
         self.use_exllama = True
         group_size = self.quant_config.group_size if (
             self.quant_config.group_size != -1) else self.input_size
-        
+
         self.qweight = Parameter(
             torch.empty(
                 self.input_size // self.quant_config.pack_factor,
@@ -143,20 +147,26 @@ class GPTQColumnParallelLinear(ColumnParallelLinear):
         assert self.qweight.device.type == "cuda"
         assert self.qweight.device.index is not None
 
+        # make_q4 segfaults if g_idx is not on cpu in the act-order case.
+        # In the non act-order case, None needs to be passed for g_idx.
         if not self.quant_config.desc_act:
             g_idx = torch.empty((1, 1), device="meta")
         else:
             g_idx = self.g_idx.to("cpu")
         self.q4 = quantization_ops.gptq_make_q4(self.qweight, self.qzeros,
-                                                    self.scales, g_idx,
-                                                    self.qweight.device.index)
-            
-    def apply_weights(self, x: torch.Tensor, bias: Optional[torch.Tensor]) -> torch.Tensor:
+                                                self.scales, g_idx,
+                                                self.qweight.device.index)
+
+    def apply_weights(
+        self,
+        x: torch.Tensor,
+        bias: Optional[torch.Tensor],
+    ) -> torch.Tensor:
         out_shape = x.shape[:-1] + (self.qweight.shape[-1], )
         reshaped_x = x.reshape(-1, x.shape[-1])
         output = torch.empty((x.shape[0], self.qweight.shape[-1]),
-                              dtype=torch.float16,
-                              device=x.device)
+                             dtype=torch.float16,
+                             device=x.device)
         quantization_ops.gptq_q4_matmul(reshaped_x, self.q4, output)
         if bias is not None:
             output = output + bias
@@ -172,8 +182,8 @@ class GPTQRowParallelLinear(RowParallelLinear):
         group_size = self.quant_config.group_size if (
             self.quant_config.group_size != -1
         ) else self.input_size_per_partition
-        if self.world_size > 1 and (self.quant_config.desc_act
-                                    and self.quant_config.group_size != -1):
+        if self.tp_size > 1 and (self.quant_config.desc_act
+                                 and self.quant_config.group_size != -1):
             group_number = self.input_size // group_size
             self.use_exllama = False
         else:
@@ -224,6 +234,8 @@ class GPTQRowParallelLinear(RowParallelLinear):
         assert self.qweight.device.type == "cuda"
         assert self.qweight.device.index is not None
 
+        # make_q4 segfaults if g_idx is not on cpu in the act-order case.
+        # In the non act-order case, None needs to be passed for g_idx.
         if not self.quant_config.desc_act:
             g_idx = torch.empty((1, 1), device="meta")
         else:

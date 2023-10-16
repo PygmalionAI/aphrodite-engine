@@ -72,6 +72,11 @@ async def generate(request: Request, x_api_key: str = Header(None)) -> Response:
         if hasattr(sampling_params, key):
             setattr(sampling_params, key, value)
 
+    try:
+        sampling_params.verify()
+    except Exception as err:
+        raise HTTPException(status_code=422, detail=str(err))
+
     request_id = random_uuid()
 
     results_generator = engine.generate(prompt, sampling_params, request_id)

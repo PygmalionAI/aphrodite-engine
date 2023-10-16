@@ -11,6 +11,7 @@ from aphrodite.modeling.megatron.communication_op import (
 )
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import SamplerOutput, SequenceOutputs, SequenceData
+from aphrodite.modeling.layers.mirostat import mirostat_get_mu_hook, mirostat_update_mu_hook
 
 _SAMPLING_EPS = 1e-5
 
@@ -83,6 +84,17 @@ class Sampler(nn.Module):
         logits = _apply_logits_processors(input_metadata, logits, output_tokens)
 
         # push_logit_hist("logitprocs", logits_at, logits)
+
+        # Apply Mirostat
+        # Note that we apply mirostat before temperature, not after like it maybe should be
+        # To be fixed by implementing customizable sampling order
+        taus, etas, mus = _get_mirostat_args(input_metadata)
+        assert len(taus) == len(etas) == len(mus) == logits.shape[0]
+        if any(tau > _SAMPLING_EPS for tau in taus):
+            logits = _apply_mirostat_v2(logits, taus, etas, mus) # mus is an inout param, :vomit:
+            mirostat_update_mu_hook(input_metadata, mus)
+        
+        
 
         # Apply Eta sampling, as described in https://arxiv.org/abs/2210.15191
         eta_cutoffs = _get_eta_cutoffs(input_metadata)
@@ -160,25 +172,7 @@ def _prune_hidden_states(
     hidden_states: torch.Tensor,
     input_metadata: InputMetadata,
 ) -> torch.Tensor:
-    last_token_indices = []
-    start_idx = 0
-    for i, seq_group in enumerate(input_metadata.seq_groups):
-        seq_ids, _ = seq_group
-        if i < input_metadata.num_prompts:
-            assert len(seq_ids) == 1, "Prompt input should have only one seq."
-            prompt_len = input_metadata.prompt_lens[i]
-            last_token_indices.append(start_idx + prompt_len - 1)
-            start_idx += prompt_len
-        else:
-            num_seqs = len(seq_ids)
-            last_token_indices.extend(range(start_idx, start_idx + num_seqs))
-            start_idx += num_seqs
-
-    last_token_indices = torch.tensor(last_token_indices,
-                                      dtype=torch.long,
-                                      device=hidden_states.device)
-    return hidden_states.index_select(0, last_token_indices)
-
+    return hidden_states.index_select(0, input_metadata.last_token_indices)
 
 def _get_penalties(
         input_metadata: InputMetadata) -> Tuple[List[float], List[float]]:
@@ -203,6 +197,65 @@ def _get_output_tokens(input_metadata: InputMetadata) -> Tuple[List[List[int]], 
             output_tokens.append(seq_data.output_token_ids)
 
     return output_tokens
+
+
+def _get_mirostat_args(
+    input_metadata: InputMetadata
+) -> Tuple[List[float], List[float], List[float]]:
+    taus: List[float] = []
+    etas: List[float] = []
+    
+    for seq_ids, params in input_metadata.seq_groups:
+        taus += [params.mirostat_tau] * len(seq_ids)  # AKA the targeted surprise
+        etas += [params.mirostat_eta] * len(seq_ids)  # AKA the learning rate
+
+    mus: List[float] = mirostat_get_mu_hook(input_metadata) # Hide global state behind a function
+
+    return taus, etas, mus
+
+
+def _apply_mirostat_v2(
+    logits: torch.Tensor,
+    taus: List[float],
+    etas: List[float],
+    mus: List[float],
+) -> torch.Tensor:
+    ttaus = torch.tensor(taus, dtype=logits.dtype, device=logits.device)
+    tetas = torch.tensor(etas, dtype=logits.dtype, device=logits.device)
+    tmus = torch.tensor(mus, dtype=logits.dtype, device=logits.device)
+
+    log_probs = torch.neg_(torch.log2_(torch.softmax(logits, dim=-1))) # Calculate surprise value per token
+    # For compatibility with ooba, done in unit of bits(log base 2) not nats(ln)
+    # Ideally this would be a log_softmax, for numerical stability and elegance purposes, but eh
+
+    miro_mask = log_probs > tmus.unsqueeze(dim=-1) # Mask out "too-surprising" tokens (above mu)
+    mininds = torch.argmin(log_probs, dim=-1)
+    miro_mask.scatter_(1, mininds.unsqueeze(dim=-1), False) # Force at least one outcome to be possible, ideally the most likely one
+
+    log_probs[miro_mask] = -float("inf")
+
+    probs = torch.softmax(log_probs, dim=-1, dtype=logits.dtype) # Get probs
+    
+    # NOTE: Mirostat updates its `mu` values based on the sample chosen.
+    #       The silly approach here is to just sample it and make the logits one-hot.
+    #       This breaks fine grained seeding, but we don't have that yet. TODO: FIX when it gets added
+    next_token_ids = torch.multinomial(probs,
+                                        num_samples=1,
+                                        replacement=True)
+    
+    # Calculation new `mu` values
+    # NOTE: If we can know the logit values of the PREVIOUS iteration, it should be
+    # possible to update `mu` before applying mirostat each iteration, thus letting us
+    # keep _sample as the last thing that happens.
+    picked_surprises = torch.gather(log_probs, dim=-1, index=next_token_ids)
+    eps = picked_surprises.squeeze() - ttaus
+    tmus = tmus - tetas * eps
+
+    mus[:] = tmus.tolist()
+    logits.fill_(-float("inf"))
+    logits.scatter_(1, next_token_ids, 1.0) # This value doesn't actually matter, so long as it's not -inf. Vectors are now one-hot, after all.
+    return logits
+
 
 def _apply_logits_processors(
     input_metadata: InputMetadata,
@@ -647,16 +700,15 @@ def _sample(
     input_metadata: InputMetadata,
 ) -> SamplerOutput:
     categorized_seq_group_ids = {t: [] for t in SamplingType}
-    start_idx = 0
-    categorized_seq_ids = {t: [] for t in SamplingType}
+    categorized_seq_ids = input_metadata.categorized_seq_ids
     for i, seq_group in enumerate(input_metadata.seq_groups):
         seq_ids, sampling_params = seq_group
         sampling_type = sampling_params.sampling_type
         categorized_seq_group_ids[sampling_type].append(i)
-        num_seqs = len(seq_ids)
-        categorized_seq_ids[sampling_type].extend(
-            range(start_idx, start_idx + num_seqs))
-        start_idx += num_seqs
+        # num_seqs = len(seq_ids)
+        # categorized_seq_ids[sampling_type].extend(
+        #     range(start_idx, start_idx + num_seqs))
+        # start_idx += num_seqs
 
     seq_outputs_dict: Dict[int, List[SequenceOutputs]] = {}
     for sampling_type in SamplingType:

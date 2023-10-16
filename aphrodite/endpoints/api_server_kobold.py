@@ -71,6 +71,7 @@ def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[Sampl
         kai_payload.top_k = -1
 
 
+
     sampling_params = SamplingParams(
         n=kai_payload.n,
         best_of=kai_payload.n,
@@ -83,10 +84,14 @@ def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[Sampl
         typical_p=kai_payload.typical,
         eta_cutoff=kai_payload.eta_cutoff,
         epsilon_cutoff=kai_payload.eps_cutoff,
+        mirostat_mode=kai_payload.mirostat,
+        mirostat_tau=kai_payload.mirostat_tau,
+        mirostat_eta=kai_payload.mirostat_eta,
         stop=kai_payload.stop_sequence,
         # ignore_eos=kai_payload.use_default_badwordsids, # TODO ban instead
         max_tokens=kai_payload.max_length,
     )
+
 
     max_input_tokens = max(1, kai_payload.max_context_length - kai_payload.max_length)
     input_tokens = tokenizer(kai_payload.prompt).input_ids[-max_input_tokens:]
@@ -137,7 +142,7 @@ async def check_generation():
 @kai_api.get("/info/version")
 async def get_version():
     """ Impersonate KAI """
-    return JSONResponse({"result": "1.2.4"})
+    return JSONResponse({"result": "1.2.5"})
 
 @kai_api.get("/model")
 async def get_model():
@@ -179,7 +184,7 @@ async def abort_generation():
 @extra_api.get("/version")
 async def get_extra_version():
     """ Impersonate KoboldCpp with streaming support """
-    return JSONResponse({"result": "KoboldCpp", "version": "1.30"})
+    return JSONResponse({"result": "KoboldCpp", "version": "1.36"})
 
 @app.get("/")
 async def get_kobold_lite_ui():
