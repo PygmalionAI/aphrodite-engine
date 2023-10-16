@@ -207,8 +207,6 @@ class SamplingParams:
             raise ValueError(f"typical_p must be in (0, 1], got {self.typical_p}.")
         if self.mirostat_mode != 0 and self.mirostat_mode != 2:
             raise ValueError(f"Only Mirostat v2 and disabled(0) supported, got {self.mirostat_mode}")
-        if self.mirostat_mode == 0 and (self.mirostat_eta != 0 or self.mirostat_tau != 0):
-            raise ValueError(f"When Mirostat is disabled, tau and eta must be 0, got:({self.mirostat_tau},{self.mirostat_eta})")
         if self.mirostat_mode != 0 and not self.mirostat_eta > 0:
             raise ValueError(f"mirostat_eta must be positive, got {self.mirostat_eta}")
         if self.mirostat_mode != 0 and not self.mirostat_tau > 0:
