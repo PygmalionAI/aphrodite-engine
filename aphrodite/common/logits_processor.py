@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 import torch
-from typing import Dict
 
 
 class LogitsProcessor(ABC):
@@ -21,7 +20,7 @@ class BiasLogitsProcessor(LogitsProcessor):
         Each key of the dict corresponds to the the token id.
     """
 
-    def __init__(self, biases: Dict[int, float]):
+    def __init__(self, biases: dict[int, float]):
         self.biases = biases
 
         if not biases:
@@ -31,7 +30,7 @@ class BiasLogitsProcessor(LogitsProcessor):
         self.values = torch.tensor(list(self.biases.values()),
                                    dtype=torch.long)
 
-    def __call__(self, logits):
+    def __call__(self, logits: torch.Tensor, output_tokens: list[list[int]]) -> None:
         if not self.biases:
             return
 
@@ -53,7 +52,17 @@ class BanEOSUntil(LogitsProcessor):
         self._min_tokens = min_tokens
         self._eos_token_id = eos_token_id
 
-    def __call__(self, logits, output_tokens):
+    def __call__(self, logits: torch.Tensor, output_tokens: list[list[int]]) -> None:
         for i in range(len(output_tokens)):
             if len(output_tokens[i]) < self._min_tokens:
                 logits[i][self._eos_token_id] = -float("inf")
+
+
+class BanTokens(LogitsProcessor):
+    """Bans specified tokens."""
+    def __init__(self, banned_token_ids:list[int]):
+        self._banned_token_ids = banned_token_ids
+
+    def __call__(self, logits: torch.Tensor, output_tokens: list[list[int]]) -> None:
+        logits[:, self._banned_token_ids] = -float("inf")
+
