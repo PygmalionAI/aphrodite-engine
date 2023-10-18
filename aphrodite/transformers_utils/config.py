@@ -4,8 +4,6 @@ from aphrodite.transformers_utils.configs import *
 
 def get_config(model: str, trust_remote_code: bool,
                revision: Optional[str] = None) -> PretrainedConfig:
-    if "mistral" in model.lower():
-        return MistralConfig.from_pretrained(model, revision=revision)
     try:
         config = AutoConfig.from_pretrained(
             model, trust_remote_code=trust_remote_code, revision=revision)
