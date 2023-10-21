@@ -347,9 +347,7 @@ class AphroditeEngine:
                         eos_token_id=self.tokenizer.eos_token_id))
         return current_worst_score >= highest_attainable_score
 
-    def _process_sequence_group_samples(
-            self, seq_group: SequenceGroup,
-            samples: List[SequenceOutputs]) -> None:
+    def _process_sequence_group_samples(self, seq_group: SequenceGroup, samples: List[SequenceOutputs]) -> None:
         parent_seqs = seq_group.get_seqs(status=SequenceStatus.RUNNING)
         existing_finished_seqs = seq_group.get_finished_seqs()
         parent_child_dict = {
@@ -363,8 +361,7 @@ class AphroditeEngine:
 
         # Process the child samples for each parent sequence
         for parent in parent_seqs:
-            child_samples: List[SequenceOutputs] = parent_child_dict[
-                parent.seq_id]
+            child_samples: List[SequenceOutputs] = parent_child_dict[parent.seq_id]
             if len(child_samples) == 0:
                 # This parent sequence has no children samples. Remove
                 # the parent sequence from the sequence group since it will
@@ -379,6 +376,7 @@ class AphroditeEngine:
                 child = parent.fork(new_child_seq_id)
                 child.append_token_id(child_sample.output_token,
                                       child_sample.logprobs)
+                child.persistent_data = child_sample.persistent_data
                 child_seqs.append((child, parent))
             # Continue the parent sequence for the last child sample.
             # We reuse the parent sequence here to reduce redundant memory
@@ -386,6 +384,7 @@ class AphroditeEngine:
             last_child_sample = child_samples[-1]
             parent.append_token_id(last_child_sample.output_token,
                                    last_child_sample.logprobs)
+            parent.persistent_data = last_child_sample.persistent_data
             child_seqs.append((parent, parent))
 
         for seq, _ in child_seqs:

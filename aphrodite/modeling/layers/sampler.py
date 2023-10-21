@@ -15,6 +15,17 @@ from aphrodite.common.sequence import SamplerOutput, SequenceOutputs, SequenceDa
 
 _SAMPLING_EPS = 1e-5
 
+class OutputMetadata:
+    def __init__(self):
+        self._metadata:dict[int,dict] = {}
+
+    def add(self, seq_id:int, key, val) -> None:
+        if seq_id not in self._metadata:
+            self._metadata[seq_id] = {}
+        self._metadata[seq_id][key] = val
+
+    def get(self, seq_id:int) -> dict:
+        return self._metadata.get(seq_id, None)
 
 # import json
 # def push_logit_hist(name, logit_hist, logit_matrix:torch.Tensor):
@@ -65,6 +76,14 @@ class Sampler(nn.Module):
         logits = _get_logits(hidden_states, embedding, embedding_bias,
                              self.vocab_size)
 
+        output_metadata = OutputMetadata()
+
+        for seqid in input_metadata.seq_data.keys():
+            sdat = input_metadata.persistent_data.get(seqid, None)
+            output_metadata.add(seqid, "dongus", [] if not sdat else sdat["dongus"] + [len(sdat["dongus"])])
+
+        with open("fuckoff.txt", 'at') as f:
+            f.write(f"C{torch.cuda.current_device()}: {output_metadata._metadata}\n")
         # logits_at = [[] for _ in logits]
         # push_logit_hist("new", logits_at, logits)
 
@@ -81,7 +100,7 @@ class Sampler(nn.Module):
         
         # push_logit_hist("rep_pen", logits_at, logits)
 
-        logits = _apply_logits_processors(input_metadata, logits, output_tokens)
+        logits = _apply_logits_processors(input_metadata, output_metadata, logits, output_tokens)
 
         # push_logit_hist("logitprocs", logits_at, logits)
 
@@ -152,7 +171,8 @@ class Sampler(nn.Module):
         # print(json.dumps(logits_at, indent=2))
 
         # Sample the next tokens.
-        return _sample(probs, logprobs, input_metadata)
+        output:SamplerOutput = _sample(probs, logprobs, input_metadata, output_metadata)
+        return output
 
 
 def _get_logits(hidden_states: torch.Tensor, embedding: torch.Tensor,
@@ -257,8 +277,10 @@ def _apply_mirostat_v2(
     return logits
 
 
+
 def _apply_logits_processors(
     input_metadata: InputMetadata,
+    output_metadata: OutputMetadata,
     logits: torch.Tensor,
     output_tokens: List[List[int]]
 ) -> torch.Tensor:
@@ -570,17 +592,15 @@ def _build_sequence_outputs(
     parent_seq_ids: List[int],
     parent_logprobs: torch.Tensor,
     num_output_logprobs: Optional[int],
+    output_metadata: OutputMetadata,
 ) -> List[SequenceOutputs]:
     # Get top-k log probabilities for the next tokens.
     next_logprobs = _get_topk_logprobs(parent_logprobs, num_output_logprobs)
     seq_outputs: List[SequenceOutputs] = []
-    for parent_id, next_token_id, token_logprob in zip(
-            parent_ids, next_token_ids, selected_token_logprobs):
+    for parent_id, next_token_id, token_logprob in zip(parent_ids, next_token_ids, selected_token_logprobs):
         output_logprobs = next_logprobs[parent_id].copy()
         output_logprobs[next_token_id] = token_logprob
-        seq_outputs.append(
-            SequenceOutputs(parent_seq_ids[parent_id], next_token_id,
-                            output_logprobs))
+        seq_outputs.append(SequenceOutputs(parent_seq_ids[parent_id], next_token_id, output_logprobs, output_metadata.get(parent_seq_ids[parent_id])))
     return seq_outputs
 
 
@@ -698,6 +718,7 @@ def _sample(
     probs: torch.Tensor,
     logprobs: torch.Tensor,
     input_metadata: InputMetadata,
+    output_metadata: OutputMetadata,
 ) -> SamplerOutput:
     categorized_seq_group_ids = {t: [] for t in SamplingType}
     categorized_seq_ids = input_metadata.categorized_seq_ids
@@ -705,10 +726,6 @@ def _sample(
         seq_ids, sampling_params = seq_group
         sampling_type = sampling_params.sampling_type
         categorized_seq_group_ids[sampling_type].append(i)
-        # num_seqs = len(seq_ids)
-        # categorized_seq_ids[sampling_type].extend(
-        #     range(start_idx, start_idx + num_seqs))
-        # start_idx += num_seqs
 
     seq_outputs_dict: Dict[int, List[SequenceOutputs]] = {}
     for sampling_type in SamplingType:
@@ -741,8 +758,7 @@ def _sample(
             seq_ids, sampling_params = seq_group
             next_token_ids, parent_ids = sample_result
             num_parent_seqs = len(seq_ids)
-            batched_logprobs_query_seq_indices.extend(
-                [sample_idx + parent_id for parent_id in parent_ids])
+            batched_logprobs_query_seq_indices.extend([sample_idx + parent_id for parent_id in parent_ids])
             batched_logprobs_query_token_indices.extend(next_token_ids)
             sample_idx += num_parent_seqs
         assert sample_idx == num_tokens
@@ -754,20 +770,18 @@ def _sample(
         # Build the sequence outputs.
         sample_idx = 0
         result_idx = 0
-        for seq_group_id, seq_group, sample_result in zip(
-                seq_group_ids, seq_groups, sample_results):
+        for seq_group_id, seq_group, sample_result in zip(seq_group_ids, seq_groups, sample_results):
             seq_ids, sampling_params = seq_group
             next_token_ids, parent_ids = sample_result
             num_results = len(next_token_ids)
             num_parent_seqs = len(seq_ids)
-            parent_logprobs = category_logprobs[sample_idx:sample_idx +
-                                                num_parent_seqs]
-            selected_token_logprobs = batched_logprobs_query_result[
-                result_idx:result_idx + num_results]
+            parent_logprobs = category_logprobs[sample_idx:sample_idx + num_parent_seqs]
+            selected_token_logprobs = batched_logprobs_query_result[result_idx:result_idx + num_results]
             seq_output = _build_sequence_outputs(parent_ids, next_token_ids,
                                                  selected_token_logprobs,
                                                  seq_ids, parent_logprobs,
-                                                 sampling_params.logprobs)
+                                                 num_output_logprobs=sampling_params.logprobs,
+                                                 output_metadata=output_metadata)
             seq_outputs_dict[seq_group_id] = seq_output
             sample_idx += num_parent_seqs
             result_idx += num_results

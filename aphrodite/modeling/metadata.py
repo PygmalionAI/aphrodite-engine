@@ -30,6 +30,7 @@ class InputMetadata:
         last_token_indices: torch.Tensor,
         categorized_seq_ids: Dict[SamplingType, torch.Tensor],
         sliding_window: Optional[int] = None,
+        persistent_data:dict[int,dict] = {},
     ) -> None:
         self.seq_groups = seq_groups
         self.seq_data = seq_data
@@ -40,6 +41,7 @@ class InputMetadata:
         self.block_tables = block_tables
         self.last_token_indices = last_token_indices
         self.categorized_seq_ids = categorized_seq_ids
+        self.persistent_data = persistent_data
 
         self.to_cache = None
         if sliding_window is not None:
