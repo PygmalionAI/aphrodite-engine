@@ -88,11 +88,11 @@ class Sampler(nn.Module):
         # Apply Mirostat
         # Note that we apply mirostat before temperature, not after like it maybe should be
         # To be fixed by implementing customizable sampling order
-        taus, etas, mus = _get_mirostat_args(input_metadata)
-        assert len(taus) == len(etas) == len(mus) == logits.shape[0]
-        if any(tau > _SAMPLING_EPS for tau in taus):
-            logits = _apply_mirostat_v2(logits, taus, etas, mus) # mus is an inout param, :vomit:
-            mirostat_update_mu_hook(input_metadata, mus)
+        # taus, etas, mus = _get_mirostat_args(input_metadata)
+        # assert len(taus) == len(etas) == len(mus) == logits.shape[0]
+        # if any(tau > _SAMPLING_EPS for tau in taus):
+        #     logits = _apply_mirostat_v2(logits, taus, etas, mus) # mus is an inout param, :vomit:
+        #     mirostat_update_mu_hook(input_metadata, mus)
         
         
 
