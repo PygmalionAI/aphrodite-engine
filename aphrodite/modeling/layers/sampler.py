@@ -11,7 +11,7 @@ from aphrodite.modeling.megatron.communication_op import (
 )
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import SamplerOutput, SequenceOutputs, SequenceData
-from aphrodite.modeling.layers.mirostat import mirostat_get_mu_hook, mirostat_update_mu_hook
+# from aphrodite.modeling.layers.mirostat import mirostat_get_mu_hook, mirostat_update_mu_hook
 
 _SAMPLING_EPS = 1e-5
 
@@ -209,7 +209,7 @@ def _get_mirostat_args(
         taus += [params.mirostat_tau] * len(seq_ids)  # AKA the targeted surprise
         etas += [params.mirostat_eta] * len(seq_ids)  # AKA the learning rate
 
-    mus: List[float] = mirostat_get_mu_hook(input_metadata) # Hide global state behind a function
+    # mus: List[float] = mirostat_get_mu_hook(input_metadata) # Hide global state behind a function
 
     return taus, etas, mus
 
