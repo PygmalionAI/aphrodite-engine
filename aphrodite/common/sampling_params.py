@@ -158,9 +158,6 @@ class SamplingParams:
         self.skip_special_tokens = skip_special_tokens
         self.logits_processors = logits_processors
 
-        self.verify()
-
-    def verify(self) -> None:
         self._verify_args()
         if self.use_beam_search:
             self._verify_beam_search()
@@ -274,9 +271,9 @@ class SamplingParams:
                 f"eta_cutoff={self.eta_cutoff}, "
                 f"epsilon_cutoff={self.epsilon_cutoff}, "
                 f"typical_p={self.typical_p}, "
-                f"mirostat_mode={self.mirostat_mode}, "
-                f"mirostat_tau={self.mirostat_tau}, "
-                f"mirostat_eta={self.mirostat_eta}, "
+                f"mirostat_mode = {self.mirostat_mode}, "
+                f"mirostat_tau = {self.mirostat_tau}, "
+                f"mirostat_eta = {self.mirostat_eta}, "
                 f"use_beam_search={self.use_beam_search}, "
                 f"length_penalty={self.length_penalty}, "
                 f"early_stopping={self.early_stopping}, "
