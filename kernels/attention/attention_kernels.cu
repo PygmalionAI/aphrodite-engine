@@ -68,7 +68,7 @@ inline __device__ float block_sum(float* red_smem, float sum) {
 }
 
 // TODO: Merge the last two dimensions of the grid.
-// Grid: (num_heads, num_seqs).
+// Grid: (num_heads, num_seqs, max_num_partitions).
 template<
   typename scalar_t,
   int HEAD_SIZE,
@@ -113,6 +113,7 @@ __device__ void paged_attention_kernel(
   const int start_token_idx = start_block_idx * BLOCK_SIZE;
   const int end_token_idx = MIN(start_token_idx + num_blocks * BLOCK_SIZE, context_len);
   const int num_tokens = end_token_idx - start_token_idx;
+
   constexpr int THREAD_GROUP_SIZE = MAX(WARP_SIZE / BLOCK_SIZE, 1);
   constexpr int NUM_THREAD_GROUPS = NUM_THREADS / THREAD_GROUP_SIZE; // Note: This assumes THREAD_GROUP_SIZE divides NUM_THREADS
   assert(NUM_THREADS % THREAD_GROUP_SIZE == 0);
@@ -239,7 +240,7 @@ __device__ void paged_attention_kernel(
 
   // Get the sum of the exp values.
   float exp_sum = 0.f;
-  for (int i = thread_idx; i < num_tokens; i += NUM_THREADS) {{
+  for (int i = thread_idx; i < num_tokens; i += NUM_THREADS) {
     float val = __expf(logits[i] - qk_max);
     logits[i] = val;
     exp_sum += val;
@@ -603,7 +604,7 @@ void paged_attention_v1_launcher(
   dim3 block(NUM_THREADS);
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   switch (head_size) {
-    // NOTE(woosuk): To reduce the compilation time, we only compile for the
+    // NOTE: To reduce the compilation time, we only compile for the
     // head sizes that we use in the model. However, we can easily extend this
     // to support any head size which is a multiple of 16.
     case 64:
