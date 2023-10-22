@@ -81,6 +81,7 @@ class SamplingParams:
             tokens after the EOS token is generated.
         max_tokens: Maximum number of tokens to generate per output sequence.
         logprobs: Number of log probabilities to return per output token.
+        custom_token_bans: List of token IDs to ban from generating
         skip_special_tokens: Whether to skip special tokens in the output.
             defaults to true.
         logits_processors: List of LogitsProcessors to change the probability
@@ -110,6 +111,7 @@ class SamplingParams:
         ignore_eos: bool = False,
         max_tokens: int = 16,
         logprobs: Optional[int] = None,
+        custom_token_bans: Optional[List[int]] = None,
         skip_special_tokens: bool = True,
         logits_processors: List[LogitsProcessor] = None,
     ) -> None:
@@ -142,6 +144,7 @@ class SamplingParams:
         self.ignore_eos = ignore_eos
         self.max_tokens = max_tokens
         self.logprobs = logprobs
+        self.custom_token_bans = custom_token_bans or []
         self.skip_special_tokens = skip_special_tokens
         self.logits_processors = logits_processors or []
 
@@ -256,5 +259,6 @@ class SamplingParams:
                 f"stop={self.stop}, "
                 f"ignore_eos={self.ignore_eos}, "
                 f"max_tokens={self.max_tokens}, "
+                f"custom_token_bans={self.custom_token_bans}, "
                 f"logprobs={self.logprobs}, "
                 f"skip_special_tokens={self.skip_special_tokens})")
