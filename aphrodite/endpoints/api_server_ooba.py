@@ -13,6 +13,7 @@ from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.utils import random_uuid
+from aphrodite.common.logits_processor import BanEOSUntil
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds.
 TIMEOUT_TO_PREVENT_DEADLOCK = 1  # seconds.
@@ -45,19 +46,28 @@ async def generate(request: Request, x_api_key: str = Header(None)) -> Response:
     request_dict = await request.json()
     prompt = request_dict.pop("prompt")
     stream = request_dict.pop("stream", False)
-
-    sampling_params = SamplingParams()
     
     if 'stopping_strings' in request_dict:
         request_dict['stop'] = request_dict.pop('stopping_strings')
     if 'max_new_tokens' in request_dict:
         request_dict['max_tokens'] = request_dict.pop('max_new_tokens')
+    if 'min_length' in request_dict:
+        request_dict['min_tokens'] = request_dict.pop('min_length')
     if 'ban_eos_token' in request_dict:
         request_dict['ignore_eos'] = request_dict.pop('ban_eos_token')
     if 'top_k' in request_dict and request_dict['top_k'] == 0:
         request_dict['top_k'] = -1
 
+    request_dict['logits_processors'] = []
 
+    min_length = request_dict.pop('min_tokens', 0)
+    if request_dict.get('ignore_eos', False):  # ignore_eos/ban_eos_token is functionally equivalent to `min_tokens = max_tokens`
+        min_length = request_dict.get('max_tokens', 16)
+
+    if min_length:
+        request_dict['logits_processors'].append(BanEOSUntil(min_length, engine.engine.tokenizer.eos_token_id))
+
+    sampling_params = SamplingParams()
     for key, value in request_dict.items():
         if hasattr(sampling_params, key):
             setattr(sampling_params, key, value)
