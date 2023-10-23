@@ -30,11 +30,17 @@ engine: AsyncAphrodite = None
 
 badwordsids: List[int] = []
 
-def _build_badwords(tokenizer):
+def _set_badwords(tokenizer, hf_config):
     global badwordsids
+    if hf_config.bad_words_ids is not None:
+        badwordsids = hf_config.bad_words_ids
+        return
+    
     badwordsids = [ v for k, v in tokenizer.get_vocab().items()
                     if any(c in str(k) for c in "[]")
                   ]
+    if tokenizer.pad_token_id in badwordsids:
+        badwordsids.remove(tokenizer.pad_token_id)
     badwordsids.append(tokenizer.eos_token_id)
 
 
@@ -251,7 +257,7 @@ if __name__ == "__main__":
                               tokenizer_mode=engine_args.tokenizer_mode,
                               trust_remote_code=engine_args.trust_remote_code)
     
-    _build_badwords(tokenizer)
+    _set_badwords(tokenizer, engine_model_config.hf_config)
 
     uvicorn.run(app,
                 host=args.host,
