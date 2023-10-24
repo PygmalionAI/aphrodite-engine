@@ -104,11 +104,11 @@ To run a quantized model, use the `--quantization` flag with either `gptq` or `a
 
 For the full list of Sampling parameters, please refer to [SamplingParams](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/common/sampling_params.py):
 
-https://github.com/PygmalionAI/aphrodite-engine/blob/56161a9674f1f9e8927aaa77e5d339498bb6eeee/aphrodite/common/sampling_params.py#L24-L87
+https://github.com/PygmalionAI/aphrodite-engine/blob/ab1ac578bafa922a6c7e323986bd320615311dad/aphrodite/common/sampling_params.py#L24-L88
 
 
 ## Common Issues
-- `The detected CUDA version (12.1) mismatches the version that was used to compile
+`The detected CUDA version (12.1) mismatches the version that was used to compile
       PyTorch (11.8). Please make sure to use the same CUDA versions.`
 
 This is normally due to your environment referring to the global installation of CUDA and not the one in your current env. Run `which nvcc` and note down the output. For example, if your output is `/home/anon/miniconda3/envs/aphrodite/bin/nvcc`, run this command:
@@ -118,10 +118,24 @@ export CUDA_HOME=/home/anon/miniconda3/envs/aphrodite
 
 Then run the installation command again.
 
+***
 
-- `Aborted due to the lack of CPU swap space. Please increase the swap space to avoid this error.`
+`Aborted due to the lack of CPU swap space. Please increase the swap space to avoid this error.`
 
 You've run out of swap space! Please pass the `--swap-space` followed by the amount of swap (in GBs) to allocate. Make sure you leave enough RAM for the model loading process.
+
+***
+```
+ncclInternalError: Internal check failed.
+Last error:
+No NVML device handle. Skipping nvlink detection.
+```
+This happens if you're doing tensor parallelism (multi-GPU) on NVLinked NVIDIA GPUs and they don't support P2P. Please run this command before running the server:
+```sh
+export NCCL_P2P_DISABLE=1
+```
+Alternatively, you can prepend `NCCL_P2P_DISABLE=1` to your server launch command.
+
 ### Notes
 
 1. By design, Aphrodite takes up 90% of your GPU's VRAM. If you're not serving an LLM at scale, you may want to limit the amount of memory it takes up. You can do this in the API example by launching the server with the `--gpu-memory-utilization 0.6` (0.6 means 60%).
