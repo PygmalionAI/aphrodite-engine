@@ -74,8 +74,6 @@ def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[Sampl
             f"max_model_len ({max_model_len})"
         )
 
-    sampling_params = SamplingParams(max_tokens=kai_payload.max_length)
-
     # KAI spec: top_k == 0 means disabled, aphrodite: top_k == -1 means disabled
     # https://github.com/KoboldAI/KoboldAI-Client/wiki/Settings
     kai_payload.top_k = kai_payload.top_k if kai_payload.top_k != 0.0 else -1
@@ -85,7 +83,6 @@ def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[Sampl
         kai_payload.n = 1
         kai_payload.top_p = 1.0
         kai_payload.top_k = -1
-
 
     sampling_params = SamplingParams(
         n=kai_payload.n,
