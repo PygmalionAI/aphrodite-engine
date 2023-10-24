@@ -28,6 +28,22 @@ logger = init_logger(__name__)
 served_model: str = "Read Only"
 engine: AsyncAphrodite = None
 
+badwordsids: List[int] = []
+
+def _set_badwords(tokenizer, hf_config):
+    global badwordsids
+    if hf_config.bad_words_ids is not None:
+        badwordsids = hf_config.bad_words_ids
+        return
+    
+    badwordsids = [ v for k, v in tokenizer.get_vocab().items()
+                    if any(c in str(k) for c in "[]")
+                  ]
+    if tokenizer.pad_token_id in badwordsids:
+        badwordsids.remove(tokenizer.pad_token_id)
+    badwordsids.append(tokenizer.eos_token_id)
+
+
 app = FastAPI()
 kai_api = APIRouter()
 extra_api = APIRouter()
@@ -84,7 +100,7 @@ def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[Sampl
         eta_cutoff=kai_payload.eta_cutoff,
         epsilon_cutoff=kai_payload.eps_cutoff,
         stop=kai_payload.stop_sequence,
-        # ignore_eos=kai_payload.use_default_badwordsids, # TODO ban instead
+        custom_token_bans=badwordsids if kai_payload.use_default_badwordsids else [],
         max_tokens=kai_payload.max_length,
     )
 
@@ -240,6 +256,8 @@ if __name__ == "__main__":
     tokenizer = get_tokenizer(engine_args.tokenizer,
                               tokenizer_mode=engine_args.tokenizer_mode,
                               trust_remote_code=engine_args.trust_remote_code)
+    
+    _set_badwords(tokenizer, engine_model_config.hf_config)
 
     uvicorn.run(app,
                 host=args.host,

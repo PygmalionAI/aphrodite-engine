@@ -58,6 +58,10 @@ class Sampler(nn.Module):
                                   presence_penalties, frequency_penalties, repetition_penalties,
                                   self.vocab_size)
         
+        banned_tokens = _get_custom_token_bans(input_metadata)
+        assert len(banned_tokens) == logits.shape[0]
+        logits = _apply_token_bans(logits, banned_tokens)
+        
         logits = _apply_logits_processors(input_metadata, logits, output_tokens)
 
         # Apply Eta sampling, as described in https://arxiv.org/abs/2210.15191
@@ -155,6 +159,16 @@ def _get_output_tokens(input_metadata: InputMetadata) -> List[List[int]]:
             output_tokens.append(seq_data.output_token_ids)
     return output_tokens
 
+
+def _get_custom_token_bans(input_metadata: InputMetadata) -> List[List[int]]:
+    banned_tokens: List[List[int]] = []
+    for seq_group in input_metadata.seq_groups:
+        seq_ids, sampling_params = seq_group
+        for _ in range(len(seq_ids)):
+            banned_tokens.append(sampling_params.custom_token_bans)
+    return banned_tokens
+
+
 def _apply_logits_processors(
     input_metadata: InputMetadata,
     logits: torch.Tensor,
@@ -232,6 +246,14 @@ def _apply_penalties(
     logits += logits * (1 / repetition_penalties.unsqueeze(dim=1) - 1) * presence_mask * (logits > 0)
     logits += logits * (repetition_penalties.unsqueeze(dim=1) - 1) * presence_mask * (logits < 0)
 
+    return logits
+
+
+def _apply_token_bans(logits: torch.Tensor, banned_tokens: List[List[int]]) -> torch.Tensor:
+    for i, banned_token_ids in enumerate(banned_tokens):
+        if not banned_token_ids:
+            continue
+        logits[i, banned_token_ids] = -float("inf")
     return logits
 
 

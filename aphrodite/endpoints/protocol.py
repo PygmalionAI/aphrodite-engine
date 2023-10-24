@@ -20,6 +20,7 @@ class SamplingParams(BaseModel):
     ignore_eos: bool = Field(False, alias="ignore_eos")
     max_tokens: int = Field(16, alias="max_length")
     logprobs: Optional[int] = Field(None, alias="logprobs")
+    custom_token_bans: Optional[List[int]] = Field(None, alias="custom_token_bans")
 
     @root_validator
     def validate_best_of(cls, values):
