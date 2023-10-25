@@ -13,7 +13,7 @@ COPY environment.yml /app/aphrodite-engine
 # Preparing Conda Environment
 RUN apt-get update \
     && apt-get install -y build-essential \
-    && conda env create \
+    && conda env create -f /app/aphrodite-engine/environment.yml -n aphrodite-engine \
     && apt-get purge -y --auto-remove build-essential \
     && pip install --upgrade ray pyarrow pandas \
     && rm -fr /var/lib/apt/lists/*
