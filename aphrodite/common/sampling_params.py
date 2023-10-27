@@ -18,7 +18,8 @@ class SamplingParams:
 
     Overall, we follow the sampling parameters from the OpenAI text completion
     API (https://platform.openai.com/docs/api-reference/completions/create).
-    In addition, we support beam search, which is not supported by OpenAI.
+    In addition, we support multiple additional samplers which are not supported
+    by OpenAI.
 
     Args:
         n: Number of output sequences to return for the given prompt.
@@ -162,6 +163,7 @@ class SamplingParams:
         self.ignore_eos = ignore_eos
         self.max_tokens = max_tokens
         self.logprobs = logprobs
+        self.prompt_logprobs = prompt_logprobs
         self.skip_special_tokens = skip_special_tokens
         self.logits_processors = logits_processors
 
@@ -224,6 +226,9 @@ class SamplingParams:
         if self.logprobs is not None and self.logprobs < 0:
             raise ValueError(
                 f"logprobs must be non-negative, got {self.logprobs}.")
+        if self.prompt_logprobs is not None and self.prompt_logprobs < 0:
+            raise ValueError(
+                f"prompt_logprobs must be non-negative, got {self.prompt_logprobs}.")
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:
