@@ -6,7 +6,8 @@ from typing import Dict
 class LogitsProcessor(ABC):
 
     @abstractmethod
-    def __call__(self, logits: torch.tensor) -> torch.tensor:
+    def __call__(self, logits: torch.Tensor, output_tokens: list[list[int]]) -> None:
+        """Logits are edited in-place"""
         pass
 
 
@@ -15,9 +16,9 @@ class BiasLogitsProcessor(LogitsProcessor):
     biases is a dict where each value is -100 to 100
       according to the OpenAI API docs.
     Args:
-      biases: Dict ov values from -100 to 100 to scale the
+      biases: Dict of values from -100 to 100 to scale the
         probability of a token being generated.
-        Each key of the dict coresponds to the the token id.
+        Each key of the dict corresponds to the the token id.
     """
 
     def __init__(self, biases: Dict[int, float]):
@@ -32,7 +33,7 @@ class BiasLogitsProcessor(LogitsProcessor):
 
     def __call__(self, logits):
         if not self.biases:
-            return logits
+            return
 
         values = self.values.to(logits.device)
         keys = self.keys.to(logits.device)
@@ -41,4 +42,18 @@ class BiasLogitsProcessor(LogitsProcessor):
                                      1 / (1 - (values / 100)))
         logits[0, keys] *= update_factors
 
-        return logits
+        
+class BanEOSUntil(LogitsProcessor):
+    """Bans the EOS token until a certain condition is met.
+    In this case, 'number of output tokens'.
+
+    With this condition, both 'min_tokens' and 'ignore_eos'
+    parameters can be handled gracefully."""
+    def __init__(self, min_tokens:int, eos_token_id:int):
+        self._min_tokens = min_tokens
+        self._eos_token_id = eos_token_id
+
+    def __call__(self, logits, output_tokens):
+        for i in range(len(output_tokens)):
+            if len(output_tokens[i]) < self._min_tokens:
+                logits[i][self._eos_token_id] = -float("inf")

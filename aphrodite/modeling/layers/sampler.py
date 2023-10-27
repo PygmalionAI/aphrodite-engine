@@ -13,7 +13,7 @@ from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (
     PromptLogprobs, SampleLogprobs, SamplerOutput, SequenceData,
     SequenceGroupOutputs, SequenceOutputs)
-from aphrodite.modeling.layers.mirostat import mirostat_get_mu_hook, mirostat_update_mu_hook
+from aphrodite.common.sequence import SamplerOutput, SequenceOutputs, SequenceData
 
 _SAMPLING_EPS = 1e-5
 
@@ -61,18 +61,12 @@ class Sampler(nn.Module):
                                   presence_penalties, frequency_penalties, repetition_penalties,
                                   self.vocab_size)
         
+        banned_tokens = _get_custom_token_bans(input_metadata)
+        assert len(banned_tokens) == logits.shape[0]
+        logits = _apply_token_bans(logits, banned_tokens)
+        
         logits = _apply_logits_processors(input_metadata, logits, output_tokens)
 
-        # Apply Mirostat
-        # Note that we apply mirostat before temperature, not after like it maybe should be
-        # To be fixed by implementing customizable sampling order
-        taus, etas, mus = _get_mirostat_args(input_metadata)
-        assert len(taus) == len(etas) == len(mus) == logits.shape[0]
-        if any(tau > _SAMPLING_EPS for tau in taus):
-            logits = _apply_mirostat_v2(logits, taus, etas, mus) # mus is an inout param, :vomit:
-            mirostat_update_mu_hook(input_metadata, mus)
-        
-        
         # Apply Eta sampling, as described in https://arxiv.org/abs/2210.15191
         eta_cutoffs = _get_eta_cutoffs(input_metadata)
         assert len(eta_cutoffs) == logits.shape[0]
@@ -207,62 +201,13 @@ def _get_output_tokens(input_metadata: InputMetadata) -> List[List[int]]:
     return output_tokens
 
 
-def _get_mirostat_args(
-    input_metadata: InputMetadata
-) -> Tuple[List[float], List[float], List[float]]:
-    taus: List[float] = []
-    etas: List[float] = []
-    
-    for seq_ids, params in input_metadata.seq_groups:
-        taus += [params.mirostat_tau] * len(seq_ids)  # AKA the targeted surprise
-        etas += [params.mirostat_eta] * len(seq_ids)  # AKA the learning rate
-
-    mus: List[float] = mirostat_get_mu_hook(input_metadata) # Hide global state behind a function
-
-    return taus, etas, mus
-
-
-def _apply_mirostat_v2(
-    logits: torch.Tensor,
-    taus: List[float],
-    etas: List[float],
-    mus: List[float],
-) -> torch.Tensor:
-    ttaus = torch.tensor(taus, dtype=logits.dtype, device=logits.device)
-    tetas = torch.tensor(etas, dtype=logits.dtype, device=logits.device)
-    tmus = torch.tensor(mus, dtype=logits.dtype, device=logits.device)
-
-    log_probs = torch.neg_(torch.log2_(torch.softmax(logits, dim=-1))) # Calculate surprise value per token
-    # For compatibility with ooba, done in unit of bits(log base 2) not nats(ln)
-    # Ideally this would be a log_softmax, for numerical stability and elegance purposes, but eh
-
-    miro_mask = log_probs > tmus.unsqueeze(dim=-1) # Mask out "too-surprising" tokens (above mu)
-    mininds = torch.argmin(log_probs, dim=-1)
-    miro_mask.scatter_(1, mininds.unsqueeze(dim=-1), False) # Force at least one outcome to be possible, ideally the most likely one
-
-    log_probs[miro_mask] = -float("inf")
-
-    probs = torch.softmax(log_probs, dim=-1, dtype=logits.dtype) # Get probs
-    
-    # NOTE: Mirostat updates its `mu` values based on the sample chosen.
-    #       The silly approach here is to just sample it and make the logits one-hot.
-    #       This breaks fine grained seeding, but we don't have that yet. TODO: FIX when it gets added
-    next_token_ids = torch.multinomial(probs,
-                                        num_samples=1,
-                                        replacement=True)
-    
-    # Calculation new `mu` values
-    # NOTE: If we can know the logit values of the PREVIOUS iteration, it should be
-    # possible to update `mu` before applying mirostat each iteration, thus letting us
-    # keep _sample as the last thing that happens.
-    picked_surprises = torch.gather(log_probs, dim=-1, index=next_token_ids)
-    eps = picked_surprises.squeeze() - ttaus
-    tmus = tmus - tetas * eps
-
-    mus[:] = tmus.tolist()
-    logits.fill_(-float("inf"))
-    logits.scatter_(1, next_token_ids, 1.0) # This value doesn't actually matter, so long as it's not -inf. Vectors are now one-hot, after all.
-    return logits
+def _get_custom_token_bans(input_metadata: InputMetadata) -> List[List[int]]:
+    banned_tokens: List[List[int]] = []
+    for seq_group in input_metadata.seq_groups:
+        seq_ids, sampling_params = seq_group
+        for _ in range(len(seq_ids)):
+            banned_tokens.append(sampling_params.custom_token_bans)
+    return banned_tokens
 
 
 def _apply_logits_processors(
@@ -270,13 +215,15 @@ def _apply_logits_processors(
     logits: torch.Tensor,
     output_tokens: List[List[int]]
 ) -> torch.Tensor:
-    for _, seq_group in enumerate(input_metadata.seq_groups):
-        _, sampling_params = seq_group
-        logits_processors = sampling_params.logits_processors
+    seq_offset = 0
 
-        if logits_processors is not None:
-            for logits_processor in logits_processors:
-                logits = logits_processor(logits, output_tokens)
+    for seq_ids,sampling_params in input_metadata.seq_groups:
+        seq_end = seq_offset + len(seq_ids)
+
+        for proc in sampling_params.logits_processors:
+            proc(logits[seq_offset:seq_end], output_tokens[seq_offset:seq_end])
+
+        seq_offset = seq_end
 
     return logits
 
@@ -340,6 +287,14 @@ def _apply_penalties(
     logits += logits * (1 / repetition_penalties.unsqueeze(dim=1) - 1) * presence_mask * (logits > 0)
     logits += logits * (repetition_penalties.unsqueeze(dim=1) - 1) * presence_mask * (logits < 0)
 
+    return logits
+
+
+def _apply_token_bans(logits: torch.Tensor, banned_tokens: List[List[int]]) -> torch.Tensor:
+    for i, banned_token_ids in enumerate(banned_tokens):
+        if not banned_token_ids:
+            continue
+        logits[i, banned_token_ids] = -float("inf")
     return logits
 
 

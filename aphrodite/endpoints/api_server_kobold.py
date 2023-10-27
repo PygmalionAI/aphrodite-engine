@@ -28,6 +28,22 @@ logger = init_logger(__name__)
 served_model: str = "Read Only"
 engine: AsyncAphrodite = None
 
+badwordsids: List[int] = []
+
+def _set_badwords(tokenizer, hf_config):
+    global badwordsids
+    if hf_config.bad_words_ids is not None:
+        badwordsids = hf_config.bad_words_ids
+        return
+    
+    badwordsids = [ v for k, v in tokenizer.get_vocab().items()
+                    if any(c in str(k) for c in "[]")
+                  ]
+    if tokenizer.pad_token_id in badwordsids:
+        badwordsids.remove(tokenizer.pad_token_id)
+    badwordsids.append(tokenizer.eos_token_id)
+
+
 app = FastAPI()
 kai_api = APIRouter()
 extra_api = APIRouter()
@@ -71,7 +87,6 @@ def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[Sampl
         kai_payload.top_k = -1
 
 
-
     sampling_params = SamplingParams(
         n=kai_payload.n,
         best_of=kai_payload.n,
@@ -84,14 +99,10 @@ def prepare_engine_payload(kai_payload: KAIGenerationInputSchema) -> Tuple[Sampl
         typical_p=kai_payload.typical,
         eta_cutoff=kai_payload.eta_cutoff,
         epsilon_cutoff=kai_payload.eps_cutoff,
-        mirostat_mode=kai_payload.mirostat,
-        mirostat_tau=kai_payload.mirostat_tau,
-        mirostat_eta=kai_payload.mirostat_eta,
         stop=kai_payload.stop_sequence,
-        # ignore_eos=kai_payload.use_default_badwordsids, # TODO ban instead
+        custom_token_bans=badwordsids if kai_payload.use_default_badwordsids else [],
         max_tokens=kai_payload.max_length,
     )
-
 
     max_input_tokens = max(1, kai_payload.max_context_length - kai_payload.max_length)
     input_tokens = tokenizer(kai_payload.prompt).input_ids[-max_input_tokens:]
@@ -142,7 +153,7 @@ async def check_generation():
 @kai_api.get("/info/version")
 async def get_version():
     """ Impersonate KAI """
-    return JSONResponse({"result": "1.2.5"})
+    return JSONResponse({"result": "1.2.4"})
 
 @kai_api.get("/model")
 async def get_model():
@@ -184,7 +195,7 @@ async def abort_generation():
 @extra_api.get("/version")
 async def get_extra_version():
     """ Impersonate KoboldCpp with streaming support """
-    return JSONResponse({"result": "KoboldCpp", "version": "1.36"})
+    return JSONResponse({"result": "KoboldCpp", "version": "1.30"})
 
 @app.get("/")
 async def get_kobold_lite_ui():
@@ -245,6 +256,8 @@ if __name__ == "__main__":
     tokenizer = get_tokenizer(engine_args.tokenizer,
                               tokenizer_mode=engine_args.tokenizer_mode,
                               trust_remote_code=engine_args.trust_remote_code)
+    
+    _set_badwords(tokenizer, engine_model_config.hf_config)
 
     uvicorn.run(app,
                 host=args.host,
