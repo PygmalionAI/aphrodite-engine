@@ -343,7 +343,6 @@ def _get_top_a_top_p_top_k(
     return top_ps, top_ks, top_as
 
 
-
 def _get_tfs(input_metadata: InputMetadata) -> List[float]:
     tfss: List[float] = []
     for i, seq_group in enumerate(input_metadata.seq_groups):
