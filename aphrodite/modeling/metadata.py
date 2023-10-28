@@ -37,6 +37,7 @@ class InputMetadata:
         self.max_context_len = max_context_len
         self.block_tables = block_tables
 
+        self.max_prompt_len = max(prompt_lens) if prompt_lens else 0
         self.to_cache = None
         if sliding_window is not None:
             # We need to keep the positions of sliding windows within
@@ -49,14 +50,14 @@ class InputMetadata:
                         start_idx + max(0, prompt_len - sliding_window),
                         start_idx + prompt_len,
                     ))
-                start_idx += prompt_len
+                start_idx += self.max_prompt_len
             to_cache.extend(range(start_idx, slot_mapping.shape[0]))
             self.to_cache = torch.tensor(to_cache,
                                          dtype=torch.int32,
                                          device=self.slot_mapping.device)
 
         self.num_prompts = len(prompt_lens)
-        self.num_prompt_tokens = sum(prompt_lens)
+        self.num_prompt_tokens = self.num_prompts * self.max_prompt_len
         self.num_generation_tokens = context_lens.shape[0]
         self.num_valid_tokens = slot_mapping.shape[0]
         if block_tables.numel() > 0:
@@ -67,12 +68,11 @@ class InputMetadata:
         assert context_lens.shape[0] == self.num_generation_tokens
 
         # Set during the execution of the first attention op.
-        self.attn_bias: List[AttentionBias] = []
+        self.attn_bias: Optional[AttentionBias] = None
 
     def __repr__(self) -> str:
         # Print only useful metadata.
         return (f'InputMetadata('
-                f'num_valid_tokens={self.num_valid_tokens}, '
                 f'num_prompt_tokens={self.num_prompt_tokens}, '
                 f'num_prompts={self.num_prompts}, '
                 f'prompt_lens={self.prompt_lens}, '
