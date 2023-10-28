@@ -27,7 +27,8 @@ class PagedAttention(nn.Module):
     """GPT-style multi-head PagedAttention.
 
     This class takes query, key, and value tensors as input. The input tensors
-    can either contain prompt tokens or generation tokens, in addition to paddings.
+    can either contain prompt tokens or generation tokens, in addition to
+    paddings.
 
     The class does the following:
     1. Perform multi_query_kv_attention for the prompts. This operation does
@@ -74,7 +75,8 @@ class PagedAttention(nn.Module):
         if input_metadata.attn_bias is not None:
             # Already set by a previous layer.
             return
-        prompt_lens = input_metadata.max_prompt_len * input_metadata.num_prompts
+        prompt_lens = [input_metadata.max_prompt_len
+                       ] * input_metadata.num_prompts
         attn_bias = BlockDiagonalCausalMask.from_seqlens(prompt_lens)
         if self.sliding_window is not None:
             attn_bias = attn_bias.make_local_attention(self.sliding_window)
@@ -97,7 +99,6 @@ class PagedAttention(nn.Module):
             value: shape = [num_prompt_tokens, num_kv_heads, head_size]
             input_metadata: metadata for paged attention.
         """
-
         if self.num_kv_heads != self.num_heads:
             # Project the key and value tensors to the desired number of heads.
             key = torch.repeat_interleave(key, self.num_queries_per_kv, dim=1)
@@ -120,6 +121,7 @@ class PagedAttention(nn.Module):
 
     def get_alibi_slopes(self) -> Optional[torch.Tensor]:
         """Returns the slopes for the alibi attention bias.
+
         Returns:
             slopes: shape = [num_heads]
         """
@@ -222,7 +224,7 @@ class PagedAttention(nn.Module):
         Args:
             query: shape = [batch_size, seq_len, num_heads * head_size]
             key: shape = [batch_size, seq_len, num_kv_heads * head_size]
-            value: shape = [batch_size, seq_len, num_kv_heads * head_size]
+            value: shape = [batch_size, num_kv_heads * head_size]
             key_cache: shape = [num_blocks, num_kv_heads, head_size/x,
                 block_size, x]
             value_cache: shape = [num_blocks, num_kv_heads, head_size,
@@ -313,8 +315,11 @@ class PagedAttentionWithRoPE(PagedAttention):
         rope_scaling: Optional[Dict[str, Any]] = None,
         sliding_window: Optional[int] = None,
     ) -> None:
-        super().__init__(num_heads, head_size, scale,
-                         num_kv_heads, sliding_window=sliding_window)
+        super().__init__(num_heads,
+                         head_size,
+                         scale,
+                         num_kv_heads,
+                         sliding_window=sliding_window)
         if rope_scaling is None:
             self.rotary_emb = RotaryEmbedding(head_size, rotary_dim,
                                               max_position, base,

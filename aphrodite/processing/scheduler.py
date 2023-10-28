@@ -73,8 +73,7 @@ class Scheduler:
             block_size=self.cache_config.block_size,
             num_gpu_blocks=self.cache_config.num_gpu_blocks,
             num_cpu_blocks=self.cache_config.num_cpu_blocks,
-            sliding_window=self.cache_config.sliding_window,
-        )
+            sliding_window=self.cache_config.sliding_window)
 
         # TODO: Use deque instead of list for better performance.
         # Sequence groups in the WAITING state.
@@ -122,7 +121,7 @@ class Scheduler:
         blocks_to_copy: Dict[int, List[int]] = {}
 
         # Fix the current time.
-        now = time.time()
+        now = time.monotonic()
 
         # Join waiting sequences if possible.
         if not self.swapped:
@@ -133,6 +132,7 @@ class Scheduler:
             num_curr_seqs = sum(seq_group.get_max_num_running_seqs()
                                 for seq_group in self.running)
             seq_lens: List[int] = []
+
             # Optimization: We do not sort the waiting queue since the preempted
             # sequence groups are added to the front and the new sequence groups
             # are added to the back.
@@ -275,7 +275,7 @@ class Scheduler:
         # Create input data structures.
         seq_group_metadata_list: List[SequenceGroupMetadata] = []
         for seq_group in scheduler_outputs.scheduled_seq_groups:
-            seq_data: Dict[int, List[SequenceData]] = {}
+            seq_data: Dict[int, SequenceData] = {}
             block_tables: Dict[int, List[int]] = {}
             for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
                 seq_id = seq.seq_id
