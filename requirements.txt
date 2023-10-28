@@ -8,8 +8,6 @@ transformers >= 4.34.0
 uvicorn
 openai # for fastapi's openai proxy emulation
 xformers >= 0.0.22
-mypy
-pytest
 fschat >= 0.2.23
 pydantic < 2
 pyarrow # needed for ray
