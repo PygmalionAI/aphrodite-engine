@@ -28,8 +28,8 @@ def test_beam_search_single_input(
     del hf_model
 
     aphrodite_model = aphrodite_runner(model, dtype=dtype)
-    aphrodite_outputs = aphrodite_model.generate_beam_search(example_prompts, beam_width,
-                                                   max_tokens)
+    aphrodite_outputs = aphrodite_model.generate_beam_search(
+        example_prompts, beam_width, max_tokens)
     del aphrodite_model
 
     for i in range(len(example_prompts)):

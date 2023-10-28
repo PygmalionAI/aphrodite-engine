@@ -25,9 +25,9 @@ def test_get_prompt_logprobs(
 
     aphrodite_model = aphrodite_runner(model, dtype=dtype)
     aphrodite_sampling_params = SamplingParams(max_tokens=max_tokens,
-                                          logprobs=5,
-                                          prompt_logprobs=5,
-                                          temperature=0.0)
+                                               logprobs=5,
+                                               prompt_logprobs=5,
+                                               temperature=0.0)
     aphrodite_results = aphrodite_model.model.generate(
         example_prompts, sampling_params=aphrodite_sampling_params)
 
@@ -40,14 +40,16 @@ def test_get_prompt_logprobs(
     for aphrodite_result, hf_logprob in zip(aphrodite_results, hf_logprobs):
         # Check prompt logprobs
         aphrodite_prompt_logprobs = aphrodite_result.prompt_logprobs[1:]
-        for i, aphrodite_prompt_logprob_dict in enumerate(aphrodite_prompt_logprobs):
+        for i, aphrodite_prompt_logprob_dict in enumerate(
+                aphrodite_prompt_logprobs):
             for token_id, logprob in aphrodite_prompt_logprob_dict.items():
                 torch.testing.assert_close(logprob,
                                            hf_logprob[0][i][token_id].item(),
                                            atol=1e-2,
                                            rtol=1e-2)
         aphrodite_sample_logprobs = aphrodite_result.outputs[0].logprobs
-        for i, aphrodite_sample_logprob_dict in enumerate(aphrodite_sample_logprobs):
+        for i, aphrodite_sample_logprob_dict in enumerate(
+                aphrodite_sample_logprobs):
             for token_id, logprob in aphrodite_sample_logprob_dict.items():
                 torch.testing.assert_close(logprob,
                                            hf_logprob[i][-1][token_id].item(),

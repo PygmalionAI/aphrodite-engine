@@ -17,6 +17,7 @@ TOKENIZERS = [
     "/mistralai/Mistral-7B-v0.1",
 ]
 
+
 def _run_incremental_decode(tokenizer, all_input_ids,
                             skip_special_tokens: bool):
     decoded_text = ""
@@ -38,6 +39,7 @@ def _run_incremental_decode(tokenizer, all_input_ids,
             prev_tokens += new_tokens
     return decoded_text
 
+
 @pytest.mark.parametrize("truth", TRUTH)
 @pytest.mark.parametrize("tokenizer_id", TOKENIZERS)
 @pytest.mark.parametrize("skip_special_tokens", (True, False))
@@ -45,11 +47,10 @@ def test_decode_streaming(tokenizer_id, truth, skip_special_tokens):
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_id)
     all_input_ids = tokenizer(truth, add_special_tokens=False)["input_ids"]
     if skip_special_tokens:
-        all_input_ids = ([tokenizer_id.bos_token_id]
-                         if tokenizer.bos_token_id is not None else
-                         []) + all_input_ids + [tokenizer.eos_token_id] # type: ignore
+        all_input_ids = (
+            [tokenizer_id.bos_token_id] if tokenizer.bos_token_id is not None
+            else []) + all_input_ids + [tokenizer.eos_token_id]  # type: ignore
     decoded_text = _run_incremental_decode(
         tokenizer, all_input_ids, skip_special_tokens=skip_special_tokens)
-    
+
     assert decoded_text == truth
-    

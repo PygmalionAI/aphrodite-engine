@@ -10,7 +10,7 @@ import requests
 
 def _query_server(prompt: str) -> dict:
     headers = {
-        "x-api-key": "EMPTY" # change as needed
+        "x-api-key": "EMPTY"  # change as needed
     }
     response = requests.post("http://localhost:2242/api/v1/generate",
                              headers=headers,
