@@ -12,7 +12,7 @@ TRUTH = [
 
 TOKENIZERS = [
     "EleutherAI/gpt-j-6b",
-    "EleutherAI/gpt-neox-20b",
+    "EleutherAI/pythia-70m-deduped",
     "meta-llama/llama-2-7b-hf",
     "/mistralai/Mistral-7B-v0.1",
 ]
