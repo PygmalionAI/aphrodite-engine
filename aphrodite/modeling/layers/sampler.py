@@ -203,10 +203,14 @@ def _get_output_tokens(input_metadata: InputMetadata) -> List[List[int]]:
 
 def _get_custom_token_bans(input_metadata: InputMetadata) -> List[List[int]]:
     banned_tokens: List[List[int]] = []
-    for seq_group in input_metadata.seq_groups:
+    for i, seq_group in enumerate(input_metadata.seq_groups):
         seq_ids, sampling_params = seq_group
-        for _ in range(len(seq_ids)):
-            banned_tokens.append(sampling_params.custom_token_bans)
+        custom_token_bans = sampling_params.custom_token_bans
+        if (i < input_metadata.num_prompts
+                and sampling_params.prompt_logprobs is not None):
+            prompt_len = input_metadata.prompt_lens[i]
+            banned_tokens += [custom_token_bans] * (prompt_len - 1)
+        banned_tokens += [custom_token_bans] * len(seq_ids)
     return banned_tokens
 
 
