@@ -23,7 +23,7 @@ _MODEL_CLASSES_SUPPORT_QUANTIZATION = {
         LlamaForCausalLM, MistralForCausalLM
     ],
     "gptq": [
-        LlamaForCausalLM, GPTJForCausalLM, GPTNeoXForCausalLM
+        LlamaForCausalLM, GPTJForCausalLM, GPTNeoXForCausalLM, MistralForCausalLM
     ],
 }
 
