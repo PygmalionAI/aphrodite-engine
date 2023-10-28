@@ -333,8 +333,11 @@ class PagedAttentionWithRoPE(PagedAttention):
         rope_scaling: Optional[Dict[str, Any]] = None,
         sliding_window: Optional[int] = None,
     ) -> None:
-        super().__init__(num_heads, head_size, scale,
-                         num_kv_heads, sliding_window=sliding_window)
+        super().__init__(num_heads,
+                         head_size,
+                         scale,
+                         num_kv_heads,
+                         sliding_window=sliding_window)
         if rope_scaling is None:
             self.rotary_emb = RotaryEmbedding(head_size, rotary_dim,
                                               max_position, base,

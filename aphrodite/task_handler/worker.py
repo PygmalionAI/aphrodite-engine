@@ -6,7 +6,7 @@ import torch
 import torch.distributed
 
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
-                         SchedulerConfig)
+                                     SchedulerConfig)
 from aphrodite.modeling import get_model, InputMetadata, set_random_seed
 from aphrodite.modeling.megatron.parallel_state import (
     initialize_model_parallel)
@@ -67,7 +67,8 @@ class Worker:
 
         # Initialize the model.
         set_random_seed(self.model_config.seed)
-        self.model = get_model(self.model_config, self.scheduler_config.max_num_batched_tokens)
+        self.model = get_model(self.model_config,
+                               self.scheduler_config.max_num_batched_tokens)
 
     @torch.inference_mode()
     def profile_num_available_blocks(
@@ -146,7 +147,7 @@ class Worker:
         else:
             max_seq_len = min(self.scheduler_config.max_model_len,
                               self.sliding_window)
-        
+
         _check_if_can_support_max_seq_len(max_seq_len, self.block_size)
 
         self.cache_engine = CacheEngine(self.cache_config, self.model_config,
@@ -261,7 +262,7 @@ class Worker:
                                            device="cuda")
         context_lens_tensor = torch.tensor(context_lens,
                                            dtype=torch.int,
-                                           device="cuda")       
+                                           device="cuda")
         padded_block_tables = [
             _pad_to_max(block_table, max_num_blocks_per_seq)
             for block_table in generation_block_tables
@@ -391,6 +392,7 @@ def _check_if_can_support_max_seq_len(max_seq_len: int,
             f"available shared memory {max_shared_mem}). "
             "This will be fixed in a future release.")
 
+
 def _check_if_gpu_supports_dtype(torch_dtype: torch.dtype):
     if torch_dtype == torch.bfloat16:
         compute_capability = torch.cuda.get_device_capability()
@@ -400,4 +402,5 @@ def _check_if_gpu_supports_dtype(torch_dtype: torch.dtype):
                 "Bfloat16 is only supported on GPUs with compute capability "
                 f"of at least 8.0. You {gpu_name} GPU has compute capability "
                 f"{compute_capability[0]}.{compute_capability[1]}. Please "
-                "use the `--dtype float16` argument when launching the engine.")
+                "use the `--dtype float16` argument when launching the engine."
+            )

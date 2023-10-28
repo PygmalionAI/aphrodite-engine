@@ -10,7 +10,7 @@ from aphrodite import pos_encoding_ops
 IS_NEOX_STYLE = [True, False]
 DTYPES = [torch.half, torch.bfloat16, torch.float]
 HEAD_SIZES = [64, 80, 96, 112, 128, 256]
-ROTARY_DIMS = [None, 32] # None means rotary dim == head size
+ROTARY_DIMS = [None, 32]  # None means rotary dim == head size
 NUM_HEADS = [7, 12, 40, 52]
 NUM_TOKENS = [11, 83, 2048]
 SEEDS = [0]
@@ -21,32 +21,35 @@ def rotate_neox(x: torch.Tensor) -> torch.Tensor:
     x2 = x[..., x.shape[-1] // 2:]
     return torch.cat((-x2, x1), dim=-1)
 
+
 def rotate_gptj(x: torch.Tensor) -> torch.Tensor:
     x1 = x[..., ::2]
     x2 = x[..., 1::2]
     x = torch.stack((-x2, x1), dim=-1)
     return x.flatten(-2)
 
+
 def apply_rope(
-        q: torch.Tensor,
-        k: torch.Tensor,
-        cos: torch.Tensor,
-        sin: torch.Tensor,
-        is_neox_style: bool,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    is_neox_style: bool,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     rotate_fn = rotate_neox if is_neox_style else rotate_gptj
     q_embed = (q * cos) + (rotate_fn(q) * sin)
     k_embed = (k * cos) + (rotate_fn(k) * sin)
     return q_embed, k_embed
 
+
 class RefRotaryEmbedding(nn.Module):
 
     def __init__(
-            self,
-            dim: int,
-            is_neox_style: bool,
-            max_position_embeddings: int = 8192,
-            base: int = 10000,
+        self,
+        dim: int,
+        is_neox_style: bool,
+        max_position_embeddings: int = 8192,
+        base: int = 10000,
     ) -> None:
         super().__init__()
         self.rotary_dim = dim
@@ -67,10 +70,10 @@ class RefRotaryEmbedding(nn.Module):
         self.register_buffer("sin_cached", sin, persistent=False)
 
     def forward(
-            self,
-            positions: torch.Tensor,
-            query: torch.Tensor,
-            key: torch.Tensor,
+        self,
+        positions: torch.Tensor,
+        query: torch.Tensor,
+        key: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         query_rot = query[..., :self.rotary_dim]
         query_pass = query[..., self.rotary_dim]
@@ -91,7 +94,8 @@ class RefRotaryEmbedding(nn.Module):
         key = torch.cat((key_rot, key_pass), dim=-1)
 
         return query, key
-    
+
+
 @pytest.mark.parametrize("is_neox_style", IS_NEOX_STYLE)
 @pytest.mark.parametrize("num_tokens", NUM_TOKENS)
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
@@ -125,7 +129,7 @@ def test_rotary_embedding(
                       num_heads * head_size,
                       dtype=dtype,
                       device="cuda")
-    
+
     # create the rotary embedding
     inv_freq = 1.0 / (base**(
         torch.arange(0, rotary_dim, 2, dtype=torch.float) / rotary_dim))
@@ -163,7 +167,3 @@ def test_rotary_embedding(
 
     assert torch.allclose(out_query, ref_query, atol=1e-5, rtol=1e-5)
     assert torch.allclose(out_key, ref_key, atol=1e-5, rtol=1e-5)
-
-
-
-        

@@ -12,6 +12,7 @@ from tqdm import tqdm
 from aphrodite import LLM, SamplingParams
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 
+
 def sample_requests(
     dataset_path: str,
     num_requests: int,
@@ -170,9 +171,10 @@ def main(args: argparse.Namespace):
 
     if args.backend == "aphrodite":
         elapsed_time = run_aphrodite(requests, args.model, args.tokenizer,
-                                args.quantization, args.tensor_parallel_size,
-                                args.seed, args.n, args.use_beam_search,
-                                args.trust_remote_code, args.dtype)
+                                     args.quantization,
+                                     args.tensor_parallel_size, args.seed,
+                                     args.n, args.use_beam_search,
+                                     args.trust_remote_code, args.dtype)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,

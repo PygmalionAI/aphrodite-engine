@@ -31,8 +31,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.post("/api/v1/generate")
-async def generate(request: Request, x_api_key: str = Header(None)) -> Response:
+async def generate(
+    request: Request, x_api_key: str = Header(None)) -> Response:
     """Generate completion for the request.
 
     The request should be a JSON object with the following fields:
@@ -41,12 +43,13 @@ async def generate(request: Request, x_api_key: str = Header(None)) -> Response:
     - other fields: the sampling parameters (See `SamplingParams` for details).
     """
     if x_api_key is None or x_api_key != valid_api_key:
-        raise HTTPException(status_code=401, detail="Unauthorized. Please acquire an API key.")
+        raise HTTPException(status_code=401,
+                            detail="Unauthorized. Please acquire an API key.")
 
     request_dict = await request.json()
     prompt = request_dict.pop("prompt")
     stream = request_dict.pop("stream", False)
-    
+
     if 'stopping_strings' in request_dict:
         request_dict['stop'] = request_dict.pop('stopping_strings')
     if 'max_new_tokens' in request_dict:
@@ -61,11 +64,14 @@ async def generate(request: Request, x_api_key: str = Header(None)) -> Response:
     request_dict['logits_processors'] = []
 
     min_length = request_dict.pop('min_tokens', 0)
-    if request_dict.get('ignore_eos', False):  # ignore_eos/ban_eos_token is functionally equivalent to `min_tokens = max_tokens`
+    if request_dict.get(
+            'ignore_eos', False
+    ):  # ignore_eos/ban_eos_token is functionally equivalent to `min_tokens = max_tokens`
         min_length = request_dict.get('max_tokens', 16)
 
     if min_length:
-        request_dict['logits_processors'].append(BanEOSUntil(min_length, engine.engine.tokenizer.eos_token_id))
+        request_dict['logits_processors'].append(
+            BanEOSUntil(min_length, engine.engine.tokenizer.eos_token_id))
 
     sampling_params = SamplingParams()
     for key, value in request_dict.items():
@@ -80,9 +86,9 @@ async def generate(request: Request, x_api_key: str = Header(None)) -> Response:
     async def stream_results() -> AsyncGenerator[bytes, None]:
         async for request_output in results_generator:
             prompt = request_output.prompt
-            text_outputs = [
-                {"text": output.text} for output in request_output.outputs
-            ]
+            text_outputs = [{
+                "text": output.text
+            } for output in request_output.outputs]
             ret = {"results": text_outputs}
             yield (json.dumps(ret) + "\n\n").encode("utf-8")
 

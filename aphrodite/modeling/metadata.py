@@ -5,6 +5,7 @@ from xformers.ops import AttentionBias
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import SequenceData
 
+
 class InputMetadata:
     """Metadata for input sequences. Used for PagedAttention.
 
@@ -40,7 +41,7 @@ class InputMetadata:
         self.to_cache = None
         if sliding_window is not None:
             # We need to keep the positions of sliding windows within
-            # the key/value tables, this is helpful to know which 
+            # the key/value tables, this is helpful to know which
             # elements we need to cache and where.
             to_cache, start_idx = [], 0
             for prompt_len in self.prompt_lens:

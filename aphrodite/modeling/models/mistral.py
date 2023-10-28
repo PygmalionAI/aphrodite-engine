@@ -294,7 +294,7 @@ class MistralForCausalLM(nn.Module):
             if "rotary_emb.inv_freq" in name:
                 continue
             if any(name.endswith(suffix) for suffix in ignore_weight_suffixes):
-                continue            
+                continue
 
             is_packed = False
             is_transposed = False
@@ -355,7 +355,7 @@ class MistralForCausalLM(nn.Module):
                 break
             if is_gate_up_weight:
                 continue
-            
+
             if name not in state_dict:
                 continue
             param = state_dict[name]

@@ -3,7 +3,8 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig, SchedulerConfig)
+from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
+                                     SchedulerConfig)
 
 
 @dataclass
@@ -175,10 +176,9 @@ class EngineArgs:
                                    self.download_dir, self.load_format,
                                    self.dtype, self.seed, self.revision,
                                    self.max_model_len, self.quantization)
-        cache_config = CacheConfig(self.block_size,
-                                   self.gpu_memory_utilization,
-                                   self.swap_space, getattr(model_config.hf_config,
-                                                            'sliding_window', None))
+        cache_config = CacheConfig(
+            self.block_size, self.gpu_memory_utilization, self.swap_space,
+            getattr(model_config.hf_config, 'sliding_window', None))
         parallel_config = ParallelConfig(self.pipeline_parallel_size,
                                          self.tensor_parallel_size,
                                          self.worker_use_ray)

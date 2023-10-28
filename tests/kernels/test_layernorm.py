@@ -9,6 +9,7 @@ HIDDEN_SIZES = [67, 768, 2048, 5120, 8192]
 NUM_TOKENS = [7, 83, 4096]
 SEEDS = [0]
 
+
 class RefRMSNorm(nn.Module):
 
     def __init__(self, hidden_size, eps=1e-6):
@@ -22,7 +23,8 @@ class RefRMSNorm(nn.Module):
         input_dtype = hidden_states.dtype
         hidden_states = hidden_states.to(torch.float32)
         variance = hidden_states.pow(2).mean(-1, keepdim=True)
-        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+        hidden_states = hidden_states * torch.rsqrt(variance +
+                                                    self.variance_epsilon)
         return self.weight * hidden_states.to(input_dtype)
 
 
@@ -53,4 +55,3 @@ def test_rms_norm(
     )
     ref_out = ref(x)
     assert torch.allclose(out, ref_out, atol=1e-2, rtol=1e-5)
-    

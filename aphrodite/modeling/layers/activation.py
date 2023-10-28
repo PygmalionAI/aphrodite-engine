@@ -4,7 +4,6 @@ import torch.nn as nn
 from aphrodite import activation_ops
 
 
-
 class SiluAndMul(nn.Module):
     """An activation function for SwiGLU.
 
@@ -30,6 +29,7 @@ class SiluAndMul(nn.Module):
         activation_ops.silu_and_mul(out, x)
         return out
 
+
 class NewGELU(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -38,7 +38,8 @@ class NewGELU(nn.Module):
         out = torch.empty(num_tokens, d, dtype=x.dtype, device=x.device)
         activation_ops.gelu_new(out, x)
         return out
-    
+
+
 class FastGELU(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -48,6 +49,7 @@ class FastGELU(nn.Module):
         activation_ops.gelu_fast(out, x)
         return out
 
+
 _ACTIVATION_REGISTRY = {
     "gelu": nn.GELU(),
     "gelu_new": NewGELU(),
@@ -56,9 +58,11 @@ _ACTIVATION_REGISTRY = {
     "relu": nn.ReLU(),
 }
 
+
 def get_act_fn(act_fn: str) -> nn.Module:
     """Get an activation function by name."""
     act_fn = act_fn.lower()
     if act_fn in _ACTIVATION_REGISTRY:
         return _ACTIVATION_REGISTRY[act_fn]
-    raise ValueError(f"Activation function {act_fn!r} is currently not supported.")
+    raise ValueError(
+        f"Activation function {act_fn!r} is currently not supported.")
