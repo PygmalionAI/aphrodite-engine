@@ -153,7 +153,7 @@ def _prune_hidden_states(
                 selected_token_indices.extend(
                     range(start_idx, start_idx + prompt_len - 1))
             selected_token_indices.append(start_idx + prompt_len - 1)
-            start_idx += input_metadata.max_context_len
+            start_idx += input_metadata.max_prompt_len
         else:
             num_seqs = len(seq_ids)
             selected_token_indices.extend(

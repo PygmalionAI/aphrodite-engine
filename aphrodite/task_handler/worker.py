@@ -184,7 +184,7 @@ class Worker:
             input_tokens.append(prompt_tokens)
             # NOTE: Here we assume that the first token in the prompt
             # is always the first token in the sequence.
-            input_positions.append(list(range(prompt_tokens)))
+            input_positions.append(list(range(prompt_len)))
 
             if seq_group_metadata.block_tables is None:
                 # During memory profiling, the block tables are not initialized
@@ -249,7 +249,6 @@ class Worker:
         padded_input_tokens = [
             _pad_to_max(tokens, max_seq_len, pad=0) for tokens in input_tokens
         ]
-
         padded_input_positions = [
             _pad_to_max(positions, max_seq_len, pad=0)
             for positions in input_positions
@@ -275,7 +274,7 @@ class Worker:
                                            device="cuda")
         context_lens_tensor = torch.tensor(context_lens,
                                            dtype=torch.int,
-                                           device="cuda")       
+                                           device="cuda")
         block_tables_tensor = torch.tensor(padded_block_tables,
                                            dtype=torch.int,
                                            device="cuda")
