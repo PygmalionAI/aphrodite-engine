@@ -30,6 +30,21 @@ python -m aphrodite.endpoints.api_server_kobold --model PygmalionAI/pygmalion-2-
 
 This will create a [KoboldAI](https://github.com/henk717/KoboldAI)-compatible API server that can be accessed at port 2242 of the localhost. You can plug in the API into a UI that supports Kobold, such as [SillyTavern](https://github.com/SillyTavern/SillyTavern).
 
+
+## Performance
+Speeds vary with different GPUs, model sizes, quantization schemes, batch sizes, etc. Here are some baseline benchmarks conducted by sending requests of varying lengths to the provided [API server](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/endpoints/api_server_ooba.py).
+
+| Model | Quantization | GPU      | Request Rate | Throughput (req/s) | Avg Latency (s) |
+| ----- | ------------ | -------- | ------------ | ------------------ | --------------- |
+| 7B    | None         | RTX 3090 | 19           | **2.66**           | **18.38**       |
+| 7B    | AWQ          | RTX 3090 | 12           | **3.08**           | **32.47**       |
+| 7B    | GPTQ         | RTX 3090 | 12           | **2.01**           | **49.78**       |
+| 13B   | AWQ          | RTX 3090 | 5            | **1.77**           | **26.77**       |
+| 13B   | GPTQ         | RTX 3090 | 5            | **1.10**           | **39.80**       |
+| 20B   | AWQ          | RTX 3090 | 3            | **0.94**           | **39.07**       |
+| 20B   | GPTQ         | RTX 3090 | 3            | **0.58**           | **75.54**       |
+
+Benchmarks with other GPUs will be added soon.
 ## Requirements
 
 - Operating System: Linux (or WSL for Windows)
