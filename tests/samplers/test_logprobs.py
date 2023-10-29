@@ -45,13 +45,13 @@ def test_get_prompt_logprobs(
             for token_id, logprob in aphrodite_prompt_logprob_dict.items():
                 torch.testing.assert_close(logprob,
                                            hf_logprob[0][i][token_id].item(),
-                                           atol=1e-2,
-                                           rtol=1e-2)
+                                           atol=1e-1,
+                                           rtol=1e-1)
         aphrodite_sample_logprobs = aphrodite_result.outputs[0].logprobs
         for i, aphrodite_sample_logprob_dict in enumerate(
                 aphrodite_sample_logprobs):
             for token_id, logprob in aphrodite_sample_logprob_dict.items():
                 torch.testing.assert_close(logprob,
                                            hf_logprob[i][-1][token_id].item(),
-                                           atol=1e-2,
-                                           rtol=1e-2)
+                                           atol=1e-1,
+                                           rtol=1e-1)

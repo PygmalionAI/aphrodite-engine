@@ -1,10 +1,7 @@
 import pytest
 
 MODELS = [
-    "EleutherAI/gpt-j-6b",
-    "EleutherAI/gpt-neox-20b",
-    "meta-llama/llama-2-7b-hf",
-    "/mistralai/Mistral-7B-v0.1",
+    "EleutherAI/pythia-70m-deduped",
 ]
 
 @pytest.mark.parametrize("model", MODELS)

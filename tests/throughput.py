@@ -180,10 +180,12 @@ def main(args: argparse.Namespace):
                               args.trust_remote_code)
     else:
         raise ValueError(f"Unknown backend: {args.backend}")
-    total_num_tokens = sum(prompt_len + output_len
-                           for _, prompt_len, output_len in requests)
+    total_input_tokens = sum(prompt_len for _, prompt_len, _ in requests)
+    total_output_tokens = sum(output_len for _, _, output_len in requests)
+
     print(f"Throughput: {len(requests) / elapsed_time:.2f} requests/s, "
-          f"{total_num_tokens / elapsed_time:.2f} tokens/s")
+          f"Input tokens/s: {total_input_tokens / elapsed_time:.2f}, "
+          f"Output tokens/s: {total_output_tokens / elapsed_time:.2f}")
 
 
 if __name__ == "__main__":
