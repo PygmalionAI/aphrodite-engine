@@ -2,7 +2,6 @@ from typing import List
 
 from aphrodite.common.sequence import SequenceGroup
 
-
 class Policy:
 
     def get_priority(
@@ -23,7 +22,6 @@ class Policy:
             reverse=True,
         )
 
-
 class FCFS(Policy):
 
     def get_priority(
@@ -32,7 +30,6 @@ class FCFS(Policy):
         seq_group: SequenceGroup,
     ) -> float:
         return now - seq_group.arrival_time
-
 
 class PolicyFactory:
 

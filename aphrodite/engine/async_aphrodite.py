@@ -168,7 +168,6 @@ class RequestTracker:
     async def wait_for_new_requests(self):
         await self.new_requests_event.wait()
 
-
 class _AsyncAphrodite(AphroditeEngine):
     """Extension of AphroditeEngine to add async methods."""
 

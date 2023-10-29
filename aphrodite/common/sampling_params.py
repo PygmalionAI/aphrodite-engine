@@ -194,15 +194,11 @@ class SamplingParams:
         if not 0.0 < self.tfs <= 1.0:
             raise ValueError(f"tfs must be in (0, 1], got {self.tfs}.")
         if not 0.0 <= self.epsilon_cutoff <= 1000.0:
-            raise ValueError(
-                f"epsilon_cutoff must be in [0, 1000], got {self.epsilon_cutoff}."
-            )
+            raise ValueError(f"epsilon_cutoff must be in [0, 1000], got {self.epsilon_cutoff}.")
         if not self.eta_cutoff >= 0:
-            raise ValueError(
-                f"eta_cutoff must be non negative, got {self.eta_cutoff}.")
+            raise ValueError(f"eta_cutoff must be non negative, got {self.eta_cutoff}.")
         if not 0.0 <= self.typical_p <= 1.0:
-            raise ValueError(
-                f"typical_p must be in (0, 1], got {self.typical_p}.")
+            raise ValueError(f"typical_p must be in (0, 1], got {self.typical_p}.")
         if self.max_tokens < 1:
             raise ValueError(
                 f"max_tokens must be at least 1, got {self.max_tokens}.")
@@ -211,8 +207,7 @@ class SamplingParams:
                 f"logprobs must be non-negative, got {self.logprobs}.")
         if self.prompt_logprobs is not None and self.prompt_logprobs < 0:
             raise ValueError(
-                f"prompt_logprobs must be non-negative, got {self.prompt_logprobs}."
-            )
+                f"prompt_logprobs must be non-negative, got {self.prompt_logprobs}.")
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:

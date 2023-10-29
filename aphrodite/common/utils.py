@@ -8,7 +8,6 @@ import torch
 
 from aphrodite import cuda_utils
 
-
 class Device(enum.Enum):
     GPU = enum.auto()
     CPU = enum.auto()

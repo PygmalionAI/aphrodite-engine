@@ -6,7 +6,6 @@ from aphrodite import quantization_ops
 from aphrodite.modeling.layers.quantized_linear.gptq import (
     GPTQColumnParallelLinear, GPTQRowParallelLinear, GPTQLinear)
 
-
 def quant_post_init(model, max_input_length: Optional[int] = None):
     device_to_buffers_size = {}
 
@@ -27,7 +26,7 @@ def quant_post_init(model, max_input_length: Optional[int] = None):
             device_to_buffers_size[device]["max_dq_buffer_size"] = max(
                 device_to_buffers_size[device]["max_dq_buffer_size"],
                 submodule.qweight.numel() * 8)
-
+            
             in_features = submodule.input_size_per_partition if isinstance(
                 submodule, GPTQRowParallelLinear) else submodule.input_size
             out_features = submodule.output_size_per_partition if isinstance(
@@ -37,7 +36,7 @@ def quant_post_init(model, max_input_length: Optional[int] = None):
                 device_to_buffers_size[device]["max_inner_outer_dim"] = max(
                     device_to_buffers_size[device]["max_inner_outer_dim"],
                     in_features, out_features)
-
+    
     if model_uses_exllama:
         device_to_buffers = {}
         max_input_len = max_input_length if use_act_order else 1
@@ -65,18 +64,18 @@ def quant_post_init(model, max_input_length: Optional[int] = None):
             quantization_ops.gptq_prepare_buffers(device,
                                                   buffers["temp_state"],
                                                   buffers["temp_dq"])
-
+            
         matmul_recons_thd = 8
         matmul_fused_remap = False
         matmul_no_half2 = False
         quantization_ops.gptq_set_tuning_params(matmul_recons_thd,
                                                 matmul_fused_remap,
                                                 matmul_no_half2)
-
+        
         # the buffers need to have been initialized first before calling make_q4
         for _, submodule in model.named_modules():
             if isinstance(
-                    submodule,
+                submodule,
                 (GPTQColumnParallelLinear, GPTQRowParallelLinear, GPTQLinear)):
                 submodule.post_init()
 

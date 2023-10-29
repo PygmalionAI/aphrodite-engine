@@ -17,6 +17,7 @@ from aphrodite.common.logger import init_logger
 from aphrodite.modeling.quantization_utils import get_quant_class
 from aphrodite.modeling.quantization_utils.base import QuantizationConfig
 
+
 logger = init_logger(__name__)
 
 
@@ -91,7 +92,7 @@ def get_quant_config(
     if quantization == "gptq" and hasattr(hf_config, "quantization_config"):
         config = hf_config.quantization_config
         return get_quant_class(quantization).from_config(config)
-
+    
     is_local = os.path.isdir(model_name_or_path)
     if not is_local:
         # Download the config files.
@@ -306,7 +307,7 @@ def load_tensor_parallel_weights(
             else:
                 index = [slice(None)] * (len(loaded_weight.get_shape()) -
                                          1) + [slice(start_idx, end_idx)]
-                loaded_weight = loaded_weight[index]
+                loaded_weight = loaded_weight[index] 
             break
 
     loaded_weight = convert_pyslice_to_tensor(loaded_weight)
@@ -339,8 +340,7 @@ def get_parallel_weight(model: torch.nn.Module):
         row_weight_suffixes = ["weight"]
         ignore_weight_suffixes = []
     else:
-        column_weight_suffixes = model.quant_config.get_column_tp_tensor_names(
-        )
+        column_weight_suffixes = model.quant_config.get_column_tp_tensor_names()
         row_weight_suffixes = model.quant_config.get_row_tp_tensor_names()
         ignore_weight_suffixes = model.quant_config.get_ignore_tensor_names()
 

@@ -1,9 +1,7 @@
 from typing import Optional
 from transformers import AutoConfig, PretrainedConfig
 
-
-def get_config(model: str,
-               trust_remote_code: bool,
+def get_config(model: str, trust_remote_code: bool,
                revision: Optional[str] = None) -> PretrainedConfig:
     try:
         config = AutoConfig.from_pretrained(

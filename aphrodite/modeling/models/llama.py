@@ -39,7 +39,8 @@ from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.quantized_linear import ParallelLinear
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
-from aphrodite.modeling.megatron.layers import (VocabParallelEmbedding)
+from aphrodite.modeling.megatron.layers import (
+    VocabParallelEmbedding)
 from aphrodite.modeling.quantization_utils import QuantizationConfig
 from aphrodite.modeling.hf_downloader import (
     convert_pyslice_to_tensor, hf_model_weights_iterator,
@@ -131,7 +132,7 @@ class LlamaAttention(nn.Module):
             self.head_dim,
             self.scaling,
             base=self.rope_theta,
-            rope_scaling=self.rope_scaling,
+            rope_scaling = self.rope_scaling,
             max_position=self.max_position_embeddings,
             rotary_dim=self.head_dim,
             num_kv_heads=self.num_kv_heads)
@@ -228,8 +229,8 @@ class LlamaModel(nn.Module):
         self.vocab_size = config.vocab_size
 
         vocab_size = ((config.vocab_size + 63) // 64) * 64
-        self.embed_tokens = VocabParallelEmbedding(vocab_size,
-                                                   config.hidden_size)
+        self.embed_tokens = VocabParallelEmbedding(
+            vocab_size, config.hidden_size)
         self.layers = nn.ModuleList([
             LlamaDecoderLayer(config, quant_config)
             for _ in range(config.num_hidden_layers)

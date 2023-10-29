@@ -8,14 +8,12 @@ from aphrodite import activation_ops
 
 DTYPES = [torch.half, torch.bfloat16, torch.float]
 NUM_TOKENS = [7, 38, 2048]
-D = [512, 4096, 5120, 13824]  # arbitrary values for testing
+D = [512, 4096, 5120, 13824] # arbitrary values for testing
 SEEDS = [0]
-
 
 def ref_silu_and_mul(x: torch.Tensor) -> torch.Tensor:
     x1, x2 = x.chunk(chunks=2, dim=1)
     return F.silu(x1) * x2
-
 
 @pytest.mark.parametrize("num_tokens", NUM_TOKENS)
 @pytest.mark.parametrize("d", D)

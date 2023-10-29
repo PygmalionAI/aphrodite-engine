@@ -73,9 +73,9 @@ class QuantizationConfig:
     @classmethod
     def get_row_tp_tensor_names(self) -> List[str]:
         raise NotImplementedError
-
+    
     def get_column_tp_tensor_names(self) -> List[str]:
         raise NotImplementedError
-
+    
     def get_ignore_tensor_names(self) -> List[str]:
         return []

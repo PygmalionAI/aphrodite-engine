@@ -1,7 +1,6 @@
 from typing import List, Optional, Union
 from pydantic import BaseModel, Field, root_validator, conint, confloat, conlist, NonNegativeFloat, NonNegativeInt, PositiveInt
 
-
 class SamplingParams(BaseModel):
     n: int = Field(1, alias="n")
     best_of: Optional[int] = Field(None, alias="best_of")
@@ -21,18 +20,15 @@ class SamplingParams(BaseModel):
     ignore_eos: bool = Field(False, alias="ignore_eos")
     max_tokens: int = Field(16, alias="max_length")
     logprobs: Optional[int] = Field(None, alias="logprobs")
-    custom_token_bans: Optional[List[int]] = Field(None,
-                                                   alias="custom_token_bans")
+    custom_token_bans: Optional[List[int]] = Field(None, alias="custom_token_bans")
 
     @root_validator
     def validate_best_of(cls, values):
         best_of = values.get("best_of")
         n = values.get("n")
         if best_of is not None and (best_of <= 0 or best_of > n):
-            raise ValueError(
-                "best_of must be a positive integer less than or equal to n")
+            raise ValueError("best_of must be a positive integer less than or equal to n")
         return values
-
 
 class KAIGenerationInputSchema(BaseModel):
     prompt: str
@@ -46,7 +42,7 @@ class KAIGenerationInputSchema(BaseModel):
     top_a: Optional[NonNegativeFloat] = 0.0
     top_p: Optional[confloat(ge=0, le=1)] = 1.0
     tfs: Optional[confloat(ge=0, le=1)] = 1.0
-    eps_cutoff: Optional[confloat(ge=0, le=1000)] = 0.0
+    eps_cutoff: Optional[confloat(ge=0,le=1000)] = 0.0
     eta_cutoff: Optional[NonNegativeFloat] = 0.0
     typical: Optional[confloat(ge=0, le=1)] = 1.0
     temperature: Optional[NonNegativeFloat] = 1.0
@@ -71,7 +67,5 @@ class KAIGenerationInputSchema(BaseModel):
 
     @root_validator
     def check_context(cls, values):
-        assert values.get("max_length") <= values.get(
-            "max_context_length"
-        ), f"max_length must not be larger than max_context_length"
+        assert values.get("max_length") <= values.get("max_context_length"), f"max_length must not be larger than max_context_length"
         return values

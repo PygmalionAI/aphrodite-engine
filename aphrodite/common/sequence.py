@@ -382,7 +382,6 @@ class SequenceOutputs:
                 and self.output_token == other.output_token
                 and self.logprobs == other.logprobs)
 
-
 class SequenceGroupOutputs:
     """The model outputs associated with a sequence group."""
 
@@ -403,7 +402,6 @@ class SequenceGroupOutputs:
             raise NotImplementedError()
         return (self.samples == other.samples
                 and self.prompt_logprobs == other.prompt_logprobs)
-
 
 # For each sequence group, we generate a list of SequenceOutputs object,
 # each of which contains one possible candidate for the next token.

@@ -1,7 +1,8 @@
 from typing import List, Optional
 
-from aphrodite.common.sequence import (PromptLogprobs, SampleLogprobs,
-                                       SequenceGroup, SequenceStatus)
+from aphrodite.common.sequence import (
+    PromptLogprobs, SampleLogprobs, SequenceGroup,
+    SequenceStatus)
 
 
 class CompletionOutput:
