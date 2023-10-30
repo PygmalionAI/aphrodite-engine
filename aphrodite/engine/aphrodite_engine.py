@@ -4,18 +4,19 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Tuple, Union
 
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
-                         SchedulerConfig)
+                                     SchedulerConfig)
 from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.ray_tools import RayWorker, initialize_cluster, ray
 from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.common.sequence import (
-    SamplerOutput, Sequence, SequenceGroup, SequenceGroupMetadata,
-    SequenceGroupOutputs, SequenceOutputs, SequenceStatus)
+from aphrodite.common.sequence import (SamplerOutput, Sequence, SequenceGroup,
+                                       SequenceGroupMetadata,
+                                       SequenceGroupOutputs, SequenceOutputs,
+                                       SequenceStatus)
 from aphrodite.transformers_utils.tokenizer import (detokenize_incrementally,
-                                               get_tokenizer)
+                                                    get_tokenizer)
 from aphrodite.common.utils import Counter
 
 if ray:

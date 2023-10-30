@@ -19,11 +19,10 @@ _MODEL_REGISTRY = {
 }
 
 _MODEL_CLASSES_SUPPORT_QUANTIZATION = {
-    "awq": [
-        LlamaForCausalLM, MistralForCausalLM
-    ],
+    "awq": [LlamaForCausalLM, MistralForCausalLM],
     "gptq": [
-        LlamaForCausalLM, GPTJForCausalLM, GPTNeoXForCausalLM, MistralForCausalLM
+        LlamaForCausalLM, GPTJForCausalLM, GPTNeoXForCausalLM,
+        MistralForCausalLM
     ],
 }
 
@@ -53,7 +52,8 @@ def get_model(model_config: ModelConfig, max_tokens: int) -> nn.Module:
     # Get the quantization config.
     quant_config = None
     if model_config.quantization is not None:
-        if model_class not in _MODEL_CLASSES_SUPPORT_QUANTIZATION[model_config.quantization]:
+        if model_class not in _MODEL_CLASSES_SUPPORT_QUANTIZATION[
+                model_config.quantization]:
             raise ValueError(
                 f"Quantization is not supported for {model_class}.")
         quant_config = get_quant_config(model_config.quantization,
