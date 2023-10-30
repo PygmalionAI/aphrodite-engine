@@ -19,8 +19,8 @@ class GPTQConfig(QuantizationConfig):
         self.pack_factor = 32 // self.weight_bits
         if self.weight_bits != 4:
             raise ValueError(
-                f"Currently only 4-bit quant is supported for GPTQ, you passed {self.weight_bits} bits."
-            )
+                "Currently only 4-bit quant is supported for GPTQ, "
+                f"you passed {self.weight_bits} bits.")
 
     def __repr__(self) -> str:
         return (f"GPTQConfig(weight_bits={self.weight_bits}), "

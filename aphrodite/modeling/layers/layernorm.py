@@ -9,7 +9,8 @@ class RMSNorm(nn.Module):
     """Root mean square normalization.
 
     Computes x -> w * x / sqrt(E[x^2] + eps) where w is the learned weight.
-    Refer to the Root Mean Square Layer Normalization paper https://arxiv.org/abs/1910.07467
+    Refer to the Root Mean Square Layer Normalization paper
+    https://arxiv.org/abs/1910.07467
     """
 
     def __init__(

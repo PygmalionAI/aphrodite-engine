@@ -231,11 +231,12 @@ class _AsyncAphrodite(AphroditeEngine):
 class AsyncAphrodite:
     """An asynchronous wrapper for AphroditeEngine.
 
-    This class is used to wrap the AphroditeEngine class to make it asynchronous. It
-    uses asyncio to create a background loop that keeps processing incoming
-    requests. The AphroditeEngine is kicked by the generate method when there
-    are requests in the waiting queue. The generate method yields the outputs
-    from the AphroditeEngine to the caller.
+    This class is used to wrap the AphroditeEngine class to make it
+    asynchronous. It uses asyncio to create a background loop that
+    keeps processing incoming requests. The AphroditeEngine is kicked
+    by the generate method when there are requests in the waiting queue.
+    The generate method yields the outputs from the AphroditeEngine to
+    the caller.
 
     NOTE: For the comprehensive list of arguments, see `AphroditeEngine`.
 
@@ -400,8 +401,8 @@ class AsyncAphrodite:
         """Generate outputs for a request.
 
         Generate outputs for a request. This method is a coroutine. It adds the
-        request into the waiting queue of the AphroditeEngine and streams the outputs
-        from the AphroditeEngine to the caller.
+        request into the waiting queue of the AphroditeEngine and streams the
+        outputs from the AphroditeEngine to the caller.
 
         Args:
             prompt: The prompt string. Can be None if prompt_token_ids is

@@ -1,4 +1,5 @@
-"""Ray for distributed multi-node inference: https://github.com/ray-project/ray"""
+"""Ray for distributed multi-node inference:
+https://github.com/ray-project/ray"""
 import socket
 from typing import Optional, Tuple, TYPE_CHECKING
 

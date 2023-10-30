@@ -20,7 +20,7 @@ from aphrodite.modeling.quantization_utils.base import QuantizationConfig
 logger = init_logger(__name__)
 
 
-class Disabledtqdm(tqdm):
+class Disabledtqdm(tqdm):  # pylint: disable=inconsistent-mro
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs, disable=True)

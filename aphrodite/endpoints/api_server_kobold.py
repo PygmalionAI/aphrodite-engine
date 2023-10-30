@@ -31,7 +31,7 @@ engine: AsyncAphrodite = None
 badwordsids: List[int] = []
 
 
-def _set_badwords(tokenizer, hf_config):
+def _set_badwords(tokenizer, hf_config):  # pylint: disable=redefined-outer-name
     global badwordsids
     if hf_config.bad_words_ids is not None:
         badwordsids = hf_config.bad_words_ids
@@ -81,7 +81,8 @@ def prepare_engine_payload(
 
     if kai_payload.max_context_length > max_model_len:
         raise ValueError(
-            f"max_context_length ({kai_payload.max_context_length}) must be less than or equal to "
+            f"max_context_length ({kai_payload.max_context_length}) "
+            "must be less than or equal to "
             f"max_model_len ({max_model_len})")
 
     sampling_params = SamplingParams(max_tokens=kai_payload.max_length)
@@ -164,7 +165,7 @@ async def generate_stream(
                                  "Cache-Control": "no-cache",
                                  "Connection": "keep-alive"
                              },
-                             media_type='text/event-stream')
+                             media_type="text/event-stream")
 
 
 @extra_api.post("/generate/check")
@@ -231,8 +232,9 @@ async def get_extra_version():
 
 @app.get("/")
 async def get_kobold_lite_ui():
-    """Serves a cached copy of the Kobold Lite UI, loading it from disk on demand if needed."""
-    #read and return embedded kobold lite
+    """Serves a cached copy of the Kobold Lite UI, loading it from disk on
+    demand if needed."""
+    # read and return embedded kobold lite
     global kobold_lite_ui
     if kobold_lite_ui == "":
         scriptpath = os.path.dirname(os.path.abspath(__file__))
@@ -270,7 +272,7 @@ if __name__ == "__main__":
                         "For use with Kobold Horde.")
 
     parser = AsyncEngineArgs.add_cli_args(parser)
-    global args
+    global args  # pylint: disable=global-at-module-level
     args = parser.parse_args()
 
     logger.info(f"args: {args}")

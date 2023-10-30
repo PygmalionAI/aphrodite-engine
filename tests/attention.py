@@ -149,7 +149,7 @@ def main(
     print(f"Kernel running time: {latency * 1000000:.3f} us")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Benchmark the paged attention kernel.")
     parser.add_argument("--version",

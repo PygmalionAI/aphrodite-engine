@@ -8,7 +8,7 @@ from tqdm import tqdm
 from aphrodite import LLM, SamplingParams
 
 
-def main(args: argparse.Namespace):
+def main(args: argparse.Namespace):  # pylint: disable=redefined-outer-name
     print(args)
 
     # Process all the requests in a single batch if possible.
@@ -51,12 +51,12 @@ def main(args: argparse.Namespace):
             torch.cuda.cudart().cudaProfilerStop()
         return latency
 
-    print("Warming up...")
+    print('Warming up...')
     run_to_completion(profile=False)
 
     # Benchmark.
     latencies = []
-    for _ in tqdm(range(args.num_iters), desc="Profiling iterations"):
+    for _ in tqdm(range(args.num_iters), desc='Profiling iterations'):
         latencies.append(run_to_completion(profile=False))
     print(f'Avg latency: {np.mean(latencies)} seconds')
 

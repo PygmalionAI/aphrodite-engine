@@ -1,13 +1,14 @@
 import contextlib
 from typing import Type
 import torch
-from torch.multiprocessing import Value
 import torch.nn as nn
 from transformers import PretrainedConfig
 
 from aphrodite.common.config import ModelConfig
-from aphrodite.modeling.models import LlamaForCausalLM, GPTJForCausalLM, GPTNeoXForCausalLM, MistralForCausalLM
-from aphrodite.modeling.hf_downloader import initialize_dummy_weights, get_quant_config
+from aphrodite.modeling.models import (LlamaForCausalLM, GPTJForCausalLM,
+                                       GPTNeoXForCausalLM, MistralForCausalLM)
+from aphrodite.modeling.hf_downloader import (initialize_dummy_weights,
+                                              get_quant_config)
 from aphrodite.modeling.layers.quantized_linear.utils import quant_post_init
 
 _MODEL_REGISTRY = {

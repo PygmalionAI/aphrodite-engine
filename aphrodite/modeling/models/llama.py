@@ -342,9 +342,10 @@ class LlamaForCausalLM(nn.Module):
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, "qkv_proj")
+                # pylint: disable=unsupported-membership-test
                 if name not in state_dict or "g_idx" in name:
                     break
-                param = state_dict[name]
+                param = state_dict[name]  # pylint: disable=unsubscriptable-object
                 if is_transposed:
                     param = param.T
 
@@ -369,8 +370,10 @@ class LlamaForCausalLM(nn.Module):
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, "gate_up_proj")
+                # pylint: disable=unsupported-membership-test
                 if "g_idx" in name or name not in state_dict:
                     break
+                # pylint: disable=unsubscriptable-object
                 param = state_dict[name]
                 if is_transposed:
                     param = param.T
@@ -388,9 +391,10 @@ class LlamaForCausalLM(nn.Module):
             if is_gate_up_weight:
                 continue
 
+            # pylint: disable=unsupported-membership-test
             if name not in state_dict:
                 continue
-            param = state_dict[name]
+            param = state_dict[name]  # pylint: disable=unsubscriptable-object
             if is_transposed:
                 param = param.T
 

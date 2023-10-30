@@ -39,7 +39,7 @@ class SamplingParams:
         repetition_penalty: Float that penalizes new tokens based on their
             frequency in the generated text so far.
             freq_pen is applied additively while
-            rep_pen is applied multiplicatively. 
+            rep_pen is applied multiplicatively.
             Must be in [1, inf). Set to 1 to disable the effect.
         temperature: Float that controls the randomness of the sampling. Lower
             values make the model more deterministic, while higher values make
@@ -57,8 +57,8 @@ class SamplingParams:
             (a form of entropy adaptive truncation sampling)
             treshold is computed as min(eta, sqrt(eta)*entropy(probs)).
             Specified in units of 1e-4. Set to 0 to disable
-        epsilon_cutoff: Float that controls the cutoff treshold for Epsilon sampling
-            (simple probability treshold truncation).
+        epsilon_cutoff: Float that controls the cutoff treshold for
+            Epsilon sampling (simple probability treshold truncation).
             Specified in units of 1e-4. Set to 0 to disable.
         typical_p: Float that controls the cumulative probability of tokens
             closest in surprise to the expected surprise to consider.
@@ -178,7 +178,7 @@ class SamplingParams:
         if not -2.0 <= self.frequency_penalty <= 2.0:
             raise ValueError("frequency_penalty must be in [-2, 2], got "
                              f"{self.frequency_penalty}.")
-        if not 1.0 <= self.repetition_penalty:
+        if self.repetition_penalty < 1.0:
             raise ValueError("repetition_penalty must be in [1, inf), got "
                              f"{self.repetition_penalty}.")
         if self.temperature < 0.0:
@@ -193,10 +193,10 @@ class SamplingParams:
             raise ValueError(f"top_a must be in [0, 1], got {self.top_a}.")
         if not 0.0 < self.tfs <= 1.0:
             raise ValueError(f"tfs must be in (0, 1], got {self.tfs}.")
-        if not 0.0 <= self.epsilon_cutoff <= 1000.0:
-            raise ValueError(
-                f"epsilon_cutoff must be in [0, 1000], got {self.epsilon_cutoff}."
-            )
+        if self.epsilon_cutoff < 0.0 or self.epsilon_cutoff > 1000.0:
+            raise ValueError("epsilon_cutoff must be in [0, 1000], got "
+                             f"{self.epsilon_cutoff}.")
+        # pylint: disable=unneeded-not
         if not self.eta_cutoff >= 0:
             raise ValueError(
                 f"eta_cutoff must be non negative, got {self.eta_cutoff}.")
@@ -210,9 +210,8 @@ class SamplingParams:
             raise ValueError(
                 f"logprobs must be non-negative, got {self.logprobs}.")
         if self.prompt_logprobs is not None and self.prompt_logprobs < 0:
-            raise ValueError(
-                f"prompt_logprobs must be non-negative, got {self.prompt_logprobs}."
-            )
+            raise ValueError("prompt_logprobs must be non-negative, got "
+                             f"{self.prompt_logprobs}.")
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:
