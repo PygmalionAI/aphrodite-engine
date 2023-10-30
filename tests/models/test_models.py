@@ -29,8 +29,8 @@ def test_models(
         hf_output_ids, hf_output_str = hf_outputs[i]
         aphrodite_output_ids, aphrodite_output_str = aphrodite_outputs[i]
         assert hf_output_str == aphrodite_output_str, (
-            f"Test{i}:\nHF: {hf_output_str!r}\nAphrodite: {aphrodite_output_str!r}"
-        )
+            f"Test{i}:\nHF: {hf_output_str!r}\nAphrodite: "
+            f"{aphrodite_output_str!r}")
         assert hf_output_ids == aphrodite_output_ids, (
             f"Test{i}:\nHF: {hf_output_ids}\nAphrodite: {aphrodite_output_ids}"
         )

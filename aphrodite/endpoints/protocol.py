@@ -25,7 +25,7 @@ class SamplingParams(BaseModel):
                                                    alias="custom_token_bans")
 
     @root_validator
-    def validate_best_of(cls, values):
+    def validate_best_of(cls, values):  # pylint: disable=no-self-argument
         best_of = values.get("best_of")
         n = values.get("n")
         if best_of is not None and (best_of <= 0 or best_of > n):
@@ -70,8 +70,8 @@ class KAIGenerationInputSchema(BaseModel):
     stop_sequence: Optional[List[str]]
 
     @root_validator
-    def check_context(cls, values):
+    def check_context(cls, values):  # pylint: disable=no-self-argument
         assert values.get("max_length") <= values.get(
             "max_context_length"
-        ), f"max_length must not be larger than max_context_length"
+        ), "max_length must not be larger than max_context_length"
         return values

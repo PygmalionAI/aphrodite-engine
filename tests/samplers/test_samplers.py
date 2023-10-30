@@ -30,7 +30,7 @@ def _prepare_test(
 ) -> Tuple[torch.Tensor, torch.Tensor, MockLogitsSampler, Worker]:
     vocab_size = 32000
     input_tensor = torch.rand((batch_size, 1024),
-                              device='cuda',
+                              device="cuda",
                               dtype=torch.float16)
     fake_logits = torch.full((batch_size, vocab_size),
                              1e-2,
@@ -55,13 +55,14 @@ def test_sampler_all_greedy(seed: int):
     for i in range(batch_size):
         seq_group_metadata_list.append(
             SequenceGroupMetadata(
-                request_id=f'test_{i}',
+                request_id=f"test_{i}",
                 is_prompt=True,
                 seq_data={0: SequenceData([1, 2, 3])},
                 sampling_params=SamplingParams(temperature=0, ),
                 block_tables={0: [1]},
             ))
 
+    # pylint: disable=protected-access
     _, _, input_metadata = worker._prepare_inputs(seq_group_metadata_list)
     sampler_output = sampler(embedding=None,
                              hidden_states=input_tensor,
@@ -94,6 +95,7 @@ def test_sampler_all_random(seed: int):
                 ),
                 block_tables={0: [1]},
             ))
+    # pylint: disable=protected-access
     _, _, input_metadata = worker._prepare_inputs(seq_group_metadata_list)
     sampler_output = sampler(embedding=None,
                              hidden_states=input_tensor,
@@ -107,6 +109,7 @@ def test_sampler_all_random(seed: int):
 def test_sampler_all_beam(seed: int):
     set_random_seed(seed)
     batch_size = random.randint(1, 256)
+    # pylint: disable=unused-variable
     input_tensor, fake_logits, sampler, worker = _prepare_test(batch_size)
 
     seq_group_metadata_list = []
@@ -123,6 +126,7 @@ def test_sampler_all_beam(seed: int):
                 ),
                 block_tables={0: [1]},
             ))
+    # pylint: disable=protected-access
     _, _, input_metadata = worker._prepare_inputs(seq_group_metadata_list)
     sampler(embedding=None,
             hidden_states=input_tensor,
@@ -175,6 +179,7 @@ def test_sampler_mixed(seed: int):
                 block_tables={0: [1]},
             ))
 
+    # pylint: disable=protected-access
     _, _, input_metadata = worker._prepare_inputs(seq_group_metadata_list)
     sampler_output = sampler(embedding=None,
                              hidden_states=input_tensor,

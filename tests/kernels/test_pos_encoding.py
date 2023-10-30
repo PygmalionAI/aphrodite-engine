@@ -161,6 +161,7 @@ def test_rotary_embedding(
         max_position_embeddings=max_position,
         base=base,
     ).to(dtype=dtype, device="cuda")
+    # pylint: disable=not-callable
     ref_query, ref_key = ref_rotary_embedding(
         positions,
         query.view(num_tokens, num_heads, head_size),

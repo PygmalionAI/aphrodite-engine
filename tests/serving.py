@@ -150,7 +150,7 @@ async def benchmark(
     await asyncio.gather(*tasks)
 
 
-def main(args: argparse.Namespace):
+def main(args: argparse.Namespace):  # pylint: disable=redefined-outer-name
     print(args)
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -218,8 +218,8 @@ if __name__ == "__main__":
                         "Otherwise, we use Poisson process to synthesize "
                         "the request arrival times.")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument('--trust-remote-code',
-                        action='store_true',
-                        help='trust remote code from huggingface')
+    parser.add_argument("--trust-remote-code",
+                        action="store_true",
+                        help="trust remote code from huggingface")
     args = parser.parse_args()
     main(args)

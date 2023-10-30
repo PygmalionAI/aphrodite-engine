@@ -255,6 +255,7 @@ class GPTNeoXForCausalLM(nn.Module):
             if ("attention.bias" in name or "attention.masked_bias" in name
                     or "rotary_emb.inv_freq" in name):
                 continue
+            # pylint: disable=unsubscriptable-object
             param = state_dict[name]
             if "query_key_value" in name:
                 # NOTE: GPT-NeoX's fused QKV has the shape of

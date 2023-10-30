@@ -1,7 +1,6 @@
 """A layer that samples the next tokens from the model's outputs."""
 from typing import Dict, List, Tuple, Optional
 
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -12,7 +11,6 @@ from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (PromptLogprobs, SampleLogprobs,
                                        SamplerOutput, SequenceData,
                                        SequenceGroupOutputs, SequenceOutputs)
-from aphrodite.common.sequence import SamplerOutput, SequenceOutputs, SequenceData
 
 _SAMPLING_EPS = 1e-5
 
@@ -53,8 +51,8 @@ class Sampler(nn.Module):
         # Apply presence and frequency penalties.
         output_tokens = _get_output_tokens(input_metadata)
         assert len(output_tokens) == logits.shape[0]
-        presence_penalties, frequency_penalties, repetition_penalties = _get_penalties(
-            input_metadata)
+        [presence_penalties, frequency_penalties,
+         repetition_penalties] = _get_penalties(input_metadata)
         assert len(presence_penalties) == logits.shape[0]
         assert len(frequency_penalties) == logits.shape[0]
         logits = _apply_penalties(logits, output_tokens, presence_penalties,
@@ -74,13 +72,15 @@ class Sampler(nn.Module):
         if any(eta > _SAMPLING_EPS for eta in eta_cutoffs):
             logits = _apply_eta_cutoff(logits, eta_cutoffs)
 
-        # Apply Locally typical sampling, as described in https://arxiv.org/abs/2202.00666
+        # Apply Locally typical sampling, as described in
+        # https://arxiv.org/abs/2202.00666
         typical_ps = _get_typical_ps(input_metadata)
         assert len(typical_ps) == logits.shape[0]
         if any(typ_p < 1.0 - _SAMPLING_EPS for typ_p in typical_ps):
             logits = _apply_typical_sampling(logits, typical_ps)
 
-        # Apply Tail Free Sampling, as described in https://www.trentonbricken.com/Tail-Free-Sampling/
+        # Apply Tail Free Sampling, as described in
+        # https://www.trentonbricken.com/Tail-Free-Sampling/
         tfss = _get_tfs(input_metadata)
         assert len(tfss) == logits.shape[0]
         if any(z < 1.0 - _SAMPLING_EPS for z in tfss):
@@ -291,8 +291,9 @@ def _apply_penalties(
     presence_mask = (bin_counts > 0)
     logits -= presence_penalties.unsqueeze(dim=1) * presence_mask
 
-    # Effectively: If token is present and logit is positive, divide logit by rep_pen.
-    #              If token is present and logit is negative, multiply logit by rep_pen.
+    # Effectively:
+    # If token is present and logit is positive, divide logit by rep_pen.
+    # If token is present and logit is negative, multiply logit by rep_pen.
     logits += logits * (1 / repetition_penalties.unsqueeze(dim=1) -
                         1) * presence_mask * (logits > 0)
     logits += logits * (repetition_penalties.unsqueeze(dim=1) -
@@ -489,7 +490,7 @@ def _apply_eta_cutoff(
 
     eta_mask = probs < eps
 
-    if (torch.all(eta_mask)):  # guard against nulling out all the logits
+    if torch.all(eta_mask):  # guard against nulling out all the logits
         topk_prob, _ = torch.max(probs, dim=-1)
         eta_mask = probs < topk_prob
 
@@ -508,7 +509,7 @@ def _apply_epsilon_cutoff(
 
     eps_mask = probs < (eps * 1e-4)
 
-    if (torch.all(eps_mask)):  # guard against nulling out all the logits
+    if torch.all(eps_mask):  # guard against nulling out all the logits
         topk_prob, _ = torch.max(probs, dim=-1)
         eps_mask = probs < topk_prob
 

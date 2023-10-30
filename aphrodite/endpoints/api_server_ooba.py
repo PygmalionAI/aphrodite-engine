@@ -1,13 +1,11 @@
 import argparse
 import json
-import os
-from typing import AsyncGenerator, Dict
+from typing import AsyncGenerator
 
-from fastapi import BackgroundTasks, Depends, Header, FastAPI, HTTPException, Request, APIRouter
+from fastapi import (BackgroundTasks, Header, FastAPI, HTTPException, Request)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 import uvicorn
-from pydantic import parse_obj_as
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
@@ -21,7 +19,7 @@ TIMEOUT_TO_PREVENT_DEADLOCK = 1  # seconds.
 app = FastAPI()
 engine = None
 
-valid_api_key = 'EMPTY'
+valid_api_key = "EMPTY"
 
 app.add_middleware(
     CORSMiddleware,
@@ -50,27 +48,28 @@ async def generate(
     prompt = request_dict.pop("prompt")
     stream = request_dict.pop("stream", False)
 
-    if 'stopping_strings' in request_dict:
-        request_dict['stop'] = request_dict.pop('stopping_strings')
-    if 'max_new_tokens' in request_dict:
-        request_dict['max_tokens'] = request_dict.pop('max_new_tokens')
-    if 'min_length' in request_dict:
-        request_dict['min_tokens'] = request_dict.pop('min_length')
-    if 'ban_eos_token' in request_dict:
-        request_dict['ignore_eos'] = request_dict.pop('ban_eos_token')
-    if 'top_k' in request_dict and request_dict['top_k'] == 0:
-        request_dict['top_k'] = -1
+    if "stopping_strings" in request_dict:
+        request_dict["stop"] = request_dict.pop("stopping_strings")
+    if "max_new_tokens" in request_dict:
+        request_dict["max_tokens"] = request_dict.pop("max_new_tokens")
+    if "min_length" in request_dict:
+        request_dict["min_tokens"] = request_dict.pop("min_length")
+    if "ban_eos_token" in request_dict:
+        request_dict["ignore_eos"] = request_dict.pop("ban_eos_token")
+    if "top_k" in request_dict and request_dict["top_k"] == 0:
+        request_dict["top_k"] = -1
 
-    request_dict['logits_processors'] = []
+    request_dict["logits_processors"] = []
 
-    min_length = request_dict.pop('min_tokens', 0)
+    min_length = request_dict.pop("min_tokens", 0)
     if request_dict.get(
-            'ignore_eos', False
-    ):  # ignore_eos/ban_eos_token is functionally equivalent to `min_tokens = max_tokens`
-        min_length = request_dict.get('max_tokens', 16)
+            "ignore_eos",
+            False):  # ignore_eos/ban_eos_token is functionally equivalent
+        # to `min_tokens = max_tokens`
+        min_length = request_dict.get("max_tokens", 16)
 
     if min_length:
-        request_dict['logits_processors'].append(
+        request_dict["logits_processors"].append(
             BanEOSUntil(min_length, engine.engine.tokenizer.eos_token_id))
 
     sampling_params = SamplingParams()
@@ -85,7 +84,7 @@ async def generate(
     # Streaming case
     async def stream_results() -> AsyncGenerator[bytes, None]:
         async for request_output in results_generator:
-            prompt = request_output.prompt
+            # prompt = request_output.prompt
             text_outputs = [{
                 "text": output.text
             } for output in request_output.outputs]

@@ -50,8 +50,8 @@ def test_gelu_new(
 ) -> None:
     torch.random.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    x = torch.randn(num_tokens, d, dtype=dtype, device='cuda')
-    out = torch.empty(num_tokens, d, dtype=dtype, device='cuda')
+    x = torch.randn(num_tokens, d, dtype=dtype, device="cuda")
+    out = torch.empty(num_tokens, d, dtype=dtype, device="cuda")
     activation_ops.gelu_new(out, x)
     ref_out = get_activation("gelu_new")(x)
     assert torch.allclose(out, ref_out, atol=1e-5, rtol=1e-5)
@@ -69,8 +69,8 @@ def test_gelu_fast(
 ) -> None:
     torch.random.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    x = torch.rand(num_tokens, d, dtype=dtype, device='cuda')
-    out = torch.empty(num_tokens, d, dtype=dtype, device='cuda')
+    x = torch.rand(num_tokens, d, dtype=dtype, device="cuda")
+    out = torch.empty(num_tokens, d, dtype=dtype, device="cuda")
     activation_ops.gelu_fast(out, x)
     ref_out = get_activation("gelu_fast")(x)
     assert torch.allclose(out, ref_out, atol=1e-5, rtol=1e-5)

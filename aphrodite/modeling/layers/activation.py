@@ -12,7 +12,6 @@ class SiluAndMul(nn.Module):
     Shapes:
         x: (batch_size, seq_len, 2 * d) or (num_tokens, 2 * d)
         return: (batch_size, seq_len, d) or (num_tokens, d)
-        
     TODO(alpin): Add more activation functions.
     """
 

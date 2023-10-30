@@ -35,7 +35,9 @@ from aphrodite.modeling.hf_downloader import (hf_model_weights_iterator,
                                               load_tensor_parallel_weights)
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
-from aphrodite.modeling.megatron.layers import (VocabParallelEmbedding)
+from aphrodite.modeling.megatron.layers import (VocabParallelEmbedding,
+                                                ColumnParallelLinear,
+                                                RowParallelLinear)
 from aphrodite.common.sequence import SamplerOutput
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
@@ -248,6 +250,7 @@ class GPTJForCausalLM(nn.Module):
                 ["q_proj", "k_proj", "v_proj"]):
                 if att_weight_name not in name:
                     continue
+                # pylint: disable=unsubscriptable-object
                 param = state_dict[name.replace(att_weight_name, "qkv_proj")]
                 shard_size = param.shape[1]
                 loaded_weight = loaded_weight[shard_size * tp_rank:shard_size *
@@ -261,6 +264,7 @@ class GPTJForCausalLM(nn.Module):
             if is_attention_weight:
                 continue
 
+            # pylint: disable=unsubscriptable-object
             param = state_dict[name]
             load_tensor_parallel_weights(param, loaded_weight, name,
                                          self._column_parallel_weights,
