@@ -8,43 +8,36 @@ from aphrodite import activation_ops
 class SiluAndMul(nn.Module):
     """An activation function for SwiGLU.
 
-    The function computes x -> silu(x[:d]) * x[d:] where d = x.shape[1] // 2.
+    The function computes x -> silu(x[:d]) * x[d:] where d = x.shape[-1] // 2.
 
     Shapes:
-        x: (num_tokens, 2 * d)
-        return: (num_tokens, d)
+        x: (batch_size, seq_len, 2 * d) or (num_tokens, 2 * d)
+        return: (batch_size, seq_len, d) or (num_tokens, d)
         
     TODO(alpin): Add more activation functions.
     """
-
-    def __init__(self):
-        super().__init__()
 
     def forward(
         self,
         x: torch.Tensor,
     ) -> torch.Tensor:
-        num_tokens = x.shape[0]
-        d = x.shape[1] // 2
-        out = torch.empty(num_tokens, d, dtype=x.dtype, device=x.device)
+        d = x.shape[-1] // 2
+        output_shape = (x.shape[:-1] + (d, ))
+        out = torch.empty(output_shape, dtype=x.dtype, device=x.device)
         activation_ops.silu_and_mul(out, x)
         return out
 
 class NewGELU(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        num_tokens = x.shape[0]
-        d = x.shape[1]
-        out = torch.empty(num_tokens, d, dtype=x.dtype, device=x.device)
+        out = torch.empty_like(x)
         activation_ops.gelu_new(out, x)
         return out
     
 class FastGELU(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        num_tokens = x.shape[0]
-        d = x.shape[1]
-        out = torch.empty(num_tokens, d, dtype=x.dtype, device=x.device)
+        out = torch.empty_like(x)
         activation_ops.gelu_fast(out, x)
         return out
 
