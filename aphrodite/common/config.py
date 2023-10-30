@@ -261,11 +261,11 @@ class SchedulerConfig:
     """
 
     def __init__(
-            self,
-            max_num_batched_tokens: Optional[int],
-            max_num_seqs: int,
-            max_model_len: int,
-            max_paddings: int,
+        self,
+        max_num_batched_tokens: Optional[int],
+        max_num_seqs: int,
+        max_model_len: int,
+        max_paddings: int,
     ) -> None:
         if max_num_batched_tokens is not None:
             self.max_num_batched_tokens = max_num_batched_tokens
@@ -288,7 +288,8 @@ class SchedulerConfig:
         if self.max_num_batched_tokens < self.max_num_seqs:
             raise ValueError(
                 f"max_num_batched_tokens ({self.max_num_batched_tokens}) must "
-                f"be greater than or equal to max_num_seqs ({self.max_num_seqs}).")
+                f"be greater than or equal to max_num_seqs ({self.max_num_seqs})."
+            )
 
 
 _STR_DTYPE_TO_TORCH_DTYPE = {
@@ -358,7 +359,8 @@ def _get_and_verify_max_len(
     if derived_max_model_len == float('inf'):
         raise ValueError(
             "The model's config.json must contain one of the following keys "
-            f"to determine the original maximum length of the model: {possible_keys}")
+            f"to determine the original maximum length of the model: {possible_keys}"
+        )
 
     rope_scaling = getattr(hf_config, "rope_scaling", None)
     if rope_scaling is not None:

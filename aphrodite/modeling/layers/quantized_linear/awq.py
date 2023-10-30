@@ -5,8 +5,9 @@ import torch
 from torch.nn.parameter import Parameter
 
 from aphrodite import quantization_ops
-from aphrodite.modeling.megatron.layers import (
-    ColumnParallelLinear, RowParallelLinear)
+from aphrodite.modeling.megatron.layers import (ColumnParallelLinear,
+                                                RowParallelLinear)
+
 
 class AWQColumnParallelLinear(ColumnParallelLinear):
 

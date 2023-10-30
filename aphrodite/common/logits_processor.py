@@ -6,7 +6,8 @@ from typing import Dict
 class LogitsProcessor(ABC):
 
     @abstractmethod
-    def __call__(self, logits: torch.Tensor, output_tokens: list[list[int]]) -> None:
+    def __call__(self, logits: torch.Tensor,
+                 output_tokens: list[list[int]]) -> None:
         """Logits are edited in-place"""
         pass
 
@@ -42,14 +43,15 @@ class BiasLogitsProcessor(LogitsProcessor):
                                      1 / (1 - (values / 100)))
         logits[0, keys] *= update_factors
 
-        
+
 class BanEOSUntil(LogitsProcessor):
     """Bans the EOS token until a certain condition is met.
     In this case, 'number of output tokens'.
 
     With this condition, both 'min_tokens' and 'ignore_eos'
     parameters can be handled gracefully."""
-    def __init__(self, min_tokens:int, eos_token_id:int):
+
+    def __init__(self, min_tokens: int, eos_token_id: int):
         self._min_tokens = min_tokens
         self._eos_token_id = eos_token_id
 

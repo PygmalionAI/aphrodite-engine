@@ -49,6 +49,7 @@ class LogicalTokenBlock:
 
 class PhysicalTokenBlock:
     """Represents the state of a block in the KV cache."""
+
     def __init__(
         self,
         device: Device,

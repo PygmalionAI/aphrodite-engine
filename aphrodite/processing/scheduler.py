@@ -7,7 +7,7 @@ from aphrodite.processing.block_manager import BlockSpaceManager
 from aphrodite.processing.policy import PolicyFactory
 from aphrodite.common.logger import init_logger
 from aphrodite.common.sequence import (Sequence, SequenceData, SequenceGroup,
-                           SequenceGroupMetadata, SequenceStatus)
+                                       SequenceGroupMetadata, SequenceStatus)
 
 logger = init_logger(__name__)
 
