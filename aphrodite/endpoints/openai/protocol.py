@@ -111,7 +111,7 @@ class CompletionRequest(BaseModel):
     ignore_eos: Optional[bool] = False
     use_beam_search: Optional[bool] = False
     logprobs: Optional[int] = None
-    prompt_logprobs: Optional[int] = None    
+    prompt_logprobs: Optional[int] = None
     stop_token_ids: Optional[List[int]] = Field(default_factory=list)
     custom_token_bans: Optional[List[int]] = Field(default_factory=list)
     skip_special_tokens: Optional[bool] = True
