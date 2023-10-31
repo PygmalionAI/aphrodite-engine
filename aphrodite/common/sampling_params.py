@@ -91,6 +91,8 @@ class SamplingParams:
         custom_token_bans: List of token IDs to ban from generating
         skip_special_tokens: Whether to skip special tokens in the output.
             defaults to true.
+        spaces_between_special_tokens: Whether to add spaces between special
+            tokens in the output. Defaults to True.
         logits_processors: List of LogitsProcessors to change the probability
             of token prediction at runtime.
     """
@@ -121,6 +123,7 @@ class SamplingParams:
         prompt_logprobs: Optional[int] = None,
         custom_token_bans: Optional[List[int]] = None,
         skip_special_tokens: bool = True,
+        spaces_between_special_tokens: bool = True,
         logits_processors: List[LogitsProcessor] = None,
     ) -> None:
         self.n = n
@@ -155,6 +158,7 @@ class SamplingParams:
         self.prompt_logprobs = prompt_logprobs
         self.custom_token_bans = custom_token_bans or []
         self.skip_special_tokens = skip_special_tokens
+        self.spaces_between_special_tokens = spaces_between_special_tokens
         self.logits_processors = logits_processors or []
 
         self._verify_args()
@@ -278,4 +282,6 @@ class SamplingParams:
                 f"custom_token_bans={self.custom_token_bans}, "
                 f"logprobs={self.logprobs}, "
                 f"prompt_logprobs={self.prompt_logprobs}, "
-                f"skip_special_tokens={self.skip_special_tokens})")
+                f"skip_special_tokens={self.skip_special_tokens}, "
+                f"spaces_between_special_tokens="
+                f"{self.spaces_between_special_tokens})")
