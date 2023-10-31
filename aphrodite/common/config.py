@@ -257,13 +257,15 @@ class SchedulerConfig:
             iteration.
         max_model_len: Maximum length of a sequence (including prompt
             and generated text).
+        max_paddings: Maximum number of paddings to be added to a batch.
     """
 
     def __init__(
-            self,
-            max_num_batched_tokens: Optional[int],
-            max_num_seqs: int,
-            max_model_len: int,
+        self,
+        max_num_batched_tokens: Optional[int],
+        max_num_seqs: int,
+        max_model_len: int,
+        max_paddings: int,
     ) -> None:
         if max_num_batched_tokens is not None:
             self.max_num_batched_tokens = max_num_batched_tokens
@@ -271,6 +273,7 @@ class SchedulerConfig:
             self.max_num_batched_tokens = max(max_model_len, 2048)
         self.max_num_seqs = max_num_seqs
         self.max_model_len = max_model_len
+        self.max_paddings = max_paddings
         self._verify_args()
 
     def _verify_args(self) -> None:
@@ -285,7 +288,8 @@ class SchedulerConfig:
         if self.max_num_batched_tokens < self.max_num_seqs:
             raise ValueError(
                 f"max_num_batched_tokens ({self.max_num_batched_tokens}) must "
-                f"be greater than or equal to max_num_seqs ({self.max_num_seqs}).")
+                "be greater than or equal to max_num_seqs "
+                f"({self.max_num_seqs}).")
 
 
 _STR_DTYPE_TO_TORCH_DTYPE = {
@@ -352,10 +356,11 @@ def _get_and_verify_max_len(
         max_len_key = getattr(hf_config, key, None)
         if max_len_key is not None:
             derived_max_model_len = min(derived_max_model_len, max_len_key)
-    if derived_max_model_len == float('inf'):
+    if derived_max_model_len == float("inf"):
         raise ValueError(
             "The model's config.json must contain one of the following keys "
-            f"to determine the original maximum length of the model: {possible_keys}")
+            "to determine the original maximum length of the model: "
+            f"{possible_keys}")
 
     rope_scaling = getattr(hf_config, "rope_scaling", None)
     if rope_scaling is not None:

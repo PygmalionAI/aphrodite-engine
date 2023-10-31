@@ -1,10 +1,10 @@
 #!/bin/bash
-if [ ! -f "conda/envs/linux/bin/python" ]; then
+if [ ! -f "conda/envs/aphrodite-runtime/bin/python" ]; then
 ./update-runtime.sh
 fi
 if [ $# -eq 0 ]
   then
-    bin/micromamba run -r conda -n linux bash
+    bin/micromamba run -r conda -n aphrodite-runtime bash
     exit
 fi
-bin/micromamba run -r conda -n linux $*
+bin/micromamba run -r conda -n aphrodite-runtime $*

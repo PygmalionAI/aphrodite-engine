@@ -1,5 +1,6 @@
 """
-Logging utility. Adapted from https://github.com/skypilot-org/skypilot/blob/master/sky/sky_logging.py
+Logging utility. Adapted from
+https://github.com/skypilot-org/skypilot/blob/master/sky/sky_logging.py
 """
 
 import logging
@@ -19,11 +20,11 @@ class NewLineFormatter(logging.Formatter):
         msg = logging.Formatter.format(self, record)
         if record.message != "":
             parts = msg.split(record.message)
-            msg = msg.replace('\n', '\r\n' + parts[0])
+            msg = msg.replace("\n", "\r\n" + parts[0])
         return msg
 
 
-_root_logger = logging.getLogger('aphrodite')
+_root_logger = logging.getLogger("aphrodite")
 _default_handler = None
 
 
@@ -49,4 +50,8 @@ _setup_logger()
 
 
 def init_logger(name: str):
-    return logging.getLogger(name)
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(_default_handler)
+    logger.propagate = False
+    return logger

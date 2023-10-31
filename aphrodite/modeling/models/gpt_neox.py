@@ -36,8 +36,8 @@ from aphrodite.modeling.hf_downloader import (hf_model_weights_iterator,
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from aphrodite.modeling.megatron.layers import (VocabParallelEmbedding,
-                                                       ColumnParallelLinear,
-                                                       RowParallelLinear)
+                                                ColumnParallelLinear,
+                                                RowParallelLinear)
 from aphrodite.common.sequence import SamplerOutput
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
@@ -255,6 +255,7 @@ class GPTNeoXForCausalLM(nn.Module):
             if ("attention.bias" in name or "attention.masked_bias" in name
                     or "rotary_emb.inv_freq" in name):
                 continue
+            # pylint: disable=unsubscriptable-object
             param = state_dict[name]
             if "query_key_value" in name:
                 # NOTE: GPT-NeoX's fused QKV has the shape of

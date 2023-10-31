@@ -1,13 +1,11 @@
 import argparse
 import json
-import os
-from typing import AsyncGenerator, Dict
+from typing import AsyncGenerator
 
-from fastapi import BackgroundTasks, Depends, Header, FastAPI, HTTPException, Request, APIRouter
+from fastapi import (BackgroundTasks, Header, FastAPI, HTTPException, Request)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 import uvicorn
-from pydantic import parse_obj_as
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
@@ -21,7 +19,7 @@ TIMEOUT_TO_PREVENT_DEADLOCK = 1  # seconds.
 app = FastAPI()
 engine = None
 
-valid_api_key = 'EMPTY'
+valid_api_key = "EMPTY"
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,8 +29,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.post("/api/v1/generate")
-async def generate(request: Request, x_api_key: str = Header(None)) -> Response:
+async def generate(
+    request: Request, x_api_key: str = Header(None)) -> Response:
     """Generate completion for the request.
 
     The request should be a JSON object with the following fields:
@@ -41,12 +41,13 @@ async def generate(request: Request, x_api_key: str = Header(None)) -> Response:
     - other fields: the sampling parameters (See `SamplingParams` for details).
     """
     if x_api_key is None or x_api_key != valid_api_key:
-        raise HTTPException(status_code=401, detail="Unauthorized. Please acquire an API key.")
+        raise HTTPException(status_code=401,
+                            detail="Unauthorized. Please acquire an API key.")
 
     request_dict = await request.json()
     prompt = request_dict.pop("prompt")
     stream = request_dict.pop("stream", False)
-    
+
     if 'stopping_strings' in request_dict:
         request_dict['stop'] = request_dict.pop('stopping_strings')
     if 'max_new_tokens' in request_dict:
@@ -72,11 +73,6 @@ async def generate(request: Request, x_api_key: str = Header(None)) -> Response:
         if hasattr(sampling_params, key):
             setattr(sampling_params, key, value)
 
-    try:
-        sampling_params.verify()
-    except Exception as err:
-        raise HTTPException(status_code=422, detail=str(err))
-
     request_id = random_uuid()
 
     results_generator = engine.generate(prompt, sampling_params, request_id)
@@ -84,10 +80,10 @@ async def generate(request: Request, x_api_key: str = Header(None)) -> Response:
     # Streaming case
     async def stream_results() -> AsyncGenerator[bytes, None]:
         async for request_output in results_generator:
-            prompt = request_output.prompt
-            text_outputs = [
-                {"text": output.text} for output in request_output.outputs
-            ]
+            # prompt = request_output.prompt
+            text_outputs = [{
+                "text": output.text
+            } for output in request_output.outputs]
             ret = {"results": text_outputs}
             yield (json.dumps(ret) + "\n\n").encode("utf-8")
 

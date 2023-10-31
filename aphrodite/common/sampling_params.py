@@ -18,7 +18,8 @@ class SamplingParams:
 
     Overall, we follow the sampling parameters from the OpenAI text completion
     API (https://platform.openai.com/docs/api-reference/completions/create).
-    In addition, we support beam search, which is not supported by OpenAI.
+    In addition, we support multiple additional samplers which are not supported
+    by OpenAI.
 
     Args:
         n: Number of output sequences to return for the given prompt.
@@ -38,7 +39,7 @@ class SamplingParams:
         repetition_penalty: Float that penalizes new tokens based on their
             frequency in the generated text so far.
             freq_pen is applied additively while
-            rep_pen is applied multiplicatively. 
+            rep_pen is applied multiplicatively.
             Must be in [1, inf). Set to 1 to disable the effect.
         temperature: Float that controls the randomness of the sampling. Lower
             values make the model more deterministic, while higher values make
@@ -56,19 +57,12 @@ class SamplingParams:
             (a form of entropy adaptive truncation sampling)
             treshold is computed as min(eta, sqrt(eta)*entropy(probs)).
             Specified in units of 1e-4. Set to 0 to disable
-        epsilon_cutoff: Float that controls the cutoff treshold for Epsilon sampling
-            (simple probability treshold truncation).
+        epsilon_cutoff: Float that controls the cutoff treshold for
+            Epsilon sampling (simple probability treshold truncation).
             Specified in units of 1e-4. Set to 0 to disable.
         typical_p: Float that controls the cumulative probability of tokens
             closest in surprise to the expected surprise to consider.
             Must be in (0, 1]. Set to 1 to disable.
-        mirostat_mode: Int specifying which version of Mirostat to use.
-            Currently only v2 is implemented. Must be either 2 or 0(disabled)
-        mirostat_tau: Float that controls target surprise(log perplexity) for Mirostat.
-            Must be positive, set **all** Mirostat options to 0 to disable it.
-        mirostat_eta: Float that controls the learning rate(allowed
-            deviation from target surprise) for Mirostat.
-            Must be positive, set **all** Mirostat options to 0 to disable it.
         use_beam_search: Whether to use beam search instead of sampling.
         length_penalty: Float that penalizes sequences based on their length.
             Used in beam search.
@@ -88,6 +82,13 @@ class SamplingParams:
             tokens after the EOS token is generated.
         max_tokens: Maximum number of tokens to generate per output sequence.
         logprobs: Number of log probabilities to return per output token.
+            Note that the implementation follows the OpenAI API: The return
+            result includes the log probabilities on the `logprobs` most likely
+            tokens, as well the chosen tokens. The API will always return the
+            log probability of the sampled token, so there  may be up to
+            `logprobs+1` elements in the response.
+        prompt_logprobs: Number of log probabilities to return per prompt token.
+        custom_token_bans: List of token IDs to ban from generating
         skip_special_tokens: Whether to skip special tokens in the output.
             defaults to true.
         logits_processors: List of LogitsProcessors to change the probability
@@ -110,9 +111,6 @@ class SamplingParams:
         eta_cutoff: float = 0.0,
         epsilon_cutoff: float = 0.0,
         typical_p: float = 1.0,
-        mirostat_mode: int = 0,
-        mirostat_tau: float = 0.0,
-        mirostat_eta: float = 0.0,
         use_beam_search: bool = False,
         length_penalty: float = 1.0,
         early_stopping: Union[bool, str] = False,
@@ -121,6 +119,8 @@ class SamplingParams:
         ignore_eos: bool = False,
         max_tokens: int = 16,
         logprobs: Optional[int] = None,
+        prompt_logprobs: Optional[int] = None,
+        custom_token_bans: Optional[List[int]] = None,
         skip_special_tokens: bool = True,
         logits_processors: List[LogitsProcessor] = None,
     ) -> None:
@@ -138,9 +138,6 @@ class SamplingParams:
         self.eta_cutoff = eta_cutoff
         self.epsilon_cutoff = epsilon_cutoff
         self.typical_p = typical_p
-        self.mirostat_mode = mirostat_mode
-        self.mirostat_tau = mirostat_tau
-        self.mirostat_eta = mirostat_eta
         self.use_beam_search = use_beam_search
         self.length_penalty = length_penalty
         self.early_stopping = early_stopping
@@ -157,12 +154,11 @@ class SamplingParams:
         self.ignore_eos = ignore_eos
         self.max_tokens = max_tokens
         self.logprobs = logprobs
+        self.prompt_logprobs = prompt_logprobs
+        self.custom_token_bans = custom_token_bans or []
         self.skip_special_tokens = skip_special_tokens
         self.logits_processors = logits_processors or []
 
-        self.verify()
-
-    def verify(self) -> None:
         self._verify_args()
         if self.use_beam_search:
             self._verify_beam_search()
@@ -184,7 +180,7 @@ class SamplingParams:
         if not -2.0 <= self.frequency_penalty <= 2.0:
             raise ValueError("frequency_penalty must be in [-2, 2], got "
                              f"{self.frequency_penalty}.")
-        if not 1.0 <= self.repetition_penalty:
+        if self.repetition_penalty < 1.0:
             raise ValueError("repetition_penalty must be in [1, inf), got "
                              f"{self.repetition_penalty}.")
         if self.temperature < 0.0:
@@ -199,10 +195,13 @@ class SamplingParams:
             raise ValueError(f"top_a must be in [0, 1], got {self.top_a}.")
         if not 0.0 < self.tfs <= 1.0:
             raise ValueError(f"tfs must be in (0, 1], got {self.tfs}.")
-        if not 0.0 <= self.epsilon_cutoff <= 1000.0:
-            raise ValueError(f"epsilon_cutoff must be in [0, 1000], got {self.epsilon_cutoff}.")
+        if self.epsilon_cutoff < 0.0 or self.epsilon_cutoff > 1000.0:
+            raise ValueError("epsilon_cutoff must be in [0, 1000], got "
+                             f"{self.epsilon_cutoff}.")
+        # pylint: disable=unneeded-not
         if not self.eta_cutoff >= 0:
-            raise ValueError(f"eta_cutoff must be non negative, got {self.eta_cutoff}.")
+            raise ValueError(
+                f"eta_cutoff must be non negative, got {self.eta_cutoff}.")
         if not 0.0 <= self.typical_p <= 1.0:
             raise ValueError(f"typical_p must be in (0, 1], got {self.typical_p}.")
         if self.mirostat_mode != 0 and self.mirostat_mode != 2:
@@ -217,6 +216,9 @@ class SamplingParams:
         if self.logprobs is not None and self.logprobs < 0:
             raise ValueError(
                 f"logprobs must be non-negative, got {self.logprobs}.")
+        if self.prompt_logprobs is not None and self.prompt_logprobs < 0:
+            raise ValueError("prompt_logprobs must be non-negative, got "
+                             f"{self.prompt_logprobs}.")
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:
@@ -274,14 +276,13 @@ class SamplingParams:
                 f"eta_cutoff={self.eta_cutoff}, "
                 f"epsilon_cutoff={self.epsilon_cutoff}, "
                 f"typical_p={self.typical_p}, "
-                f"mirostat_mode={self.mirostat_mode}, "
-                f"mirostat_tau={self.mirostat_tau}, "
-                f"mirostat_eta={self.mirostat_eta}, "
                 f"use_beam_search={self.use_beam_search}, "
                 f"length_penalty={self.length_penalty}, "
                 f"early_stopping={self.early_stopping}, "
                 f"stop={self.stop}, "
                 f"ignore_eos={self.ignore_eos}, "
                 f"max_tokens={self.max_tokens}, "
+                f"custom_token_bans={self.custom_token_bans}, "
                 f"logprobs={self.logprobs}, "
+                f"prompt_logprobs={self.prompt_logprobs}, "
                 f"skip_special_tokens={self.skip_special_tokens})")

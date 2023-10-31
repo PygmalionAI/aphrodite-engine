@@ -1,13 +1,14 @@
 import contextlib
 from typing import Type
 import torch
-from torch.multiprocessing import Value
 import torch.nn as nn
 from transformers import PretrainedConfig
 
 from aphrodite.common.config import ModelConfig
-from aphrodite.modeling.models import LlamaForCausalLM, GPTJForCausalLM, GPTNeoXForCausalLM, MistralForCausalLM
-from aphrodite.modeling.hf_downloader import initialize_dummy_weights, get_quant_config
+from aphrodite.modeling.models import (LlamaForCausalLM, GPTJForCausalLM,
+                                       GPTNeoXForCausalLM, MistralForCausalLM)
+from aphrodite.modeling.hf_downloader import (initialize_dummy_weights,
+                                              get_quant_config)
 from aphrodite.modeling.layers.quantized_linear.utils import quant_post_init
 
 _MODEL_REGISTRY = {
@@ -19,11 +20,10 @@ _MODEL_REGISTRY = {
 }
 
 _MODEL_CLASSES_SUPPORT_QUANTIZATION = {
-    "awq": [
-        LlamaForCausalLM, MistralForCausalLM
-    ],
+    "awq": [LlamaForCausalLM, MistralForCausalLM],
     "gptq": [
-        LlamaForCausalLM, GPTJForCausalLM, GPTNeoXForCausalLM
+        LlamaForCausalLM, GPTJForCausalLM, GPTNeoXForCausalLM,
+        MistralForCausalLM
     ],
 }
 
@@ -53,7 +53,8 @@ def get_model(model_config: ModelConfig, max_tokens: int) -> nn.Module:
     # Get the quantization config.
     quant_config = None
     if model_config.quantization is not None:
-        if model_class not in _MODEL_CLASSES_SUPPORT_QUANTIZATION[model_config.quantization]:
+        if model_class not in _MODEL_CLASSES_SUPPORT_QUANTIZATION[
+                model_config.quantization]:
             raise ValueError(
                 f"Quantization is not supported for {model_class}.")
         quant_config = get_quant_config(model_config.quantization,

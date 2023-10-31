@@ -30,6 +30,21 @@ python -m aphrodite.endpoints.api_server_kobold --model PygmalionAI/pygmalion-2-
 
 This will create a [KoboldAI](https://github.com/henk717/KoboldAI)-compatible API server that can be accessed at port 2242 of the localhost. You can plug in the API into a UI that supports Kobold, such as [SillyTavern](https://github.com/SillyTavern/SillyTavern).
 
+
+## Performance
+Speeds vary with different GPUs, model sizes, quantization schemes, batch sizes, etc. Here are some baseline benchmarks conducted by sending requests of varying lengths to the provided [API server](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/endpoints/api_server_ooba.py).
+
+| Model | Quantization | GPU      | Request Rate | Throughput (req/s) | Avg Latency (s) |
+| ----- | ------------ | -------- | ------------ | ------------------ | --------------- |
+| 7B    | None         | RTX 3090 | 19           | **2.66**           | **18.38**       |
+| 7B    | AWQ          | RTX 3090 | 12           | **3.08**           | **32.47**       |
+| 7B    | GPTQ         | RTX 3090 | 12           | **2.01**           | **49.78**       |
+| 13B   | AWQ          | RTX 3090 | 5            | **1.77**           | **26.77**       |
+| 13B   | GPTQ         | RTX 3090 | 5            | **1.10**           | **39.80**       |
+| 20B   | AWQ          | RTX 3090 | 3            | **0.94**           | **39.07**       |
+| 20B   | GPTQ         | RTX 3090 | 3            | **0.58**           | **75.54**       |
+
+Benchmarks with other GPUs will be added soon.
 ## Requirements
 
 - Operating System: Linux (or WSL for Windows)
@@ -104,11 +119,11 @@ To run a quantized model, use the `--quantization` flag with either `gptq` or `a
 
 For the full list of Sampling parameters, please refer to [SamplingParams](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/common/sampling_params.py):
 
-https://github.com/PygmalionAI/aphrodite-engine/blob/5acc27adebc2186f4353c02d17aebfeb449a9443/aphrodite/common/sampling_params.py#L24-L94
+https://github.com/PygmalionAI/aphrodite-engine/blob/ab1ac578bafa922a6c7e323986bd320615311dad/aphrodite/common/sampling_params.py#L24-L88
 
 
 ## Common Issues
-- `The detected CUDA version (12.1) mismatches the version that was used to compile
+`The detected CUDA version (12.1) mismatches the version that was used to compile
       PyTorch (11.8). Please make sure to use the same CUDA versions.`
 
 This is normally due to your environment referring to the global installation of CUDA and not the one in your current env. Run `which nvcc` and note down the output. For example, if your output is `/home/anon/miniconda3/envs/aphrodite/bin/nvcc`, run this command:
@@ -118,10 +133,24 @@ export CUDA_HOME=/home/anon/miniconda3/envs/aphrodite
 
 Then run the installation command again.
 
+***
 
-- `Aborted due to the lack of CPU swap space. Please increase the swap space to avoid this error.`
+`Aborted due to the lack of CPU swap space. Please increase the swap space to avoid this error.`
 
 You've run out of swap space! Please pass the `--swap-space` followed by the amount of swap (in GBs) to allocate. Make sure you leave enough RAM for the model loading process.
+
+***
+```
+ncclInternalError: Internal check failed.
+Last error:
+No NVML device handle. Skipping nvlink detection.
+```
+This happens if you're doing tensor parallelism (multi-GPU) on NVLinked NVIDIA GPUs and they don't support P2P. Please run this command before running the server:
+```sh
+export NCCL_P2P_DISABLE=1
+```
+Alternatively, you can prepend `NCCL_P2P_DISABLE=1` to your server launch command.
+
 ### Notes
 
 1. By design, Aphrodite takes up 90% of your GPU's VRAM. If you're not serving an LLM at scale, you may want to limit the amount of memory it takes up. You can do this in the API example by launching the server with the `--gpu-memory-utilization 0.6` (0.6 means 60%).

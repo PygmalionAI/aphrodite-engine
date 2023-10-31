@@ -12,6 +12,7 @@ from tqdm import tqdm
 from aphrodite import LLM, SamplingParams
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 
+
 def sample_requests(
     dataset_path: str,
     num_requests: int,
@@ -86,7 +87,7 @@ def run_aphrodite(
             max_tokens=output_len,
         )
         # FIXME: Do not use internal method.
-        llm._add_request(
+        llm._add_request(  # pylint: disable=protected-access
             prompt=prompt,
             prompt_token_ids=None,
             sampling_params=sampling_params,
@@ -94,7 +95,7 @@ def run_aphrodite(
 
     start = time.perf_counter()
     # FIXME Do use internal method.
-    llm._run_engine(use_tqdm=True)
+    llm._run_engine(use_tqdm=True)  # pylint: disable=protected-access
     end = time.perf_counter()
     return end - start
 
@@ -159,7 +160,7 @@ def run_hf(
     return end - start
 
 
-def main(args: argparse.Namespace):
+def main(args: argparse.Namespace):  # pylint: disable=redefined-outer-name
     print(args)
     random.seed(args.seed)
 
@@ -170,9 +171,10 @@ def main(args: argparse.Namespace):
 
     if args.backend == "aphrodite":
         elapsed_time = run_aphrodite(requests, args.model, args.tokenizer,
-                                args.quantization, args.tensor_parallel_size,
-                                args.seed, args.n, args.use_beam_search,
-                                args.trust_remote_code, args.dtype)
+                                     args.quantization,
+                                     args.tensor_parallel_size, args.seed,
+                                     args.n, args.use_beam_search,
+                                     args.trust_remote_code, args.dtype)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -180,10 +182,12 @@ def main(args: argparse.Namespace):
                               args.trust_remote_code)
     else:
         raise ValueError(f"Unknown backend: {args.backend}")
-    total_num_tokens = sum(prompt_len + output_len
-                           for _, prompt_len, output_len in requests)
+    total_input_tokens = sum(prompt_len for _, prompt_len, _ in requests)
+    total_output_tokens = sum(output_len for _, _, output_len in requests)
+
     print(f"Throughput: {len(requests) / elapsed_time:.2f} requests/s, "
-          f"{total_num_tokens / elapsed_time:.2f} tokens/s")
+          f"Input tokens/s: {total_input_tokens / elapsed_time:.2f}, "
+          f"Output tokens/s: {total_output_tokens / elapsed_time:.2f}")
 
 
 
@@ -199,11 +203,11 @@ if __name__ == "__main__":
                         help="Path to the dataset.")
     parser.add_argument("--model", type=str, default="facebook/opt-125m")
     parser.add_argument("--tokenizer", type=str, default=None)
-    parser.add_argument('--quantization',
-                        '-q',
-                        choices=['awq', 'gptq', None],
+    parser.add_argument("--quantization",
+                        "-q",
+                        choices=["awq", "gptq", None],
                         default=None)
-    parser.add_argument('--gpu-memory-utilization', type=float, default=0.88)
+    parser.add_argument("--gpu-memory-utilization", type=float, default=0.88)
     parser.add_argument("--tensor-parallel-size", "-tp", type=int, default=1)
     parser.add_argument("--n",
                         type=int,
@@ -219,18 +223,18 @@ if __name__ == "__main__":
                         type=int,
                         default=None,
                         help="Maximum batch size for HF backend.")
-    parser.add_argument('--trust-remote-code',
-                        action='store_true',
-                        help='trust remote code from huggingface')
+    parser.add_argument("--trust-remote-code",
+                        action="store_true",
+                        help="trust remote code from huggingface")
     parser.add_argument(
-        '--dtype',
+        "--dtype",
         type=str,
-        default='auto',
-        choices=['auto', 'half', 'float16', 'bfloat16', 'float', 'float32'],
-        help='data type for model weights and activations. '
-        'The "auto" option will use FP16 precision '
-        'for FP32 and FP16 models, and BF16 precision '
-        'for BF16 models.')
+        default="auto",
+        choices=["auto", "half", "float16", "bfloat16", "float", "float32"],
+        help="data type for model weights and activations. "
+        "The 'auto' option will use FP16 precision "
+        "for FP32 and FP16 models, and BF16 precision "
+        "for BF16 models.")
     args = parser.parse_args()
 
     if args.backend == "aphrodite":

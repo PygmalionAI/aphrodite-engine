@@ -1,12 +1,12 @@
-from ast import Param
 from typing import Optional
 
 import torch
 from torch.nn.parameter import Parameter
 
 from aphrodite import quantization_ops
-from aphrodite.modeling.megatron.layers import (
-    ColumnParallelLinear, RowParallelLinear)
+from aphrodite.modeling.megatron.layers import (ColumnParallelLinear,
+                                                RowParallelLinear)
+
 
 class AWQColumnParallelLinear(ColumnParallelLinear):
 
@@ -50,7 +50,7 @@ class AWQColumnParallelLinear(ColumnParallelLinear):
         bias: Optional[torch.Tensor],
     ) -> torch.Tensor:
         pack_factor = self.quant_config.pack_factor
-        out_shape = (x.shape[-2], self.qweight.shape[-1] * pack_factor)
+        out_shape = (x.shape[:-1] + (self.qweight.shape[-1] * pack_factor, ))
         reshaped_x = x.reshape(-1, x.shape[-1])
         out = quantization_ops.awq_gemm(reshaped_x, self.qweight, self.scales,
                                         self.qzeros, pack_factor)
@@ -95,7 +95,7 @@ class AWQRowParallelLinear(RowParallelLinear):
 
     def apply_weights(self, x: torch.Tensor) -> torch.Tensor:
         pack_factor = self.quant_config.pack_factor
-        out_shape = (x.shape[-2], self.qweight.shape[-1] * pack_factor)
+        out_shape = (x.shape[:-1] + (self.qweight.shape[-1] * pack_factor, ))
         reshaped_x = x.reshape(-1, x.shape[-1])
         out = quantization_ops.awq_gemm(reshaped_x, self.qweight, self.scales,
                                         self.qzeros, pack_factor)

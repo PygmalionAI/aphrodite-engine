@@ -4,7 +4,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Tuple, Union
 
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
-                         SchedulerConfig)
+                                     SchedulerConfig)
 from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.ray_tools import RayWorker, initialize_cluster, ray
@@ -12,10 +12,11 @@ from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (SamplerOutput, Sequence, SequenceGroup,
-                           SequenceGroupMetadata, SequenceOutputs,
-                           SequenceStatus)
+                                       SequenceGroupMetadata,
+                                       SequenceGroupOutputs, SequenceOutputs,
+                                       SequenceStatus)
 from aphrodite.transformers_utils.tokenizer import (detokenize_incrementally,
-                                               get_tokenizer)
+                                                    get_tokenizer)
 from aphrodite.common.utils import Counter
 
 if ray:
@@ -347,7 +348,15 @@ class AphroditeEngine:
                         eos_token_id=self.tokenizer.eos_token_id))
         return current_worst_score >= highest_attainable_score
 
-    def _process_sequence_group_samples(self, seq_group: SequenceGroup, samples: List[SequenceOutputs]) -> None:
+    def _process_sequence_group_outputs(self, seq_group: SequenceGroup,
+                                        outputs: SequenceGroupOutputs) -> None:
+        # Process prompt logprobs
+        prompt_logprobs = outputs.prompt_logprobs
+        if prompt_logprobs is not None:
+            seq_group.prompt_logprobs = prompt_logprobs
+
+        # Process samples
+        samples = outputs.samples
         parent_seqs = seq_group.get_seqs(status=SequenceStatus.RUNNING)
         existing_finished_seqs = seq_group.get_finished_seqs()
         parent_child_dict = {
@@ -516,8 +525,8 @@ class AphroditeEngine:
             scheduler_outputs: SchedulerOutputs) -> List[RequestOutput]:
         # Update the scheduled sequence groups with the model outputs.
         scheduled_seq_groups = scheduler_outputs.scheduled_seq_groups
-        for seq_group, samples in zip(scheduled_seq_groups, output):
-            self._process_sequence_group_samples(seq_group, samples)
+        for seq_group, outputs in zip(scheduled_seq_groups, output):
+            self._process_sequence_group_outputs(seq_group, outputs)
 
         # Free the finished sequence groups.
         self.scheduler.free_finished_seq_groups()

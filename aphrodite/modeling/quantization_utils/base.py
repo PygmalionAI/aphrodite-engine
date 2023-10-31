@@ -71,11 +71,11 @@ class QuantizationConfig:
                    for tag in cls.get_transposed_tensor_names())
 
     @classmethod
-    def get_row_tp_tensor_names(self) -> List[str]:
+    def get_row_tp_tensor_names(cls) -> List[str]:
         raise NotImplementedError
-    
+
     def get_column_tp_tensor_names(self) -> List[str]:
         raise NotImplementedError
-    
+
     def get_ignore_tensor_names(self) -> List[str]:
         return []
