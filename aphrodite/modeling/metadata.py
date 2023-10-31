@@ -5,6 +5,22 @@ from xformers.ops import AttentionBias
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import SequenceData
 
+
+class PersistentMetadata:
+    def __init__(self):
+        self._metadata:dict[int,dict] = {}
+
+    def get(self, seq_id:int) -> dict:
+        return self._metadata.get(seq_id, {})
+
+
+class OutputMetadata(PersistentMetadata):
+    def add(self, seq_id:int, key, val) -> None:
+        if seq_id not in self._metadata:
+            self._metadata[seq_id] = {}
+        self._metadata[seq_id][key] = val
+
+
 class InputMetadata:
     """Metadata for input sequences. Used for PagedAttention.
 
@@ -30,7 +46,7 @@ class InputMetadata:
         last_token_indices: torch.Tensor,
         categorized_seq_ids: Dict[SamplingType, torch.Tensor],
         sliding_window: Optional[int] = None,
-        persistent_data:dict[int,dict] = {},
+        persistent_data: Optional[PersistentMetadata] = None,
     ) -> None:
         self.seq_groups = seq_groups
         self.seq_data = seq_data
@@ -41,7 +57,7 @@ class InputMetadata:
         self.block_tables = block_tables
         self.last_token_indices = last_token_indices
         self.categorized_seq_ids = categorized_seq_ids
-        self.persistent_data = persistent_data
+        self.persistent_data = persistent_data or PersistentMetadata()
 
         self.to_cache = None
         if sliding_window is not None:
