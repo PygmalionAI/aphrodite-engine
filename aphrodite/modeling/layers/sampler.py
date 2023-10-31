@@ -5,27 +5,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from aphrodite.modeling.metadata import InputMetadata
+from aphrodite.modeling.metadata import InputMetadata, OutputMetadata
 from aphrodite.modeling.megatron.communication_op import (
     tensor_model_parallel_all_gather
 )
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import SamplerOutput, SequenceOutputs, SequenceData
-# from aphrodite.modeling.layers.mirostat import mirostat_get_mu_hook, mirostat_update_mu_hook
+
+import aphrodite.modeling.layers.sampler_mirostat as sampler_mirostat
 
 _SAMPLING_EPS = 1e-5
-
-class OutputMetadata:
-    def __init__(self):
-        self._metadata:dict[int,dict] = {}
-
-    def add(self, seq_id:int, key, val) -> None:
-        if seq_id not in self._metadata:
-            self._metadata[seq_id] = {}
-        self._metadata[seq_id][key] = val
-
-    def get(self, seq_id:int) -> dict:
-        return self._metadata.get(seq_id, None)
 
 # import json
 # def push_logit_hist(name, logit_hist, logit_matrix:torch.Tensor):
@@ -78,12 +67,6 @@ class Sampler(nn.Module):
 
         output_metadata = OutputMetadata()
 
-        for seqid in input_metadata.seq_data.keys():
-            sdat = input_metadata.persistent_data.get(seqid, None)
-            output_metadata.add(seqid, "dongus", [] if not sdat else sdat["dongus"] + [len(sdat["dongus"])])
-
-        with open("fuckoff.txt", 'at') as f:
-            f.write(f"C{torch.cuda.current_device()}: {output_metadata._metadata}\n")
         # logits_at = [[] for _ in logits]
         # push_logit_hist("new", logits_at, logits)
 
@@ -107,13 +90,8 @@ class Sampler(nn.Module):
         # Apply Mirostat
         # Note that we apply mirostat before temperature, not after like it maybe should be
         # To be fixed by implementing customizable sampling order
-        # taus, etas, mus = _get_mirostat_args(input_metadata)
-        # assert len(taus) == len(etas) == len(mus) == logits.shape[0]
-        # if any(tau > _SAMPLING_EPS for tau in taus):
-        #     logits = _apply_mirostat_v2(logits, taus, etas, mus) # mus is an inout param, :vomit:
-        #     mirostat_update_mu_hook(input_metadata, mus)
-        
-        
+        if sampler_mirostat.is_applicable(input_metadata):
+            sampler_mirostat.apply(logits, input_metadata, output_metadata)
 
         # Apply Eta sampling, as described in https://arxiv.org/abs/2210.15191
         eta_cutoffs = _get_eta_cutoffs(input_metadata)
@@ -217,65 +195,6 @@ def _get_output_tokens(input_metadata: InputMetadata) -> Tuple[List[List[int]], 
             output_tokens.append(seq_data.output_token_ids)
 
     return output_tokens
-
-
-def _get_mirostat_args(
-    input_metadata: InputMetadata
-) -> Tuple[List[float], List[float], List[float]]:
-    taus: List[float] = []
-    etas: List[float] = []
-    
-    for seq_ids, params in input_metadata.seq_groups:
-        taus += [params.mirostat_tau] * len(seq_ids)  # AKA the targeted surprise
-        etas += [params.mirostat_eta] * len(seq_ids)  # AKA the learning rate
-
-    # mus: List[float] = mirostat_get_mu_hook(input_metadata) # Hide global state behind a function
-
-    return taus, etas, mus
-
-
-def _apply_mirostat_v2(
-    logits: torch.Tensor,
-    taus: List[float],
-    etas: List[float],
-    mus: List[float],
-) -> torch.Tensor:
-    ttaus = torch.tensor(taus, dtype=logits.dtype, device=logits.device)
-    tetas = torch.tensor(etas, dtype=logits.dtype, device=logits.device)
-    tmus = torch.tensor(mus, dtype=logits.dtype, device=logits.device)
-
-    logit_surprise = torch.neg_(torch.log2_(torch.softmax(logits, dim=-1))) # Calculate surprise value per token
-    # For compatibility with ooba, done in unit of bits(log base 2) not nats(ln)
-    # Ideally this would be a log_softmax, for numerical stability and elegance purposes, but eh
-
-    miro_mask = logit_surprise > tmus.unsqueeze(dim=-1) # Mask out "too-surprising" tokens (above mu)
-    mininds = torch.argmin(logit_surprise, dim=-1)
-    miro_mask.scatter_(1, mininds.unsqueeze(dim=-1), False) # Force at least one outcome to be possible, ideally the most likely one
-
-    logits[miro_mask] = -float("inf")
-
-    probs = torch.softmax(logits, dim=-1, dtype=logits.dtype) # Get probs
-    
-    # NOTE: Mirostat updates its `mu` values based on the sample chosen.
-    #       The silly approach here is to just sample it and make the logits one-hot.
-    #       This breaks fine grained seeding, but we don't have that yet. TODO: FIX when it gets added
-    next_token_ids = torch.multinomial(probs,
-                                        num_samples=1,
-                                        replacement=True)
-    
-    # Calculation new `mu` values
-    # NOTE: If we can know the logit values of the PREVIOUS iteration, it should be
-    # possible to update `mu` before applying mirostat each iteration, thus letting us
-    # keep _sample as the last thing that happens.
-    picked_surprises = torch.gather(logit_surprise, dim=-1, index=next_token_ids)
-    eps = picked_surprises.squeeze() - ttaus
-    tmus = tmus - tetas * eps
-
-    mus[:] = tmus.tolist()
-    logits.fill_(-float("inf"))
-    logits.scatter_(1, next_token_ids, 1.0) # This value doesn't actually matter, so long as it's not -inf. Vectors are now one-hot, after all.
-    return logits
-
 
 
 def _apply_logits_processors(
