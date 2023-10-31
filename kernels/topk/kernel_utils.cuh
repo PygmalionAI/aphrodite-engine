@@ -3,7 +3,7 @@
 #include <curand_kernel.h>
 #include <float.h>
 #include <iostream>
-#include <type_traits
+#include <type_traits>
 static const float HALF_FLT_MAX = 65504.F;
 #define FINAL_MASK 0xffffffff
 
