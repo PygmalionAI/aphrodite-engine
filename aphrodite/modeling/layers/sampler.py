@@ -637,7 +637,6 @@ def _sample(
 ) -> List[Tuple[List[int], List[int]]]:
     categorized_seq_group_ids = {t: [] for t in SamplingType}
     categorized_sample_indices = input_metadata.categorized_sample_indices
-    start_idx = 0
     for i, seq_group in enumerate(input_metadata.seq_groups):
         _, sampling_params = seq_group
         sampling_type = sampling_params.sampling_type

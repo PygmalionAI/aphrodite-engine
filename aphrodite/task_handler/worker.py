@@ -222,18 +222,17 @@ class Worker:
         max_seq_len = max(prompt_lens) if prompt_lens else 1
         for seq_group_metadata in seq_group_metadata_list:
             if seq_group_metadata.is_prompt:
-            # We need to do this in this loop as we need to know max_seq_len
+                # We need to do this in this loop as we need to know max_seq_len
                 assert len(
                     seq_ids) == 1, "Prompt input should have only one seq."
                 sampling_params = seq_group_metadata.sampling_params
                 if sampling_params.prompt_logprobs is not None:
-                    selected_token_indices.extend(range(
-                        selected_token_start_idx, selected_token_start_idx +
-                        prompt_len - 1))
+                    selected_token_indices.extend(
+                        range(selected_token_start_idx,
+                              selected_token_start_idx + prompt_len - 1))
                 selected_token_indices.append(selected_token_start_idx +
                                               prompt_len - 1)
                 selected_token_start_idx += max_seq_len
-                    
                 continue
 
             seq_ids = list(seq_group_metadata.seq_data.keys())
