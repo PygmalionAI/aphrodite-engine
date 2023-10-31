@@ -50,4 +50,8 @@ _setup_logger()
 
 
 def init_logger(name: str):
-    return logging.getLogger(name)
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(_default_handler)
+    logger.propagate = False
+    return logger
