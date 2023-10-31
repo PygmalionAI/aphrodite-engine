@@ -11,6 +11,7 @@ from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (PromptLogprobs, SampleLogprobs,
                                        SamplerOutput, SequenceData,
                                        SequenceGroupOutputs, SequenceOutputs)
+from aphrodite import topk
 
 _SAMPLING_EPS = 1e-5
 
@@ -109,7 +110,10 @@ class Sampler(nn.Module):
         do_top_k = any(k != self.vocab_size for k in top_ks)
         do_top_a = any(a > _SAMPLING_EPS for a in top_as)
         if do_top_p or do_top_k or do_top_a:
-            logits = _apply_top_a_top_p_top_k(logits, top_ps, top_ks, top_as)
+            logits = _apply_top_a_top_p_top_k_with_new_kernel(logits,
+                                                              top_ps,
+                                                              top_ks,
+                                                              top_as)
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
@@ -386,6 +390,38 @@ def _get_typical_ps(input_metadata: InputMetadata) -> List[float]:
         typical_ps += [typical_p] * len(seq_ids)
     return typical_ps
 
+
+def _apply_top_a_top_p_top_k_with_new_kernel(
+        logits: torch.Tensor,
+        top_ps: List[float],
+        top_ks: List[int],
+        top_as: List[float],
+) -> torch.Tensor:
+    do_top_p = True
+    do_top_k = True
+    do_top_a = True
+    softmax_res = logits.softmax(dim=-1)
+    logit_dst = torch.full(logits.shape, -float("inf"), device=logits.device)
+    max_top_k = 0
+    if top_ps:
+        p = torch.tensor(top_ps, dtype=logits.dtype, device=logits.device)
+    if top_as:
+        a = torch.tensor(top_as, dtype=logits.dtype, device=logits.device)
+    else:
+        p = torch.Tensor()
+        a = torch.Tensor()
+        do_top_p = False
+        do_top_a = False
+    
+    if top_ks:
+        max_top_k = max(top_ks)
+        k = torch.tensor(top_ks, dtype=torch.int32, device=logits.device)
+    else:
+        k = torch.Tensor()
+        do_top_k = False
+    topk.top_k(logits, softmax_res, logit_dst, do_top_k, max_top_k, k,
+               do_top_p, p, do_top_a, a)
+    return logit_dst
 
 def _apply_top_a_top_p_top_k(
     logits: torch.Tensor,

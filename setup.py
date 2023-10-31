@@ -226,6 +226,17 @@ cuda_utils_extension = CUDAExtension(
 ext_modules.append(cuda_utils_extension)
 
 
+# TopK kernels
+topk_extension = CUDAExtension(
+    name="aphrodite.topk",
+    sources=["kernels/topk.cpp", "kernels/topk/topk_kernels.cu"],
+    extra_compile_args={
+        "cxx": CXX_FLAGS,
+        "nvcc": NVCC_FLAGS,
+    },
+)
+ext_modules.append(topk_extension)
+
 def get_path(*filepath) -> str:
     return os.path.join(ROOT_DIR, *filepath)
 
