@@ -7,8 +7,7 @@ from typing import Any, Dict, List, Optional
 import torch
 import torch.nn as nn
 from xformers import ops as xops
-from xformers.ops.fmha.attn_bias import (BlockDiagonalCausalMask,
-                                         LowerTriangularMaskWithTensorBias)
+from flash_attn.flash_attn_interface import _flash_attn_forward
 
 from aphrodite import attention_ops
 from aphrodite import cache_ops
@@ -106,18 +105,29 @@ class PagedAttention(nn.Module):
                                             self.num_queries_per_kv,
                                             dim=1)
 
-        # TODO: The unsqueeze op may incur some CPU overhead. Optimize.
-        out = xops.memory_efficient_attention_forward(
-            query.unsqueeze(0),
-            key.unsqueeze(0),
-            value.unsqueeze(0),
-            attn_bias=input_metadata.attn_bias,
-            p=0.0,
-            scale=self.scale,
+        if query.dtype == torch.float:
+            raise ValueError("The float datatype isn't supported by "
+                             "Flash Attention. Use the half datatype (fp16) "
+                             "instead.")
+        head_size = query.shape[-1]
+        if head_size > 128:
+            raise ValueError(
+                "Flash Attention doesn't support head_size > 128.")
+
+        _flash_attn_forward(
+            query,
+            key,
+            value,
+            output,
+            input_metadata.cumulative_prompt_lens,
+            input_metadata.cumulative_prompt_lens,
+            input_metadata.max_prompt_len,
+            input_metadata.max_prompt_len,
+            dropout_p=0.0,
+            softmax_scale=self.scale,
+            causal=True,
+            return_softmax=False,
         )
-        # TODO: Unnecessary copy. Optimize.
-        output.copy_(out.squeeze(0))
-        return output
 
     def get_alibi_slopes(self) -> Optional[torch.Tensor]:
         """Returns the slopes for the alibi attention bias.
