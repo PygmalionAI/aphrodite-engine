@@ -203,6 +203,16 @@ class SamplingParams:
         if not 0.0 <= self.typical_p <= 1.0:
             raise ValueError(
                 f"typical_p must be in (0, 1], got {self.typical_p}.")
+        if self.mirostat_mode:
+            if not (self.mirostat_mode == 2):
+                raise ValueError(
+                    f"Only Mirostat v2 (2) and disabled (0) supported, got {self.mirostat_mode}")
+            if not (self.mirostat_eta >= 0):
+                raise ValueError(
+                    f"mirostat_eta must be positive, got {self.mirostat_eta}")
+            if not (self.mirostat_tau >= 0):
+                raise ValueError(
+                    f"mirostat_tau must be positive, got {self.mirostat_tau}")
         if self.max_tokens < 1:
             raise ValueError(
                 f"max_tokens must be at least 1, got {self.max_tokens}.")

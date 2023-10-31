@@ -6,6 +6,21 @@ from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import SequenceData
 
 
+class PersistentMetadata:
+    def __init__(self):
+        self._metadata:dict[int,dict] = {}
+
+    def get(self, seq_id:int) -> dict:
+        return self._metadata.get(seq_id, {})
+
+
+class OutputMetadata(PersistentMetadata):
+    def add(self, seq_id:int, key, val) -> None:
+        if seq_id not in self._metadata:
+            self._metadata[seq_id] = {}
+        self._metadata[seq_id][key] = val
+
+
 class InputMetadata:
     """Metadata for input sequences. Used for PagedAttention.
 
@@ -31,6 +46,7 @@ class InputMetadata:
         selected_token_indices: torch.Tensor,
         categorized_sample_indices: Dict[SamplingType, torch.Tensor],
         sliding_window: Optional[int] = None,
+        persistent_data: Optional[PersistentMetadata] = None,
     ) -> None:
         self.seq_groups = seq_groups
         self.seq_data = seq_data
@@ -41,6 +57,7 @@ class InputMetadata:
         self.block_tables = block_tables
         self.selected_token_indices = selected_token_indices
         self.categorized_sample_indices = categorized_sample_indices
+        self.persistent_data = persistent_data or PersistentMetadata()
 
         self.max_prompt_len = max(prompt_lens) if prompt_lens else 0
         self.to_cache = None

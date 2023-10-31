@@ -4,13 +4,15 @@ from typing import Dict, List, Tuple, Optional
 import torch
 import torch.nn as nn
 
-from aphrodite.modeling.metadata import InputMetadata
+from aphrodite.modeling.metadata import InputMetadata, OutputMetadata
 from aphrodite.modeling.megatron.communication_op import (
     tensor_model_parallel_all_gather)
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (PromptLogprobs, SampleLogprobs,
                                        SamplerOutput, SequenceData,
                                        SequenceGroupOutputs, SequenceOutputs)
+
+import aphrodite.modeling.layers.sampler_mirostat as sampler_mirostat
 
 _SAMPLING_EPS = 1e-5
 
@@ -48,6 +50,8 @@ class Sampler(nn.Module):
         logits = _get_logits(hidden_states, embedding, embedding_bias,
                              self.vocab_size)
 
+        output_metadata = OutputMetadata()
+        
         # Apply presence and frequency penalties.
         output_tokens = _get_output_tokens(input_metadata)
         assert len(output_tokens) == logits.shape[0]
@@ -65,6 +69,12 @@ class Sampler(nn.Module):
 
         logits = _apply_logits_processors(input_metadata, logits,
                                           output_tokens)
+        
+        # Apply Mirostat
+        # Note that we apply mirostat before temperature, not after like it maybe should be
+        # To be fixed by implementing customizable sampling order
+        if sampler_mirostat.is_applicable(input_metadata):
+            sampler_mirostat.apply(logits, input_metadata, output_metadata)
 
         # Apply Eta sampling, as described in https://arxiv.org/abs/2210.15191
         eta_cutoffs = _get_eta_cutoffs(input_metadata)
@@ -124,7 +134,8 @@ class Sampler(nn.Module):
         prompt_logprobs, sample_logprobs = _get_logprobs(
             logprobs, input_metadata, sample_results)
         return _build_sampler_output(sample_results, input_metadata,
-                                     prompt_logprobs, sample_logprobs)
+                                     prompt_logprobs, sample_logprobs,
+                                     output_metadata)
 
 
 def _get_logits(hidden_states: torch.Tensor, embedding: torch.Tensor,
@@ -792,6 +803,7 @@ def _build_sampler_output(
     input_metadata: InputMetadata,
     prompt_logprobs: List[Optional[PromptLogprobs]],
     sample_logprobs: List[SampleLogprobs],
+    output_metadata: OutputMetadata,
 ) -> SamplerOutput:
     sampler_output = []
     for (seq_group, sample_result, group_prompt_logprobs,
@@ -805,7 +817,7 @@ def _build_sampler_output(
                                                       next_token_ids,
                                                       group_sample_logprobs):
             seq_outputs.append(
-                SequenceOutputs(seq_ids[parent_id], next_token_id, logprobs))
+                SequenceOutputs(seq_ids[parent_id], next_token_id, logprobs, output_metadata.get(seq_ids[parent_id])))
         sampler_output.append(
             SequenceGroupOutputs(seq_outputs, group_prompt_logprobs))
     return sampler_output

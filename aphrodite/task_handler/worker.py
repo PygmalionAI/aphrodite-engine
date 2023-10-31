@@ -101,6 +101,7 @@ class Worker:
                 seq_data={group_id: seq_data},
                 sampling_params=sampling_params,
                 block_tables=None,
+                persistent_data={}
             )
             seqs.append(seq)
 
@@ -325,6 +326,10 @@ class Worker:
         for seq_group_metadata in seq_group_metadata_list:
             seq_data.update(seq_group_metadata.seq_data)
 
+        persistent_data: dict[int,dict] = {}
+        for grp in seq_group_metadata_list:
+            persistent_data.update(grp.persistent_data)
+
         input_metadata = InputMetadata(
             seq_groups=seq_groups,
             seq_data=seq_data,
@@ -336,6 +341,7 @@ class Worker:
             selected_token_indices=selected_token_indices,
             categorized_sample_indices=categorized_sample_indices,
             sliding_window=self.sliding_window,
+            persistent_data=persistent_data
         )
         return tokens_tensor, positions_tensor, input_metadata
 
