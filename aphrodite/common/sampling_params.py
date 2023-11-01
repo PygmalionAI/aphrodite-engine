@@ -63,6 +63,9 @@ class SamplingParams:
         typical_p: Float that controls the cumulative probability of tokens
             closest in surprise to the expected surprise to consider.
             Must be in (0, 1]. Set to 1 to disable.
+        mirostat_mode: Can either be 0 (disabled) or 2 (Mirostat v2).
+        mirostat_tau: Target "surprisal" that mirostat works towards. Range [0, inf).
+        mirostat_eta: Rate at which mirostat updates its internal surprisal value. Range [0, inf).
         use_beam_search: Whether to use beam search instead of sampling.
         length_penalty: Float that penalizes sequences based on their length.
             Used in beam search.
@@ -110,6 +113,9 @@ class SamplingParams:
         eta_cutoff: float = 0.0,
         epsilon_cutoff: float = 0.0,
         typical_p: float = 1.0,
+        mirostat_mode: int = 0,
+        mirostat_tau: float = 0,
+        mirostat_eta: float = 0,
         use_beam_search: bool = False,
         length_penalty: float = 1.0,
         early_stopping: Union[bool, str] = False,
@@ -136,6 +142,9 @@ class SamplingParams:
         self.eta_cutoff = eta_cutoff
         self.epsilon_cutoff = epsilon_cutoff
         self.typical_p = typical_p
+        self.mirostat_mode = mirostat_mode
+        self.mirostat_tau = mirostat_tau
+        self.mirostat_eta = mirostat_eta
         self.use_beam_search = use_beam_search
         self.length_penalty = length_penalty
         self.early_stopping = early_stopping
