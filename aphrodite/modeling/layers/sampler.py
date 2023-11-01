@@ -679,10 +679,10 @@ def _sample(
 
         sample_results_dict.update(zip(seq_group_ids, sample_results))
 
-        sample_results = [
-            sample_results_dict[i]
-            for i in range(len(input_metadata.seq_groups))
-        ]
+    sample_results = [
+        sample_results_dict[i]
+        for i in range(len(input_metadata.seq_groups))
+    ]
     return sample_results
 
 
