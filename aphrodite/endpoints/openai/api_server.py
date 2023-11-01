@@ -30,7 +30,6 @@ from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.common.utils import random_uuid
-from aphrodite.common.logits import BiasLogitsProcessor
 
 try:
     import fastchat
