@@ -51,7 +51,7 @@ class Sampler(nn.Module):
                              self.vocab_size)
 
         output_metadata = OutputMetadata()
-        
+
         # Apply presence and frequency penalties.
         output_tokens = _get_output_tokens(input_metadata)
         assert len(output_tokens) == logits.shape[0]
@@ -69,7 +69,7 @@ class Sampler(nn.Module):
 
         logits = _apply_logits_processors(input_metadata, logits,
                                           output_tokens)
-        
+
         # Apply Mirostat
         # Note that we apply mirostat before temperature, not after like it maybe should be
         # To be fixed by implementing customizable sampling order
@@ -680,8 +680,7 @@ def _sample(
         sample_results_dict.update(zip(seq_group_ids, sample_results))
 
     sample_results = [
-        sample_results_dict[i]
-        for i in range(len(input_metadata.seq_groups))
+        sample_results_dict[i] for i in range(len(input_metadata.seq_groups))
     ]
     return sample_results
 
@@ -817,7 +816,8 @@ def _build_sampler_output(
                                                       next_token_ids,
                                                       group_sample_logprobs):
             seq_outputs.append(
-                SequenceOutputs(seq_ids[parent_id], next_token_id, logprobs, output_metadata.get(seq_ids[parent_id])))
+                SequenceOutputs(seq_ids[parent_id], next_token_id, logprobs,
+                                output_metadata.get(seq_ids[parent_id])))
         sampler_output.append(
             SequenceGroupOutputs(seq_outputs, group_prompt_logprobs))
     return sampler_output

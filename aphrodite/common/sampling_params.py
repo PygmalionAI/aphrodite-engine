@@ -64,8 +64,10 @@ class SamplingParams:
             closest in surprise to the expected surprise to consider.
             Must be in (0, 1]. Set to 1 to disable.
         mirostat_mode: Can either be 0 (disabled) or 2 (Mirostat v2).
-        mirostat_tau: Target "surprisal" that mirostat works towards. Range [0, inf).
-        mirostat_eta: Rate at which mirostat updates its internal surprisal value. Range [0, inf).
+        mirostat_tau: Target "surprisal" that mirostat works towards.
+            Range [0, inf).
+        mirostat_eta: Rate at which mirostat updates its internal surprisal value.
+            Range [0, inf).
         use_beam_search: Whether to use beam search instead of sampling.
         length_penalty: Float that penalizes sequences based on their length.
             Used in beam search.
@@ -215,7 +217,8 @@ class SamplingParams:
         if self.mirostat_mode:
             if not (self.mirostat_mode == 2):
                 raise ValueError(
-                    f"Only Mirostat v2 (2) and disabled (0) supported, got {self.mirostat_mode}")
+                    f"Only Mirostat v2 (2) and disabled (0) supported, got {self.mirostat_mode}"
+                )
             if not (self.mirostat_eta >= 0):
                 raise ValueError(
                     f"mirostat_eta must be positive, got {self.mirostat_eta}")

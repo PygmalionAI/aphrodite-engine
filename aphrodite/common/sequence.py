@@ -363,13 +363,8 @@ class SequenceOutputs:
             (Token id -> logP(x_i+1 | x_0, ..., x_i))
     """
 
-    def __init__(
-        self,
-        parent_seq_id: int,
-        output_token: int,
-        logprobs: Dict[int, float],
-        persistent_data: dict
-    ) -> None:
+    def __init__(self, parent_seq_id: int, output_token: int,
+                 logprobs: Dict[int, float], persistent_data: dict) -> None:
         self.parent_seq_id = parent_seq_id
         self.output_token = output_token
         self.logprobs = logprobs
