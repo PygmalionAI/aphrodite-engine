@@ -386,6 +386,7 @@ class AphroditeEngine:
                 child = parent.fork(new_child_seq_id)
                 child.append_token_id(child_sample.output_token,
                                       child_sample.logprobs)
+                child.persistent_data = child_sample.persistent_data
                 child_seqs.append((child, parent))
             # Continue the parent sequence for the last child sample.
             # We reuse the parent sequence here to reduce redundant memory
@@ -393,6 +394,7 @@ class AphroditeEngine:
             last_child_sample = child_samples[-1]
             parent.append_token_id(last_child_sample.output_token,
                                    last_child_sample.logprobs)
+            parent.persistent_data = last_child_sample.persistent_data
             child_seqs.append((parent, parent))
 
         for seq, _ in child_seqs:

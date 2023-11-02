@@ -95,13 +95,12 @@ class Worker:
             seq_len = (max_num_batched_tokens // max_num_seqs +
                        (group_id < max_num_batched_tokens % max_num_seqs))
             seq_data = SequenceData([0] * seq_len)
-            seq = SequenceGroupMetadata(
-                request_id=str(group_id),
-                is_prompt=True,
-                seq_data={group_id: seq_data},
-                sampling_params=sampling_params,
-                block_tables=None,
-            )
+            seq = SequenceGroupMetadata(request_id=str(group_id),
+                                        is_prompt=True,
+                                        seq_data={group_id: seq_data},
+                                        sampling_params=sampling_params,
+                                        block_tables=None,
+                                        persistent_data={})
             seqs.append(seq)
 
         input_tokens, input_positions, input_metadata = self._prepare_inputs(
@@ -284,6 +283,10 @@ class Worker:
         for seq_group_metadata in seq_group_metadata_list:
             seq_data.update(seq_group_metadata.seq_data)
 
+        persistent_data: dict[int, dict] = {}
+        for grp in seq_group_metadata_list:
+            persistent_data.update(grp.persistent_data)
+
         input_metadata = InputMetadata(
             seq_groups=seq_groups,
             seq_data=seq_data,
@@ -293,7 +296,7 @@ class Worker:
             max_context_len=max_context_len,
             block_tables=block_tables_tensor,
             sliding_window=self.sliding_window,
-        )
+            persistent_data=persistent_data)
         return tokens_tensor, positions_tensor, input_metadata
 
     @torch.inference_mode()
