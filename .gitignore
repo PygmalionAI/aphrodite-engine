@@ -1,3 +1,7 @@
 repos
 .vscode
 dist
+aphrodite*
+bin
+build
+conda
