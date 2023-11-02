@@ -71,7 +71,8 @@ class Sampler(nn.Module):
                                           output_tokens)
 
         # Apply Mirostat
-        # Note that we apply mirostat before temperature, not after like it maybe should be
+        # Note that we apply mirostat before temperature, not after
+        # like it maybe should be.
         # To be fixed by implementing customizable sampling order
         if sampler_mirostat.is_applicable(input_metadata):
             sampler_mirostat.apply(logits, input_metadata, output_metadata)

@@ -287,16 +287,15 @@ class Worker:
         for grp in seq_group_metadata_list:
             persistent_data.update(grp.persistent_data)
 
-        input_metadata = InputMetadata(
-            seq_groups=seq_groups,
-            seq_data=seq_data,
-            prompt_lens=prompt_lens,
-            slot_mapping=slot_mapping_tensor,
-            context_lens=context_lens_tensor,
-            max_context_len=max_context_len,
-            block_tables=block_tables_tensor,
-            sliding_window=self.sliding_window,
-            persistent_data=persistent_data)
+        input_metadata = InputMetadata(seq_groups=seq_groups,
+                                       seq_data=seq_data,
+                                       prompt_lens=prompt_lens,
+                                       slot_mapping=slot_mapping_tensor,
+                                       context_lens=context_lens_tensor,
+                                       max_context_len=max_context_len,
+                                       block_tables=block_tables_tensor,
+                                       sliding_window=self.sliding_window,
+                                       persistent_data=persistent_data)
         return tokens_tensor, positions_tensor, input_metadata
 
     @torch.inference_mode()

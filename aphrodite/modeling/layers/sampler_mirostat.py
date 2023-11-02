@@ -47,8 +47,10 @@ def _apply_mirostat_v2(
 
     logit_surprise = torch.softmax(
         logits, dim=-1).log2_().neg_()  # Calculate surprise value per token
-    # For compatibility with ooba/kobold, done in unit of bits(log base 2) not nats(ln)
-    # Ideally this would be a log_softmax, for numerical stability and elegance purposes
+    # For compatibility with ooba/kobold, done in unit of bits(log base 2)
+    # not nats(ln).
+    # Ideally this would be a log_softmax, for numerical stability and
+    # elegance purposes.
     # logit_surprise = torch.log_softmax(logits, dim=-1).neg_()
 
     miro_mask = logit_surprise > tmus.unsqueeze(
@@ -64,14 +66,15 @@ def _apply_mirostat_v2(
                           dtype=logits.dtype)  # Get probs, post-mask
 
     # NOTE: Mirostat updates its `mu` values based on the sample chosen.
-    #       The silly approach here is to just sample it and make the logits one-hot.
-    #       This breaks fine grained seeding, but we don't have that yet. TODO: FIX when it gets added
+    # The silly approach here is to just sample it and make the logits one-hot.
+    # This breaks fine grained seeding, but we don't have that yet.
+    # TODO: FIX when it gets added
     next_token_ids = torch.multinomial(probs, num_samples=1, replacement=True)
 
     # Calculation new `mu` values
-    # NOTE: If we can know the logit values of the PREVIOUS iteration, it should be
-    # possible to update `mu` before applying mirostat each iteration, thus letting us
-    # keep _sample as the last thing that happens.
+    # NOTE: If we can know the logit values of the PREVIOUS iteration,
+    # it should be possible to update `mu` before applying mirostat each
+    # iteration, thus letting us keep _sample as the last thing that happens.
     picked_surprises = torch.gather(logit_surprise,
                                     dim=-1,
                                     index=next_token_ids)
