@@ -254,7 +254,7 @@ class GPTQRowParallelLinear(RowParallelLinear):
                                  device=x.device)
             quantization_ops.gptq_q4_matmul(reshaped_x, self.q4, output)
         else:
-            output = torch.zeros((x.shape[0], self.qweight.shape[-1]),
+            output = torch.zeros((reshaped_x.shape[0], self.qweight.shape[-1]),
                                  dtype=torch.float32,
                                  device=x.device)
             quantization_ops.gptq_descact_matmul(reshaped_x.float(),
