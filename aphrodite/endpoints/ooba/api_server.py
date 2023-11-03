@@ -2,8 +2,7 @@ import argparse
 import json
 from typing import AsyncGenerator
 
-from fastapi import (BackgroundTasks, Header, FastAPI,
-                     HTTPException, Request, Response)
+from fastapi import (BackgroundTasks, Header, FastAPI, HTTPException, Request)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 import uvicorn
@@ -140,10 +139,12 @@ async def get_model_name(x_api_key: str = Header(None)) -> JSONResponse:
     else:
         return JSONResponse(content={"result": "Read Only"}, status_code=500)
 
+
 @app.get("/health")
 async def health() -> Response:
     """Health check route for K8s"""
     return Response(status_code=200)
+
 
 if __name__ == "__main__":
     engine_args = AsyncEngineArgs.from_cli_args(args)
