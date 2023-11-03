@@ -197,14 +197,6 @@ async def create_chat_completion(request: ChatCompletionRequest,
     if error_check_ret is not None:
         return error_check_ret
 
-    if not request.logit_bias:
-        logit_processors = []
-    else:
-        biases = dict(
-            map(lambda bias: (int(bias[0]), bias[1]),
-                request.logit_bias.items()))
-        logit_processors = [BiasLogitsProcessor(biases)]
-
     prompt = await get_gen_prompt(request)
     token_ids, error_check_ret = await check_length(request, prompt=prompt)
     if error_check_ret is not None:
@@ -234,11 +226,11 @@ async def create_chat_completion(request: ChatCompletionRequest,
             ignore_eos=request.ignore_eos,
             use_beam_search=request.use_beam_search,
             skip_special_tokens=request.skip_special_tokens,
-            spaces_between_special_tokens=request.spaces_between_special_tokens, # pylint: disable=line-too-long
+            spaces_between_special_tokens=request.
+            spaces_between_special_tokens,  # pylint: disable=line-too-long
             custom_token_bans=request.custom_token_bans,
             logprobs=request.logprobs,
             prompt_logprobs=request.prompt_logprobs,
-            logits_processors=logit_processors,
         )
     except ValueError as e:
         return create_error_response(HTTPStatus.BAD_REQUEST, str(e))
@@ -388,14 +380,6 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
         return create_error_response(HTTPStatus.BAD_REQUEST,
                                      "suffix is not currently supported")
 
-    if not request.logit_bias:
-        logit_processors = []
-    else:
-        logit_bias = dict(
-            map(lambda logit: (int(logit[0]), logit[1]),
-                request.logit_bias.items()))
-        logit_processors = [BiasLogitsProcessor(logit_bias)]
-
     model_name = request.model
     request_id = f"cmpl-{random_uuid()}"
 
@@ -448,11 +432,11 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
             ignore_eos=request.ignore_eos,
             use_beam_search=request.use_beam_search,
             skip_special_tokens=request.skip_special_tokens,
-            spaces_between_special_tokens=request.spaces_between_special_tokens, # pylint: disable=line-too-long
+            spaces_between_special_tokens=request.
+            spaces_between_special_tokens,  # pylint: disable=line-too-long
             custom_token_bans=request.custom_token_bans,
             logprobs=request.logprobs,
             prompt_logprobs=request.prompt_logprobs,
-            logits_processors=logit_processors,
         )
     except ValueError as e:
         return create_error_response(HTTPStatus.BAD_REQUEST, str(e))

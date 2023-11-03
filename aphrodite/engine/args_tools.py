@@ -142,7 +142,7 @@ class EngineArgs:
                             help='the percentage of GPU memory to be used for'
                             'the model executor')
         parser.add_argument('--max-num-batched-tokens',
-                            '-mnbt'
+                            '-mnbt',
                             type=int,
                             default=EngineArgs.max_num_batched_tokens,
                             help='maximum number of batched tokens per '
