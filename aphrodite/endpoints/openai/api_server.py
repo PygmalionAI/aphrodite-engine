@@ -614,7 +614,7 @@ if __name__ == "__main__":
         allow_headers=args.allowed_headers,
     )
 
-    logger.info(f"args: {args}")
+    logger.debug(f"args: {args}")
 
     if args.served_model_name is not None:
         served_model = args.served_model_name

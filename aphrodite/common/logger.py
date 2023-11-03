@@ -5,19 +5,20 @@ https://github.com/skypilot-org/skypilot/blob/master/sky/sky_logging.py
 
 import logging
 import sys
+import colorlog
 
-_FORMAT = "%(levelname)s %(asctime)s %(filename)s:%(lineno)d] %(message)s"
+_FORMAT = "%(log_color)s%(levelname)s %(asctime)s %(filename)s:%(lineno)d] %(message)s"
 _DATE_FORMAT = "%m-%d %H:%M:%S"
 
 
-class NewLineFormatter(logging.Formatter):
+class ColoredFormatter(colorlog.ColoredFormatter):
     """Adds logging prefix to newlines to align multi-line messages."""
 
-    def __init__(self, fmt, datefmt=None):
-        logging.Formatter.__init__(self, fmt, datefmt)
+    def __init__(self, fmt, datefmt=None, log_colors=None, reset=True, style='%'):
+        super().__init__(fmt, datefmt=datefmt, log_colors=log_colors, reset=reset, style=style)
 
     def format(self, record):
-        msg = logging.Formatter.format(self, record)
+        msg = super().format(record)
         if record.message != "":
             parts = msg.split(record.message)
             msg = msg.replace("\n", "\r\n" + parts[0])
@@ -36,7 +37,18 @@ def _setup_logger():
         _default_handler.flush = sys.stdout.flush  # type: ignore
         _default_handler.setLevel(logging.INFO)
         _root_logger.addHandler(_default_handler)
-    fmt = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT)
+    fmt = ColoredFormatter(
+        _FORMAT, 
+        datefmt=_DATE_FORMAT,
+        log_colors={
+            'DEBUG':    'cyan',
+            'INFO':     'green',
+            'WARNING':  'yellow',
+            'ERROR':    'red',
+            'CRITICAL': 'red,bg_white',
+        },
+        reset=True
+    )
     _default_handler.setFormatter(fmt)
     # Setting this will avoid the message
     # being propagated to the parent logger.

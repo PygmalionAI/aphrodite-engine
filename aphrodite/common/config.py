@@ -371,10 +371,18 @@ def _get_and_verify_max_len(
     if max_model_len is None:
         max_model_len = derived_max_model_len
     elif max_model_len > derived_max_model_len:
-        raise ValueError(
-            f"User-specified max_model_len ({max_model_len}) is greater than "
-            f"the derived max_model_len ({max_len_key}={derived_max_model_len}"
-            " in model's config.json). This may lead to incorrect model "
-            "outputs or CUDA errors. Make sure the value is correct and "
-            "within the model context size.")
+        # hope this works
+        scaling_factor = max_model_len / derived_max_model_len
+        hf_config.rope_scaling = {"factor": scaling_factor, "type": "dynamic"}
+        logger.warning(
+            f"User-specified max_model_len {max_model_len} is higher than "
+            f"the original {derived_max_model_len}. "
+            "Attempting to use RoPE scaling.")
+        derived_max_model_len = max_model_len
+        # raise ValueError(
+        #     f"User-specified max_model_len ({max_model_len}) is greater than "
+        #     f"the derived max_model_len ({max_len_key}={derived_max_model_len}"
+        #     " in model's config.json). This may lead to incorrect model "
+        #     "outputs or CUDA errors. Make sure the value is correct and "
+        #     "within the model context size.")
     return int(max_model_len)

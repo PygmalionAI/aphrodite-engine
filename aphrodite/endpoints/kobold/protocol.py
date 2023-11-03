@@ -61,6 +61,9 @@ class KAIGenerationInputSchema(BaseModel):
     frmtrmspch: Optional[bool]
     singleline: Optional[bool]
     use_default_badwordsids: Optional[bool]
+    mirostat: Optional[int] = 0
+    mirostat_tau: Optional[float] = 0.0
+    mirostat_eta: Optional[float] = 0.0
     disable_input_formatting: Optional[bool]
     frmtadsnsp: Optional[bool]
     quiet: Optional[bool]
