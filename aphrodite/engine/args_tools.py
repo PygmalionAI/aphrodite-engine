@@ -44,7 +44,7 @@ class EngineArgs:
         parser.add_argument(
             '--model',
             type=str,
-            default='facebook/opt-125m',
+            default='EleutherAI/pythia-70m-deduped',
             help='name or path of the huggingface model to use')
         parser.add_argument(
             '--tokenizer',
@@ -136,11 +136,13 @@ class EngineArgs:
                             default=EngineArgs.swap_space,
                             help='CPU swap space size (GiB) per GPU')
         parser.add_argument('--gpu-memory-utilization',
+                            '-gmu',
                             type=float,
                             default=EngineArgs.gpu_memory_utilization,
                             help='the percentage of GPU memory to be used for'
                             'the model executor')
         parser.add_argument('--max-num-batched-tokens',
+                            '-mnbt',
                             type=int,
                             default=EngineArgs.max_num_batched_tokens,
                             help='maximum number of batched tokens per '

@@ -19,8 +19,6 @@ TIMEOUT_TO_PREVENT_DEADLOCK = 1  # seconds.
 app = FastAPI()
 engine = None
 
-valid_api_key = "EMPTY"
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -28,6 +26,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--host", type=str, default="localhost")
+parser.add_argument("--port", type=int, default=2242)
+parser.add_argument("--api-keys", nargs="*", default=["EMPTY"])
+parser.add_argument("--served-model-name", type=str, default=None)
+parser = AsyncEngineArgs.add_cli_args(parser)
+args = parser.parse_args()
+engine_args = AsyncEngineArgs.from_cli_args(args)
+valid_api_keys = args.api_keys
+if args.served_model_name is not None:
+    served_model = args.served_model_name
+else:
+    served_model = engine_args.model
 
 
 @app.post("/api/v1/generate")
@@ -40,7 +52,7 @@ async def generate(
     - stream: whether to stream the results or not.
     - other fields: the sampling parameters (See `SamplingParams` for details).
     """
-    if x_api_key is None or x_api_key != valid_api_key:
+    if x_api_key is None or x_api_key not in valid_api_keys:
         raise HTTPException(status_code=401,
                             detail="Unauthorized. Please acquire an API key.")
 
@@ -116,23 +128,19 @@ async def generate(
 
 
 @app.get("/api/v1/model")
-async def get_model_name() -> JSONResponse:
+async def get_model_name(x_api_key: str = Header(None)) -> JSONResponse:
     """Return the model name based on the EngineArgs configuration."""
+    if x_api_key is None or x_api_key not in valid_api_keys:
+        raise HTTPException(status_code=401,
+                            detail="Unauthorized. Please acquire an API key.")
     if engine is not None:
-        model_name = engine_args.model
-        result = {"result": model_name}
+        result = {"result": f"aphrodite/{served_model}"}
         return JSONResponse(content=result)
     else:
         return JSONResponse(content={"result": "Read Only"}, status_code=500)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--host", type=str, default="localhost")
-    parser.add_argument("--port", type=int, default=2242)
-    parser = AsyncEngineArgs.add_cli_args(parser)
-    args = parser.parse_args()
-
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = AsyncAphrodite.from_engine_args(engine_args)
 

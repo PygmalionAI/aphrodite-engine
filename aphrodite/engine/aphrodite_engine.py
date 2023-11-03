@@ -71,18 +71,19 @@ class AphroditeEngine:
         log_stats: bool,
     ) -> None:
         logger.info(
-            "Initializing an LLM engine with config: "
-            f"model={model_config.model!r}, "
-            f"tokenizer={model_config.tokenizer!r}, "
-            f"tokenizer_mode={model_config.tokenizer_mode}, "
-            f"revision={model_config.revision}, "
-            f"trust_remote_code={model_config.trust_remote_code}, "
-            f"dtype={model_config.dtype}, "
-            f"download_dir={model_config.download_dir!r}, "
-            f"load_format={model_config.load_format}, "
-            f"tensor_parallel_size={parallel_config.tensor_parallel_size}, "
-            f"quantization={model_config.quantization}, "
-            f"seed={model_config.seed})")
+            "Initializing the Aphrodite Engine with the following config:\n"
+            f"Model = {model_config.model!r}\n"
+            f"Tokenizer = {model_config.tokenizer!r}\n"
+            f"tokenizer_mode = {model_config.tokenizer_mode}\n"
+            f"revision = {model_config.revision}\n"
+            f"trust_remote_code = {model_config.trust_remote_code}\n"
+            f"DataType = {model_config.dtype}\n"
+            f"Download Directory = {model_config.download_dir!r}\n"
+            f"Model Load Format = {model_config.load_format}\n"
+            f"Number of GPUs = {parallel_config.tensor_parallel_size}\n"
+            f"Quantization Format = {model_config.quantization}\n"
+            f"Sampler Seed = {model_config.seed}\n"
+            f"Context Length = {model_config.max_model_len}")
         # TODO: Print more configs in debug mode.
 
         self.model_config = model_config

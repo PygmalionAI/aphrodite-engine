@@ -20,7 +20,7 @@ from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams, _SAMPLING_EPS
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.common.utils import random_uuid
-from aphrodite.endpoints.protocol import KAIGenerationInputSchema
+from aphrodite.endpoints.kobold.protocol import KAIGenerationInputSchema
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
@@ -85,7 +85,7 @@ def prepare_engine_payload(
             "must be less than or equal to "
             f"max_model_len ({max_model_len})")
 
-    # KAI spec: top_k == 0 means disabled, aphrodite: top_k == -1 means disabled
+    # KAIspec: top_k == 0 means disabled, aphrodite: top_k == -1 means disabled
     # https://github.com/KoboldAI/KoboldAI-Client/wiki/Settings
     kai_payload.top_k = kai_payload.top_k if kai_payload.top_k != 0.0 else -1
     kai_payload.tfs = max(_SAMPLING_EPS, kai_payload.tfs)
@@ -107,6 +107,9 @@ def prepare_engine_payload(
         typical_p=kai_payload.typical,
         eta_cutoff=kai_payload.eta_cutoff,
         epsilon_cutoff=kai_payload.eps_cutoff,
+        mirostat_mode=kai_payload.mirostat,
+        mirostat_tau=kai_payload.mirostat_tau,
+        mirostat_eta=kai_payload.mirostat_eta,
         stop=kai_payload.stop_sequence,
         custom_token_bans=badwordsids
         if kai_payload.use_default_badwordsids else [],
@@ -225,7 +228,7 @@ async def abort_generation():
 @extra_api.get("/version")
 async def get_extra_version():
     """ Impersonate KoboldCpp with streaming support """
-    return JSONResponse({"result": "KoboldCpp", "version": "1.30"})
+    return JSONResponse({"result": "KoboldCpp", "version": "1.47"})
 
 
 @app.get("/")
@@ -273,7 +276,7 @@ if __name__ == "__main__":
     global args  # pylint: disable=global-at-module-level
     args = parser.parse_args()
 
-    logger.info(f"args: {args}")
+    logger.debug(f"args: {args}")
 
     if args.served_model_name is not None:
         served_model = args.served_model_name
