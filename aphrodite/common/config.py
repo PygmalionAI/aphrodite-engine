@@ -342,6 +342,7 @@ def _get_and_verify_max_len(
     hf_config: PretrainedConfig,
     max_model_len: Optional[int],
 ) -> int:
+    from math import exp, log
     """Get and verify the model's maximum length."""
     derived_max_model_len = float("inf")
     possible_keys = [
@@ -371,8 +372,11 @@ def _get_and_verify_max_len(
     if max_model_len is None:
         max_model_len = derived_max_model_len
     elif max_model_len > derived_max_model_len:
-        # hope this works
-        scaling_factor = max_model_len / derived_max_model_len
+        if derived_max_model_len == 4096:
+            scaling_factor = exp(log((max_model_len - 1150.29)/2982.33)/0.884113)
+        else:
+            scaling_factor = max_model_len / derived_max_model_len
+
         hf_config.rope_scaling = {"factor": scaling_factor, "type": "dynamic"}
         logger.warning(
             f"User-specified max_model_len {max_model_len} is higher than "
