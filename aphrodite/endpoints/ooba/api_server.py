@@ -52,7 +52,6 @@ async def generate(
     - stream: whether to stream the results or not.
     - other fields: the sampling parameters (See `SamplingParams` for details).
     """
-    print(f"Received API Key: {x_api_key}")
     if x_api_key is None or x_api_key not in valid_api_keys:
         raise HTTPException(status_code=401,
                             detail="Unauthorized. Please acquire an API key.")
@@ -131,7 +130,6 @@ async def generate(
 @app.get("/api/v1/model")
 async def get_model_name(x_api_key: str = Header(None)) -> JSONResponse:
     """Return the model name based on the EngineArgs configuration."""
-    print(f"Received API Key: {x_api_key}")
     if x_api_key is None or x_api_key not in valid_api_keys:
         raise HTTPException(status_code=401,
                             detail="Unauthorized. Please acquire an API key.")
