@@ -311,9 +311,9 @@ class MistralForCausalLM(nn.Module):
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, "qkv_proj")
-                if name not in state_dict:
+                if name not in state_dict:  # pylint: disable=unsupported-membership-test
                     break
-                param = state_dict[name]
+                param = state_dict[name]  # pylint: disable=unsubscriptable-object
                 if is_transposed:
                     param = param.T
 
@@ -346,9 +346,9 @@ class MistralForCausalLM(nn.Module):
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, "gate_up_proj")
-                if name not in state_dict:
+                if name not in state_dict:  # pylint: disable=unsupported-membership-test
                     break
-                param = state_dict[name]
+                param = state_dict[name]  # pylint: disable=unsubscriptable-object
                 if is_transposed:
                     param = param.T
 
@@ -372,9 +372,9 @@ class MistralForCausalLM(nn.Module):
             if is_gate_up_weight:
                 continue
 
-            if name not in state_dict:
+            if name not in state_dict:  # pylint: disable=unsupported-membership-test
                 continue
-            param = state_dict[name]
+            param = state_dict[name]  # pylint: disable=unsubscriptable-object
             if is_transposed:
                 param = param.T
 
