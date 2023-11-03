@@ -10,7 +10,7 @@ from typing import AsyncGenerator, Dict, List, Optional, Tuple, Union
 
 import fastapi
 import uvicorn
-from fastapi import Request
+from fastapi import Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -143,6 +143,11 @@ async def check_length(
         )
     else:
         return input_ids, None
+
+@app.get("/health")
+async def health() -> Response:
+    """Health check route for K8s"""
+    return Response(status_code=200)
 
 
 @app.get("/v1/models")

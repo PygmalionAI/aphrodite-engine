@@ -9,7 +9,7 @@ from http import HTTPStatus
 from typing import List, Tuple, AsyncGenerator
 
 import uvicorn
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, Response
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -230,6 +230,10 @@ async def get_extra_version():
     """ Impersonate KoboldCpp with streaming support """
     return JSONResponse({"result": "KoboldCpp", "version": "1.47"})
 
+@app.get("/health")
+async def health() -> Response:
+    """Health check route for K8s"""
+    return Response(status_code=200)
 
 @app.get("/")
 async def get_kobold_lite_ui():
