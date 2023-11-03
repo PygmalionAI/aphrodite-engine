@@ -6,7 +6,7 @@ from aphrodite.endpoints.llm import LLM
 from aphrodite.common.outputs import CompletionOutput, RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 
-__version__ = "0.4-dev"
+__version__ = "0.4.1-dev"
 
 __all__ = [
     "LLM",
