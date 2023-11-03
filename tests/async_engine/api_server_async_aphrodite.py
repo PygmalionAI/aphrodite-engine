@@ -5,11 +5,11 @@ from typing import Any, Dict
 import uvicorn
 from fastapi.responses import JSONResponse, Response
 
-import aphrodite.endpoints.api_server_ooba
+import aphrodite.endpoints.ooba.api_server
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 
-app = aphrodite.endpoints.api_server_ooba.app
+app = aphrodite.endpoints.ooba.api_server.app
 
 
 class AsyncAphroditeWithStats(AsyncAphrodite):
@@ -42,10 +42,10 @@ if __name__ == "__main__":
 
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = AsyncAphroditeWithStats.from_engine_args(engine_args)
-    aphrodite.endpoints.api_server_ooba.engine = engine
+    aphrodite.endpoints.ooba.api_server.engine = engine
     uvicorn.run(app,
                 host=args.host,
                 port=args.port,
                 log_level="debug",
-                timeout_keep_alive=aphrodite.endpoints.api_server_ooba.
+                timeout_keep_alive=aphrodite.endpoints.ooba.api_server.
                 TIMEOUT_KEEP_ALIVE)

@@ -30,7 +30,6 @@ from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.common.utils import random_uuid
-from aphrodite.common.logits import BiasLogitsProcessor
 
 try:
     import fastchat
@@ -235,8 +234,7 @@ async def create_chat_completion(request: ChatCompletionRequest,
             ignore_eos=request.ignore_eos,
             use_beam_search=request.use_beam_search,
             skip_special_tokens=request.skip_special_tokens,
-            spaces_between_special_tokens=request.
-            spaces_between_special_tokens,
+            spaces_between_special_tokens=request.spaces_between_special_tokens, # pylint: disable=line-too-long
             custom_token_bans=request.custom_token_bans,
             logprobs=request.logprobs,
             prompt_logprobs=request.prompt_logprobs,
@@ -450,8 +448,7 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
             ignore_eos=request.ignore_eos,
             use_beam_search=request.use_beam_search,
             skip_special_tokens=request.skip_special_tokens,
-            spaces_between_special_tokens=request.
-            spaces_between_special_tokens,
+            spaces_between_special_tokens=request.spaces_between_special_tokens, # pylint: disable=line-too-long
             custom_token_bans=request.custom_token_bans,
             logprobs=request.logprobs,
             prompt_logprobs=request.prompt_logprobs,

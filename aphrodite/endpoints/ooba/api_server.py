@@ -1,8 +1,10 @@
+import os
 import argparse
 import json
-from typing import AsyncGenerator
+from typing import AsyncGenerator, List
 
-from fastapi import (BackgroundTasks, Header, FastAPI, HTTPException, Request)
+from fastapi import (BackgroundTasks, Header, FastAPI,
+                     HTTPException, Request, Depends)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 import uvicorn
@@ -19,8 +21,6 @@ TIMEOUT_TO_PREVENT_DEADLOCK = 1  # seconds.
 app = FastAPI()
 engine = None
 
-valid_api_key = "EMPTY"
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -29,10 +29,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--host", type=str, default="localhost")
+parser.add_argument("--port", type=int, default=2242)
+parser.add_argument("--api-keys", nargs="*", default=["EMPTY"])
+parser = AsyncEngineArgs.add_cli_args(parser)
+args = parser.parse_args()
+
+valid_api_keys = args.api_keys
 
 @app.post("/api/v1/generate")
 async def generate(
-    request: Request, x_api_key: str = Header(None)) -> Response:
+    request: Request,
+    x_api_key: str = Header(None)) -> Response:
     """Generate completion for the request.
 
     The request should be a JSON object with the following fields:
@@ -40,7 +49,8 @@ async def generate(
     - stream: whether to stream the results or not.
     - other fields: the sampling parameters (See `SamplingParams` for details).
     """
-    if x_api_key is None or x_api_key != valid_api_key:
+    print(f"Received API Key: {x_api_key}")
+    if x_api_key is None or x_api_key not in valid_api_keys:
         raise HTTPException(status_code=401,
                             detail="Unauthorized. Please acquire an API key.")
 
@@ -116,8 +126,14 @@ async def generate(
 
 
 @app.get("/api/v1/model")
-async def get_model_name() -> JSONResponse:
+async def get_model_name(
+    x_api_key: str = Header(None)
+) -> JSONResponse:
     """Return the model name based on the EngineArgs configuration."""
+    print(f"Received API Key: {x_api_key}")
+    if x_api_key is None or x_api_key not in valid_api_keys:
+        raise HTTPException(status_code=401,
+                            detail="Unauthorized. Please acquire an API key.")
     if engine is not None:
         model_name = engine_args.model
         result = {"result": model_name}
@@ -127,12 +143,6 @@ async def get_model_name() -> JSONResponse:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--host", type=str, default="localhost")
-    parser.add_argument("--port", type=int, default=2242)
-    parser = AsyncEngineArgs.add_cli_args(parser)
-    args = parser.parse_args()
-
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = AsyncAphrodite.from_engine_args(engine_args)
 

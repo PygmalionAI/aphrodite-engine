@@ -20,7 +20,7 @@ from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams, _SAMPLING_EPS
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.common.utils import random_uuid
-from aphrodite.endpoints.protocol import KAIGenerationInputSchema
+from aphrodite.endpoints.kobold.protocol import KAIGenerationInputSchema
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
