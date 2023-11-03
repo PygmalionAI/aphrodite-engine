@@ -1,10 +1,9 @@
-import os
 import argparse
 import json
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator
 
 from fastapi import (BackgroundTasks, Header, FastAPI,
-                     HTTPException, Request, Depends)
+                     HTTPException, Request)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 import uvicorn

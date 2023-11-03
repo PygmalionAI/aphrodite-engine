@@ -136,7 +136,7 @@ class EngineArgs:
                             default=EngineArgs.swap_space,
                             help='CPU swap space size (GiB) per GPU')
         parser.add_argument('--gpu-memory-utilization',
-                            '-gmu'
+                            '-gmu',
                             type=float,
                             default=EngineArgs.gpu_memory_utilization,
                             help='the percentage of GPU memory to be used for'
