@@ -159,7 +159,10 @@ class PagedAttention(nn.Module):
         # sequences or heads is large, we use V1 since there is enough work
         # to parallelize.
         # TODO: Tune this heuristic.
-        use_v1 = max_num_partitions == 1 or num_seqs * num_heads > 512
+        # For context lengths > 8192, we use v2 kernel to avoid shared memory
+        # shortage.
+        use_v1 = input_metadata.max_context_len <= 8192 and (
+            max_num_partitions == 1 or num_seqs * num_heads > 512)
         if use_v1:
             # Run PagedAttention V1.
             attention_ops.paged_attention_v1(

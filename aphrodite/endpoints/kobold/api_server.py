@@ -230,10 +230,12 @@ async def get_extra_version():
     """ Impersonate KoboldCpp with streaming support """
     return JSONResponse({"result": "KoboldCpp", "version": "1.47"})
 
+
 @app.get("/health")
 async def health() -> Response:
     """Health check route for K8s"""
     return Response(status_code=200)
+
 
 @app.get("/")
 async def get_kobold_lite_ui():

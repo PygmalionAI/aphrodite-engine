@@ -144,6 +144,7 @@ async def check_length(
     else:
         return input_ids, None
 
+
 @app.get("/health")
 async def health() -> Response:
     """Health check route for K8s"""
