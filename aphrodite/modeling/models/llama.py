@@ -39,7 +39,7 @@ from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.quantized_linear import ParallelLinear
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
-from aphrodite.modeling.megatron.layers import (VocabParallelEmbedding)
+from aphrodite.modeling.megatron.layers import VocabParallelEmbedding
 from aphrodite.modeling.quantization_utils import QuantizationConfig
 from aphrodite.modeling.hf_downloader import (
     convert_pyslice_to_tensor, hf_model_weights_iterator,
@@ -101,19 +101,27 @@ class LlamaAttention(nn.Module):
         assert self.total_num_heads % tp_size == 0
         self.num_heads = self.total_num_heads // tp_size
         self.total_num_kv_heads = num_kv_heads
-        assert self.total_num_kv_heads % tp_size == 0
-        self.num_kv_heads = self.total_num_kv_heads // tp_size
+        if self.total_num_kv_heads >= tp_size:
+            # Number of KV heads is greater than TP size, so we partition
+            # the KV heads across multiple tensor parallel GPUs.
+            assert self.total_num_kv_heads % tp_size == 0
+        else:
+            # Number of KV heads is less than TP size, so we replicate
+            # the KV heads across multiple tensor parallel GPUs.
+            assert tp_size % self.total_num_kv_heads == 0
+        self.num_kv_heads = max(1, self.total_num_kv_heads // tp_size)
+        num_kv_heads_replicas = max(1, tp_size // self.total_num_kv_heads)
         self.head_dim = hidden_size // self.total_num_heads
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
         self.scaling = self.head_dim**-0.5
         self.rope_theta = rope_theta
-        self.rope_scaling = rope_scaling
         self.max_position_embeddings = max_position_embeddings
 
         self.qkv_proj = ParallelLinear.column(
             hidden_size,
-            (self.total_num_heads + 2 * self.total_num_kv_heads) *
+            (self.total_num_heads +
+             2 * self.total_num_kv_heads * num_kv_heads_replicas) *
             self.head_dim,
             bias=False,
             gather_output=False,
@@ -131,10 +139,10 @@ class LlamaAttention(nn.Module):
             self.head_dim,
             self.scaling,
             base=self.rope_theta,
-            rope_scaling=self.rope_scaling,
             max_position=self.max_position_embeddings,
             rotary_dim=self.head_dim,
-            num_kv_heads=self.num_kv_heads)
+            num_kv_heads=self.num_kv_heads,
+            rope_scaling=rope_scaling)
 
     def forward(
         self,
@@ -228,8 +236,10 @@ class LlamaModel(nn.Module):
         self.vocab_size = config.vocab_size
 
         vocab_size = ((config.vocab_size + 63) // 64) * 64
-        self.embed_tokens = VocabParallelEmbedding(vocab_size,
-                                                   config.hidden_size)
+        self.embed_tokens = VocabParallelEmbedding(
+            vocab_size,
+            config.hidden_size,
+        )
         self.layers = nn.ModuleList([
             LlamaDecoderLayer(config, quant_config)
             for _ in range(config.num_hidden_layers)
@@ -304,14 +314,22 @@ class LlamaForCausalLM(nn.Module):
                      cache_dir: Optional[str] = None,
                      load_format: str = "auto",
                      revision: Optional[str] = None):
-        (column_parallel_weights, row_parallel_weights,
-         ignore_weight_suffixes) = get_parallel_weight(self)
+        column_parallel_weights, row_parallel_weights = get_parallel_weight(
+            self)
+        column_weight_suffixes = (
+            self.quant_config.get_col_parallel_tensor_names()
+        ) if self.quant_config is not None else ["weight", "bias"]
+
         tp_size = get_tensor_model_parallel_world_size()
-        tensor_model_parallel_rank = get_tensor_model_parallel_rank()
+        tp_rank = get_tensor_model_parallel_rank()
         q_proj_shard_size = (self.config.hidden_size // tp_size)
+        num_kv_heads_replicas = max(1,
+                                    tp_size // self.config.num_key_value_heads)
+        num_kv_heads_per_gpu = max(1,
+                                   self.config.num_key_value_heads // tp_size)
         kv_proj_shard_size = (self.config.hidden_size //
                               self.config.num_attention_heads *
-                              self.config.num_key_value_heads // tp_size)
+                              num_kv_heads_per_gpu)
         attention_weight_specs = [
             # (weight_name, shard_size, offset)
             ("q_proj", q_proj_shard_size, 0),
@@ -325,13 +343,11 @@ class LlamaForCausalLM(nn.Module):
                 model_name_or_path, cache_dir, load_format, revision):
             if "rotary_emb.inv_freq" in name:
                 continue
-            if any(name.endswith(suffix) for suffix in ignore_weight_suffixes):
-                continue
 
-            is_packed = False
+            packed_dim = None
             is_transposed = False
             if self.quant_config is not None:
-                is_packed = self.quant_config.is_packed(name)
+                packed_dim = self.quant_config.get_packed_dim(name)
                 is_transposed = self.quant_config.is_transposed(name)
             if is_transposed:
                 loaded_weight = convert_pyslice_to_tensor(loaded_weight)
@@ -342,21 +358,32 @@ class LlamaForCausalLM(nn.Module):
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, "qkv_proj")
-                # pylint: disable=unsupported-membership-test
-                if name not in state_dict or "g_idx" in name:
+                if name not in state_dict:  # pylint: disable=unsupported-membership-test
                     break
                 param = state_dict[name]  # pylint: disable=unsubscriptable-object
                 if is_transposed:
                     param = param.T
 
-                if is_packed:
-                    shard_size //= self.quant_config.pack_factor
-                    offset //= self.quant_config.pack_factor
+                if packed_dim is not None:
+                    shard_dim = 0 if not is_transposed else 1
+                    if packed_dim == shard_dim:
+                        shard_size //= self.quant_config.pack_factor
+                        offset //= self.quant_config.pack_factor
 
-                loaded_weight = loaded_weight[
-                    shard_size * tensor_model_parallel_rank:shard_size *
-                    (tensor_model_parallel_rank + 1)]
-                param_slice = param.data[offset:offset + shard_size]
+                if weight_name in ["k_proj", "v_proj"]:
+                    shard_id = tp_rank // num_kv_heads_replicas
+                else:
+                    shard_id = tp_rank
+                if any(
+                        name.endswith(suffix)
+                        for suffix in column_weight_suffixes):
+                    loaded_weight = loaded_weight[shard_size *
+                                                  shard_id:shard_size *
+                                                  (shard_id + 1)]
+                    param_slice = param.data[offset:offset + shard_size]
+                else:
+                    loaded_weight = convert_pyslice_to_tensor(loaded_weight)
+                    param_slice = param.data
                 assert param_slice.shape == loaded_weight.shape
 
                 param_slice.copy_(loaded_weight)
@@ -370,20 +397,25 @@ class LlamaForCausalLM(nn.Module):
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, "gate_up_proj")
-                # pylint: disable=unsupported-membership-test
-                if "g_idx" in name or name not in state_dict:
+                if name not in state_dict:  # pylint: disable=unsupported-membership-test
                     break
-                # pylint: disable=unsubscriptable-object
-                param = state_dict[name]
+                param = state_dict[name]  # pylint: disable=unsubscriptable-object
                 if is_transposed:
                     param = param.T
 
                 shard_size = param.shape[0] // 2
-                loaded_weight = loaded_weight[
-                    shard_size * tensor_model_parallel_rank:shard_size *
-                    (tensor_model_parallel_rank + 1)]
-                param_slice = param.data[shard_size * stride_id:shard_size *
-                                         (stride_id + 1)]
+                if any(
+                        name.endswith(suffix)
+                        for suffix in column_weight_suffixes):
+                    loaded_weight = loaded_weight[shard_size *
+                                                  tp_rank:shard_size *
+                                                  (tp_rank + 1)]
+                    param_slice = param.data[shard_size *
+                                             stride_id:shard_size *
+                                             (stride_id + 1)]
+                else:
+                    loaded_weight = convert_pyslice_to_tensor(loaded_weight)
+                    param_slice = param.data
                 assert param_slice.shape == loaded_weight.shape
                 param_slice.copy_(loaded_weight)
                 is_gate_up_weight = True
@@ -391,8 +423,7 @@ class LlamaForCausalLM(nn.Module):
             if is_gate_up_weight:
                 continue
 
-            # pylint: disable=unsupported-membership-test
-            if name not in state_dict:
+            if name not in state_dict:  # pylint: disable=unsupported-membership-test
                 continue
             param = state_dict[name]  # pylint: disable=unsubscriptable-object
             if is_transposed:
@@ -400,10 +431,9 @@ class LlamaForCausalLM(nn.Module):
 
             if "embed_tokens" in name or "lm_head" in name:
                 load_padded_tensor_parallel_vocab(param, loaded_weight,
-                                                  tensor_model_parallel_rank)
+                                                  tp_rank)
                 continue
 
             load_tensor_parallel_weights(param, loaded_weight, name,
                                          column_parallel_weights,
-                                         row_parallel_weights,
-                                         tensor_model_parallel_rank)
+                                         row_parallel_weights, tp_rank)

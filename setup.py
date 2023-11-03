@@ -13,7 +13,9 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CUDA_HOME
 ROOT_DIR = os.path.dirname(__file__)
 
 # Supported NVIDIA GPU architectures.
-SUPPORTED_ARCHS = {"6.0", "6.1", "6.5", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"}
+SUPPORTED_ARCHS = {
+    "6.0", "6.1", "6.5", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"
+}
 
 # Compiler flags.
 CXX_FLAGS = ["-g", "-O2", "-std=c++17"]
@@ -153,7 +155,9 @@ ext_modules.append(cache_extension)
 # Attention kernels.
 attention_extension = CUDAExtension(
     name="aphrodite.attention_ops",
-    sources=["kernels/attention.cpp", "kernels/attention/attention_kernels.cu"],
+    sources=[
+        "kernels/attention.cpp", "kernels/attention/attention_kernels.cu"
+    ],
     extra_compile_args={
         "cxx": CXX_FLAGS,
         "nvcc": NVCC_FLAGS,
@@ -200,12 +204,9 @@ quantization_extension = CUDAExtension(
     sources=[
         "kernels/quantization.cpp", "kernels/quantization/awq/gemm_kernels.cu",
         "kernels/quantization/gptq/exllama_ext.cpp",
-        "kernels/quantization/gptq/cuda_buffers.cu",
-        "kernels/quantization/gptq/cuda_func/column_remap.cu",
-        "kernels/quantization/gptq/cuda_func/q4_matmul.cu",
-        "kernels/quantization/gptq/cuda_func/q4_matrix.cu",
-        "kernels/quantization/gptq/alt_matmul_kernel.cu",
-        "kernels/quantization/gptq/alt_matmul.cpp"
+        "kernels/quantization/gptq/q_matrix.cu",
+        "kernels/quantization/gptq/q_gemm.cu",
+        "kernels/quantization/gptq/old_matmul_kernel.cu"
     ],
     extra_compile_args={
         "cxx": CXX_FLAGS,
@@ -278,8 +279,8 @@ setuptools.setup(
         "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
-    packages=setuptools.find_packages(
-        exclude=("kernels","examples", "tests")),
+    packages=setuptools.find_packages(exclude=("kernels", "examples",
+                                               "tests")),
     python_requires=">=3.8",
     install_requires=get_requirements(),
     ext_modules=ext_modules,
