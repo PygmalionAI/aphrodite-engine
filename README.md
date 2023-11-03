@@ -25,7 +25,7 @@ Aphrodite builds upon and integrates the exceptional work from [various projects
 ```sh
 pip install aphrodite-engine
 
-python -m aphrodite.endpoints.api_server_kobold --model PygmalionAI/pygmalion-2-7b
+python -m aphrodite.endpoints.kobold.api_server --model PygmalionAI/pygmalion-2-7b
 ```
 
 This will create a [KoboldAI](https://github.com/henk717/KoboldAI)-compatible API server that can be accessed at port 2242 of the localhost. You can plug in the API into a UI that supports Kobold, such as [SillyTavern](https://github.com/SillyTavern/SillyTavern).
@@ -77,7 +77,7 @@ wsl --install
 
 Aphrodite provides an easy-to-use install script, which helps with both setting up a suitable environment for installing via the pip package and/or building from source.
 
-The requirements is `git`, `wget`, `bzip2`, and `tar` - all of which are available on the majority of Linux distributions, including WSL.
+The requirements is `git`, `wget`, `bzip2`, and `tar` - all of which are available on the majority of Linux distributions. You may need to install them for WSL (`apt update && apt install git` etc).
 
 ```sh
 git clone https://github.com/PygmalionAI/aphrodite-engine && cd aphrodite-engine
@@ -86,14 +86,18 @@ git clone https://github.com/PygmalionAI/aphrodite-engine && cd aphrodite-engine
 Then you can simply run:
 
 ```sh
-./runtime.sh python -m aphrodite.endpoints.api_server_kobold --help
+./runtime.sh python -m aphrodite.endpoints.kobold.api_server --help
 ```
 
 The `./runtime.sh` prefix will need to be appended to every command you run that involves Aphrodite, as it launches your commands within the created environment. If you prefer not doing that, you can run `./runtime.sh` by itself to enter the environment and execute commands as normal.
 
 For updating the engine, run `git pull` and then `./update-runtime.sh` to update the environment.
 
-
+Note that the command above builds the engine from source, which may take up to 10 minutes. Alternatively, you can install via pip:
+```sh
+pip install aphrodite-engine
+```
+Make sure you have a proper environment (with CUDA >12.0) set up.
 
 ## Usage
 
@@ -101,11 +105,11 @@ Aphrodite Engine provides 3 API endpoint types:
 
 1. [KoboldAI](https://github.com/henk717/KoboldAI):
   ```sh
-  python -m aphrodite.endpoints.api_server_kobold --model PygmalionAI/pygmalion-2-7b
+  python -m aphrodite.endpoints.kobold.api_server --model PygmalionAI/pygmalion-2-7b
   ```
 2. [Text Generation WebUI](https://github.com/oobabooga/text-generation-webui)
   ```sh
-  python -m aphrodite.endpoints.api_server_ooba --model PygmalionAI/pygmalion-2-7b
+  python -m aphrodite.endpoints.ooba.api_server --model PygmalionAI/pygmalion-2-7b
   ```
 3. [OpenAI](https://openai.com)
   ```sh
@@ -119,8 +123,7 @@ To run a quantized model, use the `--quantization` flag with either `gptq` or `a
 
 For the full list of Sampling parameters, please refer to [SamplingParams](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/common/sampling_params.py):
 
-https://github.com/PygmalionAI/aphrodite-engine/blob/ab1ac578bafa922a6c7e323986bd320615311dad/aphrodite/common/sampling_params.py#L24-L88
-
+https://github.com/PygmalionAI/aphrodite-engine/blob/887e03669a73bbe2c9a1e495292ba84b763c2ac8/aphrodite/common/sampling_params.py#L25-L102
 
 ## Common Issues
 `The detected CUDA version (12.1) mismatches the version that was used to compile
@@ -155,21 +158,23 @@ Alternatively, you can prepend `NCCL_P2P_DISABLE=1` to your server launch comman
 
 1. By design, Aphrodite takes up 90% of your GPU's VRAM. If you're not serving an LLM at scale, you may want to limit the amount of memory it takes up. You can do this in the API example by launching the server with the `--gpu-memory-utilization 0.6` (0.6 means 60%).
 
-2. You can view the full list of commands by running `python -m aphrodite.endpoints.api_server_ooba --help`.
+2. You can view the full list of commands by running `python -m aphrodite.endpoints.ooba.api_server --help`.
 
-3. Context Length extension via the RoPE method is supported for Llama models. Edit the `config.json` with the following values:
+3. Context Length extension via the RoPE method is supported for Llama models. Edit the `config.json` with the following values or pass the desired context length size to the `--max-model-len` arg:
 ```json
   "rope_scaling": { "factor": 2.0, "type": "dynamic"},
 ```
+
 
 ## Acknowledgements
 Aphrodite Engine would have not been possible without the phenomenal work of other open-source projects. Credits go to:
 - [vLLM](https://github.com/vllm-project/vllm) (CacheFlow)
 - [FasterTransformer](https://github.com/NVIDIA/FasterTransformer)
 - [xFormers](https://github.com/facebookresearch/xformers)
-- [AWQ](https://github.com/mit-han-lab/llm-awq/)
-- [GPTQ](https://github.com/IST-DASLab/gptq)
+- [AWQ](https://github.com/casper-hansen/AutoAWQ)
+- [AutoGPTQ](https://github.com/PanQiWei/AutoGPTQ)
 - [ExLlama](https://github.com/turboderp/exllama)
+- [Exllamav2](https://github.com/turboderp/exllama)
 - [KoboldAI](https://github.com/henk717/KoboldAI)
 - [Text Generation WebUI](https://github.com/oobabooga/text-generation-webui)
 - [Megatron-LM](https://github.com/NVIDIA/Megatron-LM)
