@@ -1,4 +1,5 @@
 """Utils."""
+from os import path
 import enum
 from platform import uname
 import uuid
@@ -43,8 +44,21 @@ def get_gpu_memory(gpu: int = 0) -> int:
 
 
 def get_cpu_memory() -> int:
-    """Returns the total CPU memory of the node in bytes."""
-    return psutil.virtual_memory().total
+    """Returns the total CPU memory of the node or container in bytes."""
+
+    memory_limit = psutil.virtual_memory().total
+
+    for limit_file in [
+            "/sys/fs/cgroup/memory/memory.limit_in_bytes",  # v1
+            "/sys/fs/cgroup/memory.max"  # v2
+    ]:
+        if path.exists(limit_file):
+            with open(limit_file) as f:
+                content = f.read().strip()
+                if content.isnumeric():  # v2 can have "max" as limit
+                    memory_limit = min(memory_limit, int(content))
+
+    return memory_limit
 
 
 def random_uuid() -> str:
