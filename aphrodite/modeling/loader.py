@@ -6,7 +6,8 @@ from transformers import PretrainedConfig
 
 from aphrodite.common.config import ModelConfig
 from aphrodite.modeling.models import (LlamaForCausalLM, GPTJForCausalLM,
-                                       GPTNeoXForCausalLM, MistralForCausalLM)
+                                       GPTNeoXForCausalLM, MistralForCausalLM,
+                                       YiForCausalLM)
 from aphrodite.modeling.hf_downloader import (initialize_dummy_weights,
                                               get_quant_config)
 from aphrodite.modeling.layers.quantized_linear.utils import quant_post_init
@@ -17,6 +18,7 @@ _MODEL_REGISTRY = {
     "GPTJForCausalLM": GPTJForCausalLM,
     "GPTNeoXForCausalLM": GPTNeoXForCausalLM,
     "MistralForCausalLM": MistralForCausalLM,
+    "YiForCausalLM": YiForCausalLM,
 }
 
 _MODEL_CLASSES_SUPPORT_QUANTIZATION = {
