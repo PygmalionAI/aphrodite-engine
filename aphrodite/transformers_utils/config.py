@@ -7,6 +7,7 @@ _CONFIG_REGISTRY = {
     "yi": YiConfig,
 }
 
+
 def get_config(model: str,
                trust_remote_code: bool,
                revision: Optional[str] = None) -> PretrainedConfig:
