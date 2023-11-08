@@ -13,7 +13,7 @@ services:
       - ${HOME}/.cache:/root/.cache/
     shm_size: 1g
     ports:
-      - "2242:2242"
+      - "7860:7860"
     deploy:
       resources:
         reservations:
