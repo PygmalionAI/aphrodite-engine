@@ -104,6 +104,7 @@ def prepare_engine_payload(
         top_p=kai_payload.top_p,
         top_k=kai_payload.top_k,
         top_a=kai_payload.top_a,
+        min_p=kai_payload.min_p,
         typical_p=kai_payload.typical,
         eta_cutoff=kai_payload.eta_cutoff,
         epsilon_cutoff=kai_payload.eps_cutoff,

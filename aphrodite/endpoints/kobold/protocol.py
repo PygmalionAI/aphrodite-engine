@@ -10,6 +10,8 @@ class SamplingParams(BaseModel):
     temperature: float = Field(1.0, alias="temperature")
     top_p: float = Field(1.0, alias="top_p")
     top_k: float = Field(-1, alias="top_k")
+    min_p: float = Field(0.0, alias="min_p")
+    top_a: float = Field(0.0, alias="top_a")
     tfs: float = Field(1.0, alias="tfs")
     eta_cutoff: float = Field(0.0, alias="eta_cutoff")
     epsilon_cutoff: float = Field(0.0, alias="epsilon_cutoff")
@@ -45,6 +47,7 @@ class KAIGenerationInputSchema(BaseModel):
     top_k: Optional[NonNegativeInt] = 0.0
     top_a: Optional[NonNegativeFloat] = 0.0
     top_p: Optional[confloat(ge=0, le=1)] = 1.0
+    min_p: Optional[confloat(ge=0, le=1)] = 0.0
     tfs: Optional[confloat(ge=0, le=1)] = 1.0
     eps_cutoff: Optional[confloat(ge=0, le=1000)] = 0.0
     eta_cutoff: Optional[NonNegativeFloat] = 0.0
