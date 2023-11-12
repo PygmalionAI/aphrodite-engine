@@ -442,7 +442,7 @@ def _apply_alphabet_soup(
     probs_sum = probs_sort.cumsum(dim=-1)
     min_p_thresholds = probs_sort[:, 0] * ms_p
     top_a_thresholds = torch.pow(probs_sort[:, 0], 2) * ts_a
-    treshold = torch.minimum(min_p_thresholds, top_a_thresholds)
+    treshold = torch.maximum(min_p_thresholds, top_a_thresholds)
     mask = (probs_sort < treshold.unsqueeze(1)
                    )  # Cull logits below the top-a threshold
     mask.logical_or_(probs_sum > ts_p.unsqueeze(
