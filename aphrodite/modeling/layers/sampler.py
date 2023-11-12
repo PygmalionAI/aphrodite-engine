@@ -115,13 +115,15 @@ class Sampler(nn.Module):
         # Apply top-p, top-k, and top-a truncation.
         top_ps, top_ks, top_as, min_ps = _get_alphabet_soup(
             input_metadata, self.vocab_size)
-        assert len(top_ps) == len(top_ks) == len(top_as) == len(min_ps) == logits.shape[0]
+        assert (len(top_ps) == len(top_ks) == 
+                len(top_as) == len(min_ps) == logits.shape[0])
         do_top_p = any(p < 1.0 - _SAMPLING_EPS for p in top_ps)
         do_top_k = any(k != self.vocab_size for k in top_ks)
         do_top_a = any(a > _SAMPLING_EPS for a in top_as)
         do_min_p = any(p > _SAMPLING_EPS for p in min_ps)
         if do_top_p or do_top_k or do_top_a or do_min_p:
-            logits = _apply_alphabet_soup(logits, top_ps, top_ks, top_as, min_ps)
+            logits = _apply_alphabet_soup(logits,
+                                top_ps, top_ks, top_as, min_ps)
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
