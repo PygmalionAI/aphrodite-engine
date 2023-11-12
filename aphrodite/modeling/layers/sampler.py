@@ -445,7 +445,8 @@ def _apply_alphabet_soup(
     min_p_thresholds = probs_sort[:, 0] * ms_p
     top_a_thresholds = torch.pow(probs_sort[:, 0], 2) * ts_a
     treshold = torch.maximum(min_p_thresholds, top_a_thresholds)
-    mask = (probs_sort < treshold.unsqueeze(1))  # Cull logits below the top-a threshold
+    mask = (probs_sort < treshold.unsqueeze(1)
+            )  # Cull logits below the top-a threshold
     mask.logical_or_(probs_sum > ts_p.unsqueeze(
         dim=1))  # Cull logits above the top-p summation threshold
     mask[:, 0] = False  # Guarantee at least one token is pickable

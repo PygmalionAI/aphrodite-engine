@@ -211,7 +211,7 @@ class SamplingParams:
         if self.top_k < -1 or self.top_k == 0:
             raise ValueError(f"top_k must be -1 (disable), or at least 1, "
                              f"got {self.top_k}.")
-        if not 0.0 <= self.top_a:
+        if self.top_a < 0:
             raise ValueError(f"top_a must be non negative, got {self.top_a}.")
         if not 0.0 <= self.min_p <= 1.0:
             raise ValueError(f"min_p must be in [0, 1], got {self.min_p}.")

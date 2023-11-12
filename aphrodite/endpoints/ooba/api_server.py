@@ -92,7 +92,7 @@ async def generate(
     try:
         sampling_params.verify()
     except Exception as err:
-        raise HTTPException(status_code=422, detail=str(err))
+        raise HTTPException(status_code=422, detail=str(err)) from err
 
     request_id = random_uuid()
 
