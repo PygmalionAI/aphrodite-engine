@@ -90,7 +90,7 @@ async def generate(
             setattr(sampling_params, key, value)
 
     try:
-        sampling_params._verify_args()
+        sampling_params.verify()
     except Exception as err:
         raise HTTPException(status_code=422, detail=str(err))
 
