@@ -74,6 +74,9 @@ class ChatCompletionRequest(BaseModel):
     top_k: Optional[int] = -1
     top_a: Optional[float] = 0.0
     min_p: Optional[float] = 0.0
+    mirostat_mode: Optional[int] = 0
+    mirostat_tau: Optional[float] = 0.0
+    mirostat_eta: Optional[float] = 0.0
     ignore_eos: Optional[bool] = False
     use_beam_search: Optional[bool] = False
     logprobs: Optional[int] = None
@@ -110,6 +113,9 @@ class CompletionRequest(BaseModel):
     top_k: Optional[int] = -1
     top_a: Optional[float] = 0.0
     min_p: Optional[float] = 0.0
+    mirostat_mode: Optional[int] = 0
+    mirostat_tau: Optional[float] = 0.0
+    mirostat_eta: Optional[float] = 0.0
     ignore_eos: Optional[bool] = False
     use_beam_search: Optional[bool] = False
     logprobs: Optional[int] = None
