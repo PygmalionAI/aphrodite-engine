@@ -113,14 +113,17 @@ class Sampler(nn.Module):
             logits.div_(t.unsqueeze(dim=1))
 
         # Apply top-p, top-k, and top-a truncation.
-        top_ps, top_ks, top_as = _get_top_a_top_p_top_k(
+        top_ps, top_ks, top_as, min_ps = _get_alphabet_soup(
             input_metadata, self.vocab_size)
-        assert len(top_ps) == len(top_ks) == logits.shape[0]
+        assert (len(top_ps) == len(top_ks) == len(top_as) == len(min_ps) ==
+                logits.shape[0])
         do_top_p = any(p < 1.0 - _SAMPLING_EPS for p in top_ps)
         do_top_k = any(k != self.vocab_size for k in top_ks)
         do_top_a = any(a > _SAMPLING_EPS for a in top_as)
-        if do_top_p or do_top_k or do_top_a:
-            logits = _apply_top_a_top_p_top_k(logits, top_ps, top_ks, top_as)
+        do_min_p = any(p > _SAMPLING_EPS for p in min_ps)
+        if do_top_p or do_top_k or do_top_a or do_min_p:
+            logits = _apply_alphabet_soup(logits, top_ps, top_ks, top_as,
+                                          min_ps)
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
@@ -342,13 +345,14 @@ def _get_temperatures(input_metadata: InputMetadata) -> List[float]:
     return temperatures
 
 
-def _get_top_a_top_p_top_k(
+def _get_alphabet_soup(
     input_metadata: InputMetadata,
     vocab_size: int,
 ) -> Tuple[List[float], List[int], List[float]]:
     top_ps: List[float] = []
     top_ks: List[int] = []
     top_as: List[float] = []
+    min_ps: List[float] = []
     for i, seq_group in enumerate(input_metadata.seq_groups):
         seq_ids, sampling_params = seq_group
         # k should not be greater than the vocab size.
@@ -361,11 +365,13 @@ def _get_top_a_top_p_top_k(
             top_ps += [sampling_params.top_p] * (prompt_len - 1)
             top_ks += [top_k] * (prompt_len - 1)
             top_as += [sampling_params.top_a] * (prompt_len - 1)
+            min_ps += [sampling_params.min_p] * (prompt_len - 1)
         top_ps += [sampling_params.top_p] * len(seq_ids)
         top_ks += [top_k] * len(seq_ids)
         top_as += [sampling_params.top_a] * len(seq_ids)
+        min_ps += [sampling_params.min_p] * len(seq_ids)
 
-    return top_ps, top_ks, top_as
+    return top_ps, top_ks, top_as, min_ps
 
 
 def _get_tfs(input_metadata: InputMetadata) -> List[float]:
@@ -420,27 +426,31 @@ def _get_typical_ps(input_metadata: InputMetadata) -> List[float]:
     return typical_ps
 
 
-def _apply_top_a_top_p_top_k(
+def _apply_alphabet_soup(
     logits: torch.Tensor,
     top_ps: List[float],
     top_ks: List[int],
     top_as: List[float],
+    min_ps: List[float],
 ) -> torch.Tensor:
     ts_p = torch.tensor(top_ps, dtype=logits.dtype, device=logits.device)
     ts_k = torch.tensor(top_ks, dtype=torch.int, device=logits.device)
     ts_a = torch.tensor(top_as, dtype=logits.dtype, device=logits.device)
+    ms_p = torch.tensor(min_ps, dtype=logits.dtype, device=logits.device)
     logits_sort, logits_idx = logits.sort(dim=-1, descending=True)
 
-    # Apply top-p and top-a.
+    # Apply top-p, min-p and top-a.
     probs_sort = logits_sort.softmax(dim=-1)
     probs_sum = probs_sort.cumsum(dim=-1)
+    min_p_thresholds = probs_sort[:, 0] * ms_p
     top_a_thresholds = torch.pow(probs_sort[:, 0], 2) * ts_a
-    top_ap_mask = (probs_sort < top_a_thresholds.unsqueeze(1)
-                   )  # Cull logits below the top-a threshold
-    top_ap_mask.logical_or_(probs_sum > ts_p.unsqueeze(
+    treshold = torch.maximum(min_p_thresholds, top_a_thresholds)
+    mask = (probs_sort < treshold.unsqueeze(1)
+            )  # Cull logits below the top-a threshold
+    mask.logical_or_(probs_sum > ts_p.unsqueeze(
         dim=1))  # Cull logits above the top-p summation threshold
-    top_ap_mask[:, 0] = False  # Guarantee at least one token is pickable
-    logits_sort[top_ap_mask] = -float("inf")
+    mask[:, 0] = False  # Guarantee at least one token is pickable
+    logits_sort[mask] = -float("inf")
 
     # Apply top-k.
     # Create a mask for the top-k elements.
