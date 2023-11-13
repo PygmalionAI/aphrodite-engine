@@ -30,6 +30,7 @@ from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.common.utils import random_uuid
+from aphrodite.common.logits_processor import BiasLogitsProcessor
 
 try:
     import fastchat
@@ -222,6 +223,14 @@ async def create_chat_completion(
     token_ids, error_check_ret = await check_length(request, prompt=prompt)
     if error_check_ret is not None:
         return error_check_ret
+    
+    if not request.logit_bias:
+        logit_processors = []
+    else:
+        biases = dict(
+            map(lambda bias: (int(bias[0]), bias[1]),
+                request.logit_bias.items()))
+        logit_processors = [BiasLogitsProcessor(biases)]
 
     model_name = request.model
     request_id = f"cmpl-{random_uuid()}"
@@ -261,6 +270,7 @@ async def create_chat_completion(
             custom_token_bans=request.custom_token_bans,
             logprobs=request.logprobs,
             prompt_logprobs=request.prompt_logprobs,
+            logits_processors=logit_processors,
         )
     except ValueError as e:
         return create_error_response(HTTPStatus.BAD_REQUEST, str(e))
@@ -403,6 +413,14 @@ async def create_completion(
     if error_check_ret is not None:
         return error_check_ret
 
+    if not request.logit_bias:
+        logit_processors = []
+    else:
+        biases = dict(
+            map(lambda bias: (int(bias[0]), bias[1]),
+                request.logit_bias.items()))
+        logit_processors = [BiasLogitsProcessor(biases)]
+
     if request.echo:
         # We do not support echo since the Aphrodite engine does not
         # currently support getting the logprobs of prompt tokens.
@@ -481,6 +499,7 @@ async def create_completion(
             custom_token_bans=request.custom_token_bans,
             logprobs=request.logprobs,
             prompt_logprobs=request.prompt_logprobs,
+            logits_processors=logit_processors,
         )
     except ValueError as e:
         return create_error_response(HTTPStatus.BAD_REQUEST, str(e))
