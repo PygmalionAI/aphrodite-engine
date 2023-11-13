@@ -10,7 +10,7 @@ from typing import AsyncGenerator, Dict, List, Optional, Tuple, Union
 
 import fastapi
 import uvicorn
-from fastapi import Request, Response
+from fastapi import Request, Response, Header, HTTPException, Depends
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -45,6 +45,16 @@ logger = init_logger(__name__)
 served_model = None
 app = fastapi.FastAPI()
 engine = None
+
+
+def _verify_api_key(x_api_key: str = Header(None)):
+    if x_api_key is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Unauthorized Access. Please provide an API Key.")
+    if x_api_key not in EXPECTED_API_KEYS:
+        raise HTTPException(status_code=401,
+                            detail="Unauthorized Access. Invalid API Key.")
 
 
 def create_error_response(status_code: HTTPStatus,
@@ -152,7 +162,9 @@ async def health() -> Response:
 
 
 @app.get("/v1/models")
-async def show_available_models():
+async def show_available_models(
+        # pylint: disable=unused-argument
+        api_key: str = Depends(_verify_api_key)):
     """Show available models. Right now we only have one model."""
     model_cards = [
         ModelCard(id=served_model,
@@ -187,8 +199,11 @@ def create_logprobs(token_ids: List[int],
 
 
 @app.post("/v1/chat/completions")
-async def create_chat_completion(request: ChatCompletionRequest,
-                                 raw_request: Request):
+async def create_chat_completion(
+    request: ChatCompletionRequest,
+    raw_request: Request,
+    # pylint: disable=unused-argument
+    api_key: str = Depends(_verify_api_key)):
     """Completion API similar to OpenAI's API.
 
     See  https://platform.openai.com/docs/api-reference/chat/create
@@ -357,7 +372,11 @@ async def create_chat_completion(request: ChatCompletionRequest,
 
 
 @app.post("/v1/completions")
-async def create_completion(request: CompletionRequest, raw_request: Request):
+async def create_completion(
+    request: CompletionRequest,
+    raw_request: Request,
+    # pylint: disable=unused-argument
+    api_key: str = Depends(_verify_api_key)):
     """Completion API similar to OpenAI's API.
 
     See https://platform.openai.com/docs/api-reference/completions/create
@@ -608,10 +627,16 @@ if __name__ == "__main__":
                         help="The model name used in the API. If not "
                         "specified, the model name will be the same as "
                         "the huggingface name.")
+    parser.add_argument("--api-keys",
+                        nargs="*",
+                        required=True,
+                        help="Authorization API Keys for the server.")
 
     parser = AsyncEngineArgs.add_cli_args(parser)
     args = parser.parse_args()
 
+    global EXPECTED_API_KEYS  # pylint: disable=global-at-module-level
+    EXPECTED_API_KEYS = args.api_keys
     app.add_middleware(
         CORSMiddleware,
         allow_origins=args.allowed_origins,
