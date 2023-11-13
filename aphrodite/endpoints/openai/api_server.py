@@ -226,6 +226,11 @@ async def create_chat_completion(
     model_name = request.model
     request_id = f"cmpl-{random_uuid()}"
     created_time = int(time.time())
+    
+    # We disable top_k at -1, add this conversion for
+    # compatibility
+    if request.top_k == 0:
+        request.top_k = -1
     try:
         sampling_params = SamplingParams(
             n=request.n,
@@ -436,6 +441,12 @@ async def create_completion(
         return error_check_ret
 
     created_time = int(time.time())
+    
+    # We disable top_k at -1, add this conversion for
+    # compatibility
+    if request.top_k == 0:
+        request.top_k = -1
+
     try:
         sampling_params = SamplingParams(
             n=request.n,
