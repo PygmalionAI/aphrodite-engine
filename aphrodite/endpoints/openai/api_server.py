@@ -48,14 +48,18 @@ app = fastapi.FastAPI()
 engine = None
 
 
-def _verify_api_key(x_api_key: str = Header(None)):
-    if x_api_key is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Unauthorized Access. Please provide an API Key.")
-    if x_api_key not in EXPECTED_API_KEYS:
-        raise HTTPException(status_code=401,
-                            detail="Unauthorized Access. Invalid API Key.")
+def _verify_api_key(x_api_key: str = Header(None),
+                    authorization: str = Header(None)):
+    if x_api_key and x_api_key in EXPECTED_API_KEYS:
+        return x_api_key
+    elif authorization:
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() == "bearer" and token in EXPECTED_API_KEYS:
+            return token
+    raise HTTPException(
+        status_code=401,
+        detail="Invalid API Key",
+    )
 
 
 def create_error_response(status_code: HTTPStatus,
