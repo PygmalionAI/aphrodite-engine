@@ -10,10 +10,11 @@ from typing import AsyncGenerator, Dict, List, Optional, Tuple, Union
 
 import fastapi
 import uvicorn
-from fastapi import Request, Response, Header, HTTPException, Depends
+from fastapi import Request, Response, HTTPException, Depends
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.security.http import HTTPAuthorizationCredentials, HTTPBearer
 from packaging import version
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
@@ -46,15 +47,15 @@ served_model = None
 app = fastapi.FastAPI()
 engine = None
 
+get_bearer_token = HTTPBearer(auto_error=False)
 
-def _verify_api_key(x_api_key: str = Header(None)):
-    if x_api_key is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Unauthorized Access. Please provide an API Key.")
-    if x_api_key not in EXPECTED_API_KEYS:
+def _verify_api_key(
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(get_bearer_token),
+):
+    if auth is None or (token := auth.credentials) not in EXPECTED_API_KEYS:
         raise HTTPException(status_code=401,
-                            detail="Unauthorized Access. Invalid API Key.")
+            detail="Unauthorized Access. Invalid API Key.")
+    return token
 
 
 def create_error_response(status_code: HTTPStatus,
