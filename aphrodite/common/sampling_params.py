@@ -319,5 +319,4 @@ class SamplingParams:
                 f"prompt_logprobs={self.prompt_logprobs}, "
                 f"skip_special_tokens={self.skip_special_tokens}, "
                 f"spaces_between_special_tokens="
-                f"{self.spaces_between_special_tokens}, "
-                f"logits_processors={self.logits_processors})")
+                f"{self.spaces_between_special_tokens})")
