@@ -223,7 +223,7 @@ async def create_chat_completion(
     token_ids, error_check_ret = await check_length(request, prompt=prompt)
     if error_check_ret is not None:
         return error_check_ret
-    
+
     if not request.logit_bias:
         logit_processors = []
     else:
