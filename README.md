@@ -17,7 +17,7 @@ Aphrodite builds upon and integrates the exceptional work from [various projects
 - Optimized CUDA kernels for improved inference
 - Quantization support via AWQ and GPTQ
 - Distributed inference
-- Variety of sampling methods (top a, tail-free sampling, rep. pen.)
+- Variety of sampling methods ([Mirostat](https://arxiv.org/abs/2007.14966), [Locally Typical Sampling](https://arxiv.org/abs/2202.00666), Tail-Free Sampling, etc)
 
 
 ## Quickstart
@@ -32,7 +32,7 @@ This will create a [KoboldAI](https://github.com/henk717/KoboldAI)-compatible AP
 
 
 ## Performance
-Speeds vary with different GPUs, model sizes, quantization schemes, batch sizes, etc. Here are some baseline benchmarks conducted by sending requests of varying lengths to the provided [API server](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/endpoints/api_server_ooba.py).
+Speeds vary with different GPUs, model sizes, quantization schemes, batch sizes, etc. Here are some baseline benchmarks conducted by sending requests of varying lengths to the provided [API server](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/endpoints/ooba/api_server.py).
 
 | Model | Quantization | GPU      | Request Rate | Throughput (req/s) | Avg Latency (s) |
 | ----- | ------------ | -------- | ------------ | ------------------ | --------------- |
@@ -103,27 +103,96 @@ Make sure you have a proper environment (with CUDA >12.0) set up.
 
 Aphrodite Engine provides 3 API endpoint types:
 
-1. [KoboldAI](https://github.com/henk717/KoboldAI):
-  ```sh
-  python -m aphrodite.endpoints.kobold.api_server --model PygmalionAI/pygmalion-2-7b
-  ```
-2. [Text Generation WebUI](https://github.com/oobabooga/text-generation-webui)
-  ```sh
-  python -m aphrodite.endpoints.ooba.api_server --model PygmalionAI/pygmalion-2-7b
-  ```
-3. [OpenAI](https://openai.com)
-  ```sh
-  python -m aphrodite.endpoints.openai.api_server --model PygmalionAI/pygmalion-2-7b
-  ```
+ #### [KoboldAI](https://github.com/henk717/KoboldAI):
+```sh
+python -m aphrodite.endpoints.kobold.api_server --model PygmalionAI/pygmalion-2-7b
+```
+cURL example:
+```sh
+curl -X 'POST' \
+  'http://localhost:5000/api/v1/generate' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "prompt": "Niko the kobold stalked carefully down the alley, his small scaly figure obscured by a dusky cloak that fluttered lightly in the cold winter breeze.",
+  "stream": false,
+  "mirostat_mode": 2,
+  "mirostat_tau": 6.5,
+  "mirostat_eta": 0.2
+}' 
+```
 
-Please refer to each endpoint's documentation on how to query them. Generally, they all work with [SillyTavern](https://github.com/SillyTavern/SillyTavern).
+
+#### [Text Generation WebUI (legacy)](https://github.com/oobabooga/text-generation-webui)
+  ```sh
+  python -m aphrodite.endpoints.ooba.api_server --model PygmalionAI/pygmalion-2-7b --api-keys EMPTY
+  ```
+cURL example:
+```sh
+curl -X POST "http://localhost:2242/api/v1/generate" \
+-H "Content-Type: application/json" \
+-H "x-api-key: EMPTY" \
+-d '{
+  "prompt": "This is a cake recipe:\n\n1.",
+  "stream": false,
+  "mirostat_mode": 2,
+  "mirostat_tau": 6.5,
+  "mirostat_eta": 0.2
+}'
+```
+
+#### [OpenAI](https://openai.com)
+  ```sh
+  python -m aphrodite.endpoints.openai.api_server --model PygmalionAI/pygmalion-2-7b --api-keys EMPTY
+  ```
+cURL Completions example:
+```sh
+curl http://localhost:2242/v1/completions \
+-H "Content-Type: application/json" \
+-H "Authorization: Bearer EMPTY" \
+-d '{
+  "model": "PygmalionAI/pygmalion-2-7b",
+  "prompt": "Every age it seems is tainted by the greed of men. Rubbish to one such as I,",
+  "stream": false,
+  "mirostat_mode": 2,
+  "mirostat_tau": 6.5,
+  "mirostat_eta": 0.2
+}'
+```
+cURL Chat Completions example:
+```sh
+curl -X POST -H 'Authorization: Bearer EMPTY' -H "Content-type: application/json" -d '{
+  "model": "PygmalionAI/pygmalion-2-7b",
+  "messages": [
+    {
+      "role": "system",
+      "content": "<|system|>Enter assistant mode."
+    },
+    {
+      "role": "user",
+      "content": "Who won the world series in 2020?"
+    },
+    {
+      "role": "assistant",
+      "content": "The Los Angeles Dodgers won the World Series in 2020."
+    },
+    {
+      "role": "user",
+      "content": "Where was it played?"
+    }
+  ]
+}' 'http://localhost:2242/v1/chat/completions'
+```
+
+For authorization, both the `Authorization: Bearer KEY` and `x-api-key: KEY` will work.
+
 
 To run a quantized model, use the `--quantization` flag with either `gptq` or `awq` and the `--dtype float16` flag. Make sure your model is in AWQ/GPTQ format and not GGUF. Run with only the `--help` flag for a full list of arguments.
 
 
 For the full list of Sampling parameters, please refer to [SamplingParams](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/common/sampling_params.py):
 
-https://github.com/PygmalionAI/aphrodite-engine/blob/887e03669a73bbe2c9a1e495292ba84b763c2ac8/aphrodite/common/sampling_params.py#L25-L102
+https://github.com/PygmalionAI/aphrodite-engine/blob/9a47d6fc1a8ad53d6272f1ec04f848068c5c261b/aphrodite/common/sampling_params.py#L25-L104
 
 ## Common Issues
 `The detected CUDA version (12.1) mismatches the version that was used to compile
@@ -174,7 +243,7 @@ Aphrodite Engine would have not been possible without the phenomenal work of oth
 - [AWQ](https://github.com/casper-hansen/AutoAWQ)
 - [AutoGPTQ](https://github.com/PanQiWei/AutoGPTQ)
 - [ExLlama](https://github.com/turboderp/exllama)
-- [Exllamav2](https://github.com/turboderp/exllama)
+- [Exllamav2](https://github.com/turboderp/exllamav2)
 - [KoboldAI](https://github.com/henk717/KoboldAI)
 - [Text Generation WebUI](https://github.com/oobabooga/text-generation-webui)
 - [Megatron-LM](https://github.com/NVIDIA/Megatron-LM)
