@@ -57,6 +57,7 @@ def get_cpu_memory() -> int:
                 content = f.read().strip()
                 if content.isnumeric():  # v2 can have "max" as limit
                     memory_limit = min(memory_limit, int(content))
+                    break  # break the loop once a limit is found
 
     return memory_limit
 
