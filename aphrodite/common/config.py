@@ -359,15 +359,24 @@ def _get_and_verify_max_len(
         if max_len_key is not None:
             derived_max_model_len = min(derived_max_model_len, max_len_key)
     if derived_max_model_len == float("inf"):
-        raise ValueError(
-            "The model's config.json must contain one of the following keys "
-            "to determine the original maximum length of the model: "
-            f"{possible_keys}")
+        if max_model_len is not None:
+            # If max_model_len is specified, we use it.
+            return max_model_len
+        default_max_len = 2048
+        logger.warning(
+            "The model's config.json does not contain any of the following "
+            "keys to determine the original maximum length of the model: "
+            f"{possible_keys}. Assuming the model's maximum length is "
+            f"{default_max_len}.")
+        derived_max_model_len = default_max_len
 
     rope_scaling = getattr(hf_config, "rope_scaling", None)
     if rope_scaling is not None:
         assert "factor" in rope_scaling
         scaling_factor = rope_scaling["factor"]
+        if rope_scaling["type"] == "yarn":
+            derived_max_model_len = rope_scaling[
+                "original_max_position_embeddings"]
         derived_max_model_len *= scaling_factor
 
     if max_model_len is None:
