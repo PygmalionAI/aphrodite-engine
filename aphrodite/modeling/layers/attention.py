@@ -321,10 +321,8 @@ class PagedAttentionWithRoPE(PagedAttention):
                          scale,
                          num_kv_heads,
                          sliding_window=sliding_window)
-        self.rotary_emb = get_rope(head_size, rotary_dim,
-                                   max_position, base,
-                                   is_neox_style,
-                                   rope_scaling)
+        self.rotary_emb = get_rope(head_size, rotary_dim, max_position, base,
+                                   is_neox_style, rope_scaling)
 
     def forward(
         self,

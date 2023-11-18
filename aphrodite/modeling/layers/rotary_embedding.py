@@ -270,6 +270,7 @@ class YaRNScalingRotaryEmbedding(RotaryEmbedding):
         cache = torch.cat((cos, sin), dim=-1)
         return cache
 
+
 def get_rope(
     head_size: int,
     rotary_dim: int,
