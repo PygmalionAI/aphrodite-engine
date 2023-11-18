@@ -171,6 +171,7 @@ class DynamicNTKScalingRotaryEmbedding(RotaryEmbedding):
         return cache
 
 
+# Inverse dim formula to find dim based on number of rotations
 def _yarn_find_correction_dim(num_rotations: int,
                               dim: int,
                               base: float = 10000,
@@ -180,6 +181,7 @@ def _yarn_find_correction_dim(num_rotations: int,
                                                               math.log(base))
 
 
+# Find dim range bounds based on rotations
 def _yarn_find_correction_range(low_rot: int,
                                 high_rot: int,
                                 dim: int,
@@ -197,7 +199,7 @@ def _yarn_linear_ramp_mask(low: float, high: float, dim: int,
                            dtype: torch.dtype,
                            device: torch.device) -> torch.Tensor:
     if low == high:
-        high += 0.001
+        high += 0.001  # Prevent singularity
 
     linear_func = (torch.arange(dim, dtype=dtype, device=device) -
                    low) / (high - low)
@@ -233,9 +235,9 @@ class YaRNScalingRotaryEmbedding(RotaryEmbedding):
         self.attn_factor = attn_factor
         self.beta_fast = beta_fast
         self.beta_slow = beta_slow
+        # Get n-d magnitude scaling corrected for interpolation
         self.mscale = float(
-            _yarn_get_mscale(self.scaling_factor) * attn_factor
-        )  # get n-d magnitude scaling corrected for interpolation
+            _yarn_get_mscale(self.scaling_factor) * attn_factor)
         super().__init__(head_size, rotary_dim, max_position_embeddings, base,
                          is_neox_style)
 
@@ -249,7 +251,7 @@ class YaRNScalingRotaryEmbedding(RotaryEmbedding):
         low, high = _yarn_find_correction_range(self.beta_fast, self.beta_slow,
                                                 self.rotary_dim, self.base,
                                                 self.max_position_embeddings)
-
+        # Get n-d rotational scaling corrected for extrapolation
         inv_freq_mask = (1 - _yarn_linear_ramp_mask(
             low, high, self.rotary_dim // 2, dtype=torch.float,
             device="cuda")) * self.extrapolation_factor
