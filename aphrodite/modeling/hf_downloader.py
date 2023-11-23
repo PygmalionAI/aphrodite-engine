@@ -11,16 +11,15 @@ from safetensors.torch import load_file, save_file, safe_open
 import numpy as np
 import torch
 from tqdm.auto import tqdm
-from transformers import PretrainedConfig
 
 from aphrodite.common.logger import init_logger
-from aphrodite.modeling.quantization_utils import get_quant_class
-from aphrodite.modeling.quantization_utils.base import QuantizationConfig
+from aphrodite.modeling.layers.quantization import (get_quantization_config,
+                                                     QuantizationConfig)
 
 logger = init_logger(__name__)
 
 
-class Disabledtqdm(tqdm):  # pylint: disable=inconsistent-mro
+class Disabledtqdm(tqdm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs, disable=True)
@@ -85,13 +84,8 @@ def convert_bin_to_safetensor_file(
 def get_quant_config(
     quantization: str,
     model_name_or_path: str,
-    hf_config: PretrainedConfig,
     cache_dir: Optional[str] = None,
 ) -> QuantizationConfig:
-    if quantization == "gptq" and hasattr(hf_config, "quantization_config"):
-        config = hf_config.quantization_config
-        return get_quant_class(quantization).from_config(config)
-
     is_local = os.path.isdir(model_name_or_path)
     if not is_local:
         # Download the config files.
@@ -104,7 +98,7 @@ def get_quant_config(
         hf_folder = model_name_or_path
     config_files = glob.glob(os.path.join(hf_folder, "*.json"))
 
-    quant_cls = get_quant_class(quantization)
+    quant_cls = get_quantization_config(quantization)
     quant_config_files = [
         f for f in config_files if any(
             f.endswith(x) for x in quant_cls.get_config_filenames())
@@ -150,6 +144,8 @@ def prepare_hf_model_weights(
     for pattern in allow_patterns:
         hf_weights_files += glob.glob(os.path.join(hf_folder, pattern))
     if not use_safetensors:
+        # Exclude files that are not needed for inference.
+        # https://github.com/huggingface/transformers/blob/v4.34.0/src/transformers/trainer.py#L227-L233
         blacklist = [
             "training_args.bin",
             "optimizer.bin",
@@ -242,7 +238,7 @@ def hf_model_weights_iterator(
             with safe_open(st_file, framework="pt") as f:
                 for name in f.keys():
                     param = f.get_slice(name)
-                    yield name, param
+                    yield name, convert_pyslice_to_tensor(param)
     else:
         for bin_file in hf_weights_files:
             state = torch.load(bin_file, map_location="cpu")
@@ -267,51 +263,10 @@ def convert_pyslice_to_tensor(x: Any) -> torch.Tensor:
     return x
 
 
-def load_padded_tensor_parallel_vocab(
-    param: torch.Tensor,
-    loaded_weight: Any,  # `torch.Tensor` or `PySafeSlice`
-    tensor_model_parallel_rank: int,
-) -> None:
-    shard_size = param.shape[0]
-    start_idx = tensor_model_parallel_rank * shard_size
-    end_idx = (tensor_model_parallel_rank + 1) * shard_size
-    loaded_weight = loaded_weight[start_idx:end_idx]
-    loaded_weight = convert_pyslice_to_tensor(loaded_weight)
-    param.data[:loaded_weight.shape[0]].copy_(loaded_weight)
-
-
-def load_tensor_parallel_weights(
-    param: torch.Tensor,
-    loaded_weight: Any,  # `torch.Tensor` or `PySafeSlice`
-    param_name: str,
-    column_parallel_weight_names: List[str],
-    row_parallel_weight_names: List[str],
-    tensor_model_parallel_rank: int,
-) -> None:
-    for p in column_parallel_weight_names:
-        if p in param_name:
-            shard_size = param.shape[0]
-            start_idx = tensor_model_parallel_rank * shard_size
-            end_idx = (tensor_model_parallel_rank + 1) * shard_size
-            loaded_weight = loaded_weight[start_idx:end_idx]
-            break
-    for p in row_parallel_weight_names:
-        if p in param_name:
-            shard_size = param.shape[-1]
-            start_idx = tensor_model_parallel_rank * shard_size
-            end_idx = (tensor_model_parallel_rank + 1) * shard_size
-            if isinstance(loaded_weight, torch.Tensor):
-                loaded_weight = loaded_weight[..., start_idx:end_idx]
-            else:
-                index = [slice(None)] * (len(loaded_weight.get_shape()) -
-                                         1) + [slice(start_idx, end_idx)]
-                loaded_weight = loaded_weight[index]
-            break
-
-    loaded_weight = convert_pyslice_to_tensor(loaded_weight)
-    assert param.shape == loaded_weight.shape, (
-        f"{param_name} shape mismatch between model and checkpoint: "
-        f"{param.shape} != {loaded_weight.shape}")
+def default_weight_loader(param: torch.Tensor,
+                          loaded_weight: torch.Tensor) -> None:
+    """Default weight loader."""
+    assert param.size() == loaded_weight.size()
     param.data.copy_(loaded_weight)
 
 
@@ -328,31 +283,4 @@ def initialize_dummy_weights(
     values between -1e-3 and 1e-3 works well for most models.
     """
     for param in model.state_dict().values():
-        if torch.is_floating_point(param):
-            param.data.uniform_(low, high)
-
-
-def get_parallel_weight(model: torch.nn.Module):
-    if model.quant_config is None:
-        column_weight_suffixes = ["weight", "bias"]
-        row_weight_suffixes = ["weight"]
-    else:
-        column_weight_suffixes = (
-            model.quant_config.get_col_parallel_tensor_names())
-        row_weight_suffixes = (
-            model.quant_config.get_row_parallel_tensor_names())
-
-    column_parallel_weights: List[str] = []
-    for layer in model.column_parallel_layers:
-        for suffix in column_weight_suffixes:
-            column_parallel_weights.append(f"{layer}.{suffix}")
-    row_parallel_weights: List[str] = []
-    for layer in model.row_parallel_layers:
-        for suffix in row_weight_suffixes:
-            row_parallel_weights.append(f"{layer}.{suffix}")
-
-    if hasattr(model, "parallel_vocab_layers"):
-        for layer in model.parallel_vocab_layers:
-            for suffix in ["weight", "bias"]:
-                column_parallel_weights.append(f"{layer}.{suffix}")
-    return column_parallel_weights, row_parallel_weights
+        param.data.uniform_(low, high)

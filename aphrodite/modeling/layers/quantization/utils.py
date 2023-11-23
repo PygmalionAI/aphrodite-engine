@@ -2,9 +2,8 @@ from typing import Optional
 
 import torch
 
-from aphrodite.modeling.layers.quantized_linear.gptq import (
-    GPTQColumnParallelLinear,
-    GPTQRowParallelLinear,
+from aphrodite.modeling.layers.quantization.gptq import (
+    GPTQLinearMethod,
     GPTQLinear,
     ExLlamaV2DeviceTensors,
 )
@@ -20,7 +19,7 @@ def quant_post_init(model, max_tokens: Optional[int] = None):
     model_uses_exllama = False
     for _, submodule in model.named_modules():
         if isinstance(submodule,
-                      (GPTQColumnParallelLinear, GPTQRowParallelLinear,
+                      (GPTQLinearMethod,
                        GPTQLinear)) and submodule.use_exllama:
             model_uses_exllama = True
             device = submodule.qweight.device
@@ -39,7 +38,7 @@ def quant_post_init(model, max_tokens: Optional[int] = None):
 
         for _, submodule in model.named_modules():
             if isinstance(submodule,
-                          (GPTQColumnParallelLinear, GPTQRowParallelLinear,
+                          (GPTQLinearMethod,
                            GPTQLinear)) and submodule.use_exllama:
                 device = submodule.qweight.device
                 submodule.post_init(temp_dq=model.device_tensors[device])
