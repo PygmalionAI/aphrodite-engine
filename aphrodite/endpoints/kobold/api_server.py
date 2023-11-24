@@ -167,11 +167,8 @@ async def generate_stream(
         async for res in results_generator:
             new_chunk = res.outputs[0].text[len(previous_output):]
             previous_output += new_chunk
-            gen_cache[kai_payload.genkey] = previous_output
             yield b"event: message\n"
             yield f"data: {json.dumps({'token': new_chunk})}\n\n".encode()
-
-        del gen_cache[kai_payload.genkey]
 
     return StreamingResponse(stream_kobold(),
                              headers={
