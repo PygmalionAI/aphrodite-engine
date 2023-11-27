@@ -229,7 +229,8 @@ async def abort_generation():
 @extra_api.get("/version")
 async def get_extra_version():
     """ Impersonate KoboldCpp with streaming support """
-    return JSONResponse({"result": "KoboldCpp", "version": "1.47"})
+    # Can not be bumped to 1.49 due to not having `trim_stop`
+    return JSONResponse({"result": "KoboldCpp", "version": "1.48"})
 
 
 @app.get("/health")
