@@ -61,6 +61,22 @@ class GPTQConfig(QuantizationConfig):
         group_size = cls.get_from_keys(config, ["group_size"])
         desc_act = cls.get_from_keys(config, ["desc_act"])
         return cls(weight_bits, group_size, desc_act)
+
+    @classmethod
+    def get_packed_tensors(cls) -> Dict[str, int]:
+        return {"qzeros": 1}
+
+    @classmethod
+    def get_transposed_tensor_names(cls) -> List[str]:
+        return ["qweight", "qzeros", "scales"]
+
+    def get_row_parallel_tensor_names(self) -> List[str]:
+        if self.desc_act or self.group_size == -1:
+            return ["qweight", "g_idx"]
+        return ["qweight", "qzeros", "scales", "g_idx"]
+
+    def get_col_parallel_tensor_names(self) -> List[str]:
+        return ["qweight", "qzeros", "scales", "bias"]
     
     def get_linear_method(self) -> "GPTQLinearMethod":
         return GPTQLinearMethod(self)
@@ -88,125 +104,125 @@ class ExLlamaV2DeviceTensors:
         return scratch_slice
 
 
-class GPTQLinearMethod(LinearMethodBase):
-    """Linear method for GPTQ.
-    Args:
-        quant_config: The GPTQ quantization config.
-    """
-    def __init__(self, quant_config: GPTQConfig):
-        self.quant_config = quant_config
+# class GPTQLinearMethod(LinearMethodBase):
+#     """Linear method for GPTQ.
+#     Args:
+#         quant_config: The GPTQ quantization config.
+#     """
+#     def __init__(self, quant_config: GPTQConfig):
+#         self.quant_config = quant_config
     
-    def create_weights(self, input_size: int, output_size: int,
-                       params_dtype: torch.dtype) -> Dict[str, torch.Tensor]:
-        if input_size % self.quant_config.group_size != 0:
-            raise ValueError(
-                "The input size is not aligned with the quantized "
-                "weight shape. This can be caused by too large "
-                "tensor parallel size.")
-        if output_size % self.quant_config.pack_factor != 0:
-            raise ValueError(
-                "The output size is not aligned with the quantized "
-                "weight shape. This can be caused by too large "
-                "tensor parallel size.")
-        if self.quant_config.desc_act and self.quant_config.group_size != -1:
-            group_number = input_size // self.quant_config.group_size
-            self.use_exllama = False
-        else:
-            group_number = input_size // self.quant_config.group_size
-            self.use_exllama = True
-        self.input_size = input_size
-        self.output_size = output_size
+#     def create_weights(self, input_size: int, output_size: int,
+#                        params_dtype: torch.dtype) -> Dict[str, torch.Tensor]:
+#         if input_size % self.quant_config.group_size != 0:
+#             raise ValueError(
+#                 "The input size is not aligned with the quantized "
+#                 "weight shape. This can be caused by too large "
+#                 "tensor parallel size.")
+#         if output_size % self.quant_config.pack_factor != 0:
+#             raise ValueError(
+#                 "The output size is not aligned with the quantized "
+#                 "weight shape. This can be caused by too large "
+#                 "tensor parallel size.")
+#         if self.quant_config.desc_act and self.quant_config.group_size != -1:
+#             group_number = input_size // self.quant_config.group_size
+#             self.use_exllama = False
+#         else:
+#             group_number = input_size // self.quant_config.group_size
+#             self.use_exllama = True
+#         self.input_size = input_size
+#         self.output_size = output_size
         
-        qweight = Parameter(
-            torch.empty(
-                input_size // self.quant_config.pack_factor,
-                output_size,
-                device="cuda",
-                dtype=torch.int32,
-            ),
-            requires_grad=False,
-        )
-        set_weight_attrs(
-            qweight, {
-                "input_dim": 0,
-                "output_dim": 1,
-                "packed_dim": 0,
-                "pack_factor": self.quant_config.pack_factor,
-            })
-        qzeros = Parameter(
-            torch.empty(
-                input_size // self.quant_config.group_size,
-                output_size // self.quant_config.pack_factor,
-                device="cuda",
-                dtype=torch.int32,
-            ),
-            requires_grad=False,
-        )
-        set_weight_attrs(
-            qzeros, {
-                "input_dim": 0,
-                "output_dim": 1,
-                "packed_dim": 1,
-                "pack_factor": self.quant_config.pack_factor,
-            })
-        scales = Parameter(
-            torch.empty(
-                input_size // self.quant_config.group_size,
-                output_size,
-                device="cuda",
-                dtype=params_dtype,
-            ),
-            requires_grad=False,
-        )
-        set_weight_attrs(scales, {
-            "input_dim": 0,
-            "output_dim": 1,
-        })
-        g_idx = Parameter(
-            torch.tensor(
-                [
-                    i // self.quant_config.group_size
-                    for i in range(input_size)
-                ],
-                device="cuda",
-                dtype=torch.int32,
-            ),
-            requires_grad=False,
-        )
-        set_weight_attrs(g_idx, {
-            "input_dim": 0,
-        })
-        return {
-            "qweight": qweight,
-            "qzeros": qzeros,
-            "scales": scales,
-            "g_idx": g_idx,
-        }
+#         qweight = Parameter(
+#             torch.empty(
+#                 input_size // self.quant_config.pack_factor,
+#                 output_size,
+#                 device="cuda",
+#                 dtype=torch.int32,
+#             ),
+#             requires_grad=False,
+#         )
+#         set_weight_attrs(
+#             qweight, {
+#                 "input_dim": 0,
+#                 "output_dim": 1,
+#                 "packed_dim": 0,
+#                 "pack_factor": self.quant_config.pack_factor,
+#             })
+#         qzeros = Parameter(
+#             torch.empty(
+#                 input_size // self.quant_config.group_size,
+#                 output_size // self.quant_config.pack_factor,
+#                 device="cuda",
+#                 dtype=torch.int32,
+#             ),
+#             requires_grad=False,
+#         )
+#         set_weight_attrs(
+#             qzeros, {
+#                 "input_dim": 0,
+#                 "output_dim": 1,
+#                 "packed_dim": 1,
+#                 "pack_factor": self.quant_config.pack_factor,
+#             })
+#         scales = Parameter(
+#             torch.empty(
+#                 input_size // self.quant_config.group_size,
+#                 output_size,
+#                 device="cuda",
+#                 dtype=params_dtype,
+#             ),
+#             requires_grad=False,
+#         )
+#         set_weight_attrs(scales, {
+#             "input_dim": 0,
+#             "output_dim": 1,
+#         })
+#         g_idx = Parameter(
+#             torch.tensor(
+#                 [
+#                     i // self.quant_config.group_size
+#                     for i in range(input_size)
+#                 ],
+#                 device="cuda",
+#                 dtype=torch.int32,
+#             ),
+#             requires_grad=False,
+#         )
+#         set_weight_attrs(g_idx, {
+#             "input_dim": 0,
+#         })
+#         return {
+#             "qweight": qweight,
+#             "qzeros": qzeros,
+#             "scales": scales,
+#             "g_idx": g_idx,
+#         }
     
-    def apply_weights(self, x: torch.Tensor) -> torch.Tensor:
-        out_shape = x.shape[:-1] + (self.qweight.shape[-1], )
-        reshaped_x = x.reshape(-1, x.shape[-1])
+#     def apply_weights(self, x: torch.Tensor) -> torch.Tensor:
+#         out_shape = x.shape[:-1] + (self.qweight.shape[-1], )
+#         reshaped_x = x.reshape(-1, x.shape[-1])
 
-        if self.use_exllama:
-            output = torch.empty((reshaped_x.shape[0], self.qweight.shape[-1]),
-                                 dtype=torch.float16,
-                                 device=x.device)
-            quantization_ops.gemm_half_q_half(reshaped_x, self.q4, output,
-                                              False)
-        else:
-            output = torch.zeros((reshaped_x.shape[0], self.qweight.shape[-1]),
-                                 dtype=torch.float32,
-                                 device=x.device)
-            quantization_ops.gptq_descact_matmul(reshaped_x.float(),
-                                                 self.qweight, output,
-                                                 self.scales.float(),
-                                                 self.qzeros, self.g_idx)
-            output = output.half()
-        return output.reshape(out_shape)
+#         if self.use_exllama:
+#             output = torch.empty((reshaped_x.shape[0], self.qweight.shape[-1]),
+#                                  dtype=torch.float16,
+#                                  device=x.device)
+#             quantization_ops.gemm_half_q_half(reshaped_x, self.q4, output,
+#                                               False)
+#         else:
+#             output = torch.zeros((reshaped_x.shape[0], self.qweight.shape[-1]),
+#                                  dtype=torch.float32,
+#                                  device=x.device)
+#             quantization_ops.gptq_descact_matmul(reshaped_x.float(),
+#                                                  self.qweight, output,
+#                                                  self.scales.float(),
+#                                                  self.qzeros, self.g_idx)
+#             output = output.half()
+#         return output.reshape(out_shape)
 
         
 
-class GPTQLinear(torch.nn.Module):
+class GPTQLinearMethod(LinearMethodBase, torch.nn.Module):
 
     def __init__(self,
                  input_size,
@@ -320,229 +336,229 @@ class GPTQLinear(torch.nn.Module):
         return self.temp_dq_size() + self.temp_fwd_size(max_tokens)
 
 
-# class GPTQColumnParallelLinear(ColumnParallelLinear):
+class GPTQColumnParallelLinear(LinearMethodBase):
 
-#     def create_weights(self, dtype: torch.dtype) -> None:
-#         assert self.input_size % self.quant_config.pack_factor == 0
-#         assert (self.output_size_per_partition %
-#                 self.quant_config.pack_factor == 0)
-#         self.use_exllama = True
-#         group_size = self.quant_config.group_size if (
-#             self.quant_config.group_size != -1) else self.input_size
+    def create_weights(self, dtype: torch.dtype) -> None:
+        assert self.input_size % self.quant_config.pack_factor == 0
+        assert (self.output_size_per_partition %
+                self.quant_config.pack_factor == 0)
+        self.use_exllama = True
+        group_size = self.quant_config.group_size if (
+            self.quant_config.group_size != -1) else self.input_size
 
-#         self.qweight = Parameter(
-#             torch.empty(
-#                 self.input_size // self.quant_config.pack_factor,
-#                 self.output_size_per_partition,
-#                 device="cuda",
-#                 dtype=torch.int32,
-#             ),
-#             requires_grad=False,
-#         )
-#         self.qzeros = Parameter(
-#             torch.empty(
-#                 self.input_size // group_size,
-#                 self.output_size_per_partition //
-#                 self.quant_config.pack_factor,
-#                 device="cuda",
-#                 dtype=torch.int32,
-#             ),
-#             requires_grad=False,
-#         )
-#         self.scales = Parameter(
-#             torch.empty(
-#                 self.input_size // group_size,
-#                 self.output_size_per_partition,
-#                 device="cuda",
-#                 dtype=dtype,
-#             ),
-#             requires_grad=False,
-#         )
-#         self.g_idx = Parameter(
-#             torch.tensor(
-#                 [i // group_size for i in range(self.input_size)],
-#                 device="cuda",
-#                 dtype=torch.int32,
-#             ),
-#             requires_grad=False,
-#         )
+        self.qweight = Parameter(
+            torch.empty(
+                self.input_size // self.quant_config.pack_factor,
+                self.output_size_per_partition,
+                device="cuda",
+                dtype=torch.int32,
+            ),
+            requires_grad=False,
+        )
+        self.qzeros = Parameter(
+            torch.empty(
+                self.input_size // group_size,
+                self.output_size_per_partition //
+                self.quant_config.pack_factor,
+                device="cuda",
+                dtype=torch.int32,
+            ),
+            requires_grad=False,
+        )
+        self.scales = Parameter(
+            torch.empty(
+                self.input_size // group_size,
+                self.output_size_per_partition,
+                device="cuda",
+                dtype=dtype,
+            ),
+            requires_grad=False,
+        )
+        self.g_idx = Parameter(
+            torch.tensor(
+                [i // group_size for i in range(self.input_size)],
+                device="cuda",
+                dtype=torch.int32,
+            ),
+            requires_grad=False,
+        )
 
-#     def post_init(self, temp_dq):
-#         assert self.qweight.device.type == "cuda"
-#         assert self.qweight.device.index is not None
+    def post_init(self, temp_dq):
+        assert self.qweight.device.type == "cuda"
+        assert self.qweight.device.index is not None
 
-#         none_tensor = torch.empty((1, 1), device="meta")
-#         temp_dq = temp_dq.get_scratch_slice(self.temp_dq_size())
-#         if not self.quant_config.desc_act:
-#             self.q4 = quantization_ops.make_q_matrix(
-#                 self.qweight,
-#                 none_tensor,
-#                 none_tensor,
-#                 self.qzeros,
-#                 self.scales,
-#                 none_tensor,
-#                 temp_dq,
-#             )
-#         else:
-#             self.q_perm = torch.empty((self.input_size, ),
-#                                       dtype=torch.short,
-#                                       device=self.qweight.device)
-#             self.q_invperm = torch.empty_like(self.q_perm)
-#             self.q4 = quantization_ops.make_q_matrix(
-#                 self.qweight,
-#                 self.q_perm,
-#                 self.q_invperm,
-#                 self.qzeros,
-#                 self.scales,
-#                 self.g_idx.cpu(),
-#                 temp_dq,
-#             )
+        none_tensor = torch.empty((1, 1), device="meta")
+        temp_dq = temp_dq.get_scratch_slice(self.temp_dq_size())
+        if not self.quant_config.desc_act:
+            self.q4 = quantization_ops.make_q_matrix(
+                self.qweight,
+                none_tensor,
+                none_tensor,
+                self.qzeros,
+                self.scales,
+                none_tensor,
+                temp_dq,
+            )
+        else:
+            self.q_perm = torch.empty((self.input_size, ),
+                                      dtype=torch.short,
+                                      device=self.qweight.device)
+            self.q_invperm = torch.empty_like(self.q_perm)
+            self.q4 = quantization_ops.make_q_matrix(
+                self.qweight,
+                self.q_perm,
+                self.q_invperm,
+                self.qzeros,
+                self.scales,
+                self.g_idx.cpu(),
+                temp_dq,
+            )
 
-#     def apply_weights(
-#         self,
-#         x: torch.Tensor,
-#         bias: Optional[torch.Tensor],
-#     ) -> torch.Tensor:
-#         out_shape = x.shape[:-1] + (self.qweight.shape[-1], )
-#         reshaped_x = x.reshape(-1, x.shape[-1])
-#         output = torch.empty((reshaped_x.shape[0], self.qweight.shape[-1]),
-#                              dtype=torch.float16,
-#                              device=x.device)
-#         quantization_ops.gemm_half_q_half(reshaped_x, self.q4, output, False)
-#         if bias is not None:
-#             output = output + bias
-#         return output.reshape(out_shape)
+    def apply_weights(
+        self,
+        x: torch.Tensor,
+        bias: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        out_shape = x.shape[:-1] + (self.qweight.shape[-1], )
+        reshaped_x = x.reshape(-1, x.shape[-1])
+        output = torch.empty((reshaped_x.shape[0], self.qweight.shape[-1]),
+                             dtype=torch.float16,
+                             device=x.device)
+        quantization_ops.gemm_half_q_half(reshaped_x, self.q4, output, False)
+        if bias is not None:
+            output = output + bias
+        return output.reshape(out_shape)
 
-#     def temp_dq_size(self):
-#         return self.input_size * self.output_size_per_partition * 2 + 128
+    def temp_dq_size(self):
+        return self.input_size * self.output_size_per_partition * 2 + 128
 
-#     def temp_fwd_size(self, max_tokens):
-#         return self.output_size_per_partition * max_tokens * 4 + 128
+    def temp_fwd_size(self, max_tokens):
+        return self.output_size_per_partition * max_tokens * 4 + 128
 
-#     def scratch_space_fixed(self, max_tokens):
-#         return self.temp_dq_size() + self.temp_fwd_size(max_tokens)
+    def scratch_space_fixed(self, max_tokens):
+        return self.temp_dq_size() + self.temp_fwd_size(max_tokens)
 
 
-# class GPTQRowParallelLinear(RowParallelLinear):
+class GPTQRowParallelLinear(LinearMethodBase):
 
-#     def create_weights(self, dtype: torch.dtype) -> None:
-#         assert (self.input_size_per_partition %
-#                 self.quant_config.pack_factor == 0)
-#         assert self.output_size % self.quant_config.pack_factor == 0
-#         group_size = self.quant_config.group_size if (
-#             self.quant_config.group_size != -1
-#         ) else self.input_size_per_partition
-#         if self.tp_size > 1 and (self.quant_config.desc_act
-#                                  and self.quant_config.group_size != -1):
-#             group_number = self.input_size // group_size
-#             self.use_exllama = False
-#         else:
-#             group_number = self.input_size_per_partition // group_size
-#             self.use_exllama = True
-#         self.qweight = Parameter(
-#             torch.empty(
-#                 self.input_size_per_partition // self.quant_config.pack_factor,
-#                 self.output_size,
-#                 device="cuda",
-#                 dtype=torch.int32,
-#             ),
-#             requires_grad=False,
-#         )
-#         self.qzeros = Parameter(
-#             torch.empty(
-#                 group_number,
-#                 self.output_size // self.quant_config.pack_factor,
-#                 device="cuda",
-#                 dtype=torch.int32,
-#             ),
-#             requires_grad=False,
-#         )
-#         self.scales = Parameter(
-#             torch.empty(
-#                 group_number,
-#                 self.output_size,
-#                 device="cuda",
-#                 dtype=dtype,
-#             ),
-#             requires_grad=False,
-#         )
-#         self.g_idx = Parameter(
-#             torch.tensor(
-#                 [
-#                     i // group_size
-#                     for i in range(self.input_size_per_partition)
-#                 ],
-#                 device="cuda",
-#                 dtype=torch.int32,
-#             ),
-#             requires_grad=False,
-#         )
+    def create_weights(self, dtype: torch.dtype) -> None:
+        assert (self.input_size_per_partition %
+                self.quant_config.pack_factor == 0)
+        assert self.output_size % self.quant_config.pack_factor == 0
+        group_size = self.quant_config.group_size if (
+            self.quant_config.group_size != -1
+        ) else self.input_size_per_partition
+        if self.tp_size > 1 and (self.quant_config.desc_act
+                                 and self.quant_config.group_size != -1):
+            group_number = self.input_size // group_size
+            self.use_exllama = False
+        else:
+            group_number = self.input_size_per_partition // group_size
+            self.use_exllama = True
+        self.qweight = Parameter(
+            torch.empty(
+                self.input_size_per_partition // self.quant_config.pack_factor,
+                self.output_size,
+                device="cuda",
+                dtype=torch.int32,
+            ),
+            requires_grad=False,
+        )
+        self.qzeros = Parameter(
+            torch.empty(
+                group_number,
+                self.output_size // self.quant_config.pack_factor,
+                device="cuda",
+                dtype=torch.int32,
+            ),
+            requires_grad=False,
+        )
+        self.scales = Parameter(
+            torch.empty(
+                group_number,
+                self.output_size,
+                device="cuda",
+                dtype=dtype,
+            ),
+            requires_grad=False,
+        )
+        self.g_idx = Parameter(
+            torch.tensor(
+                [
+                    i // group_size
+                    for i in range(self.input_size_per_partition)
+                ],
+                device="cuda",
+                dtype=torch.int32,
+            ),
+            requires_grad=False,
+        )
 
-#     def post_init(self, temp_dq):
-#         if not self.use_exllama:
-#             return
-#         assert self.qweight.device.type == "cuda"
-#         assert self.qweight.device.index is not None
+    def post_init(self, temp_dq):
+        if not self.use_exllama:
+            return
+        assert self.qweight.device.type == "cuda"
+        assert self.qweight.device.index is not None
 
-#         none_tensor = torch.empty((1, 1), device="meta")
-#         temp_dq = temp_dq.get_scratch_slice(self.temp_dq_size())
-#         if not self.quant_config.desc_act:
-#             self.q4 = quantization_ops.make_q_matrix(
-#                 self.qweight,
-#                 none_tensor,
-#                 none_tensor,
-#                 self.qzeros,
-#                 self.scales,
-#                 none_tensor,
-#                 temp_dq,
-#             )
-#         else:
-#             self.q_perm = torch.empty((self.input_size, ),
-#                                       dtype=torch.short,
-#                                       device=self.qweight.device)
-#             self.q_invperm = torch.empty_like(self.q_perm)
-#             self.q4 = quantization_ops.make_q_matrix(
-#                 self.qweight,
-#                 self.q_perm,
-#                 self.q_invperm,
-#                 self.qzeros,
-#                 self.scales,
-#                 self.g_idx.cpu(),
-#                 temp_dq,
-#             )
+        none_tensor = torch.empty((1, 1), device="meta")
+        temp_dq = temp_dq.get_scratch_slice(self.temp_dq_size())
+        if not self.quant_config.desc_act:
+            self.q4 = quantization_ops.make_q_matrix(
+                self.qweight,
+                none_tensor,
+                none_tensor,
+                self.qzeros,
+                self.scales,
+                none_tensor,
+                temp_dq,
+            )
+        else:
+            self.q_perm = torch.empty((self.input_size, ),
+                                      dtype=torch.short,
+                                      device=self.qweight.device)
+            self.q_invperm = torch.empty_like(self.q_perm)
+            self.q4 = quantization_ops.make_q_matrix(
+                self.qweight,
+                self.q_perm,
+                self.q_invperm,
+                self.qzeros,
+                self.scales,
+                self.g_idx.cpu(),
+                temp_dq,
+            )
 
-#     def apply_weights(self, x: torch.Tensor) -> torch.Tensor:
-#         out_shape = x.shape[:-1] + (self.qweight.shape[-1], )
-#         reshaped_x = x.reshape(-1, x.shape[-1])
+    def apply_weights(self, x: torch.Tensor) -> torch.Tensor:
+        out_shape = x.shape[:-1] + (self.qweight.shape[-1], )
+        reshaped_x = x.reshape(-1, x.shape[-1])
 
-#         if self.use_exllama:
-#             output = torch.empty((reshaped_x.shape[0], self.qweight.shape[-1]),
-#                                  dtype=torch.float16,
-#                                  device=x.device)
-#             quantization_ops.gemm_half_q_half(reshaped_x, self.q4, output,
-#                                               False)
-#         else:
-#             output = torch.zeros((reshaped_x.shape[0], self.qweight.shape[-1]),
-#                                  dtype=torch.float32,
-#                                  device=x.device)
-#             quantization_ops.gptq_descact_matmul(reshaped_x.float(),
-#                                                  self.qweight, output,
-#                                                  self.scales.float(),
-#                                                  self.qzeros, self.g_idx)
-#             output = output.half()
-#         return output.reshape(out_shape)
+        if self.use_exllama:
+            output = torch.empty((reshaped_x.shape[0], self.qweight.shape[-1]),
+                                 dtype=torch.float16,
+                                 device=x.device)
+            quantization_ops.gemm_half_q_half(reshaped_x, self.q4, output,
+                                              False)
+        else:
+            output = torch.zeros((reshaped_x.shape[0], self.qweight.shape[-1]),
+                                 dtype=torch.float32,
+                                 device=x.device)
+            quantization_ops.gptq_descact_matmul(reshaped_x.float(),
+                                                 self.qweight, output,
+                                                 self.scales.float(),
+                                                 self.qzeros, self.g_idx)
+            output = output.half()
+        return output.reshape(out_shape)
 
-#     def temp_dq_size(self):
-#         if not self.use_exllama:
-#             return 0
-#         return self.input_size_per_partition * self.output_size * 2 + 128
+    def temp_dq_size(self):
+        if not self.use_exllama:
+            return 0
+        return self.input_size_per_partition * self.output_size * 2 + 128
 
-#     def temp_fwd_size(self, max_tokens):
-#         if not self.use_exllama:
-#             return 0
-#         return self.output_size * max_tokens * 4 + 128
+    def temp_fwd_size(self, max_tokens):
+        if not self.use_exllama:
+            return 0
+        return self.output_size * max_tokens * 4 + 128
 
-#     def scratch_space_fixed(self, max_tokens):
-#         if not self.use_exllama:
-#             return 0
-#         return self.temp_dq_size() + self.temp_fwd_size(max_tokens)
+    def scratch_space_fixed(self, max_tokens):
+        if not self.use_exllama:
+            return 0
+        return self.temp_dq_size() + self.temp_fwd_size(max_tokens)

@@ -3,8 +3,7 @@ from typing import Optional
 import torch
 
 from aphrodite.modeling.layers.quantization.gptq import (
-    GPTQLinearMethod,
-    GPTQLinear,
+    GPTQColumnParallelLinear, GPTQRowParallelLinear, GPTQLinearMethod,
     ExLlamaV2DeviceTensors,
 )
 
@@ -19,8 +18,8 @@ def quant_post_init(model, max_tokens: Optional[int] = None):
     model_uses_exllama = False
     for _, submodule in model.named_modules():
         if isinstance(submodule,
-                      (GPTQLinearMethod,
-                       GPTQLinear)) and submodule.use_exllama:
+                      (GPTQColumnParallelLinear, GPTQRowParallelLinear,
+                       GPTQLinearMethod)) and submodule.use_exllama:
             model_uses_exllama = True
             device = submodule.qweight.device
             scratch_fixed = submodule.scratch_space_fixed(max_tokens)
@@ -38,8 +37,8 @@ def quant_post_init(model, max_tokens: Optional[int] = None):
 
         for _, submodule in model.named_modules():
             if isinstance(submodule,
-                          (GPTQLinearMethod,
-                           GPTQLinear)) and submodule.use_exllama:
+                          (GPTQColumnParallelLinear, GPTQRowParallelLinear,
+                           GPTQLinearMethod)) and submodule.use_exllama:
                 device = submodule.qweight.device
                 submodule.post_init(temp_dq=model.device_tensors[device])
     torch.cuda.empty_cache()

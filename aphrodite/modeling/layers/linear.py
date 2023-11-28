@@ -35,6 +35,7 @@ class LinearMethodBase(ABC):
         raise NotImplementedError
 
 
+
 class UnquantizedLinearMethod(LinearMethodBase):
     """Linear method without quantization.
 
