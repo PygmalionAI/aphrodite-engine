@@ -54,3 +54,4 @@ class QuantizationConfig(ABC):
     def get_linear_method(self) -> LinearMethodBase:
         """Get the linear method to use for the quantized linear layer."""
         raise NotImplementedError
+    
