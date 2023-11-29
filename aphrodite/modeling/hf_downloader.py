@@ -267,6 +267,7 @@ def convert_pyslice_to_tensor(x: Any) -> torch.Tensor:
         x = x[:]
     return x
 
+
 def default_weight_loader(param: torch.Tensor,
                           loaded_weight: torch.Tensor) -> None:
     """Default weight loader."""
