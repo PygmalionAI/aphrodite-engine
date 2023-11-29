@@ -5,7 +5,7 @@ from torch.nn.parameter import Parameter
 
 from aphrodite import quantization_ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                               set_weight_attrs)
+                                              set_weight_attrs)
 from aphrodite.modeling.layers.quantization.base_config import QuantizationConfig
 
 
@@ -153,4 +153,3 @@ class AWQLinearMethod(LinearMethodBase):
         if bias is not None:
             out = out + bias
         return out.reshape(out_shape)
-    

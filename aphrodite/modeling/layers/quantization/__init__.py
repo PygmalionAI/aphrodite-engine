@@ -5,7 +5,6 @@ from aphrodite.modeling.layers.quantization.base_config import QuantizationConfi
 
 _QUANTIZATION_CONFIG_REGISTRY = {
     "awq": AWQConfig,
-
 }
 
 
@@ -19,4 +18,3 @@ __all__ = [
     "QuantizationConfig",
     "get_quantization_config",
 ]
-

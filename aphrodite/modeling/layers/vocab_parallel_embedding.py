@@ -137,4 +137,3 @@ class ParallelLMHead(VocabParallelEmbedding):
     def forward(self, input_):
         del input_
         raise RuntimeError("LMHead's weights should be used in the sampler.")
-    

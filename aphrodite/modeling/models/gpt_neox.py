@@ -31,9 +31,9 @@ from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.attention import PagedAttentionWithRoPE
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
-                                               LinearMethodBase,
-                                               QKVParallelLinear,
-                                               RowParallelLinear)
+                                              LinearMethodBase,
+                                              QKVParallelLinear,
+                                              RowParallelLinear)
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding, ParallelLMHead)

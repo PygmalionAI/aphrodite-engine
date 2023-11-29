@@ -2,7 +2,6 @@ from typing import Optional
 
 import torch
 from transformers import PretrainedConfig
-from transformers.utils.quantization_config import QuantizationMethod
 
 from aphrodite.common.logger import init_logger
 from aphrodite.transformers_utils.config import get_config

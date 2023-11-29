@@ -14,12 +14,12 @@ from tqdm.auto import tqdm
 
 from aphrodite.common.logger import init_logger
 from aphrodite.modeling.layers.quantization import (get_quantization_config,
-                                                     QuantizationConfig)
+                                                    QuantizationConfig)
 
 logger = init_logger(__name__)
 
 
-class Disabledtqdm(tqdm):
+class Disabledtqdm(tqdm):  # pylint: disable=inconsistent-mro
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs, disable=True)
@@ -284,4 +284,3 @@ def initialize_dummy_weights(
     """
     for param in model.state_dict().values():
         param.data.uniform_(low, high)
-
