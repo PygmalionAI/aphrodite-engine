@@ -43,7 +43,9 @@ class FastGELU(nn.Module):
         activation_ops.gelu_fast(out, x)
         return out
 
+
 class ScaledActivation(nn.Module):
+
     def __init__(
         self,
         act_module: nn.Module,
@@ -53,9 +55,8 @@ class ScaledActivation(nn.Module):
         super().__init__()
         self.act_module = act_module
         self.scales = nn.Parameter(
-            torch.empty(hidden_size,
-            dtype=params_dtype, device="cuda"))
-    
+            torch.empty(hidden_size, dtype=params_dtype, device="cuda"))
+
     def forward(self, x: torch.Tensor):
         return self.act(x) / self.scales
 
@@ -73,8 +74,9 @@ def get_act_fn(
     act_fn: str,
     quant_config: Optional[QuantizationConfig] = None,
     intermediate_size: Optional[int] = None,
-    ) -> nn.Module:
+) -> nn.Module:
     """Get an activation function by name."""
+    # pylint: disable=used-before-assignment
     act_fn_name = act_fn_name.lower()
     if act_fn_name not in _ACTIVATION_REGISTRY:
         raise ValueError(
@@ -87,7 +89,9 @@ def get_act_fn(
                     "intermediate_size must be provided when using "
                     f"{act_fn_name} with quantization for scaled "
                     "activation functions.")
-            return ScaleActivation(act_fn, intermediate_size,
-                                   params_dtype=torch.get_default_dtype(),
+            return ScaledActivation(
+                act_fn,
+                intermediate_size,
+                params_dtype=torch.get_default_dtype(),
             )
-    return act_fn 
+    return act_fn

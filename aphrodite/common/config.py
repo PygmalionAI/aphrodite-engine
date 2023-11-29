@@ -121,8 +121,8 @@ class ModelConfig:
                     f"Must be one of {supported_quantization}.")
         if self.quantization is not None:
             logger.warning(f"{self.quantization} quantization is not fully "
-                        "optimized yet. The speed can be slower than "
-                        "non-quantized models (16/32bit).")
+                           "optimized yet. The speed can be slower than "
+                           "non-quantized models (16/32bit).")
 
     def verify_with_parallel_config(
         self,

@@ -126,8 +126,7 @@ class GPTNeoXMLP(nn.Module):
             linear_method=linear_method,
         )
         quant_config = getattr(linear_method, "quant_config", None)
-        self.act = get_act_fn(config.hidden_act,
-                              quant_config,
+        self.act = get_act_fn(config.hidden_act, quant_config,
                               config.intermediate_size)
 
     def forward(self, hidden_states):
