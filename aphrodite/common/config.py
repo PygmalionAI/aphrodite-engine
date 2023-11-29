@@ -101,14 +101,27 @@ class ModelConfig:
 
     def _verify_quantization(self) -> None:
         supported_quantization = ["awq"]
-        if self.quantization is None:
-            return
-        quantization = self.quantization.lower()
-        if quantization not in supported_quantization:
-            raise ValueError(
-                f"Unknown quantization: {self.quantization}. Must be one of "
-                f"{supported_quantization}.")
-        self.quantization = quantization
+        if self.quantization is not None:
+            self.quantization = self.quantization.lower()
+
+        hf_quant_config = getattr(self.hf_config, "quant_config", None)
+        if hf_quant_config is not None:
+            hf_quant_method = str(hf_quant_config["quant_method"]).lower()
+            if self.quantization is None:
+                self.quantization = hf_quant_method
+            elif self.quantization != hf_quant_method:
+                raise ValueError(
+                    f"Model quantization method is {hf_quant_method} "
+                    f"but quantization argument is {self.quantization}. "
+                    "Please use the same quantization method.")
+        if self.quantization is not None:
+            if self.quantization not in supported_quantization:
+                raise ValueError(
+                    f"Unknown quantization method: {self.quantization}. "
+                    f"Must be one of {supported_quantization}.")
+        logger.warning(f"{self.quantization} quantization is not fully "
+                       "optimized yet. The speed can be slower than "
+                       "non-quantized models (16/32bit).")
 
     def verify_with_parallel_config(
         self,
