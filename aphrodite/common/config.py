@@ -339,9 +339,8 @@ def _get_and_verify_dtype(
                 torch_dtype = config_dtype
         else:
             if dtype not in _STR_DTYPE_TO_TORCH_DTYPE:
-                raise ValueError(
-                    f"Unknown dtype: {dtype}. Must be one of "
-                    f"{list(_STR_DTYPE_TO_TORCH_DTYPE.keys())}.")
+                raise ValueError(f"Unknown dtype: {dtype}. Must be one of "
+                                 f"{list(_STR_DTYPE_TO_TORCH_DTYPE.keys())}.")
             torch_dtype = _STR_DTYPE_TO_TORCH_DTYPE[dtype]
     elif isinstance(dtype, torch.dtype):
         torch_dtype = dtype

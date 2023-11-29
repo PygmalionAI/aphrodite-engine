@@ -22,6 +22,7 @@ from aphrodite.common.sequence import SamplerOutput
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
+
 class PhiEmbedding(nn.Module):
 
     def __init__(self, config: PretrainedConfig):
@@ -270,4 +271,3 @@ class PhiForCausalLM(nn.Module):
             weight_loader = getattr(param, "weight_loader",
                                     default_weight_loader)
             weight_loader(param, loaded_weight)
-

@@ -336,11 +336,10 @@ async def create_chat_completion(
                 yield f"data: {response_json}\n\n"
                 if output.finish_reason is not None:
                     prompt_tokens = len(res.prompt_token_ids)
-                    final_usage = UsageInfo(prompt_tokens=prompt_tokens,
-                                            completion_tokens=
-                                            completion_tokens,
-                                            total_tokens=prompt_tokens +
-                                            completion_tokens)
+                    final_usage = UsageInfo(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=prompt_tokens + completion_tokens)
                     response_json = create_stream_response_json(
                         index=i,
                         text="",
@@ -587,11 +586,10 @@ async def create_completion(
                                 if request.logprobs is not None else None)
                     prompt_tokens = len(res.prompt_token_ids)
                     completion_tokens = len(output.token_ids)
-                    final_usage = UsageInfo(prompt_tokens=prompt_tokens,
-                                            completion_tokens=
-                                            completion_tokens,
-                                            total_tokens=prompt_tokens +
-                                            completion_tokens)
+                    final_usage = UsageInfo(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=prompt_tokens + completion_tokens)
                     response_json = create_stream_response_json(
                         index=i,
                         text="",
