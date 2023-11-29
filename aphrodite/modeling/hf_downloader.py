@@ -18,7 +18,7 @@ from aphrodite.modeling.layers.quantization import (get_quantization_config,
 
 logger = init_logger(__name__)
 
-magnet:?xt=urn:btih:26a88a12ab6ced545fb916ee701858d0d5e10c55&dn=Richard+Wagner++Complete+Works+For+Piano+%282+CD%29&tr=udp%3A%2F%2Ftracker.leechers-paradise.org%3A6969&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A80&tr=udp%3A%2F%2Fopen.demonii.com%3A1337&tr=udp%3A%2F%2Ftracker.coppersurfer.tk%3A6969&tr=udp%3A%2F%2Fexodus.desync.com%3A6969
+
 class Disabledtqdm(tqdm):
 
     def __init__(self, *args, **kwargs):
