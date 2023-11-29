@@ -1,22 +1,26 @@
+from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 import torch
 
+from aphrodite.modeling.layers.linear import LinearMethodBase
 
-class QuantizationConfig:
 
-    @classmethod
-    def get_name(cls) -> str:
+class QuantizationConfig(ABC):
+    """Base class for quantization configs."""
+
+    @abstractmethod
+    def get_name(self) -> str:
         """Name of the quantization method."""
         raise NotImplementedError
 
-    @classmethod
-    def get_supported_act_dtypes(cls) -> List[torch.dtype]:
+    @abstractmethod
+    def get_supported_act_dtypes(self) -> List[torch.dtype]:
         """List of supported activation dtypes."""
         raise NotImplementedError
 
-    @classmethod
-    def get_min_capability(cls) -> int:
+    @abstractmethod
+    def get_min_capability(self) -> int:
         """Minimum GPU capability to support the quantization method.
 
         E.g., 70 for Volta, 75 for Turing, 80 for Ampere.
@@ -25,12 +29,14 @@ class QuantizationConfig:
         """
         raise NotImplementedError
 
-    @classmethod
-    def get_config_filenames(cls) -> List[str]:
+    @staticmethod
+    @abstractmethod
+    def get_config_filenames() -> List[str]:
         """List of filenames to search for in the model directory."""
         raise NotImplementedError
 
     @classmethod
+    @abstractmethod
     def from_config(cls, config: Dict[str, Any]) -> "QuantizationConfig":
         """Create a config class from the model's quantization config."""
         raise NotImplementedError
@@ -81,3 +87,9 @@ class QuantizationConfig:
 
     def get_row_parallel_tensor_names(self) -> List[str]:
         raise NotImplementedError
+
+    @abstractmethod
+    def get_linear_method(self) -> LinearMethodBase:
+        """Get the linear method to use for the quantized linear layer."""
+        raise NotImplementedError
+    

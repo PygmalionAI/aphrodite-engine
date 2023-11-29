@@ -202,11 +202,12 @@ ext_modules.append(activation_extension)
 quantization_extension = CUDAExtension(
     name="aphrodite.quantization_ops",
     sources=[
-        "kernels/quantization.cpp", "kernels/quantization/awq/gemm_kernels.cu",
-        "kernels/quantization/gptq/exllama_ext.cpp",
-        "kernels/quantization/gptq/q_matrix.cu",
-        "kernels/quantization/gptq/q_gemm.cu",
-        "kernels/quantization/gptq/old_matmul_kernel.cu"
+        "kernels/quantization.cpp",
+        "kernels/quantization/awq/gemm_kernels.cu",
+        # "kernels/quantization/gptq/exllama_ext.cpp",
+        # "kernels/quantization/gptq/q_matrix.cu",
+        # "kernels/quantization/gptq/q_gemm.cu",
+        # "kernels/quantization/gptq/old_matmul_kernel.cu"
     ],
     extra_compile_args={
         "cxx": CXX_FLAGS,

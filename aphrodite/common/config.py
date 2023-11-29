@@ -2,7 +2,6 @@ from typing import Optional
 
 import torch
 from transformers import PretrainedConfig
-from transformers.utils.quantization_config import QuantizationMethod
 
 from aphrodite.common.logger import init_logger
 from aphrodite.transformers_utils.config import get_config
@@ -101,11 +100,7 @@ class ModelConfig:
         self.tokenizer_mode = tokenizer_mode
 
     def _verify_quantization(self) -> None:
-        supported_quantization = ["awq", "gptq"]
-        if hasattr(self.hf_config, "quantization_config"
-                   ) and self.hf_config.quantization_config.get(
-                       "quant_method") == QuantizationMethod.GPTQ:
-            self.quantization = "gptq"
+        supported_quantization = ["awq"]
         if self.quantization is None:
             return
         quantization = self.quantization.lower()
@@ -139,23 +134,45 @@ class ModelConfig:
         return self.hf_config.hidden_size
 
     def get_head_size(self) -> int:
-        # FIXME(woosuk): This may not be true for all models.
+        # FIXME: This may not be true for all models.
         return self.hf_config.hidden_size // self.hf_config.num_attention_heads
 
+    def get_total_num_kv_heads(self) -> int:
+        """Returns the total number of KV heads."""
+        falcon_model_types = ["falcon", "RefinedWeb", "RefinedWebModel"]
+        new_decoder_arch_falcon = (
+            self.hf_config.model_type in falcon_model_types
+            and getattr(self.hf_config, "new_decoder_architecture", False))
+        if not new_decoder_arch_falcon and getattr(self.hf_config,
+                                                   "multi_query", False):
+            # Multi-query attention, only one KV head.
+            # Currently, tensor parallelism is not supported in this case.
+            return 1
+
+        attributes = [
+            "n_head_kv",
+            "num_kv_heads",
+            "num_key_value_heads",
+            "multi_query_group_num",
+        ]
+        for attr in attributes:
+            num_kv_heads = getattr(self.hf_config, attr, None)
+            if num_kv_heads is not None:
+                return num_kv_heads
+
+        # For non-grouped-query attention models, the number of KV heads is
+        # equal to the number of attention heads.
+        return self.hf_config.num_attention_heads
+
     def get_num_kv_heads(self, parallel_config: "ParallelConfig") -> int:
-        """Returns the number of KV heads per GPU worker."""
-        if getattr(self.hf_config, "n_head_kv", None) is not None:
-            return (self.hf_config.n_head_kv //
-                    parallel_config.tensor_parallel_size)
-        if getattr(self.hf_config, "num_kv_heads", None) is not None:
-            return (self.hf_config.num_kv_heads //
-                    parallel_config.tensor_parallel_size)
-        # For LLaMA-2:
-        if getattr(self.hf_config, "num_key_value_heads", None) is not None:
-            return (self.hf_config.num_key_value_heads //
-                    parallel_config.tensor_parallel_size)
-        total_num_attention_heads = self.hf_config.num_attention_heads
-        return total_num_attention_heads // parallel_config.tensor_parallel_size
+        """Returns the number of KV heads per GPU."""
+        total_num_kv_heads = self.get_total_num_kv_heads()
+        # If tensor parallelism is used, we divide the number of KV heads by
+        # the tensor parallel size. We will replicate the KV heads in the
+        # case where the number of KV heads is smaller than the tensor
+        # parallel size so each GPU has at least one KV head.
+        return max(1,
+                   total_num_kv_heads // parallel_config.tensor_parallel_size)
 
     def get_max_model_len(self) -> int:
         return self.max_model_len

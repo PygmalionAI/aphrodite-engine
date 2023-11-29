@@ -204,7 +204,7 @@ if __name__ == "__main__":
     parser.add_argument("--tokenizer", type=str, default=None)
     parser.add_argument("--quantization",
                         "-q",
-                        choices=["awq", "gptq", None],
+                        choices=["awq", None],
                         default=None)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.88)
     parser.add_argument("--tensor-parallel-size", "-tp", type=int, default=1)
