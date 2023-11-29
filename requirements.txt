@@ -14,3 +14,4 @@ pyarrow # needed for ray
 pandas
 fastapi
 colorlog
+einops # for phi
