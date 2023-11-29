@@ -58,7 +58,7 @@ class VocabParallelEmbedding(torch.nn.Module):
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
         self.tp_size = get_tensor_model_parallel_world_size()
-        # Divide the weight matrix along the vocaburaly dimension.
+        # Divide the weight matrix along the vocabulary dimension.
         self.vocab_start_index, self.vocab_end_index = (
             vocab_range_from_global_vocab_size(
                 self.num_embeddings_padded, get_tensor_model_parallel_rank(),
