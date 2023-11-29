@@ -162,7 +162,7 @@ class EngineArgs:
         parser.add_argument('--quantization',
                             '-q',
                             type=str,
-                            choices=['awq', 'gptq', None],
+                            choices=['awq', 'squeezellm', None],
                             default=None,
                             help='Method used to quantize the weights')
         return parser

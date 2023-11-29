@@ -14,7 +14,7 @@ ROOT_DIR = os.path.dirname(__file__)
 
 # Supported NVIDIA GPU architectures.
 SUPPORTED_ARCHS = {
-    "6.0", "6.1", "6.5", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"
+    "6.0", "6.1", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"
 }
 
 # Compiler flags.
@@ -203,11 +203,8 @@ quantization_extension = CUDAExtension(
     name="aphrodite.quantization_ops",
     sources=[
         "kernels/quantization.cpp",
-        "kernels/quantization/awq/gemm_kernels.cu",
-        # "kernels/quantization/gptq/exllama_ext.cpp",
-        # "kernels/quantization/gptq/q_matrix.cu",
-        # "kernels/quantization/gptq/q_gemm.cu",
-        # "kernels/quantization/gptq/old_matmul_kernel.cu"
+        # "kernels/quantization/awq/gemm_kernels.cu",
+        "kernels/quantization/squeeze/quant_cuda_kernel.cu",
     ],
     extra_compile_args={
         "cxx": CXX_FLAGS,
