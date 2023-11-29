@@ -250,7 +250,6 @@ def hf_model_weights_iterator(
 
 def convert_pyslice_to_tensor(x: Any) -> torch.Tensor:
     """convert PySafeSlice object from safetensors to torch.Tensor
-
     PySafeSlice object supports indexing, which is done before loading the
     actual tensor and can reduce the amount of memory being read into the
     memory. However, it does not support more advanced functionalities
@@ -259,7 +258,12 @@ def convert_pyslice_to_tensor(x: Any) -> torch.Tensor:
     tensor first.
     """
     if not isinstance(x, torch.Tensor):
-        x = x[:]
+        try:
+            x = x[:]
+        except IndexError:
+            # IndexError happens when the tensor is empty.
+            # transformer.h.0.attn.masked_bias is empty in neox models.
+            return torch.Tensor()
     return x
 
 
