@@ -2,6 +2,7 @@ from typing import Optional
 
 import torch
 from transformers import PretrainedConfig
+from transformers.utils.quantization_config import QuantizationMethod
 
 from aphrodite.common.logger import init_logger
 from aphrodite.transformers_utils.config import get_config
@@ -43,9 +44,6 @@ class ModelConfig:
         revision: The specific model version to use. It can be a branch name,
             a tag name, or a commit id. If unspecified, will use the default
             version.
-        tokenizer_revision: The specific tokenizer version to use. It can be a
-            branch name, a tag name, or a commit id. If unspecified, will use
-            the default version.
         max_model_len: Maximum length of a sequence (including prompt and
             output). If None, will be derived from the model.
         quantization: Quantization method that was used to quantize the model
@@ -63,7 +61,6 @@ class ModelConfig:
         dtype: str,
         seed: int,
         revision: Optional[str] = None,
-        tokenizer_revision: Optional[str] = None,
         max_model_len: Optional[int] = None,
         quantization: Optional[str] = None,
     ) -> None:
@@ -75,7 +72,6 @@ class ModelConfig:
         self.load_format = load_format
         self.seed = seed
         self.revision = revision
-        self.tokenizer_revision = tokenizer_revision
         self.quantization = quantization
 
         self.hf_config = get_config(model, trust_remote_code, revision)
@@ -294,8 +290,6 @@ class SchedulerConfig:
         if max_num_batched_tokens is not None:
             self.max_num_batched_tokens = max_num_batched_tokens
         else:
-            # If max_model_len is too short, use 2048 as the default value for
-            # higher throughput.
             self.max_num_batched_tokens = max(max_model_len, 2048)
         self.max_num_seqs = max_num_seqs
         self.max_model_len = max_model_len
@@ -307,10 +301,10 @@ class SchedulerConfig:
             raise ValueError(
                 f"max_num_batched_tokens ({self.max_num_batched_tokens}) is "
                 f"smaller than max_model_len ({self.max_model_len}). "
-                "This effectively limits the maximum sequence length to "
-                "max_num_batched_tokens and makes Aphrodite reject longer "
-                "sequences. Please increase max_num_batched_tokens or "
-                "decrease max_model_len.")
+                f"This effectively limits the maximum sequence length to "
+                f"max_num_batched_tokens and makes Aphrodite reject longer "
+                f"sequences. Please increase max_num_batched_tokens or "
+                f"decrease max_model_len.")
         if self.max_num_batched_tokens < self.max_num_seqs:
             raise ValueError(
                 f"max_num_batched_tokens ({self.max_num_batched_tokens}) must "
