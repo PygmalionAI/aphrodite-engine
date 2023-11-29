@@ -5,6 +5,9 @@ Breathing Life into Language
 
 ![aphrodite](https://raw.githubusercontent.com/PygmalionAI/aphrodite-engine/main/assets/aphrodite.png)
 
+> [!IMPORTANT]  
+> Aphrodite is being actively developed on the [dev branch](https://github.com/PygmalionAI/aphrodite-engine/tree/dev). The main branch is treated as "stable".
+
 Aphrodite is the official backend engine for PygmalionAI. It is designed to serve as the inference endpoint for the PygmalionAI website, and to allow serving the [Pygmalion](https://huggingface.co/PygmalionAI) models to a large number of users with blazing fast speeds (thanks to FasterTransformer and vLLM). 
 
 Aphrodite builds upon and integrates the exceptional work from [various projects](#acknowledgements).
