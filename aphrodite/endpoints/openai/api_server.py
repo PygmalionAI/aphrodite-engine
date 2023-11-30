@@ -249,7 +249,7 @@ async def create_chat_completion(
 
     model_name = request.model
     request_id = f"cmpl-{random_uuid()}"
-    created_time = int(time.time())
+    created_time = int(time.monotonic())
 
     # We disable top_k at -1, add this conversion for
     # compatibility
@@ -312,6 +312,7 @@ async def create_chat_completion(
         )
         if usage is not None:
             response.usage = usage
+        # exclude unset to leave details out of each sse
         response_json = response.json(exclude_unset=True, ensure_ascii=False)
 
         return response_json
@@ -350,7 +351,8 @@ async def create_chat_completion(
                     final_usage = UsageInfo(
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
-                        total_tokens=prompt_tokens + completion_tokens)
+                        total_tokens=prompt_tokens + completion_tokens,
+                    )
                     response_json = create_stream_response_json(
                         index=i,
                         text="",
@@ -578,13 +580,23 @@ async def create_completion(
                 i = output.index
                 delta_text = output.text[len(previous_texts[i]):]
                 token_ids = output.token_ids[previous_num_tokens[i]:]
-                top_logprobs = output.logprobs[previous_num_tokens[i]:]
+                if output.logprobs is not None:
+                    top_logprobs = output.logprobs[previous_num_tokens[i]:]
+                else:
+                    top_logprobs = None
                 offsets = len(previous_texts[i])
                 if request.echo and not has_echoed[i]:
                     if not echo_without_generation:
                         delta_text = res.prompt + delta_text
                         token_ids = res.prompt_token_ids + token_ids
-                        top_logprobs = res.prompt_logprobs + top_logprobs
+                        if res.prompt_logprobs is not None and top_logprobs is not None:
+                            top_logprobs = res.prompt_logprobs + top_logprobs
+                        elif res.prompt_logprobs is not None:
+                            top_logprobs = res.prompt_logprobs
+                        elif top_logprobs is not None:
+                            top_logprobs = top_logprobs
+                        else:
+                            top_logprobs = None
                     else:
                         delta_text = res.prompt
                         token_ids = res.prompt_token_ids
@@ -617,7 +629,8 @@ async def create_completion(
                     final_usage = UsageInfo(
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
-                        total_tokens=prompt_tokens + completion_tokens)
+                        total_tokens=prompt_tokens + completion_tokens,
+                    )
                     response_json = create_stream_response_json(
                         index=i,
                         text="",
