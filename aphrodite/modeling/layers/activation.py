@@ -5,11 +5,9 @@ import torch.nn as nn
 from aphrodite._C import ops as activation_ops
 from aphrodite.modeling.layers.quantization import QuantizationConfig
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_rank,
-    get_tensor_model_parallel_world_size)
+    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from aphrodite.modeling.megatron.utils import divide
 from aphrodite.modeling.utils import set_weight_attrs
-
 
 
 class SiluAndMul(nn.Module):
