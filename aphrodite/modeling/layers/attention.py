@@ -105,12 +105,13 @@ class PagedAttention(nn.Module):
             #                                 dim=1)
             query = query.view(query.shape[0], self.num_kv_heads,
                                self.num_queries_per_kv, query.shape[-1])
-            key = key[:, :, None, :].expand(key.shape[0], self.num_kv_heads,
-                                            self.num_queries_per_kv,
-                                            key.shape[-1])
-            value = value[:, :, None, :].expand(value.shape[0], self.num_kv_heads,
-                                                self.num_queries_per_kv,
-                                                value.shape[-1])
+            key = key[:, :,
+                      None, :].expand(key.shape[0], self.num_kv_heads,
+                                      self.num_queries_per_kv, key.shape[-1])
+            value = value[:, :,
+                          None, :].expand(value.shape[0], self.num_kv_heads,
+                                          self.num_queries_per_kv,
+                                          value.shape[-1])
 
         # TODO: The unsqueeze op may incur some CPU overhead. Optimize.
         out = xops.memory_efficient_attention_forward(
@@ -442,12 +443,13 @@ class PagedAttentionWithALiBi(PagedAttention):
             # Project the key and value tensors to the desired number of heads.
             query = query.view(query.shape[0], self.num_kv_heads,
                                self.num_queries_per_kv, query.shape[-1])
-            key = key[:, :, None, :].expand(key.shape[0], self.num_kv_heads,
-                                            self.num_queries_per_kv,
-                                            key.shape[-1])
-            value = value[:, :, None, :].expand(value.shape[0], self.num_kv_heads,
-                                                self.num_queries_per_kv,
-                                                value.shape[-1])
+            key = key[:, :,
+                      None, :].expand(key.shape[0], self.num_kv_heads,
+                                      self.num_queries_per_kv, key.shape[-1])
+            value = value[:, :,
+                          None, :].expand(value.shape[0], self.num_kv_heads,
+                                          self.num_queries_per_kv,
+                                          value.shape[-1])
 
         batch_size = input_metadata.num_prompts
         seq_len = input_metadata.max_prompt_len
