@@ -4,7 +4,8 @@ from typing import Dict, List, Tuple, Optional
 import torch
 import torch.nn as nn
 
-from aphrodite.modeling.metadata import InputMetadata, OutputMetadata
+from aphrodite.modeling.sampling_metadata import (SamplingMetadata,
+                                                  OutputMetadata)
 from aphrodite.modeling.megatron.communication_op import (
     tensor_model_parallel_all_gather)
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
@@ -40,11 +41,11 @@ class Sampler(nn.Module):
         self,
         embedding: torch.Tensor,
         hidden_states: torch.Tensor,
-        input_metadata: InputMetadata,
+        sampling_metadata: SamplingMetadata,
         embedding_bias: Optional[torch.Tensor] = None,
     ) -> SamplerOutput:
         # Get the hidden states that we use for sampling.
-        hidden_states = _prune_hidden_states(hidden_states, input_metadata)
+        hidden_states = _prune_hidden_states(hidden_states, sampling_metadata)
 
         # Get the logits for the next tokens.
         logits = _get_logits(hidden_states, embedding, embedding_bias,
@@ -53,29 +54,29 @@ class Sampler(nn.Module):
         output_metadata = OutputMetadata()
 
         # Apply presence and frequency penalties.
-        output_tokens = _get_output_tokens(input_metadata)
+        output_tokens = _get_output_tokens(sampling_metadata)
         assert len(output_tokens) == logits.shape[0]
         [presence_penalties, frequency_penalties,
-         repetition_penalties] = _get_penalties(input_metadata)
+         repetition_penalties] = _get_penalties(sampling_metadata)
         assert len(presence_penalties) == logits.shape[0]
         assert len(frequency_penalties) == logits.shape[0]
         logits = _apply_penalties(logits, output_tokens, presence_penalties,
                                   frequency_penalties, repetition_penalties,
                                   self.vocab_size)
 
-        banned_tokens = _get_custom_token_bans(input_metadata)
+        banned_tokens = _get_custom_token_bans(sampling_metadata)
         assert len(banned_tokens) == logits.shape[0]
         logits = _apply_token_bans(logits, banned_tokens)
 
-        logits = _apply_logits_processors(input_metadata, logits,
+        logits = _apply_logits_processors(sampling_metadata, logits,
                                           output_tokens)
 
         # Apply Mirostat
         # Note that we apply mirostat before temperature, not after
         # like it maybe should be.
         # To be fixed by implementing customizable sampling order
-        if sampler_mirostat.is_applicable(input_metadata):
-            sampler_mirostat.apply(logits, input_metadata, output_metadata)
+        if sampler_mirostat.is_applicable(sampling_metadata):
+            sampler_mirostat.apply(logits, sampling_metadata, output_metadata)
 
         # Apply Eta sampling, as described in https://arxiv.org/abs/2210.15191
         eta_cutoffs = _get_eta_cutoffs(input_metadata)

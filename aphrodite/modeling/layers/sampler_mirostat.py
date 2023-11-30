@@ -1,7 +1,8 @@
 import torch
 from torch import Tensor
 
-from aphrodite.modeling.metadata import OutputMetadata, InputMetadata
+from aphrodite.modeling.metadata import InputMetadata
+from aphrodite.modeling.sampling_metadata import OutputMetadata
 
 
 def _fetch_args(
