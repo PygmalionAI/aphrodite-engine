@@ -511,7 +511,8 @@ async def create_completion(
             mirostat_eta=request.mirostat_eta,
             stop=request.stop,
             stop_token_ids=request.stop_token_ids,
-            max_tokens=request.max_tokens if not echo_without_generation else 1,
+            max_tokens=request.max_tokens
+            if not echo_without_generation else 1,
             best_of=request.best_of,
             ignore_eos=request.ignore_eos,
             use_beam_search=request.use_beam_search,
@@ -520,7 +521,8 @@ async def create_completion(
             spaces_between_special_tokens,  # pylint: disable=line-too-long
             custom_token_bans=request.custom_token_bans,
             logprobs=request.logprobs,
-            prompt_logprobs=request.logprobs if echo_without_generation else None,
+            prompt_logprobs=request.logprobs
+            if echo_without_generation else None,
             logits_processors=logit_processors,
         )
     except ValueError as e:
@@ -589,7 +591,7 @@ async def create_completion(
                         top_logprobs = res.prompt_logprobs
                     has_echoed[i] = True
                 if request.logprobs is not None:
-                   logprobs = create_logprobs(
+                    logprobs = create_logprobs(
                         token_ids=token_ids,
                         top_logprobs=top_logprobs,
                         num_output_top_logprobs=request.logprobs,
