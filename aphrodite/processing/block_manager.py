@@ -9,6 +9,7 @@ from aphrodite.common.utils import Device
 # Mapping: logical block number -> physical block.
 BlockTable = List[PhysicalTokenBlock]
 
+
 class BlockAllocator:
     """Manages free physical token blocks for a device.
 
@@ -51,7 +52,6 @@ class BlockAllocator:
 
     def get_num_free_blocks(self) -> int:
         return len(self.free_blocks)
-
 
 
 class AllocStatus(enum.Enum):
