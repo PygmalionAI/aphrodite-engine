@@ -3,7 +3,7 @@ from typing import Dict, List, Tuple
 
 import torch
 
-from aphrodite import cache_ops
+from aphrodite._C import cache_ops
 from aphrodite.common.config import CacheConfig, ModelConfig, ParallelConfig
 from aphrodite.common.logger import init_logger
 from aphrodite.common.utils import in_wsl

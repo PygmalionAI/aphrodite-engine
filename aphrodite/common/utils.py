@@ -7,7 +7,7 @@ import uuid
 import psutil
 import torch
 
-from aphrodite import cuda_utils
+from aphrodite._C import cuda_utils
 
 
 class Device(enum.Enum):

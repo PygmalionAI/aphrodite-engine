@@ -145,8 +145,10 @@ class AphroditeEngine:
         self._run_workers(
             "load_model",
             get_all_outputs=True,
-            max_concurrent_workers=self.parallel_config.max_parallel_loading_workers,
+            max_concurrent_workers=self.parallel_config.
+            max_parallel_loading_workers,
         )
+
     def _init_workers_ray(self, placement_group: "PlacementGroup",
                           **ray_remote_kwargs):
         # Lazy import the Worker to avoid importing torch.cuda/xformers
@@ -188,7 +190,8 @@ class AphroditeEngine:
         self._run_workers(
             "load_model",
             get_all_outputs=True,
-            max_concurrent_workers=self.parallel_config.max_parallel_loading_workers,
+            max_concurrent_workers=self.parallel_config.
+            max_parallel_loading_workers,
         )
 
     def _verify_args(self) -> None:
@@ -729,7 +732,7 @@ class AphroditeEngine:
             ]
         else:
             work_groups = [self.workers]
-        
+
         for workers in work_groups:
             all_outputs.extend(
                 self._run_workers_in_batch(workers, method, *args, **kwargs))

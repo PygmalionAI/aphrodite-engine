@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 from transformers.activations import get_activation
 
-from aphrodite import activation_ops
+from aphrodite._C import ops as activation_ops
 
 DTYPES = [torch.half, torch.bfloat16, torch.float]
 NUM_TOKENS = [7, 38, 2048]
