@@ -20,13 +20,9 @@ class SiluAndMul(nn.Module):
     Shapes:
         x: (batch_size, seq_len, 2 * d) or (num_tokens, 2 * d)
         return: (batch_size, seq_len, d) or (num_tokens, d)
-    TODO(alpin): Add more activation functions.
     """
 
-    def forward(
-        self,
-        x: torch.Tensor,
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         d = x.shape[-1] // 2
         output_shape = (x.shape[:-1] + (d, ))
         out = torch.empty(output_shape, dtype=x.dtype, device=x.device)
@@ -51,6 +47,10 @@ class FastGELU(nn.Module):
 
 
 class ScaledActivation(nn.Module):
+    """An activation function with post-scale parameters.
+
+    This is used for some quantization methods like AWQ.
+    """
 
     def __init__(
         self,
@@ -60,10 +60,12 @@ class ScaledActivation(nn.Module):
         params_dtype: Optional[torch.dtype] = None,
     ):
         super().__init__()
-        self.act_module = act_module
+        self.act = act_module
+        self.input_is_parallel = input_is_parallel
         if input_is_parallel:
             tp_size = get_tensor_model_parallel_world_size()
-            intermediate_size = divide(intermediate_size, tp_size)
+            intermediate_size_per_partition = divide(intermediate_size,
+                                                     tp_size)
         else:
             intermediate_size_per_partition = intermediate_size
         if params_dtype is None:
@@ -78,49 +80,44 @@ class ScaledActivation(nn.Module):
         return self.act(x) / self.scales
 
     def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor):
-        tp_rank = get_tensor_model_parallel_rank()
         param_data = param.data
-        shard_size = param_data.shape[0]
-        start_idx = tp_rank * shard_size
-        loaded_weight = loaded_weight.narrow(0, start_idx, shard_size)
+        if self.input_is_parallel:
+            tp_rank = get_tensor_model_parallel_rank()
+            shard_size = param_data.shape[0]
+            start_idx = tp_rank * shard_size
+            loaded_weight = loaded_weight.narrow(0, start_idx, shard_size)
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
 
 
 _ACTIVATION_REGISTRY = {
     "gelu": nn.GELU(),
-    "gelu_new": NewGELU(),
     "gelu_fast": FastGELU(),
+    "gelu_new": NewGELU(),
     "gelu_pytorch_tanh": nn.GELU(approximate="tanh"),
     "relu": nn.ReLU(),
 }
 
 
 def get_act_fn(
-    act_fn: str,
+    act_fn_name: str,
     quant_config: Optional[QuantizationConfig] = None,
     intermediate_size: Optional[int] = None,
     input_is_parallel: bool = True,
     params_dtype: Optional[torch.dtype] = None,
 ) -> nn.Module:
     """Get an activation function by name."""
-    # pylint: disable=used-before-assignment
     act_fn_name = act_fn_name.lower()
     if act_fn_name not in _ACTIVATION_REGISTRY:
         raise ValueError(
-            f"Activation function {act_fn!r} is currently not supported.")
+            f"Activation function {act_fn_name!r} is not supported.")
+
     act_fn = _ACTIVATION_REGISTRY[act_fn_name]
-    if quant_config is not None:
-        if act_fn_name in quant_config.get_scaled_act_names():
-            if intermediate_size is None:
-                raise ValueError(
-                    "intermediate_size must be provided when using "
-                    f"{act_fn_name} with quantization for scaled "
-                    "activation functions.")
-            return ScaledActivation(
-                act_fn,
-                intermediate_size,
-                input_is_parallel,
-                params_dtype,
-            )
+    if (quant_config is not None
+            and act_fn_name in quant_config.get_scaled_act_names()):
+        if intermediate_size is None:
+            raise ValueError("intermediate_size must be specified for scaled "
+                             "activation functions.")
+        return ScaledActivation(act_fn, intermediate_size, input_is_parallel,
+                                params_dtype)
     return act_fn
