@@ -589,11 +589,14 @@ async def create_completion(
                     if not echo_without_generation:
                         delta_text = res.prompt + delta_text
                         token_ids = res.prompt_token_ids + token_ids
-                        if res.prompt_logprobs is not None and top_logprobs is not None:
-                            top_logprobs = res.prompt_logprobs + top_logprobs
+                        if res.prompt_logprobs is not None:
+                            if top_logprobs is not None:
+                                top_logprobs = (res.prompt_logprobs +
+                                                top_logprobs)
                         elif res.prompt_logprobs is not None:
                             top_logprobs = res.prompt_logprobs
                         elif top_logprobs is not None:
+                            # pylint: disable=self-assigning-variable
                             top_logprobs = top_logprobs
                         else:
                             top_logprobs = None
