@@ -6,7 +6,7 @@ import torch
 from xformers import ops as xops
 from xformers.ops.fmha.attn_bias import BlockDiagonalCausalMask
 
-from aphrodite import attention_ops
+from aphrodite._C import ops as attention_ops
 from aphrodite.common.utils import get_max_shared_memory_bytes
 
 FLOAT32_BYTES = torch.finfo(torch.float).bits // 8

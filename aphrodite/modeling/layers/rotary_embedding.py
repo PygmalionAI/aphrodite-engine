@@ -28,7 +28,7 @@ import math
 import torch
 import torch.nn as nn
 
-from aphrodite import pos_encoding_ops
+from aphrodite._C import ops as pos_encoding_ops
 
 
 class RotaryEmbedding(nn.Module):
