@@ -10,8 +10,8 @@ from xformers import ops as xops
 from xformers.ops.fmha.attn_bias import (BlockDiagonalCausalMask,
                                          LowerTriangularMaskWithTensorBias)
 
-from aphrodite import attention_ops
-from aphrodite import cache_ops
+from aphrodite._C import ops as attention_ops
+from aphrodite._C import cache_ops
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 

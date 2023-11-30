@@ -121,12 +121,13 @@ class EngineArgs:
                             type=int,
                             default=EngineArgs.tensor_parallel_size,
                             help='number of tensor parallel replicas')
-        parser.add_argument('--max-parallel-loading-workers',
-                            '-mplw',
-                            type=int,
-                            help='load model sequentially in multiple batches, '
-                                  'to avoid CPU OOM when using tensor parallel '
-                                  'with large models.')
+        parser.add_argument(
+            '--max-parallel-loading-workers',
+            '-mplw',
+            type=int,
+            help='load model sequentially in multiple batches, '
+            'to avoid CPU OOM when using tensor parallel '
+            'with large models.')
         # KV cache arguments
         parser.add_argument('--block-size',
                             type=int,

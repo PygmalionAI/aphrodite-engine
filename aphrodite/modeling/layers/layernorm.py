@@ -3,7 +3,7 @@ from typing import Optional, Tuple, Union
 import torch
 import torch.nn as nn
 
-from aphrodite import layernorm_ops
+from aphrodite._C import ops as layernorm_ops
 
 
 class RMSNorm(nn.Module):

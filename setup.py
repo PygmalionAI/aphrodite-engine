@@ -141,91 +141,24 @@ if nvcc_cuda_version >= Version("11.2"):
 
 ext_modules = []
 
-# Cache operations.
-cache_extension = CUDAExtension(
-    name="aphrodite.cache_ops",
-    sources=["kernels/cache.cpp", "kernels/cache_kernels.cu"],
-    extra_compile_args={
-        "cxx": CXX_FLAGS,
-        "nvcc": NVCC_FLAGS,
-    },
-)
-ext_modules.append(cache_extension)
-
-# Attention kernels.
-attention_extension = CUDAExtension(
-    name="aphrodite.attention_ops",
+aphrodite_extension = CUDAExtension(
+    name="aphrodite._C",
     sources=[
-        "kernels/attention.cpp", "kernels/attention/attention_kernels.cu"
-    ],
-    extra_compile_args={
-        "cxx": CXX_FLAGS,
-        "nvcc": NVCC_FLAGS,
-    },
-)
-ext_modules.append(attention_extension)
-
-# Positional encoding kernels.
-positional_encoding_extension = CUDAExtension(
-    name="aphrodite.pos_encoding_ops",
-    sources=["kernels/pos_encoding.cpp", "kernels/pos_encoding_kernels.cu"],
-    extra_compile_args={
-        "cxx": CXX_FLAGS,
-        "nvcc": NVCC_FLAGS,
-    },
-)
-ext_modules.append(positional_encoding_extension)
-
-# Layer normalization kernels.
-layernorm_extension = CUDAExtension(
-    name="aphrodite.layernorm_ops",
-    sources=["kernels/layernorm.cpp", "kernels/layernorm_kernels.cu"],
-    extra_compile_args={
-        "cxx": CXX_FLAGS,
-        "nvcc": NVCC_FLAGS,
-    },
-)
-ext_modules.append(layernorm_extension)
-
-# Activation kernels.
-activation_extension = CUDAExtension(
-    name="aphrodite.activation_ops",
-    sources=["kernels/activation.cpp", "kernels/activation_kernels.cu"],
-    extra_compile_args={
-        "cxx": CXX_FLAGS,
-        "nvcc": NVCC_FLAGS,
-    },
-)
-ext_modules.append(activation_extension)
-
-# Quantization kernels.
-quantization_extension = CUDAExtension(
-    name="aphrodite.quantization_ops",
-    sources=[
-        "kernels/quantization.cpp",
+        "kernels/cache_kernels.cu",
+        "kernels/attention/attention_kernels.cu",
+        "kernels/pos_encoding_kernels.cu",
+        "kernels/activation_kernels.cu",
+        "kernels/layernorm_kernels.cu",
         "kernels/quantization/awq/gemm_kernels.cu",
-        # "kernels/quantization/gptq/exllama_ext.cpp",
-        # "kernels/quantization/gptq/q_matrix.cu",
-        # "kernels/quantization/gptq/q_gemm.cu",
-        # "kernels/quantization/gptq/old_matmul_kernel.cu"
+        "kernels/cuda_utils_kernels.cu",
+        "kernels/pybind.cpp",
     ],
     extra_compile_args={
         "cxx": CXX_FLAGS,
         "nvcc": NVCC_FLAGS,
     },
 )
-ext_modules.append(quantization_extension)
-
-# Misc. CUDA utils.
-cuda_utils_extension = CUDAExtension(
-    name="aphrodite.cuda_utils",
-    sources=["kernels/cuda_utils.cpp", "kernels/cuda_utils_kernels.cu"],
-    extra_compile_args={
-        "cxx": CXX_FLAGS,
-        "nvcc": NVCC_FLAGS,
-    },
-)
-ext_modules.append(cuda_utils_extension)
+ext_modules.append(aphrodite_extension)
 
 
 def get_path(*filepath) -> str:

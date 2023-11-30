@@ -2,7 +2,7 @@ import pytest
 import torch
 import torch.nn as nn
 
-from aphrodite import layernorm_ops
+from aphrodite._C import ops as layernorm_ops
 
 DTYPES = [torch.half, torch.bfloat16, torch.float]
 HIDDEN_SIZES = [67, 768, 2048, 5120, 8192]  # Arbitrary values for testing

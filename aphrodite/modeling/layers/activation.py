@@ -2,7 +2,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
-from aphrodite import activation_ops
+from aphrodite._C import ops as activation_ops
 from aphrodite.modeling.layers.quantization import QuantizationConfig
 
 
