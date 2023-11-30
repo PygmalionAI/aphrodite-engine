@@ -858,7 +858,7 @@ def _build_sampler_output(
                                                       group_sample_logprobs):
             seq_outputs.append(
                 SequenceOutput(seq_ids[parent_id], next_token_id, logprobs,
-                                output_metadata.get(seq_ids[parent_id])))
+                               output_metadata.get(seq_ids[parent_id])))
         sampler_output.append(
             SequenceGroupOutput(seq_outputs, group_prompt_logprobs))
     return sampler_output
