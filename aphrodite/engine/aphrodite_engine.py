@@ -142,7 +142,11 @@ class AphroditeEngine:
             "init_model",
             get_all_outputs=True,
         )
-
+        self._run_workers(
+            "load_model",
+            get_all_outputs=True,
+            max_concurrent_workers=self.parallel_config.max_parallel_loading_workers,
+        )
     def _init_workers_ray(self, placement_group: "PlacementGroup",
                           **ray_remote_kwargs):
         # Lazy import the Worker to avoid importing torch.cuda/xformers
@@ -180,6 +184,11 @@ class AphroditeEngine:
         self._run_workers(
             "init_model",
             get_all_outputs=True,
+        )
+        self._run_workers(
+            "load_model",
+            get_all_outputs=True,
+            max_concurrent_workers=self.parallel_config.max_parallel_loading_workers,
         )
 
     def _verify_args(self) -> None:
@@ -682,16 +691,15 @@ class AphroditeEngine:
             seq.status = SequenceStatus.FINISHED_STOPPED
             return
 
-    def _run_workers(
+    def _run_workers_in_batch(
         self,
+        workers,
         method: str,
         *args,
-        get_all_outputs: bool = False,
         **kwargs,
-    ) -> Any:
-        """Runs the given method on all workers."""
+    ):
         all_outputs = []
-        for worker in self.workers:
+        for worker in workers:
             if self.parallel_config.worker_use_ray:
                 executor = partial(worker.execute_method.remote, method)
             else:
@@ -702,6 +710,29 @@ class AphroditeEngine:
 
         if self.parallel_config.worker_use_ray:
             all_outputs = ray.get(all_outputs)
+        return all_outputs
+
+    def _run_workers(
+        self,
+        method: str,
+        *args,
+        get_all_outputs: bool = False,
+        max_concurrent_workers: Optional[int] = None,
+        **kwargs,
+    ) -> Any:
+        """Runs a method on all workers."""
+        all_outputs = []
+        if max_concurrent_workers:
+            work_groups = [
+                self.workers[i:i + max_concurrent_workers]
+                for i in range(0, len(self.workers), max_concurrent_workers)
+            ]
+        else:
+            work_groups = [self.workers]
+        
+        for workers in work_groups:
+            all_outputs.extend(
+                self._run_workers_in_batch(workers, method, *args, **kwargs))
 
         if get_all_outputs:
             return all_outputs
