@@ -318,4 +318,104 @@ class LoRAVocabParallelEmbedding(LoRALayer):
         bgmv(full_output, full_lora_a_embeddings, self.lora_b_stacked,
              self.indices[:self.indices_len[0]], 0, 1.0)
         return full_output.view_as(full_output_org)
+
+
+class LoRAColumnParallelLinear(LoRALayer):
+
+    def __init__(self, base_layer: ColumnParallelLinear) -> None:
+        super().__init__()
+        self.base_layer = base_layer
+
+    def create_lora_weights(
+            self,
+            max_loras: int,
+            lora_config: LoRAConfig,
+            model_config: Optional[PretrainedConfig] = None) -> None:
+        self.lora_a_stacked = torch.zeros(
+            max_loras,
+            1,
+            lora_config.max_lora_rank,
+            self.base_layer.weight.shape[1],
+            dtype=lora_config.lora_dtype,
+            device=self.base_layer.weight.device,
+        )
+        self.lora_b_stacked = torch.zeros(
+            max_loras,
+            1,
+            self.base_layer.weight.shape[0],
+            lora_config.max_lora_rank,
+            dtype=lora_config.lora_dtype,
+            device=self.base_layer.weight.device,
+        )
+
+    def reset_lora(self, index: int):
+        self.lora_a_stacked[index] = 0
+        self.lora_b_stacked[index] = 0
+
+    def set_lora(
+            self,
+            index: int,
+            lora_a: torch.Tensor,
+            lora_b: torch.Tensor,
+            embeddings_tensor: Optional[torch.Tensor],
+    ):
+        self.reset_lora(index)
+
+        self.lora_a_stacked[index,
+                            0, :lora_a.shape[1], :lora_a.shape[0]].copy_(
+                                lora_a.T, non_blocking=True)
+        self.lora_b_stacked[index,
+                            0, :lora_b.shape[1], :lora_b.shape[0]].copy_(
+                                lora_b.T, non_blocking=True)
+
+    def set_mapping(
+        self,
+        base_indices: torch.Tensor,
+        sampler_indices: torch.Tensor,
+        sampler_indices_padded: torch.Tensor,
+        embeddings_indices: torch.Tensor,
+        indices_len: List[int],
+    ):
+        self.indices = base_indices
+        self.indices_len = indices_len
+
+    def apply_weights(self, x: torch.Tensor,
+                      bias: Optional[torch.Tensor]) -> torch.Tensor:
+        output = self.base_layer.linear_method.apply_weights(
+            self.base_layer.linear_weights, x, bias)
+        _apply_lora(
+            x,
+            self.lora_a_stacked,
+            self.lora_b_stacked,
+            self.indices[:self.indices_len[0]],
+            output,
+        )
+        return output
+    
+    def forward(self, input_):
+        """Forward of ColumnParallelLinear.
+        
+        Args:
+            input_: Tensor whose last dimension is `input_size`.
+
+        Returns:
+            - output
+            - bias
+        """
+        bias = (self.base_layer.bias
+                if not self.base_layer.skip_bias_add else None)
+        
+        # matmul
+        output_parallel = self.apply_weights(input_, bias)
+        if self.base_layer.gather_output:
+            output = tensor_model_parallel_all_gather(output_parallel)
+        else:
+            output = output_parallel
+        output_bias = (self.base_layer.bias
+                       if self.base_layer.skip_bias_add else None)
+        return output, output_bias
+
+    @property
+    def linear_weights(self):
+        return self.base_layer.linear_weights
              
