@@ -3,7 +3,6 @@ import io
 import os
 import re
 import subprocess
-from typing import List, Set
 import warnings
 from pathlib import Path
 from typing import List, Set
@@ -16,9 +15,11 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CUDA_HOME
 
 ROOT_DIR = os.path.dirname(__file__)
 
+MAIN_CUDA_VERSION = "11.8"
+
 # Supported NVIDIA GPU architectures.
 SUPPORTED_ARCHS = {
-    "6.0", "6.1", "6.5", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"
+    "6.0", "6.1", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"
 }
 
 # Compiler flags.
@@ -34,9 +35,11 @@ if CUDA_HOME is None:
     raise RuntimeError(
         "Cannot find CUDA_HOME. CUDA must be available to build the package.")
 
+
 def glob(pattern: str):
     root = Path(__name__).parent
     return [str(p) for p in root.glob(pattern)]
+
 
 def get_nvcc_cuda_version(cuda_dir: str) -> Version:
     """Get the CUDA version from nvcc.
@@ -82,7 +85,8 @@ def get_torch_arch_list() -> Set[str]:
             f"Unsupported CUDA architectures ({invalid_arch_list}) are "
             "excluded from the `TORCH_CUDA_ARCH_LIST` env variable "
             f"({env_arch_list}). Supported CUDA architectures are: "
-            f"{valid_archs}.")
+            f"{valid_archs}.",
+            stacklevel=2)
     return arch_list
 
 
@@ -94,9 +98,9 @@ if not compute_capabilities:
     device_count = torch.cuda.device_count()
     for i in range(device_count):
         major, minor = torch.cuda.get_device_capability(i)
-        if major < 6:
+        if major < 7:
             raise RuntimeError(
-                "GPUs with compute capability below 6.0 are not supported.")
+                "GPUs with compute capability below 7.0 are not supported.")
         compute_capabilities.add(f"{major}.{minor}")
 
 nvcc_cuda_version = get_nvcc_cuda_version(CUDA_HOME)
@@ -113,10 +117,10 @@ if not compute_capabilities:
 # Validate the NVCC CUDA version.
 if nvcc_cuda_version < Version("11.0"):
     raise RuntimeError("CUDA 11.0 or higher is required to build the package.")
-if nvcc_cuda_version < Version("11.1"):
-    if any(cc.startswith("8.6") for cc in compute_capabilities):
-        raise RuntimeError(
-            "CUDA 11.1 or higher is required for compute capability 8.6.")
+if (nvcc_cuda_version < Version("11.1")
+        and any(cc.startswith("8.6") for cc in compute_capabilities)):
+    raise RuntimeError(
+        "CUDA 11.1 or higher is required for compute capability 8.6.")
 if nvcc_cuda_version < Version("11.8"):
     if any(cc.startswith("8.9") for cc in compute_capabilities):
         # CUDA 11.8 is required to generate the code targeting compute capability 8.9.
@@ -126,18 +130,21 @@ if nvcc_cuda_version < Version("11.8"):
         # instead of 8.9.
         warnings.warn(
             "CUDA 11.8 or higher is required for compute capability 8.9. "
-            "Targeting compute capability 8.0 instead.")
+            "Targeting compute capability 8.0 instead.",
+            stacklevel=2)
         compute_capabilities = set(cc for cc in compute_capabilities
                                    if not cc.startswith("8.9"))
         compute_capabilities.add("8.0+PTX")
     if any(cc.startswith("9.0") for cc in compute_capabilities):
         raise RuntimeError(
             "CUDA 11.8 or higher is required for compute capability 9.0.")
+
 # Use NVCC threads to parallelize the build.
 if nvcc_cuda_version >= Version("11.2"):
     num_threads = min(os.cpu_count(), 8)
     NVCC_FLAGS += ["--threads", str(num_threads)]
-NVCC_FLAGS_LORA = NVCC_FLAGS.copy()
+
+NVCC_FLAGS_SLORA = NVCC_FLAGS.copy()
 
 # Add target compute capabilities to NVCC flags.
 for capability in compute_capabilities:
@@ -146,13 +153,13 @@ for capability in compute_capabilities:
     if capability.endswith("+PTX"):
         NVCC_FLAGS += ["-gencode", f"arch=compute_{num},code=compute_{num}"]
     if int(capability[0]) >= 8:
-        NVCC_FLAGS_LORA += ["-gencode", 
-                            f"arch=compute_{num},code=sm{num}"]
+        NVCC_FLAGS_SLORA += ["-gencode", f"arch=compute_{num},code=sm_{num}"]
         if capability.endswith("+PTX"):
-            NVCC_FLAGS_LORA += ["-gencode", 
-                                f"arch=compute_{num},code=compute_{num}"]
+            NVCC_FLAGS_SLORA += [
+                "-gencode", f"arch=compute_{num},code=compute_{num}"
+            ]
 
-# changes for s-lora kernels
+# changes for LoRA kernels
 NVCC_FLAGS += torch_cpp_ext.COMMON_NVCC_FLAGS
 REMOVE_NVCC_FLAGS = [
     '-D__CUDA_NO_HALF_OPERATORS__',
@@ -164,18 +171,16 @@ for flag in REMOVE_NVCC_FLAGS:
     with contextlib.suppress(ValueError):
         torch_cpp_ext.COMMON_NVCC_FLAGS.remove(flag)
 
-
-
 ext_modules = []
 
-install_lora = bool(int(os.getenv("APHRODITE_INSTALL_SLORA_KERNELS", 1)))
+install_slora = bool(int(os.getenv("APHRODITE_INSTALL_SLORA_KERNELS", "1")))
 device_count = torch.cuda.device_count()
 for i in range(device_count):
     major, minor = torch.cuda.get_device_capability(i)
     if major < 8:
-        install_lora = False
+        install_slora = False
         break
-if install_lora:
+if install_slora:
     ext_modules.append(
         CUDAExtension(
             name="aphrodite._lora_C",
@@ -183,7 +188,7 @@ if install_lora:
             glob("kernels/slora/bgmv/*.cu"),
             extra_compile_args={
                 "cxx": CXX_FLAGS,
-                "nvcc": NVCC_FLAGS_LORA,
+                "nvcc": NVCC_FLAGS_SLORA,
             },
         ))
 
