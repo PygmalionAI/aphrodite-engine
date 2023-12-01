@@ -634,3 +634,25 @@ class LRUCacheLoRAModelManager(LoRAModelManager):
             self._registered_loras.remove_oldest()
             return True
         return False
+
+def create_lora_adapter(
+    model: nn.Module,
+    max_num_seqs: int,
+    max_num_batched_tokens: int,
+    vocab_size: int,
+    lora_config: LoRAConfig,
+    target_modules: Union[str, List[str]] = TARGET_MODULES_QKV,
+    lora_manager_cls : Type[LoRAModelManager] = LoRAModelManager,
+    **kwargs) -> LoRAModelManager:
+    """Create a LoRA adapter for a given model."""
+    if not getattr(model, "supports_lora", False):
+        raise ValueError(f"Model {type(model)} is not supported for LoRA")
+    lora_manager = lora_manager_cls(
+        model=model,
+        max_num_seqs=max_num_seqs,
+        max_num_batched_tokens=max_num_batched_tokens,
+        vocab_size=vocab_size,
+        lora_config=lora_config,
+        lora_target_modules=target_modules,
+        **kwargs)
+    return lora_manager
