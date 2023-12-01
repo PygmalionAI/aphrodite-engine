@@ -519,3 +519,471 @@ class LoRAMergedColumnParallelLinear2Slice(LoRAColumnParallelLinear):
             self.output_din,
         )
         return output
+
+class LoRAQKVParallelLinear(LoRAColumnParallelLinear):
+    """ColumnParallelLinear layer that is composed of 3 sublayers (slices)
+    packed together in qkv proj fashion
+    (q_proj + k_proj + v_proj -> qkv_proj).
+
+    This means we have 3 LoRAs, each applied to one slice of the layer.
+
+    Q slice may have different shape than K and V slices (which both have
+    the same shape).
+    """
+
+    def __init__(self, base_layer: QKVParallelLinear) -> None:
+        super().__init__(base_layer)
+
+    def create_lora_weights(
+            self,
+            max_loras: int,
+            lora_config: LoRAConfig,
+            model_config: Optional[PretrainedConfig] = None) -> None:
+        self.tp_size = get_tensor_model_parallel_world_size()
+        tp_rank = get_tensor_model_parallel_rank()
+        self.q_proj_shard_size = (self.base_layer.num_heads *
+                                  self.base_layer.head_size)
+        self.kv_proj_shard_size = (self.base_layer.num_kv_heads *
+                                   self.base_layer.head_size)
+        self.q_shard_id = tp_rank
+        self.kv_shard_id = tp_rank // self.base_layer.num_kv_head_replicas
+
+        # q, k, v
+        self.lora_a_stacked = (torch.zeros(
+            max_loras,
+            1,
+            lora_config.max_lora_rank,
+            self.base_layer.weight.shape[1],
+            dtype=lora_config.lora_dtype,
+            device=self.base_layer.weight.device,
+        ),
+                               torch.zeros(
+                                   max_loras,
+                                   1,
+                                   lora_config.max_lora_rank,
+                                   self.base_layer.weight.shape[1],
+                                   dtype=lora_config.lora_dtype,
+                                   device=self.base_layer.weight.device,
+                               ),
+                               torch.zeros(
+                                   max_loras,
+                                   1,
+                                   lora_config.max_lora_rank,
+                                   self.base_layer.weight.shape[1],
+                                   dtype=lora_config.lora_dtype,
+                                   device=self.base_layer.weight.device,
+                               ))
+        self.lora_b_stacked = (torch.zeros(
+            max_loras,
+            1,
+            self.q_proj_shard_size,
+            lora_config.max_lora_rank,
+            dtype=lora_config.lora_dtype,
+            device=self.base_layer.weight.device,
+        ),
+                               torch.zeros(
+                                   max_loras,
+                                   1,
+                                   self.kv_proj_shard_size,
+                                   lora_config.max_lora_rank,
+                                   dtype=lora_config.lora_dtype,
+                                   device=self.base_layer.weight.device,
+                               ),
+                               torch.zeros(
+                                   max_loras,
+                                   1,
+                                   self.kv_proj_shard_size,
+                                   lora_config.max_lora_rank,
+                                   dtype=lora_config.lora_dtype,
+                                   device=self.base_layer.weight.device,
+                               ))
+
+        self.output_slices = (self.q_proj_shard_size, self.kv_proj_shard_size)
+        self.packed_indices: Optional[torch.Tensor] = None
+        self.standard_indices: Optional[torch.Tensor] = None
+        self.indices_len: Optional[List[int]] = None
+
+    def reset_lora(self, index: int):
+        self.lora_a_stacked[0][index] = 0
+        self.lora_b_stacked[0][index] = 0
+        self.lora_a_stacked[1][index] = 0
+        self.lora_b_stacked[1][index] = 0
+        self.lora_a_stacked[2][index] = 0
+        self.lora_b_stacked[2][index] = 0
+
+    def set_lora(
+        self,
+        index: int,
+        lora_a: torch.Tensor,
+        lora_b: torch.Tensor,
+        embeddings_tensor: Optional[torch.Tensor],
+    ):
+        self.reset_lora(index)
+
+        if self.tp_size > 1:
+            if lora_b[0] is not None:
+                lora_b_q = lora_b[0][:, self.q_proj_shard_size *
+                                     self.q_shard_id:self.q_proj_shard_size *
+                                     (self.q_shard_id + 1)]
+                self.lora_b_stacked[0][
+                    index, 0, :lora_b_q.shape[1], :lora_b_q.shape[0]].copy_(
+                        lora_b_q.T, non_blocking=True)
+            if lora_b[1] is not None:
+                lora_b_k = lora_b[1][:, self.kv_proj_shard_size *
+                                     self.kv_shard_id:self.kv_proj_shard_size *
+                                     (self.kv_shard_id + 1)]
+                self.lora_b_stacked[1][
+                    index, 0, :lora_b_k.shape[1], :lora_b_k.shape[0]].copy_(
+                        lora_b_k.T, non_blocking=True)
+            if lora_b[2] is not None:
+                lora_b_v = lora_b[2][:, self.kv_proj_shard_size *
+                                     self.kv_shard_id:self.kv_proj_shard_size *
+                                     (self.kv_shard_id + 1)]
+                self.lora_b_stacked[2][
+                    index, 0, :lora_b_v.shape[1], :lora_b_v.shape[0]].copy_(
+                        lora_b_v.T, non_blocking=True)
+        else:
+            if lora_b[0] is not None:
+                self.lora_b_stacked[0][
+                    index, 0, :lora_b[0].shape[1], :lora_b[0].shape[0]].copy_(
+                        lora_b[0].T, non_blocking=True)
+            if lora_b[1] is not None:
+                self.lora_b_stacked[1][
+                    index, 0, :lora_b[1].shape[1], :lora_b[1].shape[0]].copy_(
+                        lora_b[1].T, non_blocking=True)
+            if lora_b[2] is not None:
+                self.lora_b_stacked[2][
+                    index, 0, :lora_b[2].shape[1], :lora_b[2].shape[0]].copy_(
+                        lora_b[2].T, non_blocking=True)
+
+        if lora_a[0] is not None:
+            self.lora_a_stacked[0][
+                index, 0, :lora_a[0].shape[1], :lora_a[0].shape[0]].copy_(
+                    lora_a[0].T, non_blocking=True)
+        if lora_a[1] is not None:
+            self.lora_a_stacked[1][
+                index, 0, :lora_a[1].shape[1], :lora_a[1].shape[0]].copy_(
+                    lora_a[1].T, non_blocking=True)
+        if lora_a[2] is not None:
+            self.lora_a_stacked[2][
+                index, 0, :lora_a[2].shape[1], :lora_a[2].shape[0]].copy_(
+                    lora_a[2].T, non_blocking=True)
+
+    def apply_weights(self, x: torch.Tensor,
+                      bias: Optional[torch.Tensor]) -> torch.Tensor:
+        output = self.base_layer.linear_method.apply_weights(
+            self.base_layer.linear_weights, x, bias)
+        _apply_lora_packed_3slice(
+            x,
+            self.lora_a_stacked,
+            self.lora_b_stacked,
+            self.indices[:self.indices_len[0]],
+            output,
+            self.output_slices,
+        )
+        return output
+    
+class LoRARowParallelLinear(LoRALayer):
+
+    def __init__(self, base_layer: RowParallelLinear) -> None:
+        super().__init__()
+        self.base_layer = base_layer
+
+    def create_lora_weights(
+            self,
+            max_loras: int,
+            lora_config: LoRAConfig,
+            model_config: Optional[PretrainedConfig] = None) -> None:
+        self.lora_a_stacked = torch.zeros(
+            (
+                max_loras,
+                1,
+                lora_config.max_lora_rank,
+                self.base_layer.weight.shape[1],
+            ),
+            dtype=lora_config.lora_dtype,
+            device=self.base_layer.weight.device,
+        )
+        self.lora_b_stacked = torch.zeros(
+            (
+                max_loras,
+                1,
+                self.base_layer.weight.shape[0],
+                lora_config.max_lora_rank,
+            ),
+            dtype=lora_config.lora_dtype,
+            device=self.base_layer.weight.device,
+        )
+        self.indices: Optional[torch.Tensor] = None
+        self.indices_len: Optional[List[int]] = None
+
+    def reset_lora(self, index: int):
+        self.lora_a_stacked[index] = 0
+        self.lora_b_stacked[index] = 0
+
+    def set_lora(
+        self,
+        index: int,
+        lora_a: torch.Tensor,
+        lora_b: torch.Tensor,
+        embeddings_tensor: Optional[torch.Tensor],
+    ):
+        self.reset_lora(index)
+        if self.base_layer.tp_size > 1:
+            tensor_model_parallel_rank = get_tensor_model_parallel_rank()
+            shard_size = self.base_layer.weight.shape[1]
+            start_idx = tensor_model_parallel_rank * shard_size
+            end_idx = (tensor_model_parallel_rank + 1) * shard_size
+            lora_a = lora_a[start_idx:end_idx, :]
+
+        self.lora_a_stacked[index,
+                            0, :lora_a.shape[1], :lora_a.shape[0]].copy_(
+                                lora_a.T, non_blocking=True)
+        self.lora_b_stacked[index,
+                            0, :lora_b.shape[1], :lora_b.shape[0]].copy_(
+                                lora_b.T, non_blocking=True)
+
+    def set_mapping(
+        self,
+        base_indices: torch.Tensor,
+        sampler_indices: torch.Tensor,
+        sampler_indices_padded: torch.Tensor,
+        embeddings_indices: torch.Tensor,
+        indices_len: List[int],
+    ):
+        self.indices = base_indices
+        self.indices_len = indices_len
+
+    def apply_weights(self, x: torch.Tensor) -> torch.Tensor:
+        output = self.base_layer.linear_method.apply_weights(
+            self.base_layer.linear_weights, x)
+        _apply_lora(
+            x,
+            self.lora_a_stacked,
+            self.lora_b_stacked,
+            self.indices[:self.indices_len[0]],
+            output,
+        )
+        return output
+
+    def forward(self, input_):
+        """Forward of RowParallelLinear
+
+        Args:
+            input_: tensor whose last dimension is `input_size`. If
+                    `input_is_parallel` is set, then the last dimension
+                    is `input_size // tp_size`.
+
+        Returns:
+            - output
+            - bias
+        """
+        # Set up backprop all-reduce.
+        if self.base_layer.input_is_parallel:
+            input_parallel = input_
+        else:
+            # TODO: simplify code below
+            tp_rank = get_tensor_model_parallel_rank()
+            splitted_input = split_tensor_along_last_dim(
+                input_, num_partitions=self.base_layer.tp_size)
+            input_parallel = splitted_input[tp_rank].contiguous()
+
+        # Matrix multiply.
+        output_parallel = self.apply_weights(input_parallel)
+        if self.base_layer.reduce_results and self.base_layer.tp_size > 1:
+            output_ = tensor_model_parallel_all_reduce(output_parallel)
+        else:
+            output_ = output_parallel
+
+        if not self.base_layer.skip_bias_add:
+            output = (output_ + self.base_layer.bias
+                      if self.base_layer.bias is not None else output_)
+            output_bias = None
+        else:
+            output = output_
+            output_bias = self.base_layer.bias
+        return output, output_bias
+
+    @property
+    def weight(self):
+        return self.base_layer.weight
+    
+
+class LoRASampler(LoRALayer):
+
+    def __init__(
+            self,
+            base_layer: Sampler,
+            hidden_size: int,
+            dtype: torch.dtype,
+            device: torch.device,
+    ) -> None:
+        super().__init__()
+        self.base_layer = base_layer
+        self.hidden_size = hidden_size
+        self.dtype = dtype
+        self.device = device
+
+    @property
+    def vocab_size(self):
+        return self.base_layer.vocab_size
+    
+    @property
+    def org_vocab_size(self):
+        return self.base_layer.org_vocab_size
+    
+    @property
+    def include_gpu_probs_tensor(self):
+        return self.base_layer.include_gpu_probs_tensor
+
+    def create_lora_weights(
+            self,
+            max_loras: int,
+            lora_config: LoRAConfig,
+            model_config: Optional[PretrainedConfig] = None,
+    ) -> None:
+        self.lora_a_stacked = torch.zeros(
+            (
+                max_loras,
+                1,
+                lora_config.max_lora_rank,
+                self.hidden_size,
+            ),
+            dtype=lora_config.lora_dtype,
+            device=self.device,
+        )
+        self.lora_b_stacked = torch.zeros(
+            (
+                max_loras,
+                1,
+                self.base_layer.vocab_size,
+                lora_config.max_lora_rank,
+            ),
+            dtype=lora_config.lora_dtype,
+            device=self.device,
+        )
+        self.embeddings_tensors = torch.full(
+            (max_loras, lora_config.lora_extra_vocab_size, self.hidden_size),
+            fill_value=float("-inf"),
+            dtype=self.dtype,
+            device=self.device,
+        )
+        self.indices = None
+        self.indices_padded = None
+        self.indices_len = None
+
+    def reset_lora(self, index: int):
+        self.lora_a_stacked[index] = 0
+        self.lora_b_stacked[index] = 0
+        self.embeddings_tensors[index] = float("-inf")
+
+    def set_lora(
+            self,
+            index: int,
+            lora_a: torch.Tensor,
+            lora_b: torch.Tensor,
+            embeddings_tensor: Optional[torch.Tensor],
+    ):
+        self.reset_lora(index)
+        self.lora_a_stacked[index,
+                            0, :lora_a.shape[1], :lora_a.shape[0]].copy_(
+                                lora_a.T, non_blocking=True)
+        self.lora_b_stacked[index,
+                            0, :lora_b.shape[1], :lora_b.shape[0]].copy_(
+                                lora_b.T, non_blocking=True)
+        if embeddings_tensor is not None:
+            self.embeddings_tensors[
+                index, :embeddings_tensor.shape[0], :embeddings_tensor.
+                shape[1], ] = embeddings_tensor
+
+    def set_mapping(
+            self,
+            base_indices: torch.Tensor,
+            sampler_indices: torch.Tensor,
+            sampler_indices_padded: torch.Tensor,
+            embeddings_indices: torch.Tensor,
+            indices_len: List[int],
+    ):
+        self.indices = sampler_indices
+        self.indices_padded = sampler_indices_padded
+        self.indices_len = indices_len
+
+    
+    def _get_logits(
+        self,
+        hidden_states: torch.Tensor,
+        embedding: torch.Tensor,
+        embedding_bias: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        # get the logits for the next tokens
+        logits = torch.matmul(hidden_states, embedding.t())
+        if embedding_bias is not None:
+            logits += embedding_bias
+        logits = tensor_model_parallel_all_gather(logits)
+        # remove paddings in vocab (if any)
+        logits = logits[:, :self.base_layer.vocab_size]
+
+        lora_logits = torch.empty(
+            self.embeddings_tensors.shape[0] + 1,
+            self.embeddings_tensors.shape[1],
+            hidden_states.shape[0],
+            dtype=self.embeddings_tensors.dtype,
+            device=self.embeddings_tensors.device,
+        )
+        torch.matmul(self.embeddings_tensors,
+                     hidden_states.T,
+                     out=lora_logits[:-1])
+        lora_logits[-1] = float("-inf")
+        lora_logits = lora_logits.mT
+
+        logits[:, self.base_layer.org_vocab_size:] = (lora_logits.reshape(
+            lora_logits.shape[0] * lora_logits.shape[1],
+            lora_logits.shape[2],
+        ).index_select(0,
+                       self.indices_padded[:self.indices_len[2]]).nan_to_num_(
+                           nan=float("-inf"),
+                           posinf=float("inf"),
+                           neginf=float("-inf")))
+        _apply_lora(
+            hidden_states,
+            self.lora_a_stacked,
+            self.lora_b_stacked,
+            self.indices[:self.indices_len[1]],
+            logits,
+        )
+        return logits
+    
+    def forward(self, *args, **kwargs):
+        return type(self.base_layer).forward(self, *args, **kwargs)
+
+
+def from_layer(layer: nn.Module,
+               max_loras: int,
+               lora_config: LoRAConfig,
+               model_config: Optional[PretrainedConfig] = None) -> LoRALayer:
+    supported_layer_types = {
+        VocabParallelEmbedding: LoRAVocabParallelEmbedding,
+        ColumnParallelLinear: LoRAColumnParallelLinear,
+        QKVParallelLinear: LoRAQKVParallelLinear,
+        MergedColumnParallelLinear: LoRAMergedColumnParallelLinear2Slice,
+        RowParallelLinear: LoRAColumnParallelLinear,
+    }
+    for src_layer_type, lora_layer_type in supported_layer_types.items():
+        if type(layer) is src_layer_type:
+            ret = lora_layer_type(layer)
+            ret.create_lora_weights(max_loras, lora_config, model_config)
+            return ret
+    return layer
+
+
+def from_layer_sampler(
+        layer: Sampler,
+        lm_head: ParallelLMHead,
+        max_loras: int,
+        lora_config: LoRAConfig,
+        model_config: Optional[PretrainedConfig] = None,
+) -> LoRASampler:
+    ret = LoRASampler(layer, lm_head.embedding_dim, lm_head.weight.dtype,
+                      lm_head.weight.device)
+    ret.create_lora_weights(max_loras, lora_config, model_config)
+    return ret
