@@ -567,3 +567,70 @@ class LoRAModelManager:
                     continue
                 replacement_loras[i] = None
             lora_model.loras[module_name] = LoRA.pack(replacement_loras)
+
+class LoRALRUCache(LRUCache):
+
+    def __init__(self, capacity: int, deactivate_lora_fn: Callable[[Hashable],
+                                                                   None]):
+        super().__init__(capacity)
+        self.deactivate_lora_fn = deactivate_lora_fn
+
+    def _on_remove(self, key: Hashable, value: Any):
+        logger.debug(f"Removing LoRA. int id: {key}")
+        self.deactivate_lora_fn(key)
+        return super()._on_remove(key, value)
+
+
+class LRUCacheLoRAModelManager(LoRAModelManager):
+    """A model manager that manages multiple LoRAs with LRU cache."""
+    def __init__(
+            self,
+            model: nn.Module,
+            max_num_seqs: int,
+            max_num_batched_tokens: int,
+            vocab_size: int,
+            lora_config: LoRAConfig,
+            lora_target_modules: Union[str, List[str]] = TARGET_MODULES_QKV,
+            packed_modules_mapping: Dict[str, List[str]] = PACKED_MODULES_CFG,
+    ):
+        super().__init__(model, max_num_seqs, max_num_batched_tokens,
+                         vocab_size, lora_config, lora_target_modules,
+                         packed_modules_mapping)
+        self._registered_loras: LoRALRUCache = LoRALRUCache(
+            self.capacity, self.deactivate_lora)
+        self._active_loras: LoRALRUCache = LoRALRUCache(
+            self.lora_slots, self._deactivate_lora)
+
+    def list_loras(self) -> Dict[int, LoRAModel]:
+        """List all registered LoRAModels."""
+        return dict(self._registered_loras.cache)
+    
+    def add_lora(self, lora: LoRAModel) -> bool:
+        """Add a LoRAModel to the manager."""
+        was_added = False
+        if lora.id not in self._registered_loras:
+            was_added = True
+            logger.debug(f"Adding LoRA. Model id: {lora_id}, "
+                         f"int id: {lora.id}")
+            self._create_merged_loras_inplace(lora)
+            self._registered_loras[lora.id] = lora
+        else:
+            self._registered_loras.touch(lora.id)
+        return was_added
+    
+    def activate_lora(
+        self,
+        lora_id: int,
+    ) -> bool:
+        if lora_id not in self._active_loras and len(
+            self._active_loras) >= self.lora_slots:
+            self._active_loras.remove_oldest()
+        result = super().activate_lora(lora_id)
+        self._active_loras.touch(lora_id)
+        return result
+
+    def remove_oldest_lora(self) -> bool:
+        if len(self._registered_loras) > 0:
+            self._registered_loras.remove_oldest()
+            return True
+        return False
