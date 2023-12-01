@@ -232,4 +232,49 @@ class LoRAModel:
         for _, lora in loras.items():
             lora.optimize()
         return cls(lora_model_id, rank, loras)
-    
+
+    @classmethod
+    def from_local_checkpoint(
+        cls,
+        lora_dir: str,
+        lora_model_id: Optional[int] = None,
+        device: str = "cuda",
+        dtype: Optional[torch.dtype] = None,
+        target_embedding_padding: Optional[int] = None) -> "LoRAModel":
+        """Create a LoRAModel from a local checkpoint."""
+        lora_config_path = os.path.join(lora_dir, "adapter_config.json")
+        lora_tensor_path = os.path.join(lora_dir, "adapter_model.safetensors")
+        lora_bin_file_path = os.path.join(lora_dir, "adapter_model.bin")
+        new_embeddings_tensor_path = os.path.join(
+            lora_dir, "new_embeddings.safetensors")
+        new_embeddings_bin_file_path = os.path.join(lora_dir,
+                                                    "new_embeddings.bin")
+        if os.path.isfile(lora_tensor_path):
+            tensors = safetensors.torch.load_file(lora_tensor_path)
+        elif os.path.isfile(lora_bin_file_path):
+            tensors = torch.load(lora_bin_file_path)
+        else:
+            raise ValueError(f"{lora_dir} doesn't contain LoRA adapters.")
+
+        embeddings = None
+        if os.path.isfile(new_embeddings_tensor_path):
+            embeddings = safetensors.torch.load_file(
+                new_embeddings_tensor_path)
+        elif os.path.isfile(new_embeddings_bin_file_path):
+            embeddings = torch.load(new_embeddings_bin_file_path)
+
+        with open(lora_config_path, "r") as f:
+            config = json.load(f)
+        rank = config["r"]
+        lora_alpha = config["lora_alpha"]
+        return cls.from_lora_tensors(
+            lora_model_id=get_lora_id()
+            if lora_model_id is None else lora_model_id,
+            rank=rank,
+            lora_alpha=lora_alpha,
+            tensors=tensors,
+            device=device,
+            dtype=dtype,
+            embeddings=embeddings,
+            target_embedding_padding=target_embedding_padding,
+        )
