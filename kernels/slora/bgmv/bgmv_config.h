@@ -1,10 +1,12 @@
 #pragma once
 
-template <int feat_in, int feat_out, typename in_T, typename out_T, typename W_T>
-void bgmv_kernel(out_T *__restrict__ Y, const in_T *__restrict__ X, const W_T* __restrict__ W,
-                 const int64_t *__restrict__ indicies, int64_t y_offset, int64_t full_y_size,
-                 int64_t batch_size, int64_t num_layers, int64_t layer_idx, float scale);
-
+template <int feat_in, int feat_out, typename in_T, typename out_T,
+          typename W_T>
+void bgmv_kernel(out_T *__restrict__ Y, const in_T *__restrict__ X,
+                 const W_T *__restrict__ W,
+                 const int64_t *__restrict__ indicies, int64_t y_offset,
+                 int64_t full_y_size, int64_t batch_size, int64_t num_layers,
+                 int64_t layer_idx, float scale);
 
 // clang-format off
 
@@ -25,8 +27,7 @@ void bgmv_kernel(out_T *__restrict__ Y, const in_T *__restrict__ X, const W_T* _
     f(in_T, out_T, W_T, narrow, 4096) \
     f(in_T, out_T, W_T, narrow, 5120) \
     f(in_T, out_T, W_T, narrow, 5504) \
-    f(in_T, out_T, W_T, narrow, 6656) \
-    f(in_T, out_T, W_T, narrow, 7168) \
+    f(in_T, out_T, W_T, narrow, 6912) \
     f(in_T, out_T, W_T, narrow, 7168) \
     f(in_T, out_T, W_T, narrow, 8192) \
     f(in_T, out_T, W_T, narrow, 9216) \
@@ -43,8 +44,9 @@ void bgmv_kernel(out_T *__restrict__ Y, const in_T *__restrict__ X, const W_T* _
     f(in_T, out_T, W_T, narrow, 36864) \
     f(in_T, out_T, W_T, narrow, 49152) \
 
-#define FOR_BGMV_WIDE_NARROW(f, T) \
-    FOR_BGMV_WIDE(f, in_T, out_T, W_T, 8) \
+// Keep this in sync with vllm/config::LoRAConfig
+#define FOR_BGMV_WIDE_NARROW(f, in_T, out_T, W_T) \
+    FOR_BGMV_WIDE(f, in_T, out_T, W_T, 8)  \
     FOR_BGMV_WIDE(f, in_T, out_T, W_T, 16) \
     FOR_BGMV_WIDE(f, in_T, out_T, W_T, 32) \
     FOR_BGMV_WIDE(f, in_T, out_T, W_T, 64)

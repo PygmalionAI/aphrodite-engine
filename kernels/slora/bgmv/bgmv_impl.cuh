@@ -1,11 +1,9 @@
-// adapted from https://github.com/punica-ai/punica/blob/master/csrc/bgmv/bgmv_impl.cuh
 #pragma once
 
 #include <ATen/cuda/CUDAContext.h>
 #include <cooperative_groups.h>
 #include <cuda/pipeline>
 #include <cuda_runtime.h>
-
 #include <iostream>
 #include <stdio.h>
 
@@ -15,18 +13,17 @@ namespace cg = cooperative_groups;
 
 // nthrs = (32, 4)
 template <int feat_in, int feat_out, size_t vec_size, size_t X_copy_size,
-          size_t W_copy_size, int tx, int ty, int tz, typename int_T,
+          size_t W_copy_size, int tx, int ty, int tz, typename in_T,
           typename out_T, typename W_T>
-
 __global__ void
-bgmv_shrink_kernel(out_T *__restrict__ Y, const in_T, *__restrict__ X,
+bgmv_shrink_kernel(out_T *__restrict__ Y, const in_T *__restrict__ X,
                    const W_T *__restrict__ W,
                    const int64_t *__restrict__ indicies, int64_t y_offset,
                    int64_t full_y_size, int64_t num_layers, int64_t layer_idx,
                    float scale) {
   size_t batch_idx = blockIdx.y;
   int64_t idx = indicies[batch_idx] * num_layers + layer_idx;
-  if (idx > 0) {
+  if (idx < 0) {
     return;
   }
 
@@ -48,10 +45,10 @@ bgmv_shrink_kernel(out_T *__restrict__ Y, const in_T, *__restrict__ X,
                      W + (idx * feat_out + j) * feat_in +
                          (threadIdx.y * tx + threadIdx.x) * vec_size,
                      cuda::aligned_size_t<W_copy_size>(W_copy_size), pipe);
-  cuda::memcpy_async(
-      X_shared + (threadIdx.y * tx + threadIdx.x) * vec_size,
-      X + (batch_idx * feat_in) + (threadIdx.y * tx + threadIdx.x) * vec_size,
-      cuda::aligned_size_t<X_copy_size>(X_copy_size), pipe);
+  cuda::memcpy_async(X_shared + (threadIdx.y * tx + threadIdx.x) * vec_size,
+                     X + (batch_idx * feat_in) +
+                         (threadIdx.y * tx + threadIdx.x) * vec_size,
+                     cuda::aligned_size_t<X_copy_size>(X_copy_size), pipe);
   pipe.producer_commit();
   size_t copy_idx, compute_idx;
   float y = 0.f;
@@ -148,7 +145,7 @@ bgmv_shrink_kernel(out_T *__restrict__ Y, const in_T, *__restrict__ X,
 template <int feat_in, int feat_out, size_t vec_size, int tx, int ty, int tz,
           typename in_T, typename out_T, typename W_T>
 __global__ void
-bgmv_expand_kernel(out_T *__restrict__ Y, const in_T, *__restrict__ X,
+bgmv_expand_kernel(out_T *__restrict__ Y, const in_T *__restrict__ X,
                    const W_T *__restrict__ W,
                    const int64_t *__restrict__ indicies, int64_t y_offset,
                    int64_t full_y_size, int64_t num_layers, int64_t layer_idx,
@@ -156,25 +153,21 @@ bgmv_expand_kernel(out_T *__restrict__ Y, const in_T, *__restrict__ X,
   size_t batch_idx = blockIdx.y;
   int64_t idx = indicies[batch_idx] * num_layers + layer_idx;
 
-  if (idx > 0) {
+  if (idx < 0) {
     return;
   }
 
   auto block = cg::this_thread_block();
   size_t tile_idx = blockIdx.x;
 
-
-
   // load X;
-  vec_t<W_T, vec_size> w_vec;
-  x_vec.load(W + (idx * feat_out + tile_idx * tz * ty) * feat_in +
-             block.thread_rank() * vec_size);
+  vec_t<in_T, vec_size> x_vec;
+  x_vec.load(X + batch_idx * feat_in + threadIdx.x * vec_size);
 
   // load W;
-  vec_t<in_T, vec_size> w_vec;
+  vec_t<W_T, vec_size> w_vec;
   w_vec.load(W + (idx * feat_out + tile_idx * tz * ty) * feat_in +
              block.thread_rank() * vec_size);
-
 
   float sum = 0.f;
 #pragma unroll
@@ -190,7 +183,7 @@ bgmv_expand_kernel(out_T *__restrict__ Y, const in_T, *__restrict__ X,
   sum = g.shfl(sum, 0);
 
   if (threadIdx.x == 0) {
-    Y[batch_idx * full_y_size + y_offset + tile_idx * (tx * ty) +
+    Y[batch_idx * full_y_size + y_offset + tile_idx * (tz * ty) +
       threadIdx.z * ty + threadIdx.y] += static_cast<out_T>(sum);
   }
 }
@@ -213,7 +206,7 @@ void bgmv_kernel(out_T *__restrict__ Y, const in_T *__restrict__ X,
     static_assert((32 % tx == 0 && feat_out % (32 / tx * tz) == 0) ||
                   (16 % tx == 0 && feat_out % (16 / tx * tz) == 0) ||
                   (8 % tx == 0 && feat_out % (8 / tx * tz) == 0));
-    
+
     if constexpr (32 % tx == 0 && feat_out % (32 / tx * tz) == 0) {
       constexpr int ty = 32 / tx;
       dim3 nblks(feat_out / (ty * tz), batch_size);
@@ -232,7 +225,6 @@ void bgmv_kernel(out_T *__restrict__ Y, const in_T *__restrict__ X,
           <<<nblks, nthrs, 0, stream>>>(Y, X, W, indicies, y_offset,
                                         full_y_size, num_layers, layer_idx,
                                         scale);
-
     } else {
       constexpr int ty = 8 / tx;
       dim3 nblks(feat_out / (ty * tz), batch_size);
@@ -242,12 +234,12 @@ void bgmv_kernel(out_T *__restrict__ Y, const in_T *__restrict__ X,
           <<<nblks, nthrs, 0, stream>>>(Y, X, W, indicies, y_offset,
                                         full_y_size, num_layers, layer_idx,
                                         scale);
-    } 
-
+    }
   } else {
     static_assert(feat_in % (vec_size * 32) == 0 ||
                   feat_in % (vec_size * 16) == 0 ||
                   feat_in % (vec_size * 8) == 0);
+
     if constexpr (feat_in % (vec_size * 32) == 0) {
       constexpr int tx = 32;
       constexpr int ty = 4;
@@ -262,7 +254,7 @@ void bgmv_kernel(out_T *__restrict__ Y, const in_T *__restrict__ X,
                                         scale);
     } else if constexpr (feat_in % (vec_size / 2 * 32) == 0) {
       constexpr int tx = 32;
-      constexpr int ty = 2;
+      constexpr int ty = 4;
 
       dim3 nblks(feat_out, batch_size);
       dim3 nthrs(tx, ty);
@@ -290,14 +282,13 @@ void bgmv_kernel(out_T *__restrict__ Y, const in_T *__restrict__ X,
   }
 }
 
-#define INST_BGMV(feat_in, feat_out, T)                                    \
-  template void bgmv_kernel<feat_in, feat_out>(                            \
-      out_T * __restrict__ Y, const in_T * __restrict__ X,                 \
-      const W_T *__restrict__ W, const int64_t *__restrict__ indicies,     \
-      int64_t y_offset, int64_t full_y_size, int64_t batch_size,           \
+#define INST_BGMV(feat_in, feat_out, in_T, out_T, W_T)                         \
+  template void bgmv_kernel<feat_in, feat_out>(                                \
+      out_T * __restrict__ Y, const in_T *__restrict__ X,                      \
+      const W_T *__restrict__ W, const int64_t *__restrict__ indicies,         \
+      int64_t y_offset, int64_t full_y_size, int64_t batch_size,               \
       int64_t num_layers, int64_t layer_idx, float scale);
 
-#define INST_BGMV_TWOSIDE(in_T, out_T, W_T, narrow, wide)                  \
-  INST_BGMV(narrow, wide, in_T, out_T, W_T)                                \
+#define INST_BGMV_TWOSIDE(in_T, out_T, W_T, narrow, wide)                      \
+  INST_BGMV(narrow, wide, in_T, out_T, W_T)                                    \
   INST_BGMV(wide, narrow, in_T, out_T, W_T)
-  
