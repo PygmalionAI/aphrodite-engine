@@ -21,8 +21,11 @@ class LinearMethodBase(ABC):
     """Base class for different (maybe quantized) linear methods."""
 
     @abstractmethod
-    def create_weights(self, input_size: int, output_size: int,
-                       params_dtype: torch.dtype) -> Dict[str, torch.Tensor]:
+    def create_weights(self,
+                       input_size: int,
+                       output_size: int,
+                       params_dtype: torch.dtype,
+                       parallel_type: str = "none") -> Dict[str, torch.Tensor]:
         """Create weights for a linear layer."""
         raise NotImplementedError
 
@@ -46,8 +49,11 @@ class UnquantizedLinearMethod(LinearMethodBase):
     def __init__(self, separate_bias_add: bool = False):
         self.separate_bias_add = separate_bias_add
 
-    def create_weights(self, input_size: int, output_size: int,
-                       params_dtype: torch.dtype) -> Dict[str, torch.Tensor]:
+    def create_weights(self,
+                       input_size: int,
+                       output_size: int,
+                       params_dtype: torch.dtype,
+                       parallel_type: str = "none") -> Dict[str, torch.Tensor]:
         weight = Parameter(torch.empty(output_size,
                                        input_size,
                                        device=torch.cuda.current_device(),
@@ -168,7 +174,8 @@ class ColumnParallelLinear(torch.nn.Module):
             linear_method = UnquantizedLinearMethod()
         self.linear_method = linear_method
         self.linear_weights = self.linear_method.create_weights(
-            self.input_size, self.output_size_per_partition, self.params_dtype)
+            self.input_size, self.output_size_per_partition, self.params_dtype,
+            "column")
         for name, weight in self.linear_weights.items():
             self.register_parameter(name, weight)
             set_weight_attrs(weight, {"weight_loader": self.weight_loader})
@@ -481,7 +488,8 @@ class RowParallelLinear(torch.nn.Module):
             linear_method = UnquantizedLinearMethod()
         self.linear_method = linear_method
         self.linear_weights = self.linear_method.create_weights(
-            self.input_size_per_partition, self.output_size, self.params_dtype)
+            self.input_size_per_partition, self.output_size, self.params_dtype,
+            "row")
         for name, weight in self.linear_weights.items():
             self.register_parameter(name, weight)
             set_weight_attrs(weight, {"weight_loader": self.weight_loader})

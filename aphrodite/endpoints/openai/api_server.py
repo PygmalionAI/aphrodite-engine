@@ -103,7 +103,9 @@ async def get_gen_prompt(request) -> str:
         roles=conv.roles,
         messages=list(conv.messages),  # prevent in-place modification
         offset=conv.offset,
-        sep_style=SeparatorStyle(conv.sep_style),
+        # default to llama2 sep_style as None is invalid
+        # FIXME: this is a hack
+        sep_style=conv.sep_style or SeparatorStyle.LLAMA2,
         sep=conv.sep,
         sep2=conv.sep2,
         stop_str=conv.stop_str,
@@ -217,7 +219,6 @@ async def create_chat_completion(
     NOTE: Currently we do not support the following features:
         - function_call (Users should implement this by themselves)
     """
-    logger.info(f"Received chat completion request: {request}")
 
     error_check_ret = await check_model(request)
     if error_check_ret is not None:
@@ -421,7 +422,6 @@ async def create_completion(
         - suffix (the language models we currently support do not support
           suffix)
     """
-    logger.info(f"Received completion request: {request}")
 
     error_check_ret = await check_model(request)
     if error_check_ret is not None:

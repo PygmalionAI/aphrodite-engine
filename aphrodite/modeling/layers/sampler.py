@@ -10,7 +10,7 @@ from aphrodite.modeling.megatron.communication_op import (
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (PromptLogprobs, SampleLogprobs,
                                        SamplerOutput, SequenceData,
-                                       SequenceGroupOutputs, SequenceOutputs)
+                                       SequenceGroupOutput, SequenceOutput)
 
 import aphrodite.modeling.layers.sampler_mirostat as sampler_mirostat
 
@@ -857,8 +857,8 @@ def _build_sampler_output(
                                                       next_token_ids,
                                                       group_sample_logprobs):
             seq_outputs.append(
-                SequenceOutputs(seq_ids[parent_id], next_token_id, logprobs,
-                                output_metadata.get(seq_ids[parent_id])))
+                SequenceOutput(seq_ids[parent_id], next_token_id, logprobs,
+                               output_metadata.get(seq_ids[parent_id])))
         sampler_output.append(
-            SequenceGroupOutputs(seq_outputs, group_prompt_logprobs))
+            SequenceGroupOutput(seq_outputs, group_prompt_logprobs))
     return sampler_output
