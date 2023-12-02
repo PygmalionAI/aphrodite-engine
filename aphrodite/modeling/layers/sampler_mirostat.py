@@ -1,12 +1,11 @@
 import torch
 from torch import Tensor
 
-from aphrodite.modeling.metadata import InputMetadata
-from aphrodite.modeling.sampling_metadata import OutputMetadata
+from aphrodite.modeling.sampling_metadata import OutputMetadata, SamplingMetadata
 
 
 def _fetch_args(
-    input_metadata: InputMetadata
+    sampling_metadata: SamplingMetadata
 ) -> tuple[list[int], list[int], list[float], list[float], list[float]]:
     logit_indices: list[int] = []
     seqids: list[int] = []
@@ -15,14 +14,14 @@ def _fetch_args(
     mus: list[float] = []
 
     index = 0
-    for seq_ids, params in input_metadata.seq_groups:
+    for seq_ids, params in sampling_metadata.seq_groups:
         if params.mirostat_mode == 2:
             logit_indices += [(index + i) for i in range(len(seq_ids))]
             seqids += seq_ids
             taus += [params.mirostat_tau] * len(seq_ids)
             etas += [params.mirostat_eta] * len(seq_ids)
             mus += [
-                input_metadata.persistent_data.get(sid).get(
+                sampling_metadata.persistent_data.get(sid).get(
                     "miro_mu", params.mirostat_tau * 2) for sid in seq_ids
             ]
         index += len(seq_ids)
@@ -90,14 +89,14 @@ def _apply_mirostat_v2(
     return logits
 
 
-def is_applicable(input_metadata: InputMetadata) -> bool:
+def is_applicable(sampling_metadata: SamplingMetadata) -> bool:
     return any(
-        (params.mirostat_mode == 2) for _, params in input_metadata.seq_groups)
+        (params.mirostat_mode == 2) for _, params in sampling_metadata.seq_groups)
 
 
-def apply(logits: Tensor, input_metadata: InputMetadata,
+def apply(logits: Tensor, sampling_metadata: SamplingMetadata,
           output_metadata: OutputMetadata) -> Tensor:
-    logit_index, seqids, taus, etas, mus = _fetch_args(input_metadata)
+    logit_index, seqids, taus, etas, mus = _fetch_args(sampling_metadata)
     # print("logidx", logit_index)
     # print("seqids", seqids)
     # print("  taus", taus)
