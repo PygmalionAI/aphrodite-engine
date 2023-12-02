@@ -697,6 +697,7 @@ def make_parser(parser=None):
 
     parser = AsyncEngineArgs.add_cli_args(parser)
 
+
 def run_server(args):
     global app, engine, served_model, max_model_len, tokenizer
 
@@ -732,7 +733,8 @@ def run_server(args):
                 port=args.port,
                 log_level="info",
                 timeout_keep_alive=TIMEOUT_KEEP_ALIVE)
-    
+
+
 if __name__ == "__main__":
-    args = make_raser().parse_args()
+    args = make_parser().parse_args()
     run_server(args)

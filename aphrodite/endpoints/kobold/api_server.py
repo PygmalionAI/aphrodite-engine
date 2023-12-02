@@ -259,6 +259,7 @@ app.include_router(kai_api, prefix="/api/v1")
 app.include_router(kai_api, prefix="/api/latest", include_in_schema=False)
 app.include_router(extra_api, prefix="/api/extra")
 
+
 def make_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser(
@@ -283,8 +284,9 @@ def make_parser(parser=None):
     parser = AsyncEngineArgs.add_cli_args(parser)
     global args  # pylint: disable=global-at-module-level
 
+
 def run_server(args):
-    global app, engine, served_model, max_model_len, tokenizer
+    global app, engine, engine_model_config, served_model, max_model_len, tokenizer
 
     logger.debug(f"args: {args}")
 
@@ -311,7 +313,7 @@ def run_server(args):
                 log_level="info",
                 timeout_keep_alive=TIMEOUT_KEEP_ALIVE)
 
+
 if __name__ == "__main__":
-    args = make_raser().parse_args()
+    args = make_parser().parse_args()
     run_server(args)
-    
