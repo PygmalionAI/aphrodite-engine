@@ -273,6 +273,7 @@ class YaRNScalingRotaryEmbedding(RotaryEmbedding):
 
 _ROPE_DICT: Dict[Tuple, RotaryEmbedding] = {}
 
+
 def get_rope(
     head_size: int,
     rotary_dim: int,
