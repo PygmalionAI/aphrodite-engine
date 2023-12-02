@@ -66,8 +66,11 @@ class SqueezeLLMLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: SqueezeLLMConfig):
         self.quant_config = quant_config
 
-    def create_weights(self, input_size: int, output_size: int,
-                       params_dtype: torch.dtype) -> Dict[str, torch.Tensor]:
+    def create_weights(self,
+                       input_size: int,
+                       output_size: int,
+                       params_dtype: torch.dtype,
+                       parallel_type: str = "none") -> Dict[str, torch.Tensor]:
         if input_size % self.quant_config.pack_factor != 0:
             raise ValueError(
                 "The input size is not aligned with the quantized "
