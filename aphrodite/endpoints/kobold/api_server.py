@@ -9,7 +9,7 @@ from http import HTTPStatus
 from typing import List, Tuple, AsyncGenerator
 
 import uvicorn
-from fastapi import FastAPI, APIRouter, Response
+from fastapi import FastAPI, APIRouter, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -27,6 +27,7 @@ TIMEOUT_KEEP_ALIVE = 5  # seconds
 logger = init_logger(__name__)
 served_model: str = "Read Only"
 engine: AsyncAphrodite = None
+gen_cache: dict = {}
 
 badwordsids: List[int] = []
 
@@ -79,6 +80,9 @@ def prepare_engine_payload(
 ) -> Tuple[SamplingParams, List[int]]:
     """Create SamplingParams and truncated input tokens for AsyncEngine"""
 
+    if not kai_payload.genkey:
+        kai_payload.genkey = f"kai-{random_uuid()}"
+
     if kai_payload.max_context_length > max_model_len:
         raise ValueError(
             f"max_context_length ({kai_payload.max_context_length}) "
@@ -126,17 +130,22 @@ def prepare_engine_payload(
 
 @kai_api.post("/generate")
 async def generate(kai_payload: KAIGenerationInputSchema) -> JSONResponse:
-    """ Generate text """
+    """Generate text"""
 
-    req_id = f"kai-{random_uuid()}"
     sampling_params, input_tokens = prepare_engine_payload(kai_payload)
-    result_generator = engine.generate(None, sampling_params, req_id,
-                                       input_tokens)
+    result_generator = engine.generate(None, sampling_params,
+                                       kai_payload.genkey, input_tokens)
 
     final_res: RequestOutput = None
+    previous_output = ""
     async for res in result_generator:
         final_res = res
+        new_chunk = res.outputs[0].text[len(previous_output):]
+        previous_output += new_chunk
+        gen_cache[kai_payload.genkey] = previous_output
+
     assert final_res is not None
+    del gen_cache[kai_payload.genkey]
 
     return JSONResponse(
         {"results": [{
@@ -147,12 +156,11 @@ async def generate(kai_payload: KAIGenerationInputSchema) -> JSONResponse:
 @extra_api.post("/generate/stream")
 async def generate_stream(
         kai_payload: KAIGenerationInputSchema) -> StreamingResponse:
-    """ Generate text SSE streaming """
+    """Generate text SSE streaming"""
 
-    req_id = f"kai-{random_uuid()}"
     sampling_params, input_tokens = prepare_engine_payload(kai_payload)
-    results_generator = engine.generate(None, sampling_params, req_id,
-                                        input_tokens)
+    results_generator = engine.generate(None, sampling_params,
+                                        kai_payload.genkey, input_tokens)
 
     async def stream_kobold() -> AsyncGenerator[bytes, None]:
         previous_output = ""
@@ -171,71 +179,98 @@ async def generate_stream(
 
 
 @extra_api.post("/generate/check")
-async def check_generation():
-    """ stub for compatibility """
-    return JSONResponse({"results": [{"text": ""}]})
+@extra_api.get("/generate/check")
+async def check_generation(request: Request):
+    """Check outputs in progress (poll streaming)"""
+
+    text = ""
+    try:
+        request_dict = await request.json()
+        if "genkey" in request_dict and request_dict["genkey"] in gen_cache:
+            text = gen_cache[request_dict["genkey"]]
+    except json.JSONDecodeError:
+        pass
+
+    return JSONResponse({"results": [{"text": text}]})
+
+
+@extra_api.post("/abort")
+async def abort_generation(request: Request):
+    """Abort running generation"""
+    try:
+        request_dict = await request.json()
+        if "genkey" in request_dict:
+            await engine.abort(request_dict["genkey"])
+    except json.JSONDecodeError:
+        pass
+
+    return JSONResponse({})
+
+
+@extra_api.post("/tokencount")
+async def count_tokens(request: Request):
+    """Tokenize string and return token count"""
+
+    request_dict = await request.json()
+    tokenizer_result = tokenizer(request_dict["prompt"])
+    return JSONResponse({"value": len(tokenizer_result.input_ids)})
 
 
 @kai_api.get("/info/version")
 async def get_version():
-    """ Impersonate KAI """
+    """Impersonate KAI"""
     return JSONResponse({"result": "1.2.4"})
 
 
 @kai_api.get("/model")
 async def get_model():
-    """ Get current model """
+    """Get current model"""
     return JSONResponse({"result": f"aphrodite/{served_model}"})
 
 
 @kai_api.get("/config/soft_prompts_list")
 async def get_available_softprompts():
-    """ stub for compatibility """
+    """Stub for compatibility"""
     return JSONResponse({"values": []})
 
 
 @kai_api.get("/config/soft_prompt")
 async def get_current_softprompt():
-    """ stub for compatibility """
+    """Stub for compatibility"""
     return JSONResponse({"value": ""})
 
 
 @kai_api.put("/config/soft_prompt")
 async def set_current_softprompt():
-    """ stub for compatibility """
+    """Stub for compatibility"""
     return JSONResponse({})
 
 
-@app.get("/api/latest/config/max_context_length")
+@kai_api.get("/config/max_length")
+async def get_max_length() -> JSONResponse:
+    """Return the configured max output length"""
+    max_length = args.max_length
+    return JSONResponse({"value": max_length})
+
+
+@kai_api.get("/config/max_context_length")
+@extra_api.get("/true_max_context_length")
 async def get_max_context_length() -> JSONResponse:
     """Return the max context length based on the EngineArgs configuration."""
     max_context_length = engine_model_config.max_model_len
     return JSONResponse({"value": max_context_length})
 
 
-@app.get("/api/latest/config/max_length")
-async def get_max_length() -> JSONResponse:
-    """Why do we need this twice?"""
-    max_length = args.max_length
-    return JSONResponse({"value": max_length})
-
-
-@extra_api.post("/abort")
-async def abort_generation():
-    """ stub for compatibility """
+@extra_api.get("/preloadstory")
+async def get_preloaded_story() -> JSONResponse:
+    """Stub for compatibility"""
     return JSONResponse({})
 
 
 @extra_api.get("/version")
 async def get_extra_version():
-    """ Impersonate KoboldCpp with streaming support """
-    return JSONResponse({"result": "KoboldCpp", "version": "1.47"})
-
-
-@app.get("/health")
-async def health() -> Response:
-    """Health check route for K8s"""
-    return Response(status_code=200)
+    """Impersonate KoboldCpp"""
+    return JSONResponse({"result": "KoboldCpp", "version": "1.42.1"})
 
 
 @app.get("/")
@@ -253,6 +288,12 @@ async def get_kobold_lite_ui():
         else:
             print("Embedded Kobold Lite not found")
     return HTMLResponse(content=kobold_lite_ui)
+
+
+@app.get("/health")
+async def health() -> Response:
+    """Health check route for K8s"""
+    return Response(status_code=200)
 
 
 app.include_router(kai_api, prefix="/api/v1")
@@ -280,7 +321,6 @@ if __name__ == "__main__":
                         "For use with Kobold Horde.")
 
     parser = AsyncEngineArgs.add_cli_args(parser)
-    global args  # pylint: disable=global-at-module-level
     args = parser.parse_args()
 
     logger.debug(f"args: {args}")
