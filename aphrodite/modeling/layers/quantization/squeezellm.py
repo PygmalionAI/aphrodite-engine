@@ -116,9 +116,7 @@ class SqueezeLLMLinearMethod(LinearMethodBase):
         reshaped_x = x.reshape(-1, x.shape[-1])
         # NOTE: The output tensor should be zero-initialized.
         out = torch.zeros(out_shape, device="cuda", dtype=torch.float16)
-        quantization_ops.squeezellm_gemm(reshaped_x,
-                                         qweight,
-                                         out,
+        quantization_ops.squeezellm_gemm(reshaped_x, qweight, out,
                                          lookup_table)
 
         if bias is not None:
