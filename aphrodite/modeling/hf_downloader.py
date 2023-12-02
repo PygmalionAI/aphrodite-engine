@@ -316,4 +316,3 @@ def get_parallel_weight(model: torch.nn.Module):
             for suffix in ["weight", "bias"]:
                 column_parallel_weights.append(f"{layer}.{suffix}")
     return column_parallel_weights, row_parallel_weights
-    

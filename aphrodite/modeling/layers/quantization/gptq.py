@@ -5,7 +5,7 @@ from torch.nn.parameter import Parameter
 
 from aphrodite._C import ops as quantization_ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                               set_weight_attrs)
+                                              set_weight_attrs)
 from aphrodite.modeling.layers.quantization.base_config import (
     QuantizationConfig)
 from aphrodite.modeling.megatron.parallel_state import (
@@ -81,7 +81,9 @@ class GPTQLinearMethod(LinearMethodBase):
         self.quant_config = quant_config
         self.use_exllama = True
 
-    def create_weights(self, input_size: int, output_size: int,
+    def create_weights(self,
+                       input_size: int,
+                       output_size: int,
                        params_dtype: torch.dtype,
                        parallel_type: str = "none") -> Dict[str, torch.Tensor]:
         if input_size % self.quant_config.group_size != 0:
@@ -121,16 +123,24 @@ class GPTQLinearMethod(LinearMethodBase):
         )
         set_weight_attrs(g_idx, {"input_dim": 0})
         tp_size = get_tensor_model_parallel_world_size()
-        if parallel_type == "row" and tp_size > 1 and (self.quant_config.desc_act
+        if parallel_type == "row" and tp_size > 1 and (
+                self.quant_config.desc_act
                 and self.quant_config.group_size != -1):
             input_size = input_size * tp_size
-            use_exllama = Parameter(torch.tensor(False, dtype=torch.bool, device="cuda"), requires_grad=False)
+            use_exllama = Parameter(torch.tensor(False,
+                                                 dtype=torch.bool,
+                                                 device="cuda"),
+                                    requires_grad=False)
         else:
-            use_exllama = Parameter(torch.tensor(True, dtype=torch.bool, device="cuda"), requires_grad=False)
+            use_exllama = Parameter(torch.tensor(True,
+                                                 dtype=torch.bool,
+                                                 device="cuda"),
+                                    requires_grad=False)
         if self.quant_config.desc_act or self.quant_config.group_size == -1:
             input_dim = None
         else:
             input_dim = 0
+        # pylint: disable=line-too-long
         group_size = self.quant_config.group_size if self.quant_config.group_size != -1 else input_size
         qzeros = Parameter(
             torch.empty(
@@ -203,15 +213,15 @@ class GPTQLinearMethod(LinearMethodBase):
                         weights["scales"],
                         weights["g_idx"].cpu(),
                     )
-            temp_dq = torch.empty((height * self.quant_config.pack_factor,
-                                   width),
-                                  dtype=torch.float16,
-                                  device=x.device)
+            temp_dq = torch.empty(
+                (height * self.quant_config.pack_factor, width),
+                dtype=torch.float16,
+                device=x.device)
             output = torch.empty((reshaped_x.shape[0], qweight.shape[-1]),
                                  dtype=torch.float16,
                                  device=x.device)
-            quantization_ops.gemm_half_q_half(reshaped_x, weights["q4"], output,
-                                              temp_dq, False)
+            quantization_ops.gemm_half_q_half(reshaped_x, weights["q4"],
+                                              output, temp_dq, False)
         else:
             output = torch.zeros((reshaped_x.shape[0], qweight.shape[-1]),
                                  dtype=torch.float32,
