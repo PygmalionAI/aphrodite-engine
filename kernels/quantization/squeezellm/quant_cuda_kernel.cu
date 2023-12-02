@@ -1,5 +1,3 @@
-// SqueezeLLM quantization kernel
-// https://arxiv.org/abs/2306.07629
 #include <torch/all.h>
 #include <torch/python.h>
 #include <cuda.h>
@@ -17,15 +15,15 @@ namespace aphrodite {
 namespace squeezellm {
 
 __device__ inline unsigned int as_unsigned(int i) {
-    return *reinterpret_cast<unsigned int*>(&i);
+  return *reinterpret_cast<unsigned int*>(&i);
 }
 
 // 4-bit matvec kernel (LUT-based)
 __global__ void NUQ4MatMulKernel(
-    const half2* __restrict__ vec,
-    const   int* __restrict__ mat,
-          half2* __restrict__ mul,
-    const __half* __restrict__ lookup_table,
+    const  half2* __restrict__ vec,
+    const    int* __restrict__ mat,
+           half2* __restrict__ mul,
+    const  __half* __restrict__ lookup_table,
     int height,
     int width,
     int batch,
@@ -35,14 +33,14 @@ __global__ void NUQ4MatMulKernel(
   const int blockwidth2 = BLOCKWIDTH / 2;
 
   int row = BLOCKHEIGHT4 * blockIdx.x;
-  int col = BLOCKWIDTH  * blockIdx.y + threadIdx.x;
+  int col =  BLOCKWIDTH * blockIdx.y + threadIdx.x;
 
   __shared__ half2 blockvec[blockwidth2];
 
   __shared__ __half deq2[16][BLOCKWIDTH];
   int off = threadIdx.x;
   int column_offset = col * 16;
-  for (int val = 0; val < 16; val+= 1) {
+  for (int val = 0; val < 16; val += 1) {
     int lut_index = column_offset + val;
     deq2[val][off] = lookup_table[lut_index];
   }
@@ -84,7 +82,7 @@ __global__ void NUQ4MatMulKernel(
       tmp2.x = deq2[lut_index1][off];
       tmp2.y = deq2[lut_index2][off];
       res2 = __hfma2(tmp2, blockvec[k + 1], res2);
-      
+
       lut_index1 = (tmp1 >> 16) & 0xF;
       lut_index2 = (tmp1 >> 20) & 0xF;
       tmp2.x = deq2[lut_index1][off];
@@ -101,7 +99,6 @@ __global__ void NUQ4MatMulKernel(
 
       i += width;
       k += 4;
-
     }
 
     // col%2 -> only set one of the two values
@@ -117,8 +114,7 @@ __global__ void NUQ4MatMulKernel(
 }
 
 } // namespace squeezellm
-} // namespace aphrodite 
-
+} // namespace aphrodite
 
 // 4-bit matvec kernel (LUT-based)
 void squeezellm_gemm(
@@ -135,7 +131,7 @@ void squeezellm_gemm(
 
   dim3 blocks(
     (height + BLOCKHEIGHT4 - 1) / BLOCKHEIGHT4,
-    (width  + BLOCKWIDTH  - 1) / BLOCKWIDTH
+    (width + BLOCKWIDTH - 1) / BLOCKWIDTH
   );
   dim3 threads(BLOCKWIDTH);
 
