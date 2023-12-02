@@ -77,7 +77,7 @@ class AWQLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: AWQConfig):
         self.quant_config = quant_config
 
-   def create_weights(self,
+    def create_weights(self,
                        input_size: int,
                        output_size: int,
                        params_dtype: torch.dtype,
