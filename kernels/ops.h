@@ -67,4 +67,10 @@ torch::Tensor awq_gemm(
   torch::Tensor _scaling_factors,
   torch::Tensor _zeros,
   int split_k_iters);
+
+void squeezellm_gemm(
+  torch::Tensor vec,
+  torch::Tensor mat,
+  torch::Tensor mul,
+  torch::Tensor lookup_table);
   
