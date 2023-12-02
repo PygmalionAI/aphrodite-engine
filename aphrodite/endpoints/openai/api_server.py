@@ -103,7 +103,9 @@ async def get_gen_prompt(request) -> str:
         roles=conv.roles,
         messages=list(conv.messages),  # prevent in-place modification
         offset=conv.offset,
-        sep_style=SeparatorStyle(conv.sep_style),
+        # default to llama2 sep_style as None is invalid
+        # FIXME: this is a hack
+        sep_style=conv.sep_style or SeparatorStyle.LLAMA2,
         sep=conv.sep,
         sep2=conv.sep2,
         stop_str=conv.stop_str,

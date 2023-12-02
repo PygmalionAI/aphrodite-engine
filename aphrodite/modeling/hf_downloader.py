@@ -288,4 +288,31 @@ def initialize_dummy_weights(
     values between -1e-3 and 1e-3 works well for most models.
     """
     for param in model.state_dict().values():
-        param.data.uniform_(low, high)
+        if torch.is_floating_point(param):
+            param.data.uniform_(low, high)
+
+
+def get_parallel_weight(model: torch.nn.Module):
+    if model.quant_config is None:
+        column_weight_suffixes = ["weight", "bias"]
+        row_weight_suffixes = ["weight"]
+    else:
+        column_weight_suffixes = (
+            model.quant_config.get_col_parallel_tensor_names())
+        row_weight_suffixes = (
+            model.quant_config.get_row_parallel_tensor_names())
+
+    column_parallel_weights: List[str] = []
+    for layer in model.column_parallel_layers:
+        for suffix in column_weight_suffixes:
+            column_parallel_weights.append(f"{layer}.{suffix}")
+    row_parallel_weights: List[str] = []
+    for layer in model.row_parallel_layers:
+        for suffix in row_weight_suffixes:
+            row_parallel_weights.append(f"{layer}.{suffix}")
+
+    if hasattr(model, "parallel_vocab_layers"):
+        for layer in model.parallel_vocab_layers:
+            for suffix in ["weight", "bias"]:
+                column_parallel_weights.append(f"{layer}.{suffix}")
+    return column_parallel_weights, row_parallel_weights
