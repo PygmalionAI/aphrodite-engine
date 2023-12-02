@@ -220,4 +220,9 @@ setuptools.setup(
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
     package_data={"aphrodite-engine": ["py.typed"]},
+    entry_points={
+        "console_scripts": [
+            "aphrodite=aphrodite.common.endpoint_scripts:main",
+        ],
+    },
 )

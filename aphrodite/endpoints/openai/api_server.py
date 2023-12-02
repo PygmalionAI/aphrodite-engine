@@ -660,9 +660,10 @@ async def create_completion(
     return response
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Aphrodite OpenAI-Compatible RESTful API server.")
+def make_parser(parser=None):
+    if parser is None:
+        parser = argparse.ArgumentParser(
+            description="Aphrodite OpenAI-Compatible RESTful API server.")
     parser.add_argument("--host",
                         type=str,
                         default="localhost",
@@ -695,7 +696,9 @@ if __name__ == "__main__":
                         help="Authorization API Keys for the server.")
 
     parser = AsyncEngineArgs.add_cli_args(parser)
-    args = parser.parse_args()
+
+def run_server(args):
+    global app, engine, served_model, max_model_len, tokenizer
 
     global EXPECTED_API_KEYS  # pylint: disable=global-at-module-level
     EXPECTED_API_KEYS = args.api_keys
@@ -729,3 +732,7 @@ if __name__ == "__main__":
                 port=args.port,
                 log_level="info",
                 timeout_keep_alive=TIMEOUT_KEEP_ALIVE)
+    
+if __name__ == "__main__":
+    args = make_raser().parse_args()
+    run_server(args)
