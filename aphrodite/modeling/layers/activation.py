@@ -76,8 +76,7 @@ def get_act_fn(
     intermediate_size: Optional[int] = None,
 ) -> nn.Module:
     """Get an activation function by name."""
-    # pylint: disable=used-before-assignment
-    act_fn_name = act_fn_name.lower()
+    act_fn_name = act_fn.lower()
     if act_fn_name not in _ACTIVATION_REGISTRY:
         raise ValueError(
             f"Activation function {act_fn!r} is currently not supported.")
