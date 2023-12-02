@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite import quantization_ops
+from aphrodite._C import ops as quantization_ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.modeling.layers.quantization.base_config import QuantizationConfig
@@ -62,6 +62,9 @@ class AWQConfig(QuantizationConfig):
 
     def get_linear_method(self) -> "AWQLinearMethod":
         return AWQLinearMethod(self)
+
+    def get_scaled_act_names(self) -> List[str]:
+        return ["gelu", "gelu_fast", "gelu_new", "gelu_pytorch_tanh"]
 
 
 class AWQLinearMethod(LinearMethodBase):

@@ -11,6 +11,7 @@ from safetensors.torch import load_file, save_file, safe_open
 import numpy as np
 import torch
 from tqdm.auto import tqdm
+from transformers import PretrainedConfig
 
 from aphrodite.common.logger import init_logger
 from aphrodite.modeling.layers.quantization import (get_quantization_config,
@@ -80,12 +81,18 @@ def convert_bin_to_safetensor_file(
             raise RuntimeError(f"The output tensors do not match for key {k}")
 
 
-# TODO: Move this to other place.
+# TODO: Move this to another place.
 def get_quant_config(
     quantization: str,
     model_name_or_path: str,
+    hf_config: PretrainedConfig,
     cache_dir: Optional[str] = None,
 ) -> QuantizationConfig:
+    quant_cls = get_quantization_config(quantization)
+    hf_quant_config = getattr(hf_config, "quantization_config", None)
+    if hf_quant_config is not None:
+        return quant_cls.from_config(hf_quant_config)
+
     is_local = os.path.isdir(model_name_or_path)
     if not is_local:
         # Download the config files.
@@ -98,7 +105,6 @@ def get_quant_config(
         hf_folder = model_name_or_path
     config_files = glob.glob(os.path.join(hf_folder, "*.json"))
 
-    quant_cls = get_quantization_config(quantization)
     quant_config_files = [
         f for f in config_files if any(
             f.endswith(x) for x in quant_cls.get_config_filenames())
@@ -237,8 +243,8 @@ def hf_model_weights_iterator(
         for st_file in hf_weights_files:
             with safe_open(st_file, framework="pt") as f:
                 for name in f.keys():
-                    param = f.get_slice(name)
-                    yield name, convert_pyslice_to_tensor(param)
+                    param = f.get_tensor(name)
+                    yield name, param
     else:
         for bin_file in hf_weights_files:
             state = torch.load(bin_file, map_location="cpu")
@@ -258,12 +264,7 @@ def convert_pyslice_to_tensor(x: Any) -> torch.Tensor:
     tensor first.
     """
     if not isinstance(x, torch.Tensor):
-        try:
-            x = x[:]
-        except IndexError:
-            # IndexError happens when the tensor is empty.
-            # transformer.h.0.attn.masked_bias is empty in neox models.
-            return torch.Tensor()
+        x = x[:]
     return x
 
 

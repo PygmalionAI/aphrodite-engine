@@ -28,7 +28,7 @@ import math
 import torch
 import torch.nn as nn
 
-from aphrodite import pos_encoding_ops
+from aphrodite._C import ops as pos_encoding_ops
 
 
 class RotaryEmbedding(nn.Module):
@@ -276,8 +276,8 @@ def get_rope(
     rotary_dim: int,
     max_position: int,
     base: int,
-    is_neox_style: bool,
-    rope_scaling: Optional[Dict[str, Any]],
+    is_neox_style: bool = True,
+    rope_scaling: Optional[Dict[str, Any]] = None,
 ) -> RotaryEmbedding:
     if rope_scaling is None:
         rotary_emb = RotaryEmbedding(head_size, rotary_dim, max_position, base,

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from transformers import PretrainedConfig
@@ -57,7 +57,7 @@ class ModelConfig:
         trust_remote_code: bool,
         download_dir: Optional[str],
         load_format: str,
-        dtype: str,
+        dtype: Union[str, torch.dtype],
         seed: int,
         revision: Optional[str] = None,
         max_model_len: Optional[int] = None,
@@ -100,15 +100,29 @@ class ModelConfig:
         self.tokenizer_mode = tokenizer_mode
 
     def _verify_quantization(self) -> None:
-        supported_quantization = ["awq", "squeezellm"]
-        if self.quantization is None:
-            return
-        quantization = self.quantization.lower()
-        if quantization not in supported_quantization:
-            raise ValueError(
-                f"Unknown quantization: {self.quantization}. Must be one of "
-                f"{supported_quantization}.")
-        self.quantization = quantization
+        supported_quantization = ["awq"]
+        if self.quantization is not None:
+            self.quantization = self.quantization.lower()
+
+        hf_quant_config = getattr(self.hf_config, "quant_config", None)
+        if hf_quant_config is not None:
+            hf_quant_method = str(hf_quant_config["quant_method"]).lower()
+            if self.quantization is None:
+                self.quantization = hf_quant_method
+            elif self.quantization != hf_quant_method:
+                raise ValueError(
+                    f"Model quantization method is {hf_quant_method} "
+                    f"but quantization argument is {self.quantization}. "
+                    "Please use the same quantization method.")
+        if self.quantization is not None:
+            if self.quantization not in supported_quantization:
+                raise ValueError(
+                    f"Unknown quantization method: {self.quantization}. "
+                    f"Must be one of {supported_quantization}.")
+        if self.quantization is not None:
+            logger.warning(f"{self.quantization} quantization is not fully "
+                           "optimized yet. The speed can be slower than "
+                           "non-quantized models (16/32bit).")
 
     def verify_with_parallel_config(
         self,
@@ -250,10 +264,12 @@ class ParallelConfig:
         pipeline_parallel_size: int,
         tensor_parallel_size: int,
         worker_use_ray: bool,
+        max_parallel_loading_workers: Optional[int] = None,
     ) -> None:
         self.pipeline_parallel_size = pipeline_parallel_size
         self.tensor_parallel_size = tensor_parallel_size
         self.worker_use_ray = worker_use_ray
+        self.max_parallel_loading_workers = max_parallel_loading_workers
 
         self.world_size = pipeline_parallel_size * tensor_parallel_size
         if self.world_size > 1:
@@ -322,7 +338,7 @@ _STR_DTYPE_TO_TORCH_DTYPE = {
 
 def _get_and_verify_dtype(
     config: PretrainedConfig,
-    dtype: str,
+    dtype: Union[str, torch.dtype],
 ) -> torch.dtype:
     # NOTE: getattr(config, "torch_dtype", torch.float32) is not correct
     # because config.torch_dtype can be None.
@@ -330,17 +346,24 @@ def _get_and_verify_dtype(
     if config_dtype is None:
         config_dtype = torch.float32
 
-    dtype = dtype.lower()
-    if dtype == "auto":
-        if config_dtype == torch.float32:
-            # Following the common practice, we use float16 for float32 models.
-            torch_dtype = torch.float16
+    if isinstance(dtype, str):
+        dtype = dtype.lower()
+        if dtype == "auto":
+            if config_dtype == torch.float32:
+                torch_dtype = torch.float16
+            else:
+                torch_dtype = config_dtype
         else:
-            torch_dtype = config_dtype
+            if dtype not in _STR_DTYPE_TO_TORCH_DTYPE:
+                raise ValueError(f"Unknown dtype: {dtype}. Must be one of "
+                                 f"{list(_STR_DTYPE_TO_TORCH_DTYPE.keys())}.")
+            torch_dtype = _STR_DTYPE_TO_TORCH_DTYPE[dtype]
+    elif isinstance(dtype, torch.dtype):
+        torch_dtype = dtype
     else:
-        if dtype not in _STR_DTYPE_TO_TORCH_DTYPE:
-            raise ValueError(f"Unknown dtype: {dtype}")
-        torch_dtype = _STR_DTYPE_TO_TORCH_DTYPE[dtype]
+        raise ValueError(
+            f"Unknown dtype: {dtype}. Must be either a string or a torch "
+            "dtype.")
 
     # Verify the dtype.
     if torch_dtype != config_dtype:

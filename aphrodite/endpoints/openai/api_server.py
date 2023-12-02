@@ -103,7 +103,9 @@ async def get_gen_prompt(request) -> str:
         roles=conv.roles,
         messages=list(conv.messages),  # prevent in-place modification
         offset=conv.offset,
-        sep_style=SeparatorStyle(conv.sep_style),
+        # default to llama2 sep_style as None is invalid
+        # FIXME: this is a hack
+        sep_style=conv.sep_style or SeparatorStyle.LLAMA2,
         sep=conv.sep,
         sep2=conv.sep2,
         stop_str=conv.stop_str,
@@ -217,7 +219,6 @@ async def create_chat_completion(
     NOTE: Currently we do not support the following features:
         - function_call (Users should implement this by themselves)
     """
-    logger.info(f"Received chat completion request: {request}")
 
     error_check_ret = await check_model(request)
     if error_check_ret is not None:
@@ -286,6 +287,7 @@ async def create_chat_completion(
         index: int,
         text: str,
         finish_reason: Optional[str] = None,
+        usage: Optional[UsageInfo] = None,
     ) -> str:
         choice_data = ChatCompletionResponseStreamChoice(
             index=index,
@@ -298,7 +300,9 @@ async def create_chat_completion(
             model=model_name,
             choices=[choice_data],
         )
-        response_json = response.json(ensure_ascii=False)
+        if usage is not None:
+            response.usage = usage
+        response_json = response.json(exclude_unset=True, ensure_ascii=False)
 
         return response_json
 
@@ -324,17 +328,24 @@ async def create_chat_completion(
                 i = output.index
                 delta_text = output.text[len(previous_texts[i]):]
                 previous_texts[i] = output.text
-                previous_num_tokens[i] = len(output.token_ids)
+                completion_tokens = len(output.token_ids)
+                previous_num_tokens[i] = completion_tokens
                 response_json = create_stream_response_json(
                     index=i,
                     text=delta_text,
                 )
                 yield f"data: {response_json}\n\n"
                 if output.finish_reason is not None:
+                    prompt_tokens = len(res.prompt_token_ids)
+                    final_usage = UsageInfo(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=prompt_tokens + completion_tokens)
                     response_json = create_stream_response_json(
                         index=i,
                         text="",
                         finish_reason=output.finish_reason,
+                        usage=final_usage,
                     )
                     yield f"data: {response_json}\n\n"
         yield "data: [DONE]\n\n"
@@ -411,7 +422,6 @@ async def create_completion(
         - suffix (the language models we currently support do not support
           suffix)
     """
-    logger.info(f"Received completion request: {request}")
 
     error_check_ret = await check_model(request)
     if error_check_ret is not None:
@@ -528,6 +538,7 @@ async def create_completion(
         text: str,
         logprobs: Optional[LogProbs] = None,
         finish_reason: Optional[str] = None,
+        usage: Optional[UsageInfo] = None,
     ) -> str:
         choice_data = CompletionResponseStreamChoice(
             index=index,
@@ -541,7 +552,9 @@ async def create_completion(
             model=model_name,
             choices=[choice_data],
         )
-        response_json = response.json(ensure_ascii=False)
+        if usage is not None:
+            response.usage = usage
+        response_json = response.json(exclude_unset=True, ensure_ascii=False)
 
         return response_json
 
@@ -571,11 +584,18 @@ async def create_completion(
                 if output.finish_reason is not None:
                     logprobs = (LogProbs()
                                 if request.logprobs is not None else None)
+                    prompt_tokens = len(res.prompt_token_ids)
+                    completion_tokens = len(output.token_ids)
+                    final_usage = UsageInfo(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=prompt_tokens + completion_tokens)
                     response_json = create_stream_response_json(
                         index=i,
                         text="",
                         logprobs=logprobs,
                         finish_reason=output.finish_reason,
+                        usage=final_usage,
                     )
                     yield f"data: {response_json}\n\n"
         yield "data: [DONE]\n\n"
