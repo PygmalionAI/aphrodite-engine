@@ -842,7 +842,7 @@ def _get_logprobs(
 
 def _build_sampler_output(
     sample_results: List[Tuple[List[int], List[int]]],
-    sampling_metadata: SamplingMetadata,,
+    sampling_metadata: SamplingMetadata,
     prompt_logprobs: List[Optional[PromptLogprobs]],
     sample_logprobs: List[SampleLogprobs],
     output_metadata: OutputMetadata,
