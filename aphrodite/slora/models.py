@@ -15,7 +15,7 @@ from torch import nn
 from aphrodite.common.config import LoRAConfig
 from aphrodite.common.utils import LRUCache
 
-from aphrodite.slora.layer import (LoRALayer, LoRAMapping, from_layer,
+from aphrodite.slora.layers import (LoRALayer, LoRAMapping, from_layer,
                                    from_layer_sampler)
 from aphrodite.slora.lora import LoRA
 from aphrodite.slora.utils import parse_fine_tuned_lora_name, replace_submodule
