@@ -28,6 +28,13 @@ ABI = 1 if torch._C._GLIBCXX_USE_CXX11_ABI else 0
 CXX_FLAGS += [f"-D_GLIBCXX_USE_CXX11_ABI={ABI}"]
 NVCC_FLAGS += [f"-D_GLIBCXX_USE_CXX11_ABI={ABI}"]
 
+cutlass_include_path = f"{ROOT_DIR}/kernels/attention/flash_attn_v2/third_party/cutlass/include"
+if not os.path.exists(cutlass_include_path):
+    raise RuntimeError(
+        "Cutlass is not found. Please run `git submodule update --init --recursive`."
+    )
+NVCC_FLAGS += [f"-I{cutlass_include_path}"]
+
 if CUDA_HOME is None:
     raise RuntimeError(
         "Cannot find CUDA_HOME. CUDA must be available to build the package.")
@@ -159,6 +166,7 @@ aphrodite_extension = CUDAExtension(
         "kernels/quantization/gptq/q_gemm.cu",
         "kernels/quantization/gptq/old_matmul_kernel.cu",
         "kernels/cuda_utils_kernels.cu",
+        "kernels/attention/flash_attn_v2/paged_flash/flash_api.cu",
         "kernels/pybind.cpp",
     ],
     extra_compile_args={
