@@ -16,6 +16,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     "paged_attention_v2",
     &paged_attention_v2,
     "PagedAttention V2.");
+  ops.def(
+    "paged_flash_attention",
+    &paged_flash_attention,
+    "Compute the attention between input query and the cached keys/values using Paged Flash Attention.");
 
   // Activation ops
   ops.def(

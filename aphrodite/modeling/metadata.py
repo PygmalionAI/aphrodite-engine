@@ -34,6 +34,8 @@ class InputMetadata:
         context_lens: the length of attention context for each generation token.
         max_context_len: The maximum context length.
         block_tables: The block tables. (Seq id -> list of physical block)
+        draft_len: length of the draft to verify.
+            Shape = [num_generation_tokens]
     """
 
     def __init__(
@@ -47,6 +49,7 @@ class InputMetadata:
         block_tables: torch.Tensor,
         sliding_window: Optional[int] = None,
         persistent_data: Optional[PersistentMetadata] = None,
+        draft_lens: Optional[List[int]] = None,
     ) -> None:
         self.seq_groups = seq_groups
         self.seq_data = seq_data
@@ -56,6 +59,7 @@ class InputMetadata:
         self.max_context_len = max_context_len
         self.block_tables = block_tables
         self.persistent_data = persistent_data or PersistentMetadata()
+        self.draft_lens = draft_lens
 
         self.max_prompt_len = max(prompt_lens) if prompt_lens else 0
         self.to_cache = None
