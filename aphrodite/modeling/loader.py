@@ -1,12 +1,12 @@
 """Utilities for selecting and loading models."""
 import contextlib
-from typing import Type
+from typing import Optional, Type
 
 import torch
 import torch.nn as nn
 from transformers import PretrainedConfig
 
-from aphrodite.common.config import ModelConfig
+from aphrodite.common.config import ModelConfig, LoRAConfig
 from aphrodite.modeling.models import *  # pylint: disable=wildcard-import
 from aphrodite.modeling.hf_downloader import (get_quant_config,
                                               initialize_dummy_weights)
@@ -42,7 +42,8 @@ def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
         f"Supported architectures: {list(_MODEL_REGISTRY.keys())}")
 
 
-def get_model(model_config: ModelConfig) -> nn.Module:
+def get_model(model_config: ModelConfig,
+              lora_config: Optional[LoRAConfig] = None) -> nn.Module:
     model_class = _get_model_architecture(model_config.hf_config)
 
     # Get the (maybe quantized) linear method.
@@ -72,7 +73,12 @@ def get_model(model_config: ModelConfig) -> nn.Module:
         # Create a model instance.
         # The weights will be initialized as empty tensors.
         with torch.device("cuda"):
-            model = model_class(model_config.hf_config, linear_method)
+            if getattr(model_class, "supports_lora", True):
+                model = model_class(model_config.hf_config,
+                                    linear_method,
+                                    lora_config)
+            else:
+                model = model_class(model_config.hf_config, linear_method)
         if model_config.load_format == "dummy":
             # NOTE: For accurate performance evaluation, we assign
             # random values to the weights.

@@ -2,7 +2,7 @@ from typing import List, Optional
 
 from aphrodite.common.sequence import (PromptLogprobs, SampleLogprobs,
                                        SequenceGroup, SequenceStatus)
-
+from aphrodite.slora.request import LoRARequest
 
 class CompletionOutput:
     """The output data of one completion output of a request.
@@ -16,6 +16,7 @@ class CompletionOutput:
         logprobs: The log probabilities of the top probability words at each
             position if the logprobs are requested.
         finish_reason: The reason why the sequence is finished.
+        lora_request: The LoRA request that was used to generate the output.
     """
 
     def __init__(
@@ -26,6 +27,7 @@ class CompletionOutput:
         cumulative_logprob: float,
         logprobs: Optional[SampleLogprobs],
         finish_reason: Optional[str] = None,
+        lora_request: Optional[LoRARequest] = None,
     ) -> None:
         self.index = index
         self.text = text
@@ -33,6 +35,7 @@ class CompletionOutput:
         self.cumulative_logprob = cumulative_logprob
         self.logprobs = logprobs
         self.finish_reason = finish_reason
+        self.lora_request = lora_request
 
     def finished(self) -> bool:
         return self.finish_reason is not None
@@ -43,7 +46,8 @@ class CompletionOutput:
                 f"token_ids={self.token_ids}, "
                 f"cumulative_logprob={self.cumulative_logprob}, "
                 f"logprobs={self.logprobs}, "
-                f"finish_reason={self.finish_reason})")
+                f"finish_reason={self.finish_reason}, "
+                f"lora_request={self.lora_request},)")
 
 
 class RequestOutput:
@@ -55,6 +59,8 @@ class RequestOutput:
         prompt_token_ids: The token IDs of the prompt.
         outputs: The output sequences of the request.
         finished: Whether the whole request is finished.
+        lora_request: The LoRA request that was used to
+            generate the output.
     """
 
     def __init__(
@@ -65,6 +71,7 @@ class RequestOutput:
         prompt_logprobs: Optional[PromptLogprobs],
         outputs: List[CompletionOutput],
         finished: bool,
+        lora_request: Optional[LoRARequest] = None,
     ) -> None:
         self.request_id = request_id
         self.prompt = prompt
@@ -72,6 +79,7 @@ class RequestOutput:
         self.prompt_logprobs = prompt_logprobs
         self.outputs = outputs
         self.finished = finished
+        self.lora_request = lora_request
 
     @classmethod
     def from_seq_group(cls, seq_group: SequenceGroup) -> "RequestOutput":
@@ -107,8 +115,13 @@ class RequestOutput:
         prompt_token_ids = seq_group.prompt_token_ids
         prompt_logprobs = seq_group.prompt_logprobs
         finished = seq_group.is_finished()
-        return cls(seq_group.request_id, prompt, prompt_token_ids,
-                   prompt_logprobs, outputs, finished)
+        return cls(seq_group.request_id,
+                   prompt,
+                   prompt_token_ids,
+                   prompt_logprobs,
+                   outputs,
+                   finished,
+                   lora_request=seq_group.lora_request)
 
     def __repr__(self) -> str:
         return (f"RequestOutput(request_id={self.request_id}, "
@@ -116,4 +129,5 @@ class RequestOutput:
                 f"prompt_token_ids={self.prompt_token_ids}, "
                 f"prompt_logprobs={self.prompt_logprobs}, "
                 f"outputs={self.outputs}, "
-                f"finished={self.finished})")
+                f"finished={self.finished}, "
+                f"lora_request={self.lora_request})")
