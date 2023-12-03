@@ -37,6 +37,7 @@ class SamplingParams(BaseModel):
 
 
 class KAIGenerationInputSchema(BaseModel):
+    genkey: Optional[str]
     prompt: str
     n: Optional[conint(ge=1, le=5)] = 1
     max_context_length: PositiveInt

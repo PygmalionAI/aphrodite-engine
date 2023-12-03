@@ -172,26 +172,6 @@ for flag in REMOVE_NVCC_FLAGS:
         torch_cpp_ext.COMMON_NVCC_FLAGS.remove(flag)
 
 ext_modules = []
-
-install_slora = bool(int(os.getenv("APHRODITE_INSTALL_SLORA_KERNELS", "1")))
-device_count = torch.cuda.device_count()
-for i in range(device_count):
-    major, minor = torch.cuda.get_device_capability(i)
-    if major < 8:
-        install_slora = False
-        break
-if install_slora:
-    ext_modules.append(
-        CUDAExtension(
-            name="aphrodite._lora_C",
-            sources=["kernels/slora/lora_ops.cc"] +
-            glob("kernels/slora/bgmv/*.cu"),
-            extra_compile_args={
-                "cxx": CXX_FLAGS,
-                "nvcc": NVCC_FLAGS_SLORA,
-            },
-        ))
-
 aphrodite_extension = CUDAExtension(
     name="aphrodite._C",
     sources=[
@@ -201,6 +181,11 @@ aphrodite_extension = CUDAExtension(
         "kernels/activation_kernels.cu",
         "kernels/layernorm_kernels.cu",
         "kernels/quantization/awq/gemm_kernels.cu",
+        "kernels/quantization/squeezellm/quant_cuda_kernel.cu",
+        "kernels/quantization/gptq/exllama_ext.cpp",
+        "kernels/quantization/gptq/q_matrix.cu",
+        "kernels/quantization/gptq/q_gemm.cu",
+        "kernels/quantization/gptq/old_matmul_kernel.cu",
         "kernels/cuda_utils_kernels.cu",
         "kernels/pybind.cpp",
     ],
@@ -216,7 +201,7 @@ def get_path(*filepath) -> str:
     return os.path.join(ROOT_DIR, *filepath)
 
 
-def find_version(filepath: str):
+def find_version(filepath: str) -> str:
     """Extract version information from the given filepath.
 
     Adapted from https://github.com/ray-project/ray/blob/0b190ee1160eeca9796bc091e07eaebf4c85b511/python/setup.py
@@ -229,9 +214,32 @@ def find_version(filepath: str):
         raise RuntimeError("Unable to find version string.")
 
 
+def get_aphrodite_version() -> str:
+    version = find_version(get_path("aphrodite-engine", "__init__.py"))
+    cuda_version = str(nvcc_cuda_version)
+    
+    # Split the version into numerical and suffix parts
+    version_parts = version.split('-')
+    version_num = version_parts[0]
+    version_suffix = version_parts[1] if len(version_parts) > 1 else ''
+    
+    if cuda_version != MAIN_CUDA_VERSION:
+        cuda_version_str = cuda_version.replace(".", "")[:3]
+        version_num += f"+cu{cuda_version_str}"
+    
+    # Reassemble the version string with the suffix, if any
+    version = version_num + ('-' + version_suffix if version_suffix else '')
+    
+    return version
+
+
 def read_readme() -> str:
-    """Read the README file."""
-    return io.open(get_path("README.md"), "r", encoding="utf-8").read()
+    """Read the README file if present."""
+    p = get_path("README.md")
+    if os.path.isfile(p):
+        return io.open(get_path("README.md"), "r", encoding="utf-8").read()
+    else:
+        return ""
 
 
 def get_requirements() -> List[str]:
