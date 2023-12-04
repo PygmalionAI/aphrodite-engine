@@ -32,7 +32,7 @@ class BiasLogitsProcessor(LogitsProcessor):
         self.values = torch.tensor(list(self.biases.values()),
                                    dtype=torch.long)
 
-    def __call__(self, logits):
+    def __call__(self, logits, output_tokens):
         if not self.biases:
             return
 

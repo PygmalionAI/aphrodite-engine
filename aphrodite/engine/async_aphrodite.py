@@ -141,10 +141,10 @@ class RequestTracker:
 
         self._request_streams[request_id].finish()
 
-    def get_new_and_finished_requests(self) -> Tuple[List[dict], Set[str]]:
+    def get_new_and_finished_requests(self) -> Tuple[List[Dict], Set[str]]:
         """Get the new requests and finished requests to be
         sent to the engine."""
-        new_requests: List[dict] = []
+        new_requests: List[Dict] = []
         finished_requests: Set[str] = set()
 
         while not self._finished_requests.empty():
@@ -483,7 +483,7 @@ class AsyncAphrodite:
         distributed_init_method, placement_group = initialize_cluster(
             parallel_config, engine_args.engine_use_ray)
         # Create the async LLM engine.
-        engine = cls(engine_args.worker_use_ray,
+        engine = cls(parallel_config.worker_use_ray,
                      engine_args.engine_use_ray,
                      *engine_configs,
                      distributed_init_method,

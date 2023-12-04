@@ -129,6 +129,7 @@ class Sequence:
         self.read_offset = 0
         # Input + output tokens
         self.tokens: Optional[List[str]] = None
+        self.persistent_data = {}
 
     def _append_logical_block(self) -> None:
         block = LogicalTokenBlock(
@@ -341,15 +342,17 @@ class SequenceGroupMetadata:
         seq_data: Dict[int, SequenceData],
         sampling_params: SamplingParams,
         block_tables: Dict[int, List[int]],
+        persistent_data: dict[int, dict],
     ) -> None:
         self.request_id = request_id
         self.is_prompt = is_prompt
         self.seq_data = seq_data
         self.sampling_params = sampling_params
         self.block_tables = block_tables
+        self.persistent_data = persistent_data
 
 
-class SequenceOutputs:
+class SequenceOutput:
     """The model output associated with a sequence.
 
     Args:
@@ -360,51 +363,50 @@ class SequenceOutputs:
             (Token id -> logP(x_i+1 | x_0, ..., x_i))
     """
 
-    def __init__(
-        self,
-        parent_seq_id: int,
-        output_token: int,
-        logprobs: Dict[int, float],
-    ) -> None:
+    def __init__(self, parent_seq_id: int, output_token: int,
+                 logprobs: Dict[int, float], persistent_data: dict) -> None:
         self.parent_seq_id = parent_seq_id
         self.output_token = output_token
         self.logprobs = logprobs
+        self.persistent_data = persistent_data
 
     def __repr__(self) -> str:
-        return (f"SequenceOutputs(parent_seq_id={self.parent_seq_id}, "
+        return (f"SequenceOutput(parent_seq_id={self.parent_seq_id}, "
                 f"output_token={self.output_token}), "
-                f"logprobs={self.logprobs}")
+                f"logprobs={self.logprobs}, "
+                f"persistent_data={self.persistent_data}")
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, SequenceOutputs):
+        if not isinstance(other, SequenceOutput):
             raise NotImplementedError()
         return (self.parent_seq_id == other.parent_seq_id
                 and self.output_token == other.output_token
-                and self.logprobs == other.logprobs)
+                and self.logprobs == other.logprobs
+                and self.persistent_data == other.persistent_data)
 
 
-class SequenceGroupOutputs:
+class SequenceGroupOutput:
     """The model outputs associated with a sequence group."""
 
     def __init__(
         self,
-        samples: List[SequenceOutputs],
+        samples: List[SequenceOutput],
         prompt_logprobs: Optional[PromptLogprobs],
     ) -> None:
         self.samples = samples
         self.prompt_logprobs = prompt_logprobs
 
     def __repr__(self) -> str:
-        return (f"SequenceGroupOutputs(samples={self.samples}, "
+        return (f"SequenceGroupOutput(samples={self.samples}, "
                 f"prompt_logprobs={self.prompt_logprobs})")
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, SequenceGroupOutputs):
+        if not isinstance(other, SequenceGroupOutput):
             raise NotImplementedError()
         return (self.samples == other.samples
                 and self.prompt_logprobs == other.prompt_logprobs)
 
 
-# For each sequence group, we generate a list of SequenceOutputs object,
+# For each sequence group, we generate a list of SequenceOutput object,
 # each of which contains one possible candidate for the next token.
-SamplerOutput = List[SequenceGroupOutputs]
+SamplerOutput = List[SequenceGroupOutput]

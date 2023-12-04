@@ -50,6 +50,8 @@ class SamplingParams:
             to -1 to consider all tokens.
         top_a: Float that controls the cutoff for Top-A sampling.
             Exact cutoff is top_a*max_prob**2. Must be in [0,inf], 0 to disable.
+        min_p: Float that controls the cutoff for min-p sampling.
+            Exact cutoff is min_p*max_prob. Must be in [0,1], 0 to disable.
         tfs: Float that controls the cummulative approximate curvature of the
             distribution to retain for Tail Free Sampling.
             Must be in (0, 1]. Set to 1 to disable
@@ -63,6 +65,11 @@ class SamplingParams:
         typical_p: Float that controls the cumulative probability of tokens
             closest in surprise to the expected surprise to consider.
             Must be in (0, 1]. Set to 1 to disable.
+        mirostat_mode: Can either be 0 (disabled) or 2 (Mirostat v2).
+        mirostat_tau: Target "surprisal" that mirostat works towards.
+            Range [0, inf).
+        mirostat_eta: Rate at which mirostat updates its internal surprisal
+            value. Range [0, inf).
         use_beam_search: Whether to use beam search instead of sampling.
         length_penalty: Float that penalizes sequences based on their length.
             Used in beam search.
@@ -91,6 +98,8 @@ class SamplingParams:
         custom_token_bans: List of token IDs to ban from generating
         skip_special_tokens: Whether to skip special tokens in the output.
             defaults to true.
+        spaces_between_special_tokens: Whether to add spaces between special
+            tokens in the output. Defaults to True.
         logits_processors: List of LogitsProcessors to change the probability
             of token prediction at runtime.
     """
@@ -106,10 +115,14 @@ class SamplingParams:
         top_p: float = 1.0,
         top_k: int = -1,
         top_a: float = 0.0,
+        min_p: float = 0.0,
         tfs: float = 1.0,
         eta_cutoff: float = 0.0,
         epsilon_cutoff: float = 0.0,
         typical_p: float = 1.0,
+        mirostat_mode: int = 0,
+        mirostat_tau: float = 0,
+        mirostat_eta: float = 0,
         use_beam_search: bool = False,
         length_penalty: float = 1.0,
         early_stopping: Union[bool, str] = False,
@@ -121,6 +134,7 @@ class SamplingParams:
         prompt_logprobs: Optional[int] = None,
         custom_token_bans: Optional[List[int]] = None,
         skip_special_tokens: bool = True,
+        spaces_between_special_tokens: bool = True,
         logits_processors: List[LogitsProcessor] = None,
     ) -> None:
         self.n = n
@@ -132,10 +146,14 @@ class SamplingParams:
         self.top_p = top_p
         self.top_k = top_k
         self.top_a = top_a
+        self.min_p = min_p
         self.tfs = tfs
         self.eta_cutoff = eta_cutoff
         self.epsilon_cutoff = epsilon_cutoff
         self.typical_p = typical_p
+        self.mirostat_mode = mirostat_mode
+        self.mirostat_tau = mirostat_tau
+        self.mirostat_eta = mirostat_eta
         self.use_beam_search = use_beam_search
         self.length_penalty = length_penalty
         self.early_stopping = early_stopping
@@ -155,8 +173,12 @@ class SamplingParams:
         self.prompt_logprobs = prompt_logprobs
         self.custom_token_bans = custom_token_bans or []
         self.skip_special_tokens = skip_special_tokens
+        self.spaces_between_special_tokens = spaces_between_special_tokens
         self.logits_processors = logits_processors or []
 
+        self.verify()
+
+    def verify(self) -> None:
         self._verify_args()
         if self.use_beam_search:
             self._verify_beam_search()
@@ -189,8 +211,10 @@ class SamplingParams:
         if self.top_k < -1 or self.top_k == 0:
             raise ValueError(f"top_k must be -1 (disable), or at least 1, "
                              f"got {self.top_k}.")
-        if not 0.0 <= self.top_a <= 1.0:
-            raise ValueError(f"top_a must be in [0, 1], got {self.top_a}.")
+        if self.top_a < 0:
+            raise ValueError(f"top_a must be non negative, got {self.top_a}.")
+        if not 0.0 <= self.min_p <= 1.0:
+            raise ValueError(f"min_p must be in [0, 1], got {self.min_p}.")
         if not 0.0 < self.tfs <= 1.0:
             raise ValueError(f"tfs must be in (0, 1], got {self.tfs}.")
         if self.epsilon_cutoff < 0.0 or self.epsilon_cutoff > 1000.0:
@@ -203,6 +227,17 @@ class SamplingParams:
         if not 0.0 <= self.typical_p <= 1.0:
             raise ValueError(
                 f"typical_p must be in (0, 1], got {self.typical_p}.")
+        if self.mirostat_mode:
+            if not self.mirostat_mode == 2:
+                raise ValueError(
+                    "Only Mirostat v2 (2) and disabled (0) supported, "
+                    f"got {self.mirostat_mode}")
+            if not self.mirostat_eta >= 0:
+                raise ValueError(
+                    f"mirostat_eta must be positive, got {self.mirostat_eta}")
+            if not self.mirostat_tau >= 0:
+                raise ValueError(
+                    f"mirostat_tau must be positive, got {self.mirostat_tau}")
         if self.max_tokens < 1:
             raise ValueError(
                 f"max_tokens must be at least 1, got {self.max_tokens}.")
@@ -265,10 +300,14 @@ class SamplingParams:
                 f"top_p={self.top_p}, "
                 f"top_k={self.top_k}, "
                 f"top_a={self.top_a}, "
+                f"min_p={self.min_p}, "
                 f"tfs={self.tfs}, "
                 f"eta_cutoff={self.eta_cutoff}, "
                 f"epsilon_cutoff={self.epsilon_cutoff}, "
                 f"typical_p={self.typical_p}, "
+                f"mirostat_mode={self.mirostat_mode}, "
+                f"mirostat_tau={self.mirostat_tau}, "
+                f"mirostat_eta={self.mirostat_eta}, "
                 f"use_beam_search={self.use_beam_search}, "
                 f"length_penalty={self.length_penalty}, "
                 f"early_stopping={self.early_stopping}, "
@@ -278,4 +317,6 @@ class SamplingParams:
                 f"custom_token_bans={self.custom_token_bans}, "
                 f"logprobs={self.logprobs}, "
                 f"prompt_logprobs={self.prompt_logprobs}, "
-                f"skip_special_tokens={self.skip_special_tokens})")
+                f"skip_special_tokens={self.skip_special_tokens}, "
+                f"spaces_between_special_tokens="
+                f"{self.spaces_between_special_tokens})")

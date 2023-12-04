@@ -10,10 +10,10 @@ from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
 from aphrodite.modeling import get_model, InputMetadata, set_random_seed
 from aphrodite.modeling.megatron.parallel_state import (
     initialize_model_parallel)
-from aphrodite.common.sampling_params import SamplingParams, SamplingType
+from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import SamplerOutput, SequenceData, SequenceGroupMetadata
 from aphrodite.task_handler.cache_engine import CacheEngine
-from aphrodite.common.utils import get_gpu_memory, get_max_shared_memory_bytes
+from aphrodite.common.utils import get_gpu_memory
 
 
 class Worker:
@@ -67,8 +67,9 @@ class Worker:
 
         # Initialize the model.
         set_random_seed(self.model_config.seed)
-        self.model = get_model(self.model_config,
-                               self.scheduler_config.max_num_batched_tokens)
+
+    def load_model(self):
+        self.model = get_model(self.model_config)
 
     @torch.inference_mode()
     def profile_num_available_blocks(
@@ -95,13 +96,12 @@ class Worker:
             seq_len = (max_num_batched_tokens // max_num_seqs +
                        (group_id < max_num_batched_tokens % max_num_seqs))
             seq_data = SequenceData([0] * seq_len)
-            seq = SequenceGroupMetadata(
-                request_id=str(group_id),
-                is_prompt=True,
-                seq_data={group_id: seq_data},
-                sampling_params=sampling_params,
-                block_tables=None,
-            )
+            seq = SequenceGroupMetadata(request_id=str(group_id),
+                                        is_prompt=True,
+                                        seq_data={group_id: seq_data},
+                                        sampling_params=sampling_params,
+                                        block_tables=None,
+                                        persistent_data={})
             seqs.append(seq)
 
         input_tokens, input_positions, input_metadata = self._prepare_inputs(
@@ -142,14 +142,6 @@ class Worker:
         self.block_size = cache_config.block_size
         self.sliding_window = cache_config.sliding_window
 
-        if self.sliding_window is None:
-            max_seq_len = self.scheduler_config.max_model_len
-        else:
-            max_seq_len = min(self.scheduler_config.max_model_len,
-                              self.sliding_window)
-
-        _check_if_can_support_max_seq_len(max_seq_len, self.block_size)
-
         self.cache_engine = CacheEngine(self.cache_config, self.model_config,
                                         self.parallel_config)
         self.cache_events = self.cache_engine.events
@@ -163,10 +155,6 @@ class Worker:
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
         slot_mapping: List[List[int]] = []
-        selected_token_indices: List[int] = []
-        selected_token_start_idx = 0
-        categorized_sample_indices = {t: [] for t in SamplingType}
-        categorized_sample_indices_start_idx = 0
 
         # Add prompt tokens.
         prompt_lens: List[int] = []
@@ -185,14 +173,6 @@ class Worker:
             prompt_tokens = seq_data.get_token_ids()
             prompt_len = len(prompt_tokens)
             prompt_lens.append(prompt_len)
-
-            if sampling_params.prompt_logprobs is not None:
-                # NOTE: prompt token positions do not need sample, skip
-                categorized_sample_indices_start_idx += prompt_len - 1
-
-            categorized_sample_indices[sampling_params.sampling_type].append(
-                categorized_sample_indices_start_idx)
-            categorized_sample_indices_start_idx += 1
 
             input_tokens.append(prompt_tokens)
             # NOTE: Here we assume that the first token in the prompt
@@ -224,36 +204,13 @@ class Worker:
         max_num_blocks_per_seq = 0
         context_lens: List[int] = []
         generation_block_tables: List[List[int]] = []
-        max_seq_len = max(prompt_lens) if prompt_lens else 1
         for seq_group_metadata in seq_group_metadata_list:
             if seq_group_metadata.is_prompt:
-                # We need to do this in this loop as we need to know max_seq_len
-                assert len(
-                    seq_ids) == 1, "Prompt input should have only one seq."
-                sampling_params = seq_group_metadata.sampling_params
-                if sampling_params.prompt_logprobs is not None:
-                    selected_token_indices.extend(
-                        range(selected_token_start_idx,
-                              selected_token_start_idx + prompt_len - 1))
-                selected_token_indices.append(selected_token_start_idx +
-                                              prompt_len - 1)
-                selected_token_start_idx += max_seq_len
                 continue
 
             seq_ids = list(seq_group_metadata.seq_data.keys())
             sampling_params = seq_group_metadata.sampling_params
             seq_groups.append((seq_ids, sampling_params))
-
-            num_seqs = len(seq_ids)
-            selected_token_indices.extend(
-                range(selected_token_start_idx,
-                      selected_token_start_idx + num_seqs))
-            selected_token_start_idx += num_seqs
-
-            categorized_sample_indices[sampling_params.sampling_type].extend(
-                range(categorized_sample_indices_start_idx,
-                      categorized_sample_indices_start_idx + num_seqs))
-            categorized_sample_indices_start_idx += num_seqs
 
             for seq_id in seq_ids:
                 seq_data = seq_group_metadata.seq_data[seq_id]
@@ -286,6 +243,7 @@ class Worker:
                 generation_block_tables.append(block_table)
 
         # NOTE: This part was optimized!
+        max_seq_len = max(prompt_lens) if prompt_lens else 1
         padded_input_tokens = [
             _pad_to_max(tokens, max_seq_len, pad=0) for tokens in input_tokens
         ]
@@ -315,13 +273,6 @@ class Worker:
         context_lens_tensor = torch.tensor(context_lens,
                                            dtype=torch.int,
                                            device="cuda")
-        selected_token_indices = torch.tensor(selected_token_indices,
-                                              dtype=torch.long,
-                                              device="cuda")
-        categorized_sample_indices = {
-            t: torch.tensor(seq_ids, dtype=torch.int, device="cuda")
-            for t, seq_ids in categorized_sample_indices.items()
-        }
         block_tables_tensor = torch.tensor(padded_block_tables,
                                            dtype=torch.int,
                                            device="cuda")
@@ -333,19 +284,19 @@ class Worker:
         for seq_group_metadata in seq_group_metadata_list:
             seq_data.update(seq_group_metadata.seq_data)
 
-        input_metadata = InputMetadata(
-            seq_groups=seq_groups,
-            seq_data=seq_data,
-            prompt_lens=prompt_lens,
-            cumulative_prompt_lens=cumulative_prompt_lens_tensor,
-            slot_mapping=slot_mapping_tensor,
-            context_lens=context_lens_tensor,
-            max_context_len=max_context_len,
-            block_tables=block_tables_tensor,
-            selected_token_indices=selected_token_indices,
-            categorized_sample_indices=categorized_sample_indices,
-            sliding_window=self.sliding_window,
-        )
+        persistent_data: dict[int, dict] = {}
+        for grp in seq_group_metadata_list:
+            persistent_data.update(grp.persistent_data)
+
+        input_metadata = InputMetadata(seq_groups=seq_groups,
+                                       seq_data=seq_data,
+                                       prompt_lens=prompt_lens,
+                                       slot_mapping=slot_mapping_tensor,
+                                       context_lens=context_lens_tensor,
+                                       max_context_len=max_context_len,
+                                       block_tables=block_tables_tensor,
+                                       sliding_window=self.sliding_window,
+                                       persistent_data=persistent_data)
         return tokens_tensor, positions_tensor, input_metadata
 
     @torch.inference_mode()
@@ -433,26 +384,6 @@ def _pad_to_alignment(x: List[int], multiple_of: int, pad: int) -> List[int]:
 
 def _pad_to_max(x: List[int], max_len: int, pad: int) -> List[int]:
     return x + [pad] * (max_len - len(x))
-
-
-def _check_if_can_support_max_seq_len(max_seq_len: int,
-                                      block_size: int) -> None:
-    # Follows the logic in
-    # attention_kernels.cu::single_query_cached_kv_attention_launcher
-    max_shared_mem = get_max_shared_memory_bytes()
-    float32_bytes = torch.finfo(torch.float).bits // 8
-    padded_max_seq_len = (
-        (max_seq_len + block_size - 1) / block_size) * block_size
-    # padded_max_seq_len + extra buffer
-    required_shared_mem = (padded_max_seq_len + 512) * float32_bytes
-    if padded_max_seq_len * float32_bytes > max_shared_mem:
-        raise RuntimeError(
-            f"Aphrodite cannot currently support max_model_len={max_seq_len} "
-            f"with block_size={block_size} on GPU with compute "
-            f"capability {torch.cuda.get_device_capability()} "
-            f"(required shared memory {required_shared_mem} > "
-            f"available shared memory {max_shared_mem}). "
-            "This will be fixed in a future release.")
 
 
 def _check_if_gpu_supports_dtype(torch_dtype: torch.dtype):

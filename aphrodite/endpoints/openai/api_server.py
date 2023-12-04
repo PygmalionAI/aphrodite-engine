@@ -10,7 +10,7 @@ from typing import AsyncGenerator, Dict, List, Optional, Tuple, Union
 
 import fastapi
 import uvicorn
-from fastapi import Request
+from fastapi import Request, Response, Header, HTTPException, Depends
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -30,7 +30,7 @@ from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.common.utils import random_uuid
-from aphrodite.common.logits import BiasLogitsProcessor
+from aphrodite.common.logits_processor import BiasLogitsProcessor
 
 try:
     import fastchat
@@ -46,6 +46,20 @@ logger = init_logger(__name__)
 served_model = None
 app = fastapi.FastAPI()
 engine = None
+
+
+def _verify_api_key(x_api_key: str = Header(None),
+                    authorization: str = Header(None)):
+    if x_api_key and x_api_key in EXPECTED_API_KEYS:
+        return x_api_key
+    elif authorization:
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() == "bearer" and token in EXPECTED_API_KEYS:
+            return token
+    raise HTTPException(
+        status_code=401,
+        detail="Invalid API Key",
+    )
 
 
 def create_error_response(status_code: HTTPStatus,
@@ -89,7 +103,9 @@ async def get_gen_prompt(request) -> str:
         roles=conv.roles,
         messages=list(conv.messages),  # prevent in-place modification
         offset=conv.offset,
-        sep_style=SeparatorStyle(conv.sep_style),
+        # default to llama2 sep_style as None is invalid
+        # FIXME: this is a hack
+        sep_style=conv.sep_style or SeparatorStyle.LLAMA2,
         sep=conv.sep,
         sep2=conv.sep2,
         stop_str=conv.stop_str,
@@ -146,8 +162,16 @@ async def check_length(
         return input_ids, None
 
 
+@app.get("/health")
+async def health() -> Response:
+    """Health check route for K8s"""
+    return Response(status_code=200)
+
+
 @app.get("/v1/models")
-async def show_available_models():
+async def show_available_models(
+        # pylint: disable=unused-argument
+        api_key: str = Depends(_verify_api_key)):
     """Show available models. Right now we only have one model."""
     model_cards = [
         ModelCard(id=served_model,
@@ -182,8 +206,11 @@ def create_logprobs(token_ids: List[int],
 
 
 @app.post("/v1/chat/completions")
-async def create_chat_completion(request: ChatCompletionRequest,
-                                 raw_request: Request):
+async def create_chat_completion(
+    request: ChatCompletionRequest,
+    raw_request: Request,
+    # pylint: disable=unused-argument
+    api_key: str = Depends(_verify_api_key)):
     """Completion API similar to OpenAI's API.
 
     See  https://platform.openai.com/docs/api-reference/chat/create
@@ -192,9 +219,13 @@ async def create_chat_completion(request: ChatCompletionRequest,
     NOTE: Currently we do not support the following features:
         - function_call (Users should implement this by themselves)
     """
-    logger.info(f"Received chat completion request: {request}")
 
     error_check_ret = await check_model(request)
+    if error_check_ret is not None:
+        return error_check_ret
+
+    prompt = await get_gen_prompt(request)
+    token_ids, error_check_ret = await check_length(request, prompt=prompt)
     if error_check_ret is not None:
         return error_check_ret
 
@@ -206,33 +237,44 @@ async def create_chat_completion(request: ChatCompletionRequest,
                 request.logit_bias.items()))
         logit_processors = [BiasLogitsProcessor(biases)]
 
-    prompt = await get_gen_prompt(request)
-    token_ids, error_check_ret = await check_length(request, prompt=prompt)
-    if error_check_ret is not None:
-        return error_check_ret
-
     model_name = request.model
     request_id = f"cmpl-{random_uuid()}"
     created_time = int(time.time())
+
+    # We disable top_k at -1, add this conversion for
+    # compatibility
+    if request.top_k == 0:
+        request.top_k = -1
     try:
         sampling_params = SamplingParams(
             n=request.n,
             presence_penalty=request.presence_penalty,
             frequency_penalty=request.frequency_penalty,
+            repetition_penalty=request.repetition_penalty,
             temperature=request.temperature,
             top_p=request.top_p,
+            top_k=request.top_k,
+            top_a=request.top_a,
+            min_p=request.min_p,
             tfs=request.tfs,
             eta_cutoff=request.eta_cutoff,
             epsilon_cutoff=request.epsilon_cutoff,
             typical_p=request.typical_p,
+            mirostat_mode=request.mirostat_mode,
+            mirostat_tau=request.mirostat_tau,
+            mirostat_eta=request.mirostat_eta,
             stop=request.stop,
             stop_token_ids=request.stop_token_ids,
             max_tokens=request.max_tokens,
             best_of=request.best_of,
-            top_k=request.top_k,
             ignore_eos=request.ignore_eos,
             use_beam_search=request.use_beam_search,
             skip_special_tokens=request.skip_special_tokens,
+            spaces_between_special_tokens=request.
+            spaces_between_special_tokens,  # pylint: disable=line-too-long
+            custom_token_bans=request.custom_token_bans,
+            logprobs=request.logprobs,
+            prompt_logprobs=request.prompt_logprobs,
             logits_processors=logit_processors,
         )
     except ValueError as e:
@@ -245,6 +287,7 @@ async def create_chat_completion(request: ChatCompletionRequest,
         index: int,
         text: str,
         finish_reason: Optional[str] = None,
+        usage: Optional[UsageInfo] = None,
     ) -> str:
         choice_data = ChatCompletionResponseStreamChoice(
             index=index,
@@ -257,7 +300,9 @@ async def create_chat_completion(request: ChatCompletionRequest,
             model=model_name,
             choices=[choice_data],
         )
-        response_json = response.json(ensure_ascii=False)
+        if usage is not None:
+            response.usage = usage
+        response_json = response.json(exclude_unset=True, ensure_ascii=False)
 
         return response_json
 
@@ -283,17 +328,24 @@ async def create_chat_completion(request: ChatCompletionRequest,
                 i = output.index
                 delta_text = output.text[len(previous_texts[i]):]
                 previous_texts[i] = output.text
-                previous_num_tokens[i] = len(output.token_ids)
+                completion_tokens = len(output.token_ids)
+                previous_num_tokens[i] = completion_tokens
                 response_json = create_stream_response_json(
                     index=i,
                     text=delta_text,
                 )
                 yield f"data: {response_json}\n\n"
                 if output.finish_reason is not None:
+                    prompt_tokens = len(res.prompt_token_ids)
+                    final_usage = UsageInfo(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=prompt_tokens + completion_tokens)
                     response_json = create_stream_response_json(
                         index=i,
                         text="",
                         finish_reason=output.finish_reason,
+                        usage=final_usage,
                     )
                     yield f"data: {response_json}\n\n"
         yield "data: [DONE]\n\n"
@@ -354,7 +406,11 @@ async def create_chat_completion(request: ChatCompletionRequest,
 
 
 @app.post("/v1/completions")
-async def create_completion(request: CompletionRequest, raw_request: Request):
+async def create_completion(
+    request: CompletionRequest,
+    raw_request: Request,
+    # pylint: disable=unused-argument
+    api_key: str = Depends(_verify_api_key)):
     """Completion API similar to OpenAI's API.
 
     See https://platform.openai.com/docs/api-reference/completions/create
@@ -366,11 +422,18 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
         - suffix (the language models we currently support do not support
           suffix)
     """
-    logger.info(f"Received completion request: {request}")
 
     error_check_ret = await check_model(request)
     if error_check_ret is not None:
         return error_check_ret
+
+    if not request.logit_bias:
+        logit_processors = []
+    else:
+        biases = dict(
+            map(lambda bias: (int(bias[0]), bias[1]),
+                request.logit_bias.items()))
+        logit_processors = [BiasLogitsProcessor(biases)]
 
     if request.echo:
         # We do not support echo since the Aphrodite engine does not
@@ -382,14 +445,6 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
         # The language models we currently support do not support suffix.
         return create_error_response(HTTPStatus.BAD_REQUEST,
                                      "suffix is not currently supported")
-
-    if not request.logit_bias:
-        logit_processors = []
-    else:
-        logit_bias = dict(
-            map(lambda logit: (int(logit[0]), logit[1]),
-                request.logit_bias.items()))
-        logit_processors = [BiasLogitsProcessor(logit_bias)]
 
     model_name = request.model
     request_id = f"cmpl-{random_uuid()}"
@@ -422,23 +477,42 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
         return error_check_ret
 
     created_time = int(time.time())
+
+    # We disable top_k at -1, add this conversion for
+    # compatibility
+    if request.top_k == 0:
+        request.top_k = -1
+
     try:
         sampling_params = SamplingParams(
             n=request.n,
-            best_of=request.best_of,
             presence_penalty=request.presence_penalty,
             frequency_penalty=request.frequency_penalty,
+            repetition_penalty=request.repetition_penalty,
             temperature=request.temperature,
             top_p=request.top_p,
-            tfs=request.tfs,
             top_k=request.top_k,
+            top_a=request.top_a,
+            min_p=request.min_p,
+            tfs=request.tfs,
+            eta_cutoff=request.eta_cutoff,
+            epsilon_cutoff=request.epsilon_cutoff,
+            typical_p=request.typical_p,
+            mirostat_mode=request.mirostat_mode,
+            mirostat_tau=request.mirostat_tau,
+            mirostat_eta=request.mirostat_eta,
             stop=request.stop,
             stop_token_ids=request.stop_token_ids,
-            ignore_eos=request.ignore_eos,
             max_tokens=request.max_tokens,
-            logprobs=request.logprobs,
+            best_of=request.best_of,
+            ignore_eos=request.ignore_eos,
             use_beam_search=request.use_beam_search,
             skip_special_tokens=request.skip_special_tokens,
+            spaces_between_special_tokens=request.
+            spaces_between_special_tokens,  # pylint: disable=line-too-long
+            custom_token_bans=request.custom_token_bans,
+            logprobs=request.logprobs,
+            prompt_logprobs=request.prompt_logprobs,
             logits_processors=logit_processors,
         )
     except ValueError as e:
@@ -464,6 +538,7 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
         text: str,
         logprobs: Optional[LogProbs] = None,
         finish_reason: Optional[str] = None,
+        usage: Optional[UsageInfo] = None,
     ) -> str:
         choice_data = CompletionResponseStreamChoice(
             index=index,
@@ -477,7 +552,9 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
             model=model_name,
             choices=[choice_data],
         )
-        response_json = response.json(ensure_ascii=False)
+        if usage is not None:
+            response.usage = usage
+        response_json = response.json(exclude_unset=True, ensure_ascii=False)
 
         return response_json
 
@@ -507,11 +584,18 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
                 if output.finish_reason is not None:
                     logprobs = (LogProbs()
                                 if request.logprobs is not None else None)
+                    prompt_tokens = len(res.prompt_token_ids)
+                    completion_tokens = len(output.token_ids)
+                    final_usage = UsageInfo(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=prompt_tokens + completion_tokens)
                     response_json = create_stream_response_json(
                         index=i,
                         text="",
                         logprobs=logprobs,
                         finish_reason=output.finish_reason,
+                        usage=final_usage,
                     )
                     yield f"data: {response_json}\n\n"
         yield "data: [DONE]\n\n"
@@ -605,10 +689,16 @@ if __name__ == "__main__":
                         help="The model name used in the API. If not "
                         "specified, the model name will be the same as "
                         "the huggingface name.")
+    parser.add_argument("--api-keys",
+                        nargs="*",
+                        required=True,
+                        help="Authorization API Keys for the server.")
 
     parser = AsyncEngineArgs.add_cli_args(parser)
     args = parser.parse_args()
 
+    global EXPECTED_API_KEYS  # pylint: disable=global-at-module-level
+    EXPECTED_API_KEYS = args.api_keys
     app.add_middleware(
         CORSMiddleware,
         allow_origins=args.allowed_origins,
@@ -617,7 +707,7 @@ if __name__ == "__main__":
         allow_headers=args.allowed_headers,
     )
 
-    logger.info(f"args: {args}")
+    logger.debug(f"args: {args}")
 
     if args.served_model_name is not None:
         served_model = args.served_model_name
@@ -627,7 +717,7 @@ if __name__ == "__main__":
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = AsyncAphrodite.from_engine_args(engine_args)
     engine_model_config = asyncio.run(engine.get_model_config())
-    max_model_len = engine_model_config.get_max_model_len()
+    max_model_len = engine_model_config.max_model_len
 
     # A separate tokenizer to map token IDs to strings.
     tokenizer = get_tokenizer(engine_args.tokenizer,

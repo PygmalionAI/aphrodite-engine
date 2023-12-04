@@ -3,7 +3,7 @@ import time
 from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 from aphrodite.common.config import CacheConfig, SchedulerConfig
-from aphrodite.processing.block_manager import BlockSpaceManager
+from aphrodite.processing.block_manager import AllocStatus, BlockSpaceManager
 from aphrodite.processing.policy import PolicyFactory
 from aphrodite.common.logger import init_logger
 from aphrodite.common.sequence import (Sequence, SequenceData, SequenceGroup,
@@ -154,8 +154,18 @@ class Scheduler:
                     continue
 
                 # If the sequence group cannot be allocated, stop.
-                if not self.block_manager.can_allocate(seq_group):
+                can_allocate = self.block_manager.can_allocate(seq_group)
+                if can_allocate == AllocStatus.LATER:
                     break
+                elif can_allocate == AllocStatus.NEVER:
+                    logger.warning(
+                        f"Input prompt ({num_prompt_tokens} tokens) is too long"
+                        f" and exceeds the capacity of the block manager.")
+                    for seq in seq_group.get_seqs():
+                        seq.status = SequenceStatus.FINISHED_IGNORED
+                    ignored_seq_groups.append(seq_group)
+                    self.waiting.pop(0)
+                    continue
 
                 # If the number of batched tokens exceeds the limit, stop.
                 new_seq_lens = seq_lens + [num_prompt_tokens]
@@ -186,7 +196,8 @@ class Scheduler:
                 scheduler_outputs = SchedulerOutputs(
                     scheduled_seq_groups=scheduled,
                     prompt_run=True,
-                    num_batched_tokens=len(seq_lens) * max(seq_lens),
+                    num_batched_tokens=len(seq_lens) *
+                    max(seq_lens) if seq_lens else 0,
                     blocks_to_swap_in=blocks_to_swap_in,
                     blocks_to_swap_out=blocks_to_swap_out,
                     blocks_to_copy=blocks_to_copy,
@@ -277,10 +288,12 @@ class Scheduler:
         for seq_group in scheduler_outputs.scheduled_seq_groups:
             seq_data: Dict[int, SequenceData] = {}
             block_tables: Dict[int, List[int]] = {}
+            persistent_data: dict[int, dict] = {}
             for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
                 seq_id = seq.seq_id
                 seq_data[seq_id] = seq.data
                 block_tables[seq_id] = self.block_manager.get_block_table(seq)
+                persistent_data[seq_id] = seq.persistent_data
 
             seq_group_metadata = SequenceGroupMetadata(
                 request_id=seq_group.request_id,
@@ -288,6 +301,7 @@ class Scheduler:
                 seq_data=seq_data,
                 sampling_params=seq_group.sampling_params,
                 block_tables=block_tables,
+                persistent_data=persistent_data,
             )
             seq_group_metadata_list.append(seq_group_metadata)
         return seq_group_metadata_list, scheduler_outputs

@@ -67,14 +67,24 @@ class ChatCompletionRequest(BaseModel):
     stream: Optional[bool] = False
     presence_penalty: Optional[float] = 0.0
     frequency_penalty: Optional[float] = 0.0
+    repetition_penalty: Optional[float] = 1.0
     logit_bias: Optional[Dict[str, float]] = None
     user: Optional[str] = None
     best_of: Optional[int] = None
     top_k: Optional[int] = -1
+    top_a: Optional[float] = 0.0
+    min_p: Optional[float] = 0.0
+    mirostat_mode: Optional[int] = 0
+    mirostat_tau: Optional[float] = 0.0
+    mirostat_eta: Optional[float] = 0.0
     ignore_eos: Optional[bool] = False
     use_beam_search: Optional[bool] = False
+    logprobs: Optional[int] = None
+    prompt_logprobs: Optional[int] = None
     stop_token_ids: Optional[List[int]] = Field(default_factory=list)
+    custom_token_bans: Optional[List[int]] = Field(default_factory=list)
     skip_special_tokens: Optional[bool] = True
+    spaces_between_special_tokens: Optional[bool] = True
 
 
 class CompletionRequest(BaseModel):
@@ -96,14 +106,24 @@ class CompletionRequest(BaseModel):
     stop: Optional[Union[str, List[str]]] = Field(default_factory=list)
     presence_penalty: Optional[float] = 0.0
     frequency_penalty: Optional[float] = 0.0
+    repetition_penalty: Optional[float] = 1.0
     best_of: Optional[int] = None
     logit_bias: Optional[Dict[str, float]] = None
     user: Optional[str] = None
     top_k: Optional[int] = -1
+    top_a: Optional[float] = 0.0
+    min_p: Optional[float] = 0.0
+    mirostat_mode: Optional[int] = 0
+    mirostat_tau: Optional[float] = 0.0
+    mirostat_eta: Optional[float] = 0.0
     ignore_eos: Optional[bool] = False
     use_beam_search: Optional[bool] = False
+    logprobs: Optional[int] = None
+    prompt_logprobs: Optional[int] = None
     stop_token_ids: Optional[List[int]] = Field(default_factory=list)
+    custom_token_bans: Optional[List[int]] = Field(default_factory=list)
     skip_special_tokens: Optional[bool] = True
+    spaces_between_special_tokens: Optional[bool] = True
 
 
 class LogProbs(BaseModel):
@@ -143,6 +163,7 @@ class CompletionStreamResponse(BaseModel):
     created: int = Field(default_factory=lambda: int(time.time()))
     model: str
     choices: List[CompletionResponseStreamChoice]
+    usage: Optional[UsageInfo]
 
 
 class ChatMessage(BaseModel):
@@ -182,3 +203,5 @@ class ChatCompletionStreamResponse(BaseModel):
     created: int = Field(default_factory=lambda: int(time.time()))
     model: str
     choices: List[ChatCompletionResponseStreamChoice]
+    usage: Optional[UsageInfo] = Field(
+        default=None, description="data about request and response")

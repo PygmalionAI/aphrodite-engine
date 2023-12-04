@@ -54,13 +54,13 @@ def test_sampler_all_greedy(seed: int):
     seq_group_metadata_list = []
     for i in range(batch_size):
         seq_group_metadata_list.append(
-            SequenceGroupMetadata(
-                request_id=f"test_{i}",
-                is_prompt=True,
-                seq_data={0: SequenceData([1, 2, 3])},
-                sampling_params=SamplingParams(temperature=0, ),
-                block_tables={0: [1]},
-            ))
+            SequenceGroupMetadata(request_id=f"test_{i}",
+                                  is_prompt=True,
+                                  seq_data={0: SequenceData([1, 2, 3])},
+                                  sampling_params=SamplingParams(
+                                      temperature=0, ),
+                                  block_tables={0: [1]},
+                                  persistent_data={}))
 
     # pylint: disable=protected-access
     _, _, input_metadata = worker._prepare_inputs(seq_group_metadata_list)
@@ -85,16 +85,15 @@ def test_sampler_all_random(seed: int):
     seq_group_metadata_list = []
     for i in range(batch_size):
         seq_group_metadata_list.append(
-            SequenceGroupMetadata(
-                request_id=f"test_{i}",
-                is_prompt=True,
-                seq_data={0: SequenceData([1, 2, 3])},
-                sampling_params=SamplingParams(
-                    temperature=1.0,
-                    n=random.randint(1, 10),
-                ),
-                block_tables={0: [1]},
-            ))
+            SequenceGroupMetadata(request_id=f"test_{i}",
+                                  is_prompt=True,
+                                  seq_data={0: SequenceData([1, 2, 3])},
+                                  sampling_params=SamplingParams(
+                                      temperature=1.0,
+                                      n=random.randint(1, 10),
+                                  ),
+                                  block_tables={0: [1]},
+                                  persistent_data={}))
     # pylint: disable=protected-access
     _, _, input_metadata = worker._prepare_inputs(seq_group_metadata_list)
     sampler_output = sampler(embedding=None,
@@ -115,17 +114,16 @@ def test_sampler_all_beam(seed: int):
     seq_group_metadata_list = []
     for i in range(batch_size):
         seq_group_metadata_list.append(
-            SequenceGroupMetadata(
-                request_id=f"test_{i}",
-                is_prompt=True,
-                seq_data={0: SequenceData([1, 2, 3])},
-                sampling_params=SamplingParams(
-                    temperature=0,
-                    best_of=2,
-                    use_beam_search=True,
-                ),
-                block_tables={0: [1]},
-            ))
+            SequenceGroupMetadata(request_id=f"test_{i}",
+                                  is_prompt=True,
+                                  seq_data={0: SequenceData([1, 2, 3])},
+                                  sampling_params=SamplingParams(
+                                      temperature=0,
+                                      best_of=2,
+                                      use_beam_search=True,
+                                  ),
+                                  block_tables={0: [1]},
+                                  persistent_data={}))
     # pylint: disable=protected-access
     _, _, input_metadata = worker._prepare_inputs(seq_group_metadata_list)
     sampler(embedding=None,
@@ -171,13 +169,12 @@ def test_sampler_mixed(seed: int):
             fake_logits[i, i + idx] = 1e2
             expected_tokens.append(i + idx)
         seq_group_metadata_list.append(
-            SequenceGroupMetadata(
-                request_id=f"test_{i}",
-                is_prompt=True,
-                seq_data={0: SequenceData([1, 2, 3])},
-                sampling_params=sampling_params,
-                block_tables={0: [1]},
-            ))
+            SequenceGroupMetadata(request_id=f"test_{i}",
+                                  is_prompt=True,
+                                  seq_data={0: SequenceData([1, 2, 3])},
+                                  sampling_params=sampling_params,
+                                  block_tables={0: [1]},
+                                  persistent_data={}))
 
     # pylint: disable=protected-access
     _, _, input_metadata = worker._prepare_inputs(seq_group_metadata_list)

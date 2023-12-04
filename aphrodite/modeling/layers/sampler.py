@@ -4,13 +4,15 @@ from typing import Dict, List, Tuple, Optional
 import torch
 import torch.nn as nn
 
-from aphrodite.modeling.metadata import InputMetadata
+from aphrodite.modeling.metadata import InputMetadata, OutputMetadata
 from aphrodite.modeling.megatron.communication_op import (
     tensor_model_parallel_all_gather)
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (PromptLogprobs, SampleLogprobs,
                                        SamplerOutput, SequenceData,
-                                       SequenceGroupOutputs, SequenceOutputs)
+                                       SequenceGroupOutput, SequenceOutput)
+
+import aphrodite.modeling.layers.sampler_mirostat as sampler_mirostat
 
 _SAMPLING_EPS = 1e-5
 
@@ -48,6 +50,8 @@ class Sampler(nn.Module):
         logits = _get_logits(hidden_states, embedding, embedding_bias,
                              self.vocab_size)
 
+        output_metadata = OutputMetadata()
+
         # Apply presence and frequency penalties.
         output_tokens = _get_output_tokens(input_metadata)
         assert len(output_tokens) == logits.shape[0]
@@ -65,6 +69,13 @@ class Sampler(nn.Module):
 
         logits = _apply_logits_processors(input_metadata, logits,
                                           output_tokens)
+
+        # Apply Mirostat
+        # Note that we apply mirostat before temperature, not after
+        # like it maybe should be.
+        # To be fixed by implementing customizable sampling order
+        if sampler_mirostat.is_applicable(input_metadata):
+            sampler_mirostat.apply(logits, input_metadata, output_metadata)
 
         # Apply Eta sampling, as described in https://arxiv.org/abs/2210.15191
         eta_cutoffs = _get_eta_cutoffs(input_metadata)
@@ -102,14 +113,17 @@ class Sampler(nn.Module):
             logits.div_(t.unsqueeze(dim=1))
 
         # Apply top-p, top-k, and top-a truncation.
-        top_ps, top_ks, top_as = _get_top_a_top_p_top_k(
+        top_ps, top_ks, top_as, min_ps = _get_alphabet_soup(
             input_metadata, self.vocab_size)
-        assert len(top_ps) == len(top_ks) == logits.shape[0]
+        assert (len(top_ps) == len(top_ks) == len(top_as) == len(min_ps) ==
+                logits.shape[0])
         do_top_p = any(p < 1.0 - _SAMPLING_EPS for p in top_ps)
         do_top_k = any(k != self.vocab_size for k in top_ks)
         do_top_a = any(a > _SAMPLING_EPS for a in top_as)
-        if do_top_p or do_top_k or do_top_a:
-            logits = _apply_top_a_top_p_top_k(logits, top_ps, top_ks, top_as)
+        do_min_p = any(p > _SAMPLING_EPS for p in min_ps)
+        if do_top_p or do_top_k or do_top_a or do_min_p:
+            logits = _apply_alphabet_soup(logits, top_ps, top_ks, top_as,
+                                          min_ps)
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
@@ -124,7 +138,8 @@ class Sampler(nn.Module):
         prompt_logprobs, sample_logprobs = _get_logprobs(
             logprobs, input_metadata, sample_results)
         return _build_sampler_output(sample_results, input_metadata,
-                                     prompt_logprobs, sample_logprobs)
+                                     prompt_logprobs, sample_logprobs,
+                                     output_metadata)
 
 
 def _get_logits(hidden_states: torch.Tensor, embedding: torch.Tensor,
@@ -144,8 +159,29 @@ def _prune_hidden_states(
     hidden_states: torch.Tensor,
     input_metadata: InputMetadata,
 ) -> torch.Tensor:
+    selected_token_indices: List[int] = []
+    start_idx = 0
+    for i, seq_group in enumerate(input_metadata.seq_groups):
+        seq_ids, sampling_params = seq_group
+        if i < input_metadata.num_prompts:
+            assert len(seq_ids) == 1, "Prompt input should have only one seq."
+            prompt_len = input_metadata.prompt_lens[i]
+            if sampling_params.prompt_logprobs is not None:
+                selected_token_indices.extend(
+                    range(start_idx, start_idx + prompt_len - 1))
+            selected_token_indices.append(start_idx + prompt_len - 1)
+            start_idx += input_metadata.max_prompt_len
+        else:
+            num_seqs = len(seq_ids)
+            selected_token_indices.extend(
+                range(start_idx, start_idx + num_seqs))
+            start_idx += num_seqs
+
+    selected_token_indices = torch.tensor(selected_token_indices,
+                                          dtype=torch.long,
+                                          device=hidden_states.device)
     hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-    return hidden_states.index_select(0, input_metadata.selected_token_indices)
+    return hidden_states.index_select(0, selected_token_indices)
 
 
 def _get_penalties(
@@ -309,13 +345,14 @@ def _get_temperatures(input_metadata: InputMetadata) -> List[float]:
     return temperatures
 
 
-def _get_top_a_top_p_top_k(
+def _get_alphabet_soup(
     input_metadata: InputMetadata,
     vocab_size: int,
 ) -> Tuple[List[float], List[int], List[float]]:
     top_ps: List[float] = []
     top_ks: List[int] = []
     top_as: List[float] = []
+    min_ps: List[float] = []
     for i, seq_group in enumerate(input_metadata.seq_groups):
         seq_ids, sampling_params = seq_group
         # k should not be greater than the vocab size.
@@ -328,11 +365,13 @@ def _get_top_a_top_p_top_k(
             top_ps += [sampling_params.top_p] * (prompt_len - 1)
             top_ks += [top_k] * (prompt_len - 1)
             top_as += [sampling_params.top_a] * (prompt_len - 1)
+            min_ps += [sampling_params.min_p] * (prompt_len - 1)
         top_ps += [sampling_params.top_p] * len(seq_ids)
         top_ks += [top_k] * len(seq_ids)
         top_as += [sampling_params.top_a] * len(seq_ids)
+        min_ps += [sampling_params.min_p] * len(seq_ids)
 
-    return top_ps, top_ks, top_as
+    return top_ps, top_ks, top_as, min_ps
 
 
 def _get_tfs(input_metadata: InputMetadata) -> List[float]:
@@ -387,27 +426,31 @@ def _get_typical_ps(input_metadata: InputMetadata) -> List[float]:
     return typical_ps
 
 
-def _apply_top_a_top_p_top_k(
+def _apply_alphabet_soup(
     logits: torch.Tensor,
     top_ps: List[float],
     top_ks: List[int],
     top_as: List[float],
+    min_ps: List[float],
 ) -> torch.Tensor:
     ts_p = torch.tensor(top_ps, dtype=logits.dtype, device=logits.device)
     ts_k = torch.tensor(top_ks, dtype=torch.int, device=logits.device)
     ts_a = torch.tensor(top_as, dtype=logits.dtype, device=logits.device)
+    ms_p = torch.tensor(min_ps, dtype=logits.dtype, device=logits.device)
     logits_sort, logits_idx = logits.sort(dim=-1, descending=True)
 
-    # Apply top-p and top-a.
+    # Apply top-p, min-p and top-a.
     probs_sort = logits_sort.softmax(dim=-1)
     probs_sum = probs_sort.cumsum(dim=-1)
+    min_p_thresholds = probs_sort[:, 0] * ms_p
     top_a_thresholds = torch.pow(probs_sort[:, 0], 2) * ts_a
-    top_ap_mask = (probs_sort < top_a_thresholds.unsqueeze(1)
-                   )  # Cull logits below the top-a threshold
-    top_ap_mask.logical_or_(probs_sum > ts_p.unsqueeze(
+    treshold = torch.maximum(min_p_thresholds, top_a_thresholds)
+    mask = (probs_sort < treshold.unsqueeze(1)
+            )  # Cull logits below the top-a threshold
+    mask.logical_or_(probs_sum > ts_p.unsqueeze(
         dim=1))  # Cull logits above the top-p summation threshold
-    top_ap_mask[:, 0] = False  # Guarantee at least one token is pickable
-    logits_sort[top_ap_mask] = -float("inf")
+    mask[:, 0] = False  # Guarantee at least one token is pickable
+    logits_sort[mask] = -float("inf")
 
     # Apply top-k.
     # Create a mask for the top-k elements.
@@ -636,11 +679,20 @@ def _sample(
     input_metadata: InputMetadata,
 ) -> List[Tuple[List[int], List[int]]]:
     categorized_seq_group_ids = {t: [] for t in SamplingType}
-    categorized_sample_indices = input_metadata.categorized_sample_indices
+    categorized_sample_indices = {t: [] for t in SamplingType}
+    start_idx = 0
     for i, seq_group in enumerate(input_metadata.seq_groups):
-        _, sampling_params = seq_group
+        seq_ids, sampling_params = seq_group
         sampling_type = sampling_params.sampling_type
+        if (i < input_metadata.num_prompts
+                and sampling_params.prompt_logprobs is not None):
+            prompt_len = input_metadata.prompt_lens[i]
+            start_idx += prompt_len - 1
         categorized_seq_group_ids[sampling_type].append(i)
+        num_seqs = len(seq_ids)
+        categorized_sample_indices[sampling_type].extend(
+            range(start_idx, start_idx + num_seqs))
+        start_idx += num_seqs
 
     sample_results_dict: Dict[int, Tuple[List[int], List[int]]] = {}
     for sampling_type in SamplingType:
@@ -668,10 +720,9 @@ def _sample(
 
         sample_results_dict.update(zip(seq_group_ids, sample_results))
 
-        sample_results = [
-            sample_results_dict[i]
-            for i in range(len(input_metadata.seq_groups))
-        ]
+    sample_results = [
+        sample_results_dict[i] for i in range(len(input_metadata.seq_groups))
+    ]
     return sample_results
 
 
@@ -792,6 +843,7 @@ def _build_sampler_output(
     input_metadata: InputMetadata,
     prompt_logprobs: List[Optional[PromptLogprobs]],
     sample_logprobs: List[SampleLogprobs],
+    output_metadata: OutputMetadata,
 ) -> SamplerOutput:
     sampler_output = []
     for (seq_group, sample_result, group_prompt_logprobs,
@@ -805,7 +857,8 @@ def _build_sampler_output(
                                                       next_token_ids,
                                                       group_sample_logprobs):
             seq_outputs.append(
-                SequenceOutputs(seq_ids[parent_id], next_token_id, logprobs))
+                SequenceOutput(seq_ids[parent_id], next_token_id, logprobs,
+                               output_metadata.get(seq_ids[parent_id])))
         sampler_output.append(
-            SequenceGroupOutputs(seq_outputs, group_prompt_logprobs))
+            SequenceGroupOutput(seq_outputs, group_prompt_logprobs))
     return sampler_output

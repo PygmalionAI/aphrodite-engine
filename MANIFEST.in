@@ -1,5 +1,5 @@
 include LICENSE
 include requirements.txt
-include aphrodite/endpoints/klite.embd
+include aphrodite/endpoints/kobold/klite.embd
 
 recursive-include kernels *

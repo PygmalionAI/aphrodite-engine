@@ -24,7 +24,11 @@
 
 #include <algorithm>
 
+#ifndef USE_ROCM
 #define WARP_SIZE 32
+#else
+#define WARP_SIZE 64
+#endif
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define DIVIDE_ROUND_UP(a, b) (((a) + (b) - 1) / (b))
@@ -41,7 +45,7 @@ inline __device__ float block_sum(float* red_smem, float sum) {
   // Compute the sum per warp.
 #pragma unroll
   for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
-    sum += APHRODITE_SHFL_XOR_SYNC(uint32_t(-1), sum, mask);
+    sum += APHRODITE_SHFL_XOR_SYNC(sum, mask);
   }
 
   // Warp leaders store the data to shared memory.
@@ -60,11 +64,11 @@ inline __device__ float block_sum(float* red_smem, float sum) {
   // Parallel reduction inside the warp.
 #pragma unroll
   for (int mask = NUM_WARPS / 2; mask >= 1; mask /= 2) {
-    sum += APHRODITE_SHFL_XOR_SYNC(uint32_t(-1), sum, mask);
+    sum += APHRODITE_SHFL_XOR_SYNC(sum, mask);
   }
 
   // Broadcast to other threads.
-  return APHRODITE_SHFL_SYNC(uint32_t(-1), sum, 0);
+  return APHRODITE_SHFL_SYNC(sum, 0);
 }
 
 // TODO: Merge the last two dimensions of the grid.
@@ -236,7 +240,7 @@ __device__ void paged_attention_kernel(
     qk_max = fmaxf(qk_max, APHRODITE_SHFL_XOR_SYNC(qk_max, mask));
   }
   // Broadcast the max qk value to all threads.
-  qk_max = APHRODITE_SHFL_SYNC(uint32_t(-1), qk_max, 0);
+  qk_max = APHRODITE_SHFL_SYNC(qk_max, 0);
 
   // Get the sum of the exp values.
   float exp_sum = 0.f;
@@ -320,7 +324,7 @@ __device__ void paged_attention_kernel(
     float acc = accs[i];
 #pragma unroll
     for (int mask = NUM_V_VECS_PER_ROW / 2; mask >= 1; mask /= 2) {
-      acc += APHRODITE_SHFL_XOR_SYNC(uint32_t(-1), acc, mask);
+      acc += APHRODITE_SHFL_XOR_SYNC(acc, mask);
     }
     accs[i] = acc;
   }
@@ -499,7 +503,7 @@ __global__ void paged_attention_v2_reduce_kernel(
     max_logit = fmaxf(max_logit, APHRODITE_SHFL_XOR_SYNC(max_logit, mask));
   }
   // Broadcast the max value to all threads.
-  max_logit = APHRODITE_SHFL_SYNC(uint32_t(-1), max_logit, 0);
+  max_logit = APHRODITE_SHFL_SYNC(max_logit, 0);
 
   // Load rescaled exp sums to shared memory.
   float* shared_exp_sums = reinterpret_cast<float*>(shared_mem + sizeof(float) * num_partitions);
@@ -532,6 +536,8 @@ __global__ void paged_attention_v2_reduce_kernel(
 
 } // namespace aphrodite
 
+
+#ifndef USE_ROCM
 #define LAUNCH_PAGED_ATTENTION_V1(HEAD_SIZE)                                                  \
   cudaFuncSetAttribute(                                                                       \
     (void*)aphrodite::paged_attention_v1_kernel<T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS>,       \
@@ -551,7 +557,27 @@ __global__ void paged_attention_v2_reduce_kernel(
     q_stride,                                                                                 \
     kv_block_stride,                                                                          \
     kv_head_stride);
-
+#else
+#define LAUNCH_PAGED_ATTENTION_V1(HEAD_SIZE)                                                  \
+  hipFuncSetAttribute(                                                                       \
+    (void*)aphrodite::paged_attention_v1_kernel<T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS>,            \
+    hipFuncAttributeMaxDynamicSharedMemorySize, shared_mem_size);                            \
+  aphrodite::paged_attention_v1_kernel<T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS>                      \
+  <<<grid, block, shared_mem_size, stream>>>(                                                 \
+    out_ptr,                                                                                  \
+    query_ptr,                                                                                \
+    key_cache_ptr,                                                                            \
+    value_cache_ptr,                                                                          \
+    head_mapping_ptr,                                                                         \
+    scale,                                                                                    \
+    block_tables_ptr,                                                                         \
+    context_lens_ptr,                                                                         \
+    max_num_blocks_per_seq,                                                                   \
+    alibi_slopes_ptr,                                                                         \
+    q_stride,                                                                                 \
+    kv_block_stride,                                                                          \
+    kv_head_stride);
+#endif
 // TODO: Tune NUM_THREADS.
 template<
   typename T,

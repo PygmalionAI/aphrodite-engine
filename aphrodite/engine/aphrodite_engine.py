@@ -13,7 +13,7 @@ from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (SamplerOutput, Sequence, SequenceGroup,
                                        SequenceGroupMetadata,
-                                       SequenceGroupOutputs, SequenceOutputs,
+                                       SequenceGroupOutput, SequenceOutput,
                                        SequenceStatus)
 from aphrodite.transformers_utils.tokenizer import (detokenize_incrementally,
                                                     get_tokenizer)
@@ -71,18 +71,19 @@ class AphroditeEngine:
         log_stats: bool,
     ) -> None:
         logger.info(
-            "Initializing an LLM engine with config: "
-            f"model={model_config.model!r}, "
-            f"tokenizer={model_config.tokenizer!r}, "
-            f"tokenizer_mode={model_config.tokenizer_mode}, "
-            f"revision={model_config.revision}, "
-            f"trust_remote_code={model_config.trust_remote_code}, "
-            f"dtype={model_config.dtype}, "
-            f"download_dir={model_config.download_dir!r}, "
-            f"load_format={model_config.load_format}, "
-            f"tensor_parallel_size={parallel_config.tensor_parallel_size}, "
-            f"quantization={model_config.quantization}, "
-            f"seed={model_config.seed})")
+            "Initializing the Aphrodite Engine with the following config:\n"
+            f"Model = {model_config.model!r}\n"
+            f"Tokenizer = {model_config.tokenizer!r}\n"
+            f"tokenizer_mode = {model_config.tokenizer_mode}\n"
+            f"revision = {model_config.revision}\n"
+            f"trust_remote_code = {model_config.trust_remote_code}\n"
+            f"DataType = {model_config.dtype}\n"
+            f"Download Directory = {model_config.download_dir!r}\n"
+            f"Model Load Format = {model_config.load_format}\n"
+            f"Number of GPUs = {parallel_config.tensor_parallel_size}\n"
+            f"Quantization Format = {model_config.quantization}\n"
+            f"Sampler Seed = {model_config.seed}\n"
+            f"Context Length = {model_config.max_model_len}")
         # TODO: Print more configs in debug mode.
 
         self.model_config = model_config
@@ -141,6 +142,12 @@ class AphroditeEngine:
             "init_model",
             get_all_outputs=True,
         )
+        self._run_workers(
+            "load_model",
+            get_all_outputs=True,
+            max_concurrent_workers=self.parallel_config.
+            max_parallel_loading_workers,
+        )
 
     def _init_workers_ray(self, placement_group: "PlacementGroup",
                           **ray_remote_kwargs):
@@ -179,6 +186,12 @@ class AphroditeEngine:
         self._run_workers(
             "init_model",
             get_all_outputs=True,
+        )
+        self._run_workers(
+            "load_model",
+            get_all_outputs=True,
+            max_concurrent_workers=self.parallel_config.
+            max_parallel_loading_workers,
         )
 
     def _verify_args(self) -> None:
@@ -349,7 +362,7 @@ class AphroditeEngine:
         return current_worst_score >= highest_attainable_score
 
     def _process_sequence_group_outputs(self, seq_group: SequenceGroup,
-                                        outputs: SequenceGroupOutputs) -> None:
+                                        outputs: SequenceGroupOutput) -> None:
         # Process prompt logprobs
         prompt_logprobs = outputs.prompt_logprobs
         if prompt_logprobs is not None:
@@ -370,7 +383,7 @@ class AphroditeEngine:
 
         # Process the child samples for each parent sequence
         for parent in parent_seqs:
-            child_samples: List[SequenceOutputs] = parent_child_dict[
+            child_samples: List[SequenceOutput] = parent_child_dict[
                 parent.seq_id]
             if len(child_samples) == 0:
                 # This parent sequence has no children samples. Remove
@@ -386,6 +399,7 @@ class AphroditeEngine:
                 child = parent.fork(new_child_seq_id)
                 child.append_token_id(child_sample.output_token,
                                       child_sample.logprobs)
+                child.persistent_data = child_sample.persistent_data
                 child_seqs.append((child, parent))
             # Continue the parent sequence for the last child sample.
             # We reuse the parent sequence here to reduce redundant memory
@@ -393,6 +407,7 @@ class AphroditeEngine:
             last_child_sample = child_samples[-1]
             parent.append_token_id(last_child_sample.output_token,
                                    last_child_sample.logprobs)
+            parent.persistent_data = last_child_sample.persistent_data
             child_seqs.append((parent, parent))
 
         for seq, _ in child_seqs:
@@ -565,7 +580,7 @@ class AphroditeEngine:
             blocks_to_copy=scheduler_outputs.blocks_to_copy,
         )
 
-        return self._process_model_outputs(output, scheduler_outputs) + ignored
+        return self._process_model_outputs(output, scheduler_outputs)
 
     def _log_system_stats(
         self,
@@ -630,8 +645,7 @@ class AphroditeEngine:
                     f"CPU KV cache usage: {cpu_cache_usage * 100:.1f}%")
         self.last_logging_time = now
 
-    def _decode_sequence(self, seq: Sequence,
-                         sampling_params: SamplingParams) -> None:
+    def _decode_sequence(self, seq: Sequence, prms: SamplingParams) -> None:
         """Decodes the new token for a sequence."""
         (new_tokens, new_output_text, prefix_offset,
          read_offset) = detokenize_incrementally(
@@ -640,8 +654,8 @@ class AphroditeEngine:
              prev_tokens=seq.tokens,
              prefix_offset=seq.prefix_offset,
              read_offset=seq.read_offset,
-             skip_special_tokens=sampling_params.skip_special_tokens,
-         )
+             skip_special_tokens=prms.skip_special_tokens,
+             spaces_between_special_tokens=prms.spaces_between_special_tokens)
         if seq.tokens is None:
             seq.tokens = new_tokens
         else:
@@ -680,16 +694,15 @@ class AphroditeEngine:
             seq.status = SequenceStatus.FINISHED_STOPPED
             return
 
-    def _run_workers(
+    def _run_workers_in_batch(
         self,
+        workers,
         method: str,
         *args,
-        get_all_outputs: bool = False,
         **kwargs,
-    ) -> Any:
-        """Runs the given method on all workers."""
+    ):
         all_outputs = []
-        for worker in self.workers:
+        for worker in workers:
             if self.parallel_config.worker_use_ray:
                 executor = partial(worker.execute_method.remote, method)
             else:
@@ -700,6 +713,29 @@ class AphroditeEngine:
 
         if self.parallel_config.worker_use_ray:
             all_outputs = ray.get(all_outputs)
+        return all_outputs
+
+    def _run_workers(
+        self,
+        method: str,
+        *args,
+        get_all_outputs: bool = False,
+        max_concurrent_workers: Optional[int] = None,
+        **kwargs,
+    ) -> Any:
+        """Runs a method on all workers."""
+        all_outputs = []
+        if max_concurrent_workers:
+            work_groups = [
+                self.workers[i:i + max_concurrent_workers]
+                for i in range(0, len(self.workers), max_concurrent_workers)
+            ]
+        else:
+            work_groups = [self.workers]
+
+        for workers in work_groups:
+            all_outputs.extend(
+                self._run_workers_in_batch(workers, method, *args, **kwargs))
 
         if get_all_outputs:
             return all_outputs

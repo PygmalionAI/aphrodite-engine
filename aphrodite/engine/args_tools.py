@@ -22,6 +22,7 @@ class EngineArgs:
     worker_use_ray: bool = False
     pipeline_parallel_size: int = 1
     tensor_parallel_size: int = 1
+    max_parallel_loading_workers: Optional[int] = None
     block_size: int = 16
     swap_space: int = 4  # GiB
     gpu_memory_utilization: float = 0.90
@@ -44,7 +45,7 @@ class EngineArgs:
         parser.add_argument(
             '--model',
             type=str,
-            default='facebook/opt-125m',
+            default='EleutherAI/pythia-70m-deduped',
             help='name or path of the huggingface model to use')
         parser.add_argument(
             '--tokenizer',
@@ -120,6 +121,13 @@ class EngineArgs:
                             type=int,
                             default=EngineArgs.tensor_parallel_size,
                             help='number of tensor parallel replicas')
+        parser.add_argument(
+            '--max-parallel-loading-workers',
+            '-mplw',
+            type=int,
+            help='load model sequentially in multiple batches, '
+            'to avoid CPU OOM when using tensor parallel '
+            'with large models.')
         # KV cache arguments
         parser.add_argument('--block-size',
                             type=int,
@@ -136,11 +144,13 @@ class EngineArgs:
                             default=EngineArgs.swap_space,
                             help='CPU swap space size (GiB) per GPU')
         parser.add_argument('--gpu-memory-utilization',
+                            '-gmu',
                             type=float,
                             default=EngineArgs.gpu_memory_utilization,
                             help='the percentage of GPU memory to be used for'
                             'the model executor')
         parser.add_argument('--max-num-batched-tokens',
+                            '-mnbt',
                             type=int,
                             default=EngineArgs.max_num_batched_tokens,
                             help='maximum number of batched tokens per '
@@ -160,7 +170,7 @@ class EngineArgs:
         parser.add_argument('--quantization',
                             '-q',
                             type=str,
-                            choices=['awq', 'gptq', None],
+                            choices=['awq', 'squeezellm', 'gptq', None],
                             default=None,
                             help='Method used to quantize the weights')
         return parser
@@ -186,7 +196,8 @@ class EngineArgs:
             getattr(model_config.hf_config, 'sliding_window', None))
         parallel_config = ParallelConfig(self.pipeline_parallel_size,
                                          self.tensor_parallel_size,
-                                         self.worker_use_ray)
+                                         self.worker_use_ray,
+                                         self.max_parallel_loading_workers)
         scheduler_config = SchedulerConfig(self.max_num_batched_tokens,
                                            self.max_num_seqs,
                                            model_config.max_model_len,
