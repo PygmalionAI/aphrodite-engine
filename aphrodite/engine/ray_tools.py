@@ -3,6 +3,8 @@ https://github.com/ray-project/ray"""
 import socket
 from typing import Optional, Tuple, TYPE_CHECKING
 
+import torch
+
 from aphrodite.common.config import ParallelConfig
 from aphrodite.common.logger import init_logger
 
@@ -77,7 +79,12 @@ def initialize_cluster(
                 "Ray is not installed. Please install Ray to use distributed "
                 "serving.")
         # Connect to a ray cluster.
-        ray.init(address=ray_address, ignore_reinit_error=True)
+        if torch.version.hip:
+            ray.init(address=ray_address,
+                     ignore_reinit_error=True,
+                     num_gpus=parallel_config.world_size)
+        else:
+            ray.init(address=ray_address, ignore_reinit_error=True)
 
     if not parallel_config.worker_use_ray:
         # Initialize cluster locally.
