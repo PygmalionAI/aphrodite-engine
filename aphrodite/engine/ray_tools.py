@@ -3,10 +3,10 @@ https://github.com/ray-project/ray"""
 import socket
 from typing import Optional, Tuple, TYPE_CHECKING
 
-import torch
-
 from aphrodite.common.config import ParallelConfig
 from aphrodite.common.logger import init_logger
+
+import torch
 
 logger = init_logger(__name__)
 

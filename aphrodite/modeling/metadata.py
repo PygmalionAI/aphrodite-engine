@@ -1,5 +1,6 @@
 from typing import Dict, List, Tuple, Optional
 import torch
+from xformers.ops import AttentionBias
 
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import SequenceData
@@ -40,7 +41,6 @@ class InputMetadata:
         seq_groups: List[Tuple[List[int], SamplingParams]],
         seq_data: Dict[int, SequenceData],
         prompt_lens: List[int],
-        cumulative_prompt_lens: torch.Tensor,
         slot_mapping: torch.Tensor,
         context_lens: torch.Tensor,
         max_context_len: int,
@@ -51,7 +51,6 @@ class InputMetadata:
         self.seq_groups = seq_groups
         self.seq_data = seq_data
         self.prompt_lens = prompt_lens
-        self.cumulative_prompt_lens = cumulative_prompt_lens
         self.slot_mapping = slot_mapping
         self.context_lens = context_lens
         self.max_context_len = max_context_len
@@ -79,7 +78,6 @@ class InputMetadata:
 
         self.num_prompts = len(prompt_lens)
         self.num_prompt_tokens = self.num_prompts * self.max_prompt_len
-        self.max_prompt_len = max(prompt_lens) if prompt_lens else 0
         self.num_generation_tokens = context_lens.shape[0]
         self.num_valid_tokens = slot_mapping.shape[0]
         if block_tables.numel() > 0:
@@ -88,8 +86,8 @@ class InputMetadata:
             self.max_num_blocks_per_seq = 0
         assert block_tables.shape[0] == self.num_generation_tokens
 
-        # sorry xformers
-        self.attn_bias: []
+        # Set during the execution of the first attention op.
+        self.attn_bias: Optional[AttentionBias] = None
 
     def __repr__(self) -> str:
         # Print only useful metadata.
