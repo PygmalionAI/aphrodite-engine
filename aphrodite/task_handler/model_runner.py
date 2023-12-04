@@ -103,7 +103,7 @@ class ModelRunner:
         slot_mapping = _make_tensor_with_pad(slot_mapping,
                                              max_prompt_len,
                                              pad=_PAD_SLOT_ID,
-                                             dtype=torch.long)
+                                             dtype=torch.int)
 
         input_metadata = InputMetadata(
             prompt_lens=prompt_lens,
@@ -165,7 +165,7 @@ class ModelRunner:
         slot_mapping = _make_tensor_with_pad(slot_mapping,
                                              max_len=1,
                                              pad=_PAD_SLOT_ID,
-                                             dtype=torch.long)
+                                             dtype=torch.int)
         max_context_len = max(context_lens)
         context_lens = torch.tensor(context_lens,
                                     dtype=torch.int,
@@ -312,7 +312,7 @@ class ModelRunner:
                 seq_data={group_id: seq_data},
                 sampling_params=sampling_params,
                 block_tables=None,
-                persistent_metadata=PersistentMetadata(),
+                persistent_data={},
             )
             seqs.append(seq)
 
