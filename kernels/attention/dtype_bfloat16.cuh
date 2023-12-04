@@ -111,12 +111,7 @@ inline __device__ __nv_bfloat16 add(__nv_bfloat16 a, __nv_bfloat16 b) {
   #ifndef USE_ROCM
     return a + b;
   #else
-    hip_bfloat16 A, B;
-    __hip_bfloat16 c;
-    A.data = a.data;
-    B.data = b.data;
-    c.data = (A + B).data;
-    return c;
+    return __hadd(a, b);
   #endif
 #endif
 }
