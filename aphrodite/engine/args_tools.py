@@ -3,6 +3,8 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+import torch
+
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig)
 
@@ -100,11 +102,11 @@ class EngineArgs:
                 default=EngineArgs.load_format,
                 choices=['auto', 'pt', 'safetensors', 'npcache', 'dummy'],
                 help='The format of the model weights to load. '
-                '"auto" will try to load the weights in the safetensors format '
-                'and fall back to the pytorch bin format if safetensors format '
+                '"auto" will try to load the weights in the safetensors '
+                'and fall back to the pytorch bin format if safetensors '
                 'is not available. '
                 '"pt" will load the weights in the pytorch bin format. '
-                '"safetensors" will load the weights in the safetensors format. '
+                '"safetensors" will load the weights in the safetensors. '
                 '"npcache" will load the weights in pytorch format and store '
                 'a numpy cache to speed up the loading. '
                 '"dummy" will initialize the weights with random values, '

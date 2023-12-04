@@ -49,8 +49,8 @@ def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
             return _MODEL_REGISTRY[arch]
         elif arch in _ROCM_DISABLED_MODELS:
             raise ValueError(
-                f"Model architecture {arch} is not supported by ROCm for now. \n"
-                f"Supported architectures {list(_MODEL_REGISTRY.keys())}")
+                f"Model architecture {arch} is not supported by ROCm for now."
+                f"\nSupported architectures {list(_MODEL_REGISTRY.keys())}")
     raise ValueError(
         f"Model architectures {architectures} are not supported for now. "
         f"Supported architectures: {list(_MODEL_REGISTRY.keys())}")
