@@ -162,6 +162,7 @@ def _prune_hidden_states(
 ) -> torch.Tensor:
     selected_token_indices: List[int] = []
     start_idx = 0
+    max_prompt_len = max(sampling_metadata.prompt_lens) if sampling_metadata.prompt_lens else 1
     for i, seq_group in enumerate(sampling_metadata.seq_groups):
         seq_ids, sampling_params = seq_group
         if i < sampling_metadata.num_prompts:
@@ -171,7 +172,7 @@ def _prune_hidden_states(
                 selected_token_indices.extend(
                     range(start_idx, start_idx + prompt_len - 1))
             selected_token_indices.append(start_idx + prompt_len - 1)
-            start_idx += sampling_metadata.max_prompt_len
+            start_idx += max_prompt_len
         else:
             num_seqs = len(seq_ids)
             selected_token_indices.extend(
