@@ -1,16 +1,19 @@
 from typing import Type
 
-from aphrodite.modeling.layers.quantization.awq import AWQConfig
+import torch
 from aphrodite.modeling.layers.quantization.squeezellm import SqueezeLLMConfig
 from aphrodite.modeling.layers.quantization.gptq import GPTQConfig
 from aphrodite.modeling.layers.quantization.base_config import (
     QuantizationConfig)
 
 _QUANTIZATION_CONFIG_REGISTRY = {
-    "awq": AWQConfig,
     "squeezellm": SqueezeLLMConfig,
     "gptq": GPTQConfig,
 }
+
+if torch.cuda.is_available() and torch.version.cuda:
+    from aphrodite.modeling.layers.quantization.awq import AWQConfig
+    _QUANTIZATION_CONFIG_REGISTRY["awq"] = AWQConfig
 
 
 def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:

@@ -7,7 +7,8 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 from xformers import ops as xops
-from flash_attn.flash_attn_interface import _flash_attn_forward
+from xformers.ops.fmha.attn_bias import (BlockDiagonalCausalMask,
+                                         LowerTriangularMaskWithTensorBias)
 
 from aphrodite._C import ops as attention_ops
 from aphrodite._C import cache_ops
@@ -170,6 +171,8 @@ class PagedAttention(nn.Module):
                 attn_bias=input_metadata.attn_bias,
                 p=0.0,
                 scale=self.scale,
+                op=xops.fmha.MemoryEfficientAttentionFlashAttentionOp[0] if
+                (torch.cuda.is_available() and torch.version.hip) else None,
             )
             output = out.view_as(query)
         else:
