@@ -1,7 +1,7 @@
 --- /opt/conda/envs/py_3.10/lib/python3.10/site-packages/xformers/ops/fmha/flash.py	2023-11-29 03:17:03.930103539 +0000
 +++ flash.py	2023-11-28 16:14:25.206128903 +0000
 @@ -31,39 +31,39 @@
-
+ 
  FLASH_VERSION = "0.0.0"
  try:
 -    try:
@@ -32,11 +32,11 @@
 +    #    flash_ver_parsed = tuple(int(s) for s in FLASH_VERSION.split(".")[:2])
 +    #    if flash_ver_parsed < (2, 3):
 +    #        raise ImportError("Requires 2.3 for sliding window support")
-
+ 
      # create library so that flash-attn goes through the PyTorch Dispatcher
 -    _flash_lib = torch.library.Library("xformers_flash", "DEF")
 +    #_flash_lib = torch.library.Library("xformers_flash", "DEF")
-
+ 
 -    _flash_lib.define(
 -        "flash_fwd(Tensor query, Tensor key, Tensor value, "
 -        "Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, "
@@ -67,7 +67,7 @@
 +    #    "int max_seqlen_q, int max_seqlen_k, "
 +    #    "float p, float softmax_scale, bool is_causal, int window_size, Tensor rng_state) -> (Tensor, Tensor, Tensor)"
 +    #)
-
+ 
      def _flash_fwd(
          query,
 @@ -98,8 +98,8 @@
@@ -115,18 +115,18 @@
                  rng_state,
              )
          return dq, dk, dv
-
+ 
 -    _flash_lib.impl("flash_fwd", _flash_fwd, "CUDA")
 -    _flash_lib.impl("flash_bwd", _flash_bwd, "CUDA")
 +    #_flash_lib.impl("flash_fwd", _flash_fwd, "CUDA")
 +    #_flash_lib.impl("flash_bwd", _flash_bwd, "CUDA")
  except ImportError:
      pass
-
+ 
 @@ -348,7 +348,7 @@
          implementation.
      """
-
+ 
 -    OPERATOR = get_operator("xformers_flash", "flash_fwd")
 +    OPERATOR = _flash_fwd # get_operator("xformers_flash", "flash_fwd")
      SUPPORTED_DEVICES: Set[str] = {"cuda"}
