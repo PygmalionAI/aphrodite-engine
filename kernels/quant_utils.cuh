@@ -235,4 +235,4 @@ __inline__ __device__ bf16_8_t vec_conversion<bf16_8_t, Float8_>(const Float8_ &
     b.z = vec_conversion<__nv_bfloat162, float2>(a.z);
     b.w = vec_conversion<__nv_bfloat162, float2>(a.w);
     return b;
-} 
+}

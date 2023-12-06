@@ -83,7 +83,9 @@ class AphroditeEngine:
             f"Number of GPUs = {parallel_config.tensor_parallel_size}\n"
             f"Quantization Format = {model_config.quantization}\n"
             f"Sampler Seed = {model_config.seed}\n"
-            f"Context Length = {model_config.max_model_len}")
+            f"Context Length = {model_config.max_model_len}\n"
+            f"KV Cache DataType = {model_config.kv_cache_dtype}\n"
+            f"Use KV Cache Quantization = {model_config.quant_kv_cache}")
         # TODO: Print more configs in debug mode.
 
         self.model_config = model_config
