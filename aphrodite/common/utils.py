@@ -28,13 +28,15 @@ class Counter:
     def reset(self) -> None:
         self.counter = 0
 
+def is_hip():
+    return torch.version.hip
 
 def get_max_shared_memory_bytes(gpu: int = 0) -> int:
     """Returns the maximum shared memory per thread block in bytes."""
     # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html
     cudaDevAttrMaxSharedMemoryPerBlockOptin = 97  # pylint: disable=invalid-name
     max_shared_mem = cuda_utils.get_device_attribute(
-        cudaDevAttrMaxSharedMemoryPerBlockOptin, gpu)
+        cudaDevAttrMaxSharedMemoryPerBlockOptin, gpu) if (not is_hip()) else 74
     return int(max_shared_mem)
 
 
