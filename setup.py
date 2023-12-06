@@ -23,15 +23,22 @@ ROCM_SUPPORTED_ARCHS = {
     "gfx90a", "gfx908", "gfx906", "gfx1030", "gfx1100"
 }
 
+def _is_hip():
+    return torch.version.hip
+
+def _is_cuda():
+    return torch.version.cuda
+
+
 # Compiler flags.
 CXX_FLAGS = ["-g", "-O2", "-std=c++17"]
 # TODO: Should we use -O3?
 NVCC_FLAGS = ["-O2", "-std=c++17"]
 
-if torch.version.hip and ROCM_HOME is not None:
+if _is_hip() and ROCM_HOME is not None:
     NVCC_FLAGS += ["-DUSE_ROCM"]
 
-if torch.version.cuda and CUDA_HOME is None:
+if _is_cuda() and CUDA_HOME is None:
     raise RuntimeError(
         "Cannot find CUDA_HOME. CUDA must be available to build the package.")
 
@@ -131,7 +138,7 @@ def get_torch_arch_list() -> Set[str]:
 
 # First, check the TORCH_CUDA_ARCH_LIST environment variable.
 compute_capabilities = get_torch_arch_list()
-if torch.version.cuda and not compute_capabilities:
+if _is_cuda() and not compute_capabilities:
     # If TORCH_CUDA_ARCH_LIST is not defined or empty, target all available
     # GPUs on the current machine.
     device_count = torch.cuda.device_count()
@@ -142,7 +149,7 @@ if torch.version.cuda and not compute_capabilities:
                 "GPUs with compute capability below 6.0 are not supported.")
         compute_capabilities.add(f"{major}.{minor}")
 
-if torch.version.cuda:
+if _is_cuda():
     nvcc_cuda_version = get_nvcc_cuda_version(CUDA_HOME)
     if not compute_capabilities:
         # If no GPU is specified nor available, add all supported architectures
@@ -193,7 +200,7 @@ if torch.version.cuda:
         num_threads = min(os.cpu_count(), 8)
         NVCC_FLAGS += ["--threads", str(num_threads)]
 
-elif torch.version.hip:
+elif _is_hip():
     amd_arch = get_amdgpu_offload_arch()
     if amd_arch not in ROCM_SUPPORTED_ARCHS:
         raise RuntimeError(
@@ -217,7 +224,7 @@ aphrodite_extension_sources = [
     "kernels/pybind.cpp",
 ]
 
-if torch.version.cuda:
+if _is_cuda():
     aphrodite_extension_sources.append("kernels/quantization/awq/gemm_kernels.cu")
 
 aphrodite_extension = CUDAExtension(
@@ -251,7 +258,7 @@ def find_version(filepath: str) -> str:
 def get_aphrodite_version() -> str:
     version = find_version(get_path("aphrodite-engine", "__init__.py"))
     
-    if torch.version.hip:
+    if _is_hip():
         # get the HIP version
 
         hipcc_version = get_hipcc_rocm_version()
@@ -286,14 +293,12 @@ def read_readme() -> str:
 
 def get_requirements() -> List[str]:
     """Get Python package dependencies from requirements.txt."""
-    if torch.version.hip:
+    if _is_hip():
         with open(get_path("requirements-rocm.txt")) as f:
             requirements = f.read().strip().split("\n")
     else:
         with open(get_path("requirements.txt")) as f:
             requirements = f.read().strip().split("\n")
-    print("requirements: ", requirements)
-    # exit()
     return requirements
 
 
