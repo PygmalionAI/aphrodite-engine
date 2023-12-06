@@ -43,6 +43,8 @@ class PagedAttention(nn.Module):
         num_kv_heads: Optional[int] = None,
         alibi_slopes: Optional[List[float]] = None,
         sliding_window: Optional[int] = None,
+        quant_kv_cache: bool = False,
+        kv_quant_params: List[float] = None,
     ) -> None:
         super().__init__()
         self.num_heads = num_heads
@@ -56,6 +58,10 @@ class PagedAttention(nn.Module):
 
         assert self.num_heads % self.num_kv_heads == 0
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
+        self.quant_kv_cache = quant_kv_cache
+        self.kv_quant_params = kv_quant_params if kv_quant_params is not None else [
+            1.0, 0.0, 1.0, 0.0
+        ]
         self.head_mapping = torch.repeat_interleave(
             torch.arange(self.num_kv_heads, dtype=torch.int32, device="cuda"),
             self.num_queries_per_kv)
@@ -221,6 +227,7 @@ def _make_alibi_bias(
 
 
 def _paged_attention(
+    self,
     query: torch.Tensor,
     key_cache: torch.Tensor,
     value_cache: torch.Tensor,
@@ -259,6 +266,8 @@ def _paged_attention(
             block_size,
             input_metadata.max_context_len,
             alibi_slopes,
+            self.quant_kv_cache,
+            *self.kv_quant_params,
         )
     else:
         # Run PagedAttention V2.
@@ -289,5 +298,7 @@ def _paged_attention(
             block_size,
             input_metadata.max_context_len,
             alibi_slopes,
+            self.quant_kv_cache,
+            *self.kv_quant_params,
         )
     return output
