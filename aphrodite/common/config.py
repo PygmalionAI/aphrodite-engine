@@ -134,12 +134,11 @@ class ModelConfig:
                 raise ValueError(
                     f"Unknown quantization method: {self.quantization}. "
                     f"Must be one of {supported_quantization}.")
-            if is_hip(       
+            if is_hip(
             ) and self.quantization in rocm_not_supported_quantization:
                 raise ValueError(
                     f"{self.quantization} quantization method is currently "
-                    "not supported in ROCm."
-                )
+                    "not supported in ROCm.")
         if self.quantization is not None:
             logger.warning(f"{self.quantization} quantization is not fully "
                            "optimized yet. The speed can be slower than "

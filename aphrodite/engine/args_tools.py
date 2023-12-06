@@ -3,8 +3,6 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-import torch
-
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig)
 

@@ -28,8 +28,10 @@ class Counter:
     def reset(self) -> None:
         self.counter = 0
 
+
 def is_hip():
     return torch.version.hip
+
 
 def get_max_shared_memory_bytes(gpu: int = 0) -> int:
     """Returns the maximum shared memory per thread block in bytes."""

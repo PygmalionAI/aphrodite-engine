@@ -55,7 +55,7 @@ def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
             if is_hip() and arch in _ROCM_PARTIALLY_SUPPORTED_MODELS:
                 logger.warning(
                     f"{arch} is not fully supported in ROCm. Reason: "
-                    f"{_ROCM_PARTIALLY_SUPPORTED_MODELS[arch]}"")
+                    f"{_ROCM_PARTIALLY_SUPPORTED_MODELS[arch]}")
             return _MODEL_REGISTRY[arch]
         elif arch in _ROCM_UNSUPPORTED_MODELS:
             raise ValueError(

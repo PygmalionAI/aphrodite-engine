@@ -119,9 +119,7 @@ class SqueezeLLMLinearMethod(LinearMethodBase):
         out_shape = x.shape[:-1] + (qweight.shape[-1], )
         reshaped_x = x.reshape(-1, x.shape[-1])
         if is_hip():
-            out_f = torch.zeros(out_shape,
-                                device="cuda",
-                                dtype=torch.float)
+            out_f = torch.zeros(out_shape, device="cuda", dtype=torch.float)
             quantization_ops.squeezellm_gemm(reshaped_x, qweight, out_f,
                                              lookup_table)
             out = out_f.to(dtype=torch.float16)
