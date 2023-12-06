@@ -4,7 +4,7 @@
 #include "attention_generic.cuh"
 #include "dtype_float32.cuh"
 
-namespace vllm {
+namespace aphrodite {
 // define int8  vector types for quantization of kv cache
 
 template<>
