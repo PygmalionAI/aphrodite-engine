@@ -5,7 +5,7 @@ from transformers import PretrainedConfig
 
 from aphrodite.common.logger import init_logger
 from aphrodite.transformers_utils.config import get_config
-from aphrodite.common.utils import get_cpu_memory
+from aphrodite.common.utils import get_cpu_memory, is_hip
 
 from math import exp, log
 
@@ -83,12 +83,26 @@ class ModelConfig:
 
     def _verify_load_format(self) -> None:
         load_format = self.load_format.lower()
-        if load_format not in [
-                "auto", "pt", "safetensors", "npcache", "dummy"
-        ]:
+        supported_load_format = [
+            "auto", "pt", "safetensors", "npcache", "dummy"
+        ]
+        rocm_not_supported_load_format = ["safetensors"]
+        if load_format not in supported_load_format:
             raise ValueError(
                 f"Unknown load format: {self.load_format}. Must be one of "
                 "'auto', 'pt', 'safetensors', 'npcache', or 'dummy'.")
+        if is_hip():
+            if load_format in ["safetensors"]:
+                rocm_supported_load_format = [
+                    f for f in supported_load_format
+                    if (f not in rocm_not_supported_load_format)
+                ]
+                raise ValueError(
+                    f"load format {load_format} is not supported on ROCm. "
+                    f"Must be one of {rocm_supported_load_format}.")
+            # force ROCm to load from pt weights if nothing is set
+            if load_format == "auto":
+                load_format = "pt"
         self.load_format = load_format
 
     def _verify_tokenizer_mode(self) -> None:
@@ -101,6 +115,7 @@ class ModelConfig:
 
     def _verify_quantization(self) -> None:
         supported_quantization = ["awq", "squeezellm", "gptq"]
+        rocm_not_supported_quantization = ["awq"]
         if self.quantization is not None:
             self.quantization = self.quantization.lower()
 
@@ -119,6 +134,12 @@ class ModelConfig:
                 raise ValueError(
                     f"Unknown quantization method: {self.quantization}. "
                     f"Must be one of {supported_quantization}.")
+            if is_hip(       
+            ) and self.quantization in rocm_not_supported_quantization:
+                raise ValueError(
+                    f"{self.quantization} quantization method is currently "
+                    "not supported in ROCm."
+                )
         if self.quantization is not None:
             logger.warning(f"{self.quantization} quantization is not fully "
                            "optimized yet. The speed can be slower than "
@@ -335,6 +356,8 @@ _STR_DTYPE_TO_TORCH_DTYPE = {
     "bfloat16": torch.bfloat16,
 }
 
+_ROCM_NOT_SUPPORTED_DTYPE = ["float", "float32"]
+
 
 def _get_and_verify_dtype(
     config: PretrainedConfig,
@@ -364,6 +387,14 @@ def _get_and_verify_dtype(
         raise ValueError(
             f"Unknown dtype: {dtype}. Must be either a string or a torch "
             "dtype.")
+
+    if is_hip() and torch_dtype == torch.float32:
+        rocm_supported_dtypes = [
+            k for k, v in _STR_DTYPE_TO_TORCH_DTYPE.items()
+            if (k not in _ROCM_NOT_SUPPORTED_DTYPE)
+        ]
+        raise ValueError(f"dtype \'{dtype}\' is not supported in ROCm. "
+                         f"Supported dtypes are {rocm_supported_dtypes}")
 
     # Verify the dtype.
     if torch_dtype != config_dtype:
