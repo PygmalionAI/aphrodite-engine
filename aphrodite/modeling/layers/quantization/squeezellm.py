@@ -7,6 +7,7 @@ from aphrodite._C import ops as quantization_ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.modeling.layers.quantization.base_config import QuantizationConfig
+from aphrodite.common.utils import is_hip
 
 
 class SqueezeLLMConfig(QuantizationConfig):
@@ -117,15 +118,15 @@ class SqueezeLLMLinearMethod(LinearMethodBase):
         lookup_table = weights["lookup_table"]
         out_shape = x.shape[:-1] + (qweight.shape[-1], )
         reshaped_x = x.reshape(-1, x.shape[-1])
-        if torch.cuda.is_available() and torch.version.hip:
-            out_float = torch.zeros(out_shape,
-                                    device="cuda",
-                                    dtype=torch.float)
-            quantization_ops.squeezellm_gemm(reshaped_x, qweight, out_float,
+        if is_hip():
+            out_f = torch.zeros(out_shape,
+                                device="cuda",
+                                dtype=torch.float)
+            quantization_ops.squeezellm_gemm(reshaped_x, qweight, out_f,
                                              lookup_table)
-            out = out_float.to(dtype=torch.float16)
+            out = out_f.to(dtype=torch.float16)
             # do something specific for HIP
-        elif torch.cuda.is_available() and torch.version.cuda:
+        else:
             # NOTE: The output tensor should be zero-initialized.
             out = torch.zeros(out_shape, device="cuda", dtype=torch.float16)
             quantization_ops.squeezellm_gemm(reshaped_x, qweight, out,

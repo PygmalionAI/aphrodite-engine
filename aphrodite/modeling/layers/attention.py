@@ -13,6 +13,7 @@ from xformers.ops.fmha.attn_bias import (BlockDiagonalCausalMask,
 from aphrodite._C import ops as attention_ops
 from aphrodite._C import cache_ops
 from aphrodite.modeling.metadata import InputMetadata
+from aphrodite.common.utils import is_hip
 
 _SUPPORTED_HEAD_SIZES = [64, 80, 96, 112, 128, 256]
 # Should be the same as PARTITION_SIZE in `paged_attention_v2_launcher`.
@@ -172,7 +173,7 @@ class PagedAttention(nn.Module):
                 p=0.0,
                 scale=self.scale,
                 op=xops.fmha.MemoryEfficientAttentionFlashAttentionOp[0] if
-                (torch.cuda.is_available() and torch.version.hip) else None,
+                (is_hip()) else None,
             )
             output = out.view_as(query)
         else:

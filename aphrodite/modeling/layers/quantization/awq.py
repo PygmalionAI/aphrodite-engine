@@ -5,9 +5,14 @@ from torch.nn.parameter import Parameter
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.modeling.layers.quantization.base_config import QuantizationConfig
-if torch.cuda.is_available() and torch.version.hip:
-    print("Warning: Aphrodite Engine does not support AWQ on ROCm.")
-elif torch.cuda.is_available() and torch.version.cuda:
+from aphrodite.common.logger import init_logger
+from aphrodite.common.utils import is_hip
+
+logger = init_logger(__name__)
+
+if is_hip():
+    logger.warning("AWQ is not supported on ROCm.")
+else:
     from aphrodite._C import ops as quantization_ops
 
 
