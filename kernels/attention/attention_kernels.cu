@@ -16,6 +16,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#ifdef USE_ROCM
+#include <hip/hip_runtime.h>
+#endif
+
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 
@@ -27,7 +31,7 @@
 #ifndef USE_ROCM
 #define WARP_SIZE 32
 #else
-#define WARP_SIZE 64
+#define WARP_SIZE warpSize
 #endif
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -537,11 +541,10 @@ __global__ void paged_attention_v2_reduce_kernel(
 } // namespace aphrodite
 
 
-#ifndef USE_ROCM
 #define LAUNCH_PAGED_ATTENTION_V1(HEAD_SIZE)                                                  \
-  cudaFuncSetAttribute(                                                                       \
-    (void*)aphrodite::paged_attention_v1_kernel<T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS>,       \
-    cudaFuncAttributeMaxDynamicSharedMemorySize, shared_mem_size);                            \
+  APHRODITE_DevFuncAttribute_SET_MaxDynamicSharedMemorySize(                                  \
+    ((void*)aphrodite::paged_attention_v1_kernel<T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS>),     \
+    shared_mem_size);                                                                         \
   aphrodite::paged_attention_v1_kernel<T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS>                 \
   <<<grid, block, shared_mem_size, stream>>>(                                                 \
     out_ptr,                                                                                  \
@@ -557,27 +560,8 @@ __global__ void paged_attention_v2_reduce_kernel(
     q_stride,                                                                                 \
     kv_block_stride,                                                                          \
     kv_head_stride);
-#else
-#define LAUNCH_PAGED_ATTENTION_V1(HEAD_SIZE)                                                  \
-  hipFuncSetAttribute(                                                                       \
-    (void*)aphrodite::paged_attention_v1_kernel<T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS>,            \
-    hipFuncAttributeMaxDynamicSharedMemorySize, shared_mem_size);                            \
-  aphrodite::paged_attention_v1_kernel<T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS>                      \
-  <<<grid, block, shared_mem_size, stream>>>(                                                 \
-    out_ptr,                                                                                  \
-    query_ptr,                                                                                \
-    key_cache_ptr,                                                                            \
-    value_cache_ptr,                                                                          \
-    head_mapping_ptr,                                                                         \
-    scale,                                                                                    \
-    block_tables_ptr,                                                                         \
-    context_lens_ptr,                                                                         \
-    max_num_blocks_per_seq,                                                                   \
-    alibi_slopes_ptr,                                                                         \
-    q_stride,                                                                                 \
-    kv_block_stride,                                                                          \
-    kv_head_stride);
-#endif
+
+
 // TODO: Tune NUM_THREADS.
 template<
   typename T,
