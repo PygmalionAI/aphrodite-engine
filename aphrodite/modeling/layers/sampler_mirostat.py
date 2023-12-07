@@ -5,7 +5,7 @@ from aphrodite.modeling.sampling_metadata import OutputMetadata, SamplingMetadat
 
 
 def _fetch_args(
-    sampling_metadata: SamplingMetadata
+    metadata: SamplingMetadata
 ) -> tuple[list[int], list[int], list[float], list[float], list[float]]:
     logit_indices: list[int] = []
     seqids: list[int] = []
@@ -14,14 +14,21 @@ def _fetch_args(
     mus: list[float] = []
 
     index = 0
-    for seq_ids, params in sampling_metadata.seq_groups:
+    for i, (seq_ids, params) in enumerate(metadata.seq_groups):
+        # NOTE: If there are prompt logprobs here, SKIP THEM
+        #       Miro persists data via seq_id, which these lack.
+        #       In addition, mu is calculated using miro's chosen token,
+        #       which prompt processing would ignore entirely.
+        if (i < metadata.num_prompts and params.prompt_logprobs):
+            index += metadata.prompt_lens[i] - 1
+
         if params.mirostat_mode == 2:
             logit_indices += [(index + i) for i in range(len(seq_ids))]
             seqids += seq_ids
             taus += [params.mirostat_tau] * len(seq_ids)
             etas += [params.mirostat_eta] * len(seq_ids)
             mus += [
-                sampling_metadata.persistent_data.get(sid).get(
+                metadata.persistent_metadata.get(sid).get(
                     "miro_mu", params.mirostat_tau * 2) for sid in seq_ids
             ]
         index += len(seq_ids)
@@ -97,9 +104,6 @@ def is_applicable(sampling_metadata: SamplingMetadata) -> bool:
 def apply(logits: Tensor, sampling_metadata: SamplingMetadata,
           output_metadata: OutputMetadata) -> Tensor:
     logit_index, seqids, taus, etas, mus = _fetch_args(sampling_metadata)
-    # print("logidx", logit_index)
-    # print("seqids", seqids)
-    # print("  taus", taus)
 
     logits[logit_index] = _apply_mirostat_v2(
         logits[logit_index], taus, etas, mus)  # mus is an inout param, :vomit:
