@@ -246,12 +246,17 @@ class ModelRunner:
         for seq_group_metadata in seq_group_metadata_list:
             seq_data.update(seq_group_metadata.seq_data)
 
+        seq_persistence_data: dict[int, dict] = {}
+        for grp in seq_group_metadata_list:
+            seq_persistence_data.update(grp.persistent_data)
+
         sampling_metadata = SamplingMetadata(
             seq_groups=seq_groups,
             seq_data=seq_data,
             prompt_lens=prompt_lens,
             selected_token_indices=selected_token_indices,
             categorized_sample_indices=categorized_sample_indices,
+            persistent_metadata=PersistentMetadata(seq_persistence_data),
         )
         return sampling_metadata
 
