@@ -213,7 +213,7 @@ elif _is_hip():
 ext_modules = []
 
 aphrodite_extension_sources = [
-    "kernels/cache_kernels.cpp",
+    "kernels/cache_kernels.cu",
     "kernels/attention/attention_kernels.cu",
     "kernels/pos_encoding_kernels.cu",
     "kernels/activation_kernels.cu",
