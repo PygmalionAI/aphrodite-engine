@@ -31,13 +31,13 @@ ENV LLVM_SYMBOLIZER_PATH=/opt/rocm/llvm/bin/llvm-symbolizer
 ENV PATH=$PATH:/opt/rocm/bin:/libtorch/bin:
 ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib/:/libtorch/lib:
 ENV CPLUS_INCLUDE_PATH=$CPLUS_INCLUDE_PATH:/libtorch/include:/libtorch/include/torch/csrc/api/include/:/opt/rocm/include/:
-ENV PYTORCH_ROCM_ARCH=gfx900;gfx906;gfx908;gfx90a;gfx1030;gfx1100;gfx1101
 
 # Install ROCm flash-attention
 RUN mkdir libs \
     && cd libs \
-    && git clone https://github.com/AlpinDale/flash-attention-rocm.git \
-    && cd flash-attention-rocm \
+    && git clone https://github.com/ROCmSoftwarePlatform/flash-attention.git \
+    && cd flash-attention \
+    && git checkout 3d2b6f5 \
     && git submodule update --init \
     && export GPU_ARCHS=$(/opt/rocm/llvm/bin/amdgpu-offload-arch) \
     && patch /opt/conda/envs/py_3.10/lib/python3.10/site-packages/torch/utils/hipify/hipify_python.py hipify_patch.patch \
