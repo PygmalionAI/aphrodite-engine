@@ -62,12 +62,15 @@ void gelu_fast(
   torch::Tensor& out,
   torch::Tensor& input);
 
+// The AWQ kernels are only available on CUDA
+#ifndef USE_ROCM
 torch::Tensor awq_gemm(
   torch::Tensor _in_feats,
   torch::Tensor _kernel,
   torch::Tensor _scaling_factors,
   torch::Tensor _zeros,
   int split_k_iters);
+#endif
 
 void squeezellm_gemm(
   torch::Tensor vec,
