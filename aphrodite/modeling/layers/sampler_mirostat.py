@@ -97,8 +97,8 @@ def _apply_mirostat_v2(
 
 
 def is_applicable(sampling_metadata: SamplingMetadata) -> bool:
-    return any(
-        (params.mirostat_mode == 2) for _, params in sampling_metadata.seq_groups)
+    return any((params.mirostat_mode == 2)
+               for _, params in sampling_metadata.seq_groups)
 
 
 def apply(logits: Tensor, sampling_metadata: SamplingMetadata,

@@ -2,13 +2,13 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 
-from aphrodite.common.config import (
-    ModelConfig, ParallelConfig, SchedulerConfig)
+from aphrodite.common.config import (ModelConfig, ParallelConfig,
+                                     SchedulerConfig)
 from aphrodite.common.logger import init_logger
 from aphrodite.modeling import get_model, InputMetadata, SamplingMetadata
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
-from aphrodite.common.sequence import (
-    SamplerOutput, SequenceData, SequenceGroupMetadata)
+from aphrodite.common.sequence import (SamplerOutput, SequenceData,
+                                       SequenceGroupMetadata)
 from aphrodite.modeling.sampling_metadata import PersistentMetadata
 
 logger = init_logger(__name__)
@@ -325,7 +325,7 @@ class ModelRunner:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [(None, None)] * num_layers
         self.execute_model(seqs, kv_caches)
-        return
+        # return
 
 
 def _pad_to_max(x: List[int], max_len: int, pad: int) -> List[int]:

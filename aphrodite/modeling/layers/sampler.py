@@ -162,7 +162,8 @@ def _prune_hidden_states(
 ) -> torch.Tensor:
     selected_token_indices: List[int] = []
     start_idx = 0
-    max_prompt_len = max(sampling_metadata.prompt_lens) if sampling_metadata.prompt_lens else 1
+    max_prompt_len = max(
+        sampling_metadata.prompt_lens) if sampling_metadata.prompt_lens else 1
     for i, seq_group in enumerate(sampling_metadata.seq_groups):
         seq_ids, sampling_params = seq_group
         if i < sampling_metadata.num_prompts:
@@ -187,7 +188,8 @@ def _prune_hidden_states(
 
 
 def _get_penalties(
-        sampling_metadata: SamplingMetadata) -> Tuple[List[float], List[float]]:
+        sampling_metadata: SamplingMetadata
+) -> Tuple[List[float], List[float]]:
     # Collect the presence and frequency penalties.
     presence_penalties: List[float] = []
     frequency_penalties: List[float] = []
@@ -224,8 +226,8 @@ def _get_output_tokens(sampling_metadata: SamplingMetadata) -> List[List[int]]:
     return output_tokens
 
 
-def _get_custom_token_bans(sampling_metadata: SamplingMetadata
-    ) -> List[List[int]]:
+def _get_custom_token_bans(
+        sampling_metadata: SamplingMetadata) -> List[List[int]]:
     banned_tokens: List[List[int]] = []
     for i, seq_group in enumerate(sampling_metadata.seq_groups):
         seq_ids, sampling_params = seq_group
@@ -724,7 +726,8 @@ def _sample(
         sample_results_dict.update(zip(seq_group_ids, sample_results))
 
     sample_results = [
-        sample_results_dict[i] for i in range(len(sampling_metadata.seq_groups))
+        sample_results_dict[i]
+        for i in range(len(sampling_metadata.seq_groups))
     ]
     return sample_results
 

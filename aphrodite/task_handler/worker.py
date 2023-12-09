@@ -111,7 +111,6 @@ class Worker:
         self.gpu_cache = self.cache_engine.gpu_cache
         self.model_runner.set_block_size(self.cache_engine.block_size)
 
-
     @torch.inference_mode()
     def execute_model(
         self,

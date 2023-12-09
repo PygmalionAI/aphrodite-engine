@@ -1,9 +1,5 @@
-from typing import Dict, List, Tuple, Optional
+from typing import List, Optional
 import torch
-from xformers.ops import AttentionBias
-
-from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.common.sequence import SequenceData
 
 
 class InputMetadata:

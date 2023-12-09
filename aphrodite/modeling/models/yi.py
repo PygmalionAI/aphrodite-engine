@@ -294,7 +294,7 @@ class YiForCausalLM(nn.Module):
         hidden_states = self.model(input_ids, positions, kv_caches,
                                    input_metadata, cache_events)
         return hidden_states
-    
+
     def sample(
         self,
         hidden_states: torch.Tensor,
