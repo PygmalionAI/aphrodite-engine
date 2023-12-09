@@ -112,11 +112,13 @@ def create_error_response(status_code: HTTPStatus,
 
 
 def load_chat_template(args, tokenizer):
-    if args.chat_template is None:
+    if args.chat_template is not None:
         try:
             with open(args.chat_template, "r") as f:
                 chat_template = f.read()
         except OSError:
+            # If opening a file fails, set chat template to be args to
+            # ensure we decode so our escape are interpreted correctly
             chat_template = codecs.decode(args.chat_template, "unicode_escape")
 
         tokenizer.chat_template = chat_template
@@ -125,8 +127,7 @@ def load_chat_template(args, tokenizer):
     elif tokenizer.chat_template is not None:
         logger.info(f"Using default chat template:\n{tokenizer.chat_template}")
     else:
-        logger.warning("No chat template provided. Chat completions API "
-                       "will not work.")
+        logger.warning("No chat template provided. Chat API will not work.")
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):  # pylint: disable=unused-argument
@@ -239,9 +240,8 @@ async def create_chat_completion(
             conversation=request.messages,
             tokenize=False,
             add_generation_prompt=request.add_generation_prompt)
-    except ValueError as e:
-        logger.error("Error in applying chat template from "
-                     f"request.messages: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error in applying chat template from request: {str(e)}")
         return create_error_response(HTTPStatus.BAD_REQUEST, str(e))
 
     token_ids, error_check_ret = await check_length(request, prompt=prompt)
@@ -315,10 +315,7 @@ async def create_chat_completion(
         role = get_role()
         for i in range(request.n):
             choice_data = ChatCompletionResponseStreamChoice(
-                index=i,
-                delta=DeltaMessage(role=role),
-                finish_reason=None,
-            )
+                index=i, delta=DeltaMessage(role=role), finish_reason=None)
             chunk = ChatCompletionStreamResponse(id=request_id,
                                                  object=chunk_object_type,
                                                  created=created_time,
@@ -326,14 +323,14 @@ async def create_chat_completion(
                                                  model=model_name)
             data = chunk.json(exclude_unset=True, ensure_ascii=False)
             yield f"data: {data}\n\n"
-        
-        # send response to echo the input portion of the last message
+
+        # Send response to echo the input portion of the last message
         if request.echo:
             last_msg_content = ""
             if request.messages and isinstance(
-                request.messages, list) and request.messages[-1].get(
-                    "content") and request.messages[-1].get(
-                        "role") == role:
+                    request.messages, list) and request.messages[-1].get(
+                        "content") and request.messages[-1].get(
+                            "role") == role:
                 last_msg_content = request.messages[-1]["content"]
             if last_msg_content:
                 for i in range(request.n):
@@ -349,8 +346,8 @@ async def create_chat_completion(
                         model=model_name)
                     data = chunk.json(exclude_unset=True, ensure_ascii=False)
                     yield f"data: {data}\n\n"
-        
-        # send response for each token for each request.n (index)
+
+        # Send response for each token for each request.n (index)
         previous_texts = [""] * request.n
         previous_num_tokens = [0] * request.n
         finish_reason_sent = [False] * request.n
@@ -358,12 +355,12 @@ async def create_chat_completion(
             res: RequestOutput
             for output in res.outputs:
                 i = output.index
-                
+
                 if finish_reason_sent[i]:
                     continue
 
                 if output.finish_reason is None:
-                    # send token-by-token response for each request.n
+                    # Send token-by-token response for each request.n
                     delta_text = output.text[len(previous_texts[i]):]
                     previous_texts[i] = output.text
                     completion_tokens = len(output.token_ids)
@@ -381,16 +378,14 @@ async def create_chat_completion(
                     data = chunk.json(exclude_unset=True, ensure_ascii=False)
                     yield f"data: {data}\n\n"
                 else:
-                    # send the finish response for each request.n only once
+                    # Send the finish response for each request.n only once
                     prompt_tokens = len(res.prompt_token_ids)
                     final_usage = UsageInfo(
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
                         total_tokens=prompt_tokens + completion_tokens)
                     choice_data = ChatCompletionResponseStreamChoice(
-                        index=i,
-                        delta=[],
-                        finish_reason=output.finish_reason)
+                        index=i, delta=[], finish_reason=output.finish_reason)
                     chunk = ChatCompletionStreamResponse(
                         id=request_id,
                         object=chunk_object_type,
@@ -402,8 +397,9 @@ async def create_chat_completion(
                     data = chunk.json(exclude_unset=True,
                                       exclude_none=True,
                                       ensure_ascii=False)
-                    yield f"data: {response_json}\n\n"
+                    yield f"data: {data}\n\n"
                     finish_reason_sent[i] = True
+        # Send the final done message after all response.n are finished
         yield "data: [DONE]\n\n"
 
     async def completion_full_generator():
@@ -423,21 +419,22 @@ async def create_chat_completion(
             choice_data = ChatCompletionResponseChoice(
                 index=output.index,
                 message=ChatMessage(role=role, content=output.text),
-                finish_reason=output.finish_reason)
+                finish_reason=output.finish_reason,
+            )
             choices.append(choice_data)
-        
+
         if request.echo:
             last_msg_content = ""
-            if request.messages and isintance(
-                request.messages, list) and request.messages[-1].get(
-                    "content") and request.messages[-1].get(
-                        "role") == role:
+            if request.messages and isinstance(
+                    request.messages, list) and request.messages[-1].get(
+                        "content") and request.messages[-1].get(
+                            "role") == role:
                 last_msg_content = request.messages[-1]["content"]
 
             for choice in choices:
-                full_message = last_msg_content + choices.message.content
+                full_message = last_msg_content + choice.message.content
                 choice.message.content = full_message
-        
+
         num_prompt_tokens = len(final_res.prompt_token_ids)
         num_generated_tokens = sum(
             len(output.token_ids) for output in final_res.outputs)
@@ -456,7 +453,7 @@ async def create_chat_completion(
 
         return response
 
-    # streaming response
+    # Streaming response
     if request.stream:
         return StreamingResponse(completion_stream_generator(),
                                  media_type="text/event-stream")
