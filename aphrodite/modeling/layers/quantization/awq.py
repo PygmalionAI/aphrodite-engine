@@ -2,11 +2,18 @@ from typing import Any, Dict, List, Optional
 
 import torch
 from torch.nn.parameter import Parameter
-
-from aphrodite._C import ops as quantization_ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.modeling.layers.quantization.base_config import QuantizationConfig
+from aphrodite.common.logger import init_logger
+from aphrodite.common.utils import is_hip
+
+logger = init_logger(__name__)
+
+if is_hip():
+    logger.warning("AWQ is not supported on ROCm.")
+else:
+    from aphrodite._C import ops as quantization_ops
 
 
 class AWQConfig(QuantizationConfig):
