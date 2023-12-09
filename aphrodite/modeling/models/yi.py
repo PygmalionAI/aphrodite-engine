@@ -46,6 +46,7 @@ from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding, ParallelLMHead)
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_world_size)
+from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (default_weight_loader,
                                               hf_model_weights_iterator)
 from aphrodite.common.sequence import SamplerOutput
@@ -289,11 +290,18 @@ class YiForCausalLM(nn.Module):
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
         cache_events: Optional[List[torch.cuda.Event]],
-    ) -> SamplerOutput:
+    ) -> torch.Tensor:
         hidden_states = self.model(input_ids, positions, kv_caches,
                                    input_metadata, cache_events)
+        return hidden_states
+
+    def sample(
+        self,
+        hidden_states: torch.Tensor,
+        sampling_metadata: SamplingMetadata,
+    ) -> SamplerOutput:
         next_tokens = self.sampler(self.lm_head.weight, hidden_states,
-                                   input_metadata)
+                                   sampling_metadata)
         return next_tokens
 
     def load_weights(self,
@@ -317,11 +325,16 @@ class YiForCausalLM(nn.Module):
             for (param_name, weight_name, shard_id) in stacked_params_mapping:
                 if weight_name not in name:
                     continue
-                param = params_dict[name.replace(weight_name, param_name)]
+                name = name.replace(weight_name, param_name)
+                if name not in params_dict:
+                    continue
+                param = params_dict[name]
                 weight_loader = param.weight_loader
                 weight_loader(param, loaded_weight, shard_id)
                 break
             else:
+                if name not in params_dict:
+                    continue
                 param = params_dict[name]
                 weight_loader = getattr(param, "weight_loader",
                                         default_weight_loader)

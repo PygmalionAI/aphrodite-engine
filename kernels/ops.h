@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <torch/extension.h>
 
 void paged_attention_v1(
@@ -61,10 +62,42 @@ void gelu_fast(
   torch::Tensor& out,
   torch::Tensor& input);
 
+// The AWQ kernels are only available on CUDA
+#ifndef USE_ROCM
 torch::Tensor awq_gemm(
   torch::Tensor _in_feats,
   torch::Tensor _kernel,
   torch::Tensor _scaling_factors,
   torch::Tensor _zeros,
   int split_k_iters);
+#endif
+
+void squeezellm_gemm(
+  torch::Tensor vec,
+  torch::Tensor mat,
+  torch::Tensor mul,
+  torch::Tensor lookup_table);
+
+uintptr_t make_q_matrix(
+    torch::Tensor q_weight,
+    torch::Tensor q_perm,
+    torch::Tensor q_invperm,
+    torch::Tensor gptq_qzeros,
+    torch::Tensor gptq_scales,
+    torch::Tensor gptq_g_idx);
+
+void gemm_half_q_half(
+    torch::Tensor a,
+    uintptr_t b,
+    torch::Tensor c,
+    torch::Tensor temp_dq,
+    bool force_cuda);
+
+void gptq_descact_matmul(
+  torch::Tensor vec,
+  torch::Tensor mat,
+  torch::Tensor mul,
+  torch::Tensor scales,
+  torch::Tensor zeros,
+  torch::Tensor g_idx);
   

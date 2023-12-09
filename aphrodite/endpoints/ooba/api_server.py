@@ -12,10 +12,12 @@ from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.utils import random_uuid
 from aphrodite.common.logits_processor import BanEOSUntil
+from aphrodite.common.logger import init_logger
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds.
 TIMEOUT_TO_PREVENT_DEADLOCK = 1  # seconds.
 
+logger = init_logger(__name__)
 app = FastAPI()
 engine = None
 
@@ -154,6 +156,9 @@ async def health() -> Response:
 if __name__ == "__main__":
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = AsyncAphrodite.from_engine_args(engine_args)
+
+    logger.warning("Deprecation warning: The legacy oobabooga API"
+                   " is deprecated and will be removed in a future release.")
 
     uvicorn.run(app,
                 host=args.host,

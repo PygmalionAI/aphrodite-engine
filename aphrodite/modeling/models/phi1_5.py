@@ -17,6 +17,7 @@ from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding, ParallelLMHead)
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_world_size)
+from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (default_weight_loader,
                                               hf_model_weights_iterator)
 from aphrodite.common.sequence import SamplerOutput
@@ -173,28 +174,6 @@ class PhiLayer(nn.Module):
         return hidden_states
 
 
-class PhiCausalLMHead(nn.Module):
-
-    def __init__(self, config: PretrainedConfig):
-        super().__init__()
-        self.ln = nn.LayerNorm(config.hidden_size,
-                               eps=config.layer_norm_epsilon)
-        self.linear = ParallelLMHead(config.vocab_size,
-                                     config.hidden_size,
-                                     bias=True)
-        self.sampler = Sampler(config.vocab_size)
-
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        input_metadata: InputMetadata,
-    ):
-        hidden_states = self.ln(hidden_states)
-        next_tokens = self.sampler(self.linear.weight, hidden_states,
-                                   input_metadata, self.linear.bias)
-        return next_tokens
-
-
 class PhiModel(nn.Module):
 
     def __init__(self,
@@ -216,7 +195,7 @@ class PhiModel(nn.Module):
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
         cache_events: Optional[List[torch.cuda.Event]],
-    ) -> SamplerOutput:
+    ) -> torch.Tensor:
         hidden_states = self.embd(input_ids)
         for i in range(self.config.num_hidden_layers):
             if cache_events is None:
@@ -234,6 +213,17 @@ class PhiModel(nn.Module):
         return hidden_states
 
 
+class PhiCausalLMHead(nn.Module):
+
+    def __init__(self, config: PretrainedConfig):
+        super().__init__()
+        self.ln = nn.LayerNorm(config.hidden_size,
+                               eps=config.layer_norm_epsilon)
+        self.linear = ParallelLMHead(config.vocab_size,
+                                     config.hidden_size,
+                                     bias=True)
+
+
 class PhiForCausalLM(nn.Module):
 
     def __init__(self,
@@ -245,6 +235,7 @@ class PhiForCausalLM(nn.Module):
 
         self.transformer = PhiModel(config, linear_method)
         self.lm_head = PhiCausalLMHead(config)
+        self.sampler = Sampler(config.vocab_size)
 
     def forward(
         self,
@@ -253,11 +244,21 @@ class PhiForCausalLM(nn.Module):
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
         cache_events: Optional[List[torch.cuda.Event]],
-    ) -> SamplerOutput:
+    ) -> torch.Tensor:
         hidden_states = self.transformer(input_ids, positions, kv_caches,
                                          input_metadata, cache_events)
-        lm_logits = self.lm_head(hidden_states, input_metadata)
-        return lm_logits
+        hidden_states = self.lm_head.ln(hidden_states)
+        return hidden_states
+
+    def sample(
+        self,
+        hidden_states: torch.Tensor,
+        sampling_metadata: SamplingMetadata,
+    ) -> SamplerOutput:
+        head = self.lm_head.linear
+        next_tokens = self.sampler(head.weight, hidden_states,
+                                   sampling_metadata, head.bias)
+        return next_tokens
 
     def load_weights(self,
                      model_name_or_path: str,
@@ -271,6 +272,8 @@ class PhiForCausalLM(nn.Module):
                 continue
 
             # pylint: disable=E1136
+            if name not in params_dict:
+                continue
             param = params_dict[name]
             weight_loader = getattr(param, "weight_loader",
                                     default_weight_loader)

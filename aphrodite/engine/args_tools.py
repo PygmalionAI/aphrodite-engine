@@ -81,11 +81,11 @@ class EngineArgs:
             default=EngineArgs.load_format,
             choices=['auto', 'pt', 'safetensors', 'npcache', 'dummy'],
             help='The format of the model weights to load. '
-            '"auto" will try to load the weights in the safetensors format '
-            'and fall back to the pytorch bin format if safetensors format '
+            '"auto" will try to load the weights in the safetensors '
+            'and fall back to the pytorch bin format if safetensors '
             'is not available. '
             '"pt" will load the weights in the pytorch bin format. '
-            '"safetensors" will load the weights in the safetensors format. '
+            '"safetensors" will load the weights in the safetensors. '
             '"npcache" will load the weights in pytorch format and store '
             'a numpy cache to speed up the loading. '
             '"dummy" will initialize the weights with random values, '
@@ -170,7 +170,7 @@ class EngineArgs:
         parser.add_argument('--quantization',
                             '-q',
                             type=str,
-                            choices=['awq', 'gptq', None],
+                            choices=['awq', 'squeezellm', 'gptq', None],
                             default=None,
                             help='Method used to quantize the weights')
         return parser
@@ -191,9 +191,10 @@ class EngineArgs:
                                    self.download_dir, self.load_format,
                                    self.dtype, self.seed, self.revision,
                                    self.max_model_len, self.quantization)
-        cache_config = CacheConfig(
-            self.block_size, self.gpu_memory_utilization, self.swap_space,
-            getattr(model_config.hf_config, 'sliding_window', None))
+        cache_config = CacheConfig(self.block_size,
+                                   self.gpu_memory_utilization,
+                                   self.swap_space,
+                                   model_config.get_sliding_window())
         parallel_config = ParallelConfig(self.pipeline_parallel_size,
                                          self.tensor_parallel_size,
                                          self.worker_use_ray,

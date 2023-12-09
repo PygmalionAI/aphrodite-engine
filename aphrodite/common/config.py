@@ -5,9 +5,7 @@ from transformers import PretrainedConfig
 
 from aphrodite.common.logger import init_logger
 from aphrodite.transformers_utils.config import get_config
-from aphrodite.common.utils import get_cpu_memory
-
-from math import exp, log
+from aphrodite.common.utils import get_cpu_memory, is_hip
 
 logger = init_logger(__name__)
 
@@ -83,12 +81,26 @@ class ModelConfig:
 
     def _verify_load_format(self) -> None:
         load_format = self.load_format.lower()
-        if load_format not in [
-                "auto", "pt", "safetensors", "npcache", "dummy"
-        ]:
+        supported_load_format = [
+            "auto", "pt", "safetensors", "npcache", "dummy"
+        ]
+        rocm_not_supported_load_format = ["safetensors"]
+        if load_format not in supported_load_format:
             raise ValueError(
                 f"Unknown load format: {self.load_format}. Must be one of "
                 "'auto', 'pt', 'safetensors', 'npcache', or 'dummy'.")
+        if is_hip():
+            if load_format in ["safetensors"]:
+                rocm_supported_load_format = [
+                    f for f in supported_load_format
+                    if (f not in rocm_not_supported_load_format)
+                ]
+                raise ValueError(
+                    f"load format {load_format} is not supported on ROCm. "
+                    f"Must be one of {rocm_supported_load_format}.")
+            # force ROCm to load from pt weights if nothing is set
+            if load_format == "auto":
+                load_format = "pt"
         self.load_format = load_format
 
     def _verify_tokenizer_mode(self) -> None:
@@ -100,7 +112,8 @@ class ModelConfig:
         self.tokenizer_mode = tokenizer_mode
 
     def _verify_quantization(self) -> None:
-        supported_quantization = ["awq"]
+        supported_quantization = ["awq", "squeezellm", "gptq"]
+        rocm_not_supported_quantization = ["awq"]
         if self.quantization is not None:
             self.quantization = self.quantization.lower()
 
@@ -119,6 +132,11 @@ class ModelConfig:
                 raise ValueError(
                     f"Unknown quantization method: {self.quantization}. "
                     f"Must be one of {supported_quantization}.")
+            if is_hip(
+            ) and self.quantization in rocm_not_supported_quantization:
+                raise ValueError(
+                    f"{self.quantization} quantization method is currently "
+                    "not supported in ROCm.")
         if self.quantization is not None:
             logger.warning(f"{self.quantization} quantization is not fully "
                            "optimized yet. The speed can be slower than "
@@ -143,6 +161,12 @@ class ModelConfig:
                 f"Total number of hidden layers ({total_num_hidden_layers}) "
                 "must be divisible by pipeline parallel size "
                 f"({pipeline_parallel_size}).")
+
+    def get_sliding_window(self) -> Optional[int]:
+        return getattr(self.hf_config, "sliding_window", None)
+
+    def get_vocab_size(self) -> int:
+        return self.hf_config.vocab_size
 
     def get_hidden_size(self) -> int:
         return self.hf_config.hidden_size
@@ -335,6 +359,8 @@ _STR_DTYPE_TO_TORCH_DTYPE = {
     "bfloat16": torch.bfloat16,
 }
 
+_ROCM_NOT_SUPPORTED_DTYPE = ["float", "float32"]
+
 
 def _get_and_verify_dtype(
     config: PretrainedConfig,
@@ -364,6 +390,14 @@ def _get_and_verify_dtype(
         raise ValueError(
             f"Unknown dtype: {dtype}. Must be either a string or a torch "
             "dtype.")
+
+    if is_hip() and torch_dtype == torch.float32:
+        rocm_supported_dtypes = [
+            k for k, v in _STR_DTYPE_TO_TORCH_DTYPE.items()
+            if (k not in _ROCM_NOT_SUPPORTED_DTYPE)
+        ]
+        raise ValueError(f"dtype \'{dtype}\' is not supported in ROCm. "
+                         f"Supported dtypes are {rocm_supported_dtypes}")
 
     # Verify the dtype.
     if torch_dtype != config_dtype:
@@ -422,12 +456,8 @@ def _get_and_verify_max_len(
     if max_model_len is None:
         max_model_len = derived_max_model_len
     elif max_model_len > derived_max_model_len:
-        if derived_max_model_len == 4096:
-            scaling_factor = exp(
-                log((max_model_len - 1150.29) / 2982.33) / .884113)
-        else:
-            scaling_factor = max_model_len / derived_max_model_len
-
+        # hope this works
+        scaling_factor = max_model_len / derived_max_model_len
         hf_config.rope_scaling = {"factor": scaling_factor, "type": "dynamic"}
         logger.warning(
             f"User-specified max_model_len {max_model_len} is higher than "

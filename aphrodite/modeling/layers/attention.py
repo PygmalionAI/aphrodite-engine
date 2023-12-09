@@ -13,6 +13,7 @@ from xformers.ops.fmha.attn_bias import (BlockDiagonalCausalMask,
 from aphrodite._C import ops as attention_ops
 from aphrodite._C import cache_ops
 from aphrodite.modeling.metadata import InputMetadata
+from aphrodite.common.utils import is_hip
 
 _SUPPORTED_HEAD_SIZES = [64, 80, 96, 112, 128, 256]
 # Should be the same as PARTITION_SIZE in `paged_attention_v2_launcher`.
@@ -104,23 +105,15 @@ class PagedAttention(nn.Module):
         # vectors will not be cached. This happens during the initial memory
         # profiling run.
         if key_cache is not None and value_cache is not None:
-            key_to_cache = key
-            value_to_cache = value
-            if input_metadata.to_cache is not None:
-                key_to_cache = key_to_cache[input_metadata.to_cache]
-                value_to_cache = value_to_cache[input_metadata.to_cache]
-                slot_mapping = slot_mapping[input_metadata.to_cache]
-
             cache_ops.reshape_and_cache(
-                key_to_cache,
-                value_to_cache,
+                key,
+                value,
                 key_cache,
                 value_cache,
                 slot_mapping,
             )
 
-        is_prompt = len(input_metadata.prompt_lens) > 0
-        if is_prompt:
+        if input_metadata.is_prompt:
             # Prompt run.
             if self.num_kv_heads != self.num_heads:
                 # As of Nov 2023, xformers only supports MHA. For MQA/GQA,
@@ -171,6 +164,8 @@ class PagedAttention(nn.Module):
                 attn_bias=input_metadata.attn_bias,
                 p=0.0,
                 scale=self.scale,
+                op=xops.fmha.MemoryEfficientAttentionFlashAttentionOp[0] if
+                (is_hip()) else None,
             )
             output = out.view_as(query)
         else:

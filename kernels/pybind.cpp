@@ -49,7 +49,13 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     "Apply GPT-NeoX or GPT-J style rotary embedding to query and key");
 
   // Quantization ops
+  #ifndef USE_ROCM
   ops.def("awq_gemm", &awq_gemm, "Quantized GEMM for AWQ");
+  #endif
+  ops.def("squeezellm_gemm", &squeezellm_gemm, "Quantized GEMM for SqueezeLLM");
+  ops.def("make_q_matrix", &make_q_matrix, "make_q_matrix");
+  ops.def("gemm_half_q_half", &gemm_half_q_half, "gemm_half_q_half");
+  ops.def("gptq_descact_matmul", &gptq_descact_matmul, "Quantized GEMM for GPTQ for parallelized desc_act layer.");
 
   // Cache ops
   pybind11::module cache_ops = m.def_submodule("cache_ops", "Aphrodite Engine cache ops");
