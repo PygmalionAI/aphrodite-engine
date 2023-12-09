@@ -15,7 +15,6 @@ from fastapi import Request, Response, Header, HTTPException, Depends
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from packaging import version
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
@@ -40,6 +39,7 @@ served_model = None
 app = fastapi.FastAPI()
 engine = None
 response_role = None
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -111,7 +111,7 @@ def create_error_response(status_code: HTTPStatus,
                         status_code=status_code.value)
 
 
-def load_chat_template(args, tokenizer):
+def load_chat_template(args, tokenizer):  # pylint: disable=redefined-outer-name
     if args.chat_template is not None:
         try:
             with open(args.chat_template, "r") as f:
@@ -128,6 +128,7 @@ def load_chat_template(args, tokenizer):
         logger.info(f"Using default chat template:\n{tokenizer.chat_template}")
     else:
         logger.warning("No chat template provided. Chat API will not work.")
+
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):  # pylint: disable=unused-argument
@@ -240,7 +241,7 @@ async def create_chat_completion(
             conversation=request.messages,
             tokenize=False,
             add_generation_prompt=request.add_generation_prompt)
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         logger.error(f"Error in applying chat template from request: {str(e)}")
         return create_error_response(HTTPStatus.BAD_REQUEST, str(e))
 
@@ -308,7 +309,6 @@ async def create_chat_completion(
             return response_role
         else:
             return request.messages[-1]["role"]
-
 
     async def completion_stream_generator() -> AsyncGenerator[str, None]:
         # Send first response for each request.n (index) with the role
@@ -734,7 +734,7 @@ if __name__ == "__main__":
         served_model = args.served_model_name
     else:
         served_model = args.model
-    
+
     response_role = args.response_role
 
     engine_args = AsyncEngineArgs.from_cli_args(args)
@@ -746,7 +746,7 @@ if __name__ == "__main__":
     tokenizer = get_tokenizer(engine_args.tokenizer,
                               tokenizer_mode=engine_args.tokenizer_mode,
                               trust_remote_code=engine_args.trust_remote_code)
-    
+
     load_chat_template(args, tokenizer)
 
     uvicorn.run(app,
