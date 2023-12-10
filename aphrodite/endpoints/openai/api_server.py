@@ -204,8 +204,7 @@ def create_logprobs(token_ids: List[int],
         logprobs.tokens.append(token)
         logprobs.token_logprobs.append(id_logprob[token_id])
         if len(logprobs.text_offset) == 0:
-            # pylint: disable=unsubscriptable-object
-            logprobs.text_offset.append(initial_text_offset)
+            logprobs.text_offset.append(initial_text_offset) # pylint: disable=unsubscriptable-object
         else:
             logprobs.text_offset.append(logprobs.text_offset[-1] +
                                         last_token_len)
