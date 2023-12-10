@@ -271,8 +271,8 @@ class PhiForCausalLM(nn.Module):
             if "rotary_emb.inv_freq" in name:
                 continue
 
-            # pylint: disable=E1136
-            if name not in params_dict:
+            # skip loading extra bias for GPTQ models
+            if name.endswith("bias") and name not in params_dict:
                 continue
             param = params_dict[name]
             weight_loader = getattr(param, "weight_loader",
