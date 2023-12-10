@@ -69,7 +69,9 @@ class GPTQConfig(QuantizationConfig):
     def get_scaled_act_names(self) -> List[str]:
         return []
 
-ExlState = Enum('ExlState', ['Unused', 'Uninitialized', 'Ready'])
+
+ExlState = Enum("ExlState", ["Unused", "Uninitialized", "Ready"])
+
 
 class GPTQLinearMethod(LinearMethodBase):
     """Linear method for GPTQ.
@@ -101,7 +103,8 @@ class GPTQLinearMethod(LinearMethodBase):
         exllama_state = ExlState.Uninitialized
         scale_and_zero_size = input_size // group_size
         scale_and_zero_input_dim = None
-        if input_size != input_size_per_partition and self.quant_config.group_size != -1:
+        if (input_size != input_size_per_partition
+                and self.quant_config.group_size != -1):
             # For act-order models, we cannot use Exllama for row parallel layer
             if self.quant_config.desc_act:
                 exllama_state = ExlState.Unused
@@ -182,22 +185,20 @@ class GPTQLinearMethod(LinearMethodBase):
         qweight = weights["qweight"]
         out_shape = x.shape[:-1] + (qweight.shape[-1], )
         reshaped_x = x.reshape(-1, x.shape[-1])
-       # exllama needs to shuffle the weight after it's loaded
-       # here we do the shuffle on the first forward pass
+        # exllama needs to shuffle the weight after it's loaded
+        # here we do the shuffle on the first forward pass
         if weights["exllama_state"] == ExlState.Uninitialized:
             if self.quant_config.desc_act:
                 weights["g_idx"] = torch.argsort(weights["g_idx"]).to(
-                    torch.int
-                )
+                    torch.int)
             else:
                 weights["g_idx"] = torch.empty((1, 1), device="meta")
             weights["exllama_state"] = ExlState.Ready
             quantization_ops.gptq_shuffle(weights["qweight"], weights["g_idx"])
-        output = quantization_ops.gptq_gemm(reshaped_x, weights["qweight"],
-                                            weights["qzeros"],
-                                            weights["scales"],
-                                            weights["g_idx"],
-                                            weights["exllama_state"] == ExlState.Ready)
+        output = quantization_ops.gptq_gemm(
+            reshaped_x, weights["qweight"], weights["qzeros"],
+            weights["scales"], weights["g_idx"],
+            weights["exllama_state"] == ExlState.Ready)
         if bias is not None:
             output = output + bias
         return output.reshape(out_shape)

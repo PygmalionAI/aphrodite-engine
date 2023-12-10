@@ -22,8 +22,7 @@ class LinearMethodBase(ABC):
 
     @abstractmethod
     def create_weights(self, input_size_per_partition: int,
-                       output_size_per_partition: int,
-                       input_size: int,
+                       output_size_per_partition: int, input_size: int,
                        output_size: int,
                        params_dtype: torch.dtype) -> Dict[str, Any]:
         """Create weights for a linear layer."""
@@ -50,15 +49,14 @@ class UnquantizedLinearMethod(LinearMethodBase):
         self.separate_bias_add = separate_bias_add
 
     def create_weights(self, input_size_per_partition: int,
-                       output_size_per_partition: int,
-                       input_size: int,
+                       output_size_per_partition: int, input_size: int,
                        output_size: int,
                        params_dtype: torch.dtype) -> Dict[str, Any]:
         weight = Parameter(torch.empty(output_size_per_partition,
                                        input_size_per_partition,
                                        device=torch.cuda.current_device(),
                                        dtype=params_dtype),
-                                       requires_grad=False)
+                           requires_grad=False)
         set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})
         return {"weight": weight}
 
