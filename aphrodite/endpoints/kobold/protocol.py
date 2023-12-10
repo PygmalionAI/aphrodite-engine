@@ -71,6 +71,7 @@ class KAIGenerationInputSchema(BaseModel):
     disable_input_formatting: Optional[bool]
     frmtadsnsp: Optional[bool]
     quiet: Optional[bool]
+    # pylint: disable=unexpected-keyword-arg
     sampler_order: Optional[conlist(int, min_items=6)]
     sampler_seed: Optional[conint(ge=0, le=2**64 - 1)]
     sampler_full_determinism: Optional[bool]
