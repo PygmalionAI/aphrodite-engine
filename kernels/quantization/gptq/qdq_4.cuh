@@ -3,6 +3,9 @@
 
 #include "qdq_util.cuh"
 
+namespace aphrodite {
+namespace gptq {
+
 // Permutation:
 //
 // 77775555 33331111  66664444 22220000
@@ -135,8 +138,13 @@ __forceinline__ __device__ void dequant_4bit_8_gptq
     }
 }
 
+} // namespace gptq
+} // namespace aphrodite
+
 #else
 
+namespace aphrodite {
+namespace gptq {
 __forceinline__ __device__ void shuffle_4bit_8
 (
     uint32_t* q,
@@ -218,5 +226,8 @@ __forceinline__ __device__ void dequant_4bit_8_gptq
         dq[3] = __hadd2(dqh2[3], z1[0]);
     }
 }
+
+} // namespace gptq
+} // namespace aphrodite
 
 #endif

@@ -1,6 +1,9 @@
 #ifndef _qdq_util_cuh
 #define _qdq_util_cuh
 
+namespace aphrodite {
+namespace gptq {
+
 union half2_uint32
 {
     uint32_t as_uint32;
@@ -47,5 +50,8 @@ __forceinline__ __device__ int exb(const uint32_t q1, const uint32_t q0, const i
 {
     return (int)(__funnelshift_rc(q0, q1, shift) & mask);
 }
+
+} // namespace gptq
+} // namespace aphrodite
 
 #endif

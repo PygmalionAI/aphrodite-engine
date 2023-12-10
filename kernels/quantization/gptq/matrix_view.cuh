@@ -6,6 +6,10 @@
 
 #include "qdq_util.cuh"
 
+
+namespace aphrodite {
+namespace gptq {
+
 class MatrixView_half
 {
 public:
@@ -117,5 +121,29 @@ public:
         items[3] = (d >> 12) & 0x0f;
     }
 };
+
+class MatrixView_q4_column
+{
+public:
+    const uint32_t* data;
+    const int height;
+    const int width;
+
+    __device__ __forceinline__ MatrixView_q4_column(const uint32_t* data, const int height, const int width)
+        : data(data), height(height), width(width)
+    { }
+
+    __device__ __forceinline__ int item(int row, int column) const
+    {
+        int shift = (row & 0x07) * 4;
+        return (data[row / 8 * width + column] >> shift) & 0x0f;
+    }
+
+    __device__ __forceinline__ uint32_t item_uint32_t(int row, int column) { return data[row / 8 * width + column]; }
+    __device__ __forceinline__ const uint32_t* item_uint32_ptr(int row, int column) { return &data[row / 8 * width + column]; }
+};
+
+}  // namespace gptq
+}  // namespace aphrodite
 
 #endif
