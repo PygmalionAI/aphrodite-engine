@@ -1,3 +1,7 @@
+/*
+Copied from https://github.com/turboderp/exllamav2
+*/
+
 #ifndef _qdq_4_cuh
 #define _qdq_4_cuh
 
@@ -5,7 +9,6 @@
 
 namespace aphrodite {
 namespace gptq {
-
 // Permutation:
 //
 // 77775555 33331111  66664444 22220000
@@ -137,9 +140,8 @@ __forceinline__ __device__ void dequant_4bit_8_gptq
         dq[3] = __hfma2(q3.as_half2, y1y16[1], z1z16[1]);  // half2( q[6] - z, q[7] - z )
     }
 }
-
-} // namespace gptq
-} // namespace aphrodite
+}  // namespace gptq
+}  // namespace aphrodite
 
 #else
 
@@ -227,7 +229,7 @@ __forceinline__ __device__ void dequant_4bit_8_gptq
     }
 }
 
-} // namespace gptq
-} // namespace aphrodite
+}  // namespace gptq
+}  // namespace aphrodite
 
 #endif

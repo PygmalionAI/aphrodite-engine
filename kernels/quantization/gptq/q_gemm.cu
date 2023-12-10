@@ -1,6 +1,9 @@
+/*
+Adapted from https://github.com/turboderp/exllamav2 and https://github.com/qwopqwop200/GPTQ-for-LLaMa
+*/
+
 #include <cstdint>
 #include <cstdio>
-
 
 #include <torch/extension.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -10,9 +13,7 @@
 
 #include "compat.cuh"
 #include "matrix_view.cuh"
-
 #include "qdq_4.cuh"
-
 
 namespace aphrodite {
 namespace gptq {
@@ -259,6 +260,7 @@ fp_gemm_half_q_half_gptq_kernel pick_gemm_half_q_half_gptq_kernel(bool first_blo
     return NULL;
 }
 
+
 void gemm_half_q_half_cuda_part
 (
     const half* a,
@@ -298,6 +300,7 @@ void gemm_half_q_half_cuda_part
         b_q_perm
     );
 }
+
 
 __global__ void reconstruct_exllama_kernel
 (
@@ -649,6 +652,7 @@ void gemm_half_q_half_cuda
     const half* b_gptq_scales,
     const int* b_g_idx,
     half* c,
+    half* temp_dq,
     int size_m,
     int size_n,
     int size_k,
@@ -657,19 +661,19 @@ void gemm_half_q_half_cuda
 )
 {
     if ((use_exllama && size_m > MAX_Q_GEMM_ROWS) || (!use_exllama && size_m > MAX_ALT_GEMM_ROWS)) {
-
         // Reconstruct FP16 matrix, then cuBLAS
         if (use_exllama) {
-            reconstruct_exllama(b_q_weight, b_gptq_qzeros, b_gptq_scales, b_g_idx, temp_dq, size_k, size_n, groups);
+            reconstruct_exllama(b_q_weight, b_gptq_qzeros, b_gptq_scales, b_g_idx, temp_dq,
+                                size_k, size_n, groups);
         }
         else
         {
-            reconstruct_gptq(b_q_weight, b_gptq_qzeros, b_gptq_scales, b_g_idx, temp_dq, size_k, size_n, groups);
+            reconstruct_gptq(b_q_weight, b_gptq_qzeros, b_gptq_scales, b_g_idx,
+                             temp_dq, size_k, size_n, groups);
         }
 
         const half alpha = __float2half(1.0f);
         const half beta = __float2half(0.0f);
-
         cublasHgemm(cublas_handle,
                     CUBLAS_OP_N,
                     CUBLAS_OP_N,
@@ -677,31 +681,36 @@ void gemm_half_q_half_cuda
                     &alpha, temp_dq, size_n,
                             a,       size_k,
                     &beta,  c,       size_n);
-
     }
-    else if {use_exllama}
+    else if (use_exllama)
     {
         // Quantized matmul
-
         int max_chunks = size_m / BLOCK_M_SIZE_MAX;
         int last_chunk = max_chunks * BLOCK_M_SIZE_MAX;
         int last_chunk_size = size_m - last_chunk;
 
         if (max_chunks)
         {
-            gemm_half_q_half_cuda_part(a, b_q_weight, b_gptq_qzeros, b_gptq_scales, b_g_idx, c, last_chunk, size_n, size_k, BLOCK_M_SIZE_MAX, groups);
+            gemm_half_q_half_cuda_part(a, b_q_weight, b_gptq_qzeros, b_gptq_scales, b_g_idx,
+                                        c, last_chunk, size_n, size_k, BLOCK_M_SIZE_MAX,
+                                        groups);
         }
 
         if (last_chunk_size)
         {
-            gemm_half_q_half_cuda_part(a + last_chunk * size_k, b_q_weight, b_gptq_qzeros, b_gptq_scales, b_g_idx, c + last_chunk * size_n, last_chunk_size, size_n, size_k, last_chunk_size, groups);
+            gemm_half_q_half_cuda_part(a + last_chunk * size_k, b_q_weight, b_gptq_qzeros,
+                                        b_gptq_scales, b_g_idx, c + last_chunk * size_n,
+                                        last_chunk_size, size_n, size_k, last_chunk_size,
+                                        groups);
         }
     }
     else
     {
-        gemm_half_q_half_alt(a, b_q_weight, b_gptq_qzeros, b_gptq_scales, b_g_idx, c, size_m, size_n, size_k);
+        gemm_half_q_half_alt(a, b_q_weight, b_gptq_qzeros, b_gptq_scales, b_g_idx,
+                             c, size_m, size_n, size_k);
     }
 }
+
 
 __global__ void shuffle_kernel
 (
@@ -714,8 +723,9 @@ __global__ void shuffle_kernel
     if (n >= size_n) return;
     int k = 0;
     uint32_t* b_ptr = b_q_weight + n;
-    while (k < size_k) { shuffle_4bit_8 (b_ptr, size_n); b_ptr += 1 * size_n; k += 8; }
+    while (k < size_k) { shuffle_4bit_8 (b_ptr, size_n); b_ptr += 1 * size_n; k +=  8; }
 }
+
 
 __global__ void make_sequential_kernel
 (

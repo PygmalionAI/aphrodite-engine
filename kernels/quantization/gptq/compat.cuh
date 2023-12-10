@@ -1,3 +1,7 @@
+/*
+Copied from https://github.com/turboderp/exllamav2
+*/
+
 #ifndef _compat_cuh
 #define _compat_cuh
 
@@ -55,7 +59,6 @@ __device__ __forceinline__ void atomicAdd(half2* address, half2 val) { atomicAdd
 #endif
 #endif
 
-
-} // namespace gptq
-} // namespace aphrodite
+}  // namespace gptq
+}  // namespace aphrodite
 #endif

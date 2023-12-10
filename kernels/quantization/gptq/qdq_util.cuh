@@ -1,3 +1,7 @@
+/*
+Copied from https://github.com/turboderp/exllamav2
+*/
+
 #ifndef _qdq_util_cuh
 #define _qdq_util_cuh
 
@@ -51,7 +55,6 @@ __forceinline__ __device__ int exb(const uint32_t q1, const uint32_t q0, const i
     return (int)(__funnelshift_rc(q0, q1, shift) & mask);
 }
 
-} // namespace gptq
-} // namespace aphrodite
-
+}  // namespace gptq
+}  // namespace aphrodite
 #endif

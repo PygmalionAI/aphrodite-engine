@@ -1,3 +1,7 @@
+/*
+Adapted from https://github.com/turboderp/exllamav2 and https://github.com/turboderp/exllama
+*/
+
 #ifndef _matrix_view_cuh
 #define _matrix_view_cuh
 
@@ -5,7 +9,6 @@
 #include <cuda_fp16.h>
 
 #include "qdq_util.cuh"
-
 
 namespace aphrodite {
 namespace gptq {
@@ -144,6 +147,5 @@ public:
 };
 
 }  // namespace gptq
-}  // namespace aphrodite
-
+}  // namespace vllm
 #endif
