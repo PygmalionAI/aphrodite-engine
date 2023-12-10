@@ -219,10 +219,7 @@ aphrodite_extension_sources = [
     "kernels/activation_kernels.cu",
     "kernels/layernorm_kernels.cu",
     "kernels/quantization/squeezellm/quant_cuda_kernel.cu",
-    "kernels/quantization/gptq/exllama_ext.cpp",
-    "kernels/quantization/gptq/q_matrix.cu",
     "kernels/quantization/gptq/q_gemm.cu",
-    "kernels/quantization/gptq/old_matmul_kernel.cu",
     "kernels/cuda_utils_kernels.cu",
     "kernels/pybind.cpp",
 ]
