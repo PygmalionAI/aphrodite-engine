@@ -1,0 +1,18 @@
+[submodule "third_party/Legion"]
+	path = third_party/Legion
+	url = https://github.com/StanfordLegion/legion
+[submodule "third_party/optional"]
+	path = third_party/optional
+	url = https://github.com/TartanLlama/optional
+[submodule "third_party/variant"]
+	path = third_party/variant
+	url = https://github.com/mpark/variant
+[submodule "third_party/nccl"]
+	path = third_party/nccl
+	url = https://github.com/NVIDIA/nccl
+[submodule "third_party/pybind11"]
+	path = third_party/pybind11
+	url = https://github.com/pybind/pybind11
+[submodule "third_party/googletest"]
+	path = third_party/googletest
+	url = https://github.com/google/googletest
