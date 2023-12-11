@@ -28,9 +28,11 @@
 #include "caconst.h"
 #include "catype.h"
 
+namespace astarte {
+
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
-  FF_INIT_TASK_ID,
+  CA_INIT_TASK_ID,
   IMAGE_INIT_TASK_ID,
   LABEL_INIT_TASK_ID,
   LOAD_IMAGES_TASK_ID,
@@ -776,9 +778,9 @@ public:
       bool position_bias = false,
       char const *name = NULL);
   
-  // ==========================
-  // C++ APIs for inference
-  // ==========================
+  // ======================= //
+  // C++ APIs for inference  //
+  // ======================= //
   GenerationResult generate(std::vector<std::string> &prompts,
                             int max_seq_length);
   
@@ -871,4 +873,431 @@ public:
   template <int NDIM>
   Tensor create_constant(int const dims[], float value, DataType data_type);
 
-}
+  // =============== //
+  // Graph C++ APIs  //
+  // =============== //
+
+  float graph_cost(const PCG::Graph *graph,
+                   const PCG::Node &sink_node,
+                   MachineView const &sink_view,
+                   const PCG::Node &source_node,
+                   MachineView const &source_view,
+                   MachineResource const &resources,
+                   bool include_sink_compute_time,
+                   bool constructing_optimal_view = false);
+  void construct_optimal_view(
+      const PCG::Graph *graph,
+      const PCG::Node &sink_node,
+      MachineView const &sink_view,
+      const PCG::Node &source_node,
+      MachineView const &source_view,
+      MachineResource const &resources,
+      bool include_sink_compute_time,
+      float optimal_cost,
+      std::unordered_map<PCG::Node, MachineView> &optimal_views);
+  void deserialize_graph_optimal_view(
+      Legion::Deserializer &dez,
+      PCG::Graph *graph,
+      std::unordered_map<PCG::Node, MachineView> &optimal_views);
+  bool convert_graph_to_operators(
+      const PCG::Graph *graph,
+      std::unordered_map<PCG::Node, MachineView> const &optimal_views);
+  static void register_all_machine_views(int num_nodes,
+                                         int gpus_per_node,
+                                         int cpus_per_node,
+                                         std::vector<MachineView> &valid_views);
+  // ================================ //
+  // Internal PCG::Node creation APIs //
+  // ================================ //
+  template <typename T>
+  PCG::Node get_or_create_node(const typename T::Input &input,
+                               typename T::Params const &params) {
+    using Params = typename T::Params;
+
+    auto input_shapes = get_input_shape<typename T::Input>(input);
+
+    if (!params.is_valid(input_shapes)) {
+      printf("!params.is_valid(input_shapes)\n");
+      return PCG::Node::INVALID_NODE;
+    }
+
+    T *op = nullptr;
+
+    std::pair<typename ToShape<typename T::Input>::type, Params> key{
+        input_shapes, params};
+    auto &cache = FlexFlow::get<std::unordered_map<
+        std::pair<typename ToShape<typename T::Input>::type, Params>,
+        T *>>(this->cached_ops);
+    auto const &it = cache.find(key);
+    if (it != cache.end()) {
+      op = it->second;
+    } else {
+      op = new T(*this, params, input);
+      cache[key] = op;
+    }
+
+    assert(op->get_params() == params);
+    return this->new_node(op);
+  }
+
+  PCG::Node get_or_create_noop_node(const ParallelTensor input);
+  PCG::Node get_or_create_input_node(ParallelTensorShape const &);
+  PCG::Node get_or_create_fused_parallel_node(
+      const ParallelTensor input,
+      std::vector<ParallelOpInfo> const &parallel_ops);
+  PCG::Node get_or_create_parallel_op_node(const ParallelTensor input,
+                                           ParallelOpInfo const &);
+  // ========================================================== //
+  // Internal APIs that should not be invoked from applications //
+  // ========================================================== //
+  void create_disjoint_partition(int num_dims,
+                                 const ParallelDim dims[],
+                                 Legion::IndexSpace const &part_is,
+                                 Legion::LogicalRegion const &region,
+                                 Legion::LogicalPartition &part);
+  template <int NDIM, int TDIM>
+  void create_disjoint_partition_with_dim2(
+      const ParallelDim dims[],
+      Legion::IndexSpaceT<TDIM> const &part_is,
+      Legion::LogicalRegion const &region,
+      Legion::LogicalPartition &part);
+  void create_aliased_partition(int num_dims,
+                                const ParallelDim dims[],
+                                int aliased_dim,
+                                Legion::IndexSpace const &part_is,
+                                Legion::LogicalRegion const &region,
+                                Legion::LogicalPartition &part);
+  template <int NDIM, int TDIM>
+  void create_aliased_partition_with_dim2(
+      const ParallelDim dims[],
+      int aliased_dim,
+      Legion::IndexSpaceT<TDIM> const &part_is,
+      Legion::LogicalRegion const &region,
+      Legion::LogicalPartition &part);
+
+  template <int NDIM>
+  void create_disjoint_partition(const ParallelTensor tensor,
+                                 Legion::IndexSpaceT<NDIM> const &part_is,
+                                 Legion::LogicalPartition &part_fwd,
+                                 Legion::LogicalPartition &part_bwd);
+
+  template <int NDIM, int TDIM>
+  void create_data_parallel_partition_with_diff_dims(
+      const ParallelTensor tensor,
+      Legion::IndexSpaceT<TDIM> const &task_is,
+      Legion::LogicalPartition &part_fwd,
+      Legion::LogicalPartition &part_bwd);
+  template <int NDIM>
+  void map_conv_weight(ParallelTensor p, Op const *parallel_op);
+  template <int NDIM, int TDIM>
+  void map_linear_weight(ParallelTensor p, Op const *parallel_op);
+  template <int NDIM, int TDIM>
+  ParallelTensor create_linear_replica(int const *dims,
+                                       Legion::IndexSpaceT<TDIM> const &part_is,
+                                       DataType data_type);
+  static PerfMetrics
+      update_metrics_task(Legion::Task const *task,
+                          std::vector<Legion::PhysicalRegion> const &regions,
+                          Legion::Context ctx,
+                          Legion::Runtime *runtime);
+  // ========================================================== //
+  // Internal APIs that should not be invoked from applications //
+  // ========================================================== //
+  void reset_metrics();
+  void init_operators();
+  void init_operators_inference(
+      std::vector<ParallelTensor> const &batch_inputs,
+      std::vector<ParallelTensor> const &batch_outputs);
+  void prefetch();
+  void forward(int seq_length = -1);
+  void compute_metrics();
+  void get_metrics();
+  void backward(int seq_length = -1);
+  void update();
+  bool apply_fusion(std::vector<Op *> const &operators,
+                    std::vector<Op *> &new_operators);
+  Op *get_final_operator() const;
+  void compile(LossType loss_type,
+               std::vector<MetricsType> const &metrics,
+               CompMode comp_mode = COMP_MODE_TRAINING);
+  void compile(Optimizer *optimizer,
+               LossType loss_type,
+               std::vector<MetricsType> const &metrics,
+               CompMode comp_mode = COMP_MODE_TRAINING);
+  void compile_inference();
+  void set_transformer_layer_id(int id);
+  void set_position_offset(int offset);
+  void graph_optimize(size_t budget,
+                      bool only_data_parallel,
+                      std::unique_ptr<PCG::Graph> &best_graph,
+                      std::unordered_map<PCG::Node, MachineView> &optimal_view);
+  void graph_optimize(size_t budget,
+                      bool only_data_parallel,
+                      std::unique_ptr<PCG::Graph> &best_graph,
+                      std::unordered_map<PCG::Node, MachineView> &optimal_view,
+                      bool perform_memory_search,
+                      MemoryOptimConfig new_config,
+                      MemorySearchResult &search_result);
+  void mcmc_optimize(std::map<Op const *, ParallelConfig> &best,
+                     size_t budget,
+                     float alpha,
+                     CompMode comp_mode,
+                     bool use_propagation) const;
+#ifdef CA_USE_NCCL
+  ncclComm_t *find_nccl_comms(MachineView const &view) const;
+#endif
+#ifdef CA_USE_PROPAGATE
+  void propagate(std::map<Op *, ParallelConfig> const &current,
+                 std::map<Op *, ParallelConfig> &next) const;
+#endif
+  void rewrite(std::map<Op const *, ParallelConfig> const &current,
+               std::map<Op const *, ParallelConfig> &next,
+               bool use_propagation) const;
+  void recompile_on_condition(RecompileState &r);
+  void zero_gradients();
+  void print_layers(int id);
+
+  std::unordered_map<Op *, std::vector<std::pair<Op *, int>>>
+      get_bwd_edge_map() const;
+
+  // Internal funcitons
+  Legion::IndexSpace get_or_create_task_is(ParallelConfig const &pc);
+  Legion::IndexSpace get_or_create_task_is(MachineView const &view);
+  Legion::IndexSpace get_or_create_task_is(Legion::Domain const &domain);
+  Legion::IndexSpace get_or_create_task_is(const ParallelTensor);
+  Legion::IndexSpace get_task_is(Legion::Domain const &domain) const;
+  Legion::IndexSpace get_task_is(ParallelConfig const &pc) const;
+  Legion::IndexSpace get_task_is(MachineView const &view) const;
+  void create_operators_from_layers();
+  Op *create_operator_from_layer(Layer *layer,
+                                 std::vector<ParallelTensor> const &inputs);
+  // APIs for setting iteration configs
+public:
+  void set_iteration_config_sequence_length(int seq_length);
+
+  /**
+   * @brief Clear the cache of the GraphSearchHelper and SearchHelper.
+   */
+  void clear_graph_search_cache();
+
+public:
+  size_t op_global_guid, layer_global_guid;
+  size_t tensor_global_guid, parallel_tensor_global_guid, node_global_guid;
+  size_t current_transformer_layer_id;
+  // positional embedding start offset
+  int position_offset;
+  CAConfig config;
+  CAIterationConfig iter_config;
+  Optimizer *optimizer;
+  PCG::SearchHelper *search;
+  PCG::GraphSearchHelper *graph_search;
+  Loss *loss_op;
+  Metrics *metrics_op;
+  Simulator *simulator;
+  int metrics_input;
+  ParallelTensor parallel_label_tensor;
+  Tensor label_tensor;
+
+  std::vector<Layer *> layers;
+  std::vector<Op *> operators;
+  std::vector<ParallelTensor> parameters;
+  CAHandler handlers[MAX_NUM_WORKERS];
+  Legion::Future current_metrics;
+  // Cached operators: key: operator hash, value: operator pointer
+  std::tuple<
+      std::unordered_map<
+          std::pair<std::vector<ParallelTensorShape>, AggregateParams>,
+          Aggregate *>,
+      std::unordered_map<std::pair<ParallelTensorShape, AggregateSpecParams>,
+                         AggregateSpec *>,
+      std::unordered_map<
+          std::pair<std::pair<ParallelTensorShape, ParallelTensorShape>,
+                    BatchMatmulParams>,
+          BatchMatmul *>,
+      std::unordered_map<std::pair<ParallelTensorShape, CastParams>, Cast *>,
+      std::unordered_map<
+          std::pair<std::vector<ParallelTensorShape>, ConcatParams>,
+          Concat *>,
+      std::unordered_map<std::pair<ParallelTensorShape, Conv2DParams>,
+                         Conv2D *>,
+      std::unordered_map<std::pair<ParallelTensorShape, DropoutParams>,
+                         Dropout *>,
+      std::unordered_map<
+          std::pair<std::pair<ParallelTensorShape, ParallelTensorShape>,
+                    ElementBinaryParams>,
+          ElementBinary *>,
+      std::unordered_map<std::pair<ParallelTensorShape, ElementUnaryParams>,
+                         ElementUnary *>,
+      std::unordered_map<std::pair<ParallelTensorShape, EmbeddingParams>,
+                         Embedding *>,
+      std::unordered_map<
+          std::pair<std::vector<ParallelTensorShape>, ExpertsParams>,
+          Experts *>,
+      std::unordered_map<std::pair<ParallelTensorShape, FlatParams>, Flat *>,
+      std::unordered_map<
+          std::pair<std::pair<ParallelTensorShape, ParallelTensorShape>,
+                    GatherParams>,
+          Gather *>,
+      std::unordered_map<
+          std::pair<std::pair<ParallelTensorShape, ParallelTensorShape>,
+                    Group_byParams>,
+          Group_by *>,
+      std::unordered_map<std::pair<ParallelTensorShape, LayerNormParams>,
+                         LayerNorm *>,
+      std::unordered_map<std::pair<std::tuple<ParallelTensorShape,
+                                              ParallelTensorShape,
+                                              ParallelTensorShape>,
+                                   ResidualLayerNormParams>,
+                         ResidualLayerNorm *>,
+      std::unordered_map<
+          std::pair<std::pair<ParallelTensorShape, ParallelTensorShape>,
+                    AddBiasResidualLayerNormParams>,
+          AddBiasResidualLayerNorm *>,
+      std::unordered_map<
+          std::pair<std::pair<ParallelTensorShape, ParallelTensorShape>,
+                    SigmoidSiluMultiParams>,
+          SigmoidSiluMulti *>,
+      std::unordered_map<std::pair<ParallelTensorShape, LinearParams>,
+                         Linear *>,
+      std::unordered_map<std::pair<ParallelTensorShape, Pool2DParams>,
+                         Pool2D *>,
+      std::unordered_map<std::pair<std::tuple<ParallelTensorShape,
+                                              ParallelTensorShape,
+                                              ParallelTensorShape>,
+                                   MultiHeadAttentionParams>,
+                         MultiHeadAttention *>,
+      std::unordered_map<
+          std::pair<ParallelTensorShape, IncMultiHeadSelfAttentionParams>,
+          IncMultiHeadSelfAttention *>,
+      std::unordered_map<std::pair<ParallelTensorShape, BeamTopKParams>,
+                         BeamTopK *>,
+      std::unordered_map<std::pair<ParallelTensorShape, SamplingParams>,
+                         Sampling *>,
+      std::unordered_map<std::pair<ParallelTensorShape, ArgMaxParams>,
+                         ArgMax *>,
+      std::unordered_map<
+          std::pair<ParallelTensorShape, SpecIncMultiHeadSelfAttentionParams>,
+          SpecIncMultiHeadSelfAttention *>,
+      std::unordered_map<
+          std::pair<ParallelTensorShape, TreeIncMultiHeadSelfAttentionParams>,
+          TreeIncMultiHeadSelfAttention *>,
+      std::unordered_map<std::pair<ParallelTensorShape, ReduceParams>,
+                         Reduce *>,
+      std::unordered_map<std::pair<ParallelTensorShape, ReshapeParams>,
+                         Reshape *>,
+      std::unordered_map<std::pair<ParallelTensorShape, SplitParams>, Split *>,
+      std::unordered_map<std::pair<ParallelTensorShape, SoftmaxParams>,
+                         Softmax *>,
+      std::unordered_map<std::pair<ParallelTensorShape, TopKParams>, TopK *>,
+      std::unordered_map<std::pair<ParallelTensorShape, ArgTopKParams>,
+                         ArgTopK *>,
+      std::unordered_map<std::pair<ParallelTensorShape, TransposeParams>,
+                         Transpose *>,
+      std::unordered_map<std::pair<ParallelTensorShape, RMSNormParams>,
+                         RMSNorm *>,
+      std::unordered_map<
+          std::pair<std::pair<ParallelTensorShape, ParallelTensorShape>,
+                    ResidualRMSNormParams>,
+          ResidualRMSNorm *>,
+      std::unordered_map<std::pair<ParallelTensorShape, RepartitionParams>,
+                         Repartition *>,
+      std::unordered_map<std::pair<ParallelTensorShape, ReplicateParams>,
+                         Replicate *>,
+      std::unordered_map<std::pair<ParallelTensorShape, ReductionParams>,
+                         Reduction *>,
+      std::unordered_map<std::pair<ParallelTensorShape, CombineParams>,
+                         Combine *>,
+      std::unordered_map<std::pair<ParallelTensorShape, AllReduceParams>,
+                         AllReduce *>,
+      std::unordered_map<std::pair<ParallelTensorShape, FusedParallelOpParams>,
+                         FusedParallelOp *>>
+      cached_ops;
+  std::unordered_map<size_t, NoOp *> cached_noop_ops;
+  std::unordered_map<size_t, NoOp *> cached_input_ops;
+  std::vector<MachineView> all_valid_views;
+  int model_id; // unique incremental id assigned to each model. Used in the
+                // inference_debugging mode.
+#ifdef CA_USE_NCCL
+  std::unordered_map<size_t, ncclComm_t *> view_hash_to_nccl_comms;
+#endif
+private:
+  bool debug;
+  std::map<MachineView, Legion::IndexSpace, MachineViewDimCompare> all_task_is;
+
+  template <int NDIM>
+  void map_tensor_with_dim(ParallelTensor tensor, Op const *parallel_op);
+  template <int NDIM, int TDIM>
+  void map_tensor_with_dim2(ParallelTensor tensor, Op const *parallel_op);
+  template <int NDIM>
+  void map_weight_with_dim(ParallelTensor weight, Op const *parallel_op);
+
+  Tensor binary(OperatorType op,
+                Tensor const x,
+                Tensor const y,
+                bool inplace_a = false,
+                char const *name = NULL);
+  ElementBinary *binary(OperatorType op, char const *name = NULL);
+  Tensor unary(OperatorType op,
+               Tensor const x,
+               bool inplace = true,
+               char const *name = NULL,
+               float scalar = 0.0);
+  ElementUnary *
+      unary(OperatorType op, char const *name = NULL, float scalar = 0.0);
+  PCG::Node new_node(Op *);
+  static int model_counter; // number of instantiated CAModel objects. Used to
+                            // assign a unique incremental id to each model.
+                            // Used in the inference_debugging mode.
+};
+
+class UtilityTasks {
+public:
+  static CAHandler
+      init_cuda_task(Legion::Task const *task,
+                     std::vector<Legion::PhysicalRegion> const &regions,
+                     Legion::Context ctx,
+                     Legion::Runtime *runtime);
+  static void dummy_task(Legion::Task const *task,
+                         std::vector<Legion::PhysicalRegion> const &regions,
+                         Legion::Context ctx,
+                         Legion::Runtime *runtime);
+  static void
+      init_images_task(Legion::Task const *task,
+                       std::vector<Legion::PhysicalRegion> const &regions,
+                       Legion::Context ctx,
+                       Legion::Runtime *runtime);
+  static void
+      init_labels_task(Legion::Task const *task,
+                       std::vector<Legion::PhysicalRegion> const &regions,
+                       Legion::Context ctx,
+                       Legion::Runtime *runtime);
+  static void
+      load_images_task(Legion::Task const *task,
+                       std::vector<Legion::PhysicalRegion> const &regions,
+                       Legion::Context ctx,
+                       Legion::Runtime *runtime);
+  static void
+      normalize_images_task(Legion::Task const *task,
+                            std::vector<Legion::PhysicalRegion> const &regions,
+                            Legion::Context ctx,
+                            Legion::Runtime *runtime);
+};
+
+void top_level_task(Legion::Task const *task,
+                    std::vector<Legion::PhysicalRegion> const &regions,
+                    Legion::Context ctx,
+                    Legion::Runtime *runtime);
+
+void data_load_task(Legion::Task const *task,
+                    std::vector<Legion::PhysicalRegion> const &regions,
+                    Legion::Context ctx,
+                    Legion::Runtime *runtime);
+
+void register_flexflow_internal_tasks(Legion::Runtime *runtime = NULL,
+                                      bool pre_register = true,
+                                      bool enable_control_replication = true);
+
+void register_custom_tasks();
+
+}; // namespace astarte
+#endif
