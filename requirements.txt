@@ -17,5 +17,3 @@ fastapi
 colorlog
 einops # for phi
 aioprometheus[starlette] # for prometheus metrics
-megablocks # for mixtral
-stanford-stk # for mixtral
