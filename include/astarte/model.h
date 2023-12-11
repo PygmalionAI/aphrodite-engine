@@ -775,5 +775,100 @@ public:
       bool qk_prod_scaling = true,
       bool position_bias = false,
       char const *name = NULL);
-                
+  
+  // ==========================
+  // C++ APIs for inference
+  // ==========================
+  GenerationResult generate(std::vector<std::string> &prompts,
+                            int max_seq_length);
+  
+  Tensor create_tensor_legion_ordering(int num_dim,
+                                       int const dims[],
+                                       DataType data_type,
+                                       Layer const *owner_op = NULL,
+                                       int owner_idx = 0,
+                                       bool create_grad = true);
+  ParallelTensor create_parallel_tensor_legion_ordering(
+    int num_dim,
+    const ParallelDim dims[],
+    DataType data_type,
+    Op const *owner_op = NULL,
+    int owner_idx = 0,
+    bool create_grad = true,
+    size_t input_tensor_guid = 0);
+  
+  Tensor create_tensor(int num_dim,
+                       int const dims[],
+                       DataType data_type,
+                       Layer const *owner_op = NULL,
+                       int owner_idx = 0,
+                       bool create_grad = true);
+  ParallelTensor create_parallel_tensor(int num_dim,
+                                        const ParallelDim dims[],
+                                        DataType data_type,
+                                        Op const *owner_op = NULL,
+                                        int owner_idx = 0,
+                                        bool create_grad = true,
+                                        size_t input_tensor_guid = 0);
+  template <int NDIM>
+  Tensor create_tensor(int const dims[],
+                       DataType data_type,
+                       Layer const *owner_op = NULL,
+                       int owner_idx = 0,
+                       bool create_grad = true);
+  template <int NDIM>
+  ParallelTensor create_parallel_tensor(const ParallelDim dims[],
+                                        DataType data_type,
+                                        Op const *owner_op = NULL,
+                                        int owner_idx = 0,
+                                        bool create_grad = true,
+                                        size_t input_tensor_guid = 0);
+  Parameter create_weight(int numdim,
+                          int const dims[],
+                          DataType data_type,
+                          Layer const *owner_op = NULL,
+                          bool create_grad = true,
+                          Initializer *initializer = NULL,
+                          ParameterSyncType sync_type = ParameterSyncType::NONE);
+  Parameter create_weight_legion_ordering(
+    int numdim,
+    int const dims[],
+    DataType data_type,
+    Layer const *owner_op = NULL,
+    bool create_grad = true,
+    Initializer *initializer = NULL,
+    ParameterSyncType sync_type = ParameterSyncType::NONE);
+  template <int NDIM>
+  ParallelParameter create_parallel_weight(
+    const ParallelDim dims[],
+    DataType data_type,
+    Op const *owner_op = NULL,
+    bool create_grad = true,
+    Initializer *initializer = NULL,
+    ParameterSyncType sync_type = ParameterSyncType::NONE);
+  ParallelParameter create_parallel_weight(
+    int numdim,
+    const ParallelDim dims[],
+    DataType data_type,
+    Op const *owner_op = NULL,
+    bool create_grad = true,
+    Initializer *initializer = NULL,
+    ParameterSyncType sync_type = ParameterSyncType::NONE);
+  ParallelParameter create_parallel_tensor_legion_ordering(
+    int num_dim,
+    const ParallelDim dims[],
+    DataType data_type,
+    Op const *owner_op = NULL,
+    bool create_grad = true,
+    Initializer *initializer = NULL,
+    ParameterSyncType sync_type = ParameterSyncType::NONE);
+  
+  void map_tensor(ParallelTensor tensor, Op const *parallel_op);
+  void map_weight(ParallelTensor tensor, Op const *parallel_op);
+  bool get_parallel_tensor_from_tensor(const Tensor tensor,
+                                       ParallelTensor &parallel_tensor) const;
+  
+  template <int NDIM>
+  Tensor create_constant(int const dims[], float value, DataType data_type);
+
 }
