@@ -336,3 +336,444 @@ struct ToShape {
     using type = T;
 };
 
+template <>
+struct ToShape<ParallelTensor> {
+    using type = ParallelTensorShape;
+};
+
+template <typename .. Args, template <typename...> class Container>
+struct ToShape<Container<Args...>> {
+    using type = Container<typename ToShape<Args>::type...>;
+};
+
+// TODO: Move this to an appropriate place
+template <typename Input>
+typename ToShape<Input>::type get_input_shape(Input const &input) = delete;
+
+template <>
+std::tuple<> get_input_shape(std::tuple<> const &);
+
+template <>
+std::tuple<ParallelTensorShape, ParallelTensorShape, ParallelTensorShape>
+  get_input_shape(std::pair<ParallelTensor, ParallelTensor> const &inputs);
+
+template <>
+ParallelTensorShape get_input_shape(ParallelTensor const &input);
+
+template <>
+std::pair<ParallelTensorShape, ParallelTensorShape>
+  get_input_shape(std::pair<ParallelTensor, ParallelTensor> const &inputs);
+
+template <>
+std::vector<ParallelTensorShape>
+  get_input_shape(std::vector<ParallelTensor> const &inputs);
+
+class CAModel {
+public:
+  CAModel(CAConfig &config, bool cpu_offload = false);
+
+  static constexpr float PROPAGATION_CHANCE = 0.25;
+  static constexpr float CONTINUE_PROPAGATION_CHANCE = 0.75;
+  static constexpr float PROPAGATION_SIZE_WEIGHT = 1.0;
+
+  bool cpu_offload;
+  // C++ APIs for constructing models
+  // Add an exp layer
+  Tensor exp(const Tensor x, char const *name = NULL);
+  // Add an add layer
+  Tensor add(const Tensor x,
+             const Tensor y,
+             bool inplace_a = false,
+             char const *name = NULL);
+  // Add a subtract layer
+  Tensor subtract(const Tensor x,
+                  const Tensor y,
+                  bool inplace_a = false,
+                  char const *name = NULL);
+  // Add a multiply layer
+  Tensor multiply(const Tensor x,
+                  const Tensor y,
+                  bool inplace_a = false,
+                  char const *name = NULL);
+  // Add a divide layer
+  Tensor divide(const Tensor x,
+                const Tensor y,
+                bool inplace_a = false,
+                char const *name = NULL);
+  // Add a max layer
+  Tensor max(const Tensor x,
+             const Tensor y,
+             bool inplace_a = false,
+             char const *name = NULL);
+  // Add a min layer
+  Tensor min(const Tensor x,
+             const Tensor y,
+             bool inplace_a = false,
+             char const *name = NULL);
+  // Add a rsqrt layer
+  Tensor rsqrt(const Tensor x, bool inplace = True, char const *name = NULL);
+  // Add a pow layer
+  Tensor pow(const Tensor x,
+             float const exponent,
+             bool inplace_a = false,
+             char const *name = NULL);
+  // Add a scalar multiply layer
+  Tensor scalar_multiply(const Tensor x,
+                         float const scalar,
+                         bool inplace = false,
+                         char const *name = NULL);
+  // Add a scalar add layer
+  Tensor scalar_add(const Tensor x,
+                    float const scalar,
+                    bool inplace = false,
+                    char const *name = NULL);
+  // Add a scalar subtract layer
+  Tensor scalar_sub(const Tensor x,
+                    float const scalar,
+                    bool inplace = false,
+                    char const *name = NULL);
+  // Add a scalar truediv layer
+  Tensor scalar_truediv(const Tensor x,
+                        float const scalar,
+                        bool inplace = false,
+                        char const *name = NULL);
+  // Add a sin layer
+  Tensor sin(const Tensor x, char const *name = NULL);
+  // Add a cos layer
+  Tensor cos(const Tensor x, char const *name = NULL);
+  // Add activation layers
+  Tensor relu(const Tensor x, bool inplace = true, char const *name = NULL);
+  Tensor identity(const Tensor x, char const *name = NULL);
+  Tensor gelu(const Tensor x, char const *name = NULL);
+  Tensor sigmoid(const Tensor x, char const *name = NULL);
+  Tensor tanh(const Tensor x, char const *name = NULL);
+  Tensor elu(const Tensor x, char const *name = NULL);
+  // Add a 2D convolution layer
+  Tensor conv2d(const Tensor input,
+                int outChannels,
+                int kernelH,
+                int strideH,
+                int strideW,
+                int paddingH,
+                int paddingW,
+                ActiMode activation = AC_MODE_NONE,
+                int groups = 1,
+                bool use_bias = true,
+                Layer const *shared_op = NULL,
+                Initializer *kernel_initializer = NULL,
+                Initializer *bias_initializer = NULL,
+                char const *name = NULL);
+  // Add a dropout layer
+  Tensor dropout(const Tensor input,
+                 float rate,
+                 unsigned long long seed = 0,
+                 char const *name = NULL);
+  // Add an embedding layer
+  Tensor embedding(const Tensor input,
+                   int num_entries,
+                   int outDim,
+                   AggrMode aggr,
+                   DataType dtype = DT_FLOAT,
+                   Layer const *shared_op = NULL,
+                   Initializer *kernel_initializer = NULL,
+                   char const *name = NULL);
+  // Add a gather layer
+  Tensor gather(const Tensor input,
+                const Tensor index,
+                int dim,
+                char const *name = NULL);
+  // Add a group_by layer
+  Tensor group_by(const Tensor data,
+                  const Tensor assign,
+                  Tensor *outputs,
+                  int n,
+                  float alpha,
+                  char const *name = NULL);
+  // Add a cache layer
+  Tensor cache(Tensor const &input,
+               int num_batches,
+               std::function<float(float *, void const *, void const *, int)>
+                   score_f = {},
+               char const *name = NULL);
+  // Add aggregate layer
+  Tensor aggregate(Tensor const *inputs,
+                   int n,
+                   float lambda_bal,
+                   char const *name = NULL);
+  // Add aggregate_spec layer
+  Tensor aggregate_spec(Tensor const *inputs,
+                        int n,
+                        float lambda_bal,
+                        char const *name = NULL);
+  // Add a pool2d layer
+  Tensor pool2d(const Tensor input,
+                int kernelH,
+                int kernelW,
+                int strideH,
+                int strideW,
+                int paddingH,
+                int paddingW,
+                PoolType type = POOL_MAX,
+                ActiMode activation = AC_MODE_NONE,
+                char const *name = NULL);
+  // Add a layer_norm layer
+  Tensor layer_norm(const Tensor input,
+                    std::vector<int> const &axes,
+                    bool elementwise_affine,
+                    float eps,
+                    bool use_bias = true,
+                    DataType data_type = DT_NONE,
+                    char const *name = NULL);
+  // Add a layer_norm layer with residual(s)
+  void residual_layer_norm(const Tensor input,
+                           const Tensor residual1,
+                           const Tensor residual2,
+                           Tensor *outputs,
+                           bool use_two_residuals,
+                           std::vector<int> const &axes,
+                           bool elementwise_affine,
+                           float eps,
+                           bool use_bias = true,
+                           DataType data_type = DT_NONE,
+                           char const *name = NULL);
+  // Add a add_bias_residual_layer_norm layer
+  void add_bias_residual_layer_norm(const Tensor input,
+                                    const Tensor residual,
+                                    Tensor *outputs,
+                                    std::vector<int> const &axes,
+                                    bool elementwise_affine,
+                                    float eps,
+                                    bool use_bias = true,
+                                    DataType data_type = DT_NONE,
+                                    char const *name = NULL);
+  // Add a sigmoid_silu_multi layer
+  Tensor sigmoid_silu_multi(const Tensor input1,
+                            const Tensor input2,
+                            DataType data_type = DT_NONE,
+                            char const *name = NULL);
+  // Add a batch_norm layer
+  Tensor batch_norm(const Tensor input, bool relu = true, char const *name = NULL);
+  // Add a batch_matmul layer
+  Tensor batch_matmul(const Tensor A,
+                      const Tensor B,
+                      int a_seq_length_dim = -1,
+                      int b_seq_length_dim = -1,
+                      char const *name = NULL);
+  // Add a root mean square layer
+  Tensor rms_norm(const Tensor input,
+                  float eps,
+                  int dim,
+                  DataType data_type = DT_NONE,
+                  char const *name = NULL);
+  // Add a residual root mean square layer
+  void residual_rms_norm(const Tensor input1,
+                         const Tensor input2,
+                         Tensor *outputs,
+                         float eps,
+                         int dim,
+                         DataType data_type = DT_NONE,
+                         char const *name = NULL);
+  // Add a beam search top_k layer
+  Tensor beam_top_k(const Tensor input,
+                    int max_beam_size,
+                    bool sorted,
+                    char const *name = NULL);
+  // Add a dense layer
+  Tensor dense(const Tensor input,
+               int outDim,
+               ActiMode activation = AC_MODE_NONE,
+               bool use_bias = true,
+               DataType data_type = DT_NONE,
+               Layer const *shared_op = NULL,
+               Initializer *kernel_initializer = NULL,
+               Initializer *bias_initializer = NULL,
+               RegularizerMode regularizer_mode = REG_MODE_NONE,
+               float regularizer_lambda = 0.0,
+               char const *name = NULL);
+  // Add a cast layer
+  Tensor cast(const Tensor input, DataType dtype, char const *name = NULL);
+  // Add a concat layer
+  Tensor concat(int n, Tensor const *tensors, int axis, char const *name = NULL);
+  // Add an experts layer
+  Tensor experts(
+    Tensor const *inputs,
+    int num_experts,
+    int experts_start_idx,
+    int experts_output_dim_size,
+    float alpha,
+    int experts_num_layers = 1,           // number of linear layers per expert
+    int experts_internal_dim_size = 0,    // hidden dimension for internal layers
+    char const *name = NULL);
+  
+  // Add a mean layer
+  Tensor mean(const Tensor input,
+              std::vector<int> const &dims,
+              bool keepdims,
+              char const *name);
+  // Add a MoE layer (wrapping top_k, group_by, and aggregate operators)
+  Tensor moe(const Tensor input,
+             int num_exp,
+             int num_select,
+             int expert_hidden_size,
+             float alpha,
+             float lambda);
+  // Add a split layer
+  void split(const Tensor input,
+             Tensor *outputs,
+             std::vector<int> const &split,
+             int axis,
+             char const *name = NULL);
+  // Add a flat layer
+  Tensor flat(const Tensor input, char const *name = NULL);
+  // Add a softmax layer
+  Tensor softmax(const Tensor input,
+                 int dim = -1,
+                 DataType data_type = DT_NONE,
+                 char const *name = NULL);
+  // Create input tensor and constants
+  Tensor transpose(const Tensor input,
+                   std::vector<int> const &perm,
+                   char const *name = NULL);
+  Tensor reduce_sum(const Tensor input,
+                    std::vector<int> const &axes,
+                    bool keepdims = false,
+                    char const *name = nullptr);
+  Tensor reshape(const Tensor input,
+                 std::vector<int> const &shape,
+                 char const *name = NULL);
+  Tensor reverse(const Tensor input, int axis, char const *name = NULL);
+  void top_k(const Tensor input,
+             Tensor *outputs,
+             int k,
+             bool sorted,
+             char const *name = NULL);
+  Tensor arg_top_k(const Tensor input,
+                   int k,
+                   bool sorted,
+                   char const *name = NULL);
+  Tensor argmax(const Tensor input, bool beam_search, char const *name = NULL);
+  Tensor sampling(const Tensor input, float top_p, char const *name = NULL);
+  Tensor multihead_attention(const Tensor query,
+                             const Tensor key,
+                             const Tensor value,
+                             int embed_dim,
+                             int num_heads,
+                             int kdim = 0,
+                             int vdim = 0,
+                             float dropout = 0.0f,
+                             bool bias = true,
+                             bool add_bias_kv = false,
+                             bool add_zero_attn = false,
+                             DataType data_type = DT_NONE,
+                             Initializer *kernel_initializer = NULL,
+                             char const *name = NULL);
+  Tensor inc_multihead_self_attention(const Tensor input,
+                                      int embed_dim,
+                                      int num_heads,
+                                      int kdim = 0,
+                                      int vdim = 0,
+                                      float dropout = 0.0f,
+                                      bool bias = false,
+                                      bool add_bias_kv = false,
+                                      bool add_zero_attn = false,
+                                      DataType data_type = DT_NONE,
+                                      Initializer *kernel_initializer = NULL,
+                                      bool apply_rotary_embedding = false,
+                                      bool scaling_query = false,
+                                      float scaling_factor = 1.0f,
+                                      float qk_prod_scaling = true,
+                                      bool position_bias = false,
+                                      char const *name = NULL);
+  Tensor spec_inc_multihead_self_attention(const Tensor input,
+                                           int embed_dim,
+                                           int num_heads,
+                                           int kdim = 0,
+                                           int vdim = 0,
+                                           float dropout = 0.0f,
+                                           bool bias = false,
+                                           bool add_bias_kv = false,
+                                           bool add_zero_attn = false,
+                                           DataType data_type = DT_NONE,
+                                           Initializer *kernel_initializer = NULL,
+                                           bool apply_rotary_embedding = false,
+                                           bool scaling_query = false,
+                                           float scaling_factor = 1.0f,
+                                           bool qk_prod_scaling = true,
+                                           bool position_bias = false,
+                                           char const *name = NULL);
+  Tensor inc_multihead_self_attention_verify(
+      const Tensor input,
+      int embed_dim,
+      int num_heads,
+      int kdim = 0,
+      int vdim = 0,
+      float dropout = 0.0f,
+      bool bias = false,
+      bool add_bias_kv = false,
+      bool add_zero_attn = false,
+      DataType data_type = DT_NONE,
+      Initializer *kernel_initializer = NULL,
+      bool apply_rotary_embedding = false,
+      bool scaling_query = false,
+      float scaling_factor = 1.0f,
+      bool qk_prod_scaling = true,
+      bool position_bias = false,
+      char const *name = NULL);
+    
+  Tensor inc_multiquery_self_attention(const Tensor input,
+                                       int embed_dim,
+                                       int num_q_heads,
+                                       int num_kv_heads,
+                                       int kdim = 0,
+                                       int vdim = 0,
+                                       float dropout = 0.0f,
+                                       bool bias = false,
+                                       bool add_bias_kv = false,
+                                       bool add_zero_attn = false,
+                                       DataType data_type = DT_NONE,
+                                       Initializer *kernel_initializer = NULL,
+                                       bool apply_rotary_embedding = false,
+                                       bool scaling_query = false,
+                                       float scaling_factor = 1.0f,
+                                       bool qk_prod_scaling = true,
+                                       bool position_bias = false,
+                                       char const *name = NULL);
+  Tensor spec_inc_multiquery_self_attention(const Tensor input,
+                                            int embed_dim,
+                                            int num_q_heads,
+                                            int num_kv_heads,
+                                            int kdim = 0,
+                                            int vdim = 0,
+                                            float dropout = 0.0f,
+                                            bool bias = false,
+                                            bool add_bias_kv = false,
+                                            bool add_zero_attn = false,
+                                            DataType data_type = DT_NONE,
+                                            Initializer *kernel_initializer = NULL,
+                                            bool apply_rotary_embedding = false,
+                                            bool scaling_query = false,
+                                            float scaling_factor = 1.0f,
+                                            bool qk_prod_scaling = true,
+                                            bool position_bias = false,
+                                            char const *name = NULL);
+  Tensor inc_multiquery_self_attention_verify(
+      const Tensor input,
+      int embed_dim,
+      int num_q_heads,
+      int num_kv_heads,
+      int kdim = 0,
+      int vdim = 0,
+      float dropout = 0.0f,
+      bool bias = false,
+      bool add_bias_kv = false,
+      bool add_zero_attn = false,
+      DataType data_type = DT_NONE,
+      Initializer *kernel_initializer = NULL,
+      bool apply_rotary_embedding = false,
+      bool scaling_query = false,
+      float scaling_factor = 1.0f,
+      bool qk_prod_scaling = true,
+      bool position_bias = false,
+      char const *name = NULL);
+                
+}
