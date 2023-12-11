@@ -16,3 +16,4 @@ pandas
 fastapi
 colorlog
 einops # for phi
+aioprometheus[starlette] # for prometheus metrics
