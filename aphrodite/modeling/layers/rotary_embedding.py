@@ -37,6 +37,7 @@ def _rotate_neox(x: torch.Tensor) -> torch.Tensor:
     x2 = x[..., x.shape[-1] // 2:]
     return torch.cat((-x2, x1), dim=-1)
 
+
 def _rotate_gptj(x: torch.Tensor) -> torch.Tensor:
     """PyTorch-native implemenation."""
     x1 = x[..., ::2]
@@ -97,10 +98,10 @@ class RotaryEmbedding(nn.Module):
         return cache
 
     def _forward(
-            self,
-            positions: torch.Tensor,
-            query: torch.Tensor,
-            key: torch.Tensor,
+        self,
+        positions: torch.Tensor,
+        query: torch.Tensor,
+        key: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """PyTorch-native implementation. Equivalent to forward()."""
         query = query.view(*query.shape[:-1], -1, self.head_size)

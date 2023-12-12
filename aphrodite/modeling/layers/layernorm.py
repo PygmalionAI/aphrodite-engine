@@ -24,9 +24,9 @@ class RMSNorm(nn.Module):
         self.variance_epsilon = eps
 
     def _forward(
-            self,
-            x: torch.Tensor,
-            residual: Optional[torch.Tensor] = None,
+        self,
+        x: torch.Tensor,
+        residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """PyTorch-native implementation. Equivalent to forward()."""
         orig_dtype = x.dtype
