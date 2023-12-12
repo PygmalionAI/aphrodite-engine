@@ -7,13 +7,14 @@ from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig)
 from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
 from aphrodite.engine.args_tools import EngineArgs
+from aphrodite.engine.metrics import record_metrics
 from aphrodite.engine.ray_tools import RayWorker, initialize_cluster, ray
 from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (SamplerOutput, Sequence, SequenceGroup,
                                        SequenceGroupMetadata,
-                                       SequenceGroupOutputs, SequenceOutputs,
+                                       SequenceGroupOutput, SequenceOutput,
                                        SequenceStatus)
 from aphrodite.transformers_utils.tokenizer import (detokenize_incrementally,
                                                     get_tokenizer)
@@ -88,8 +89,6 @@ class AphroditeEngine:
 
         self.model_config = model_config
         self.cache_config = cache_config
-        assert self.cache_config.sliding_window == getattr(
-            self.model_config.hf_config, "sliding_window", None)
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
         self.log_stats = log_stats
@@ -142,6 +141,12 @@ class AphroditeEngine:
             "init_model",
             get_all_outputs=True,
         )
+        self._run_workers(
+            "load_model",
+            get_all_outputs=True,
+            max_concurrent_workers=self.parallel_config.
+            max_parallel_loading_workers,
+        )
 
     def _init_workers_ray(self, placement_group: "PlacementGroup",
                           **ray_remote_kwargs):
@@ -180,6 +185,12 @@ class AphroditeEngine:
         self._run_workers(
             "init_model",
             get_all_outputs=True,
+        )
+        self._run_workers(
+            "load_model",
+            get_all_outputs=True,
+            max_concurrent_workers=self.parallel_config.
+            max_parallel_loading_workers,
         )
 
     def _verify_args(self) -> None:
@@ -350,7 +361,7 @@ class AphroditeEngine:
         return current_worst_score >= highest_attainable_score
 
     def _process_sequence_group_outputs(self, seq_group: SequenceGroup,
-                                        outputs: SequenceGroupOutputs) -> None:
+                                        outputs: SequenceGroupOutput) -> None:
         # Process prompt logprobs
         prompt_logprobs = outputs.prompt_logprobs
         if prompt_logprobs is not None:
@@ -371,7 +382,7 @@ class AphroditeEngine:
 
         # Process the child samples for each parent sequence
         for parent in parent_seqs:
-            child_samples: List[SequenceOutputs] = parent_child_dict[
+            child_samples: List[SequenceOutput] = parent_child_dict[
                 parent.seq_id]
             if len(child_samples) == 0:
                 # This parent sequence has no children samples. Remove
@@ -568,7 +579,7 @@ class AphroditeEngine:
             blocks_to_copy=scheduler_outputs.blocks_to_copy,
         )
 
-        return self._process_model_outputs(output, scheduler_outputs) + ignored
+        return self._process_model_outputs(output, scheduler_outputs)
 
     def _log_system_stats(
         self,
@@ -582,8 +593,8 @@ class AphroditeEngine:
         else:
             self.num_generation_tokens.append((now, num_batched_tokens))
 
-        elapsed_time = now - self.last_logging_time
-        if elapsed_time < _LOGGING_INTERVAL_SEC:
+        should_log = now - self.last_logging_time >= _LOGGING_INTERVAL_SEC
+        if not should_log:
             return
 
         # Discard the old stats.
@@ -621,6 +632,16 @@ class AphroditeEngine:
             cpu_cache_usage = num_used_cpu_blocks / total_num_cpu_blocks
         else:
             cpu_cache_usage = 0.0
+
+        record_metrics(
+            avg_prompt_throughput=avg_prompt_throughput,
+            avg_generation_throughput=avg_generation_throughput,
+            scheduler_running=len(self.scheduler.running),
+            scheduler_swapped=len(self.scheduler.swapped),
+            scheduler_waiting=len(self.scheduler.waiting),
+            gpu_cache_usage=gpu_cache_usage,
+            cpu_cache_usage=cpu_cache_usage,
+        )
 
         logger.info("Avg prompt throughput: "
                     f"{avg_prompt_throughput:.1f} tokens/s, "
@@ -682,16 +703,15 @@ class AphroditeEngine:
             seq.status = SequenceStatus.FINISHED_STOPPED
             return
 
-    def _run_workers(
+    def _run_workers_in_batch(
         self,
+        workers,
         method: str,
         *args,
-        get_all_outputs: bool = False,
         **kwargs,
-    ) -> Any:
-        """Runs the given method on all workers."""
+    ):
         all_outputs = []
-        for worker in self.workers:
+        for worker in workers:
             if self.parallel_config.worker_use_ray:
                 executor = partial(worker.execute_method.remote, method)
             else:
@@ -702,6 +722,29 @@ class AphroditeEngine:
 
         if self.parallel_config.worker_use_ray:
             all_outputs = ray.get(all_outputs)
+        return all_outputs
+
+    def _run_workers(
+        self,
+        method: str,
+        *args,
+        get_all_outputs: bool = False,
+        max_concurrent_workers: Optional[int] = None,
+        **kwargs,
+    ) -> Any:
+        """Runs a method on all workers."""
+        all_outputs = []
+        if max_concurrent_workers:
+            work_groups = [
+                self.workers[i:i + max_concurrent_workers]
+                for i in range(0, len(self.workers), max_concurrent_workers)
+            ]
+        else:
+            work_groups = [self.workers]
+
+        for workers in work_groups:
+            all_outputs.extend(
+                self._run_workers_in_batch(workers, method, *args, **kwargs))
 
         if get_all_outputs:
             return all_outputs

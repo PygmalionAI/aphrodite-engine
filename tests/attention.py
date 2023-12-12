@@ -4,7 +4,7 @@ import time
 
 import torch
 
-from aphrodite import attention_ops
+from aphrodite._C import ops as attention_ops
 
 NUM_BLOCKS = 1024
 PARTITION_SIZE = 512

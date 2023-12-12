@@ -3,7 +3,7 @@ import random
 import pytest
 import torch
 
-from aphrodite import cache_ops
+from aphrodite._C import cache_ops
 
 DTYPES = [torch.half, torch.bfloat16, torch.float]
 NUM_TOKENS = [7, 83, 2048]  # Arbitrary values for testing

@@ -1,32 +1,42 @@
+"""Utilities for selecting and loading models."""
 import contextlib
 from typing import Type
+
 import torch
 import torch.nn as nn
 from transformers import PretrainedConfig
 
 from aphrodite.common.config import ModelConfig
-from aphrodite.modeling.models import (LlamaForCausalLM, GPTJForCausalLM,
-                                       GPTNeoXForCausalLM, MistralForCausalLM,
-                                       YiForCausalLM)
-from aphrodite.modeling.hf_downloader import (initialize_dummy_weights,
-                                              get_quant_config)
-from aphrodite.modeling.layers.quantized_linear.utils import quant_post_init
+from aphrodite.modeling.models import *  # pylint: disable=wildcard-import
+from aphrodite.modeling.hf_downloader import (get_quant_config,
+                                              initialize_dummy_weights)
+from aphrodite.common.utils import is_hip
+from aphrodite.common.logger import init_logger
 
+logger = init_logger(__name__)
+
+# TODO: Lazy-load the model classes.
 _MODEL_REGISTRY = {
-    "LlamaForCausalLM": LlamaForCausalLM,
-    "LLaMAForCausalLM": LlamaForCausalLM,
     "GPTJForCausalLM": GPTJForCausalLM,
     "GPTNeoXForCausalLM": GPTNeoXForCausalLM,
+    "LlamaForCausalLM": LlamaForCausalLM,
+    "LLaMAForCausalLM": LlamaForCausalLM,  # For decapoda-research/llama-*
     "MistralForCausalLM": MistralForCausalLM,
+    "MixtralForCausalLM": MixtralForCausalLM,
     "YiForCausalLM": YiForCausalLM,
+    "PhiForCausalLM": PhiForCausalLM,
 }
 
-_MODEL_CLASSES_SUPPORT_QUANTIZATION = {
-    "awq": [LlamaForCausalLM, MistralForCausalLM, YiForCausalLM],
-    "gptq": [
-        LlamaForCausalLM, GPTJForCausalLM, GPTNeoXForCausalLM,
-        MistralForCausalLM, YiForCausalLM
-    ],
+# Models to be disabled in ROCm
+_ROCM_UNSUPPORTED_MODELS = []
+if is_hip():
+    for rocm_model in _ROCM_UNSUPPORTED_MODELS:
+        del _MODEL_REGISTRY[rocm_model]
+
+# Models partially supported in ROCm
+_ROCM_PARTIALLY_SUPPORTED_MODELS = {
+    "MistralForCausalLM":
+    "Sliding window attention is not supported in ROCm's flash attention",
 }
 
 
@@ -43,22 +53,26 @@ def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
     architectures = getattr(config, "architectures", [])
     for arch in architectures:
         if arch in _MODEL_REGISTRY:
+            if is_hip() and arch in _ROCM_PARTIALLY_SUPPORTED_MODELS:
+                logger.warning(
+                    f"{arch} is not fully supported in ROCm. Reason: "
+                    f"{_ROCM_PARTIALLY_SUPPORTED_MODELS[arch]}")
             return _MODEL_REGISTRY[arch]
+        elif arch in _ROCM_UNSUPPORTED_MODELS:
+            raise ValueError(
+                f"Model architecture {arch} is not supported by ROCm for now."
+                f"\nSupported architectures {list(_MODEL_REGISTRY.keys())}")
     raise ValueError(
         f"Model architectures {architectures} are not supported for now. "
         f"Supported architectures: {list(_MODEL_REGISTRY.keys())}")
 
 
-def get_model(model_config: ModelConfig, max_tokens: int) -> nn.Module:
+def get_model(model_config: ModelConfig) -> nn.Module:
     model_class = _get_model_architecture(model_config.hf_config)
 
-    # Get the quantization config.
-    quant_config = None
+    # Get the (maybe quantized) linear method.
+    linear_method = None
     if model_config.quantization is not None:
-        if model_class not in _MODEL_CLASSES_SUPPORT_QUANTIZATION[
-                model_config.quantization]:
-            raise ValueError(
-                f"Quantization is not supported for {model_class}.")
         quant_config = get_quant_config(model_config.quantization,
                                         model_config.model,
                                         model_config.hf_config,
@@ -77,26 +91,19 @@ def get_model(model_config: ModelConfig, max_tokens: int) -> nn.Module:
                 f"{model_config.dtype} is not supported for quantization "
                 f"method {model_config.quantization}. Supported dtypes: "
                 f"{supported_dtypes}")
+        linear_method = quant_config.get_linear_method()
 
     with _set_default_torch_dtype(model_config.dtype):
         # Create a model instance.
         # The weights will be initialized as empty tensors.
-        if model_config.quantization is not None and (
-                model_class in _MODEL_CLASSES_SUPPORT_QUANTIZATION[
-                    model_config.quantization]):
-            model = model_class(model_config.hf_config, quant_config)
-        else:
-            model = model_class(model_config.hf_config)
+        with torch.device("cuda"):
+            model = model_class(model_config.hf_config, linear_method)
         if model_config.load_format == "dummy":
-            model = model.cuda()
-            # NOTE(woosuk): For accurate performance evaluation, we assign
+            # NOTE: For accurate performance evaluation, we assign
             # random values to the weights.
             initialize_dummy_weights(model)
         else:
             # Load the weights from the cached or downloaded files.
             model.load_weights(model_config.model, model_config.download_dir,
                                model_config.load_format, model_config.revision)
-            model = model.cuda()
-        if model_config.quantization is not None:
-            quant_post_init(model, max_tokens)
     return model.eval()

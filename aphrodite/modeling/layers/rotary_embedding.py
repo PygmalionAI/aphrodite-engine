@@ -28,7 +28,7 @@ import math
 import torch
 import torch.nn as nn
 
-from aphrodite import pos_encoding_ops
+from aphrodite._C import ops as pos_encoding_ops
 
 
 class RotaryEmbedding(nn.Module):
@@ -271,14 +271,21 @@ class YaRNScalingRotaryEmbedding(RotaryEmbedding):
         return cache
 
 
+_ROPE_DICT: Dict[Tuple, RotaryEmbedding] = {}
+
+
 def get_rope(
     head_size: int,
     rotary_dim: int,
     max_position: int,
     base: int,
-    is_neox_style: bool,
-    rope_scaling: Optional[Dict[str, Any]],
+    is_neox_style: bool = True,
+    rope_scaling: Optional[Dict[str, Any]] = None,
 ) -> RotaryEmbedding:
+    key = (head_size, rotary_dim, max_position, base, is_neox_style,
+           tuple(rope_scaling.items()) if rope_scaling is not None else None)
+    if key in _ROPE_DICT:
+        return _ROPE_DICT[key]
     if rope_scaling is None:
         rotary_emb = RotaryEmbedding(head_size, rotary_dim, max_position, base,
                                      is_neox_style)
@@ -311,4 +318,5 @@ def get_rope(
                                                     **extra_kwargs)
         else:
             raise ValueError(f"Unknown RoPE scaling type {scaling_type}")
+    _ROPE_DICT[key] = rotary_emb
     return rotary_emb

@@ -85,6 +85,8 @@ class ChatCompletionRequest(BaseModel):
     custom_token_bans: Optional[List[int]] = Field(default_factory=list)
     skip_special_tokens: Optional[bool] = True
     spaces_between_special_tokens: Optional[bool] = True
+    add_generation_prompt: Optional[bool] = True
+    echo: Optional[bool] = False
 
 
 class CompletionRequest(BaseModel):
@@ -163,6 +165,7 @@ class CompletionStreamResponse(BaseModel):
     created: int = Field(default_factory=lambda: int(time.time()))
     model: str
     choices: List[CompletionResponseStreamChoice]
+    usage: Optional[UsageInfo]
 
 
 class ChatMessage(BaseModel):
@@ -202,3 +205,5 @@ class ChatCompletionStreamResponse(BaseModel):
     created: int = Field(default_factory=lambda: int(time.time()))
     model: str
     choices: List[ChatCompletionResponseStreamChoice]
+    usage: Optional[UsageInfo] = Field(
+        default=None, description="data about request and response")

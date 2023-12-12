@@ -26,32 +26,37 @@ Aphrodite builds upon and integrates the exceptional work from [various projects
 ## Quickstart
 
 ```sh
-pip install aphrodite-engine
+pip install git+https://github.com/PygmalionAI/aphrodite-engine@dev
 
-python -m aphrodite.endpoints.kobold.api_server --model PygmalionAI/pygmalion-2-7b
+python -m aphrodite.endpoints.openai.api_server --model PygmalionAI/pygmalion-2-7b
 ```
 
-This will create a [KoboldAI](https://github.com/henk717/KoboldAI)-compatible API server that can be accessed at port 2242 of the localhost. You can plug in the API into a UI that supports Kobold, such as [SillyTavern](https://github.com/SillyTavern/SillyTavern).
+This will create a [OpenAI](https://platform.openai.com/docs/api-reference/)-compatible API server that can be accessed at port 2242 of the localhost. You can plug in the API into a UI that supports Kobold, such as [SillyTavern](https://github.com/SillyTavern/SillyTavern).
 
 
 ## Performance
-Speeds vary with different GPUs, model sizes, quantization schemes, batch sizes, etc. Here are some baseline benchmarks conducted by sending requests of varying lengths to the provided [API server](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/endpoints/ooba/api_server.py).
+Speeds vary with different GPUs, model sizes, quantization schemes, batch sizes, etc. Here are some baseline benchmarks conducted by requesting as many completions as possible from the [API server](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/endpoints/openai/api_server.py). Keep in mind that these are the theoritical peak throughput with parallel decoding, with as high a batch size as possible. **Per-request generation speed is a fraction of this, at 30-40 t/s**.
 
-| Model | Quantization | GPU      | Request Rate | Throughput (req/s) | Avg Latency (s) |
-| ----- | ------------ | -------- | ------------ | ------------------ | --------------- |
-| 7B    | None         | RTX 3090 | 19           | **2.66**           | **18.38**       |
-| 7B    | AWQ          | RTX 3090 | 12           | **3.08**           | **32.47**       |
-| 7B    | GPTQ         | RTX 3090 | 12           | **2.01**           | **49.78**       |
-| 13B   | AWQ          | RTX 3090 | 5            | **1.77**           | **26.77**       |
-| 13B   | GPTQ         | RTX 3090 | 5            | **1.10**           | **39.80**       |
-| 20B   | AWQ          | RTX 3090 | 3            | **0.94**           | **39.07**       |
-| 20B   | GPTQ         | RTX 3090 | 3            | **0.58**           | **75.54**       |
+> [!NOTE]  
+> 16bit models can achieve much higher throughput if they have access to more VRAM, either by using larger GPUs, or tensor parallelism over many GPUs.
 
-Benchmarks with other GPUs will be added soon.
+| Model      | Quantization | GPU      | Throughput (output t/s) |
+| ---------- | ------------ | -------- | ----------------------- |
+| Llama-2 7B | None         | RTX 4090 | 2576.2                  |
+|            | AWQ          | RTX 4090 | 3551.3                  |
+|            | GPTQ         | RTX 4090 | 2919.1                  |
+|            | SqueezeLLM   | RTX 4090 | 580.3                   |
+| Mistral 7B | None         | RTX 4090 | 5489.3                  |
+|            | AWQ          | RTX 4090 | 4078.8                  |
+|            | GPTQ         | RTX 4090 | 4516.2                  |
+|            | SqueezeLLM   | RTX 4090 | 549.5                   |
+
 ## Requirements
 
 - Operating System: Linux (or WSL for Windows)
 - Python: at least 3.8
+
+#### Build Requirements:
 - CUDA 11.8 (recommended, supports 11.0-11.8)
 
 ## Supported GPUs
@@ -73,7 +78,9 @@ If you do not meet the minimum CC, you will not be able to run Aphrodite. At the
 ## Setting up the environment
 **If you run into any problems, please refer to the common [Common Issues](#common-issues) section, or open an [Issue](https://github.com/PygmalionAI/aphrodite-engine/issues) if you can't find the answer there.**
 
-Aphrodite will require a slightly specialized environment to run, as the latest CUDA versions are currently not supported. You can use Conda to easily configure your environment. If you're on windows, make sure you have [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) installed. You can do this by opening Windows PowerShell and running:
+Normally, all you need is NVIDIA device drivers. You can then simply run `pip install aphrodite-engine` to install the package. If you wish to build from source, however, then follow along with the instructions below.
+
+Aphrodite will require a slightly specialized environment to build, as the latest CUDA versions are currently not supported. You can use Conda to easily configure your environment. If you're on windows, make sure you have [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) installed. You can do this by opening Windows PowerShell and running:
 ```sh
 wsl --install
 ```
@@ -89,70 +96,32 @@ git clone https://github.com/PygmalionAI/aphrodite-engine && cd aphrodite-engine
 Then you can simply run:
 
 ```sh
-./runtime.sh python -m aphrodite.endpoints.kobold.api_server --help
+./runtime.sh python -m aphrodite.endpoints.openai.api_server --help
 ```
 
 The `./runtime.sh` prefix will need to be appended to every command you run that involves Aphrodite, as it launches your commands within the created environment. If you prefer not doing that, you can run `./runtime.sh` by itself to enter the environment and execute commands as normal.
 
 For updating the engine, run `git pull` and then `./update-runtime.sh` to update the environment.
 
-Note that the command above builds the engine from source, which may take up to 10 minutes. Alternatively, you can install via pip:
+Alternatively, you can install via pip:
 ```sh
-pip install aphrodite-engine
+pip install git+https://github.com/PygmalionAI/aphrodite-engine
 ```
-Make sure you have a proper environment (with CUDA >12.0) set up.
+Make sure you have a proper environment (with CUDA <12.0) set up.
 
 ## Usage
 
 Aphrodite Engine provides 3 API endpoint types:
 
- #### [KoboldAI](https://github.com/henk717/KoboldAI):
-```sh
-python -m aphrodite.endpoints.kobold.api_server --model PygmalionAI/pygmalion-2-7b
-```
-cURL example:
-```sh
-curl -X 'POST' \
-  'http://localhost:5000/api/v1/generate' \
-  -H 'accept: application/json' \
-  -H 'Content-Type: application/json' \
-  -d '{
-  "prompt": "Niko the kobold stalked carefully down the alley, his small scaly figure obscured by a dusky cloak that fluttered lightly in the cold winter breeze.",
-  "stream": false,
-  "mirostat_mode": 2,
-  "mirostat_tau": 6.5,
-  "mirostat_eta": 0.2
-}' 
-```
-
-
-#### [Text Generation WebUI (legacy)](https://github.com/oobabooga/text-generation-webui)
-  ```sh
-  python -m aphrodite.endpoints.ooba.api_server --model PygmalionAI/pygmalion-2-7b --api-keys EMPTY
-  ```
-cURL example:
-```sh
-curl -X POST "http://localhost:2242/api/v1/generate" \
--H "Content-Type: application/json" \
--H "x-api-key: EMPTY" \
--d '{
-  "prompt": "This is a cake recipe:\n\n1.",
-  "stream": false,
-  "mirostat_mode": 2,
-  "mirostat_tau": 6.5,
-  "mirostat_eta": 0.2
-}'
-```
-
 #### [OpenAI](https://openai.com)
   ```sh
-  python -m aphrodite.endpoints.openai.api_server --model PygmalionAI/pygmalion-2-7b --api-keys EMPTY
+  python -m aphrodite.endpoints.openai.api_server --model PygmalionAI/pygmalion-2-7b --api-keys sk-example-key
   ```
-cURL Completions example:
+Completions example:
 ```sh
 curl http://localhost:2242/v1/completions \
 -H "Content-Type: application/json" \
--H "Authorization: Bearer EMPTY" \
+-H "Authorization: Bearer sk-example-key" \
 -d '{
   "model": "PygmalionAI/pygmalion-2-7b",
   "prompt": "Every age it seems is tainted by the greed of men. Rubbish to one such as I,",
@@ -162,9 +131,9 @@ curl http://localhost:2242/v1/completions \
   "mirostat_eta": 0.2
 }'
 ```
-cURL Chat Completions example:
+Chat Completions example:
 ```sh
-curl -X POST -H 'Authorization: Bearer EMPTY' -H "Content-type: application/json" -d '{
+curl -X POST -H 'Authorization: Bearer sk-example-key' -H "Content-type: application/json" -d '{
   "model": "PygmalionAI/pygmalion-2-7b",
   "messages": [
     {
@@ -187,10 +156,30 @@ curl -X POST -H 'Authorization: Bearer EMPTY' -H "Content-type: application/json
 }' 'http://localhost:2242/v1/chat/completions'
 ```
 
-For authorization, both the `Authorization: Bearer KEY` and `x-api-key: KEY` will work.
+For authorization, both the `Authorization: Bearer KEY` and `x-api-key: KEY` headers will work.
 
+ #### [KoboldAI](https://github.com/henk717/KoboldAI):
+```sh
+python -m aphrodite.endpoints.kobold.api_server --model PygmalionAI/pygmalion-2-7b
+```
+cURL example:
+```sh
+curl -X 'POST' \
+  'http://localhost:5000/api/v1/generate' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "prompt": "Niko the kobold stalked carefully down the alley, his small scaly figure obscured by a dusky cloak that fluttered lightly in the cold winter breeze.",
+  "max_context_length": 4096,
+  "max_length": 512,
+  "stream": false,
+  "mirostat_mode": 2,
+  "mirostat_tau": 6.5,
+  "mirostat_eta": 0.2
+}' 
+```
 
-To run a quantized model, use the `--quantization` flag with either `gptq` or `awq` and the `--dtype float16` flag. Make sure your model is in AWQ/GPTQ format and not GGUF. Run with only the `--help` flag for a full list of arguments.
+To run a quantized model, use the `--quantization` flag with either `gptq`, `awq`, or `squeezellm` and the `--dtype float16` flags. Make sure your model is in the appropriate format (i.e. not GGUF or exl2). Run with only the `--help` flag for a full list of arguments.
 
 
 For the full list of Sampling parameters, please refer to [SamplingParams](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/common/sampling_params.py):
@@ -232,10 +221,7 @@ Alternatively, you can prepend `NCCL_P2P_DISABLE=1` to your server launch comman
 
 2. You can view the full list of commands by running `python -m aphrodite.endpoints.ooba.api_server --help`.
 
-3. Context Length extension via the RoPE method is supported for Llama models. Edit the `config.json` with the following values or pass the desired context length size to the `--max-model-len` arg:
-```json
-  "rope_scaling": { "factor": 2.0, "type": "dynamic"},
-```
+3. Context Length extension via the RoPE method is supported for most models. Use the command-line flag `--max-model-len` to specify a desired context length and the engine will adjust the RoPE scaling accordingly.
 
 
 ## Acknowledgements
@@ -243,14 +229,16 @@ Aphrodite Engine would have not been possible without the phenomenal work of oth
 - [vLLM](https://github.com/vllm-project/vllm) (CacheFlow)
 - [FasterTransformer](https://github.com/NVIDIA/FasterTransformer)
 - [xFormers](https://github.com/facebookresearch/xformers)
-- [AWQ](https://github.com/casper-hansen/AutoAWQ)
+- [AutoAWQ](https://github.com/casper-hansen/AutoAWQ)
 - [AutoGPTQ](https://github.com/PanQiWei/AutoGPTQ)
+- [SqueezeLLM](https://github.com/SqueezeAILab/SqueezeLLM/)
 - [ExLlama](https://github.com/turboderp/exllama)
 - [Exllamav2](https://github.com/turboderp/exllamav2)
 - [KoboldAI](https://github.com/henk717/KoboldAI)
 - [Text Generation WebUI](https://github.com/oobabooga/text-generation-webui)
 - [Megatron-LM](https://github.com/NVIDIA/Megatron-LM)
 - [FastChat](https://github.com/lm-sys/FastChat)
+- [Ray](https://github.com/ray-project/ray)
 - [SkyPilot](https://github.com/skypilot-org/skypilot)
 - [OpenAI Python Library](https://github.com/openai/openai-python)
 
