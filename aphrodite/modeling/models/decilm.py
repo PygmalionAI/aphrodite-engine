@@ -40,13 +40,15 @@ DECI_LM_MODEL_NAME = "Deci/DeciLM-7b-instruct"
 class DeciLMForCausalLM(LlamaForCausalLM):
     """
     Implementation for https://huggingface.co/Deci/DeciLM-7b-instruct.
-    Based on the llama executor.
+    Based on the llama modeling code..
     The main difference is that DeciLM uses Variable Grouped Query Attention.
-    The constant number of GQA heads in the decoder is overriden with a value per layer.
-    Usually, in the HuggingFace implementation, Instead of "config.num_key_value_heads",
-    We use "config.num_key_value_heads_per_layer[i]" which varies.
-    Currently, PagedAttention does not work well with variable GQA, so we normalize the
-    weights upon loading, and use uniform GQA with the max value instead.
+    The constant number of GQA heads in the decoder is overriden with a value
+    per layer. Usually, in the HuggingFace implementation, Instead of
+    `config.num_key_value_heads`, we use
+    `config.num_key_value_heads_per_layer[i]` which varies.
+    Currently, PagedAttention does not work well with variable GQA,
+    so we normalize the weights upon loading, and use uniform GQA with the max
+    value instead.
     """
 
     def __init__(
@@ -55,7 +57,7 @@ class DeciLMForCausalLM(LlamaForCausalLM):
         linear_method: Optional[LinearMethodBase] = None,
     ) -> None:
         config.num_key_value_heads = max(config.num_key_value_heads_per_layer)
-        delattr(config, 'num_key_value_heads_per_layer')
+        delattr(config, "num_key_value_heads_per_layer")
         super().__init__(config=config, linear_method=linear_method)
 
     def load_weights(self,
@@ -115,4 +117,3 @@ class DeciLMForCausalLM(LlamaForCausalLM):
                                               hidden_size)
 
         return loaded_weight
-    
