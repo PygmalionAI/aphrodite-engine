@@ -3,7 +3,7 @@ psutil
 ray ~= 2.5.1
 sentencepiece
 numpy
-torch ~= 2.0.0
+torch ~= 2.0.1
 transformers >= 4.36.0 # for mixtral
 uvicorn
 openai # for fastapi's openai proxy emulation
