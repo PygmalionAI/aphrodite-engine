@@ -22,6 +22,7 @@ _MODEL_REGISTRY = {
     "LlamaForCausalLM": LlamaForCausalLM,
     "LLaMAForCausalLM": LlamaForCausalLM,  # For decapoda-research/llama-*
     "MistralForCausalLM": MistralForCausalLM,
+    "MixtralForCausalLM": MixtralForCausalLM,
     "YiForCausalLM": YiForCausalLM,
     "PhiForCausalLM": PhiForCausalLM,
 }

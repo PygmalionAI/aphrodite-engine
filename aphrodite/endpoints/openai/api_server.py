@@ -92,8 +92,10 @@ def parse_args():
     parser = AsyncEngineArgs.add_cli_args(parser)
     return parser.parse_args()
 
-app.add_middleware(MetricsMiddleware) # trace HTTP server metrics
+
+app.add_middleware(MetricsMiddleware)  # trace HTTP server metrics
 app.add_route("/metrics", metrics)
+
 
 def _verify_api_key(x_api_key: str = Header(None),
                     authorization: str = Header(None)):
@@ -209,7 +211,7 @@ def create_logprobs(token_ids: List[int],
         logprobs.tokens.append(token)
         logprobs.token_logprobs.append(id_logprob[token_id])
         if len(logprobs.text_offset) == 0:
-            logprobs.text_offset.append(initial_text_offset) # pylint: disable=unsubscriptable-object
+            logprobs.text_offset.append(initial_text_offset)  # pylint: disable=unsubscriptable-object
         else:
             logprobs.text_offset.append(logprobs.text_offset[-1] +
                                         last_token_len)
@@ -755,7 +757,7 @@ if __name__ == "__main__":
     load_chat_template(args, tokenizer)
 
     add_global_metrics_labels(model_name=engine_args.model)
-    
+
     uvicorn.run(app,
                 host=args.host,
                 port=args.port,
