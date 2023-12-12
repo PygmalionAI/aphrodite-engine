@@ -7,6 +7,9 @@ cuda_home=/usr/local/cuda-$2
 PATH=${cuda_home}/bin:$PATH
 LD_LIBRARY_PATH=${cuda_home}/lib64:$LD_LIBRARY_PATH
 
+# Limit Ninja's number of processes to 1 to prevent OOM
+export MAX_JOBS=1
+
 # Install requirements
 $python_executable -m pip install wheel packaging
 $python_executable -m pip install -r requirements.txt
