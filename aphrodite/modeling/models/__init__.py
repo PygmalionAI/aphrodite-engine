@@ -31,6 +31,7 @@ _ROCM_PARTIALLY_SUPPORTED_MODELS = {
     "Sliding window attention is not yet supported in ROCM's flash attention.",
 }
 
+
 class ModelRegistry:
 
     @staticmethod
@@ -39,26 +40,21 @@ class ModelRegistry:
             return None
         if is_hip():
             if model_arch in _ROCM_UNSUPPORTED_MODELS:
-                raise ValueError(
-                    f"Model architecture {model_arch} is not "
-                    "supported in ROCm for now."
-                )
+                raise ValueError(f"Model architecture {model_arch} is not "
+                                 "supported in ROCm for now.")
             if model_arch in _ROCM_PARTIALLY_SUPPORTED_MODELS:
                 logger.warning(
                     f"Model architecture {model_arch} is partially supported "
                     "by ROCm: " + _ROCM_PARTIALLY_SUPPORTED_MODELS[model_arch])
-   
+
         module_name, model_cls_name = _MODELS[model_arch]
         module = importlib.import_module(
             f"aphrodite.modeling.models.{module_name}")
         return getattr(module, model_cls_name, None)
-  
+
     @staticmethod
     def get_supported_archs() -> List[str]:
         return list(_MODELS.keys())
-  
 
 
-__all__ = [
-    "ModelRegistry"
-]
+__all__ = ["ModelRegistry"]

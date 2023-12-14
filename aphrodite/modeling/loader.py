@@ -12,7 +12,6 @@ from aphrodite.modeling.hf_downloader import (get_quant_config,
                                               initialize_dummy_weights)
 
 
-
 @contextlib.contextmanager
 def _set_default_torch_dtype(dtype: torch.dtype):
     """Sets the default torch dtype to the given dtype."""
