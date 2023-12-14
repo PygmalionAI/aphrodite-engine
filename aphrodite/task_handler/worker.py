@@ -13,7 +13,6 @@ from aphrodite.modeling.megatron.parallel_state import (
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 from aphrodite.task_handler.cache_engine import CacheEngine
 from aphrodite.task_handler.model_runner import ModelRunner
-from aphrodite.common.utils import get_gpu_memory
 
 
 class Worker:
@@ -37,9 +36,9 @@ class Worker:
         self.scheduler_config = scheduler_config
         self.rank = rank
         self.distributed_init_method = distributed_init_method
+
         self.model_runner = ModelRunner(model_config, parallel_config,
                                         scheduler_config)
-
         # Uninitialized cache engine. Will be initialized by
         # self.init_cache_engine().
         self.cache_config = None
@@ -78,6 +77,10 @@ class Worker:
         gpu_memory_utilization: float,
         cpu_swap_space: int,
     ) -> Tuple[int, int]:
+        # Profile the memory usage of the model and get the maximum number of
+        # cache blocks that can be allocated with the remaining free memory.
+        torch.cuda.empty_cache()
+
         # Execute a forward pass with dummy inputs to profile the memory usage
         # of the model.
         self.model_runner.profile_run()
@@ -85,8 +88,9 @@ class Worker:
         # Calculate the number of blocks that can be allocated with the
         # profiled peak memory.
         torch.cuda.synchronize()
-        peak_memory = torch.cuda.max_memory_allocated()
-        total_gpu_memory = get_gpu_memory()
+        free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
+        peak_memory = total_gpu_memory - free_gpu_memory
+
         cache_block_size = CacheEngine.get_cache_block_size(
             block_size, self.model_config, self.parallel_config)
         num_gpu_blocks = int(
@@ -104,7 +108,6 @@ class Worker:
 
     def init_cache_engine(self, cache_config: CacheConfig) -> None:
         self.cache_config = cache_config
-
         self.cache_engine = CacheEngine(self.cache_config, self.model_config,
                                         self.parallel_config)
         self.cache_events = self.cache_engine.events
@@ -131,10 +134,7 @@ class Worker:
             self.cache_engine.copy(blocks_to_copy)
             issued_cache_op = True
 
-        if issued_cache_op:
-            cache_events = self.cache_events
-        else:
-            cache_events = None
+        cache_events = self.cache_events if issued_cache_op else None
 
         # If there is no input, we don't need to execute the model.
         if not seq_group_metadata_list:
