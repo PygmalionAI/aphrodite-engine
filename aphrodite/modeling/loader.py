@@ -30,7 +30,7 @@ def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
             return model_cls
     raise ValueError(
         f"Model architectures {architectures} are not supported for now. "
-        f"Supported architectures: {ModelRegistry.get_supported_archs()")
+        f"Supported architectures: {ModelRegistry.get_supported_archs()}")
 
 
 def get_model(model_config: ModelConfig) -> nn.Module:
