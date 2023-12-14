@@ -101,7 +101,7 @@ class ModelConfig:
             # force ROCm to load from pt weights if nothing is set
             if load_format == "auto":
                 load_format = "pt"
-        
+
         # FIXME: This is a temporary hack. Support safetensor weights.
         architectures = getattr(self.hf_config, "architectures", [])
         if "MixtralForCausalLM" in architectures and load_format != "pt":
