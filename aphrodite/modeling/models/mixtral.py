@@ -34,16 +34,15 @@ from transformers import MistralConfig
 
 try:
     import megablocks.ops as ops
-except ImportError:
-    print("MegaBlocks not found, please see "
-          "https://github.com/stanford-futuredata/megablocks/. "
-          "Note that MegaBlocks depends on mosaicml-turbo, which only "
-          "supports python 3.10.")
+except ImportError as e:
+    raise ImportError("MegaBlocks not found. "
+                      "Please install it by `pip install megablocks`.") from e
 try:
     import stk
-except ImportError:
-    print(
-        "STK not found: please see https://github.com/stanford-futuredata/stk")
+except ImportError as e:
+    raise ImportError(
+        "STK not found. "
+        "Please install it by `pip install stanford-stk`.") from e
 
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.attention import PagedAttention
