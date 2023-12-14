@@ -139,7 +139,7 @@ class Worker:
         # If there is no input, we don't need to execute the model.
         if not seq_group_metadata_list:
             if cache_events is not None:
-                for event in cache_events: # pylint: disable=not-an-iterable
+                for event in cache_events:  # pylint: disable=not-an-iterable
                     event.wait()
             return {}
 
