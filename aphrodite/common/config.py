@@ -112,7 +112,7 @@ class ModelConfig:
             elif load_format == "auto":
                 # Do not fall back to pt weights.
                 load_format = "safetensors"
-                
+
         self.load_format = load_format
 
     def _verify_tokenizer_mode(self) -> None:
