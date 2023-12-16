@@ -33,6 +33,72 @@ public:
 
   void reset(void);
 
+  static void register_cpu_tasks(Legion::Runtime *runtime = NULL,
+                                 bool pre_register = true,
+                                 bool enable_control_replication = true);
+  static void register_gpu_tasks(Legion::Runtime *runtime = NULL,
+                                 bool pre_register = true,
+                                 bool enable_control_replication = true);
   
+  template <typename DT>
+  static void load_input(Legion::Task const *task,
+                         std::vector<Legion::PhysicalRegion> const &regions,
+                         Legion::Context ctx,
+                         Legion::Runtime *runtime);
+  
+  template <typename DT>
+  static void load_entire_dataset_from_numpy(
+    Legion::Task const *task,
+    std::vector<Legion::PhysicalRegion> const &regions,
+    Legion::Context ctx,
+    Legion::Runtime *runtime);
+  template <typename DT, int NDIM>
+  static void load_entire_dataset_from_numpy_with_dim(
+    Legion::Task const *task,
+    std::vector<Legion::PhysicalRegion> const &regions,
+    Legion::Context ctx,
+    Legion::Runtime *runtime);
+  template <typename DT>
+  static void index_load_entire_dataset_from_numpy(
+    Legion::Task const *task,
+    std::vector<Legion::PhysicalRegion> const &regions,
+    Legion::Context ctx,
+    Legion::Runtime *runtime);
+  template <typename DT, int NDIM>
+  static void index_load_entire_dataset_from_numpy_with_dim(
+    Legion::Task const *task,
+    std::vector<Legion::PhysicalRegion> const &regions,
+    Legion::Context ctx,
+    Legion::Runtime *runtime);
 
-}
+private:
+  template <int NDIM>
+  void next_batch_xd_launcher(astarte::CAModel &ca, int task_id);
+
+  template <int NDIM>
+  void index_loader_xd_launcher(astarte::CAModel &ca,
+                                int task_id,
+                                void *full_input_ptr,
+                                size_t size_per_sample);
+
+public:
+  int num_samples, next_index;
+  DataType datatype;
+  astarte::ParallelTensor full_input, batch_input;
+
+};
+
+#define MAX_NUM_SAMPLES 4196
+struct SampleIdxs {
+  int num_samples;
+  int idxs[MAX_NUM_SAMPLES];
+};
+
+struct IndexLoadArg {
+  int num_samples;
+  size_t size_per_sample;
+  int idx;
+  void *ptr;
+};
+
+#endif // __ASTARTE_DATALOADER_H__
