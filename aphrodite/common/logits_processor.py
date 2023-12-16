@@ -1,13 +1,13 @@
 from abc import ABC, abstractmethod
 import torch
-from typing import Dict
+from typing import Dict, List
 
 
 class LogitsProcessor(ABC):
 
     @abstractmethod
     def __call__(self, logits: torch.Tensor,
-                 output_tokens: list[list[int]]) -> None:
+                 output_tokens: List[List[int]]) -> None:
         """Logits are edited in-place"""
         pass
 
