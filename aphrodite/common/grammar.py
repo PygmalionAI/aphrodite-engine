@@ -135,5 +135,6 @@ class EpsilonNFA:
             current_state = stack.pop()
             if current_state not in visited:
                 visited.add(current_state)
-                stack.extend(self.nfa["transition_function"][current_state].get()"$". [])
+                stack.extend(self.nfa["transition_function"][current_state].get("$", []))
         return visited
+
