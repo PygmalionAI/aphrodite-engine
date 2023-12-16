@@ -85,6 +85,8 @@ class SamplingParams:
         stop_token_ids: List of tokens that stop the generation when they are
             generated. The returned output will contain the stop tokens unless
             the stop tokens are sepcial tokens.
+        include_stop_str_in_output: Whether to include the stop strings in output
+            text. Defaults to False.
         ignore_eos: Whether to ignore the EOS token and continue generating
             tokens after the EOS token is generated.
         max_tokens: Maximum number of tokens to generate per output sequence.
@@ -128,6 +130,7 @@ class SamplingParams:
         early_stopping: Union[bool, str] = False,
         stop: Union[None, str, List[str]] = None,
         stop_token_ids: List[int] = None,
+        include_stop_str_in_output: bool = False,
         ignore_eos: bool = False,
         max_tokens: int = 16,
         logprobs: Optional[int] = None,
@@ -175,8 +178,20 @@ class SamplingParams:
         self.skip_special_tokens = skip_special_tokens
         self.spaces_between_special_tokens = spaces_between_special_tokens
         self.logits_processors = logits_processors or []
+        self.cinlude_stop_str_in_output = include_stop_str_in_output
 
         self.verify()
+        if self.use_beam_search:
+            self._verify_beam_search()
+        else:
+            self._verify_non_beam_search()
+            if self.temperature < _SAMPLING_EPS:
+                # Zero temperature means greedy sampling.
+                self.top_p = 1.0
+                self.top_k = -1
+                self.min_p = 0.0
+                self.top_a = 0.0
+                self._verify_greedy_sampling()
 
     def verify(self) -> None:
         self._verify_args()
@@ -311,7 +326,9 @@ class SamplingParams:
                 f"use_beam_search={self.use_beam_search}, "
                 f"length_penalty={self.length_penalty}, "
                 f"early_stopping={self.early_stopping}, "
-                f"stop={self.stop}, "
+                f"stop={self.stop}, ",
+                f"stop_token_ids={self.stop_token_ids}, "
+                f"include_stop_str_in_output={self.include_stop_str_in_output}, "
                 f"ignore_eos={self.ignore_eos}, "
                 f"max_tokens={self.max_tokens}, "
                 f"custom_token_bans={self.custom_token_bans}, "
