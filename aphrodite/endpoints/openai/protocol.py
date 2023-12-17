@@ -64,6 +64,7 @@ class ChatCompletionRequest(BaseModel):
     n: Optional[int] = 1
     max_tokens: Optional[int] = None
     stop: Optional[Union[str, List[str]]] = Field(default_factory=list)
+    include_stop_str_in_output: Optional[bool] = False
     stream: Optional[bool] = False
     presence_penalty: Optional[float] = 0.0
     frequency_penalty: Optional[float] = 0.0
@@ -106,6 +107,7 @@ class CompletionRequest(BaseModel):
     logprobs: Optional[int] = None
     echo: Optional[bool] = False
     stop: Optional[Union[str, List[str]]] = Field(default_factory=list)
+    include_stop_str_in_output: Optional[bool] = False
     presence_penalty: Optional[float] = 0.0
     frequency_penalty: Optional[float] = 0.0
     repetition_penalty: Optional[float] = 1.0
