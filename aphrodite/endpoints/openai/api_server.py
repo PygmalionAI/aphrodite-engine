@@ -302,6 +302,8 @@ async def create_chat_completion(
             mirostat_eta=request.mirostat_eta,
             stop=request.stop,
             stop_token_ids=request.stop_token_ids,
+            include_stop_str_in_output=request.
+            include_stop_str_in_output,
             max_tokens=request.max_tokens,
             best_of=request.best_of,
             ignore_eos=request.ignore_eos,
@@ -572,6 +574,8 @@ async def create_completion(
             mirostat_eta=request.mirostat_eta,
             stop=request.stop,
             stop_token_ids=request.stop_token_ids,
+            include_stop_str_in_output=request.
+            include_stop_str_in_output,
             max_tokens=request.max_tokens
             if not echo_without_generation else 1,
             best_of=request.best_of,
