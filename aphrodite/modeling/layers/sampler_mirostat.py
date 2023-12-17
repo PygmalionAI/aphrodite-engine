@@ -1,3 +1,5 @@
+from typing import Tuple, List
+
 import torch
 from torch import Tensor
 
@@ -6,12 +8,12 @@ from aphrodite.modeling.sampling_metadata import OutputMetadata, SamplingMetadat
 
 def _fetch_args(
     metadata: SamplingMetadata
-) -> tuple[list[int], list[int], list[float], list[float], list[float]]:
-    logit_indices: list[int] = []
-    seqids: list[int] = []
-    taus: list[float] = []
-    etas: list[float] = []
-    mus: list[float] = []
+) -> Tuple[List[int], List[int], List[float], List[float], List[float]]:
+    logit_indices: List[int] = []
+    seqids: List[int] = []
+    taus: List[float] = []
+    etas: List[float] = []
+    mus: List[float] = []
 
     index = 0
     for i, (seq_ids, params) in enumerate(metadata.seq_groups):
@@ -35,7 +37,7 @@ def _fetch_args(
     return logit_indices, seqids, taus, etas, mus
 
 
-def _store_args(seqids: list[int], mus: list[float],
+def _store_args(seqids: List[int], mus: List[float],
                 output_metadata: OutputMetadata) -> None:
     for sid, mu in zip(seqids, mus):
         output_metadata.add(sid, "miro_mu", mu)
@@ -43,9 +45,9 @@ def _store_args(seqids: list[int], mus: list[float],
 
 def _apply_mirostat_v2(
         logits: Tensor,
-        taus: list[float],  # AKA the targeted surprise
-        etas: list[float],  # AKA the learning rate
-        mus: list[
+        taus: List[float],  # AKA the targeted surprise
+        etas: List[float],  # AKA the learning rate
+        mus: List[
             float],  # AKA the accumulator that always tries to approach [tau]
 ) -> Tensor:
     ttaus = torch.tensor(taus, dtype=logits.dtype, device=logits.device)
