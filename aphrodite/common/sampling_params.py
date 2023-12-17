@@ -85,8 +85,8 @@ class SamplingParams:
         stop_token_ids: List of tokens that stop the generation when they are
             generated. The returned output will contain the stop tokens unless
             the stop tokens are sepcial tokens.
-        include_stop_str_in_output: Whether to include the stop strings in output
-            text. Defaults to False.
+        include_stop_str_in_output: Whether to include the stop strings in
+            output text. Defaults to False.
         ignore_eos: Whether to ignore the EOS token and continue generating
             tokens after the EOS token is generated.
         max_tokens: Maximum number of tokens to generate per output sequence.
@@ -326,14 +326,15 @@ class SamplingParams:
                 f"use_beam_search={self.use_beam_search}, "
                 f"length_penalty={self.length_penalty}, "
                 f"early_stopping={self.early_stopping}, "
-                f"stop={self.stop}, ",
+                f"stop={self.stop}, "
                 f"stop_token_ids={self.stop_token_ids}, "
-                f"include_stop_str_in_output={self.include_stop_str_in_output}, "
+                "include_stop_str_in_output="
+                f"{self.include_stop_str_in_output}, "
                 f"ignore_eos={self.ignore_eos}, "
                 f"max_tokens={self.max_tokens}, "
                 f"custom_token_bans={self.custom_token_bans}, "
                 f"logprobs={self.logprobs}, "
                 f"prompt_logprobs={self.prompt_logprobs}, "
                 f"skip_special_tokens={self.skip_special_tokens}, "
-                f"spaces_between_special_tokens="
+                "spaces_between_special_tokens="
                 f"{self.spaces_between_special_tokens})")
