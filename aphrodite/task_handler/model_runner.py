@@ -23,7 +23,6 @@ _PAD_SLOT_ID = -1
 _BATCH_SIZES_TO_CAPTURE = [1, 2, 4] + [8 * i for i in range(1, 33)]
 
 
-
 class ModelRunner:
 
     def __init__(
@@ -41,7 +40,7 @@ class ModelRunner:
         self.block_size = None  # Set after initial profiling.
 
         self.graph_runners: Dict[int, CUDAGraphRunner] = {}
-        self.graph_memory_pool = None # set during graph capture.and
+        self.graph_memory_pool = None  # set during graph capture.and
 
         self.max_context_len_to_capture = (
             self.model_config.max_context_len_to_capture
@@ -52,7 +51,7 @@ class ModelRunner:
         # in numpy and only copy the actual input content at every iteration.
         # The shape of the cached block table will be
         # (max batch size to capture, max context len to capture / block size)
-        self.graph_block_tables = None # set after initial profiling.
+        self.graph_block_tables = None  # set after initial profiling.
 
     def load_model(self) -> None:
         self.model = get_model(self.model_config)
@@ -61,7 +60,7 @@ class ModelRunner:
         self.block_size = block_size
 
         max_num_blocks = (self.max_context_len_to_capture + block_size -
-                         1) // block_size
+                          1) // block_size
         self.graph_block_tables = np.zeros(
             (max(_BATCH_SIZES_TO_CAPTURE), max_num_blocks), dtype=np.in32)
 
@@ -192,7 +191,7 @@ class ModelRunner:
             # batch size of the captured graph.
             graph_batch_size = _get_graph_batch_size(batch_size)
             assert graph_batch_size >= batch_size
-            for _ in range(graph_batch_size = batch_size):
+            for _ in range(graph_batch_size=batch_size):
                 input_tokens.append([])
                 input_positions.append([])
                 slot_mapping.append([])
@@ -363,7 +362,7 @@ class ModelRunner:
         return output
 
     @torch.inference_mode()
-    def profile_run(self) -> None: # pylint: disable=useless-return
+    def profile_run(self) -> None:  # pylint: disable=useless-return
         # Enable top-k sampling to reflect the accurate memory usage.
         vocab_size = self.model_config.get_vocab_size()
         sampling_params = SamplingParams(top_p=0.99, top_k=vocab_size - 1)
@@ -450,7 +449,7 @@ class CUDAGraphRunner:
         self.input_buffers: Dict[str, torch.Tensor] = {}
         self.output_buffers: Dict[str, torch.Tensor] = {}
 
-    def capture( # pylint: disable=useless-return
+    def capture(  # pylint: disable=useless-return
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
@@ -481,7 +480,6 @@ class CUDAGraphRunner:
                 input_metadata,
             )
         torch.cuda.synchronize()
-
 
         self.input_buffers = {
             "input_ids": input_ids,
@@ -535,6 +533,7 @@ def _make_tensor_with_pad(
 ) -> torch.Tensor:
     padded_x = [_pad_to_max(x_i, max_len, pad) for x_i in x]
     return torch.tensor(padded_x, dtype=dtype, device=device)
+
 
 def _get_graph_batch_size(batch_size: int) -> int:
     if batch_size <= 2:

@@ -150,7 +150,7 @@ class Worker:
         # Wati for cache operations to finish.
         # TODO: Profile swapping overhead and optimize if needed.
         if cache_events is not None:
-            for event in cache_events: # pylint: disable=not-an-iterable
+            for event in cache_events:  # pylint: disable=not-an-iterable
                 event.wait()
 
         # If there is no input, we don't need to execute the model.
