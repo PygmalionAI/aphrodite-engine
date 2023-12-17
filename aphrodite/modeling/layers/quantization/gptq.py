@@ -115,7 +115,7 @@ class GPTQLinearMethod(LinearMethodBase):
                 and self.quant_config.group_size != -1):
             # For act-order models, we cannot use Exllama for row parallel layer
             if self.quant_config.desc_act:
-                exllama_state = ExlState.UNUSED
+                exllama_state = ExllamaState.UNUSED
             else:
                 # we need to partition qzeros and scales for exllama kernel
                 scale_and_zero_size = input_size_per_partition // group_size
@@ -196,18 +196,18 @@ class GPTQLinearMethod(LinearMethodBase):
         reshaped_x = x.reshape(-1, x.shape[-1])
         # exllama needs to shuffle the weight after it's loaded
         # here we do the shuffle on the first forward pass
-        if weights["exllama_state"] == ExlState.UNINITIALIZED:
+        if weights["exllama_state"] == ExllamaState.UNINITIALIZED:
             if self.quant_config.desc_act:
                 weights["g_idx"] = torch.argsort(weights["g_idx"]).to(
                     torch.int)
             else:
                 weights["g_idx"] = torch.empty((1, 1), device="meta")
-            weights["exllama_state"] = ExlState.READY
+            weights["exllama_state"] = ExllamaState.READY
             quantization_ops.gptq_shuffle(weights["qweight"], weights["g_idx"])
         output = quantization_ops.gptq_gemm(
             reshaped_x, weights["qweight"], weights["qzeros"],
             weights["scales"], weights["g_idx"],
-            weights["exllama_state"] == ExlState.READY)
+            weights["exllama_state"] == ExllamaState.READY)
         if bias is not None:
             output = output + bias
         return output.reshape(out_shape)
