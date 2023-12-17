@@ -18,7 +18,7 @@ logger = init_logger(__name__)
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 _PAD_SLOT_ID = -1
-# Capture graphs for batch size 1, 2, 4, 8, 16, 24, 32, 40, ..., 256
+# Capture graphs for batch size 1, 2, 4, 8, 16, 24, 32, 40, ..., 256.
 # NOTE: _get_graph_batch_size needs to be updated if this list is changed.
 _BATCH_SIZES_TO_CAPTURE = [1, 2, 4] + [8 * i for i in range(1, 33)]
 
@@ -35,12 +35,15 @@ class ModelRunner:
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
 
-        self.sliding_window = model_config.get_sliding_window()
+        # model_config can be None in tests/samplers/test_sampler.py.
+        # FIXME(woosuk): This is a hack to make the tests work. Refactor this.
+        self.sliding_window = (model_config.get_sliding_window()
+                               if model_config is not None else None)
         self.model = None
         self.block_size = None  # Set after initial profiling.
 
         self.graph_runners: Dict[int, CUDAGraphRunner] = {}
-        self.graph_memory_pool = None  # set during graph capture.and
+        self.graph_memory_pool = None  # Set during graph capture.
 
         self.max_context_len_to_capture = (
             self.model_config.max_context_len_to_capture
@@ -50,8 +53,8 @@ class ModelRunner:
         # Python can be expensive. To optimize this, we cache the block table
         # in numpy and only copy the actual input content at every iteration.
         # The shape of the cached block table will be
-        # (max batch size to capture, max context len to capture / block size)
-        self.graph_block_tables = None  # set after initial profiling.
+        # (max batch size to capture, max context len to capture / block size).
+        self.graph_block_tables = None  # Set after initial profiling.
 
     def load_model(self) -> None:
         self.model = get_model(self.model_config)
@@ -86,7 +89,7 @@ class ModelRunner:
             prompt_lens.append(prompt_len)
 
             input_tokens.append(prompt_tokens)
-            # NOTE: Here we assume that the first token in the prompt
+            # NOTE(woosuk): Here we assume that the first token in the prompt
             # is always the first token in the sequence.
             input_positions.append(list(range(prompt_len)))
 
@@ -180,6 +183,7 @@ class ModelRunner:
                                              self.block_size)
                     block_table = block_table[-sliding_window_blocks:]
                 block_tables.append(block_table)
+
         batch_size = len(input_tokens)
         max_context_len = max(context_lens)
         use_captured_graph = (
@@ -191,17 +195,17 @@ class ModelRunner:
             # batch size of the captured graph.
             graph_batch_size = _get_graph_batch_size(batch_size)
             assert graph_batch_size >= batch_size
-            for _ in range(graph_batch_size=batch_size):
+            for _ in range(graph_batch_size - batch_size):
                 input_tokens.append([])
                 input_positions.append([])
                 slot_mapping.append([])
                 context_lens.append(1)
                 block_tables.append([])
             batch_size = graph_batch_size
+
         # When using CUDA graph, we don't need to make the tensors on the GPU
         # because they will be eventually copied to the designated GPU buffer.
         device = "cpu" if use_captured_graph else "cuda"
-
         input_tokens = _make_tensor_with_pad(input_tokens,
                                              max_len=1,
                                              pad=0,
@@ -217,20 +221,20 @@ class ModelRunner:
                                              pad=_PAD_SLOT_ID,
                                              dtype=torch.long,
                                              device=device)
-
         context_lens = torch.tensor(context_lens,
                                     dtype=torch.int,
                                     device=device)
+
         if use_captured_graph:
             # The shape of graph_block_tables is
-            # [max batch size, max context len // block size]
+            # [max batch size, max context len // block size].
             input_block_tables = self.graph_block_tables[:batch_size]
             for i, block_table in enumerate(block_tables):
                 if block_table:
                     input_block_tables[i, :len(block_table)] = block_table
             block_tables = torch.from_numpy(input_block_tables).to(device)
         else:
-            block_table = _make_tensor_with_pad(
+            block_tables = _make_tensor_with_pad(
                 block_tables,
                 max_len=max_context_len,
                 pad=0,
@@ -362,7 +366,7 @@ class ModelRunner:
         return output
 
     @torch.inference_mode()
-    def profile_run(self) -> None:  # pylint: disable=useless-return
+    def profile_run(self) -> None:
         # Enable top-k sampling to reflect the accurate memory usage.
         vocab_size = self.model_config.get_vocab_size()
         sampling_params = SamplingParams(top_p=0.99, top_k=vocab_size - 1)
@@ -398,8 +402,8 @@ class ModelRunner:
         assert not self.model_config.enforce_eager
         logger.info("Capturing the model for CUDA graphs. This may lead to "
                     "unexpected consequences if the model is not static. To "
-                    "run the model in eager mode, set 'enforce_eager=True' "
-                    "or use '--enforce-eager' in the CLI.")
+                    "run the model in eager mode, set 'enforce_eager=True' or "
+                    "use '--enforce-eager' in the CLI.")
         start_time = time.perf_counter()
 
         # Prepare dummy inputs. These will be reused for all batch sizes.
@@ -413,9 +417,9 @@ class ModelRunner:
         block_tables = torch.from_numpy(self.graph_block_tables).cuda()
 
         # NOTE: Capturing the largest batch size first may help reduce the
-        # memory usage of CUDA graphs.
+        # memory usage of CUDA graph.
         for batch_size in reversed(_BATCH_SIZES_TO_CAPTURE):
-            # create dummy input_metadata
+            # Create dummy input_metadata.
             input_metadata = InputMetadata(
                 prompt_lens=[],
                 slot_mapping=slot_mapping[:batch_size],
@@ -424,6 +428,7 @@ class ModelRunner:
                 block_tables=block_tables[:batch_size],
                 use_cuda_graph=True,
             )
+
             graph_runner = CUDAGraphRunner(self.model)
             graph_runner.capture(
                 input_tokens[:batch_size],
@@ -437,8 +442,8 @@ class ModelRunner:
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
-        # this usually takes 10 seconds
-        logger.info(f"Graph capturing finished in {elapsed_time:.0f} seconds.")
+        # This usually takes < 10 seconds.
+        logger.info(f"Graph capturing finished in {elapsed_time:.0f} secs.")
 
 
 class CUDAGraphRunner:
@@ -449,7 +454,7 @@ class CUDAGraphRunner:
         self.input_buffers: Dict[str, torch.Tensor] = {}
         self.output_buffers: Dict[str, torch.Tensor] = {}
 
-    def capture(  # pylint: disable=useless-return
+    def capture(
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
@@ -459,9 +464,8 @@ class CUDAGraphRunner:
     ) -> None:
         assert self.graph is None
         # Run the model once without capturing the graph.
-        # This is to make sure that the captured graph does not
-        # include the kernel launches for initial benchmarking.
-        # (e.g. Triton autotune.)
+        # This is to make sure that the captured graph does not include the
+        # kernel launches for initial benchmarking (e.g., Triton autotune).
         self.model(
             input_ids,
             positions,
@@ -481,6 +485,7 @@ class CUDAGraphRunner:
             )
         torch.cuda.synchronize()
 
+        # Save the input and output buffers.
         self.input_buffers = {
             "input_ids": input_ids,
             "positions": positions,
@@ -499,10 +504,10 @@ class CUDAGraphRunner:
         kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
         input_metadata: InputMetadata,
     ) -> torch.Tensor:
-        # KV caches are fixed tensors, so we don't need to copy them
+        # KV caches are fixed tensors, so we don't need to copy them.
         del kv_caches
 
-        # Copy the input tensors to the input buffers
+        # Copy the input tensors to the input buffers.
         self.input_buffers["input_ids"].copy_(input_ids)
         self.input_buffers["positions"].copy_(positions)
         self.input_buffers["slot_mapping"].copy_(input_metadata.slot_mapping)
