@@ -20,6 +20,7 @@ class SamplingParams(BaseModel):
     length_penalty: float = Field(1.0, alias="length_penalty")
     early_stopping: Union[bool, str] = Field(False, alias="early_stopping")
     stop: Union[None, str, List[str]] = Field(None, alias="stop_sequence")
+    include_stop_str_in_output: Optional[bool] = False
     ignore_eos: bool = Field(False, alias="ignore_eos")
     max_tokens: int = Field(16, alias="max_length")
     logprobs: Optional[int] = Field(None, alias="logprobs")
@@ -76,6 +77,7 @@ class KAIGenerationInputSchema(BaseModel):
     sampler_seed: Optional[conint(ge=0, le=2**64 - 1)]
     sampler_full_determinism: Optional[bool]
     stop_sequence: Optional[List[str]]
+    include_stop_str_in_output: Optional[bool] = False
 
     @root_validator
     def check_context(cls, values):  # pylint: disable=no-self-argument

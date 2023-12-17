@@ -246,7 +246,7 @@ class ModelRunner:
         for seq_group_metadata in seq_group_metadata_list:
             seq_data.update(seq_group_metadata.seq_data)
 
-        seq_persistence_data: dict[int, dict] = {}
+        seq_persistence_data: Dict[int, dict] = {}
         for grp in seq_group_metadata_list:
             seq_persistence_data.update(grp.persistent_data)
 

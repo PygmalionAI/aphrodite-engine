@@ -8,8 +8,8 @@ from aphrodite.common.sequence import SequenceData
 
 class PersistentMetadata:
 
-    def __init__(self, metadata: dict[int, dict] | None = None):
-        self._metadata: dict[int, dict] = metadata or {}
+    def __init__(self, metadata: Optional[Dict[int, dict]] = None):
+        self._metadata: Dict[int, dict] = metadata or {}
 
     def get(self, seq_id: int) -> dict:
         return self._metadata.get(seq_id, {})

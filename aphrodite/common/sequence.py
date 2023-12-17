@@ -342,7 +342,7 @@ class SequenceGroupMetadata:
         seq_data: Dict[int, SequenceData],
         sampling_params: SamplingParams,
         block_tables: Dict[int, List[int]],
-        persistent_data: dict[int, dict],
+        persistent_data: Dict[int, dict],
     ) -> None:
         self.request_id = request_id
         self.is_prompt = is_prompt
