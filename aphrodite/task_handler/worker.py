@@ -50,7 +50,7 @@ class Worker:
         # torch.distributed.all_reduce does not free the input tensor until
         # the synchronization point. This causes the memory usage to grow
         # as the number of all_reduce calls increases. This env var disables
-        # this behaviour. 
+        # this behaviour.
 
         os.environ["TORCH_NCCL_AVOID_RECORD_STREAMS"] = "1"
 
@@ -150,7 +150,7 @@ class Worker:
         # Wati for cache operations to finish.
         # TODO: Profile swapping overhead and optimize if needed.
         if cache_events is not None:
-            for event in cache_events:
+            for event in cache_events: # pylint: disable=not-an-iterable
                 event.wait()
 
         # If there is no input, we don't need to execute the model.
@@ -187,7 +187,6 @@ def _init_distributed_environment(
             init_method=distributed_init_method,
         )
 
-    
     # A small all_reduce warmup
     torch.distributed.all_reduce(torch.zeros(1).cuda())
 

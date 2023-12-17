@@ -50,7 +50,7 @@ class ModelConfig:
             If False, we will use CUDA graph and eager execution in hybrid.
         max_context_len_to_capture: Maximum context len covered by CUDA graphs.
             When a sequence has context length larger than this, we will fall
-            back to eager mode. 
+            back to eager mode.
     """
 
     def __init__(

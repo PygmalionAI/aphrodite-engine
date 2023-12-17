@@ -180,8 +180,7 @@ class ModelRunner:
                     sliding_window_blocks = (self.sliding_window //
                                              self.block_size)
                     block_table = block_table[-sliding_window_blocks:]
-                block_tables.append(block_table)
-        
+                block_tables.append(block_table)      
         batch_size = len(input_tokens)
         max_context_len = max(context_lens)
         use_captured_graph = (
@@ -199,8 +198,7 @@ class ModelRunner:
                 slot_mapping.append([])
                 context_lens.append(1)
                 block_tables.append([])
-            batch_size = graph_batch_size
-        
+            batch_size = graph_batch_size   
         # When using CUDA graph, we don't need to make the tensors on the GPU
         # because they will be eventually copied to the designated GPU buffer.
         device = "cpu" if use_captured_graph else "cuda"
@@ -223,8 +221,7 @@ class ModelRunner:
 
         context_lens = torch.tensor(context_lens,
                                     dtype=torch.int,
-                                    device=device)
-        
+                                    device=device)      
         if use_captured_graph:
             # The shape of graph_block_tables is
             # [max batch size, max context len // block size]
@@ -366,7 +363,7 @@ class ModelRunner:
         return output
 
     @torch.inference_mode()
-    def profile_run(self) -> None:
+    def profile_run(self) -> None: # pylint: disable=useless-return
         # Enable top-k sampling to reflect the accurate memory usage.
         vocab_size = self.model_config.get_vocab_size()
         sampling_params = SamplingParams(top_p=0.99, top_k=vocab_size - 1)
@@ -453,7 +450,7 @@ class CUDAGraphRunner:
         self.input_buffers: Dict[str, torch.Tensor] = {}
         self.output_buffers: Dict[str, torch.Tensor] = {}
 
-    def capture(
+    def capture( # pylint: disable=useless-return
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
@@ -522,7 +519,7 @@ class CUDAGraphRunner:
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
-            
+           
 
 def _pad_to_max(x: List[int], max_len: int, pad: int) -> List[int]:
     assert len(x) <= max_len

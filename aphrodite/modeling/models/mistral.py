@@ -191,7 +191,7 @@ class MistralDecoderLayer(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
         kv_cache: KVCache,
-        input_metadata: InputMetadata,,
+        input_metadata: InputMetadata,
         residual: Optional[torch.Tensor],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # Self Attention
