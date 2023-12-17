@@ -129,7 +129,7 @@ class ModelRunner:
         slot_mapping = _make_tensor_with_pad(slot_mapping,
                                              max_prompt_len,
                                              pad=_PAD_SLOT_ID,
-                                             dtype=torch.int)
+                                             dtype=torch.long)
 
         input_metadata = InputMetadata(
             prompt_lens=prompt_lens,
@@ -215,7 +215,7 @@ class ModelRunner:
         slot_mapping = _make_tensor_with_pad(slot_mapping,
                                              max_len=1,
                                              pad=_PAD_SLOT_ID,
-                                             dtype=torch.int,
+                                             dtype=torch.long,
                                              device=device)
 
         context_lens = torch.tensor(context_lens,
