@@ -178,7 +178,7 @@ class SamplingParams:
         self.skip_special_tokens = skip_special_tokens
         self.spaces_between_special_tokens = spaces_between_special_tokens
         self.logits_processors = logits_processors or []
-        self.inlude_stop_str_in_output = include_stop_str_in_output
+        self.include_stop_str_in_output = include_stop_str_in_output
 
         self.verify()
         if self.use_beam_search:
