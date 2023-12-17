@@ -10,8 +10,6 @@ from aphrodite.common.config import (ModelConfig, ParallelConfig,
 from aphrodite.common.logger import init_logger
 from aphrodite.modeling import get_model, InputMetadata, SamplingMetadata
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
-from aphrodite.modeling.megatron.parallel_state import (
-    with_custom_nccl_for_all_reduce)
 from aphrodite.common.sequence import (SamplerOutput, SequenceData,
                                        SequenceGroupMetadata)
 from aphrodite.modeling.sampling_metadata import PersistentMetadata
@@ -468,8 +466,18 @@ class CUDAGraphRunner:
         # This is to make sure that the captured graph does not
         # include the kernel launches for initial benchmarking.
         # (e.g. Triton autotune.)
-        with with_custom_nccl_for_all_reduce():
-            self.model(
+        self.model(
+            input_ids,
+            positions,
+            kv_caches,
+            input_metadata,
+        )
+        torch.cuda.synchronize()
+
+        # Capture the graph.
+        self.graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(self.graph, pool=memory_pool):
+            hidden_states = self.model(
                 input_ids,
                 positions,
                 kv_caches,
@@ -477,18 +485,6 @@ class CUDAGraphRunner:
             )
         torch.cuda.synchronize()
 
-        # Capture the graph.
-        # NOTE: Python 3.8 does not support multi-line with statements
-        self.graph = torch.cuda.StreamCapture()
-        with torch.cuda.graph(self.graph, pool=memory_pool):
-            with with_custom_nccl_for_all_reduce():
-                hidden_states = self.model(
-                    input_ids,
-                    positions,
-                    kv_caches,
-                    input_metadata,        
-                )
-        torch.cuda.synchronize()
 
         self.input_buffers = {
             "input_ids": input_ids,
