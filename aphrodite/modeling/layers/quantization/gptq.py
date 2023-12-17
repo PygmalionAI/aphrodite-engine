@@ -73,7 +73,7 @@ class ExllamaState(Enum):
 
     UNUSED = enum.auto()
     UNINITIALIZED = enum.auto()
-    READY = enum.auto()ed", "Uninitialized", "Ready"])
+    READY = enum.auto()
 
 
 class GPTQLinearMethod(LinearMethodBase):
