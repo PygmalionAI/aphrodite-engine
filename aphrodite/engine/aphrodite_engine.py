@@ -18,7 +18,7 @@ from aphrodite.common.sequence import (SamplerOutput, Sequence, SequenceGroup,
                                        SequenceStatus)
 from aphrodite.transformers_utils.tokenizer import (detokenize_incrementally,
                                                     get_tokenizer)
-from aphrodite.common.utils import Counter
+from aphrodite.common.utils import Counter, get_open_port
 
 if ray:
     from ray.air.util.torch_dist import init_torch_dist_process_group
@@ -84,7 +84,8 @@ class AphroditeEngine:
             f"Number of GPUs = {parallel_config.tensor_parallel_size}\n"
             f"Quantization Format = {model_config.quantization}\n"
             f"Sampler Seed = {model_config.seed}\n"
-            f"Context Length = {model_config.max_model_len}")
+            f"Context Length = {model_config.max_model_len}\n"
+            f"Enforce Eager Mode = {model_config.enforce_eager}\n")
         # TODO: Print more configs in debug mode.
 
         self.model_config = model_config
@@ -188,6 +189,7 @@ class AphroditeEngine:
                           ))
         self._run_workers(
             "init_model",
+            cupy_port=get_open_port(),
             get_all_outputs=True,
         )
         self._run_workers(
@@ -231,6 +233,9 @@ class AphroditeEngine:
 
         # Initialize the cache.
         self._run_workers("init_cache_engine", cache_config=self.cache_config)
+        # Warm up the model. This includes capturing the model into CUDA graph
+        # if enforce_eager is set to False.
+        self._run_workers("warm_up_model")
 
     @classmethod
     def from_engine_args(cls, engine_args: EngineArgs) -> "AphroditeEngine":

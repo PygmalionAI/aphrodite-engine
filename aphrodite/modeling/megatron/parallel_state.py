@@ -4,8 +4,11 @@
 # Adapted from https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/parallel_state.py
 # Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
 """Model and data parallel groups."""
+import contextlib
 
 import torch
+
+from aphrodite.modeling.megatron import cupy_utils
 
 # Tensor model parallel group that the current rank belongs to.
 _TENSOR_MODEL_PARALLEL_GROUP = None
@@ -178,3 +181,34 @@ def destroy_model_parallel():
     _PIPELINE_MODEL_PARALLEL_GROUP = None
     global _PIPELINE_GLOBAL_RANKS
     _PIPELINE_GLOBAL_RANKS = None
+    # Destroy the cupy states if any.
+    cupy_utils.destroy_process_group()
+
+
+# Whether to use cupy for nccl all-reduce.
+# We use cupy for all-reduce when using CUDA graph, because
+# torch.distributed is not well supported by CUDA graph.abs
+_ENABLE_CUPY_FOR_ALL_REDUCE = False
+
+@contextlib.contextmanager
+def with_custom_nccl_for_all_reduce():
+    """Use custom nccl instead of torch.distributed for all-reduce"""
+    tp_size = get_tensor_model_parallel_world_size()
+    if tp_size == 1:
+        # no-op
+        # NOTE: We don't initialize CuPy when tp_size is 1.
+        yield
+    else:
+        global _ENABLE_CUPY_FOR_ALL_REDUCE
+        old = _ENABLE_CUPY_FOR_ALL_REDUCE
+        _ENABLE_CUPY_FOR_ALL_REDUCE = True
+
+        stream = torch.cuda.current_stream()
+        with cupy_utils.set_cupy_stream(stream):
+            yield
+        _ENABLE_CUPY_FOR_ALL_REDUCE = old
+
+def is_custom_nccl_enabled_for_all_reduce():
+    """Check if custom nccl is enabled for all-reduce."""
+    global _ENABLE_CUPY_FOR_ALL_REDUCE
+    return _ENABLE_CUPY_FOR_ALL_REDUCE

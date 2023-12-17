@@ -17,3 +17,4 @@ fastapi
 colorlog
 einops # for phi
 aioprometheus[starlette] # for prometheus metrics
+cupy-cuda11x # for CUDA graphs.
