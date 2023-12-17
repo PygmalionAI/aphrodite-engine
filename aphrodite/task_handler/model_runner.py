@@ -180,7 +180,7 @@ class ModelRunner:
                     sliding_window_blocks = (self.sliding_window //
                                              self.block_size)
                     block_table = block_table[-sliding_window_blocks:]
-                block_tables.append(block_table) 
+                block_tables.append(block_table)
         batch_size = len(input_tokens)
         max_context_len = max(context_lens)
         use_captured_graph = (
