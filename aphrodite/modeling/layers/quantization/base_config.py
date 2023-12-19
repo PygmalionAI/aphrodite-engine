@@ -88,6 +88,16 @@ class QuantizationConfig(ABC):
     def get_row_parallel_tensor_names(self) -> List[str]:
         raise NotImplementedError
 
+    @classmethod
+    def merge_weight(cls) -> bool:
+        """Allow merging Q/K/V and Up/Gate weights"""
+        return True
+
+    @classmethod
+    def quantize_vocab(cls) -> bool:
+        """Whether quantize output vocabulary"""
+        return False
+
     @abstractmethod
     def get_linear_method(self) -> LinearMethodBase:
         """Get the linear method to use for the quantized linear layer."""
