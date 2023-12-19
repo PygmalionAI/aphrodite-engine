@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import PretrainedConfig
+import numpy as np
 
 from aphrodite.common.config import LoRAConfig
 from aphrodite.lora.punica import add_lora, add_lora_slice, bgmv
