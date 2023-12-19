@@ -96,7 +96,10 @@ class Worker:
         # profiled peak memory.
         torch.cuda.synchronize()
         free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
-        peak_memory = total_gpu_memory - free_gpu_memory
+        # peak_memory = total_gpu_memory - free_gpu_memory #
+        # if the GPU memory is consumed by others before, the peak_memory is
+        # the total consumed memory, that is not what we want.
+        peak_memory = torch.cuda.max_memory_allocated()
 
         cache_block_size = CacheEngine.get_cache_block_size(
             block_size, self.model_config, self.parallel_config)
@@ -132,6 +135,7 @@ class Worker:
         blocks_to_swap_in: Dict[int, int],
         blocks_to_swap_out: Dict[int, int],
         blocks_to_copy: Dict[int, List[int]],
+        runner_method: str = "execute_model",
     ) -> SamplerOutput:
         # Issue cache operations.
         issued_cache_op = False
@@ -157,9 +161,23 @@ class Worker:
         if not seq_group_metadata_list:
             return {}
 
-        output = self.model_runner.execute_model(seq_group_metadata_list,
-                                                 self.gpu_cache)
+        output = self.model_runner.__getattribute__(runner_method)(
+            seq_group_metadata_list, self.gpu_cache)
         return output
+
+    @torch.inference_mode()
+    def execute_model_methord(
+        self,
+        model_methord: str,
+        *args,
+        **kwargs,
+    ):
+        """Directly execute some none distributed model methord.
+        Just a temporary hack.
+        For the image token replace of the llava model.
+        """
+        return self.model_runner.model.__getattribute__(model_methord)(
+            *args, **kwargs)
 
 
 def _init_distributed_environment(
