@@ -5,7 +5,8 @@ import torch
 import torch.nn as nn
 
 from aphrodite.modeling.sampling_metadata import (SamplingMetadata,
-                                                  OutputMetadata)
+                                                  OutputMetadata,
+                                                  SamplingTensors)
 from aphrodite.modeling.megatron.communication_op import (
     tensor_model_parallel_all_gather)
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
@@ -15,7 +16,6 @@ from aphrodite.common.sequence import (PromptLogprobs, SampleLogprobs,
 
 import aphrodite.modeling.layers.sampler_mirostat as sampler_mirostat
 
-_SAMPLING_EPS = 1e-5
 
 
 class Sampler(nn.Module):
@@ -36,6 +36,7 @@ class Sampler(nn.Module):
     def __init__(self, vocab_size: int) -> None:
         super().__init__()
         self.vocab_size = vocab_size
+        self._copy_stream = torch.cuda.Stream = torch.cuda.Stream()
 
     def forward(
         self,
@@ -50,9 +51,14 @@ class Sampler(nn.Module):
         # Get the logits for the next tokens.
         logits = _get_logits(hidden_states, embedding, embedding_bias,
                              self.vocab_size)
+        _, vocab_size = logits.shape
 
         output_metadata = OutputMetadata()
 
+        # Prepare sampling tensors in another stream to overlap
+        # CPU<->GPU data transfer with GPU computation in forward pass.
+        with torch.cuda.stream(self._copy_stream):
+            (sampling_tensors, do_penalties, do_alphabet_soup, do_cutoffs)
         # Apply presence and frequency penalties.
         output_tokens = _get_output_tokens(sampling_metadata)
         assert len(output_tokens) == logits.shape[0]

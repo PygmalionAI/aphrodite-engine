@@ -131,6 +131,191 @@ class SamplingTensors:
                 # i.e. greedy sampling or beam search
                 # Set the temperature to 1 to avoid division by zero.
                 temperature = 1.0
-            if not do_alphabet_soup and ()
+            if not do_alphabet_soup and (top_p < 1.0 - _SAMPLING_EPS
+                                         or top_k != vocab_size
+                                         or top_a > 0.0
+                                         or min_p > _SAMPLING_EPS):
+                do_alphabet_soup = True
+            if not do_penalties and (abs(p) >= _SAMPLING_EPS
+                                     or abs(f) >= _SAMPLING_EPS
+                                     or abs(r - 1.0) >= _SAMPLING_EPS):
+                do_penalties = True
+            if not do_cutoffs and (eta_cutoff > _SAMPLING_EPS
+                                    or epsilon_cutoff > _SAMPLING_EPS
+                                    or typical_p < 1.0 - _SAMPLING_EPS
+                                    or tfs < 1.0 - _SAMPLING_EPS):
+                do_cutoffs = True
+            if (i < sampling_metadata.num_prompts
+                    and sampling_params.prompt_logprobs is not None):
+                # For tokens in the prompt that we only need to get their
+                # logprobs
+                prompt_len = sampling_metadata.prompt_lens[i]
+                temperatures += [temperature] * (prompt_len - 1)
+                top_ps += [top_p] * (prompt_len - 1)
+                top_ks += [top_k] * (prompt_len - 1)
+                top_as += [top_a] * (prompt_len - 1)
+                min_ps += [min_p] * (prompt_len - 1)
+                presence_penalties += [0] * (prompt_len - 1)
+                frequency_penalties += [0] * (prompt_len - 1)
+                repetition_penalties += [1] * (prompt_len - 1)
+                tfss += [1] * (prompt_len - 1)
+                eta_cutoffs += [0] * (prompt_len - 1)
+                epsilon_cutoffs += [0] * (prompt_len - 1)
+                typical_ps += [1] * (prompt_len - 1)
+                prompt_tokens.extend([] for _ in range(prompt_len - 1))
+                output_tokens.extend([] for _ in range(prompt_len - 1))
+            for seq_id in seq_ids:
+                seq_data = sampling_metadata.seq_data[seq_id]
+                prompt_tokens.append(seq_data.prompt_tokens)
+                output_tokens.append(seq_data.output_tokens)
+            temperatures += [temperature] * len(seq_ids)
+            top_ps += [top_p] * len(seq_ids)
+            top_ks += [top_k] * len(seq_ids)
+            top_as += [top_a] * len(seq_ids)
+            min_ps += [min_p] * len(seq_ids)
+            presence_penalties += [p] * len(seq_ids)
+            frequency_penalties += [f] * len(seq_ids)
+            repetition_penalties += [r] * len(seq_ids)
+            tfss += [tfs] * len(seq_ids)
+            eta_cutoffs += [eta_cutoff] * len(seq_ids)
+            epsilon_cutoffs += [epsilon_cutoff] * len(seq_ids)
+            typical_ps += [typical_p] * len(seq_ids)
 
+        sampling_tensors = SamplingTensors.from_lists(
+            temperatures, top_ps, top_ks, top_as, min_ps, presence_penalties,
+            frequency_penalties, repetition_penalties, tfss, eta_cutoffs,
+            epsilon_cutoffs, typical_ps, prompt_tokens, output_tokens,
+            vocab_size, device, dtype)
+        return (sampling_tensors, do_penalties, do_alphabet_soup, do_cutoffs)
 
+    @classmethod
+    def from_lists(cls, temperatures: List[float], top_ps: List[float],
+                   top_ks: List[int], top_as: List[float], min_ps: List[float],
+                   presence_penalties: List[float],
+                   frequency_penalties: List[float],
+                   repetition_penalties: List[float], tfss: List[float],
+                   eta_cutoffs: List[float], epsilon_cutoffs: List[float],
+                   typical_ps: List[float], prompt_tokens: List[List[int]],
+                   output_tokens: List[List[int]], vocab_size: int,
+                   device: torch.device, dtype: torch.dtype
+                   ) -> "SamplingTensors":
+        # Note that the performance will be very bad without
+        # pinned memory.
+        pin_memory = not in_wsl()
+        prompt_max_len = max(len(tokens) for tokens in prompt_tokens)
+        prompt_padded_tokens = [
+            tokens + [vocab_size] * (prompt_max_len - len(tokens))
+            for tokens in prompt_tokens
+        ]
+        output_max_len = max(len(tokens) for tokens in output_tokens)
+        output_padded_tokens = [
+            tokens + [vocab_size] * (output_max_len - len(tokens))
+            for tokens in output_tokens
+        ]
+
+        temperatures_t = torch.tensor(
+            temperatures,
+            device="cpu",
+            dtype=dtype,
+            pin_memory=pin_memory
+        )
+        top_ps_t = torch.tensor(
+            top_ps,
+            device="cpu",
+            dtype=dtype,
+            pin_memory=pin_memory
+        )
+        top_ks_t = torch.tensor(
+            top_ks,
+            device="cpu",
+            dtype=torch.int,
+            pin_memory=pin_memory
+        )
+        top_as_t = torch.tensor(
+            top_as,
+            device="cpu",
+            dtype=dtype,
+            pin_memory=pin_memory
+        )
+        min_ps_t = torch.tensor(
+            min_ps,
+            device="cpu",
+            dtype=dtype,
+            pin_memory=pin_memory
+        )
+        presence_penalties_t = torch.tensor(
+            presence_penalties,
+            device="cpu",
+            dtype=dtype,
+            pin_memory=pin_memory
+        )
+        frequency_penalties_t = torch.tensor(
+            frequency_penalties,
+            device="cpu",
+            dtype=dtype,
+            pin_memory=pin_memory
+        )
+        repetition_penalties_t = torch.tensor(
+            repetition_penalties,
+            device="cpu",
+            dtype=dtype,
+            pin_memory=pin_memory
+        )
+        tfss_t = torch.tensor(
+            tfss,
+            device="cpu",
+            dtype=dtype,
+            pin_memory=pin_memory
+        )
+        eta_cutoffs_t = torch.tensor(
+            eta_cutoffs,
+            device="cpu",
+            dtype=dtype,
+            pin_memory=pin_memory
+        )
+        epsilon_cutoffs_t = torch.tensor(
+            epsilon_cutoffs,
+            device="cpu",
+            dtype=dtype,
+            pin_memory=pin_memory
+        )
+        typical_ps_t = torch.tensor(
+            typical_ps,
+            device="cpu",
+            dtype=dtype,
+            pin_memory=pin_memory
+        )
+        prompt_tensor = torch.tensor(
+            prompt_padded_tokens,
+            device=device,
+            dtype=torch.long,
+            pin_memory=pin_memory
+        )
+        output_tensor = torch.tensor(
+            output_padded_tokens,
+            device=device,
+            dtype=torch.long,
+            pin_memory=pin_memory
+        )
+        # Because the memory is pinned, we can do non-blocking
+        # transfer to device.
+        return cls(
+            temperatures=temperatures_t.to(device=device, non_blocking=True),
+            top_ps=top_ps_t.to(device=device, non_blocking=True),
+            top_ks=top_ks_t.to(device=device, non_blocking=True),
+            top_as=top_as_t.to(device=device, non_blocking=True),
+            min_ps=min_ps_t.to(device=device, non_blocking=True),
+            presence_penalties=presence_penalties_t.to(
+                device=device, non_blocking=True),
+            frequency_penalties=frequency_penalties_t.to(
+                device=device, non_blocking=True),
+            repetition_penalties=repetition_penalties_t.to(
+                device=device, non_blocking=True),
+            tfss=tfss_t.to(device=device, non_blocking=True),
+            eta_cutoffs=eta_cutoffs_t.to(device=device, non_blocking=True),
+            epsilon_cutoffs=epsilon_cutoffs_t.to(
+                device=device, non_blocking=True),
+            typical_ps=typical_ps_t.to(device=device, non_blocking=True),
+            prompt_tokens=prompt_tensor.to(device=device, non_blocking=True),
+            output_tokens=output_tensor.to(device=device, non_blocking=True),
+        )
