@@ -331,5 +331,6 @@ setuptools.setup(
     install_requires=get_requirements(),
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
-    package_data={"aphrodite-engine": ["py.typed"]},
+    package_data={"aphrodite-engine": ["aphrodite/endpoints/kobold/klite.embd",
+                                       "py.typed"]},
 )
