@@ -366,7 +366,7 @@ class ModelRunner:
         return output
 
     @torch.inference_mode()
-    def profile_run(self) -> None:
+    def profile_run(self) -> None:  # pylint: disable=useless-return
         # Enable top-k sampling to reflect the accurate memory usage.
         vocab_size = self.model_config.get_vocab_size()
         sampling_params = SamplingParams(top_p=0.99, top_k=vocab_size - 1)
@@ -454,7 +454,7 @@ class CUDAGraphRunner:
         self.input_buffers: Dict[str, torch.Tensor] = {}
         self.output_buffers: Dict[str, torch.Tensor] = {}
 
-    def capture(
+    def capture(  # pylint: disable=useless-return
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
