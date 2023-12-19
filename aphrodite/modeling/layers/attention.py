@@ -27,13 +27,10 @@ class PagedAttention(nn.Module):
     can either contain prompt tokens or generation tokens.
     The class does the following:
 
-    1. Wait for the cache operations (e.g., swap, copy) to finish. The cache
-        operations are issued by the cache engine before executing the forward
-        pass of the model, and they are executed asynchronously.
-    2. Reshape and store the input key and value tensors in the KV cache.
-    3. Perform (multi-head/multi-query/grouped-query) attention using either
+    1. Reshape and store the input key and value tensors in the KV cache.
+    2. Perform (multi-head/multi-query/grouped-query) attention using either
         xformers or the PagedAttention custom op.
-    4. Return the output tensor.
+    3. Return the output tensor.
     """
 
     def __init__(
@@ -57,9 +54,6 @@ class PagedAttention(nn.Module):
 
         assert self.num_heads % self.num_kv_heads == 0
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
-        self.head_mapping = torch.repeat_interleave(
-            torch.arange(self.num_kv_heads, dtype=torch.int32, device="cuda"),
-            self.num_queries_per_kv)
 
         if self.head_size not in _SUPPORTED_HEAD_SIZES:
             raise ValueError(f"head_size ({self.head_size}) is not supported. "
@@ -73,20 +67,18 @@ class PagedAttention(nn.Module):
         key_cache: Optional[torch.Tensor],
         value_cache: Optional[torch.Tensor],
         input_metadata: InputMetadata,
-        cache_event: Optional[torch.cuda.Event],
     ) -> torch.Tensor:
         """PagedAttention forward pass.
 
         Args:
             query: shape = [batch_size, seq_len, num_heads * head_size]
             key: shape = [batch_size, seq_len, num_kv_heads * head_size]
-            value: shape = [batch_size, num_kv_heads * head_size]
+            value: shape = [batch_size, seq_len, num_kv_heads * head_size]
             key_cache: shape = [num_blocks, num_kv_heads, head_size/x,
                 block_size, x]
             value_cache: shape = [num_blocks, num_kv_heads, head_size,
                 block_size]
             input_metadata: metadata for the inputs.
-            cache_event: event to wait for the cache operations to finish.
         Returns:
             shape = [batch_size, seq_len, num_heads * head_size]
         """
@@ -95,10 +87,6 @@ class PagedAttention(nn.Module):
         query = query.view(-1, self.num_heads, self.head_size)
         key = key.view(-1, self.num_kv_heads, self.head_size)
         value = value.view(-1, self.num_kv_heads, self.head_size)
-        slot_mapping = input_metadata.slot_mapping.flatten()
-
-        if cache_event is not None:
-            cache_event.wait()
 
         # Reshape the keys and values and store them in the cache.
         # If key_cache and value_cache are not provided, the new key and value
@@ -110,7 +98,7 @@ class PagedAttention(nn.Module):
                 value,
                 key_cache,
                 value_cache,
-                slot_mapping,
+                input_metadata.slot_mapping.flatten(),
             )
 
         if input_metadata.is_prompt:
@@ -170,15 +158,20 @@ class PagedAttention(nn.Module):
             output = out.view_as(query)
         else:
             # Decoding run.
-            output = _paged_attention(
-                query,
-                key_cache,
-                value_cache,
-                input_metadata,
-                self.head_mapping,
-                self.scale,
-                self.alibi_slopes,
-            )
+            if key_cache is not None and value_cache is not None:
+                output = _paged_attention(
+                    query,
+                    key_cache,
+                    value_cache,
+                    input_metadata,
+                    self.num_kv_heads,
+                    self.scale,
+                    self.alibi_slopes,
+                )
+            else:
+                # This happens during the initial memory profiling run
+                # for CUDA graphs.
+                output = torch.zeros_like(query)
 
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
@@ -220,7 +213,7 @@ def _paged_attention(
     key_cache: torch.Tensor,
     value_cache: torch.Tensor,
     input_metadata: InputMetadata,
-    head_mapping: torch.Tensor,
+    num_kv_heads: int,
     scale: float,
     alibi_slopes: Optional[torch.Tensor],
 ) -> torch.Tensor:
@@ -247,7 +240,7 @@ def _paged_attention(
             query,
             key_cache,
             value_cache,
-            head_mapping,
+            num_kv_heads,
             scale,
             input_metadata.block_tables,
             input_metadata.context_lens,
@@ -277,7 +270,7 @@ def _paged_attention(
             query,
             key_cache,
             value_cache,
-            head_mapping,
+            num_kv_heads,
             scale,
             input_metadata.block_tables,
             input_metadata.context_lens,

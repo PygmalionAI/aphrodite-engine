@@ -84,7 +84,8 @@ class AphroditeEngine:
             f"Number of GPUs = {parallel_config.tensor_parallel_size}\n"
             f"Quantization Format = {model_config.quantization}\n"
             f"Sampler Seed = {model_config.seed}\n"
-            f"Context Length = {model_config.max_model_len}")
+            f"Context Length = {model_config.max_model_len}\n"
+            f"Enforce Eager Mode = {model_config.enforce_eager}")
         # TODO: Print more configs in debug mode.
 
         self.model_config = model_config
@@ -158,9 +159,13 @@ class AphroditeEngine:
         for bundle in placement_group.bundle_specs:
             if not bundle.get("GPU", 0):
                 continue
+            if self.parallel_config.tensor_parallel_size == 1:
+                num_gpus = self.cache_config.gpu_memory_utilization
+            else:
+                num_gpus = 1
             worker = ray.remote(
                 num_cpus=0,
-                num_gpus=1,
+                num_gpus=num_gpus,
                 scheduling_strategy=PlacementGroupSchedulingStrategy(
                     placement_group=placement_group,
                     placement_group_capture_child_tasks=True),
@@ -227,6 +232,9 @@ class AphroditeEngine:
 
         # Initialize the cache.
         self._run_workers("init_cache_engine", cache_config=self.cache_config)
+        # Warm up the model. This includes capturing the model into CUDA graph
+        # if enforce_eager is set to False.
+        self._run_workers("warm_up_model")
 
     @classmethod
     def from_engine_args(cls, engine_args: EngineArgs) -> "AphroditeEngine":
@@ -678,9 +686,10 @@ class AphroditeEngine:
         """Stop the finished sequences."""
         for stop_str in sampling_params.stop:
             if seq.output_text.endswith(stop_str):
-                # Truncate the output text so that the stop string is
-                # not included in the output.
-                seq.output_text = seq.output_text[:-len(stop_str)]
+                if not sampling_params.include_stop_str_in_output:
+                    # Truncate the output text so that the stop string is
+                    # not included in the output
+                    seq.output_text = seq.output_text[:-len(stop_str)]
                 seq.status = SequenceStatus.FINISHED_STOPPED
                 return
         if seq.get_last_token_id() in sampling_params.stop_token_ids:

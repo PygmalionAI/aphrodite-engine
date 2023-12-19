@@ -1,6 +1,9 @@
+import math
 from typing import Optional
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from aphrodite._C import ops as activation_ops
 from aphrodite.modeling.layers.quantization import QuantizationConfig
@@ -20,6 +23,11 @@ class SiluAndMul(nn.Module):
         return: (batch_size, seq_len, d) or (num_tokens, d)
     """
 
+    def _forward(self, x: torch.Tensor) -> torch.Tensor:
+        """PyTorch-native implementation. Equivalent to forward()."""
+        d = x.shape[-1] // 2
+        return F.silu(x[..., :d]) * x[..., d:]
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         d = x.shape[-1] // 2
         output_shape = (x.shape[:-1] + (d, ))
@@ -30,6 +38,12 @@ class SiluAndMul(nn.Module):
 
 class NewGELU(nn.Module):
 
+    def _forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Pytorch-native implemenation. Equivalent to forward()."""
+        c = math.sqrt(2.0 / math.pi)
+        return 0.5 * x * (1.0 + torch.tanh(c *
+                                           (x + 0.044715 * torch.pow(x, 3.0))))
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = torch.empty_like(x)
         activation_ops.gelu_new(out, x)
@@ -37,6 +51,11 @@ class NewGELU(nn.Module):
 
 
 class FastGELU(nn.Module):
+
+    def _forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Pytorch-native implemenation. Equivalent to forward()."""
+        return 0.5 * x * (1.0 + torch.tanh(x * 0.7978845608028654 *
+                                           (1.0 + 0.044715 * x * x)))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = torch.empty_like(x)

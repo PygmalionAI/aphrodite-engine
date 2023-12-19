@@ -1,6 +1,7 @@
 """Utils."""
 from os import path
 import enum
+import socket
 from platform import uname
 import uuid
 
@@ -43,11 +44,6 @@ def get_max_shared_memory_bytes(gpu: int = 0) -> int:
     return int(max_shared_mem)
 
 
-def get_gpu_memory(gpu: int = 0) -> int:
-    """Returns the total memory of the GPU in bytes."""
-    return torch.cuda.get_device_properties(gpu).total_memory
-
-
 def get_cpu_memory() -> int:
     """Returns the total CPU memory of the node or container in bytes."""
 
@@ -73,3 +69,9 @@ def random_uuid() -> str:
 def in_wsl() -> bool:
     # Reference: https://github.com/microsoft/WSL/issues/4071
     return "microsoft" in " ".join(uname()).lower()
+
+
+def get_open_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]

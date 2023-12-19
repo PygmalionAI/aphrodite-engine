@@ -44,7 +44,13 @@ class ModelConfig:
         max_model_len: Maximum length of a sequence (including prompt and
             output). If None, will be derived from the model.
         quantization: Quantization method that was used to quantize the model
-            weights. If None, we assume the model weights are not quantized.
+            weights. If None, we assume the model weights are not quantized
+        enforce_eager: Whether to enforce eager execution. If True, we will
+            disable CUDA graph and always execute the model in eager mode.
+            If False, we will use CUDA graph and eager execution in hybrid.
+        max_context_len_to_capture: Maximum context len covered by CUDA graphs.
+            When a sequence has context length larger than this, we will fall
+            back to eager mode.
     """
 
     def __init__(
@@ -60,6 +66,8 @@ class ModelConfig:
         revision: Optional[str] = None,
         max_model_len: Optional[int] = None,
         quantization: Optional[str] = None,
+        enforce_eager: bool = False,
+        max_context_len_to_capture: Optional[int] = None,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -70,6 +78,8 @@ class ModelConfig:
         self.seed = seed
         self.revision = revision
         self.quantization = quantization
+        self.enforce_eager = enforce_eager
+        self.max_context_len_to_capture = max_context_len_to_capture
 
         self.hf_config = get_config(model, trust_remote_code, revision)
         self.dtype = _get_and_verify_dtype(self.hf_config, dtype)
@@ -78,6 +88,7 @@ class ModelConfig:
         self._verify_load_format()
         self._verify_tokenizer_mode()
         self._verify_quantization()
+        self._verify_cuda_graph()
 
     def _verify_load_format(self) -> None:
         load_format = self.load_format.lower()
@@ -101,6 +112,14 @@ class ModelConfig:
             # force ROCm to load from pt weights if nothing is set
             if load_format == "auto":
                 load_format = "pt"
+
+        # TODO: Remove this check once HF updates the pt weights of Mixtral.
+        architectures = getattr(self.hf_config, "architectures", [])
+        if "MixtralForCausalLM" in architectures and load_format == "pt":
+            raise ValueError(
+                "Currently, the 'pt' format is not supported for Mixtral. "
+                "Please use the 'safetensors' format instead. ")
+
         self.load_format = load_format
 
     def _verify_tokenizer_mode(self) -> None:
@@ -141,6 +160,17 @@ class ModelConfig:
             logger.warning(f"{self.quantization} quantization is not fully "
                            "optimized yet. The speed can be slower than "
                            "non-quantized models (16/32bit).")
+
+    def _verify_cuda_graph(self) -> None:
+        if self.max_context_len_to_capture is None:
+            self.max_context_len_to_capture = self.max_model_len
+        self.max_context_len_to_capture = min(self.max_context_len_to_capture,
+                                              self.max_model_len)
+        if (self.quantization in ["gptq", "squeezellm"]
+                and not self.enforce_eager):
+            logger.warning(f"{self.quantization} does not support CUDA graph "
+                           "yet. Disabling CUDA graph.")
+            self.enforce_eager = True
 
     def verify_with_parallel_config(
         self,
