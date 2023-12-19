@@ -18,7 +18,7 @@ from aphrodite.common.sequence import (SamplerOutput, Sequence, SequenceGroup,
                                        SequenceStatus)
 from aphrodite.transformers_utils.tokenizer import (detokenize_incrementally,
                                                     get_tokenizer)
-from aphrodite.common.utils import Counter, get_open_port
+from aphrodite.common.utils import Counter
 
 if ray:
     from ray.air.util.torch_dist import init_torch_dist_process_group
@@ -140,7 +140,6 @@ class AphroditeEngine:
         self.workers.append(worker)
         self._run_workers(
             "init_model",
-            cupy_port=get_open_port(),
             get_all_outputs=True,
         )
         self._run_workers(
