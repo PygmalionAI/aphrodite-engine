@@ -90,7 +90,7 @@ __device__ void paged_attention_kernel(
   const scalar_t* __restrict__ q,         // [num_seqs, num_heads, head_size]
   const scalar_t* __restrict__ k_cache,   // [num_blocks, num_kv_heads, head_size/x, block_size, x]
   const scalar_t* __restrict__ v_cache,   // [num_blocks, num_kv_heads, head_size, block_size]
-  const int num_kv_heads,   // [num_heads]
+  const int num_kv_heads,                 // [num_heads]
   const float scale,
   const int* __restrict__ block_tables,   // [num_seqs, max_num_blocks_per_seq]
   const int* __restrict__ context_lens,   // [num_seqs]
@@ -185,7 +185,10 @@ __device__ void paged_attention_kernel(
   // dot product with the query.
   const int* block_table = block_tables + seq_idx * max_num_blocks_per_seq;
   for (int block_idx = start_block_idx + warp_idx; block_idx < end_block_idx; block_idx += NUM_WARPS) {
-    const int physical_block_number = block_table[block_idx];
+    // NOTE: The block number is stored in int32. However, we cast it to int64
+    // because int32 can lead to overflow when this variable is multiplied by large numbers
+    // (e.g., kv_block_stride).
+    const int64_t physical_block_number = static_cast<int64_t>(block_table[block_idx]);
 
     // Load a key to registers.
     // Each thread in a thread group has a different part of the key.
@@ -295,7 +298,10 @@ __device__ void paged_attention_kernel(
   scalar_t zero_value;
   zero(zero_value);
   for (int block_idx = start_block_idx + warp_idx; block_idx < end_block_idx; block_idx += NUM_WARPS) {
-    const int physical_block_number = block_table[block_idx];
+    // NOTE: The block number is stored in int32. However, we cast it to int64
+    // because int32 can lead to overflow when this variable is multiplied by large numbers
+    // (e.g., kv_block_stride).
+    const int64_t physical_block_number = static_cast<int64_t>(block_table[block_idx]);
     const int physical_block_offset = (lane % NUM_V_VECS_PER_ROW) * V_VEC_SIZE;
     const int token_idx = block_idx * BLOCK_SIZE + physical_block_offset;
     L_vec logits_vec;
@@ -541,18 +547,17 @@ __global__ void paged_attention_v2_reduce_kernel(
 
 } // namespace aphrodite
 
-
 #define LAUNCH_PAGED_ATTENTION_V1(HEAD_SIZE)                                                  \
-  APHRODITE_DevFuncAttribute_SET_MaxDynamicSharedMemorySize(                                  \
-    ((void*)aphrodite::paged_attention_v1_kernel<T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS>),     \
+  APHRODITE_DevFuncAttribute_SET_MaxDynamicSharedMemorySize(                                       \
+    ((void*)aphrodite::paged_attention_v1_kernel<T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS>),          \
     shared_mem_size);                                                                         \
-  aphrodite::paged_attention_v1_kernel<T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS>                 \
+  aphrodite::paged_attention_v1_kernel<T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS>                      \
   <<<grid, block, shared_mem_size, stream>>>(                                                 \
     out_ptr,                                                                                  \
     query_ptr,                                                                                \
     key_cache_ptr,                                                                            \
     value_cache_ptr,                                                                          \
-    num_kv_heads,                                                                         \
+    num_kv_heads,                                                                             \
     scale,                                                                                    \
     block_tables_ptr,                                                                         \
     context_lens_ptr,                                                                         \
@@ -561,7 +566,6 @@ __global__ void paged_attention_v2_reduce_kernel(
     q_stride,                                                                                 \
     kv_block_stride,                                                                          \
     kv_head_stride);
-
 
 // TODO: Tune NUM_THREADS.
 template<
@@ -704,7 +708,7 @@ void paged_attention_v1(
     query_ptr,                                                                                \
     key_cache_ptr,                                                                            \
     value_cache_ptr,                                                                          \
-    num_kv_heads,                                                                         \
+    num_kv_heads,                                                                             \
     scale,                                                                                    \
     block_tables_ptr,                                                                         \
     context_lens_ptr,                                                                         \
