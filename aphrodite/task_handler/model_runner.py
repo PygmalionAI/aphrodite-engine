@@ -36,7 +36,7 @@ class ModelRunner:
         self.scheduler_config = scheduler_config
 
         # model_config can be None in tests/samplers/test_sampler.py.
-        # FIXME(woosuk): This is a hack to make the tests work. Refactor this.
+        # FIXME: This is a hack to make the tests work. Refactor this.
         self.sliding_window = (model_config.get_sliding_window()
                                if model_config is not None else None)
         self.model = None
@@ -89,7 +89,7 @@ class ModelRunner:
             prompt_lens.append(prompt_len)
 
             input_tokens.append(prompt_tokens)
-            # NOTE(woosuk): Here we assume that the first token in the prompt
+            # NOTE: Here we assume that the first token in the prompt
             # is always the first token in the sequence.
             input_positions.append(list(range(prompt_len)))
 
