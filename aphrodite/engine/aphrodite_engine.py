@@ -85,7 +85,7 @@ class AphroditeEngine:
             f"Quantization Format = {model_config.quantization}\n"
             f"Sampler Seed = {model_config.seed}\n"
             f"Context Length = {model_config.max_model_len}\n"
-            f"Enforce Eager Mode = {model_config.enforce_eager}\n")
+            f"Enforce Eager Mode = {model_config.enforce_eager}")
         # TODO: Print more configs in debug mode.
 
         self.model_config = model_config
