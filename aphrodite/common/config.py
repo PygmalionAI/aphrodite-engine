@@ -166,9 +166,10 @@ class ModelConfig:
             self.max_context_len_to_capture = self.max_model_len
         self.max_context_len_to_capture = min(self.max_context_len_to_capture,
                                               self.max_model_len)
-        if self.quantization == "gptq" and not self.enforce_eager:
-            logger.warning("GPTQ does not support CUDA graph yet. Disabling "
-                           "CUDA graph.")
+        if (self.quantization in ["gptq", "squeezellm"]
+                and not self.enforce_eager):
+            logger.warning(f"{self.quantization} does not support CUDA graph "
+                           "yet. Disabling CUDA graph.")
             self.enforce_eager = True
 
     def verify_with_parallel_config(
