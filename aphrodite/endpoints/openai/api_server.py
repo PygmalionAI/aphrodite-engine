@@ -75,7 +75,6 @@ def parse_args():
                         "the huggingface name.")
     parser.add_argument("--api-keys",
                         nargs="*",
-                        required=True,
                         help="Authorization API Keys for the server.")
     parser.add_argument("--chat-template",
                         type=str,
@@ -99,6 +98,8 @@ app.add_route("/metrics", metrics)
 
 def _verify_api_key(x_api_key: str = Header(None),
                     authorization: str = Header(None)):
+    if not EXPECTED_API_KEYS:  # If no keys are provided
+        return "NoKey"  # Return a default value
     if x_api_key and x_api_key in EXPECTED_API_KEYS:
         return x_api_key
     elif authorization:
