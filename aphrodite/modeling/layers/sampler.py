@@ -33,9 +33,24 @@ class Sampler(nn.Module):
     parameters (e.g., sampling method, temperature, top-p, top-k, etc.).
     """
 
-    def __init__(self, vocab_size: int) -> None:
+    def __init__(self,
+                 vocab_size: int,
+                 org_vocab_size: Optional[int] = None) -> None:
         super().__init__()
         self.vocab_size = vocab_size
+        # original vocabulary size (without LoRA).
+        self.org_vocab_size = org_vocab_size or vocab_size
+
+    def _get_logits(self, hidden_states: torch.Tensor, embedding: torch.Tensor,
+                    embedding_bias: Optional[torch.Tensor]) -> torch.Tensor:
+        # Get the logits for the next tokens.
+        logits = torch.matmul(hidden_states, embedding.t())
+        if embedding_bias is not None:
+            logits += embedding_bias
+        logits = tensor_model_parallel_all_gather(logits)
+        # Remove paddings in vocab (if any).
+        logits = logits[:, :self.org_vocab_size]
+        return logits
 
     def forward(
         self,
@@ -48,8 +63,7 @@ class Sampler(nn.Module):
         hidden_states = _prune_hidden_states(hidden_states, sampling_metadata)
 
         # Get the logits for the next tokens.
-        logits = _get_logits(hidden_states, embedding, embedding_bias,
-                             self.vocab_size)
+        logits = _get_logits(hidden_states, embedding, embedding_bias)
 
         output_metadata = OutputMetadata()
 
@@ -141,19 +155,6 @@ class Sampler(nn.Module):
         return _build_sampler_output(sample_results, sampling_metadata,
                                      prompt_logprobs, sample_logprobs,
                                      output_metadata)
-
-
-def _get_logits(hidden_states: torch.Tensor, embedding: torch.Tensor,
-                embedding_bias: Optional[torch.Tensor],
-                vocab_size: int) -> torch.Tensor:
-    # Get the logits for the next tokens.
-    logits = torch.matmul(hidden_states, embedding.t())
-    if embedding_bias is not None:
-        logits += embedding_bias
-    logits = tensor_model_parallel_all_gather(logits)
-    # Remove paddings in vocab (if any).
-    logits = logits[:, :vocab_size]
-    return logits
 
 
 def _prune_hidden_states(

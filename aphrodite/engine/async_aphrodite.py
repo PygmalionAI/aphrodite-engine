@@ -3,6 +3,7 @@ import time
 from functools import partial
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Type, Union
 
+from aphrodite.lora.request import LoRARequest
 from aphrodite.common.config import ModelConfig
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
@@ -197,6 +198,50 @@ class _AsyncAphrodite(AphroditeEngine):
 
         return self._process_model_outputs(output, scheduler_outputs) + ignored
 
+    async def encode_request_async(
+        self,
+        request_id: str,  # pylint: disable=unused-argument
+        prompt: Optional[str],
+        prompt_token_ids: Optional[List[int]] = None,
+        lora_request: Optional[LoRARequest] = None,
+    ):
+        if prompt_token_ids is None:
+            assert prompt is not None
+            prompt_token_ids = await self.tokenizer.encode_async(
+                request_id=request_id,
+                prompt=prompt,
+                lora_request=lora_request)
+        return prompt_token_ids
+
+    async def add_request_async(
+        self,
+        request_id: str,
+        prompt: Optional[str],
+        sampling_params: SamplingParams,
+        prompt_token_ids: Optional[List[int]] = None,
+        arrival_time: Optional[float] = None,
+        lora_request: Optional[LoRARequest] = None,
+    ) -> None:
+        if lora_request is not None and not self.lora_config:
+            raise ValueError(f"Got lora_request {lora_request} but LoRA is "
+                             "not enabled!")
+        if arrival_time is None:
+            arrival_time = time.time()
+        prompt_token_ids = await self.encode_request_async(
+            request_id=request_id,
+            prompt=prompt,
+            prompt_token_ids=prompt_token_ids,
+            lora_request=lora_request)
+
+        return self.add_request(
+            request_id,
+            prompt=prompt,
+            prompt_token_ids=prompt_token_ids,
+            sampling_params=sampling_params,
+            arrival_time=arrival_time,
+            lora_request=lora_request,
+        )
+
     async def _run_workers_async(
         self,
         method: str,
@@ -328,7 +373,7 @@ class AsyncAphrodite:
             if self.engine_use_ray:
                 await self.engine.add_request.remote(**new_request)
             else:
-                self.engine.add_request(**new_request)
+                await self.engine.add_request_async(**new_request)
 
         if finished_requests:
             await self._engine_abort(finished_requests)
@@ -367,6 +412,7 @@ class AsyncAphrodite:
         sampling_params: SamplingParams,
         prompt_token_ids: Optional[List[int]] = None,
         arrival_time: Optional[float] = None,
+        lora_request: Optional[LoRARequest] = None,
     ) -> AsyncStream:
         if self.log_requests:
             shortened_prompt = prompt
@@ -380,7 +426,8 @@ class AsyncAphrodite:
             logger.info(f"Received request {request_id}: "
                         f"prompt: {shortened_prompt!r}, "
                         f"sampling params: {sampling_params}, "
-                        f"prompt token ids: {shortened_token_ids}.")
+                        f"prompt token ids: {shortened_token_ids}, "
+                        f"lora_request: {lora_request}.")
 
         if not self.is_running:
             if self.start_engine_loop:
@@ -392,12 +439,21 @@ class AsyncAphrodite:
                     "error that caused the background loop to stop "
                     "(AsyncEngineDeadError).")
 
+        if arrival_time is None:
+            arrival_time = time.time()
+        prompt_token_ids = await self.engine.encode_request_async(
+            request_id=request_id,
+            prompt=prompt,
+            prompt_token_ids=prompt_token_ids,
+            lora_request=lora_request)
+
         stream = self._request_tracker.add_request(
             request_id,
             prompt=prompt,
             sampling_params=sampling_params,
             prompt_token_ids=prompt_token_ids,
-            arrival_time=arrival_time)
+            arrival_time=arrival_time,
+            lora_request=lora_request)
 
         return stream
 
@@ -406,7 +462,8 @@ class AsyncAphrodite:
             prompt: Optional[str],
             sampling_params: SamplingParams,
             request_id: str,
-            prompt_token_ids: Optional[List[int]] = None) -> RequestOutput:
+            prompt_token_ids: Optional[List[int]] = None,
+            lora_request: Optional[LoRARequest] = None) -> RequestOutput:
         """Generate outputs for a request.
 
         Generate outputs for a request. This method is a coroutine. It adds the
@@ -420,6 +477,7 @@ class AsyncAphrodite:
             request_id: The unique id of the request.
             prompt_token_ids: The token IDs of the prompt. If None, we
                 use the tokenizer to convert the prompts to token IDs.
+            lora_request: LoRA request to use for generation, if any.
 
         Yields:
             The output `RequestOutput` objects from the AphroditeEngine for the
@@ -429,11 +487,14 @@ class AsyncAphrodite:
         arrival_time = time.time()
 
         try:
-            stream = await self.add_request(request_id,
-                                            prompt,
-                                            sampling_params,
-                                            prompt_token_ids=prompt_token_ids,
-                                            arrival_time=arrival_time)
+            stream = await self.add_request(
+                request_id,
+                prompt,
+                sampling_params,
+                prompt_token_ids=prompt_token_ids,
+                arrival_time=arrival_time,
+                lora_request=lora_request,
+            )
 
             async for request_output in stream:
                 yield request_output

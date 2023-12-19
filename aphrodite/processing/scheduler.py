@@ -1,10 +1,11 @@
 import enum
 import time
-from typing import Dict, Iterable, List, Optional, Tuple, Union
+from typing import Dict, Iterable, List, Optional, Tuple, Union, Set
 
-from aphrodite.common.config import CacheConfig, SchedulerConfig
+from aphrodite.common.config import CacheConfig, LoRAConfig, SchedulerConfig
 from aphrodite.processing.block_manager import AllocStatus, BlockSpaceManager
 from aphrodite.processing.policy import PolicyFactory
+from aphrodite.lora.request import LoRARequest
 from aphrodite.common.logger import init_logger
 from aphrodite.common.sequence import (Sequence, SequenceData, SequenceGroup,
                                        SequenceGroupMetadata, SequenceStatus)
@@ -36,6 +37,7 @@ class SchedulerOutputs:
         blocks_to_swap_out: Dict[int, int],
         blocks_to_copy: Dict[int, List[int]],
         ignored_seq_groups: List[SequenceGroup],
+        lora_enabled: bool = False,
     ) -> None:
         self.scheduled_seq_groups = scheduled_seq_groups
         self.prompt_run = prompt_run
@@ -46,11 +48,22 @@ class SchedulerOutputs:
         # Swap in and swap out should never happen at the same time.
         assert not (blocks_to_swap_in and blocks_to_swap_out)
         self.ignored_seq_groups = ignored_seq_groups
+        if lora_enabled:
+            self.num_loras = len(set(self.lora_requests))
+            self._sort_by_lora_ids()
 
     def is_empty(self) -> bool:
         # NOTE: We do not consider the ignored sequence groups.
         return (not self.scheduled_seq_groups and not self.blocks_to_swap_in
                 and not self.blocks_to_swap_out and not self.blocks_to_copy)
+
+    def _sort_by_lora_ids(self) -> bool:
+        self.scheduled_seq_groups.sort(key=lambda g: (
+            g.lora_request.lora_int_id if g.lora_request else 0, g.request_id))
+
+    @property
+    def lora_requests(self) -> Set[LoRARequest]:
+        return {g.lora_request for g in self.scheduled_seq_groups}
 
 
 class Scheduler:
@@ -59,9 +72,14 @@ class Scheduler:
         self,
         scheduler_config: SchedulerConfig,
         cache_config: CacheConfig,
+        lora_config: Optional[LoRAConfig],
     ) -> None:
         self.scheduler_config = scheduler_config
         self.cache_config = cache_config
+        # Note for LoRA scheduling: the current policy is extremely
+        # simple and NOT fair. It can lead to starvation of some
+        # LoRAs. This should be improved in the future.
+        self.lora_config = lora_config
 
         self.prompt_limit = min(self.scheduler_config.max_model_len,
                                 self.scheduler_config.max_num_batched_tokens)
@@ -82,6 +100,10 @@ class Scheduler:
         self.running: List[SequenceGroup] = []
         # Sequence groups in the SWAPPED state.
         self.swapped: List[SequenceGroup] = []
+
+    @property
+    def lora_enabled(self) -> bool:
+        return bool(self.lora_config)
 
     def add_seq_group(self, seq_group: SequenceGroup) -> None:
         # Add sequence groups to the waiting queue.
@@ -131,13 +153,16 @@ class Scheduler:
             # requests in the generation phase.
             num_curr_seqs = sum(seq_group.get_max_num_running_seqs()
                                 for seq_group in self.running)
+            curr_loras = set(
+                seq_group.lora_int_id
+                for seq_group in self.running) if self.lora_enabled else None
             seq_lens: List[int] = []
 
             # Optimization: We do not sort the waiting queue since the preempted
             # sequence groups are added to the front and the new sequence groups
             # are added to the back.
-            while self.waiting:
-                seq_group = self.waiting[0]
+            waiting_indices_to_remove = []
+            for i, seq_group in enumerate(self.waiting):
 
                 assert seq_group.num_seqs() == 1, (
                     "Waiting sequence group should have only one prompt "
@@ -150,7 +175,7 @@ class Scheduler:
                     for seq in seq_group.get_seqs():
                         seq.status = SequenceStatus.FINISHED_IGNORED
                     ignored_seq_groups.append(seq_group)
-                    self.waiting.pop(0)
+                    waiting_indices_to_remove.append(i)
                     continue
 
                 # If the sequence group cannot be allocated, stop.
@@ -164,8 +189,17 @@ class Scheduler:
                     for seq in seq_group.get_seqs():
                         seq.status = SequenceStatus.FINISHED_IGNORED
                     ignored_seq_groups.append(seq_group)
-                    self.waiting.pop(0)
+                    waiting_indices_to_remove.append(i)
                     continue
+
+                lora_int_id = 0
+                if self.lora_enabled:
+                    lora_int_id = seq_group.lora_int_id
+                    if lora_int_id > 0 and lora_int_id not in curr_loras and len(
+                            curr_loras) >= self.lora_config.max_loras:
+                        # We don't have a space for another LoRA, so
+                        # we ignore this request for now.
+                        continue
 
                 # If the number of batched tokens exceeds the limit, stop.
                 new_seq_lens = seq_lens + [num_prompt_tokens]
@@ -186,11 +220,16 @@ class Scheduler:
                     break
                 seq_lens = new_seq_lens
 
-                seq_group = self.waiting.pop(0)
+                waiting_indices_to_remove.append(i)
+                if lora_int_id > 0:
+                    curr_loras.add(lora_int_id)
                 self._allocate(seq_group)
                 self.running.append(seq_group)
                 num_curr_seqs += num_new_seqs
                 scheduled.append(seq_group)
+
+            for i in reversed(waiting_indices_to_remove):
+                self.waiting.pop(i)
 
             if scheduled or ignored_seq_groups:
                 scheduler_outputs = SchedulerOutputs(
@@ -202,6 +241,7 @@ class Scheduler:
                     blocks_to_swap_out=blocks_to_swap_out,
                     blocks_to_copy=blocks_to_copy,
                     ignored_seq_groups=ignored_seq_groups,
+                    lora_enabled=self.lora_enabled,
                 )
                 return scheduler_outputs
 
@@ -239,9 +279,22 @@ class Scheduler:
         if not preempted:
             num_curr_seqs = sum(seq_group.get_max_num_running_seqs()
                                 for seq_group in self.running)
+            curr_loras = set(
+                seq_group.lora_int_id
+                for seq_group in self.running) if self.lora_enabled else None
 
-            while self.swapped:
-                seq_group = self.swapped[0]
+            swapped_indices_to_remove = []
+
+            for i, seq_group in enumerate(self.swapped):
+                lora_int_id = 0
+                if self.lora_enabled:
+                    lora_int_id = seq_group.lora_int_id
+                    if lora_int_id > 0 and lora_int_id not in curr_loras and len(
+                            curr_loras) >= self.lora_config.max_loras:
+                        # We don't have a space for another LoRA, so
+                        # we ignore this request for now.
+                        continue
+
                 # If the sequence group cannot be swapped in, stop.
                 if not self.block_manager.can_swap_in(seq_group):
                     break
@@ -253,12 +306,17 @@ class Scheduler:
                         self.scheduler_config.max_num_seqs):
                     break
 
-                seq_group = self.swapped.pop(0)
+                swapped_indices_to_remove.append(i)
+                if lora_int_id > 0:
+                    curr_loras.add(lora_int_id)
                 self._swap_in(seq_group, blocks_to_swap_in)
                 self._append_slot(seq_group, blocks_to_copy)
                 num_curr_seqs += num_new_seqs
                 self.running.append(seq_group)
 
+            for i in reversed(swapped_indices_to_remove):
+                self.swapped.pop(i)
+                
         # Each sequence in the generation phase only takes one token slot.
         # Therefore, the number of batched tokens is equal to the number of
         # sequences in the RUNNING state.
@@ -274,6 +332,7 @@ class Scheduler:
             blocks_to_swap_out=blocks_to_swap_out,
             blocks_to_copy=blocks_to_copy,
             ignored_seq_groups=[],
+            lora_enabled=self.lora_enabled,
         )
         return scheduler_outputs
 
@@ -302,6 +361,7 @@ class Scheduler:
                 sampling_params=seq_group.sampling_params,
                 block_tables=block_tables,
                 persistent_data=persistent_data,
+                lora_request=seq_group.lora_request,
             )
             seq_group_metadata_list.append(seq_group_metadata)
         return seq_group_metadata_list, scheduler_outputs

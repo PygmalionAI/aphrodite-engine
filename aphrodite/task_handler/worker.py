@@ -1,18 +1,20 @@
 """A GPU worker class."""
+import gc
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple, Set, Optional
 
 import torch
 import torch.distributed
 
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
-                                     SchedulerConfig)
+                                     SchedulerConfig, LoRAConfig)
 from aphrodite.modeling import set_random_seed
 from aphrodite.modeling.megatron.parallel_state import (
     initialize_model_parallel)
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 from aphrodite.task_handler.cache_engine import CacheEngine
 from aphrodite.task_handler.model_runner import ModelRunner
+from aphrodite.lora.request import LoRARequest
 
 
 class Worker:
@@ -30,21 +32,24 @@ class Worker:
         scheduler_config: SchedulerConfig,
         rank: Optional[int] = None,
         distributed_init_method: Optional[str] = None,
+        lora_config: Optional[LoRAConfig] = None,
     ) -> None:
         self.model_config = model_config
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
         self.rank = rank
         self.distributed_init_method = distributed_init_method
+        self.lora_config = lora_config
 
         self.model_runner = ModelRunner(model_config, parallel_config,
-                                        scheduler_config)
+                                        scheduler_config, lora_config)
         # Uninitialized cache engine. Will be initialized by
         # self.init_cache_engine().
         self.cache_config = None
         self.cache_engine = None
         self.cache_events = None
         self.gpu_cache = None
+        self.lora_manager = None
 
     def init_model(self) -> None:
         # torch.distributed.all_reduce does not free the input tensor until
@@ -106,6 +111,8 @@ class Worker:
         num_cpu_blocks = int(cpu_swap_space // cache_block_size)
         num_gpu_blocks = max(num_gpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
+        self.model_runner.remove_all_loras()
+        gc.collect()
         torch.cuda.empty_cache()
 
         return num_gpu_blocks, num_cpu_blocks
@@ -160,6 +167,15 @@ class Worker:
         output = self.model_runner.execute_model(seq_group_metadata_list,
                                                  self.gpu_cache)
         return output
+
+    def add_lora(self, lora_request: LoRARequest) -> bool:
+        return self.model_runner.add_lora(lora_request)
+
+    def remove_lora(self, lora_id: int) -> bool:
+        return self.model_runner.remove_lora(lora_id)
+
+    def list_loras(self) -> Set[int]:
+        return self.model_runner.list_loras()
 
 
 def _init_distributed_environment(
