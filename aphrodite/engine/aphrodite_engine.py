@@ -155,8 +155,7 @@ class AphroditeEngine:
             max_num_seqs=self.scheduler_config.max_num_seqs,
             max_input_length=None,
             tokenizer_mode=self.model_config.tokenizer_mode,
-            trust_remote_code=self.model_config.trust_remote_code,
-            revision=self.model_config.tokenizer_revision)
+            trust_remote_code=self.model_config.trust_remote_code)
         init_kwargs.update(kwargs)
         self.tokenizer: MultiLoRATokenizer = MultiLoRATokenizer(
             self.model_config.tokenizer, **init_kwargs)
