@@ -63,7 +63,7 @@ class Sampler(nn.Module):
         hidden_states = _prune_hidden_states(hidden_states, sampling_metadata)
 
         # Get the logits for the next tokens.
-        logits = _get_logits(hidden_states, embedding, embedding_bias)
+        logits = self._get_logits(hidden_states, embedding, embedding_bias)
 
         output_metadata = OutputMetadata()
 
