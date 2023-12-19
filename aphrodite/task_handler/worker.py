@@ -8,6 +8,7 @@ import torch.distributed
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig)
 from aphrodite.modeling import set_random_seed
+from aphrodite.modeling.megatron import cupy_utils
 from aphrodite.modeling.megatron.parallel_state import (
     initialize_model_parallel)
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
@@ -46,7 +47,7 @@ class Worker:
         self.cache_events = None
         self.gpu_cache = None
 
-    def init_model(self):
+    def init_model(self, cupy_port: Optional[int] = None):
         # torch.distributed.all_reduce does not free the input tensor until
         # the synchronization point. This causes the memory usage to grow
         # as the number of all_reduce calls increases. This env var disables
@@ -69,7 +70,7 @@ class Worker:
 
         # Initialize the distributed environment.
         _init_distributed_environment(self.parallel_config, self.rank,
-                                      self.distributed_init_method)
+                                      cupy_port, self.distributed_init_method)
 
         # Initialize the model.
         set_random_seed(self.model_config.seed)
@@ -165,6 +166,7 @@ class Worker:
 def _init_distributed_environment(
     parallel_config: ParallelConfig,
     rank: int,
+    cupy_port: Optional[int],
     distributed_init_method: Optional[str] = None,
 ) -> None:
     """Initialize the distributed environment."""
@@ -187,8 +189,28 @@ def _init_distributed_environment(
             init_method=distributed_init_method,
         )
 
-    # A small all_reduce warmup
-    torch.distributed.all_reduce(torch.zeros(1).cuda())
+    if cupy_utils.is_initialized():
+        cupy_world_size = cupy_utils.get_world_size()
+        if cupy_world_size != parallel_config.world_size:
+            raise RuntimeError(
+                "cupy.distributed is already initialized but the cupy world "
+                "size does not match parallel_config.world_size "
+                f"({cupy_world_size} vs. {parallel_config.world_size}).")
+    elif parallel_config.world_size > 1:
+        # NOTE: We don't initialize CuPy process group when world size
+        # is 1.
+        # TODO: Support multi-node connection.
+        cupy_utils.init_process_group(
+            world_size=parallel_config.world_size,
+            rank=rank,
+            host="localhost",
+            port=cupy_port,
+        )
+
+    if parallel_config.world_size > 1:
+        # A small all_reduce for warmup.
+        torch.distributed.all_reduce(torch.zeros(1).cuda())
+        cupy_utils.all_reduce(torch.zeros(1).cuda())
 
     initialize_model_parallel(parallel_config.tensor_parallel_size,
                               parallel_config.pipeline_parallel_size)
