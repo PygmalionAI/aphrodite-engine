@@ -7,7 +7,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import PretrainedConfig
-import numpy as np
 
 from aphrodite.common.config import LoRAConfig
 from aphrodite.lora.punica import add_lora, add_lora_slice, bgmv
@@ -307,9 +306,6 @@ class LoRAVocabParallelEmbedding(LoRALayer):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         added_tokens_mask = x > self.base_layer.org_vocab_size - 1
-        # Ensure that the slice of self.embeddings_indices[1] has the same number of elements as x
-        assert np.prod(self.embeddings_indices[1][:self.indices_len[3]].shape) == np.prod(x.shape)
-
         indices = self.embeddings_indices[1][:self.indices_len[3]].view_as(x)
         full_lora_a_embeddings = F.embedding(
             x + indices,
