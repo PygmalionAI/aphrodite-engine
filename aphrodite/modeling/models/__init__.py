@@ -19,6 +19,8 @@ _MODELS = {
     "MixtralForCausalLM": ("mixtral", "MixtralForCausalLM"),
     "PhiForCausalLM": ("phi_1_5", "PhiForCausalLM"),
     "YiForCausalLM": ("yi", "YiForCausalLM"),
+    "LlavaLlamaForCausalLM": ("llava", "LlavaForConditionalGeneration"),
+    "LlavaMistralForCausalLM": ("bakllava", "BakLlavaForConditionalGeneration"),
 }
 
 # Models not supported by ROCm
