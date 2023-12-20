@@ -81,7 +81,9 @@ class AphroditeEngine:
             f"DataType = {model_config.dtype}\n"
             f"Download Directory = {model_config.download_dir!r}\n"
             f"Model Load Format = {model_config.load_format}\n"
-            f"Number of GPUs = {parallel_config.tensor_parallel_size}\n"
+            f"Tensor Parallel Size = {parallel_config.tensor_parallel_size}\n"
+            "Pipeline Parallel Size = "
+            f"{parallel_config.pipeline_parallel_size}\n"
             f"Quantization Format = {model_config.quantization}\n"
             f"Sampler Seed = {model_config.seed}\n"
             f"Context Length = {model_config.max_model_len}\n"
@@ -585,7 +587,9 @@ class AphroditeEngine:
             blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,
             blocks_to_swap_out=scheduler_outputs.blocks_to_swap_out,
             blocks_to_copy=scheduler_outputs.blocks_to_copy,
+            get_all_outputs=True,
         )
+        output = output[-1] # the last pipeline stage returns the output
 
         return self._process_model_outputs(output, scheduler_outputs)
 
