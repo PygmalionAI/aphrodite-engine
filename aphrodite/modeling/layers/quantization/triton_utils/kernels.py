@@ -191,6 +191,7 @@ class QuantLinearInferenceOnlyFunction(torch.autograd.Function):
 
     @staticmethod
     @custom_fwd(cast_inputs=torch.float16)
+    # pylint: disable=unused-argument
     def forward(ctx, input, qweight, scales, qzeros, g_idx, bits, maxq):
         output = quant_matmul_248(input, qweight, scales, qzeros, g_idx, bits,
                                   maxq)
