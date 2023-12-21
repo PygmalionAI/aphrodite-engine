@@ -7,8 +7,8 @@ from torch.nn.parameter import Parameter
 
 from aphrodite._C import ops
 from aphrodite.common.logger import init_logger
-from aphrodite.modeling.layers.linear import (
-    LinearMethodBase, set_weight_attrs)
+from aphrodite.modeling.layers.linear import (LinearMethodBase,
+                                              set_weight_attrs)
 from aphrodite.modeling.layers.quantization.base_config import QuantizationConfig
 from aphrodite.modeling.layers.quantization.triton_utils.kernels import (
     QuantLinearInferenceOnlyFunction)
@@ -65,15 +65,17 @@ class GPTQConfig(QuantizationConfig):
         #or CUDA kernel will be used for quantization precision other than
         # 4 bits.
         if self.weight_bits in [2, 4, 8]:
-            self.kernel_type = GPTQLinearKernel.TRITON if self.use_triton else GPTQLinearKernel.CUDA
+            self.kernel_type = (GPTQLinearKernel.TRITON
+                                if self.use_triton else GPTQLinearKernel.CUDA)
             if self.weight_bits == 4:
-                self.kernel_type = GPTQLinearKernel.EXLLAMA if not disable_exllama else self.kernel_type
+                self.kernel_type = (GPTQLinearKernel.EXLLAMA if
+                                    not disable_exllama else self.kernel_type)
         elif self.weight_bits == 3:
             self.kernel_type = GPTQLinearKernel.CUDA
         else:
             raise ValueError(
-                "Currently, only 2, 3, 4, and 8-bit weight quantization is supported for"
-                f"GPTQ, but got {self.weight_bits} bits.")
+                "Currently, only 2, 3, 4, and 8-bit weight quantization is "
+                f"supported for GPTQ, but got {self.weight_bits} bits.")
         self.maxq = 2**self.weight_bits - 1
 
     def __repr__(self) -> str:
@@ -170,6 +172,7 @@ class GPTQLinearMethod(LinearMethodBase):
             self.autogptq_cuda_available = _autogptq_cuda_available
 
             self.autogptq_cuda = autogptq_cuda_256
+            # pylint: disable=line-too-long
             if input_size_per_partition % 256 != 0 or output_size_per_partition % 256 != 0:
                 self.autogptq_cuda = autogptq_cuda_64
             if input_size_per_partition % 64 != 0 or output_size_per_partition % 64 != 0:
@@ -182,6 +185,7 @@ class GPTQLinearMethod(LinearMethodBase):
         exllama_state = ExllamaState.UNINITIALIZED
         scale_and_zero_size = input_size // group_size
         scale_and_zero_input_dim = None
+        # pylint: disable=line-too-long
         if input_size != input_size_per_partition and self.quant_config.group_size != -1:
             # For act-order models, we cannot use Exllama for row parallel layer
             if self.quant_config.desc_act:
@@ -259,7 +263,9 @@ class GPTQLinearMethod(LinearMethodBase):
             "qzeros": qzeros,
             "scales": scales,
             "exllama_state":
-            exllama_state,  # when use_triton is true or quantization precision is not equal to 4-bit, exllama state will be ignored
+            exllama_state,  # when use_triton is true or quantization precision
+            # is not equal to 4-bit, exllama state will be
+            # ignored
         }
 
     def apply_weights(self,
@@ -295,6 +301,7 @@ class GPTQLinearMethod(LinearMethodBase):
             output = output.half().reshape(out_shape)
         else:
             self.kernel_switch_threshold = 128
+            # pylint: disable=line-too-long
             if reshaped_x.device.type == "cuda" and self.autogptq_cuda_available and (
                     self.kernel_switch_threshold == 0
                     or reshaped_x.shape[0] < self.kernel_switch_threshold):
@@ -413,4 +420,3 @@ class GPTQLinearMethod(LinearMethodBase):
         if bias is not None:
             output = output + bias
         return output.reshape(out_shape)
-    

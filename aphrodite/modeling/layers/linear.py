@@ -275,11 +275,13 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                 current_shard_offset += output_size
             packed_dim = getattr(param, "packed_dim", None)
             for shard_id, shard_offset, shard_size in shard_offsets:
-                # If quantized, we need to adjust the offset and size to account
-                # for the packing.
+                # If quantized, we need to adjust the offset and size to
+                # account for the packing.
                 if packed_dim == output_dim:
-                    shard_size = shard_size // param.storage_bits_size * param.weight_bits
-                    shard_offset = shard_offset // param.storage_bits_size * param.weight_bits
+                    shard_size = (shard_size // param.storage_bits_size *
+                                  param.weight_bits)
+                    shard_offset = (shard_offset // param.storage_bits_size *
+                                    param.weight_bits)
                 loaded_weight_shard = loaded_weight.narrow(
                     output_dim, shard_offset, shard_size)
                 self.weight_loader(param, loaded_weight_shard, shard_id)
@@ -295,8 +297,10 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
             # for the packing.
             packed_dim = getattr(param, "packed_dim", None)
             if packed_dim == output_dim:
-                shard_size = shard_size // param.storage_bits_size * param.weight_bits
-                shard_offset = shard_offset // param.storage_bits_size * param.weight_bits
+                shard_size = (shard_size // param.storage_bits_size *
+                              param.weight_bits)
+                shard_offset = (shard_offset // param.storage_bits_size *
+                                param.weight_bits)
             param_data = param_data.narrow(output_dim, shard_offset,
                                            shard_size)
             start_idx = tp_rank * shard_size
@@ -395,8 +399,10 @@ class QKVParallelLinear(ColumnParallelLinear):
                 # If quantized, we need to adjust the offset and size to account
                 # for the packing.
                 if packed_dim == output_dim:
-                    shard_size = shard_size // param.storage_bits_size * param.weight_bits
-                    shard_offset = shard_offset // param.storage_bits_size * param.weight_bits
+                    shard_size = (shard_size // param.storage_bits_size *
+                                  param.weight_bits)
+                    shard_offset = (shard_offset // param.storage_bits_size *
+                                    param.weight_bits)
                 loaded_weight_shard = loaded_weight.narrow(
                     output_dim, shard_offset, shard_size)
                 self.weight_loader(param, loaded_weight_shard, shard_id)
@@ -419,8 +425,10 @@ class QKVParallelLinear(ColumnParallelLinear):
             # for the packing.
             packed_dim = getattr(param, "packed_dim", None)
             if packed_dim == output_dim:
-                shard_size = shard_size // param.storage_bits_size * param.weight_bits
-                shard_offset = shard_offset // param.storage_bits_size * param.weight_bits
+                shard_size = (shard_size // param.storage_bits_size *
+                              param.weight_bits)
+                shard_offset = (shard_offset // param.storage_bits_size *
+                                param.weight_bits)
             param_data = param_data.narrow(output_dim, shard_offset,
                                            shard_size)
             shard_id = tp_rank // self.num_kv_head_replicas

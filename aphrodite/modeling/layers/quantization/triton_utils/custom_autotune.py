@@ -6,10 +6,8 @@ from typing import Dict
 import triton
 
 #  code based https://github.com/fpgaminer/GPTQ-triton
-"""
-Mostly the same as the autotuner in Triton, but with a few changes
-like using 40 runs instead of 100.
-"""
+# Mostly the same as the autotuner in Triton, but with a few changes
+# like using 40 runs instead of 100.
 
 
 class CustomizedTritonAutoTuner(triton.KernelInterface):
@@ -73,11 +71,13 @@ class CustomizedTritonAutoTuner(triton.KernelInterface):
                         **current)
 
         try:
-            # In testings using only 40 reps seems to be close enough and it appears to be what PyTorch uses
-            # PyTorch also sets fast_flush to True, but I didn't see any speedup so I'll leave the default
-            return triton.testing.do_bench(kernel_call,
-                                           quantiles=(0.5, 0.2, 0.8),
-                                           rep=40)
+            # In testings using only 40 reps seems to be close enough and
+            # it appears to be what PyTorch uses. PyTorch also sets fast_flush
+            # to True, but I didn't see any speedup so I'll leave the default
+            return triton.testing.do_bench(  # pylint: disable=unexpected-keyword-arg,line-too-long
+                kernel_call,
+                quantiles=(0.5, 0.2, 0.8),
+                rep=40)
         except triton.OutOfResources:
             return (float('inf'), float('inf'), float('inf'))
 
@@ -86,9 +86,11 @@ class CustomizedTritonAutoTuner(triton.KernelInterface):
         if len(self.configs) > 1:
             key = tuple(args[i] for i in self.key_idx)
 
-            # This reduces the amount of autotuning by rounding the keys to the nearest power of two
-            # In my testing this gives decent results, and greatly reduces the amount of tuning required
+            # This reduces the amount of autotuning by rounding the keys to
+            # the nearest power of two. In my testing this gives decent
+            # results, and greatly reduces the amount of tuning required
             if self.nearest_power_of_two:
+                # pylint: disable=consider-using-generator
                 key = tuple([2**int(math.log2(x) + 0.5) for x in key])
 
             if key not in self.cache:
@@ -166,7 +168,8 @@ def autotune(configs,
 
 def matmul248_kernel_config_pruner(configs, nargs):
     """
-    The main purpose of this function is to shrink BLOCK_SIZE_* when the corresponding dimension is smaller.
+    The main purpose of this function is to shrink BLOCK_SIZE_* when the
+    corresponding dimension is smaller.
     """
     m = max(2**int(math.ceil(math.log2(nargs['M']))), 16)
     n = max(2**int(math.ceil(math.log2(nargs['N']))), 16)
@@ -196,4 +199,4 @@ def matmul248_kernel_config_pruner(configs, nargs):
             num_warps=config.num_warps)
 
 
-__all__ = ["autotune"]
+__all__ = ['autotune']

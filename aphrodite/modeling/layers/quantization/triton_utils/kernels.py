@@ -10,10 +10,11 @@ from . import custom_autotune
 logger = getLogger(__name__)
 
 # Adapted from:
-# https://github.com/fpgaminer/GPTQ-triton 
+# https://github.com/fpgaminer/GPTQ-triton
 # https://github.com/PanQiWei/AutoGPTQ
 
 
+# pylint: disable=invalid-name
 @custom_autotune.autotune(
     configs=[
         triton.Config(
@@ -79,6 +80,8 @@ logger = getLogger(__name__)
         'top_k': None,
     },
 )
+# pylint: enable=invalid-name
+
 @triton.jit
 def quant_matmul_248_kernel(
         a_ptr, b_ptr, c_ptr, scales_ptr, zeros_ptr, g_ptr, M, N, K, bits, maxq,
@@ -120,7 +123,8 @@ def quant_matmul_248_kernel(
         (offs_k[:, None] // infearure_per_bits) * stride_bk +
         offs_bn[None, :] * stride_bn)  # (BLOCK_SIZE_K, BLOCK_SIZE_N)
     g_ptrs = g_ptr + offs_k
-    # shifter is used to extract the N bits of each element in the 32-bit word from B
+    # shifter is used to extract the N bits of each element in the 32-bit
+    # word from B
     scales_ptrs = scales_ptr + offs_bn[None, :]
     zeros_ptrs = zeros_ptr + (offs_bn[None, :] // infearure_per_bits)
 
@@ -131,7 +135,8 @@ def quant_matmul_248_kernel(
     for _ in range(0, num_pid_k):
         g_idx = tl.load(g_ptrs)
 
-        # Fetch scales and zeros; these are per-outfeature and thus reused in the inner loop
+        # Fetch scales and zeros; these are per-outfeature and thus reused in
+        # the inner loop
         scales = tl.load(
             scales_ptrs +
             g_idx[:, None] * stride_scales)  # (BLOCK_SIZE_K, BLOCK_SIZE_N,)
@@ -161,6 +166,7 @@ def quant_matmul_248_kernel(
     tl.store(c_ptrs, accumulator, mask=c_mask)
 
 
+# pylint: disable=redefined-builtin
 def quant_matmul_248(input, qweight, scales, qzeros, g_idx, bits, maxq):
     with torch.cuda.device(input.device):
         output = torch.empty((input.shape[0], qweight.shape[1]),
@@ -180,6 +186,7 @@ def quant_matmul_248(input, qweight, scales, qzeros, g_idx, bits, maxq):
         return output
 
 
+# pylint: disable=redefined-builtin
 class QuantLinearInferenceOnlyFunction(torch.autograd.Function):
 
     @staticmethod
@@ -188,4 +195,3 @@ class QuantLinearInferenceOnlyFunction(torch.autograd.Function):
         output = quant_matmul_248(input, qweight, scales, qzeros, g_idx, bits,
                                   maxq)
         return output
-    
