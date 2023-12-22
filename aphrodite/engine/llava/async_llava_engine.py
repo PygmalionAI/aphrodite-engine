@@ -8,7 +8,7 @@ from aphrodite.engine.async_aphrodite import (
     AsyncAphrodite, _AsyncAphrodite, AsyncStream, AsyncEngineDeadError)
 from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
-from aphrodite.commom.sampling_params import SamplingParams
+from aphrodite.common.sampling_params import SamplingParams
 
 logger = init_logger(__name__)
 
