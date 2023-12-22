@@ -72,3 +72,66 @@ void reshape_and_cache_cpu_impl(
 }
 }; // namespace
 
+void copy_blocks_cpu(
+    std::vector<torch::Tensor> &key_caches,
+    std::vector<torch::Tensor> &value_caches,
+    const std::map<int64_t, std::vector<int64_t>> &block_mapping) {
+  int num_layers = key_caches.size();
+  TORCH_CHECK(num_layers == value_caches.size());
+  if (num_layers == 0) {
+    return;
+  }
+
+  std::vector<std::pair<int64_t, int64_t>> mapping_pairs;
+  mapping_pairs.reserve(block_mapping.size());
+  for (const auto &pair : block_mapping) {
+    for (const auto &dst : pair.second) {
+      mapping_pairs.emplace_back(pair.first, dst);
+    }
+  }
+
+  const int element_num_per_block = key_caches[0][0].numel();
+  APHRODITE_DISPATCH_FLOATING_TYPES(
+      key_caches[0][0].scalar_type(), "copy_blocks_cpu_impl", [&] {
+        CPU_KERNEL_GUARD_IN(copy_blocks_cpu_impl)
+        copy_blocks_cpu_impl<scalar_t>(
+            key_caches, value_caches, mapping_pairs, element_num_per_block, num_layers);
+        CPU_KERNEL_GUARD_OUT(copy_blocks_cpu_impl)
+      });
+
+}
+
+void reshape_and_cache_cpu(
+  torch::Tensor &key, torch::Tensor &value,
+  torch::Tensor &key_cache, torch::Tensor &value_cache,
+  torch::Tensor &slot_mapping) {
+    int num_tokens = key.size(0);
+    int num_heads = key.size(1);
+    int head_size = key.size(2);
+    int block_size = key_cache.size(3);
+    int x = key_cache.size(4);
+    int key_stride = key.stride(0);
+    int value_stride = value.stride(0);
+
+    APHRODITE_DISPATCH_FLOATING_TYPES(
+      key.scalar_type(), "reshape_and_cache_cpu_impl", [&] {
+        CPU_KERNEL_GUARD_IN(reshape_and_cache_cpu_impl)
+        reshape_and_cache_cpu_impl<scalar_t>(
+          key.data_ptr<scalar_t>(), value.data_ptr<scalar_t>(),
+          key_cache.data_ptr<scalar_t>(), value_cache.data_ptr<scalar_t>(),
+          slot_mapping.data_ptr<int64_t>(), num_tokens, key_stride, value_stride,
+          num_heads, head_size, block_size, x);
+        CPU_KERNEL_GUARD_OUT(reshape_and_cache_cpu_impl)
+      });
+}
+
+void swap_blocks_cpu(torch::Tensor &src, torch::Tensor &dst,
+                     const std::map<int64_t, int64_t> &block_mapping) {
+  TORCH_CHECK(false, "swap_blocks is unsupported on CPU.")
+}
+
+void gather_cached_kv_cpu(torch::Tensor &key, torch::Tensor &value,
+                          torch::Tensor &key_cache, torch::Tensor &value_cache,
+                          torch::Tensor &slot_mapping) {
+  TORCH_CHECK(false, "gather_cached_kv is unsupported on CPU.")
+}
