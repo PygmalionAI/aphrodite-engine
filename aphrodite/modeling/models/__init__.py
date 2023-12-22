@@ -19,8 +19,7 @@ _MODELS = {
     "MixtralForCausalLM": ("mixtral", "MixtralForCausalLM"),
     "PhiForCausalLM": ("phi_1_5", "PhiForCausalLM"),
     "YiForCausalLM": ("yi", "YiForCausalLM"),
-    "LlavaForConditionalGeneration":
-    ("llava", "LlavaForConditionalGeneration"),
+    "LlavaLlamaForCausalLM": ("llava", "LlavaForConditionalGeneration"),
     "LlavaMistralForCausalLM": ("bakllava", "BakLlavaForConditionalGeneration"),
 }
 
