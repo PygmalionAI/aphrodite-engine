@@ -7,7 +7,7 @@ from PIL import Image
 import numpy as np
 
 from aphrodite.engine.ray_tools import ray
-from aphrodite.engine.llm_engine import AphroditeEngine
+from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (Sequence, SequenceGroup)
