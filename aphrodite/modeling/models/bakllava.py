@@ -9,7 +9,7 @@ from transformers.activations import ACT2FN
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.linear import LinearMethodBase
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.modeling.weight_utils import (default_weight_loader,
+from aphrodite.modeling.hf_downloader import (default_weight_loader,
                                               hf_model_weights_iterator)
 from aphrodite.modeling.models.mistral import MistralForCausalLM
 from aphrodite.common.sequence import SamplerOutput
