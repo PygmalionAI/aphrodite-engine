@@ -13,6 +13,7 @@ from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (SamplerOutput, SequenceData,
                                        SequenceGroupMetadata)
 from aphrodite.modeling.sampling_metadata import PersistentMetadata
+from aphrodite.common.utils import in_wsl
 
 logger = init_logger(__name__)
 
@@ -41,6 +42,7 @@ class ModelRunner:
                                if model_config is not None else None)
         self.model = None
         self.block_size = None  # Set after initial profiling.
+        self.device = self.model_config.device
 
         self.graph_runners: Dict[int, CUDAGraphRunner] = {}
         self.graph_memory_pool = None  # Set during graph capture.
@@ -55,6 +57,8 @@ class ModelRunner:
         # The shape of the cached block table will be
         # (max batch size to capture, max context len to capture / block size).
         self.graph_block_tables = None  # Set after initial profiling.
+        # cache in_wsl result
+        self.in_wsl = in_wsl()
 
     def load_model(self) -> None:
         self.model = get_model(self.model_config)
@@ -124,15 +128,18 @@ class ModelRunner:
         input_tokens = _make_tensor_with_pad(input_tokens,
                                              max_prompt_len,
                                              pad=0,
-                                             dtype=torch.long)
+                                             dtype=torch.long,
+                                             device=self.device)
         input_positions = _make_tensor_with_pad(input_positions,
                                                 max_prompt_len,
                                                 pad=0,
-                                                dtype=torch.long)
+                                                dtype=torch.long,
+                                                device=self.device)
         slot_mapping = _make_tensor_with_pad(slot_mapping,
                                              max_prompt_len,
                                              pad=_PAD_SLOT_ID,
-                                             dtype=torch.long)
+                                             dtype=torch.long,
+                                             device=self.device)
 
         input_metadata = InputMetadata(
             prompt_lens=prompt_lens,
@@ -205,25 +212,32 @@ class ModelRunner:
 
         # When using CUDA graph, we don't need to make the tensors on the GPU
         # because they will be eventually copied to the designated GPU buffer.
-        device = "cpu" if use_captured_graph else "cuda"
+        device = "cpu" if use_captured_graph or str(
+            self.device) == "cpu" else "cuda"
+        pin_memory = use_captured_graph and not self.in_wsl and str(
+            self.device) != "cpu"
         input_tokens = _make_tensor_with_pad(input_tokens,
                                              max_len=1,
                                              pad=0,
                                              dtype=torch.long,
-                                             device=device)
+                                             device=device,
+                                             pin_memory=pin_memory)
         input_positions = _make_tensor_with_pad(input_positions,
                                                 max_len=1,
                                                 pad=0,
                                                 dtype=torch.long,
-                                                device=device)
+                                                device=device,
+                                                pin_memory=pin_memory)
         slot_mapping = _make_tensor_with_pad(slot_mapping,
                                              max_len=1,
                                              pad=_PAD_SLOT_ID,
                                              dtype=torch.long,
-                                             device=device)
+                                             device=device,
+                                             pin_memory=pin_memory)
         context_lens = torch.tensor(context_lens,
                                     dtype=torch.int,
-                                    device=device)
+                                    device=device,
+                                    pin_memory=pin_memory)
 
         if use_captured_graph:
             # The shape of graph_block_tables is
@@ -232,13 +246,14 @@ class ModelRunner:
             for i, block_table in enumerate(block_tables):
                 if block_table:
                     input_block_tables[i, :len(block_table)] = block_table
-            block_tables = torch.from_numpy(input_block_tables).to(device)
+            block_tables = torch.tensor(input_block_tables, device=device)
         else:
             block_tables = _make_tensor_with_pad(
                 block_tables,
                 max_len=max_context_len,
                 pad=0,
                 dtype=torch.int,
+                device=device,
             )
 
         input_metadata = InputMetadata(
@@ -300,11 +315,15 @@ class ModelRunner:
                               categorized_sample_indices_start_idx + num_seqs))
                 categorized_sample_indices_start_idx += num_seqs
 
-        selected_token_indices = torch.tensor(selected_token_indices,
-                                              dtype=torch.long,
-                                              device="cuda")
+        selected_token_indices = _async_h2d(selected_token_indices,
+                                            dtype=torch.long,
+                                            pin_memory=not self.in_wsl,
+                                            device=self.device)
         categorized_sample_indices = {
-            t: torch.tensor(seq_ids, dtype=torch.int, device="cuda")
+            t: _async_h2d(seq_ids,
+                          dtype=torch.int,
+                          pin_memory=not self.in_wsl,
+                          device=self.device)
             for t, seq_ids in categorized_sample_indices.items()
         }
 
@@ -342,8 +361,6 @@ class ModelRunner:
         else:
             inputs = self._prepare_decode(seq_group_metadata_list)
             input_tokens, input_positions, input_metadata = inputs
-        sampling_metadata = self._prepare_sample(seq_group_metadata_list,
-                                                 input_metadata.prompt_lens)
 
         # Execute the model.
         if input_metadata.use_cuda_graph:
@@ -357,6 +374,9 @@ class ModelRunner:
             kv_caches=kv_caches,
             input_metadata=input_metadata,
         )
+
+        sampling_metadata = self._prepare_sample(seq_group_metadata_list,
+                                                 input_metadata.prompt_lens)
 
         # Sample the next token.
         output = self.model.sample(
@@ -512,11 +532,14 @@ class CUDAGraphRunner:
         del kv_caches
 
         # Copy the input tensors to the input buffers.
-        self.input_buffers["input_ids"].copy_(input_ids)
-        self.input_buffers["positions"].copy_(positions)
-        self.input_buffers["slot_mapping"].copy_(input_metadata.slot_mapping)
-        self.input_buffers["context_lens"].copy_(input_metadata.context_lens)
-        self.input_buffers["block_tables"].copy_(input_metadata.block_tables)
+        self.input_buffers["input_ids"].copy_(input_ids, non_blocking=True)
+        self.input_buffers["positions"].copy_(positions, non_blocking=True)
+        self.input_buffers["slot_mapping"].copy_(input_metadata.slot_mapping,
+                                                 non_blocking=True)
+        self.input_buffers["context_lens"].copy_(input_metadata.context_lens,
+                                                 non_blocking=True)
+        self.input_buffers["block_tables"].copy_(input_metadata.block_tables,
+                                                 non_blocking=True)
 
         # Run the graph.
         self.graph.replay()
@@ -539,9 +562,13 @@ def _make_tensor_with_pad(
     pad: int,
     dtype: torch.dtype,
     device: Union[str, torch.device] = "cuda",
+    pin_memory: bool = False,
 ) -> torch.Tensor:
     padded_x = [_pad_to_max(x_i, max_len, pad) for x_i in x]
-    return torch.tensor(padded_x, dtype=dtype, device=device)
+    return torch.tensor(padded_x,
+                        dtype=dtype,
+                        device=device,
+                        pin_memory=pin_memory and str(device) == "cpu")
 
 
 def _get_graph_batch_size(batch_size: int) -> int:
@@ -550,4 +577,11 @@ def _get_graph_batch_size(batch_size: int) -> int:
     elif batch_size <= 4:
         return 4
     else:
-        return (batch_size + 7) // 8 * 8
+        return (batch_size + 7) // 8 * 
+        
+def _async_h2d(data: list, dtype, pin_memory, device):
+    if str(device) == "cpu":
+        return torch.tensor(data, dtype=dtype)
+    return torch.tensor(data, dtype=dtype,
+                        pin_memory=pin_memory).to(device="cuda",
+                                                  non_blocking=True)
