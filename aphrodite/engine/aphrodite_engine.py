@@ -222,10 +222,19 @@ class AphroditeEngine:
         logger.info(f"# GPU blocks: {num_gpu_blocks}, "
                     f"# CPU blocks: {num_cpu_blocks}")
 
-        if num_gpu_blocks <= 0:
+        if num_gpu_blocks < 0:
             raise ValueError("No available memory for the cache blocks. "
-                             "Try increasing `gpu_memory_utilization` when "
-                             "initializing the engine.")
+                             "Try increasing `gpu_memory_utilization` or "
+                             " `swap_space` when initializing the engine.")
+        max_seq_len = self.cache_config.block_size * num_gpu_blocks
+        if self.model_config.max_model_len > max_seq_len and str(
+                self.model_config.device) != 'cpu':
+            raise ValueError(
+                f"The model's max seq len ({self.model_config.max_model_len}) "
+                "is larger than the maximum number of tokens that can be "
+                f"stored in KV cache ({max_seq_len}). Try increasing "
+                "`gpu_memory_utilization` or decreasing `max_model_len` when "
+                "initializing the engine.")
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
@@ -627,10 +636,13 @@ class AphroditeEngine:
             avg_generation_throughput = 0.0
 
         total_num_gpu_blocks = self.cache_config.num_gpu_blocks
-        num_free_gpu_blocks = (
-            self.scheduler.block_manager.get_num_free_gpu_blocks())
-        num_used_gpu_blocks = total_num_gpu_blocks - num_free_gpu_blocks
-        gpu_cache_usage = num_used_gpu_blocks / total_num_gpu_blocks
+        if total_num_gpu_blocks > 0:
+            num_free_gpu_blocks = (
+                self.scheduler.block_manager.get_num_free_gpu_blocks())
+            num_used_gpu_blocks = total_num_gpu_blocks - num_free_gpu_blocks
+            gpu_cache_usage = num_used_gpu_blocks / total_num_gpu_blocks
+        else:
+            gpu_cache_usage = 0.0
 
         total_num_cpu_blocks = self.cache_config.num_cpu_blocks
         if total_num_cpu_blocks > 0:
