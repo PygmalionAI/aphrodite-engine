@@ -20,6 +20,7 @@ def _set_default_torch_dtype(dtype: torch.dtype):
     yield
     torch.set_default_dtype(old_dtype)
 
+
 @contextlib.contextmanager
 def _set_default_torch_device(device: torch.device):
     """Sets the default torch device to the given device."""
@@ -27,6 +28,7 @@ def _set_default_torch_device(device: torch.device):
     torch.set_default_device(device)
     yield
     torch.set_default_device(old_device)
+
 
 def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
     architectures = getattr(config, "architectures", [])

@@ -42,6 +42,7 @@ class CacheEngine:
 
         # Initialize the cache.
         self.gpu_cache = self.allocate_gpu_cache()
+        # pylint: disable=no-value-for-parameter
         self.cpu_cache = self.allocate_cpu_cache()
 
         if not cache_config.cpu_only:

@@ -138,6 +138,7 @@ class PagedAttention(nn.Module):
                     input_metadata.attn_bias = attn_bias
                 else:
                     assert not self.cpu_only
+                    # pylint: disable=too-many-function-args
                     input_metadata.attn_bias = _make_alibi_bias(
                         self.alibi_slopes, self.num_kv_heads, batch_size,
                         seq_len, query.dtype)
@@ -153,23 +154,25 @@ class PagedAttention(nn.Module):
                 key = key.unflatten(0, (batch_size, seq_len))
                 value = value.unflatten(0, (batch_size, seq_len))
 
-            out = xops.memory_efficient_attention_forward(
+            out = (xops.memory_efficient_attention_forward(
                 query,
                 key,
                 value,
                 attn_bias=input_metadata.attn_bias,
                 p=0.0,
                 scale=self.scale,
-                op=xops.fmha.MemoryEfficientAttentionFlashAttentionOp[0] if
-                (is_hip()) else None,
-            ) if not self.cpu_only else torch.nn.functional.scaled_dot_product_attention(
-                query.movedim(1,
-                              query.dim() -
-                              2), key.movedim(1,
-                                              query.dim() - 2),
-                value.movedim(1,
-                              value.dim() - 2), input_metadata.attn_bias,
-                0.0).movedim(query.dim() - 2, 1).contiguous()
+                op=xops.fmha.MemoryEfficientAttentionFlashAttentionOp[0]
+                if is_hip() else None,
+            ) if not self.cpu_only else
+                   torch.nn.functional.scaled_dot_product_attention(
+                       query.movedim(1,
+                                     query.dim() -
+                                     2), key.movedim(1,
+                                                     query.dim() - 2),
+                       value.movedim(1,
+                                     value.dim() -
+                                     2), input_metadata.attn_bias,
+                       0.0).movedim(query.dim() - 2, 1).contiguous())
             output = out.view_as(query)
         else:
             # Decoding run.

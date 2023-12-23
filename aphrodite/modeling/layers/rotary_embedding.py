@@ -82,7 +82,7 @@ class RotaryEmbedding(nn.Module):
         inv_freq = 1.0 / (base**(torch.arange(
             0, self.rotary_dim, 2, dtype=torch.float) / self.rotary_dim))
         return inv_freq
-    
+
     def _compute_cos_sin_cache(self) -> torch.Tensor:
         """Compute the cos and sin cache."""
         inv_freq = self._compute_inv_freq(self.base)

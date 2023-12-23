@@ -48,9 +48,9 @@ class Worker:
         self.cpu_cache = None
 
     def init_model(self) -> None:
-        if self.model_config.device == torch.device('cpu'):
+        if self.model_config.device == torch.device("cpu"):
             self.rank = 0
-            self.device = torch.device('cpu')
+            self.device = torch.device("cpu")
             # Initialize the distributed environment.
             _init_distributed_environment(self.parallel_config, self.rank,
                                           self.distributed_init_method)
@@ -94,7 +94,7 @@ class Worker:
         gpu_memory_utilization: float,
         cpu_swap_space: int,
     ) -> Tuple[int, int]:
-        if self.model_config.device == torch.device('cpu'):
+        if self.model_config.device == torch.device("cpu"):
             cache_block_size = CacheEngine.get_cache_block_size(
                 block_size, self.model_config, self.parallel_config)
             num_gpu_blocks = 0
@@ -178,7 +178,7 @@ class Worker:
 
         output = self.model_runner.execute_model(
             seq_group_metadata_list, self.cpu_cache if self.model_config.device
-            == torch.device('cpu') else self.gpu_cache)
+            == torch.device("cpu") else self.gpu_cache)
         return output
 
 
@@ -201,7 +201,7 @@ def _init_distributed_environment(
             "is not already initialized")
     else:
         backend = "nccl"
-        if parallel_config.device == torch.device('cpu'):
+        if parallel_config.device == torch.device("cpu"):
             backend = "gloo"
         torch.distributed.init_process_group(
             backend=backend,
