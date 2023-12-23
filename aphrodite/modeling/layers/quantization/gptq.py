@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite._C import ops as quantization_ops
+from aphrodite._C import ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.modeling.layers.quantization.base_config import (
@@ -14,6 +14,7 @@ from aphrodite.modeling.layers.quantization.base_config import (
 
 class GPTQConfig(QuantizationConfig):
     """Config class for GPTQ.
+
     Reference: https://arxiv.org/abs/2210.17323
     """
 
@@ -78,6 +79,7 @@ class ExllamaState(Enum):
 
 class GPTQLinearMethod(LinearMethodBase):
     """Linear method for GPTQ.
+
     Args:
         quant_config: The GPTQ quantization config.
     """
@@ -104,6 +106,7 @@ class GPTQLinearMethod(LinearMethodBase):
                 "The output size is not aligned with the quantized "
                 "weight shape. This can be caused by too large "
                 "tensor parallel size.")
+
         if self.quant_config.group_size != -1:
             group_size = self.quant_config.group_size
         else:
@@ -111,8 +114,7 @@ class GPTQLinearMethod(LinearMethodBase):
         exllama_state = ExllamaState.UNINITIALIZED
         scale_and_zero_size = input_size // group_size
         scale_and_zero_input_dim = None
-        if (input_size != input_size_per_partition
-                and self.quant_config.group_size != -1):
+        if input_size != input_size_per_partition and self.quant_config.group_size != -1:
             # For act-order models, we cannot use Exllama for row parallel layer
             if self.quant_config.desc_act:
                 exllama_state = ExllamaState.UNUSED
@@ -203,11 +205,12 @@ class GPTQLinearMethod(LinearMethodBase):
             else:
                 weights["g_idx"] = torch.empty((1, 1), device="meta")
             weights["exllama_state"] = ExllamaState.READY
-            quantization_ops.gptq_shuffle(weights["qweight"], weights["g_idx"])
-        output = quantization_ops.gptq_gemm(
-            reshaped_x, weights["qweight"], weights["qzeros"],
-            weights["scales"], weights["g_idx"],
-            weights["exllama_state"] == ExllamaState.READY)
+            ops.gptq_shuffle(weights["qweight"], weights["g_idx"])
+        output = ops.gptq_gemm(reshaped_x, weights["qweight"],
+                               weights["qzeros"], weights["scales"],
+                               weights["g_idx"],
+                               weights["exllama_state"] == ExllamaState.READY)
         if bias is not None:
             output = output + bias
         return output.reshape(out_shape)
+    
