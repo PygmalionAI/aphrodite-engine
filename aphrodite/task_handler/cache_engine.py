@@ -43,7 +43,7 @@ class CacheEngine:
         # Initialize the cache.
         self.gpu_cache = self.allocate_gpu_cache()
         # pylint: disable=no-value-for-parameter
-        self.cpu_cache = self.allocate_cpu_cache()
+        self.cpu_cache = self.allocate_cpu_cache(device=torch.device("cpu"))
 
         if not cache_config.cpu_only:
             # Initialize the stream for caching operations.
