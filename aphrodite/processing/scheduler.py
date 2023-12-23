@@ -74,7 +74,7 @@ class Scheduler:
             num_gpu_blocks=self.cache_config.num_gpu_blocks,
             num_cpu_blocks=self.cache_config.num_cpu_blocks,
             sliding_window=self.cache_config.sliding_window,
-            cpu_only==cache_config.cpu_only)
+            cpu_only=cache_config.cpu_only)
 
         # TODO: Use deque instead of list for better performance.
         # Sequence groups in the WAITING state.

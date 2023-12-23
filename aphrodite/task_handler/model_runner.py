@@ -577,7 +577,7 @@ def _get_graph_batch_size(batch_size: int) -> int:
     elif batch_size <= 4:
         return 4
     else:
-        return (batch_size + 7) // 8 * 
+        return (batch_size + 7) // 8 * 8
         
 def _async_h2d(data: list, dtype, pin_memory, device):
     if str(device) == "cpu":
