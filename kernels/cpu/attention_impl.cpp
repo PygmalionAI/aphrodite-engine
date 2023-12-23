@@ -385,14 +385,14 @@ void paged_attention_v1_cpu(torch::Tensor &out, torch::Tensor &query,
                             int max_context_len,
                             const c10::optional<torch::Tensor> &alibi_slopes) {
   APHRODITE_DISPATCH_FLOATING_TYPES(query.scalar_type(), "paged_attention_v1_impl",
-                                    [&] {
-                                      CPU_KERNEL_GUARD_IN(paged_attention_v1_impl)
-                                      CALL_KERNEL_LAUNCHER_BLOCK_SIZE(scalar_t)
-                                      CPU_KERNEL_GUARD_OUT(paged_attention_v1_impl)
-                                    });
+                               [&] {
+                                 CPU_KERNEL_GUARD_IN(paged_attention_v1_impl)
+                                 CALL_KERNEL_LAUNCHER_BLOCK_SIZE(scalar_t);
+                                 CPU_KERNEL_GUARD_OUT(paged_attention_v1_impl)
+                               });
 }
 
-void paged_attention_v2_cpu(torch::Tensor &out, torch::Tensor &exp_sum,
+void paged_attention_v2_cpu(torch::Tensor &out, torch::Tensor &exp_sums,
                             torch::Tensor &max_logits, torch::Tensor &tmp_out,
                             torch::Tensor &query, torch::Tensor &key_cache,
                             torch::Tensor &value_cache, int num_kv_heads,

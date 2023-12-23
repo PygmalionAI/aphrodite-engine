@@ -1,12 +1,19 @@
+
 #include "cpu_types.hpp"
 
 namespace {
 template <typename scalar_t>
 void rotary_embedding_impl(
-    const int64_t *__restrict__ positions,  // [batch_size, seq_len] or [num_tokens]
-    scalar_t *__restrict__ query,           // [batch_size, seq_len, num_heads, head_size] or [num_tokens, num_heads, head_size] 
-    scalar_t *__restrict__ key,             // [batch_size, seq_len, num_kv_heads, head_size] or [num_tokens, num_kv_heads, head_size]
-    const scalar_t *__restrict__ cos_sin_cache, // [max_position, 2, rot_dim // 2]
+    const int64_t
+        *__restrict__ positions, // [batch_size, seq_len] or [num_tokens]
+    scalar_t
+        *__restrict__ query, /// [batch_size, seq_len, num_heads, head_size] or
+                             /// [num_tokens, num_heads, head_size]
+    scalar_t
+        *__restrict__ key, // [batch_size, seq_len, num_kv_heads, head_size] or
+                           // [num_tokens, num_kv_heads, head_size]
+    const scalar_t
+        *__restrict__ cos_sin_cache, // [max_position, 2, rot_dim // 2]
     const int rot_dim, const int query_stride, const int key_stride,
     const int num_heads, const int num_kv_heads, const int head_size,
     const int num_tokens) {
@@ -48,7 +55,7 @@ void rotary_embedding_impl(
         auto out1 = fp32_q_x * fp32_cos - fp32_q_y * fp32_sin;
         scalar_vec_t(out1.reg).save(query + out_x);
 
-        auto out2 = fp32_q_x * fp32_sin + fp32_q_y * fp32_cos;
+        auto out2 = fp32_q_y * fp32_cos + fp32_q_x * fp32_sin;
         scalar_vec_t(out2.reg).save(query + out_y);
       }
     }
@@ -78,8 +85,7 @@ void rotary_embedding_impl(
 
         auto out1 = fp32_k_x * fp32_cos - fp32_k_y * fp32_sin;
         scalar_vec_t(out1.reg).save(key + out_x);
-
-        auto out2 = fp32_k_x * fp32_sin + fp32_k_y * fp32_cos;
+        auto out2 = fp32_k_y * fp32_cos + fp32_k_x * fp32_sin;
         scalar_vec_t(out2.reg).save(key + out_y);
       }
     }
@@ -98,12 +104,14 @@ void rotary_embedding_cpu(torch::Tensor &positions, torch::Tensor &query,
   int key_stride = key.stride(-2);
   int query_stride = query.stride(-2);
 
-  APHRODITE_DISPATCH_FLOATING_TYPES(query.scalar_type(), "rotary_embedding_impl", [&] {
-    CPU_KERNEL_GUARD_IN(rotary_embedding_impl)
-    rotary_embedding_impl(positions.data_ptr<int64_t>(), query.data_ptr<scalar_t>(),
-                          key.data_ptr<scalar_t>(), cos_sin_cache.data_ptr<scalar_t>(),
-                          rot_dim, query_stride, key_stride, num_heads, num_kv_heads,
-                          head_size, num_tokens);
-    CPU_KERNEL_GUARD_OUT(rotary_embedding_impl)
-  });
+  APHRODITE_DISPATCH_FLOATING_TYPES(
+      query.scalar_type(), "rotary_embedding_impl", [&] {
+        CPU_KERNEL_GUARD_IN(rotary_embedding_impl)
+        rotary_embedding_impl(
+            positions.data_ptr<int64_t>(), query.data_ptr<scalar_t>(),
+            key.data_ptr<scalar_t>(), cos_sin_cache.data_ptr<scalar_t>(),
+            rot_dim, query_stride, key_stride, num_heads, num_kv_heads,
+            head_size, num_tokens);
+        CPU_KERNEL_GUARD_OUT(rotary_embedding_impl)
+      });
 }

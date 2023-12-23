@@ -110,12 +110,12 @@ static v4sf exp_ps(v4sf x) {
 namespace vec_op {
 
 // FIXME: FP16 is not fully supported in Torch-CPU
-#define VLLM_DISPATCH_CASE_FLOATING_TYPES(...)                                 \
+#define APHRODITE_DISPATCH_CASE_FLOATING_TYPES(...)                                 \
   AT_DISPATCH_CASE(at::ScalarType::Float, __VA_ARGS__)                         \
   AT_DISPATCH_CASE(at::ScalarType::BFloat16, __VA_ARGS__)
 
-#define VLLM_DISPATCH_FLOATING_TYPES(TYPE, NAME, ...)                          \
-  AT_DISPATCH_SWITCH(TYPE, NAME, VLLM_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__))
+#define APHRODITE_DISPATCH_FLOATING_TYPES(TYPE, NAME, ...)                          \
+  AT_DISPATCH_SWITCH(TYPE, NAME, APHRODITE_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__))
 
 #ifndef CPU_OP_GUARD
 #define CPU_KERNEL_GUARD_IN(NAME)
@@ -395,12 +395,12 @@ inline void storeFP32ToT<c10::BFloat16>(float v, c10::BFloat16 *ptr) {
 namespace vec_op {
 
 // FIXME: FP16 is not fully supported in Torch-CPU
-#define VLLM_DISPATCH_CASE_FLOATING_TYPES(...)                                 \
+#define APHRODITE_DISPATCH_CASE_FLOATING_TYPES(...)                                 \
   AT_DISPATCH_CASE(at::ScalarType::Float, __VA_ARGS__)                         \
   AT_DISPATCH_CASE(at::ScalarType::BFloat16, __VA_ARGS__)
 
-#define VLLM_DISPATCH_FLOATING_TYPES(TYPE, NAME, ...)                          \
-  AT_DISPATCH_SWITCH(TYPE, NAME, VLLM_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__))
+#define APHRODITE_DISPATCH_FLOATING_TYPES(TYPE, NAME, ...)                          \
+  AT_DISPATCH_SWITCH(TYPE, NAME, APHRODITE_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__))
 
 #ifndef CPU_OP_GUARD
 #define CPU_KERNEL_GUARD_IN(NAME)

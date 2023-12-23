@@ -18,7 +18,7 @@ void rms_norm_cpu_impl(scalar_t *__restrict__ out,
     for (int j = 0; j < hidden_size; j += VEC_ELEM_NUM) {
       scalar_vec_t x(input_p + j);
       vec_op::FP32Vec8 fp32_x(x.reg);
-      variance += variance + fp32_x * fp32_x;
+      variance = variance + fp32_x * fp32_x;
     }
 
     float s_variance =
@@ -59,12 +59,12 @@ void fused_add_rms_norm_cpu_impl(scalar_t *__restrict__ input,
       scalar_vec_t x(input_p + j);
       scalar_vec_t res(residual_p + j);
       vec_op::FP32Vec8 fp32_x(x.reg);
-      vec_op::FP32Vec8 fp32_r(res.reg);
+      vec_op::FP32Vec8 fp32_res(res.reg);
 
       fp32_x = fp32_x + fp32_res;
-      variance += variance + fp32_x * fp32_x;
+      variance = variance + fp32_x * fp32_x;
       scalar_vec_t out(fp32_x.reg);
-      out.save(input_p + j);
+      out.save(residual_p + j);
     }
 
     float s_variance =
@@ -72,10 +72,10 @@ void fused_add_rms_norm_cpu_impl(scalar_t *__restrict__ input,
     vec_op::FP32Vec8 fp32_s_variance(s_variance);
 
     for (int j = 0; j < hidden_size; j += VEC_ELEM_NUM) {
-      scalar_vec_t x(weight + j);
-      scalar_vec_t w(residual_p + j);
+      scalar_vec_t w(weight + j);
+      scalar_vec_t res(residual_p + j);
 
-      vec_op::FP32Vec8 fp32_w(x.reg);
+      vec_op::FP32Vec8 fp32_w(w.reg);
       vec_op::FP32Vec8 fp32_res(res.reg);
 
       vec_op::FP32Vec8 fp32_out = fp32_res * fp32_s_variance * fp32_w;
@@ -106,16 +106,12 @@ void fused_add_rms_norm_cpu(torch::Tensor &input, torch::Tensor &residual,
   int hidden_size = input.size(-1);
   int num_tokens = input.numel() / hidden_size;
 
-  APHRODITE_DISPATCH_FLOATING_TYPES(input.scalar_type(),
-                                     "fused_add_rms_norm_cpu_impl", [&] {
-                                       CPU_KERNEL_GUARD_IN(
-                                           fused_add_rms_norm_cpu_impl)
-                                       fused_add_rms_norm_cpu_impl(
-                                           input.data_ptr<scalar_t>(),
-                                           residual.data_ptr<scalar_t>(),
-                                           weight.data_ptr<scalar_t>(), epsilon,
-                                           num_tokens, hidden_size);
-                                       CPU_KERNEL_GUARD_OUT(
-                                           fused_add_rms_norm_cpu_impl)
-                                     });
+  APHRODITE_DISPATCH_FLOATING_TYPES(
+      input.scalar_type(), "fused_add_rms_norm_cpu_impl", [&] {
+        CPU_KERNEL_GUARD_IN(fused_add_rms_norm_cpu_impl)
+        fused_add_rms_norm_cpu_impl(
+            input.data_ptr<scalar_t>(), residual.data_ptr<scalar_t>(),
+            weight.data_ptr<scalar_t>(), epsilon, num_tokens, hidden_size);
+        CPU_KERNEL_GUARD_OUT(fused_add_rms_norm_cpu_impl)
+      });
 }
