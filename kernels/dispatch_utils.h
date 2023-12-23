@@ -14,24 +14,31 @@
     TYPE, NAME, APHRODITE_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__))
 
 #ifdef APHRODITE_BUILD_CPU_ONLY
-#define APHRODITE_DISPATCH_TO_CUDA_CASE(BASENAME, ...)
+#define APHRODITE_DISPATCH_TO_CUDA_CASE(BASENAME, ...) 
 #else
-#define APHRODITE_DISPATCH_TO_CUDA_CASE(BASENAME, ...)                  \
-  case c10::DeviceType::CUDA: {                                         \
-    return BASENAME##_cpu(__VA_ARGS__);                                 \
+#define APHRODITE_DISPATCH_TO_CUDA_CASE(BASENAME, ...)                              \
+  case c10::DeviceType::CUDA: {                                                \
+    return BASENAME(__VA_ARGS__);                                              \
+  }
+#endif
+
+#ifdef APHRODITE_BUILD_CPU_OPS
+#define APHRODITE_DISPATCH_TO_CPU_CASE(BASENAME, ...)                               \
+  case c10::DeviceType::CPU: {                                                 \
+    return BASENAME##_cpu(__VA_ARGS__);                                        \
   }
 #else
 #define APHRODITE_DISPATCH_TO_CPU_CASE(BASENAME, ...)
 #endif
 
-#define APHRODITE_DISPATCH_DEVICES(DEVICE, BASENAME, ...)               \
-  {                                                                     \
-    auto device = DEVICE.type();                                        \
-    switch (device) {                                                   \
-      APHRODITE_DISPATCH_TO_CPU_CASE(BASENAME, __VA_ARGS__)             \
-      APHRODITE_DISPATCH_TO_CUDA_CASE(BASENAME, __VA_ARGS__)            \
-    default:                                                            \
-      AT_ERROR('"', #BASENAME, "\" " not implemented for '"',           \
-               c10::DeviceTypeName(device), "'");                       \
-    }                                                                   \
-}
+#define APHRODITE_DISPATCH_DEVICES(DEVICE, BASENAME, ...)                           \
+  {                                                                            \
+    auto device = DEVICE.type();                                               \
+    switch (device) {                                                          \
+      APHRODITE_DISPATCH_TO_CUDA_CASE(BASENAME, __VA_ARGS__)                        \
+      APHRODITE_DISPATCH_TO_CPU_CASE(BASENAME, __VA_ARGS__)                         \
+    default:                                                                   \
+      AT_ERROR('"', #BASENAME, "\" not implemented for '",                      \
+               c10::DeviceTypeName(device), "'");                              \
+    }                                                                          \
+  }
