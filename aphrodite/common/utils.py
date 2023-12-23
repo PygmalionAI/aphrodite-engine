@@ -8,7 +8,6 @@ import uuid
 import psutil
 import torch
 
-from aphrodite._C import cuda_utils
 
 
 class Device(enum.Enum):
@@ -35,6 +34,7 @@ def is_hip() -> bool:
 
 
 def get_max_shared_memory_bytes(gpu: int = 0) -> int:
+    from aphrodite._C import cuda_utils
     """Returns the maximum shared memory per thread block in bytes."""
     # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html
     # pylint: disable=invalid-name
