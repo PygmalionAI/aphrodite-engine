@@ -130,4 +130,3 @@ class SqueezeLLMLinearMethod(LinearMethodBase):
         if bias is not None:
             out = out + bias
         return out.reshape(out_shape)
-    
