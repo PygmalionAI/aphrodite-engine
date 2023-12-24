@@ -84,7 +84,8 @@ class AphroditeEngine:
             f"Number of GPUs = {parallel_config.tensor_parallel_size}\n"
             f"Quantization Format = {model_config.quantization}\n"
             f"Sampler Seed = {model_config.seed}\n"
-            f"Context Length = {model_config.max_model_len}")
+            f"Context Length = {model_config.max_model_len}\n"
+            f"Enforce Eager Mode = {model_config.enforce_eager}")
         # TODO: Print more configs in debug mode.
 
         self.model_config = model_config
@@ -231,6 +232,9 @@ class AphroditeEngine:
 
         # Initialize the cache.
         self._run_workers("init_cache_engine", cache_config=self.cache_config)
+        # Warm up the model. This includes capturing the model into CUDA graph
+        # if enforce_eager is set to False.
+        self._run_workers("warm_up_model")
 
     @classmethod
     def from_engine_args(cls, engine_args: EngineArgs) -> "AphroditeEngine":

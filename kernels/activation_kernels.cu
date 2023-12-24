@@ -68,7 +68,7 @@ __global__ void activation_kernel(
 // Launch element-wise activation kernel.
 #define LAUNCH_ACTIVATION_KERNEL(KERNEL)                                                  \
   int d = input.size(-1);                                                                 \
-  int64_t num_tokens = input.numel() / d;                                                     \
+  int64_t num_tokens = input.numel() / d;                                                 \
   dim3 grid(num_tokens);                                                                  \
   dim3 block(std::min(d, 1024));                                                          \
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();                           \
