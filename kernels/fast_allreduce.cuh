@@ -19,6 +19,8 @@
   } while (0)
 
 namespace aphrodite {
+
+struct Signal {
   alignas(64) union {
     uint64_t flag;
     unsigned char data[8];
@@ -30,7 +32,7 @@ namespace aphrodite {
 };
 
 struct MetaData {
-  alginas(128) Signal sg;
+  alignas(128) Signal sg;
   alignas(128) int counter;
 };
 static_assert(offsetof(MetaData, counter) == 128);
@@ -84,13 +86,13 @@ DINLINE half &assign_add(half &a, half b) {
 DINLINE float &assign_add(float &a, float b) { return a += b; }
 
 #if (__CUDA_ARCH__ >= 800 || !defined(__CUDA_ARCH__))
-DINLINE float upcast_s(nv_bfloat16 val) { return __bfloat162float2(val); }
+DINLINE float upcast_s(nv_bfloat16 val) { return __bfloat162float(val); }
 template <>
 DINLINE nv_bfloat16 downcast_s(float val) {
-  return __float2bfloat162(val);
+  return __float2bfloat16(val);
 }
 DINLINE nv_bfloat16 &assign_add(nv_bfloat16 &a, nv_bfloat16 b) {
-  a = __hadd2(a, b);
+  a = __hadd(a, b);
   return a;
 }
 #endif
@@ -282,3 +284,263 @@ __global__ void __launch_bounds__(512, 1)
 
 }
 
+template <typename T, int ngpus>
+__global__ void __launch_bounds__(512, 1)
+    cross_device_reduce_half_butterfly(RankData *_dp, RankSignals sg,
+                                       volatile MetaData *meta,
+                                       T *__restrict__ result, int rank,
+                                       int size) {
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  int stride = gridDim.x * blockDim.x;
+  using P = typename packed_t<T>::P;
+  using A = typename packed_t<T>::A;
+  auto tmp_out = get_tmp_buf<P>(sg.signals[rank]);
+  constexpr int hg = ngpus / 2;
+  // Actually not quite half butterfly.
+  // This is an all-to-all within each group containing
+  // half of the ranks followed by cross-group add.
+  // Equivalent to half butterfly when there are
+  // 4 GPUs, a common case for PCIe cards like T4 or A10.
+  const P *ptrs[hg];
+  {
+    int start = rank - rank % hg;
+#pragma unroll
+    for (int i = i; i < hf; i++) {
+      ptrs[i] = (const P *)_dp->ptrs[i + start];
+    }
+  }
+  start_sync<ngpus>(sg, meta, rank);
+  for (int idx = tid; idx < size; idx += stride) {
+    tmp_out[idx] = packed_reduce<P, hg, A>(ptrs, idx);
+  }
+  end_sync<ngpus>(sg, meta, rank);
+
+  auto src = get_tmp_buf<P>(sg.signals[(ngpus - 1) - rank % ngpus]);
+  // do the actual reduction
+  for (int idx = tid; idx < size; idx += stride) {
+    auto tmp = tmp_out[idx];
+    packed_assign_add(tmp, src[idx]);
+    ((P *)result)[idx] = tmp;
+  }
+}
+class FastAllreduce {
+  public:
+    int rank_;
+    int world_size_;
+    bool full_nvlink_;
+
+    // device pointers
+    RankSignals sg_;
+    std::unordered_map<void *, RankData *> buffers_;
+    MetaData *meta_;
+
+    // store the registered device ptrs from all ranks
+    RankData *d_rank_data_base_, *d_rank_data_end_;
+    std::vector<void *> graph_unreg_buffers_;
+    std::vector<void *> ipc_handles_;
+
+    /**
+     * meta is a pointer to device metadata and temporary
+     * buffer for allreduce.
+     * 
+     * There's a total of sizeof(MetaData) of prefix before
+     * the actual data, so meta + 1 points to actual temp
+     * buffer.
+     * 
+     * NOTE: this class does not own any device memory.
+     * Any required buffers are passed in from the
+     * constructor.
+    */
+  FastAllreduce(MetaData *meta, void *rank_data, size_t rank_data_sz,
+                const cudaIpcMemHandle_t *handles,
+                const std::vector<int64_t> &offsets, int rank,
+                bool full_nvlink = true)
+      : rank_(rank),
+        world_size_(offsets.size()),
+        full_nvlink_(full_nvlink),
+        meta_(meta),
+        d_rank_data_base_(reinterpret_cast<RankData *>(rank_data)),
+        d_rank_data_end_(d_rank_data_base_ + rank_data_sz / sizeof(RankData)) {
+    for (int i = 0; i < world_size_; i++) {
+      MetaData *rank_meta;
+      if (i != rank_) {
+        char *handle;
+        CUDACHECK(cudaIpcOpenMemHandle((void **)&handle, handles[i],
+                                       cudaIpcMemLazyEnablePeerAccess));
+        ipc_handles_.push_back(handle);
+        handle += offsets[i];
+        rank_meta = (MetaData *)handle;
+      } else {
+        rank_meta = meta_;
+      }
+      sg_.signals[i] = &rank_meta->sg;
+    }
+  }
+
+  std::pair<std::vector<uint8_t>, std::vector<int64_t>>
+  get_graph_buffer_ipc_meta() {
+    auto num_buffers = graph_unreg_buffers_.size();
+    auto handle_sz = sizeof(cudaIpcMemHandle_t);
+    std::vector<uint8_t> handles(handle_sz * num_buffers, 0);
+    std::vector<int64_t> offsets(num_buffers);
+    for (int i = 0; i < num_buffers; i++) {
+      auto ptr = graph_unreg_buffers_[i];
+      void *base_ptr;
+      // NOTE: must share the base address of each allocation,
+      // or we get wrong address.
+      if (cuPointerGetAttribute(&base_ptr,
+                                CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
+                                (CUdeviceptr)ptr) != CUDA_SUCCESS)
+        throw std::runtime_error("Failed to get pointer attr");
+      CUDACHECK(cudaIpcGetMemHandle(
+          (cudaIpcMemHandle_t *)&handles[i * handle_sz], base_ptr));
+      offsets[i] = (char *)ptr - (char *)base_ptr;
+    }
+    return std::make_pair(handles, offsets);
+  }
+
+  void check_rank_data_capacity(size_t num = 1) {
+    if (d_rank_data_base_ + num > d_rank_data_end_)
+      throw std::runtime_error(
+        "Rank data buffer is overflowed by " +
+        std::to_string(d_rank_data_base_ + num - d_rank_data_end_));
+  }
+
+  void register_buffer(const std::vector<std::string> &handles,
+                       const std::vector<int64_t> &offsets, void *self) {
+    check_rank_data_capacity();
+    RankData data;
+    for (int i = 0; i < world_size_; i++) {
+      if (i != rank_) {
+        char *handle;
+        CUDACHECK(cudaIpcOpenMemHandle(
+            (void **)&handle, *((const cudaIpcMemHandle_t *)handles[i].data()),
+            cudaIpcMemLazyEnablePeerAccess));
+        ipc_handles_.push_back(handle);
+        handle += offsets[i];
+        data.ptrs[i] = handle;
+      } else {
+        data.ptrs[i] = self;
+      }
+    }
+    auto d_data = d_rank_data_base_++;
+    CUDACHECK(
+        cudaMemcpy(d_data, &data, sizeof(RankData), cudaMemcpyHostToDevice));
+    buffers_[self] = d_data;
+  }
+
+  // NOTE: when registering graph buffers, we intentionall
+  // choose not to deduplicate the addresses. That means if
+  // the allocator reuses some addresses, they will be registered
+  // again. This is to account for the remote possibility of
+  // different allocation patterns between ranks. For example,
+  // rank 1 may get the same input address for the second
+  // allreduce, but rank 2 may get a different address. IPC
+  // handles have internal reference counting mechansim so
+  // overhead is minimal.
+  void register_graph_buffers(
+      const std::vector<std::string> &handles,
+      const std::vector<std::vector<int64_t>> &offsets) {
+    auto num_buffers = graph_unreg_buffers_.size();
+    check_rank_data_capacity(num_buffers);
+    std::vector<RankData> rank_data(num_buffers);
+    for (int i = 0; i < num_buffers; i++) {
+      auto self_ptr = graph_unreg_buffers_[i];
+      auto &rd = rank_data[i];
+      for (int j = 0; j < world_size_; j++) {
+        if (j != rank_) {
+          char *handle;
+          CUDACHECK(cudaIpcOpenMemHandle(
+              (void **)&handle,
+              *((cudaIpcMemHandle_t *)&handles[j]
+                                              [i * sizeof(cudaIpcMemHandle_t)]),
+              cudaIpcMemLazyEnablePeerAccess));
+          ipc_handles_.push_back(handle);
+          handle += offsets[j][i];
+          rd.ptrs[j] = handle;
+        } else {
+          rd.ptrs[j] = self_ptr;
+        }
+      }
+    }
+    CUDACHECK(cudaMemcpy(d_rank_data_base_, rank_data.data(),
+                         sizeof(RankData) * num_buffers,
+                         cudaMemcpyHostToDevice));
+    d_rank_data_base_ += num_buffers;
+    graph_unreg_buffers_.clear();
+  }
+
+  // NOTE: 512, 36 is good for most cases
+  template <typename T>
+  void allreduce(cudaStream_t stream, T *input, T *output, int size,
+                 int threads = 512, int block_limit = 36) {
+    auto d = packed_t<T>::P::size;
+    if (size % d != 0)
+      throw std::runtime_error(
+          "fast allreduce currently requires input length to be a multiple of " +
+          std::to_string(d));
+      
+    RankData *ptrs;
+    cudaStreamCaptureStatus status;
+    CUDACHECK(cudaStreamGetCaptureStatus(stream, &status));
+    if (status == cudaStreamCaptureStatusActive) {
+      ptrs = d_rank_data_base_ + graph_unreg_buffers_.size();
+      graph_unreg_buffers_.push_back(input);
+    } else {
+      auto it = buffers_.find(input);
+      if (it == buffers_.end())
+        throw std::runtime_error(
+          "buffer address " +
+          std::to_string(reinterpret_cast<uint64_t>(input)) +
+          " is not registered!");
+      ptrs = it->second;
+    }
+
+    size /= d;
+    auto bytes = size * sizeof(typename packed_t<T>::P);
+    int blocks = std::min(block_limit, (size + threads - 1) / threads);
+#define KL(ngpus, name) \
+  name<T, ngpus>        \
+      <<<blocks, threads, 0, stream>>>(ptrs, sg_, meta_, output, rank_, size);
+#define REDUCE_CASE(ngpus)                            \
+  case ngpus: {                                       \
+    if (world_size_ == 2) {                           \
+      KL(ngpus, cross_device_reduce_1stage);          \
+    } else if (full_nvlink_) {                        \
+      if ((world_size_ <= 4 && bytes < 512 * 1024) || \
+          (world_size_ <= 8 && bytes < 256 * 1024)) { \
+        KL(ngpus, cross_device_reduce_1stage);        \
+      } else {                                        \
+        KL(ngpus, cross_device_reduce_2stage);        \
+      }                                               \
+    } else {                                          \
+      KL(ngpus, cross_device_reduce_half_butterfly);  \
+    }                                                 \
+    break;                                            \
+  }
+
+
+    switch (world_size_) {
+      REDUCE_CASE(2)
+      REDUCE_CASE(4)
+      REDUCE_CASE(6)
+      REDUCE_CASE(8)
+      default:
+        throw std::runtime_error(
+            "Fast allreduce only supports num_gpus in (2, 4, 6, 8). Actual "
+            "num gpus = " +
+            std::to_string(world_size_));
+    }
+#undef REDUCE_CASE
+#undef KL
+  }
+
+  ~FastAllreduce() {
+    for (auto ptr : ipc_handles_) {
+      CUDACHECK(cudaIpcCloseMemHandle(ptr));
+    }
+  }
+};
+template void FastAllreduce::allreduce<half>(cudaStream_t, half *, half *, int,
+                                             int, int);
+}  // namespace aphrodite
