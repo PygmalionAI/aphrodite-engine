@@ -11,33 +11,32 @@
 #include "mpi.h"
 #include "nccl.h"
 
-#define MPICHECK(cmd)
-  do {                                                \
-      int e = cmd;                                    \
-      if (e != MPI_SUCCESS) {                         \
-          printf("Failed: MPI error %s:%d '%d'\n",    \
-                  __FILE__,__LINE__, e);              \
-          exit(EXIT_FAILURE);                         \
-      }                                               \
+#define MPICHECK(cmd)                                                  \
+  do {                                                                 \
+    int e = cmd;                                                       \
+    if (e != MPI_SUCCESS) {                                            \
+      printf("Failed: MPI error %s:%d '%d'\n", __FILE__, __LINE__, e); \
+      exit(EXIT_FAILURE);                                              \
+    }                                                                  \
   } while (0)
 
-#define NCCLCHECK(cmd)                                    \
-  do {                                                    \
-    ncclResult_t r = cmd;                                 \
-    if (r != ncclSuccess) {                               \
-      printf("Failed, NCCL error %s:%d '%s'\n",           \
-             __FILE__, __LINE__, ncclGetErrorString(r));  \
-      exit(EXIT_FAILURE);                                 \
-    }                                                     \
+#define NCCLCHECK(cmd)                                              \
+  do {                                                              \
+    ncclResult_t r = cmd;                                           \
+    if (r != ncclSuccess) {                                         \
+      printf("Failed, NCCL error %s:%d '%s'\n", __FILE__, __LINE__, \
+             ncclGetErrorString(r));                                \
+      exit(EXIT_FAILURE);                                           \
+    }                                                               \
   } while (0)
 
 __global__ void dummy_kernel() {
-  for (int i = 0; i < 100; i++) __nanosleep(1000000); // 1ms
+  for (int i = 0; i < 100; i++) __nanosleep(1000000);  // 100ms
 }
 
 template <typename T>
 __global__ void set_data(T *data, int size, int myRank) {
-  for (int idx = blockidx.x * blockDim.x + threadIdx.x; idx < size;
+  for (int idx = blockIdx.x * blockDim.x + threadIdx.x; idx < size;
        idx += gridDim.x * blockDim.x) {
     data[idx] = myRank * 0.11f;
   }
@@ -70,7 +69,7 @@ __global__ void gen_data(curandState_t *state, T *data, double *ground_truth,
     double sum = 0.0;
     for (int i = 0; i < nRanks; i++) {
       double val = curand_uniform_double(&state[idx * nRanks + i]) * 4;
-      T hval = val; // downcast first
+      T hval = val;  // downcast first
       sum += static_cast<double>(hval);
       if (i == myRank) data[idx] = hval;
     }
@@ -89,25 +88,28 @@ void run(int myRank, int nRanks, ncclComm_t &comm, int threads, int block_limit,
 
   cudaIpcMemHandle_t self_data_handle;
   cudaIpcMemHandle_t data_handles[8];
-  aphrodite::MetaData *buffer;
+  aphrodite::Metadata *buffer;
   T *self_data_copy;
-  CUDACHECK(cudaMalloc(&buffer, 2 * data_size * sizeof(T) + sizeof(aphrodite::MetaData)));
-  CUDACHECK(cudaMemset(buffer, 0, 2 * data_size * sizeof(T) + sizeof(aphrodite::MetaData)));
+  CUDACHECK(
+      cudaMalloc(&buffer, 2 * data_size * sizeof(T) + sizeof(aphrodite::Metadata)));
+  CUDACHECK(cudaMemset(buffer, 0,
+                       2 * data_size * sizeof(T) + sizeof(aphrodite::Metadata)));
   CUDACHECK(cudaMalloc(&self_data_copy, data_size * sizeof(T)));
   CUDACHECK(cudaIpcGetMemHandle(&self_data_handle, buffer));
 
   MPICHECK(MPI_Allgather(&self_data_handle, sizeof(cudaIpcMemHandle_t),
-           MPI_BYTE, data_handles, sizeof(cudaIpcMemHandle_t),
-           MPI_BYTE, MPI_COMM_WORLD));
-  
+                         MPI_BYTE, data_handles, sizeof(cudaIpcMemHandle_t),
+                         MPI_BYTE, MPI_COMM_WORLD));
+
   void *rank_data;
   size_t rank_data_sz = 16 * 1024 * 1024;
   CUDACHECK(cudaMalloc(&rank_data, rank_data_sz));
   std::vector<int64_t> offsets(nRanks, 0);
   aphrodite::FastAllreduce fa(buffer, rank_data, rank_data_sz, data_handles, offsets,
-                              myRank);
-  auto *self_data = reinterpret_cast<T *>(reinterpret_cast<char *>(buffer) +
-                                          sizeof(aphrodite::MetaData) + data_size * sizeof(T));
+                         myRank);
+  auto *self_data =
+      reinterpret_cast<T *>(reinterpret_cast<char *>(buffer) +
+                            sizeof(aphrodite::Metadata) + data_size * sizeof(T));
   // hack buffer registration
   {
     std::vector<std::string> handles;
@@ -118,7 +120,7 @@ void run(int myRank, int nRanks, ncclComm_t &comm, int threads, int block_limit,
       handles.emplace_back(begin, end);
     }
     std::vector<int64_t> offsets(
-        nRanks, sizeof(aphrodite::MetaData) + data_size * sizeof(T));
+        nRanks, sizeof(aphrodite::Metadata) + data_size * sizeof(T));
     fa.register_buffer(handles, offsets, self_data);
   }
 

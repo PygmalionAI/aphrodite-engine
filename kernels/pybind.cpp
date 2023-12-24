@@ -88,6 +88,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   fast_ar.def("dispose", &dispose, "dispose");
   fast_ar.def("meta_size", &meta_size, "meta_size");
   fast_ar.def("register_buffer", &register_buffer, "register_buffer");
-  fast_ar.def("get_graph_buffer_ipc_meta", &get_graph_buffer_ipc_meta, "get_graph_buffer_ipc_meta");
-  fast_ar.def("register_graph_buffers", &register_graph_buffers, "register_graph_buffers");
+  fast_ar.def("get_graph_buffer_ipc_meta", &get_graph_buffer_ipc_meta,
+              "get_graph_buffer_ipc_meta");
+  fast_ar.def("register_graph_buffers", &register_graph_buffers,
+              "register_graph_buffers");
 }

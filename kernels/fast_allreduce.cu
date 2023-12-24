@@ -15,22 +15,22 @@ fptr_t init_fast_ar(torch::Tensor &meta, torch::Tensor &rank_data,
                     bool full_nvlink) {
   int world_size = offsets.size();
   if (world_size > 8)
-    throw std::invalid_argument("world_size > 8 is not supported");
+    throw std::invalid_argument("world size > 8 is not supported");
   if (world_size % 2 != 0)
-    throw std::invalid_argument("Odd num gpus is not supported yet");
+    throw std::invalid_argument("Odd num gpus is not supported for now");
   if (world_size != handles.size())
     throw std::invalid_argument(
-      "handles length should equal to offsets length.");
+        "handles length should equal to offsets length");
   if (rank < 0 || rank >= world_size)
-    throw std::invalid_argument("invalid rank passed in.");
+    throw std::invalid_argument("invalid rank passed in");
 
   cudaIpcMemHandle_t ipc_handles[8];
   for (int i = 0; i < world_size; i++) {
     std::memcpy(&ipc_handles[i], handles[i].data(), sizeof(cudaIpcMemHandle_t));
   }
   return (fptr_t) new aphrodite::FastAllreduce(
-    reinterpret_cast<aphrodite::MetaData *>(meta.data_ptr()), rank_data.data_ptr(),
-    rank_data.numel(), ipc_handles, offsets, rank, full_nvlink);
+      reinterpret_cast<aphrodite::Metadata *>(meta.data_ptr()), rank_data.data_ptr(),
+      rank_data.numel(), ipc_handles, offsets, rank, full_nvlink);
 }
 
 void allreduce(fptr_t _fa, torch::Tensor &inp, torch::Tensor &out) {
@@ -54,14 +54,14 @@ void allreduce(fptr_t _fa, torch::Tensor &inp, torch::Tensor &out) {
 #if (__CUDA_ARCH__ >= 800 || !defined(__CUDA_ARCH__))
     case at::ScalarType::BFloat16: {
       fa->allreduce<nv_bfloat16>(
-        stream, reinterpret_cast<nv_bfloat16 *>(inp.data_ptr()),
-        reinterpret_cast<nv_bfloat16 *>(out.data_ptr()), inp.numel());
+          stream, reinterpret_cast<nv_bfloat16 *>(inp.data_ptr()),
+          reinterpret_cast<nv_bfloat16 *>(out.data_ptr()), inp.numel());
       break;
     }
 #endif
     default:
       throw std::runtime_error(
-        "Fast allreduce only supports float32, float16 and bfloat16");
+          "Fast allreduce only supports float32, float16 and bfloat16");
   }
 }
 
@@ -70,7 +70,7 @@ void dispose(fptr_t _fa) {
   delete fa;
 }
 
-int meta_size() { return sizeof(aphrodite::MetaData); }
+int meta_size() { return sizeof(aphrodite::Metadata); }
 
 void register_buffer(fptr_t _fa, torch::Tensor &t,
                      const std::vector<std::string> &handles,
