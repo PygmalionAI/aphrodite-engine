@@ -107,9 +107,9 @@ class SamplingTensors:
         eta_cutoffs: List[float] = []
         epsilon_cutoffs: List[float] = []
         typical_ps: List[float] = []
-        do_penalties: False
-        do_alphabet_soup: False
-        do_cutoffs: False
+        do_penalties = False
+        do_alphabet_soup = False
+        do_cutoffs = False
         for i, seq_group in enumerate(sampling_metadata.seq_groups):
             seq_ids, sampling_params = seq_group
             temperature = sampling_params.temperature
@@ -141,9 +141,9 @@ class SamplingTensors:
                                      or abs(r - 1.0) >= _SAMPLING_EPS):
                 do_penalties = True
             if not do_cutoffs and (eta_cutoff > _SAMPLING_EPS
-                                    or epsilon_cutoff > _SAMPLING_EPS
-                                    or typical_p < 1.0 - _SAMPLING_EPS
-                                    or tfs < 1.0 - _SAMPLING_EPS):
+                                   or epsilon_cutoff > _SAMPLING_EPS
+                                   or typical_p < 1.0 - _SAMPLING_EPS
+                                   or tfs < 1.0 - _SAMPLING_EPS):
                 do_cutoffs = True
             if (i < sampling_metadata.num_prompts
                     and sampling_params.prompt_logprobs is not None):
