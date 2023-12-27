@@ -26,6 +26,7 @@ try:
                 init_hf_modules()
             self.worker = None
 
+
         def init_worker(self, worker_init_fn):
             self.worker = worker_init_fn()
 
@@ -68,16 +69,7 @@ def initialize_cluster(
         each worker in each pipeline stage. Each device ID is a tuple of
         (rank, node resource, device id).
     """
-    
-    # Attempt to change the affinity for linux only.
-    # Some python versions do not support this,
-    # so we check if the os has the attribute.
-    if sys.platform.startswith('linux'):
-        if getattr(os,"sched_setaffinity"):
-            os.sched_setaffinity(0, set(range(0,os.cpu_count() - 1)))
-        else:
-            logger.warning("Unable to set scheduler affinity as function does not exist.")
-    
+
     
     if parallel_config.worker_use_ray or engine_use_ray:
         if ray is None:
@@ -104,9 +96,11 @@ def initialize_cluster(
     if current_placement_group:
         # We are in a placement group
         bundles = current_placement_group.bundle_specs
+        
         # Verify that we can use the placement group.
         gpu_bundles = 0
         for bundle in bundles:
+            logger.info(f"Bundle Info: {bundle.get('CPU')} | {bundle.get('GPU')}")
             bundle_gpus = bundle.get("GPU", 0)
             if bundle_gpus > 1:
                 raise ValueError(
