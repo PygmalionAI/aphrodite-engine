@@ -1,10 +1,6 @@
 """Ray for distributed multi-node inference:
 https://github.com/ray-project/ray"""
-import os
-import sys
 from typing import Optional, Tuple, TYPE_CHECKING
-
-import psutil
 
 from aphrodite.common.config import ParallelConfig
 from aphrodite.common.logger import init_logger
