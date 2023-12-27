@@ -3,6 +3,7 @@
 
 #include "cuda_compat.h"
 #include "dispatch_utils.h"
+#include "quantization/kvcache/quant_utils.cuh"
 
 #include <algorithm>
 #include <cassert>
@@ -140,12 +141,12 @@ void copy_blocks(
 
 namespace aphrodite {
 
-template<typename scalar_t>
+template<typename scalar_t, typename cache_t, bool enable_fp8_kv_cache>
 __global__ void reshape_and_cache_kernel(
   const scalar_t* __restrict__ key,           // [num_tokens, num_heads, head_size]
   const scalar_t* __restrict__ value,         // [num_tokens, num_heads, head_size]
-  scalar_t* __restrict__ key_cache,           // [num_blocks, num_heads, head_size/x, block_size, x]
-  scalar_t* __restrict__ value_cache,         // [num_blocks, num_heads, head_size, block_size]
+  cache_t* __restrict__ key_cache,            // [num_blocks, num_heads, head_size/x, block_size, x]
+  cache_t* __restrict__ value_cache,          // [num_blocks, num_heads, head_size, block_size]
   const int64_t* __restrict__ slot_mapping,   // [num_tokens]
   const int key_stride,
   const int value_stride,
