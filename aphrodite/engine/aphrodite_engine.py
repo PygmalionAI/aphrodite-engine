@@ -175,24 +175,6 @@ class AphroditeEngine:
                 **ray_remote_kwargs,
             )(RayWorker).remote(self.model_config.trust_remote_code)
             self.workers.append(worker)
-        
-        # HACK
-        # After running ray.init(), ray processes affinity is set to (0,1).
-        # (or whatever the CPU scheduler fancies)
-        # We however want the actual workers that are being used, so we call here since calling after ray.init()
-        # but not before .append() as it has a consequence that these workers are not applied affinities correctly.
-        # We reassign each ray process by taking the modulus of the number of cpu_cores available.
-        # (cpu_count also include hyper-threading. For most purposes, I think it's fine including hyper-threads)
-        # Issue: https://github.com/PygmalionAI/aphrodite-engine/issues/115
-        # The solution is similar to the taskset solution in the issue linked above.
-
-        current_process = psutil.Process()
-        ray_threads = 0
-        for process in current_process.children(recursive=True):
-            if "ray::" in process.name():
-                core_use = ray_threads % os.cpu_count()
-                process.cpu_affinity([core_use])
-                ray_threads += 1
 
         # Initialize torch distributed process group for the workers.
         init_torch_dist_process_group(self.workers, backend="nccl")
@@ -218,6 +200,22 @@ class AphroditeEngine:
             max_concurrent_workers=self.parallel_config.
             max_parallel_loading_workers,
         )
+        
+        # HACK
+        # After running ray.init(), ray processes affinity is set to (0,1).
+        # (or whatever the CPU scheduler fancies)
+        # We however want the actual workers that are being used, so we call here since calling after ray.init() and everything else.
+        # We reassign each ray process by taking the modulus of the number of cpu_cores available.
+        # (cpu_count also include hyper-threading. For most purposes, I think it's fine including hyper-threads)
+        # Issue: https://github.com/PygmalionAI/aphrodite-engine/issues/115
+        # The solution is similar to the taskset solution in the issue linked above.
+        current_process = psutil.Process()
+        ray_threads = 0
+        for process in current_process.children(recursive=True):
+            # process.pid
+            if "raylet" in process.name() or "ray::" in process.name():
+                process.cpu_affinity([ray_threads % os.cpu_count()])
+                ray_threads += 1
 
     def _verify_args(self) -> None:
         self.model_config.verify_with_parallel_config(self.parallel_config)
