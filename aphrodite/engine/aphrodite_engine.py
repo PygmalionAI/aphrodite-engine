@@ -1,7 +1,10 @@
 import copy
+import os
 import time
 from functools import partial
 from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Tuple, Union
+
+import psutil
 
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig)
@@ -172,6 +175,24 @@ class AphroditeEngine:
                 **ray_remote_kwargs,
             )(RayWorker).remote(self.model_config.trust_remote_code)
             self.workers.append(worker)
+        
+        # HACK
+        # After running ray.init(), ray processes affinity is set to (0,1).
+        # (or whatever the CPU scheduler fancies)
+        # We however want the actual workers that are being used, so we call here since calling after ray.init()
+        # but not before .append() as it has a consequence that these workers are not applied affinities correctly.
+        # We reassign each ray process by taking the modulus of the number of cpu_cores available.
+        # (cpu_count also include hyper-threading. For most purposes, I think it's fine including hyper-threads)
+        # Issue: https://github.com/PygmalionAI/aphrodite-engine/issues/115
+        # The solution is similar to the taskset solution in the issue linked above.
+
+        current_process = psutil.Process()
+        ray_threads = 0
+        for process in current_process.children(recursive=True):
+            if "ray::" in process.name():
+                core_use = ray_threads % os.cpu_count()
+                process.cpu_affinity([core_use])
+                ray_threads += 1
 
         # Initialize torch distributed process group for the workers.
         init_torch_dist_process_group(self.workers, backend="nccl")
