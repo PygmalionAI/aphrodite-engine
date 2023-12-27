@@ -40,12 +40,12 @@ __inline__ __device__ uint32_t vec_conversion<uint32_t, uint16_t>(const uint16_t
     return tmp.u32;
 }
 
-// fp8x4 -> half4
+// fp8x4 -> half2x2
 template<>
 __inline__ __device__ uint2 vec_conversion<uint2, uint32_t>(const uint32_t& a)
 {
     union {
-        uint2 u32x2;
+        uint2    u32x2;
         uint32_t u32[2];
     } tmp;
     tmp.u32[0] = vec_conversion<uint32_t, uint16_t>((uint16_t)a);
@@ -53,13 +53,13 @@ __inline__ __device__ uint2 vec_conversion<uint2, uint32_t>(const uint32_t& a)
     return tmp.u32x2;
 }
 
-// fp8x8 -> half8
+// fp8x8 -> half2x4
 template<>
 __inline__ __device__ uint4 vec_conversion<uint4, uint2>(const uint2& a)
 {
     union {
-        uint4 u64x4;
-        uint32_t u64[2];
+        uint4 u64x2;
+        uint2 u64[2];
     } tmp;
     tmp.u64[0] = vec_conversion<uint2, uint32_t>(a.x);
     tmp.u64[1] = vec_conversion<uint2, uint32_t>(a.y);
@@ -70,29 +70,38 @@ __inline__ __device__ uint4 vec_conversion<uint4, uint2>(const uint2& a)
 template<>
 __inline__ __device__ __nv_bfloat16 vec_conversion<__nv_bfloat16, uint8_t>(const uint8_t& a)
 {
-    // Note there is no direct convert function from fp8 to bfloat16
-    // So we convert fp8 to half first, then convert half to bfloat16
+    // Note there is no direct convert function from fp8 to bf16.
+    // fp8 -> half
     __half_raw res = __nv_cvt_fp8_to_halfraw(a, __NV_E5M2);
-    // half -> float -> bfloat16
+    // half -> float -> bf16
     float tmp = half_to_float(res.x);
     return __float2bfloat16(tmp);
-
 }
 
-// fp8x2 -> bf16_4_t
+// fp8x2 -> __nv_bfloat162
+template<>
+__inline__ __device__ __nv_bfloat162 vec_conversion<__nv_bfloat162, uint16_t>(const uint16_t& a)
+{
+    __nv_bfloat162 res;
+    res.x = vec_conversion<__nv_bfloat16, uint8_t>((uint8_t)a);
+    res.y = vec_conversion<__nv_bfloat16, uint8_t>((uint8_t)(a >> 8U));
+    return res;
+}
+
+// fp8x4 -> bf16_4_t
 template<>
 __inline__ __device__ bf16_4_t vec_conversion<bf16_4_t, uint32_t>(const uint32_t& a)
 {
     bf16_4_t res;
     // uint16_t hi = (uint16_t)(a >> 16U);
-    res.x = vec_conversion<__nv_bfloat16, uint16_t>((uint16_t)a);
-    res.y = vec_conversion<__nv_bfloat16, uint16_t>((uint16_t)(a >> 16U));
+    res.x = vec_conversion<__nv_bfloat162, uint16_t>((uint16_t)a);
+    res.y = vec_conversion<__nv_bfloat162, uint16_t>((uint16_t)(a >> 16U));
     return res;
 }
 
 // fp8x8 -> bf16_8_t
 template<>
-__inline__ __device__ bf16_8_t vec_conversion<bf16_8_t, uint4>(const uint4& a)
+__inline__ __device__ bf16_8_t vec_conversion<bf16_8_t, uint2>(const uint2& a)
 {
     bf16_4_t tmp1, tmp2;
     tmp1 = vec_conversion<bf16_4_t, uint32_t>(a.x);
@@ -115,3 +124,146 @@ __inline__ __device__ float vec_conversion<float, uint8_t>(const uint8_t& a)
     return half_to_float(tmp);
 }
 
+// fp8x2 -> float2
+template<>
+__inline__ __device__ float2 vec_conversion<float2, uint16_t>(const uint16_t& a)
+{
+    // fp8x2 -> half2
+    uint32_t tmp = vec_conversion<uint32_t, uint16_t>(a);
+    // half2 -> float2
+    return half2_to_float2(tmp);
+}
+
+// fp8x4 -> float4
+template<>
+__inline__ __device__ Float4_ vec_conversion<Float4_, uint32_t>(const uint32_t& a)
+{
+    Float4_ res;
+    res.x = vec_conversion<float2, uint16_t>((uint16_t)a);
+    res.y = vec_conversion<float2, uint16_t>((uint16_t)(a >> 16U));
+    return res;
+}
+
+// fp8x8 -> float8
+template<>
+__inline__ __device__ Float8_ vec_conversion<Float8_, uint2>(const uint2& a)
+{
+    Float4_ tmp1, tmp2;
+    tmp1 = vec_conversion<Float4_, uint32_t>(a.x);
+    tmp2 = vec_conversion<Float4_, uint32_t>(a.y);
+    Float8_ res;
+    res.x = tmp1.x;
+    res.y = tmp1.y;
+    res.z = tmp2.x;
+    res.w = tmp2.y;
+    return res;
+}
+
+
+// half -> fp8
+template<>
+__inline__ __device__ uint8_t vec_conversion<uint8_t, uint16_t>(const uint16_t& a)
+{
+    __half_raw tmp;
+    tmp.x = a;
+    __nv_fp8_storage_t res = __nv_cvt_halfraw_to_fp8(tmp, __NV_SATFINITE, __NV_E5M2);
+    return (uint8_t)res;
+}
+
+// bf16 -> fp8
+template<>
+__inline__ __device__ uint8_t vec_conversion<uint8_t, __nv_bfloat16>(const __nv_bfloat16& a)
+{
+    __nv_fp8_storage_t res = __nv_cvt_bfloat16raw_to_fp8(__nv_bfloat16_raw(a), __NV_SATFINITE, __NV_E5M2);
+    return (uint8_t)res;
+}
+
+// float -> fp8
+template<>
+__inline__ __device__ uint8_t vec_conversion<uint8_t, float>(const float& a)
+{
+    __nv_fp8_storage_t res = __nv_cvt_float_to_fp8(a, __NV_SATFINITE, __NV_E5M2);
+    return (uint8_t)res;
+}
+
+// only for compiling
+template<>
+__inline__ __device__ float4 vec_conversion<float4, uint32_t>(const uint32_t& a)
+{
+    float4 res = make_float4(1.0f, 2.0f, 3.0f, 4.0f);
+    return res;
+}
+
+
+template<>
+__inline__ __device__ uint32_t vec_conversion<uint32_t, float2>(const float2& a)
+{
+    union {
+        half2    float16;
+        uint32_t uint32;
+    };
+
+    float16 = __float22half2_rn(a);
+    return uint32;
+}
+
+template<>
+__inline__ __device__ uint2 vec_conversion<uint2, Float4_>(const Float4_& a)
+{
+    uint2  b;
+    float2 val;
+    val.x = a.x.x;
+    val.y = a.x.y;
+    b.x   = vec_conversion<uint32_t, float2>(val);
+
+    val.x = a.y.x;
+    val.y = a.y.y;
+    b.y   = vec_conversion<uint32_t, float2>(val);
+
+    return b;
+}
+
+template<>
+__inline__ __device__ float4 vec_conversion<float4, Float4_>(const Float4_& a)
+{
+    float4 b;
+    b.x = a.x.x;
+    b.y = a.x.y;
+    b.z = a.y.x;
+    b.w = a.y.y;
+    return b;
+}
+
+template<>
+__inline__ __device__ uint4 vec_conversion<uint4, Float8_>(const Float8_& a)
+{
+    uint4 b;
+    b.x = vec_conversion<uint32_t, float2>(a.x);
+    b.y = vec_conversion<uint32_t, float2>(a.y);
+    b.z = vec_conversion<uint32_t, float2>(a.z);
+    b.w = vec_conversion<uint32_t, float2>(a.w);
+    return b;
+}
+
+template<>
+__inline__ __device__ __nv_bfloat162 vec_conversion<__nv_bfloat162, float2>(const float2 &a) {
+    return __float22bfloat162_rn(a);
+}
+
+template<>
+__inline__ __device__ bf16_4_t vec_conversion<bf16_4_t, Float4_>(const Float4_ &a) {
+    bf16_4_t b;
+    b.x = vec_conversion<__nv_bfloat162, float2>(a.x);
+    b.y = vec_conversion<__nv_bfloat162, float2>(a.y);
+    return b;
+}
+
+template<>
+__inline__ __device__ bf16_8_t vec_conversion<bf16_8_t, Float8_>(const Float8_ &a) {
+    bf16_8_t b;
+    b.x = vec_conversion<__nv_bfloat162, float2>(a.x);
+    b.y = vec_conversion<__nv_bfloat162, float2>(a.y);
+    b.z = vec_conversion<__nv_bfloat162, float2>(a.z);
+    b.w = vec_conversion<__nv_bfloat162, float2>(a.w);
+    return b;
+}
