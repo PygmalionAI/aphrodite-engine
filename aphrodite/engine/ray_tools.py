@@ -5,7 +5,7 @@ from typing import Optional, Tuple, TYPE_CHECKING
 from aphrodite.common.config import ParallelConfig
 from aphrodite.common.logger import init_logger
 from aphrodite.common.utils import get_open_port, is_hip
-import os
+import os, sys
 
 logger = init_logger(__name__)
 
@@ -67,13 +67,15 @@ def initialize_cluster(
         (rank, node resource, device id).
     """
     
-    # Attempt to change the affinity.
+    # Attempt to change the affinity for linux only.
     # Some python versions do not support this,
     # so we check if the os has the attribute.
-    if getattr(os,"sched_setaffinity"):
-        os.sched_setaffinity(0, set(range(0,os.cpu_count() - 1)))
-    else:
-        logger.warning("Unable to set scheduler affinity as function does not exist.")
+    if sys.platform.startswith('linux'):
+        if getattr(os,"sched_setaffinity"):
+            os.sched_setaffinity(0, set(range(0,os.cpu_count() - 1)))
+        else:
+            logger.warning("Unable to set scheduler affinity as function does not exist.")
+    
     
     if parallel_config.worker_use_ray or engine_use_ray:
         if ray is None:
