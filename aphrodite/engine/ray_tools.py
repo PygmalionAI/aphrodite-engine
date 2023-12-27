@@ -1,11 +1,13 @@
 """Ray for distributed multi-node inference:
 https://github.com/ray-project/ray"""
 from typing import Optional, Tuple, TYPE_CHECKING
+import os
+import sys
 
 from aphrodite.common.config import ParallelConfig
 from aphrodite.common.logger import init_logger
 from aphrodite.common.utils import get_open_port, is_hip
-import os, sys
+
 
 logger = init_logger(__name__)
 
