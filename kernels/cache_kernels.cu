@@ -183,12 +183,33 @@ __global__ void reshape_and_cache_kernel(
                                   + head_idx * head_size * block_size
                                   + head_offset * block_size
                                   + block_offset;
-    key_cache[tgt_key_idx] = key[src_key_idx];
-    value_cache[tgt_value_idx] = value[src_value_idx];
+    scalar_t tgt_key = APHRODITE_LDG(&key[src_key_idx]);
+    scalar tgt_value = APHRODITE_LDG(&value[src_value_idx]);
+    if constexpr (enable_fp8_kv_cache) {
+      key_cache[tgt_key_idx] = vec_conversion<uint8_t, scalar_t>(tgt_key);
+      value_cache[tgt_value_idx] = vec_conversion<uint8_t, scalar_t>(tgt_value);
+    } else {
+      key_cache[tgt_key_idx] = tgt_key;
+      value_cache[tgt_value_idx] = tgt_value;
+    }
   }
 }
 
 } // namespace aphrodite
+
+#define CALL_RESHAPE_AND_CACHE(KV_T, CACHE_T, ENABLE_FP8_KV_CACHE)        \
+  aphrodite::reshape_and_cache_kernel<KV_T, CACHE_T, ENABLE_FP8_KV_CACHE><<<grid, block, 0, stream>>>( \
+    reinterpret_cast<KV_T*>(key.data_ptr()),                             \
+    reinterpret_cast<KV_T*>(value.data_ptr()),                           \
+    reinterpret_cast<CACHE_T*>(key_cache.data_ptr()),                    \
+    reinterpret_cast<CACHE_T*>(value_cache.data_ptr()),                  \
+    slot_mapping.data_ptr<int64_t>(),                                    \
+    key_stride,                                                          \
+    value_stride,                                                        \
+    num_heads,                                                           \
+    head_size,                                                           \
+    block_size,                                                          \
+    x);
 
 void reshape_and_cache(
   torch::Tensor& key,           // [num_tokens, num_heads, head_size]
