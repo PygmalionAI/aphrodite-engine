@@ -212,13 +212,14 @@ class AphroditeEngine:
         current_process = psutil.Process()
         ray_threads = 0
         logical_cores = psutil.cpu_count(logical=True)
-        all_cores = psutil.cpu_count(logical=False)
-        ht_scale = all_cores / logical_cores
+        physical_cores = psutil.cpu_count(logical=False)
+        ht_scale = physical_cores / logical_cores
         for process in current_process.children(recursive=True):
             # process.pid
             if "ray::" in process.name():
-                process.cpu_affinity([ray_threads % psutil.cpu_count()])
-                ray_threads += 1 * ht_scale if ht_scale > 1.0 else 1
+                process.cpu_affinity([ray_threads])
+                ray_threads += int(1 * ht_scale) if ht_scale > 1.0 else 1
+                ray_threads = ray_threads % logical_cores
 
     def _verify_args(self) -> None:
         self.model_config.verify_with_parallel_config(self.parallel_config)
