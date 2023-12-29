@@ -199,7 +199,7 @@ class AphroditeEngine:
             max_concurrent_workers=self.parallel_config.
             max_parallel_loading_workers,
         )
-        
+
         # HACK
         # After running ray.init(), ray processes affinity is set to (0,1).
         # (or whatever the CPU scheduler fancies)
