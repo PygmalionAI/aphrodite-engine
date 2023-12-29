@@ -1,15 +1,24 @@
 import io
 import os
+import platform
 import re
 import subprocess
+import sys
 from typing import List, Set
 import warnings
 
 from packaging.version import parse, Version
 import setuptools
 import torch
-from torch.utils.cpp_extension import (
-    BuildExtension, CUDAExtension, CUDA_HOME, ROCM_HOME)
+
+
+BUILD_CPU_ONLY = os.getenv("APHRODITE_CPU_ONLY", "0") == "1" or sys.platform == "darwin"
+
+if not BUILD_CPU_ONLY:
+    from torch.utils.cpp_extension import (BuildExtension, CUDAExtension,
+                                           CUDA_HOME, ROCM_HOME)
+else:
+    from torch.utils.cpp_extension import BuildExtension, CppExtension
 
 ROOT_DIR = os.path.dirname(__file__)
 
@@ -24,10 +33,10 @@ ROCM_SUPPORTED_ARCHS = {
 }
 
 def _is_hip() -> bool:
-    return torch.version.hip is not None
+    return torch.version.hip is not None and not BUILD_CPU_ONLY
 
 def _is_cuda() -> bool:
-    return torch.version.cuda is not None
+    return torch.version.cuda is not None and not BUILD_CPU_ONLY
 
 
 # Compiler flags.
@@ -138,6 +147,20 @@ def get_torch_arch_list() -> Set[str]:
             stacklevel=2)
     return arch_list
 
+if not BUILD_CPU_ONLY:
+    # Fiest, check the TORCH_CUDA_ARCH_LIST environment variable.
+    compute_capabilities = get_torch_arch_list()
+    if not compute_capabilities:
+        # If TORCH_CUDA_ARCH_LIST is not defined or empty, target
+        # all available GPUs on the current machine
+        device_count = torch.cuda.device_count()
+        for i in range(device_count):
+            major, minor = torch.cuda.get_device_capability(i)
+            if major < 6:
+                raise RuntimeError(
+                    "GPUs with compute capability below 6.0 are not supported.")
+            compute_capabilities.add(f"{major}.{minor}")
+
 
 # First, check the TORCH_CUDA_ARCH_LIST environment variable.
 compute_capabilities = get_torch_arch_list()
@@ -210,6 +233,34 @@ elif _is_hip():
             f"Only the following arch is supported: {ROCM_SUPPORTED_ARCHS}"
             f"amdgpu_arch_found: {amd_arch}")
 
+# Setup CPU Operations
+BUILD_CPU_OPS = (os.getenv('APHRODITE_BUILD_CPU_OPS', "0") == "1" or BUILD_CPU_ONLY)
+CPU_OPS_SOURCES = []
+LIBS = []
+if BUILD_CPU_OPS:
+    if BUILD_CPU_ONLY:
+        CXX_FLAGS += ["-DAPHRODITE_BUILD_CPU_ONLY"]
+    if sys.platform == 'darwin':
+        CXX_FLAGS += ["-Xclang", "-fopenmp"]
+        LIBS += ["omp"]
+    else:
+        CXX_FLAGS += ["-fopenmp"]
+    if platform.processor() == 'arm':
+        CXX_FLAGS += [
+            "-DAPHRODITE_BUILD_CPU_OPS", "-march=armv8.6-a+bf16"
+        ]
+    else:
+        CXX_FLAGS += [
+            "-DAPHRODITE_BUILD_CPU_OPS", "-mavx512f", "-mavx512bf16", "-mavx512vl"
+        ]
+    CPU_OPS_SOURCES += [
+        "kernels/cpu/activation_impl.cpp",
+        "kernels/cpu/attention_impl.cpp",
+        "kernels/cpu/cache_impl.cpp",
+        "kernels/cpu/layernorm_impl.cpp",
+        "kernels/cpu/pos_encoding_impl.cpp",
+    ]
+
 ext_modules = []
 
 aphrodite_extension_sources = [
@@ -222,19 +273,32 @@ aphrodite_extension_sources = [
     "kernels/quantization/gptq/q_gemm.cu",
     "kernels/cuda_utils_kernels.cu",
     "kernels/pybind.cpp",
-]
+] + CPU_OPS_SOURCES
 
 if _is_cuda():
     aphrodite_extension_sources.append("kernels/quantization/awq/gemm_kernels.cu")
 
-aphrodite_extension = CUDAExtension(
-    name="aphrodite._C",
-    sources=aphrodite_extension_sources,
-    extra_compile_args={
-        "cxx": CXX_FLAGS,
-        "nvcc": NVCC_FLAGS,
-    },
-)
+if not BUILD_CPU_ONLY:
+    aphrodite_extension = CUDAExtension(
+        name="aphrodite._C",
+        sources=aphrodite_extension_sources,
+        extra_compile_args={
+            "cxx": CXX_FLAGS,
+            "nvcc": NVCC_FLAGS,
+        },
+    )
+else:
+    aphrodite_extension_sources = [
+        "kernels/pybind.cpp",
+    ] + CPU_OPS_SOURCES
+    aphrodite_extension = CppExtension(
+        name="aphrodite._C",
+        sources=aphrodite_extension_sources,
+        extra_compile_args={
+            "cxx": CXX_FLAGS,
+        },
+        libraries=LIBS,
+    )
 ext_modules.append(aphrodite_extension)
 
 
@@ -265,7 +329,7 @@ def get_aphrodite_version() -> str:
         if hipcc_version != MAIN_CUDA_VERSION:
             rocm_version_str = hipcc_version.replace(".", "")[:3]
             version += f"+rocm{rocm_version_str}"
-    else:
+    elif _is_cuda():
         cuda_version = str(nvcc_cuda_version)
         # Split the version into numerical and suffix parts
         version_parts = version.split('-')
@@ -296,9 +360,13 @@ def get_requirements() -> List[str]:
     if _is_hip():
         with open(get_path("requirements-rocm.txt")) as f:
             requirements = f.read().strip().split("\n")
-    else:
-        with open(get_path("requirements.txt")) as f:
+    elif _is_cuda():
+        with open(get_path("requirements-gpu.txt")) as f:
             requirements = f.read().strip().split("\n")
+    else:
+        with open(get_path("requirements-cpu.txt")) as f:
+            requirements = f.read().strip().split("\n")
+
     return requirements
 
 
