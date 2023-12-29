@@ -33,7 +33,6 @@ _ROCM_PARTIALLY_SUPPORTED_MODELS = {
     "Sliding window attention is not yet supported in ROCm's flash attention",
 }
 
-
 class ModelRegistry:
 
     @staticmethod

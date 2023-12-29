@@ -30,10 +30,12 @@ class ModelRunner:
         model_config: ModelConfig,
         parallel_config: ParallelConfig,
         scheduler_config: SchedulerConfig,
+        pp_rank: int,
     ):
         self.model_config = model_config
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
+        self.pp_rank = pp_rank
 
         # model_config can be None in tests/samplers/test_sampler.py.
         # FIXME: This is a hack to make the tests work. Refactor this.
@@ -391,7 +393,8 @@ class ModelRunner:
             seqs.append(seq)
 
         # Run the model with the dummy inputs.
-        num_layers = self.model_config.get_num_layers(self.parallel_config)
+        num_layers = self.model_config.get_num_layers(self.parallel_config,
+                                                      self.pp_rank)
         kv_caches = [(None, None)] * num_layers
         self.execute_model(seqs, kv_caches)
         torch.cuda.synchronize()
