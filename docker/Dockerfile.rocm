@@ -40,7 +40,7 @@ RUN mkdir libs \
     && git checkout howiejay/navi_support \
     && git submodule update --init \
     && export GPU_ARCHS=$(/opt/rocm/llvm/bin/amdgpu-offload-arch) \
-    && patch /opt/conda/envs/py_3.10/lib/python3.10/site-packages/torch/utils/hipify/hipify_python.py hipify_patch.patch \
+    && patch /opt/conda/envs/py_3.10/lib/python3.10/site-packages/torch/utils/hipify/hipify_python.py hipify_python.patch \
     && python3 setup.py install \
     && cd ..
 
