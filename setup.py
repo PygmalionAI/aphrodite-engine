@@ -237,7 +237,6 @@ aphrodite_extension = CUDAExtension(
 )
 ext_modules.append(aphrodite_extension)
 
-
 def get_path(*filepath) -> str:
     return os.path.join(ROOT_DIR, *filepath)
 
