@@ -95,23 +95,20 @@ class ModelConfig:
         supported_load_format = [
             "auto", "pt", "safetensors", "npcache", "dummy"
         ]
-        rocm_not_supported_load_format = ["safetensors"]
+        rocm_not_supported_load_format = []
         if load_format not in supported_load_format:
             raise ValueError(
                 f"Unknown load format: {self.load_format}. Must be one of "
                 "'auto', 'pt', 'safetensors', 'npcache', or 'dummy'.")
-        if is_hip():
-            if load_format in ["safetensors"]:
-                rocm_supported_load_format = [
-                    f for f in supported_load_format
-                    if (f not in rocm_not_supported_load_format)
-                ]
-                raise ValueError(
-                    f"load format {load_format} is not supported on ROCm. "
-                    f"Must be one of {rocm_supported_load_format}.")
-            # force ROCm to load from pt weights if nothing is set
-            if load_format == "auto":
-                load_format = "pt"
+        if is_hip() and load_format in rocm_not_supported_load_format:
+            rocm_supported_load_format = [
+                f for f in supported_load_format
+                if (f not in rocm_not_supported_load_format)
+            ]
+            raise ValueError(
+                f"load format \'{load_format}\' is not supported in ROCm. "
+                f"Supported load format are "
+                f"{rocm_supported_load_format}")
 
         # TODO: Remove this check once HF updates the pt weights of Mixtral.
         architectures = getattr(self.hf_config, "architectures", [])
@@ -166,11 +163,6 @@ class ModelConfig:
             self.max_context_len_to_capture = self.max_model_len
         self.max_context_len_to_capture = min(self.max_context_len_to_capture,
                                               self.max_model_len)
-        if (self.quantization in ["gptq", "squeezellm"]
-                and not self.enforce_eager):
-            logger.warning(f"{self.quantization} does not support CUDA graph "
-                           "yet. Disabling CUDA graph.")
-            self.enforce_eager = True
 
     def verify_with_parallel_config(
         self,
