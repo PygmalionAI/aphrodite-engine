@@ -2,6 +2,7 @@ from typing import Type
 
 from aphrodite.modeling.layers.quantization.squeezellm import SqueezeLLMConfig
 from aphrodite.modeling.layers.quantization.gptq import GPTQConfig
+from aphrodite.modeling.layers.quantization.quip import QuipConfig
 from aphrodite.modeling.layers.quantization.base_config import (
     QuantizationConfig)
 from aphrodite.common.utils import is_hip
@@ -9,6 +10,7 @@ from aphrodite.common.utils import is_hip
 _QUANTIZATION_CONFIG_REGISTRY = {
     "squeezellm": SqueezeLLMConfig,
     "gptq": GPTQConfig,
+    "quip": QuipConfig,
 }
 
 if not is_hip():
