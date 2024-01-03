@@ -18,7 +18,7 @@ Adapted from https://github.com/turboderp/exllamav2 and https://github.com/qwopq
 #include "qdq_4.cuh"
 #include "qdq_8.cuh"
 
-namespace vllm {
+namespace aphrodite {
 namespace gptq {
 
 #define BLOCK_KN_SIZE 128
@@ -2019,7 +2019,7 @@ void shuffle_exllama_weight
 }
 
 }  // namespace gptq
-}  // namespace vllm
+}  // namespace aphrodite
 
 torch::Tensor gptq_gemm
 (
@@ -2037,7 +2037,7 @@ torch::Tensor gptq_gemm
     at::Tensor c = torch::empty({a.size(0), b_q_weight.size(1)}, options);
     at::Tensor temp_dq = torch::empty({b_q_weight.size(0) * 32 / bit, b_q_weight.size(1)}, options);
 
-    vllm::gptq::gemm_half_q_half_cuda
+    aphrodite::gptq::gemm_half_q_half_cuda
     (
         at::cuda::getCurrentCUDABlasHandle(),
         (const half*) a.data_ptr(),
@@ -2065,7 +2065,7 @@ void gptq_shuffle
 )
 {
     const at::cuda::OptionalCUDAGuard device_guard(device_of(q_weight));
-    vllm::gptq::shuffle_exllama_weight(
+    aphrodite::gptq::shuffle_exllama_weight(
         (uint32_t*) q_weight.data_ptr(),
         q_perm.device().is_meta() ? NULL : (int*) q_perm.data_ptr(),
         q_weight.size(0) * 32 / bit,
