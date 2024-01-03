@@ -87,7 +87,9 @@ class AphroditeEngine:
             f"Quantization Format = {model_config.quantization}\n"
             f"Sampler Seed = {model_config.seed}\n"
             f"Context Length = {model_config.max_model_len}\n"
-            f"Enforce Eager Mode = {model_config.enforce_eager}")
+            f"Enforce Eager Mode = {model_config.enforce_eager}\n"
+            f"KV Cache DataType = {cache_config.cache_dtype}\n"
+            f"Seed = {model_config.seed}")
         # TODO: Print more configs in debug mode.
 
         self.model_config = model_config
@@ -238,6 +240,7 @@ class AphroditeEngine:
             block_size=self.cache_config.block_size,
             gpu_memory_utilization=self.cache_config.gpu_memory_utilization,
             cpu_swap_space=self.cache_config.swap_space_bytes,
+            cache_dtype=self.cache_config.cache_dtype,
         )
 
         # Since we use a shared centralized controller, we take the minimum
