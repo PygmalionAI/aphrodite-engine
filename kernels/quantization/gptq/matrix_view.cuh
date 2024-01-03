@@ -147,5 +147,5 @@ public:
 };
 
 }  // namespace gptq
-}  // namespace vllm
+}  // namespace aphrodite
 #endif
