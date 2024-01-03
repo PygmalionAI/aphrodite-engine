@@ -109,6 +109,10 @@ def get_quant_config(
         f for f in config_files if any(
             f.endswith(x) for x in quant_cls.get_config_filenames())
     ]
+    # we don't need quant config for quip quantization
+    quant_config_files = [
+        f for f in quant_config_files if "quip" not in f
+    ]
     if len(quant_config_files) == 0:
         raise ValueError(f"Cannot find the config file for {quantization}")
     if len(quant_config_files) > 1:
