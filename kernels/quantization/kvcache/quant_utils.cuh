@@ -4,7 +4,6 @@
 #include <stdint.h>
 #include <float.h>
 #include <type_traits>
-
 #include "../../attention/attention_dtypes.h"
 #include "../../attention/dtype_float32.cuh"
 #include "../../attention/dtype_float16.cuh"
@@ -12,11 +11,13 @@
 
 using namespace aphrodite;
 
+
 template<typename Tout, typename Tin>
 __inline__ __device__ Tout vec_conversion(const Tin& x)
 {
     return x;
 }
+
 
 // fp8 -> half
 template<>
@@ -93,7 +94,6 @@ template<>
 __inline__ __device__ bf16_4_t vec_conversion<bf16_4_t, uint32_t>(const uint32_t& a)
 {
     bf16_4_t res;
-    // uint16_t hi = (uint16_t)(a >> 16U);
     res.x = vec_conversion<__nv_bfloat162, uint16_t>((uint16_t)a);
     res.y = vec_conversion<__nv_bfloat162, uint16_t>((uint16_t)(a >> 16U));
     return res;
@@ -186,11 +186,12 @@ __inline__ __device__ uint8_t vec_conversion<uint8_t, float>(const float& a)
     return (uint8_t)res;
 }
 
-// only for compiling
+// fp8x4 -> float4
 template<>
 __inline__ __device__ float4 vec_conversion<float4, uint32_t>(const uint32_t& a)
 {
-    float4 res = make_float4(1.0f, 2.0f, 3.0f, 4.0f);
+    Float4_ tmp = vec_conversion<Float4_, uint32_t>(a);
+    float4 res = make_float4(tmp.x.x, tmp.x.y, tmp.y.x, tmp.y.y);
     return res;
 }
 

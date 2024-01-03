@@ -21,8 +21,8 @@
 #endif
 
 #include <torch/extension.h>
-#include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include "attention_dtypes.h"
 #include "attention_utils.cuh"
@@ -215,7 +215,7 @@ __device__ void paged_attention_kernel(
         const int offset2 = (vec_idx * VEC_SIZE) % x;
         if constexpr (ENABLE_FP8_KV_CACHE) {
           Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(k_ptr + offset1 * BLOCK_SIZE * x + offset2);
-          // vector conversion from Quant_vec to K_vec.
+          // Vector conversion from Quant_vec to K_vec.
           k_vecs[j] = vec_conversion<K_vec, Quant_vec>(k_vec_quant);
         } else {
           k_vecs[j] = *reinterpret_cast<const K_vec*>(k_ptr + offset1 * BLOCK_SIZE * x + offset2);
@@ -329,7 +329,7 @@ __device__ void paged_attention_kernel(
         V_vec v_vec;
         if constexpr (ENABLE_FP8_KV_CACHE) {
           V_quant_vec v_quant_vec = *reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
-          // vector conversion from V_quant_vec to V_vec.
+          // Vector conversion from V_quant_vec to V_vec.
           v_vec = vec_conversion<V_vec, V_quant_vec>(v_quant_vec);
         } else {
           v_vec = *reinterpret_cast<const V_vec*>(v_ptr + offset);
@@ -570,24 +570,24 @@ __global__ void paged_attention_v2_reduce_kernel(
 
 } // namespace aphrodite
 
-#define LAUNCH_PAGED_ATTENTION_V1(HEAD_SIZE)                                                                            \
-  APHRODITE_DevFuncAttribute_SET_MaxDynamicSharedMemorySize(                                                            \
-    ((void*)aphrodite::paged_attention_v1_kernel<T, CACHE_T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS, ENABLE_FP8_KV_CACHE>), \
-    shared_mem_size);                                                                                                   \
-  aphrodite::paged_attention_v1_kernel<T, CACHE_T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS, ENABLE_FP8_KV_CACHE              \
-  <<<grid, block, shared_mem_size, stream>>>(                                                                           \
-    out_ptr,                                                                                                            \
-    query_ptr,                                                                                                          \
-    key_cache_ptr,                                                                                                      \
-    value_cache_ptr,                                                                                                    \
-    num_kv_heads,                                                                                                       \
-    scale,                                                                                                              \
-    block_tables_ptr,                                                                                                   \
-    context_lens_ptr,                                                                                                   \
-    max_num_blocks_per_seq,                                                                                             \
-    alibi_slopes_ptr,                                                                                                   \
-    q_stride,                                                                                                           \
-    kv_block_stride,                                                                                                    \
+#define LAUNCH_PAGED_ATTENTION_V1(HEAD_SIZE)                                                  \
+  APHRODITE_DevFuncAttribute_SET_MaxDynamicSharedMemorySize(                                       \
+    ((void*)aphrodite::paged_attention_v1_kernel<T, CACHE_T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS,   \
+      ENABLE_FP8_KV_CACHE>), shared_mem_size);                                                \
+  aphrodite::paged_attention_v1_kernel<T, CACHE_T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS,             \
+  ENABLE_FP8_KV_CACHE><<<grid, block, shared_mem_size, stream>>>(                             \
+    out_ptr,                                                                                  \
+    query_ptr,                                                                                \
+    key_cache_ptr,                                                                            \
+    value_cache_ptr,                                                                          \
+    num_kv_heads,                                                                             \
+    scale,                                                                                    \
+    block_tables_ptr,                                                                         \
+    context_lens_ptr,                                                                         \
+    max_num_blocks_per_seq,                                                                   \
+    alibi_slopes_ptr,                                                                         \
+    q_stride,                                                                                 \
+    kv_block_stride,                                                                          \
     kv_head_stride);
 
 // TODO: Tune NUM_THREADS.
@@ -686,20 +686,20 @@ void paged_attention_v1_launcher(
 
 // NOTE: To reduce the compilation time, we omitted block sizes
 // 1, 2, 4, 64, 128, 256.
-#define CALL_V1_LAUNCHER_BLOCK_SIZE(T, CACHE_T, ENABLE_FP8_KV_CACHE)      \
-  switch (block_size) {                                                   \
-    case 8:                                                               \
-      CALL_V1_LAUNCHER(T, CACHE_T, 8, ENABLE_FP8_KV_CACHE);               \
-      break;                                                              \
-    case 16:                                                              \
-      CALL_V1_LAUNCHER(T, CACHE_T, 16, ENABLE_FP8_KV_CACHE);              \
-      break;                                                              \
-    case 32:                                                              \
-      CALL_V1_LAUNCHER(T, CACHE_T, 32, ENABLE_FP8_KV_CACHE);              \
-      break;                                                              \
-    default:                                                              \
-      TORCH_CHECK(false, "Unsupported block size: ", block_size);         \
-      break;                                                              \
+#define CALL_V1_LAUNCHER_BLOCK_SIZE(T, CACHE_T, ENABLE_FP8_KV_CACHE)\
+  switch (block_size) {                                             \
+    case 8:                                                         \
+      CALL_V1_LAUNCHER(T, CACHE_T, 8, ENABLE_FP8_KV_CACHE);         \
+      break;                                                        \
+    case 16:                                                        \
+      CALL_V1_LAUNCHER(T, CACHE_T, 16, ENABLE_FP8_KV_CACHE);        \
+      break;                                                        \
+    case 32:                                                        \
+      CALL_V1_LAUNCHER(T, CACHE_T, 32, ENABLE_FP8_KV_CACHE);        \
+      break;                                                        \
+    default:                                                        \
+      TORCH_CHECK(false, "Unsupported block size: ", block_size);   \
+      break;                                                        \
   }
 
 void paged_attention_v1(
@@ -713,7 +713,8 @@ void paged_attention_v1(
   torch::Tensor& context_lens,    // [num_seqs]
   int block_size,
   int max_context_len,
-  const c10::optional<torch::Tensor>& alibi_slopes, const bool enable_fp8_kv_cache) {
+  const c10::optional<torch::Tensor>& alibi_slopes,
+  const bool enable_fp8_kv_cache) {
   if (enable_fp8_kv_cache) {
     if (query.dtype() == at::ScalarType::Float) {
       CALL_V1_LAUNCHER_BLOCK_SIZE(float, uint8_t, true);
@@ -737,31 +738,32 @@ void paged_attention_v1(
   }
 }
 
-#define LAUNCH_PAGED_ATTENTION_V2(HEAD_SIZE)                                                                                \
-  aphrodite::paged_attention_v2_kernel<T, CACHE_T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS, ENABLE_FP8_KV_CACHE, PARTITION_SIZE> \
-  <<<grid, block, shared_mem_size, stream>>>(                                                                               \
-    exp_sums_ptr,                                                                                                           \
-    max_logits_ptr,                                                                                                         \
-    tmp_out_ptr,                                                                                                            \
-    query_ptr,                                                                                                              \
-    key_cache_ptr,                                                                                                          \
-    value_cache_ptr,                                                                                                        \
-    num_kv_heads,                                                                                                           \
-    scale,                                                                                                                  \
-    block_tables_ptr,                                                                                                       \
-    context_lens_ptr,                                                                                                       \
-    max_num_blocks_per_seq,                                                                                                 \
-    alibi_slopes_ptr,                                                                                                       \
-    q_stride,                                                                                                               \
-    kv_block_stride,                                                                                                        \
-    kv_head_stride);                                                                                                        \
-  aphrodite::paged_attention_v2_reduce_kernel<T, HEAD_SIZE, NUM_THREADS, PARTITION_SIZE>                                    \
-  <<<reduce_grid, block, reduce_shared_mem_size, stream>>>(                                                                 \
-    out_ptr,                                                                                                                \
-    exp_sums_ptr,                                                                                                           \
-    max_logits_ptr,                                                                                                         \
-    tmp_out_ptr,                                                                                                            \
-    context_lens_ptr,                                                                                                       \
+#define LAUNCH_PAGED_ATTENTION_V2(HEAD_SIZE)                                                  \
+  aphrodite::paged_attention_v2_kernel<T, CACHE_T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS,             \
+  ENABLE_FP8_KV_CACHE, PARTITION_SIZE>                                                        \
+  <<<grid, block, shared_mem_size, stream>>>(                                                 \
+    exp_sums_ptr,                                                                             \
+    max_logits_ptr,                                                                           \
+    tmp_out_ptr,                                                                              \
+    query_ptr,                                                                                \
+    key_cache_ptr,                                                                            \
+    value_cache_ptr,                                                                          \
+    num_kv_heads,                                                                             \
+    scale,                                                                                    \
+    block_tables_ptr,                                                                         \
+    context_lens_ptr,                                                                         \
+    max_num_blocks_per_seq,                                                                   \
+    alibi_slopes_ptr,                                                                         \
+    q_stride,                                                                                 \
+    kv_block_stride,                                                                          \
+    kv_head_stride);                                                                          \
+  aphrodite::paged_attention_v2_reduce_kernel<T, HEAD_SIZE, NUM_THREADS, PARTITION_SIZE>           \
+  <<<reduce_grid, block, reduce_shared_mem_size, stream>>>(                                   \
+    out_ptr,                                                                                  \
+    exp_sums_ptr,                                                                             \
+    max_logits_ptr,                                                                           \
+    tmp_out_ptr,                                                                              \
+    context_lens_ptr,                                                                         \
     max_num_partitions);
 
 template<
@@ -872,20 +874,20 @@ void paged_attention_v2_launcher(
 
 // NOTE: To reduce the compilation time, we omitted block sizes
 // 1, 2, 4, 64, 128, 256.
-#define CALL_V2_LAUNCHER_BLOCK_SIZE(T, CACHE_T, ENABLE_FP8_KV_CACHE)\
-  switch (block_size) {                                             \
-    case 8:                                                         \
-      CALL_V2_LAUNCHER(T, CACHE_T, 8, ENABLE_FP8_KV_CACHE);         \
-      break;                                                        \
-    case 16:                                                        \
-      CALL_V2_LAUNCHER(T, CACHE_T, 16, ENABLE_FP8_KV_CACHE);        \
-      break;                                                        \
-    case 32:                                                        \
-      CALL_V2_LAUNCHER(T, CACHE_T, 32, ENABLE_FP8_KV_CACHE);        \
-      break;                                                        \
-    default:                                                        \
-      TORCH_CHECK(false, "Unsupported block size: ", block_size);   \
-      break;                                                        \
+#define CALL_V2_LAUNCHER_BLOCK_SIZE(T, CACHE_T, ENABLE_FP8_KV_CACHE)        \
+  switch (block_size) {                                                     \
+    case 8:                                                                 \
+      CALL_V2_LAUNCHER(T, CACHE_T, 8, ENABLE_FP8_KV_CACHE);                 \
+      break;                                                                \
+    case 16:                                                                \
+      CALL_V2_LAUNCHER(T, CACHE_T, 16, ENABLE_FP8_KV_CACHE);                \
+      break;                                                                \
+    case 32:                                                                \
+      CALL_V2_LAUNCHER(T, CACHE_T, 32, ENABLE_FP8_KV_CACHE);                \
+      break;                                                                \
+    default:                                                                \
+      TORCH_CHECK(false, "Unsupported block size: ", block_size);           \
+      break;                                                                \
   }
 
 void paged_attention_v2(
