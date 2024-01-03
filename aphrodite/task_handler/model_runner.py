@@ -423,6 +423,8 @@ class ModelRunner:
         # NOTE: Capturing the largest batch size first may help reduce the
         # memory usage of CUDA graph.
         for batch_size in reversed(_BATCH_SIZES_TO_CAPTURE):
+            if batch_size > self.scheduler_config.max_num_seqs:
+                continue
             # Create dummy input_metadata.
             input_metadata = InputMetadata(
                 prompt_lens=[],

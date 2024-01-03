@@ -226,6 +226,7 @@ aphrodite_extension_sources = [
 
 if _is_cuda():
     aphrodite_extension_sources.append("kernels/quantization/awq/gemm_kernels.cu")
+    aphrodite_extension_sources.append("kernels/quantization/quip/origin_order.cu")
 
 aphrodite_extension = CUDAExtension(
     name="aphrodite._C",
@@ -331,6 +332,7 @@ setuptools.setup(
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
     package_data={"aphrodite-engine": ["aphrodite/endpoints/kobold/klite.embd",
-                                       "py.typed"]},
+                                       "py.typed",
+                                       "modeling/layers/quantization/hadamard.safetensors"]},
     include_package_data=True,
 )
