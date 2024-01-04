@@ -43,15 +43,15 @@ class MoE(nn.Module):
                                      linear_method=None)
 
         self.w1s = nn.Parameter(
-            torch.empty(self.num_total_experts, self.hidden_size,
-                       self.intermediate_size, device="cuda"))
+            torch.rand(self.num_total_experts, self.hidden_size,
+                       self.intermediate_size))
         self.w2s = nn.Parameter(
-            torch.empty(self.num_total_experts, self.intermediate_size,
-                       self.hidden_size, device="cuda"))
+            torch.rand(self.num_total_experts, self.intermediate_size,
+                       self.hidden_size))
         self.w3s = nn.Parameter(
-            torch.empty(self.num_total_experts, self.hidden_size,
-                       self.intermediate_size, device="cuda"))
-        
+            torch.rand(self.num_total_experts, self.hidden_size,
+                       self.intermediate_size))
+
         set_weight_attrs(self.w1s, {
             "weight_loader": self.weight_loader,
             "tp_type": "column"
@@ -122,6 +122,7 @@ class MoE(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Expand and group hidden states and routing weights according
         to the selected experts.
+
         Args:
             hidden_states (torch.Tensor): [batch_size, hidden_size]
                 hidden states.
@@ -129,6 +130,7 @@ class MoE(nn.Module):
                 the indices of the selected experts.
             routing_weights (torch.Tensor): [batch_size, top_k_experts]
                 the routing weights of the selected experts.
+
         Returns:
             expanded_hidden_states: [batch_size * top_k_experts, hidden_size]
                 expanded hidden states that rows are grouped by experts.
@@ -287,16 +289,19 @@ def grouped_matmul(input: torch.Tensor,
                    activation: str = ""):
     """Performs a grouped matrix-matrix product of matrices stored in input
     and mat2.
+
     input is a tensor of shape [batch_size, k] where each group are stored
     compactly in the batch dimension. The range of each group is specified
     in cumulative_group_range. This allows the input to have fixed shape
     regardless of the group sizes.
+
     Args:
         input (torch.Tensor): [batch_size, k] compact input.
         cumulative_group_range (torch.Tensor): [num_groups + 1] the cumulative
             range of the groups in input.
         mat2 (torch.Tensor): [num_groups, k, n] the second matrix.
         activation (str, optional): "" or "silu". Defaults to "".
+
     Returns:
         torch.Tensor: [batch_size, hidden_size] compact output where groups
             are stored compactly in the batch dimension.

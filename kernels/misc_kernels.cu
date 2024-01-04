@@ -26,7 +26,7 @@ __global__ void bincount_kernel(scalar_t *__restrict__ src, int32_t *out,
 void aphrodite_bincount(torch::Tensor src, torch::Tensor out) {
     // the PyTorch bincount is not compatible with CUDA graph
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  APHRODITE_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_ALL_TYPES(
     src.scalar_type(), "bincount_kernel", [&] {
     aphrodite::bincount_kernel<scalar_t><<<BLOCKS(src.numel()), THREADS, 0, stream>>>(
         src.data<scalar_t>(), out.data<int32_t>(), src.numel());
