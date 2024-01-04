@@ -4,16 +4,28 @@ from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_world_size,
     get_tensor_model_parallel_group,
 )
+from aphrodite.modeling.megatron import fast_allreduce as fast_ar
 
 
-def tensor_model_parallel_all_reduce(input_):
+def tensor_model_parallel_all_reduce(input_: torch.Tensor):
     """All-reduce the input tensor across model parallel group.
     Note: This operation is applied in-place on the input tensor.
     """
     # Bypass the function if we are using only 1 GPU.
     if get_tensor_model_parallel_world_size() == 1:
         return input_
-    # All-reduce.
+    # fast allreduce only works with IPC pre-registered buffer.
+    # This is only handled when captured with cuda graph
+    if fast_ar.is_capturing():
+        fa_handle = fast_ar.get_handle()
+        if torch.cuda.is_current_stream_capturing():
+            if fa_handle.should_fast_ar(input_):
+                return fa_handle.all_reduce(input_)
+        else:
+            if fa_handle.should_fast_ar(input_):
+                # if warm up, mimic the allocation pattern
+                # since fast allreduce is out-of-place
+                return torch.empty_like(input_)
     torch.distributed.all_reduce(input_,
                                  group=get_tensor_model_parallel_group())
     return input_

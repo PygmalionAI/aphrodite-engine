@@ -34,6 +34,7 @@ class EngineArgs:
     quantization: Optional[str] = None
     enforce_eager: bool = False
     max_context_len_to_capture: int = 8192
+    disable_fast_allreduce: bool = False
     kv_cache_dtype: Optional[str] = None
 
     def __post_init__(self):
@@ -187,6 +188,13 @@ class EngineArgs:
                             help='maximum context length covered by CUDA '
                             'graphs. When a sequence has context length '
                             'larger than this, we fall back to eager mode.')
+        parser.add_argument('--disable-fast-allreduce',
+                            action='store_true',
+                            default=EngineArgs.disable_fast_allreduce,
+                            help='Disable the custom all-reduce kernel and '
+                                 'fall back to NCCL. Note that custom kernel '
+                                 'is only used with CUDA graph '
+                                 'and never in eager mode.')
         parser.add_argument('--kv-cache-dtype',
                             type=str,
                             choices=['fp8', None],
@@ -219,7 +227,8 @@ class EngineArgs:
         parallel_config = ParallelConfig(self.pipeline_parallel_size,
                                          self.tensor_parallel_size,
                                          self.worker_use_ray,
-                                         self.max_parallel_loading_workers)
+                                         self.max_parallel_loading_workers,
+                                         self.disable_fast_allreduce)
         scheduler_config = SchedulerConfig(self.max_num_batched_tokens,
                                            self.max_num_seqs,
                                            model_config.max_model_len,

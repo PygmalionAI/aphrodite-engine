@@ -60,6 +60,9 @@ class LLM:
         max_context_len_to_capture: Maximum context len covered by CUDA graphs.
             When a sequence has context length larger than this, we fall back
             to eager mode.
+        disable_fast_allreduce: Disable the custom all-reduce kernel and fall
+            back to NCCL. Note that custom kernel is only used with CUDA graph
+            and never in eager mode.
     """
 
     def __init__(
@@ -77,6 +80,7 @@ class LLM:
         swap_space: int = 4,
         enforce_eager: bool = False,
         max_context_len_to_capture: int = 8192,
+        disable_fast_allreduce: bool = False,
         **kwargs,
     ) -> None:
         if "disable_log_stats" not in kwargs:
@@ -95,6 +99,7 @@ class LLM:
             swap_space=swap_space,
             enforce_eager=enforce_eager,
             max_context_len_to_capture=max_context_len_to_capture,
+            disable_fast_allreduce=disable_fast_allreduce,
             **kwargs,
         )
         self.llm_engine = AphroditeEngine.from_engine_args(engine_args)

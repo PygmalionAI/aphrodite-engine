@@ -88,6 +88,8 @@ class AphroditeEngine:
             f"Sampler Seed = {model_config.seed}\n"
             f"Context Length = {model_config.max_model_len}\n"
             f"Enforce Eager Mode = {model_config.enforce_eager}\n"
+            "Disable Fast All-Reduce = "
+            f"{parallel_config.disable_fast_allreduce}\n"
             f"KV Cache DataType = {cache_config.cache_dtype}\n"
             f"Seed = {model_config.seed}")
         # TODO: Print more configs in debug mode.
