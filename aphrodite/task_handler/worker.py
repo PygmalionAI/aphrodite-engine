@@ -7,7 +7,7 @@ import torch.distributed
 
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig)
-from aphrodite.modeling import 
+from aphrodite.modeling import set_random_seed
 from aphrodite.modeling.megatron.communication_op import (
     broadcast_object_list)
 from aphrodite.modeling.megatron.parallel_state import (
