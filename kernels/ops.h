@@ -12,7 +12,8 @@ void paged_attention_v1(
   torch::Tensor& context_lens,
   int block_size,
   int max_context_len,
-  const c10::optional<torch::Tensor>& alibi_slopes);
+  const c10::optional<torch::Tensor>& alibi_slopes,
+  const bool enable_fp8_kv_cache);
 
 void paged_attention_v2(
   torch::Tensor& out,
@@ -28,7 +29,8 @@ void paged_attention_v2(
   torch::Tensor& context_lens,
   int block_size,
   int max_context_len,
-  const c10::optional<torch::Tensor>& alibi_slopes);
+  const c10::optional<torch::Tensor>& alibi_slopes,
+  const bool enable_fp8_kv_cache);
 
 void rms_norm(
   torch::Tensor& out,
@@ -84,24 +86,11 @@ torch::Tensor gptq_gemm(
   torch::Tensor b_gptq_qzeros,
   torch::Tensor b_gptq_scales,
   torch::Tensor b_g_idx,
-  bool use_exllama);
+  bool use_exllama,
+  int bit);
 
 void gptq_shuffle(
   torch::Tensor q_weight,
-  torch::Tensor q_perm);
+  torch::Tensor q_perm,
+  int bit);
   
-
-using fptr_t = uint64_t;
-fptr_t init_fast_ar(torch::Tensor &meta, torch::Tensor &rank_data,
-                    const std::vector<std::string> &handles,
-                    const std::vector<int64_t> &offsets, int rank,
-                    bool full_nvlink);
-void allreduce(fptr_t _fa, torch::Tensor &inp, torch::Tensor &out);
-void dispose(fptr_t _fa);
-int meta_size();
-void register_buffer(fptr_t _fa, torch::Tensor &t,
-                     const std::vector<std::string> &handles,
-                     const std::vector<int64_t> &offsets);
-std::pair<std::vector<uint8_t>, std::vector<int64_t>> get_graph_buffer_ipc_meta(fptr_t _fa);
-void register_graph_buffers(fptr_t _fa, const std::vector<std::string> &handles,
-                            const std::vector<std::vector<int64_t>> &offsets);

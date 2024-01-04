@@ -1,6 +1,7 @@
 import enum
 from enum import Enum
 from typing import Any, Dict, List, Optional
+from fractions import Fraction
 
 import torch
 from torch.nn.parameter import Parameter
@@ -14,6 +15,7 @@ from aphrodite.modeling.layers.quantization.base_config import (
 
 class GPTQConfig(QuantizationConfig):
     """Config class for GPTQ.
+
     Reference: https://arxiv.org/abs/2210.17323
     """
 
@@ -26,12 +28,11 @@ class GPTQConfig(QuantizationConfig):
         self.weight_bits = weight_bits
         self.group_size = group_size
         self.desc_act = desc_act
-        self.pack_factor = 32 // self.weight_bits
-        # exllama kernel v1 only supports 4 bit
-        if self.weight_bits != 4:
+        self.pack_factor = Fraction(32, self.weight_bits)
+        if self.weight_bits not in [2, 3, 4, 8]:
             raise ValueError(
-                "Currently, only 4-bit weight quantization is supported for "
-                f"GPTQ, but got {self.weight_bits} bits.")
+                "Currently, only 2/3/4/8-bit weight quantization is supported "
+                f"for GPTQ, but got {self.weight_bits} bits.")
 
     def __repr__(self) -> str:
         return (f"GPTQConfig(weight_bits={self.weight_bits}, "
@@ -78,6 +79,7 @@ class ExllamaState(Enum):
 
 class GPTQLinearMethod(LinearMethodBase):
     """Linear method for GPTQ.
+
     Args:
         quant_config: The GPTQ quantization config.
     """
@@ -99,11 +101,13 @@ class GPTQLinearMethod(LinearMethodBase):
                 "The input size is not aligned with the quantized "
                 "weight shape. This can be caused by too large "
                 "tensor parallel size.")
-        if output_size_per_partition % self.quant_config.pack_factor != 0:
+        if (output_size_per_partition % self.quant_config.pack_factor.numerator
+                != 0):
             raise ValueError(
                 "The output size is not aligned with the quantized "
                 "weight shape. This can be caused by too large "
                 "tensor parallel size.")
+
         if self.quant_config.group_size != -1:
             group_size = self.quant_config.group_size
         else:
@@ -194,8 +198,8 @@ class GPTQLinearMethod(LinearMethodBase):
         qweight = weights["qweight"]
         out_shape = x.shape[:-1] + (qweight.shape[-1], )
         reshaped_x = x.reshape(-1, x.shape[-1])
-        # exllama needs to shuffle the weight after it's loaded
-        # here we do the shuffle on the first forward pass
+        # exllama needs to shuffle the weight after the weight is loaded
+        # here we do the shuffle on first forward pass
         if weights["exllama_state"] == ExllamaState.UNINITIALIZED:
             if self.quant_config.desc_act:
                 weights["g_idx"] = torch.argsort(weights["g_idx"]).to(
@@ -203,11 +207,13 @@ class GPTQLinearMethod(LinearMethodBase):
             else:
                 weights["g_idx"] = torch.empty((1, 1), device="meta")
             weights["exllama_state"] = ExllamaState.READY
-            quantization_ops.gptq_shuffle(weights["qweight"], weights["g_idx"])
+            quantization_ops.gptq_shuffle(weights["qweight"], weights["g_idx"],
+                                          self.quant_config.weight_bits)
         output = quantization_ops.gptq_gemm(
             reshaped_x, weights["qweight"], weights["qzeros"],
             weights["scales"], weights["g_idx"],
-            weights["exllama_state"] == ExllamaState.READY)
+            weights["exllama_state"] == ExllamaState.READY,
+            self.quant_config.weight_bits)
         if bias is not None:
             output = output + bias
         return output.reshape(out_shape)
