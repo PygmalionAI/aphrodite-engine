@@ -184,14 +184,21 @@ class _AsyncAphrodite(AphroditeEngine):
         """
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
 
-        # Execute the model.
-        output = (await self._run_workers_async(
-            "execute_model",
-            seq_group_metadata_list=seq_group_metadata_list,
-            blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,
-            blocks_to_swap_out=scheduler_outputs.blocks_to_swap_out,
-            blocks_to_copy=scheduler_outputs.blocks_to_copy,
-        )) if not scheduler_outputs.is_empty() else []
+        if not scheduler_outputs.is_empty():
+            # Execute the model.
+            all_outputs = await self._run_workers_async(
+                "execute_model",
+                driver_kwargs={
+                    "seq_group_metadata_list": seq_group_metadata_list,
+                    "blocks_to_swap_in": scheduler_outputs.blocks_to_swap_in,
+                    "blocks_to_swap_out": scheduler_outputs.blocks_to_swap_out,
+                    "blocks_to_copy": scheduler_outputs.blocks_to_copy,
+                })
+
+            # Only the driver worker returns the sampling results.
+            output = all_outputs[0]
+        else:
+            output = []
 
         return self._process_model_outputs(output, scheduler_outputs)
 
@@ -199,31 +206,28 @@ class _AsyncAphrodite(AphroditeEngine):
         self,
         method: str,
         *args,
-        get_all_outputs: bool = False,
+        driver_args: Optional[List[Any]] = None,
+        driver_kwargs: Optional[Dict[str, Any]] = None,
         **kwargs,
     ) -> Any:
         """Runs the given method on all workers."""
-        all_outputs = []
+        coros = []
+        if driver_args is None:
+            driver_args = args
+        if driver_kwargs is None:
+            driver_kwargs = kwargs
+
+        # Run the driver worker asynchronously.
+        driver_executor = getattr(self.driver_worker, method)
+        coros.append(asyncio.get_event_loop().run_in_executor(
+            None, partial(driver_executor, *driver_args, **driver_kwargs)))
+
+        # Run the ray workers asynchronously.
         for worker in self.workers:
-            if self.parallel_config.worker_use_ray:
-                executor = partial(worker.execute_method.remote, method)
-            else:
-                executor = getattr(worker, method)
+            coros.append(worker.execute_method.remote(method, *args, **kwargs))
 
-            output = executor(*args, **kwargs)
-            all_outputs.append(output)
-
-        if self.parallel_config.worker_use_ray:
-            all_outputs = await asyncio.gather(*all_outputs)
-
-        if get_all_outputs:
-            return all_outputs
-
-        # Make sure all workers have the same results.
-        output = all_outputs[0]
-        for other_output in all_outputs[1:]:
-            assert output == other_output
-        return output
+        all_outputs = await asyncio.gather(*coros)
+        return all_outputs
 
 
 class AsyncAphrodite:
@@ -487,13 +491,12 @@ class AsyncAphrodite:
         engine_configs = engine_args.create_engine_configs()
         parallel_config = engine_configs[2]
         # Initialize the cluster.
-        distributed_init_method, placement_group = initialize_cluster(
-            parallel_config, engine_args.engine_use_ray)
+        placement_group = initialize_cluster(parallel_config,
+                                             engine_args.engine_use_ray)
         # Create the async LLM engine.
         engine = cls(parallel_config.worker_use_ray,
                      engine_args.engine_use_ray,
                      *engine_configs,
-                     distributed_init_method,
                      placement_group,
                      log_requests=not engine_args.disable_log_requests,
                      log_stats=not engine_args.disable_log_stats,

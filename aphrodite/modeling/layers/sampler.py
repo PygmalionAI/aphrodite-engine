@@ -7,7 +7,7 @@ import torch.nn as nn
 from aphrodite.modeling.sampling_metadata import (SamplingMetadata,
                                                   OutputMetadata)
 from aphrodite.modeling.megatron.communication_op import (
-    tensor_model_parallel_all_gather)
+    tensor_model_parallel_gather)
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (PromptLogprobs, SampleLogprobs,
                                        SamplerOutput, SequenceData,
@@ -43,13 +43,14 @@ class Sampler(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
         embedding_bias: Optional[torch.Tensor] = None,
-    ) -> SamplerOutput:
+    ) -> Optional[SamplerOutput]:
         # Get the hidden states that we use for sampling.
         hidden_states = _prune_hidden_states(hidden_states, sampling_metadata)
 
         # Get the logits for the next tokens.
         logits = _get_logits(hidden_states, embedding, embedding_bias,
                              self.vocab_size)
+
 
         output_metadata = OutputMetadata()
 
@@ -67,6 +68,14 @@ class Sampler(nn.Module):
         banned_tokens = _get_custom_token_bans(sampling_metadata)
         assert len(banned_tokens) == logits.shape[0]
         logits = _apply_token_bans(logits, banned_tokens)
+
+        # Only perform sampling in the driver worker.
+        # Note: `_get_logits` is still distributed across TP workers because
+        # the `embedding` weight is distributed across TP workers.
+        # TODO: Change the get_logits part to a separate stage.
+        if not sampling_metadata.perform_sampling:
+            return None
+        assert logits is not None
 
         logits = _apply_logits_processors(sampling_metadata, logits,
                                           output_tokens)
@@ -145,14 +154,15 @@ class Sampler(nn.Module):
 
 def _get_logits(hidden_states: torch.Tensor, embedding: torch.Tensor,
                 embedding_bias: Optional[torch.Tensor],
-                vocab_size: int) -> torch.Tensor:
+                vocab_size: int) -> Optional[torch.Tensor]:
     # Get the logits for the next tokens.
     logits = torch.matmul(hidden_states, embedding.t())
     if embedding_bias is not None:
         logits += embedding_bias
-    logits = tensor_model_parallel_all_gather(logits)
+    logits = tensor_model_parallel_gather(logits)
     # Remove paddings in vocab (if any).
-    logits = logits[:, :vocab_size]
+    if logits is not None:
+        logits = logits[:, :vocab_size]
     return logits
 
 
