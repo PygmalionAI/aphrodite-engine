@@ -1,5 +1,7 @@
+import enum
 from enum import Enum
 from typing import Any, Dict, List, Optional
+from fractions import Fraction
 
 import torch
 from torch.nn.parameter import Parameter
@@ -13,6 +15,7 @@ from aphrodite.modeling.layers.quantization.base_config import (
 
 class GPTQConfig(QuantizationConfig):
     """Config class for GPTQ.
+
     Reference: https://arxiv.org/abs/2210.17323
     """
 
@@ -25,12 +28,11 @@ class GPTQConfig(QuantizationConfig):
         self.weight_bits = weight_bits
         self.group_size = group_size
         self.desc_act = desc_act
-        self.pack_factor = 32 // self.weight_bits
-        # exllama kernel v1 only supports 4 bit
-        if self.weight_bits != 4:
+        self.pack_factor = Fraction(32, self.weight_bits)
+        if self.weight_bits not in [2, 3, 4, 8]:
             raise ValueError(
-                "Currently, only 4-bit weight quantization is supported for "
-                f"GPTQ, but got {self.weight_bits} bits.")
+                "Currently, only 2/3/4/8-bit weight quantization is supported "
+                f"for GPTQ, but got {self.weight_bits} bits.")
 
     def __repr__(self) -> str:
         return (f"GPTQConfig(weight_bits={self.weight_bits}, "
@@ -52,9 +54,7 @@ class GPTQConfig(QuantizationConfig):
 
     @classmethod
     def get_config_filenames(cls) -> List[str]:
-        return [
-            "quantize_config.json",
-        ]
+        return ["quantize_config.json"]
 
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "GPTQConfig":
@@ -70,11 +70,16 @@ class GPTQConfig(QuantizationConfig):
         return []
 
 
-ExlState = Enum("ExlState", ["Unused", "Uninitialized", "Ready"])
+class ExllamaState(Enum):
+
+    UNUSED = enum.auto()
+    UNINITIALIZED = enum.auto()
+    READY = enum.auto()
 
 
 class GPTQLinearMethod(LinearMethodBase):
     """Linear method for GPTQ.
+
     Args:
         quant_config: The GPTQ quantization config.
     """
@@ -82,32 +87,39 @@ class GPTQLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: GPTQConfig):
         self.quant_config = quant_config
 
-    def create_weights(self, input_size_per_partition: int,
-                       output_size_per_partition: int, input_size: int,
-                       output_size: int,
-                       params_dtype: torch.dtype) -> Dict[str, Any]:
+    def create_weights(
+        self,
+        input_size_per_partition: int,
+        output_size_per_partition: int,
+        input_size: int,
+        output_size: int,
+        params_dtype: torch.dtype,
+    ) -> Dict[str, Any]:
+        del output_size  # Unused.
         if input_size_per_partition % self.quant_config.group_size != 0:
             raise ValueError(
                 "The input size is not aligned with the quantized "
                 "weight shape. This can be caused by too large "
                 "tensor parallel size.")
-        if output_size_per_partition % self.quant_config.pack_factor != 0:
+        if (output_size_per_partition % self.quant_config.pack_factor.numerator
+                != 0):
             raise ValueError(
                 "The output size is not aligned with the quantized "
                 "weight shape. This can be caused by too large "
                 "tensor parallel size.")
+
         if self.quant_config.group_size != -1:
             group_size = self.quant_config.group_size
         else:
             group_size = input_size
-        exllama_state = ExlState.Uninitialized
+        exllama_state = ExllamaState.UNINITIALIZED
         scale_and_zero_size = input_size // group_size
         scale_and_zero_input_dim = None
         if (input_size != input_size_per_partition
                 and self.quant_config.group_size != -1):
             # For act-order models, we cannot use Exllama for row parallel layer
             if self.quant_config.desc_act:
-                exllama_state = ExlState.Unused
+                exllama_state = ExllamaState.UNUSED
             else:
                 # we need to partition qzeros and scales for exllama kernel
                 scale_and_zero_size = input_size_per_partition // group_size
@@ -140,7 +152,8 @@ class GPTQLinearMethod(LinearMethodBase):
             ),
             requires_grad=False,
         )
-        set_weight_attrs(g_idx, {"input_dim": 0})
+        # Ignore warning from fused linear layers such as QKVParallelLinear.
+        set_weight_attrs(g_idx, {"input_dim": 0, "ignore_warning": True})
         qzeros = Parameter(
             torch.empty(
                 scale_and_zero_size,
@@ -185,20 +198,22 @@ class GPTQLinearMethod(LinearMethodBase):
         qweight = weights["qweight"]
         out_shape = x.shape[:-1] + (qweight.shape[-1], )
         reshaped_x = x.reshape(-1, x.shape[-1])
-        # exllama needs to shuffle the weight after it's loaded
-        # here we do the shuffle on the first forward pass
-        if weights["exllama_state"] == ExlState.Uninitialized:
+        # exllama needs to shuffle the weight after the weight is loaded
+        # here we do the shuffle on first forward pass
+        if weights["exllama_state"] == ExllamaState.UNINITIALIZED:
             if self.quant_config.desc_act:
                 weights["g_idx"] = torch.argsort(weights["g_idx"]).to(
                     torch.int)
             else:
                 weights["g_idx"] = torch.empty((1, 1), device="meta")
-            weights["exllama_state"] = ExlState.Ready
-            quantization_ops.gptq_shuffle(weights["qweight"], weights["g_idx"])
+            weights["exllama_state"] = ExllamaState.READY
+            quantization_ops.gptq_shuffle(weights["qweight"], weights["g_idx"],
+                                          self.quant_config.weight_bits)
         output = quantization_ops.gptq_gemm(
             reshaped_x, weights["qweight"], weights["qzeros"],
             weights["scales"], weights["g_idx"],
-            weights["exllama_state"] == ExlState.Ready)
+            weights["exllama_state"] == ExllamaState.READY,
+            self.quant_config.weight_bits)
         if bias is not None:
             output = output + bias
         return output.reshape(out_shape)

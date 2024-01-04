@@ -1,7 +1,10 @@
 import copy
+import os
 import time
 from functools import partial
 from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Tuple, Union
+
+import psutil
 
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig)
@@ -13,7 +16,6 @@ from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (SamplerOutput, Sequence, SequenceGroup,
-                                       SequenceGroupMetadata,
                                        SequenceGroupOutput, SequenceOutput,
                                        SequenceStatus)
 from aphrodite.transformers_utils.tokenizer import (detokenize_incrementally,
@@ -84,7 +86,10 @@ class AphroditeEngine:
             f"Number of GPUs = {parallel_config.tensor_parallel_size}\n"
             f"Quantization Format = {model_config.quantization}\n"
             f"Sampler Seed = {model_config.seed}\n"
-            f"Context Length = {model_config.max_model_len}")
+            f"Context Length = {model_config.max_model_len}\n"
+            f"Enforce Eager Mode = {model_config.enforce_eager}\n"
+            f"KV Cache DataType = {cache_config.cache_dtype}\n"
+            f"Seed = {model_config.seed}")
         # TODO: Print more configs in debug mode.
 
         self.model_config = model_config
@@ -103,6 +108,10 @@ class AphroditeEngine:
 
         # Create the parallel GPU workers.
         if self.parallel_config.worker_use_ray:
+            # Disable Ray usage stats collection.
+            ray_usage = os.environ.get("RAY_USAGE_STATS_ENABLED", "0")
+            if ray_usage != "1":
+                os.environ["RAY_USAGE_STATS_ENABLED"] = "0"
             self._init_workers_ray(placement_group)
         else:
             self._init_workers(distributed_init_method)
@@ -197,6 +206,27 @@ class AphroditeEngine:
             max_parallel_loading_workers,
         )
 
+        # HACK
+        # After running ray.init(), ray processes affinity is set to (0,1).
+        # (or whatever the CPU scheduler fancies)
+        # We however want the actual workers that are being used,
+        # so we call here since calling after ray.init() and everything else.
+        # We reassign each ray process by taking the
+        # modulus of the number of cpu_cores available.
+        # Issue: https://github.com/PygmalionAI/aphrodite-engine/issues/115
+        # The solution is similar to the taskset solution linked above.
+        current_process = psutil.Process()
+        ray_threads = 0
+        logical_cores = psutil.cpu_count(logical=True)
+        physical_cores = psutil.cpu_count(logical=False)
+        ht_scale = physical_cores / logical_cores
+        for process in current_process.children(recursive=True):
+            # process.pid
+            if "ray::" in process.name():
+                process.cpu_affinity([ray_threads])
+                ray_threads += int(1 * ht_scale) if ht_scale > 1.0 else 1
+                ray_threads = ray_threads % logical_cores
+
     def _verify_args(self) -> None:
         self.model_config.verify_with_parallel_config(self.parallel_config)
         self.cache_config.verify_with_parallel_config(self.parallel_config)
@@ -210,6 +240,7 @@ class AphroditeEngine:
             block_size=self.cache_config.block_size,
             gpu_memory_utilization=self.cache_config.gpu_memory_utilization,
             cpu_swap_space=self.cache_config.swap_space_bytes,
+            cache_dtype=self.cache_config.cache_dtype,
         )
 
         # Since we use a shared centralized controller, we take the minimum
@@ -226,11 +257,23 @@ class AphroditeEngine:
                              "Try increasing `gpu_memory_utilization` when "
                              "initializing the engine.")
 
+        max_seq_len = self.cache_config.block_size * num_gpu_blocks
+        if self.model_config.max_model_len > max_seq_len:
+            raise ValueError(
+                f"The model's max seq len ({self.model_config.max_model_len}) "
+                "is larger than the maximum number of tokens that can be "
+                f"stored in KV cache ({max_seq_len}). Try increasing "
+                "`gpu_memory_utilization` or decreasing `max_model_len` when "
+                "initializing the engine.")
+
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
 
         # Initialize the cache.
         self._run_workers("init_cache_engine", cache_config=self.cache_config)
+        # Warm up the model. This includes capturing the model into CUDA graph
+        # if enforce_eager is set to False.
+        self._run_workers("warm_up_model")
 
     @classmethod
     def from_engine_args(cls, engine_args: EngineArgs) -> "AphroditeEngine":
@@ -309,16 +352,6 @@ class AphroditeEngine:
     def has_unfinished_requests(self) -> bool:
         """Returns True if there are unfinished requests."""
         return self.scheduler.has_unfinished_seqs()
-
-    def _schedule(
-        self
-    ) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs,
-               List[RequestOutput]]:
-        seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
-        return seq_group_metadata_list, scheduler_outputs, [
-            RequestOutput.from_seq_group(seq_group)
-            for seq_group in scheduler_outputs.ignored_seq_groups
-        ]
 
     def _check_beam_search_early_stopping(
         self,
@@ -570,9 +603,7 @@ class AphroditeEngine:
         and updates the scheduler with the model outputs. Finally, it decodes
         the sequences and returns the newly generated results.
         """
-        seq_group_metadata_list, scheduler_outputs, ignored = self._schedule()
-        if scheduler_outputs.is_empty():
-            return ignored
+        seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
 
         # Execute the model.
         output = self._run_workers(
@@ -581,7 +612,7 @@ class AphroditeEngine:
             blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,
             blocks_to_swap_out=scheduler_outputs.blocks_to_swap_out,
             blocks_to_copy=scheduler_outputs.blocks_to_copy,
-        )
+        ) if not scheduler_outputs.is_empty() else []
 
         return self._process_model_outputs(output, scheduler_outputs)
 
@@ -682,9 +713,10 @@ class AphroditeEngine:
         """Stop the finished sequences."""
         for stop_str in sampling_params.stop:
             if seq.output_text.endswith(stop_str):
-                # Truncate the output text so that the stop string is
-                # not included in the output.
-                seq.output_text = seq.output_text[:-len(stop_str)]
+                if not sampling_params.include_stop_str_in_output:
+                    # Truncate the output text so that the stop string is
+                    # not included in the output
+                    seq.output_text = seq.output_text[:-len(stop_str)]
                 seq.status = SequenceStatus.FINISHED_STOPPED
                 return
         if seq.get_last_token_id() in sampling_params.stop_token_ids:

@@ -275,8 +275,8 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                 current_shard_offset += output_size
             packed_dim = getattr(param, "packed_dim", None)
             for shard_id, shard_offset, shard_size in shard_offsets:
-                # If quantized, we need to adjust the offset and size to account
-                # for the packing.
+                # If quantized, we need to adjust the offset and size to
+                # account for the packing.
                 if packed_dim == output_dim:
                     shard_size = shard_size // param.pack_factor
                     shard_offset = shard_offset // param.pack_factor
@@ -303,10 +303,12 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
             loaded_weight = loaded_weight.narrow(output_dim, start_idx,
                                                  shard_size)
         else:
-            logger.warning(
-                "Loading a weight without `output_dim` attribute in "
-                "MergedColumnParallelLinear, assume the weight is "
-                "the same for all partitions.")
+            ignore_warning = getattr(param, "ignore_warning", False)
+            if not ignore_warning:
+                logger.warning(
+                    "Loading a weight without `output_dim` attribute in "
+                    "MergedColumnParallelLinear, assume the weight is "
+                    "the same for all partitions.")
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
 
@@ -426,10 +428,12 @@ class QKVParallelLinear(ColumnParallelLinear):
             loaded_weight = loaded_weight.narrow(output_dim, start_idx,
                                                  shard_size)
         else:
-            logger.warning(
-                "Loading a weight without `output_dim` attribute in "
-                "QKVParallelLinear, assume the weight is the same "
-                "for all partitions.")
+            ignore_warning = getattr(param, "ignore_warning", False)
+            if not ignore_warning:
+                logger.warning(
+                    "Loading a weight without `output_dim` attribute in "
+                    "QKVParallelLinear, assume the weight is the same "
+                    "for all partitions.")
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
 

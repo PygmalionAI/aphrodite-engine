@@ -32,6 +32,9 @@ class EngineArgs:
     disable_log_stats: bool = False
     revision: Optional[str] = None
     quantization: Optional[str] = None
+    enforce_eager: bool = False
+    max_context_len_to_capture: int = 8192
+    kv_cache_dtype: Optional[str] = None
 
     def __post_init__(self):
         if self.tokenizer is None:
@@ -173,6 +176,22 @@ class EngineArgs:
                             choices=['awq', 'squeezellm', 'gptq', None],
                             default=None,
                             help='Method used to quantize the weights')
+        parser.add_argument('--enforce-eager',
+                            action='store_true',
+                            help='Always use eager-mode PyTorch. If False, '
+                            'will use eager mode and CUDA graph in hybrid '
+                            'for maximum performance and flexibility.')
+        parser.add_argument('--max-context-len-to-capture',
+                            type=int,
+                            default=EngineArgs.max_context_len_to_capture,
+                            help='maximum context length covered by CUDA '
+                            'graphs. When a sequence has context length '
+                            'larger than this, we fall back to eager mode.')
+        parser.add_argument('--kv-cache-dtype',
+                            type=str,
+                            choices=['fp8', None],
+                            default=None,
+                            help='Data type for the KV cache.')
         return parser
 
     @classmethod
@@ -190,10 +209,12 @@ class EngineArgs:
                                    self.tokenizer_mode, self.trust_remote_code,
                                    self.download_dir, self.load_format,
                                    self.dtype, self.seed, self.revision,
-                                   self.max_model_len, self.quantization)
+                                   self.max_model_len, self.quantization,
+                                   self.enforce_eager,
+                                   self.max_context_len_to_capture)
         cache_config = CacheConfig(self.block_size,
                                    self.gpu_memory_utilization,
-                                   self.swap_space,
+                                   self.swap_space, self.kv_cache_dtype,
                                    model_config.get_sliding_window())
         parallel_config = ParallelConfig(self.pipeline_parallel_size,
                                          self.tensor_parallel_size,

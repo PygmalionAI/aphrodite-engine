@@ -116,6 +116,7 @@ def prepare_engine_payload(
         mirostat_tau=kai_payload.mirostat_tau,
         mirostat_eta=kai_payload.mirostat_eta,
         stop=kai_payload.stop_sequence,
+        include_stop_str_in_output=kai_payload.include_stop_str_in_output,
         custom_token_bans=badwordsids
         if kai_payload.use_default_badwordsids else [],
         max_tokens=kai_payload.max_length,

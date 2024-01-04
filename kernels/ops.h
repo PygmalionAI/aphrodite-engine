@@ -12,7 +12,8 @@ void paged_attention_v1(
   torch::Tensor& context_lens,
   int block_size,
   int max_context_len,
-  const c10::optional<torch::Tensor>& alibi_slopes);
+  const c10::optional<torch::Tensor>& alibi_slopes,
+  const bool enable_fp8_kv_cache);
 
 void paged_attention_v2(
   torch::Tensor& out,
@@ -28,7 +29,8 @@ void paged_attention_v2(
   torch::Tensor& context_lens,
   int block_size,
   int max_context_len,
-  const c10::optional<torch::Tensor>& alibi_slopes);
+  const c10::optional<torch::Tensor>& alibi_slopes,
+  const bool enable_fp8_kv_cache);
 
 void rms_norm(
   torch::Tensor& out,
@@ -78,19 +80,17 @@ void squeezellm_gemm(
   torch::Tensor mul,
   torch::Tensor lookup_table);
 
-torch::Tensor gptq_gemm
-(
+torch::Tensor gptq_gemm(
   torch::Tensor a,
   torch::Tensor b_q_weight,
   torch::Tensor b_gptq_qzeros,
   torch::Tensor b_gptq_scales,
   torch::Tensor b_g_idx,
-  bool use_exllama
-);
+  bool use_exllama,
+  int bit);
 
-void gptq_shuffle
-(
+void gptq_shuffle(
   torch::Tensor q_weight,
-  torch::Tensor q_perm
-);
+  torch::Tensor q_perm,
+  int bit);
   

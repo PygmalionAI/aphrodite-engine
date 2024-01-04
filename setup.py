@@ -237,7 +237,6 @@ aphrodite_extension = CUDAExtension(
 )
 ext_modules.append(aphrodite_extension)
 
-
 def get_path(*filepath) -> str:
     return os.path.join(ROOT_DIR, *filepath)
 
@@ -331,5 +330,7 @@ setuptools.setup(
     install_requires=get_requirements(),
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
-    package_data={"aphrodite-engine": ["py.typed"]},
+    package_data={"aphrodite-engine": ["aphrodite/endpoints/kobold/klite.embd",
+                                       "py.typed"]},
+    include_package_data=True,
 )

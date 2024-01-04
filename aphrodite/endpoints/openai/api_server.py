@@ -75,7 +75,6 @@ def parse_args():
                         "the huggingface name.")
     parser.add_argument("--api-keys",
                         nargs="*",
-                        required=True,
                         help="Authorization API Keys for the server.")
     parser.add_argument("--chat-template",
                         type=str,
@@ -88,6 +87,14 @@ def parse_args():
                         default="assistant",
                         help="The role name to return if "
                         "`request.add_generation_prompt=True.")
+    parser.add_argument("--ssl-keyfile",
+                        type=str,
+                        default=None,
+                        help="SSL key file path.")
+    parser.add_argument("--ssl-certfile",
+                        type=str,
+                        default=None,
+                        help="SSL cert file path.")
 
     parser = AsyncEngineArgs.add_cli_args(parser)
     return parser.parse_args()
@@ -99,6 +106,8 @@ app.add_route("/metrics", metrics)
 
 def _verify_api_key(x_api_key: str = Header(None),
                     authorization: str = Header(None)):
+    if not EXPECTED_API_KEYS:  # If no keys are provided
+        return "NoKey"  # Return a default value
     if x_api_key and x_api_key in EXPECTED_API_KEYS:
         return x_api_key
     elif authorization:
@@ -302,6 +311,7 @@ async def create_chat_completion(
             mirostat_eta=request.mirostat_eta,
             stop=request.stop,
             stop_token_ids=request.stop_token_ids,
+            include_stop_str_in_output=request.include_stop_str_in_output,
             max_tokens=request.max_tokens,
             best_of=request.best_of,
             ignore_eos=request.ignore_eos,
@@ -572,6 +582,7 @@ async def create_completion(
             mirostat_eta=request.mirostat_eta,
             stop=request.stop,
             stop_token_ids=request.stop_token_ids,
+            include_stop_str_in_output=request.include_stop_str_in_output,
             max_tokens=request.max_tokens
             if not echo_without_generation else 1,
             best_of=request.best_of,
@@ -816,4 +827,6 @@ if __name__ == "__main__":
                 host=args.host,
                 port=args.port,
                 log_level="info",
-                timeout_keep_alive=TIMEOUT_KEEP_ALIVE)
+                timeout_keep_alive=TIMEOUT_KEEP_ALIVE,
+                ssl_keyfile=args.ssl_keyfile,
+                ssl_certfile=args.ssl_certfile)

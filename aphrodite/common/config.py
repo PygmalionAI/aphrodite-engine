@@ -44,7 +44,13 @@ class ModelConfig:
         max_model_len: Maximum length of a sequence (including prompt and
             output). If None, will be derived from the model.
         quantization: Quantization method that was used to quantize the model
-            weights. If None, we assume the model weights are not quantized.
+            weights. If None, we assume the model weights are not quantized
+        enforce_eager: Whether to enforce eager execution. If True, we will
+            disable CUDA graph and always execute the model in eager mode.
+            If False, we will use CUDA graph and eager execution in hybrid.
+        max_context_len_to_capture: Maximum context len covered by CUDA graphs.
+            When a sequence has context length larger than this, we will fall
+            back to eager mode.
     """
 
     def __init__(
@@ -60,6 +66,8 @@ class ModelConfig:
         revision: Optional[str] = None,
         max_model_len: Optional[int] = None,
         quantization: Optional[str] = None,
+        enforce_eager: bool = False,
+        max_context_len_to_capture: Optional[int] = None,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -70,6 +78,8 @@ class ModelConfig:
         self.seed = seed
         self.revision = revision
         self.quantization = quantization
+        self.enforce_eager = enforce_eager
+        self.max_context_len_to_capture = max_context_len_to_capture
 
         self.hf_config = get_config(model, trust_remote_code, revision)
         self.dtype = _get_and_verify_dtype(self.hf_config, dtype)
@@ -78,38 +88,35 @@ class ModelConfig:
         self._verify_load_format()
         self._verify_tokenizer_mode()
         self._verify_quantization()
+        self._verify_cuda_graph()
 
     def _verify_load_format(self) -> None:
         load_format = self.load_format.lower()
         supported_load_format = [
             "auto", "pt", "safetensors", "npcache", "dummy"
         ]
-        rocm_not_supported_load_format = ["safetensors"]
+        rocm_not_supported_load_format = []
         if load_format not in supported_load_format:
             raise ValueError(
                 f"Unknown load format: {self.load_format}. Must be one of "
                 "'auto', 'pt', 'safetensors', 'npcache', or 'dummy'.")
-        if is_hip():
-            if load_format in ["safetensors"]:
-                rocm_supported_load_format = [
-                    f for f in supported_load_format
-                    if (f not in rocm_not_supported_load_format)
-                ]
-                raise ValueError(
-                    f"load format {load_format} is not supported on ROCm. "
-                    f"Must be one of {rocm_supported_load_format}.")
-            # force ROCm to load from pt weights if nothing is set
-            if load_format == "auto":
-                load_format = "pt"
+        if is_hip() and load_format in rocm_not_supported_load_format:
+            rocm_supported_load_format = [
+                f for f in supported_load_format
+                if (f not in rocm_not_supported_load_format)
+            ]
+            raise ValueError(
+                f"load format \'{load_format}\' is not supported in ROCm. "
+                f"Supported load format are "
+                f"{rocm_supported_load_format}")
 
-        # FIXME: This is a temporary hack. Support safetensor weights.
+        # TODO: Remove this check once HF updates the pt weights of Mixtral.
         architectures = getattr(self.hf_config, "architectures", [])
-        if "MixtralForCausalLM" in architectures and load_format != "pt":
-            logger.info(
-                "Currently, only 'pt' format is supported for Mixtral. "
-                "Changing the format to 'pt'. This may re-download the "
-                "weights if you have downloaded the safetensor weights.")
-            load_format = "pt"
+        if "MixtralForCausalLM" in architectures and load_format == "pt":
+            raise ValueError(
+                "Currently, the 'pt' format is not supported for Mixtral. "
+                "Please use the 'safetensors' format instead. ")
+
         self.load_format = load_format
 
     def _verify_tokenizer_mode(self) -> None:
@@ -150,6 +157,12 @@ class ModelConfig:
             logger.warning(f"{self.quantization} quantization is not fully "
                            "optimized yet. The speed can be slower than "
                            "non-quantized models (16/32bit).")
+
+    def _verify_cuda_graph(self) -> None:
+        if self.max_context_len_to_capture is None:
+            self.max_context_len_to_capture = self.max_model_len
+        self.max_context_len_to_capture = min(self.max_context_len_to_capture,
+                                              self.max_model_len)
 
     def verify_with_parallel_config(
         self,
@@ -237,6 +250,7 @@ class CacheConfig:
         gpu_memory_utilization: Fraction of GPU memory to use for the
             Aphrodite execution.
         swap_space: Size of the CPU swap space per GPU (in GiB).
+        cache_dtype: Data type fro the KV cache.
     """
 
     def __init__(
@@ -244,11 +258,17 @@ class CacheConfig:
         block_size: int,
         gpu_memory_utilization: float,
         swap_space: int,
+        cache_dtype: str,
         sliding_window: Optional[int] = None,
     ) -> None:
         self.block_size = block_size
         self.gpu_memory_utilization = gpu_memory_utilization
         self.swap_space_bytes = swap_space * _GB
+        self.cache_dtype = cache_dtype
+        if cache_dtype and "fp8" in cache_dtype.lower():
+            # As FP8 is not a formal data type, we use
+            # torch.uint8 instead.
+            self.cache_dtype = torch.uint8
         self.sliding_window = sliding_window
         self._verify_args()
 

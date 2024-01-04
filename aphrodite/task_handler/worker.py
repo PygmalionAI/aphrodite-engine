@@ -46,7 +46,14 @@ class Worker:
         self.cache_events = None
         self.gpu_cache = None
 
-    def init_model(self):
+    def init_model(self) -> None:
+        # torch.distributed.all_reduce does not free the input tensor until
+        # the synchronization point. This causes the memory usage to grow
+        # as the number of all_reduce calls increases. This env var disables
+        # this behaviour.
+
+        os.environ["TORCH_NCCL_AVOID_RECORD_STREAMS"] = "1"
+
         # This env var set by Ray causes exceptions with graph building.
         os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
         # Env vars will be set by Ray.
@@ -76,6 +83,7 @@ class Worker:
         block_size: int,
         gpu_memory_utilization: float,
         cpu_swap_space: int,
+        cache_dtype: torch.dtype,
     ) -> Tuple[int, int]:
         # Profile the memory usage of the model and get the maximum number of
         # cache blocks that can be allocated with the remaining free memory.
@@ -92,7 +100,7 @@ class Worker:
         peak_memory = total_gpu_memory - free_gpu_memory
 
         cache_block_size = CacheEngine.get_cache_block_size(
-            block_size, self.model_config, self.parallel_config)
+            block_size, cache_dtype, self.model_config, self.parallel_config)
         num_gpu_blocks = int(
             (total_gpu_memory * gpu_memory_utilization - peak_memory) //
             cache_block_size)
@@ -101,9 +109,6 @@ class Worker:
         num_cpu_blocks = max(num_cpu_blocks, 0)
         torch.cuda.empty_cache()
 
-        # Reset the seed to ensure that the random state is not affected by
-        # the model initialization and profiling.
-        set_random_seed(self.model_config.seed)
         return num_gpu_blocks, num_cpu_blocks
 
     def init_cache_engine(self, cache_config: CacheConfig) -> None:
@@ -113,6 +118,13 @@ class Worker:
         self.cache_events = self.cache_engine.events
         self.gpu_cache = self.cache_engine.gpu_cache
         self.model_runner.set_block_size(self.cache_engine.block_size)
+
+    def warm_up_model(self) -> None:
+        if not self.model_config.enforce_eager:
+            self.model_runner.capture_model(self.gpu_cache)
+        # Reset the seed to ensure that the random state is not affected by
+        # the model initialization and profiling.
+        set_random_seed(self.model_config.seed)
 
     @torch.inference_mode()
     def execute_model(
@@ -136,15 +148,18 @@ class Worker:
 
         cache_events = self.cache_events if issued_cache_op else None
 
+        # Wati for cache operations to finish.
+        # TODO: Profile swapping overhead and optimize if needed.
+        if cache_events is not None:
+            for event in cache_events:  # pylint: disable=not-an-iterable
+                event.wait()
+
         # If there is no input, we don't need to execute the model.
         if not seq_group_metadata_list:
-            if cache_events is not None:
-                for event in cache_events:  # pylint: disable=not-an-iterable
-                    event.wait()
             return {}
 
         output = self.model_runner.execute_model(seq_group_metadata_list,
-                                                 self.gpu_cache, cache_events)
+                                                 self.gpu_cache)
         return output
 
 
@@ -175,6 +190,7 @@ def _init_distributed_environment(
 
     # A small all_reduce for warmup.
     torch.distributed.all_reduce(torch.zeros(1).cuda())
+
     initialize_model_parallel(parallel_config.tensor_parallel_size,
                               parallel_config.pipeline_parallel_size)
 

@@ -1,6 +1,9 @@
-from typing import Dict, List, Optional, Tuple
+import time
+from typing import Dict, List, Tuple, Union
 
+import numpy as np
 import torch
+import torch.nn as nn
 
 from aphrodite.common.config import (ModelConfig, ParallelConfig,
                                      SchedulerConfig)
@@ -13,7 +16,11 @@ from aphrodite.modeling.sampling_metadata import PersistentMetadata
 
 logger = init_logger(__name__)
 
+KVCache = Tuple[torch.Tensor, torch.Tensor]
 _PAD_SLOT_ID = -1
+# Capture graphs for batch size 1, 2, 4, 8, 16, 24, 32, 40, ..., 256.
+# NOTE: _get_graph_batch_size needs to be updated if this list is changed.
+_BATCH_SIZES_TO_CAPTURE = [1, 2, 4] + [8 * i for i in range(1, 33)]
 
 
 class ModelRunner:
@@ -28,15 +35,37 @@ class ModelRunner:
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
 
-        self.sliding_window = model_config.get_sliding_window()
+        # model_config can be None in tests/samplers/test_sampler.py.
+        # FIXME: This is a hack to make the tests work. Refactor this.
+        self.sliding_window = (model_config.get_sliding_window()
+                               if model_config is not None else None)
         self.model = None
         self.block_size = None  # Set after initial profiling.
+
+        self.graph_runners: Dict[int, CUDAGraphRunner] = {}
+        self.graph_memory_pool = None  # Set during graph capture.
+
+        self.max_context_len_to_capture = (
+            self.model_config.max_context_len_to_capture
+            if self.model_config is not None else 0)
+        # When using CUDA graph, the input block tables must be padded to
+        # max_context_len_to_capture. However, creating the block table in
+        # Python can be expensive. To optimize this, we cache the block table
+        # in numpy and only copy the actual input content at every iteration.
+        # The shape of the cached block table will be
+        # (max batch size to capture, max context len to capture / block size).
+        self.graph_block_tables = None  # Set after initial profiling.
 
     def load_model(self) -> None:
         self.model = get_model(self.model_config)
 
     def set_block_size(self, block_size: int) -> None:
         self.block_size = block_size
+
+        max_num_blocks = (self.max_context_len_to_capture + block_size -
+                          1) // block_size
+        self.graph_block_tables = np.zeros(
+            (max(_BATCH_SIZES_TO_CAPTURE), max_num_blocks), dtype=np.int32)
 
     def _prepare_prompt(
         self,
@@ -103,7 +132,7 @@ class ModelRunner:
         slot_mapping = _make_tensor_with_pad(slot_mapping,
                                              max_prompt_len,
                                              pad=_PAD_SLOT_ID,
-                                             dtype=torch.int)
+                                             dtype=torch.long)
 
         input_metadata = InputMetadata(
             prompt_lens=prompt_lens,
@@ -111,6 +140,7 @@ class ModelRunner:
             max_context_len=None,
             context_lens=None,
             block_tables=None,
+            use_cuda_graph=False,
         )
         return input_tokens, input_positions, input_metadata
 
@@ -154,27 +184,62 @@ class ModelRunner:
                     block_table = block_table[-sliding_window_blocks:]
                 block_tables.append(block_table)
 
+        batch_size = len(input_tokens)
+        max_context_len = max(context_lens)
+        use_captured_graph = (
+            not self.model_config.enforce_eager
+            and batch_size <= _BATCH_SIZES_TO_CAPTURE[-1]
+            and max_context_len <= self.max_context_len_to_capture)
+        if use_captured_graph:
+            # Pad the input tokens, positions, and slot mapping to match the
+            # batch size of the captured graph.
+            graph_batch_size = _get_graph_batch_size(batch_size)
+            assert graph_batch_size >= batch_size
+            for _ in range(graph_batch_size - batch_size):
+                input_tokens.append([])
+                input_positions.append([])
+                slot_mapping.append([])
+                context_lens.append(1)
+                block_tables.append([])
+            batch_size = graph_batch_size
+
+        # When using CUDA graph, we don't need to make the tensors on the GPU
+        # because they will be eventually copied to the designated GPU buffer.
+        device = "cpu" if use_captured_graph else "cuda"
         input_tokens = _make_tensor_with_pad(input_tokens,
                                              max_len=1,
                                              pad=0,
-                                             dtype=torch.long)
+                                             dtype=torch.long,
+                                             device=device)
         input_positions = _make_tensor_with_pad(input_positions,
                                                 max_len=1,
                                                 pad=0,
-                                                dtype=torch.long)
+                                                dtype=torch.long,
+                                                device=device)
         slot_mapping = _make_tensor_with_pad(slot_mapping,
                                              max_len=1,
                                              pad=_PAD_SLOT_ID,
-                                             dtype=torch.int)
-        max_context_len = max(context_lens)
+                                             dtype=torch.long,
+                                             device=device)
         context_lens = torch.tensor(context_lens,
                                     dtype=torch.int,
-                                    device="cuda")
-        max_block_table_len = max([len(t) for t in block_tables])
-        block_tables = _make_tensor_with_pad(block_tables,
-                                             max_len=max_block_table_len,
-                                             pad=0,
-                                             dtype=torch.int)
+                                    device=device)
+
+        if use_captured_graph:
+            # The shape of graph_block_tables is
+            # [max batch size, max context len // block size].
+            input_block_tables = self.graph_block_tables[:batch_size]
+            for i, block_table in enumerate(block_tables):
+                if block_table:
+                    input_block_tables[i, :len(block_table)] = block_table
+            block_tables = torch.from_numpy(input_block_tables).to(device)
+        else:
+            block_tables = _make_tensor_with_pad(
+                block_tables,
+                max_len=max_context_len,
+                pad=0,
+                dtype=torch.int,
+            )
 
         input_metadata = InputMetadata(
             prompt_lens=[],
@@ -182,6 +247,7 @@ class ModelRunner:
             max_context_len=max_context_len,
             context_lens=context_lens,
             block_tables=block_tables,
+            use_cuda_graph=use_captured_graph,
         )
         return input_tokens, input_positions, input_metadata
 
@@ -246,7 +312,7 @@ class ModelRunner:
         for seq_group_metadata in seq_group_metadata_list:
             seq_data.update(seq_group_metadata.seq_data)
 
-        seq_persistence_data: dict[int, dict] = {}
+        seq_persistence_data: Dict[int, dict] = {}
         for grp in seq_group_metadata_list:
             seq_persistence_data.update(grp.persistent_data)
 
@@ -265,12 +331,11 @@ class ModelRunner:
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
         kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
-        cache_events: Optional[List[torch.cuda.Event]] = None,
     ) -> SamplerOutput:
         # NOTE: We assume that all sequences in the group are all prompts or
         # all decodes.
-        # Prepare input tensors.
         is_prompt = seq_group_metadata_list[0].is_prompt
+        # Prepare input tensors.
         if is_prompt:
             inputs = self._prepare_prompt(seq_group_metadata_list)
             input_tokens, input_positions, input_metadata = inputs
@@ -281,12 +346,16 @@ class ModelRunner:
                                                  input_metadata.prompt_lens)
 
         # Execute the model.
-        hidden_states = self.model(
+        if input_metadata.use_cuda_graph:
+            graph_batch_size = input_tokens.shape[0]
+            model_executable = self.graph_runners[graph_batch_size]
+        else:
+            model_executable = self.model
+        hidden_states = model_executable(
             input_ids=input_tokens,
             positions=input_positions,
             kv_caches=kv_caches,
             input_metadata=input_metadata,
-            cache_events=cache_events,
         )
 
         # Sample the next token.
@@ -297,7 +366,7 @@ class ModelRunner:
         return output
 
     @torch.inference_mode()
-    def profile_run(self) -> None:
+    def profile_run(self) -> None:  # pylint: disable=useless-return
         # Enable top-k sampling to reflect the accurate memory usage.
         vocab_size = self.model_config.get_vocab_size()
         sampling_params = SamplingParams(top_p=0.99, top_k=vocab_size - 1)
@@ -325,7 +394,138 @@ class ModelRunner:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [(None, None)] * num_layers
         self.execute_model(seqs, kv_caches)
-        # return
+        torch.cuda.synchronize()
+        return
+
+    @torch.inference_mode()
+    def capture_model(self, kv_caches: List[KVCache]) -> None:
+        assert not self.model_config.enforce_eager
+        logger.info("Capturing the model for CUDA graphs. This may lead to "
+                    "unexpected consequences if the model is not static. To "
+                    "run the model in eager mode, set 'enforce_eager=True' or "
+                    "use '--enforce-eager' in the CLI.")
+        logger.warning("CUDA graphs can take additional 1~3 GiB of memory "
+                       "per GPU. If you are running out of memory, consider "
+                       "decreasing `gpu_memory_utilization` or enforcing "
+                       "eager mode.")
+        start_time = time.perf_counter()
+
+        # Prepare dummy inputs. These will be reused for all batch sizes.
+        max_batch_size = max(_BATCH_SIZES_TO_CAPTURE)
+        input_tokens = torch.zeros(max_batch_size, 1, dtype=torch.long).cuda()
+        input_positions = torch.zeros(max_batch_size, 1,
+                                      dtype=torch.long).cuda()
+        slot_mapping = torch.empty(max_batch_size, 1, dtype=torch.long).cuda()
+        slot_mapping.fill_(_PAD_SLOT_ID)
+        context_lens = torch.ones(max_batch_size, dtype=torch.int32).cuda()
+        block_tables = torch.from_numpy(self.graph_block_tables).cuda()
+
+        # NOTE: Capturing the largest batch size first may help reduce the
+        # memory usage of CUDA graph.
+        for batch_size in reversed(_BATCH_SIZES_TO_CAPTURE):
+            # Create dummy input_metadata.
+            input_metadata = InputMetadata(
+                prompt_lens=[],
+                slot_mapping=slot_mapping[:batch_size],
+                max_context_len=self.max_context_len_to_capture,
+                context_lens=context_lens[:batch_size],
+                block_tables=block_tables[:batch_size],
+                use_cuda_graph=True,
+            )
+
+            graph_runner = CUDAGraphRunner(self.model)
+            graph_runner.capture(
+                input_tokens[:batch_size],
+                input_positions[:batch_size],
+                kv_caches,
+                input_metadata,
+                memory_pool=self.graph_memory_pool,
+            )
+            self.graph_memory_pool = graph_runner.graph.pool()
+            self.graph_runners[batch_size] = graph_runner
+
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+        # This usually takes < 10 seconds.
+        logger.info(f"Graph capturing finished in {elapsed_time:.0f} secs.")
+
+
+class CUDAGraphRunner:
+
+    def __init__(self, model: nn.Module):
+        self.model = model
+        self.graph = None
+        self.input_buffers: Dict[str, torch.Tensor] = {}
+        self.output_buffers: Dict[str, torch.Tensor] = {}
+
+    def capture(  # pylint: disable=useless-return
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        kv_caches: List[KVCache],
+        input_metadata: InputMetadata,
+        memory_pool,
+    ) -> None:
+        assert self.graph is None
+        # Run the model once without capturing the graph.
+        # This is to make sure that the captured graph does not include the
+        # kernel launches for initial benchmarking (e.g., Triton autotune).
+        self.model(
+            input_ids,
+            positions,
+            kv_caches,
+            input_metadata,
+        )
+        torch.cuda.synchronize()
+
+        # Capture the graph.
+        self.graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(self.graph, pool=memory_pool):
+            hidden_states = self.model(
+                input_ids,
+                positions,
+                kv_caches,
+                input_metadata,
+            )
+        torch.cuda.synchronize()
+
+        # Save the input and output buffers.
+        self.input_buffers = {
+            "input_ids": input_ids,
+            "positions": positions,
+            "kv_caches": kv_caches,
+            "slot_mapping": input_metadata.slot_mapping,
+            "context_lens": input_metadata.context_lens,
+            "block_tables": input_metadata.block_tables,
+        }
+        self.output_buffers = {"hidden_states": hidden_states}
+        return
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
+        input_metadata: InputMetadata,
+    ) -> torch.Tensor:
+        # KV caches are fixed tensors, so we don't need to copy them.
+        del kv_caches
+
+        # Copy the input tensors to the input buffers.
+        self.input_buffers["input_ids"].copy_(input_ids)
+        self.input_buffers["positions"].copy_(positions)
+        self.input_buffers["slot_mapping"].copy_(input_metadata.slot_mapping)
+        self.input_buffers["context_lens"].copy_(input_metadata.context_lens)
+        self.input_buffers["block_tables"].copy_(input_metadata.block_tables)
+
+        # Run the graph.
+        self.graph.replay()
+
+        # Return the output tensor.
+        return self.output_buffers["hidden_states"]
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
 
 
 def _pad_to_max(x: List[int], max_len: int, pad: int) -> List[int]:
@@ -338,6 +538,16 @@ def _make_tensor_with_pad(
     max_len: int,
     pad: int,
     dtype: torch.dtype,
+    device: Union[str, torch.device] = "cuda",
 ) -> torch.Tensor:
     padded_x = [_pad_to_max(x_i, max_len, pad) for x_i in x]
-    return torch.tensor(padded_x, dtype=dtype, device="cuda")
+    return torch.tensor(padded_x, dtype=dtype, device=device)
+
+
+def _get_graph_batch_size(batch_size: int) -> int:
+    if batch_size <= 2:
+        return batch_size
+    elif batch_size <= 4:
+        return 4
+    else:
+        return (batch_size + 7) // 8 * 8
