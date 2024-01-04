@@ -50,7 +50,6 @@ from aphrodite.common.sequence import SamplerOutput
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 
-
 class MixtralAttention(nn.Module):
 
     def __init__(self,
@@ -284,7 +283,7 @@ class MixtralForCausalLM(nn.Module):
              expert_id) for expert_id in range(self.config.num_local_experts)
             for weight_name in ["w1", "w2", "w3"]
         ]
-        
+
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
                 model_name_or_path,

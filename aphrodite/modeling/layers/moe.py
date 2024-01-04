@@ -94,9 +94,9 @@ class MoE(nn.Module):
 
         # Step 1: expand and permute hidden states and routing weights to group
         #        hidden states by experts.
-        expanded_hidden_states, experts_range, expanded_weights, reverse_indices = \
-            self.expand_and_permutate_hidden_states(
-                hidden_states, selected_experts, routing_weights)
+        (expanded_hidden_states, experts_range, expanded_weights,
+         reverse_indices) = self.expand_and_permutate_hidden_states(
+             hidden_states, selected_experts, routing_weights)
 
         # Step 2: compute the output of each expert.
         expanded_hidden_states = self.grouped_mlp(expanded_hidden_states,
@@ -153,8 +153,8 @@ class MoE(nn.Module):
         torch.cumsum(num_rows_per_expert, dim=0, out=cum_experts_range[1:])
         expanded_weights = routing_weights.view(-1)[reverse_indices]
         reverse_indices.div_(self.top_k, rounding_mode="floor")
-        return hidden_states[
-            reverse_indices], cum_experts_range, expanded_weights, reverse_indices
+        return (hidden_states[reverse_indices], cum_experts_range,
+                expanded_weights, reverse_indices)
 
     def grouped_mlp(
         self,
@@ -222,8 +222,7 @@ def grouped_matmul_kernel(
         num_n_tiles = tl.cdiv(gn, BLOCK_SIZE_N)
         num_tiles = num_m_tiles * num_n_tiles
         # iterate through the tiles in the current gemm problem
-        while (tile_idx >= last_problem_end
-               and tile_idx < last_problem_end + num_tiles):
+        while last_problem_end <= tile_idx < last_problem_end + num_tiles:
 
             # pick up a tile from the current gemm problem
             k = gk
@@ -283,10 +282,11 @@ def silu(x):
     return x * tl.sigmoid(x)
 
 
-def grouped_matmul(input: torch.Tensor,
-                   cumulative_group_range: torch.Tensor,
-                   mat2: torch.Tensor,
-                   activation: str = ""):
+def grouped_matmul(
+        input: torch.Tensor,  # pylint: disable=redefined-builtin
+        cumulative_group_range: torch.Tensor,
+        mat2: torch.Tensor,
+        activation: str = ""):
     """Performs a grouped matrix-matrix product of matrices stored in input
     and mat2.
 
@@ -306,7 +306,7 @@ def grouped_matmul(input: torch.Tensor,
         torch.Tensor: [batch_size, hidden_size] compact output where groups
             are stored compactly in the batch dimension.
     """
-    device = torch.device('cuda')
+    device = torch.device("cuda")
     assert cumulative_group_range.shape[0] == mat2.shape[0] + 1
     group_size = cumulative_group_range.shape[0] - 1
     output = torch.zeros(input.shape[0],
@@ -328,7 +328,7 @@ def grouped_matmul(input: torch.Tensor,
         BLOCK_SIZE_M = 32
         BLOCK_SIZE_N = 128
     # we use a fixed number of CTA, and it's auto-tunable
-    grid = lambda META: (META['NUM_SM'], )
+    grid = lambda META: (META["NUM_SM"], )
     grouped_matmul_kernel[grid](input,
                                 cumulative_group_range,
                                 mat2,
@@ -345,6 +345,6 @@ def grouped_matmul(input: torch.Tensor,
                                 BLOCK_SIZE_K=BLOCK_SIZE_K,
                                 NUM_SM=NUM_SM,
                                 num_warps=num_warps,
-                                num_stages=num_stages),
+                                num_stages=num_stages)
 
     return output
