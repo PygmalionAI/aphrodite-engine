@@ -519,17 +519,17 @@ async def create_completion(
         else:
             grammar_logits_processor = GrammarLogitsProcessor(
                 tokenizer=tokenizer, grammar=request.grammar)
-        logits_processors = [grammar_logits_processor]
+        logit_processors = [grammar_logits_processor]
     else:
-        logits_processors = []
-
-    if not request.logit_bias:
         logit_processors = []
-    else:
-        biases = dict(
-            map(lambda bias: (int(bias[0]), bias[1]),
-                request.logit_bias.items()))
-        logit_processors = [BiasLogitsProcessor(biases)]
+
+    # if not request.logit_bias:
+    #     logit_processors = []
+    # else:
+    #     biases = dict(
+    #         map(lambda bias: (int(bias[0]), bias[1]),
+    #             request.logit_bias.items()))
+    #     logit_processors = [BiasLogitsProcessor(biases)]
 
     # OpenAI API supports echoing the prompt when max_tokens is 0.
     echo_without_generation = request.echo and request.max_tokens == 0
