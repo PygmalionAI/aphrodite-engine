@@ -34,6 +34,9 @@ from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.common.utils import random_uuid
 from aphrodite.common.logits_processor import BiasLogitsProcessor
+from aphrodite.common.grammar import (
+    GrammarLogitsProcessor,
+    RayRemoteGrammarLogitsProcessor)
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
@@ -508,6 +511,17 @@ async def create_completion(
     error_check_ret = await check_model(request)
     if error_check_ret is not None:
         return error_check_ret
+
+    if request.grammar:
+        if engine.worker_use_ray:
+            grammar_logits_processor = RayRemoteGrammarLogitsProcessor(
+                tokenizer=tokenizer, grammar=request.grammar)
+        else:
+            grammar_logits_processor = GrammarLogitsProcessor(
+                tokenizer=tokenizer, grammar=request.grammar)
+        logits_processors = [grammar_logits_processor]
+    else:
+        logits_processors = []
 
     if not request.logit_bias:
         logit_processors = []

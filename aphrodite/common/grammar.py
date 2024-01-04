@@ -1,249 +1,468 @@
 import collections
+from copy import deepcopy, copy
+from dataclasses import dataclass, fields
 import functools
+import regex
+import torch
+from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
+from typing import Optional, List, Set, Union
+import weakref
 
-class TokenIndex:
-    def __init__(self, tokenizer):
-        self.tokenizer = tokenizer
+import ray
 
-        # map id -> token str (including whitespaces)
-        self.norm_vocab = {}
-        for token_id in tokenizer.vocab.values():
-            norm_token = tokenizer.decode([tokenizer.bos_token_id, token_id])[
-                len(tokenizer.bos_token):]
-        
-        # get index allowing efficient retrieval of valid tokens,
-        # given a sequence
-
-        # given tokens ["art", "artist", "argument", "alice"]
-        # map "a" -> ["ar", "al"]
-        # map "ar" -> ["art", "artist"]
-        # map "art" -> [None, "artist"] (None indicates no match)
-        self.char_map = collections.defaultdict(set)
-        for word in self.norm_vocab:
-            for i in range(1, len(word) + 1):
-                prefix = word[:i]
-                if i < len(word):
-                    self.char_map[prefix].add(word[i])
-                else:
-                    # Add None for complete matches
-                    self.char_map[prefix].add(None)
-    
-    def get_valid_next_charset(self, seq, legal_chars):
-        results = set(self.char_map[seq]) & legal_chars
-        return results
-    
-    def is_token(self, tok):
-        return tok in self.norm_vocab
+from lark import Lark
+from lark.parsers.lalr_interactive_parser import InteractiveParser
+from lark.parsers.lalr_parser_state import ParserState
+from lark.lexer import Token, Pattern, PatternStr, PatternRE
 
 
-class EpsilonNFA:
-    """Traverses a Character-Based Epsilon-NFA.
-    Used to find the next valid token given a sequence of tokens.
-    
-    self.nfa (dict): A dictionary representing the NFA. It includes:
-        - 'states' (list): A list of states (UUID) in the NFA.
-        - 'initial_state' (UUID or any hashable ID): The initial state.
-        - 'final_states' (list): A list of final or accepting states (UUID).
-        - 'alphabets' (list): The set of input symbols (characters).
-        - 'transition_function' (dict): A dictionary representing the state
-            transitions. Each key is a state (UUID), and its value is another
-            dictionary mapping input symbols to list of next states (UUIDs).
-    
-    self.nfa should never be mutated.
+# Fix Lark Interactive LALR Parser Speed Issue
+# https://github.com/lark-parser/lark/issues/1142#issuecomment-1863209804
+class FastParserState(ParserState):
+    copy_memo = {}
+
+    def __copy__(self):
+        new_value_stack = []
+        for value in self.value_stack:
+            key = f"{id(self)}_{id(value)}"
+            if key not in self.copy_memo:
+                self.copy_memo[key] = deepcopy(value, self.copy_memo)
+            new_value_stack.append(self.copy_memo[key])
+
+        new_instance = type(self)(
+            self.parse_conf,
+            self.lexer,
+            copy(self.state_stack),
+            new_value_stack,
+        )
+
+        self.copy_memo[id(self)] = new_instance
+        return new_instance
+
+
+class FastInteractiveParser(InteractiveParser):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.parser_state = FastParserState(
+            self.parser_state.parse_conf,
+            self.parser_state.lexer,
+            self.parser_state.state_stack,
+            self.parser_state.value_stack,
+        )
+        self.hash_val = None
+
+    def __hash__(self):
+        if self.hash_val is None:
+            self.hash_val = hash(tuple(self.parser_state.state_stack))
+        return self.hash_val
+
+    def __copy__(self):
+        return type(self)(
+            self.parser,
+            copy(self.parser_state),
+            copy(self.lexer_thread),
+        )
+
+
+#########################################################################
+#########################################################################
+
+
+def get_pattern_validator(pattern: Pattern):
+    """
+    Accepts a pattern object, either lark.lexer.PatternStr or lark.lexer.PatternRE
+    Returns a function which validates a complete or partial string
+    Returns Tuple with 2 values
+    - 0) The processed portion of the sequence (None if no match at all)
+    - 1) None if doesn't complete terminal, "" if completes terminal with no remainder, or "remainder"
+    """
+    if isinstance(pattern, PatternRE):
+        compiled_pattern = regex.compile(pattern.value)
+
+        @functools.lru_cache(int(1e6))
+        def get_re_matched_parts(seq):
+            # match complete terminal, potentially with leftover seq
+            complete_terminal_match = compiled_pattern.match(seq)
+            if complete_terminal_match:
+                spans = complete_terminal_match.spans()
+                if spans:
+                    span = complete_terminal_match.spans()[0]
+                    if span[0] == 0:
+                        processed_seq = seq[:span[1]]
+                        remainder_seq = seq[span[1]:]
+                        return processed_seq, remainder_seq
+
+            # match doesn't complete terminal, but the sequence is fully allowed
+            partial_terminal_match = compiled_pattern.fullmatch(seq,
+                                                                partial=True)
+            if partial_terminal_match:
+                return seq, None
+
+            return None, None
+
+        return get_re_matched_parts
+
+    elif isinstance(pattern, PatternStr):
+        base_str = pattern.value
+
+        @functools.lru_cache(int(1e6))
+        def get_str_matched_parts(seq):
+            if seq.startswith(base_str):
+                processed_seq = seq[:len(base_str)]
+                remainder_seq = seq[len(base_str):]
+                return processed_seq, remainder_seq
+            elif base_str.startswith(seq):
+                return seq, None
+            else:
+                return None, None
+
+        return get_str_matched_parts
+
+    else:
+        raise TypeError(f"Invalid pattern type: {type(pattern)}")
+
+
+def method_lru_cache(*lru_args, **lru_kwargs):
+    # https://stackoverflow.com/a/44078118
+    def decorator(func):
+
+        @functools.wraps(func)
+        def wrapped_func(self, *args, **kwargs):
+            self_weak = weakref.ref(self)
+
+            @functools.wraps(func)
+            @functools.lru_cache(*lru_args, **lru_kwargs)
+            def cached_method(*args, **kwargs):
+                return func(self_weak(), *args, **kwargs)
+
+            setattr(self, func.__name__, cached_method)
+            return cached_method(*args, **kwargs)
+
+        return wrapped_func
+
+    return decorator
+
+
+memoize_by_instance = method_lru_cache(int(1e7))
+
+
+class TrieNode:
+
+    def __init__(self):
+        self.children = {}
+        self.is_end_of_word = False
+        self.value = None
+
+
+class Trie:
+
+    def __init__(self):
+        self.root = TrieNode()
+
+    def insert(self, key, value):
+        node = self.root
+        for char in key:
+            if char not in node.children:
+                node.children[char] = TrieNode()
+            node = node.children[char]
+        node.is_end_of_word = True
+        node.value = value
+
+    def get_best(self, word):
+        node = self.root
+        prefix = ""
+        best_prefix = ""
+        best_value = node.value
+        for char in word:
+            if char in node.children:
+                node = node.children[char]
+                prefix += char
+                if node.is_end_of_word:
+                    best_prefix = prefix
+                    best_value = node.value
+            else:
+                break  # break if char not in trie
+
+        remainder = word[len(best_prefix):]
+        return best_prefix, best_value, remainder
+
+
+@dataclass
+class IncrementalParserState:
+    """
+    Parsing utility which enforces uniqueness of
+    - interactive parser state stack
+    - incomplete `partial_token` string
+    the state of the parser and the incomplete token comprise a unique parser state
+    Core function exposed is `self.step(new_seq)`
+    - Returns a new IncrementalParserState based with new_seq applied
+    Memoization strategy is
+    - 1) Ensure uniqueness of (interactive_parser, partial_token)
+    - 2) Cache class methods via `memoize_by_instance` which considers id(self) and fn arguments
     """
 
-    def __init__(self, nfa):
-        self.nfa = nfa
+    # unique state key
+    interactive_parser: FastInteractiveParser
 
-        # set of states you may be in
-        self.current_states = set([nfa['initial_state']])
-        self.current_str = ""
+    # function of key
+    terminal_candidates: list
 
-        self.legal_chars = set(
-            [char for char in self.nfa['alphabets'] if char != "$"])
-        self._resolved_epsilon_cache = {}
+    # shared across instances
+    _ignored_terms: set
+    _seq_validator: dict
+    _memo: dict
+    _full_seq_trie: Trie
 
-    def step_seq(self, seq):
-        for char in seq:
-            self.step(char)
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.interactive_parser.parser_state.state_stack})"
 
-    def step(self, char):
-        """Updates the canonical state."""
-        next_states = self.next_char_state_map()[char]
-        if not next_states:
-            raise ValueError(
-                f"Illegal transition from '{self.current_str}', "
-                f"no next state for '{char}'")
-        self.current_states = next_states
-        self.current_str += char
+    @classmethod
+    @functools.lru_cache(1000)
+    def from_grammar(cls, grammar: str, start: str):
+        lark_parser = Lark(
+            grammar,
+            regex=True,  # use `regex` not `re`
+            start=start,
+            parser='lalr',
+            cache=True,  # results in 2-3x faster loading
+        )
+        base_interactive_parser = lark_parser.parse_interactive()
+        interactive_parser = FastInteractiveParser(
+            base_interactive_parser.parser,
+            base_interactive_parser.parser_state,
+            base_interactive_parser.lexer_thread)
+        interactive_parser.lexer_thread.state.text = ""
 
-    def simulate_step(self, chars, state_step=None):
-        """Return map of chars and their resulting next state-set
-        given a current state-set and new chars."""
-        if state_step is None:
-            state_step = self.current_states
-        state_map = self.next_char_state_map(state_set)
-        return {tok: state_map[tok] for tok in chars if tok in state_map}
+        _seq_validator = {(term.name): get_pattern_validator(term.pattern)
+                          for term in lark_parser.terminals}
+        _seq_validator["$END"] = lambda seq: tuple(
+            ["" if seq is None else None] * 2)
 
-    def copy(self):
-        new_nfa = EpsilonNFA(self.nfa)
-        new_nfa.current_states = self.current_states
-        new_nfa.current_str = self.current_str
-        new_nfa._resolved_epsilon_cache = self._resolved_epsilon_cache
-        return new_nfa
+        parser = cls(interactive_parser=interactive_parser,
+                     terminal_candidates=None,
+                     _ignored_terms=set(lark_parser.lexer_conf.ignore),
+                     _seq_validator=_seq_validator,
+                     _memo={},
+                     _full_seq_trie=Trie())
+        parser._full_seq_trie.insert("", parser)
+        return parser
 
-    @property
-    def allow_stop_next(self):
-        return None in self.next_char_state_map()
+    def new(self, **kwargs):
+        """Cached create now state"""
+        parser_state_key = hash(kwargs["interactive_parser"])
+        if parser_state_key in self._memo:
+            return self._memo[parser_state_key]
 
-    def next_char_state_map(self, current_states=None):
-        """Creates a mapping of possible next characters to a set of
-        valid states for each character.
+        instance_dict = {f.name: getattr(self, f.name) for f in fields(self)}
+        instance_dict.update(kwargs)
+        inst = self.__class__(**instance_dict)
+
+        self._memo[parser_state_key] = inst
+
+        return inst
+
+    def __getitem__(self, full_seq):
+        """Get the parser state, given a full sequence"""
+        match_seq, parser, remainder_seq = self._full_seq_trie.get_best(
+            full_seq)
+        if parser is None:
+            return
+        if remainder_seq:
+            result = parser.step(remainder_seq)
+            if result is None:
+                return None
+            remainder_seq, parser = result
+            processed_seq = full_seq
+            if remainder_seq:
+                processed_seq = processed_seq[:-len(remainder_seq)]
+            self._full_seq_trie.insert(processed_seq, parser)
+        return remainder_seq, parser
+
+    @memoize_by_instance
+    def step(self, new_seq: str):
         """
-        if current_states is None:
-            current_states = self.current_states
-        
-        char_to_states = collections.defaultdict(set)
+        - Construct extended (maybe-partial) token candidate
+        - If complete match, create new-terminal incremented parser state
+          - there is leftover from new_seq, recurse on the new parser
+        - If partial matches,
+              return new parser with updated partial token str and updated terminal candidates
+        - If no partial matches, return None
+        """
+        if new_seq == "":
+            return "", self
 
-        if bool(current_states & set(self.nfa["final_states"])):
-            char_to_states[None] = None
-        
-        for state in self._resolve_epsilon_closure(current_states):
-            for char, next_states in self.nfa["transition_function"][state].items():
-                if next_states and char != "$":
-                    char_to_states[char].update(next_states)
-        
-        return char_to_states
+        best_terminal, processed_seq, remainder_seq = self.get_best_matched_terminal(
+            new_seq)
 
-    def _resolve_epsilon_closure(self, states):
-        closure = set()
-        for state in states:
-            if state in self._resolved_epsilon_cache:
-                new_closures = self._resolved_epsilon_cache[state]
+        # invalid
+        if best_terminal is None:
+            return None
+
+        # candidate doesn't complete terminal
+        elif remainder_seq is None:
+            return processed_seq, self
+
+        # candidate completes terminal
+        else:
+            new_parser = self._next_with_new_terminal(best_terminal)
+            if remainder_seq == "":
+                return "", new_parser
             else:
-                new_closures = self._get_epsilon_closure(state)
-                self._resolved_epsilon_cache[state] = new_closures
-            closure.update(self._get_epsilon_closure(state))
-        return closure
+                return new_parser.step(remainder_seq)
 
-    def _get_epsilon_closure(self, state, visited=None):
-        if visited is None:
-            visited = set()
+    @memoize_by_instance
+    def _next_with_new_terminal(self, terminal):
+        if terminal in self._ignored_terms:
+            new_interactive_parser = self.interactive_parser
+        else:
+            new_interactive_parser = self.get_stepped_parser_state(terminal)
 
-        stack = [state]
-        while stack:
-            current_state = stack.pop()
-            if current_state not in visited:
-                visited.add(current_state)
-                stack.extend(self.nfa["transition_function"][current_state].get("$", []))
-        return visited
+        return self.new(
+            interactive_parser=new_interactive_parser,
+            terminal_candidates=None,
+        )
+
+    def get_best_matched_terminal(self, seq):
+        for terminal in self.accepts():
+            processed_seq, remainder_seq = self._seq_validator[terminal](seq)
+            if processed_seq:
+                return terminal, processed_seq, remainder_seq
+
+        return None, None, None
+
+    @memoize_by_instance
+    def get_stepped_parser_state(self, new_token_str):
+        ip = copy(self.interactive_parser)
+        ip.feed_token(Token(new_token_str, ''))
+        return ip
+
+    @memoize_by_instance
+    def accepts(self):
+        return set(self.interactive_parser.accepts()) | self._ignored_terms
+
+    @memoize_by_instance
+    def allowed_terminals(self):
+        if self.terminal_candidates is not None:
+            return tuple(sorted(self.terminal_candidates))
+        return tuple(sorted(self.accepts()))
+
+    @memoize_by_instance
+    def is_valid_next_seq(self, new_seq: Optional[str]):
+        if new_seq is None:
+            return "$END" in self.allowed_terminals()
+        return self.step(new_seq) is not None
 
 
-class TokenConstraintLogitProcessor:
-    def __init__(self, tokenizer, nfa):
+class TokenVocab:
+    """
+    Normalized token vocabulary accounting for whitespace and multiple IDs per token
+    - iter: iterate over normalized token strings
+    - vocab[token_str]: return token id set
+    """
+
+    def __init__(self,
+                 tokenizer: Union[PreTrainedTokenizer,
+                                  PreTrainedTokenizerFast],
+                 legal_chars: Optional[Set[str]] = None):
+
+        self.norm_vocab = collections.defaultdict(set)
+        for token_id in tokenizer.vocab.values():
+            if token_id == tokenizer.eos_token_id:
+                self.norm_vocab[None].add(token_id)
+                continue
+            bos_len = len(tokenizer.bos_token)
+            norm_token = tokenizer.decode([tokenizer.bos_token_id,
+                                           token_id])[bos_len:]
+            if legal_chars is None or all(
+                [char in legal_chars for char in norm_token]):
+                self.norm_vocab[norm_token].add(token_id)
+
+    def __iter__(self):
+        return iter(self.norm_vocab)
+
+    def __getitem__(self, tok_str):
+        return self.norm_vocab[tok_str]
+
+
+class NextTokenValidator:
+
+    def __init__(
+        self,
+        tokenizer,
+        grammar: str,
+        grammar_start: str = "start",
+        legal_chars: Optional[set[str]] = None,
+    ):
         self.tokenizer = tokenizer
-        self.token_index = TokenIndex(tokenizer)
-        self.nfa = nfa
-        self.prev_token_ids = []
-        self.prev_text = ""
+        self.vocab = TokenVocab(tokenizer, legal_chars=legal_chars)
+        self.root_parser = IncrementalParserState.from_grammar(
+            grammar, grammar_start)
 
-    def __call__(self, token_ids, logits):
+    def get_valid_next_token_strs(self, full_seq):
+        """
+        Generate valid token strings given the full sequence
+        """
 
-        # ensure integrity
-        assert token_ids[:len(self.prev_token_ids)] == self.prev_token_ids
-        self.prev_token_ids = token_ids
+        result = self.root_parser[full_seq]
+        if result is None:
+            return []
+        partial_term, parser = result
+        for token in self.vocab:
+            if token is None:
+                if partial_term == "" and parser.is_valid_next_seq(token):
+                    yield None
+            else:
+                if parser.is_valid_next_seq(partial_term + token):
+                    yield token
 
-        # get new text and step NFA forward
-        text = tokenizer.decode(token_ids)
-        new_text = text[len(self.prev_text):]
-        self.prev_text = text
-        self.nfa.step_seq(new_text)
+    def get_valid_next_token_ids(self, full_seq):
+        """
+        Generate valid token ids given the full sequence
+        """
+        for tok_str in self.get_valid_next_token_strs(full_seq):
+            yield from self.vocab[tok_str]
 
-        # get valid new token ids
-        valid_tokens = set(self.get_allowable_next_token_set())
-        valid_token_ids = [
-            self.tokenizer.eos_token_id if t is None else self.token_index.norm_vocab[t]
-            for t in valid_tokens
-        ]
 
-        if not valid_token_ids:
-            raise ValueError("Found no valid tokens, this should never occur.")
+class GrammarLogitsProcessor(NextTokenValidator):
+    """
+    Apply NextTokenValidator in __call__ and set excluded tokens logits to -inf
+    """
 
-        logits = [
-            logit_val if tok_id in valid_token_ids else -float("inf")
-            for tok_id, logit_val in zip(sorted(self.tokenizer.vocab.values()), logits)
-        ]
+    def __call__(self, token_ids: List[int],
+                 logits: torch.Tensor) -> torch.Tensor:
+        # get valid token IDs given prior tokens
+        sequence = self.tokenizer.decode(token_ids)
+        valid_token_ids = self.get_valid_next_token_ids(sequence)
+        valid = torch.tensor(list(valid_token_ids), dtype=torch.long)
+
+        # modify logits given valid token IDs
+        N = len(logits)
+        mask = torch.zeros(N, dtype=torch.bool)
+        mask[valid] = True
+        logits[~mask] = float('-inf')
         return logits
 
 
-    def get_allowable_next_token_set(self, current_text="", nfa_next_tok_states=False):
-        """
-        Get set of valid tokens.
-        1) Ask NFA for legal first char
-        3) While legal TokenIndex hasn't been exhausted
-          A) Ask TokenIndex for legal Nth char set
-          B) Ask NFA for
-        """
-        if nfa_next_tok_states is None:
-            return [None]
-        if nfa_next_tok_states == False:
-            nfa_next_tok_states = self.nfa.next_char_state_map()
+@ray.remote
+class GrammarLogitsProcessorActor:
 
-        legal_tokens = []
+    def __init__(self, *args, **kwargs):
+        self.processor = GrammarLogitsProcessor(*args, **kwargs)
 
-        if None in nfa_next_tok_states:
-            legal_tokens.append(None)
-            del nfa_next_tok_states[None]
-
-        for char, next_states in nfa_next_tok_states.items():
-            # all current sequences are legal per nfa, find legal next token with token index
-            new_seq = current_text + char
-            tokidx_next_chars = self.token_index.get_valid_next_charset(
-                new_seq,
-                self.nfa.legal_chars
-            )
-
-            if self.token_index.is_token(new_seq):
-                legal_tokens.append(new_seq)
-
-            # given legal next chars in token index, get the subset allowed by NFA and recurse
-            legal_tokens += self.get_allowable_next_token_set(
-                new_seq,
-                self.nfa.simulate_step(tokidx_next_chars, next_states)
-            )
-
-        return legal_tokens
+    def process_logits(self, token_ids: List[int],
+                       logits: torch.Tensor) -> torch.Tensor:
+        return self.processor(token_ids, logits)
 
 
-if __name__ == "__main__":
-    from automata_toolkit import regex_to_nfa
-    import transformers
-    import numpy as np
+class RayRemoteGrammarLogitsProcessor:
 
-    tokenizer = transformers.AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
+    def __init__(self, *args, **kwargs):
+        self.actor = GrammarLogitsProcessorActor.remote(*args, **kwargs)
 
-    sample_from_logits = lambda lgts: np.random.choice(len(lgts), p=np.exp(lgts)/np.sum(np.exp(lgts)))
-
-    for i in range(4):
-
-        logit_processor = TokenConstraintLogitProcessor(
-            tokenizer=tokenizer,
-            nfa=EpsilonNFA(nfa=regex_to_nfa.regex_to_nfa(
-                r"(large )?(language )((models )+(inference engines ))(are )((useful)+((very )*complex))."
-            )),
-        )
-
-        token_ids = []
-        while True:
-            logits = logit_processor(
-                token_ids=token_ids,
-                logits=np.random.uniform(-10, 10, len(tokenizer.vocab))
-            )
-            new_token_id = sample_from_logits(logits)
-            token_ids.append(new_token_id)
-            if new_token_id == tokenizer.eos_token_id:
-                break
-        print(f"run #{i}")
-        print("\ttokenid", token_ids)
-        print("\ttokens:", [tokenizer.decode(tok_id, ) for tok_id in token_ids])
-        print("\tresult:", tokenizer.decode(token_ids, skip_special_tokens=False))
+    def __call__(self, token_ids: List[int],
+                 logits: torch.Tensor) -> torch.Tensor:
+        logits_cpu = logits.cpu()
+        result_id = self.actor.process_logits.remote(token_ids, logits_cpu)
+        return ray.get(result_id)
+    
