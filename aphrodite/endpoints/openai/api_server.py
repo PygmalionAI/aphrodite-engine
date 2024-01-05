@@ -17,6 +17,7 @@ from fastapi import Request, Response, Header, HTTPException, Depends
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
@@ -193,6 +194,19 @@ async def health() -> Response:
     """Health check route for K8s"""
     return Response(status_code=200)
 
+class Text(BaseModel):
+    text: str
+
+@app.post("/v1/tokenize")
+async def tokenize_text(
+    text: Text,
+    api_key: str = Depends(_verify_api_key)):
+    try:
+        tokenized_text = tokenizer.tokenize(text.text)
+        token_ids = tokenizer.convert_tokens_to_ids(tokenized_text)
+        return {"value": len(tokenized_text), "ids": token_ids}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/v1/models")
 async def show_available_models(
