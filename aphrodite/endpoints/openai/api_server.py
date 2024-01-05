@@ -194,22 +194,22 @@ async def health() -> Response:
     """Health check route for K8s"""
     return Response(status_code=200)
 
-class Text(BaseModel):
-    text: str
+class Prompt(BaseModel):
+    prompt: str
 
 @app.post("/v1/tokenize")
 async def tokenize_text(
-    text: Text,
+    prompt: Prompt,
     api_key: str = Depends(_verify_api_key)):
-    """Tokenize text using the tokenizer.
+    """Tokenize prompt using the tokenizer.
     Returns:
-        value: The number of tokens in the text.
-        ids: The token IDs of the text.
+        value: The number of tokens in the prompt.
+        ids: The token IDs of the prompt.
     """
     try:
-        tokenized_text = tokenizer.tokenize(text.text)
-        token_ids = tokenizer.convert_tokens_to_ids(tokenized_text)
-        return {"value": len(tokenized_text), "ids": token_ids}
+        tokenized_prompt = tokenizer.tokenize(prompt.prompt)
+        token_ids = tokenizer.convert_tokens_to_ids(tokenized_prompt)
+        return {"value": len(tokenized_prompt), "ids": token_ids}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
