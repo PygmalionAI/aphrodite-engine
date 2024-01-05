@@ -3,6 +3,7 @@ from typing import Dict, List, Tuple, Optional
 
 import torch
 import torch.nn as nn
+import torch.jit
 
 from aphrodite.modeling.sampling_metadata import (SamplingMetadata,
                                                   OutputMetadata)
@@ -17,6 +18,20 @@ import aphrodite.modeling.layers.sampler_mirostat as sampler_mirostat
 
 _SAMPLING_EPS = 1e-5
 
+@torch.jit.script
+def _multinomial(
+    probs: torch.Tensor,
+    num_samples: int,
+) -> torch.Tensor:
+    if num_samples > 1:
+        probs = probs[:, None, :].expand(probs.shape[0], num_samples,
+                                         probs.shape[1]).contiguous().view(
+                                             -1, probs.shape[1]
+                                         )
+
+    q = torch.empty_like(probs).exponential_(1.0)
+    return probs.div_(q).argmax(dim=1).view(-1, num_samples)
+        
 
 class Sampler(nn.Module):
     """Samples the next tokens from the model's outputs.
@@ -599,9 +614,7 @@ def _random_sample(
         if is_prompt:
             seq_ids, sampling_params = seq_group
             max_best_of = max(max_best_of, sampling_params.best_of)
-    random_samples = torch.multinomial(probs,
-                                       num_samples=max_best_of,
-                                       replacement=True).cpu()
+    random_samples = _multinomial(probs, max_best_of).cpu()
     sample_idx = 0
     results = []
     for seq_group, is_prompt in zip(selected_seq_groups, is_prompts):
