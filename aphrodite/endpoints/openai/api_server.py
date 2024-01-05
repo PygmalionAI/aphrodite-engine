@@ -201,6 +201,11 @@ class Text(BaseModel):
 async def tokenize_text(
     text: Text,
     api_key: str = Depends(_verify_api_key)):
+    """Tokenize text using the tokenizer.
+    Returns:
+        value: The number of tokens in the text.
+        ids: The token IDs of the text.
+    """
     try:
         tokenized_text = tokenizer.tokenize(text.text)
         token_ids = tokenizer.convert_tokens_to_ids(tokenized_text)
