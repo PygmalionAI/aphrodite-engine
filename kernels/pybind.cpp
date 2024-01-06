@@ -55,6 +55,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   ops.def("awq_gemm", &awq_gemm, "Quantized GEMM for AWQ");
   #endif
   ops.def("squeezellm_gemm", &squeezellm_gemm, "Quantized GEMM for SqueezeLLM");
+  ops.def("quip_decompress", &decompress_e8p_origorder, "decompress_packed_e8p");
+  ops.def("quip_gemv", &e8p_mm_origorder, "e8p_mm_origorder");
 
   // Cache ops
   pybind11::module cache_ops = m.def_submodule("cache_ops", "Aphrodite Engine cache ops");
