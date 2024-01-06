@@ -385,4 +385,3 @@ class _CorrectnessTestHelper:
                                density=True)
 
         return hist.hist
-    

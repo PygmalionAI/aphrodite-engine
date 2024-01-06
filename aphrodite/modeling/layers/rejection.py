@@ -7,17 +7,15 @@ import torch.jit
 
 
 class RejectionSampler(nn.Module):
-    """Modified Rejection Sampling as described in
-    https://arxiv.org/pdf/2302.01318.pdf
-    
-    Accept a subset of the K draft tokens from left to right, recovering
-    the distribution of the target model in the process.
+    """Apply modified rejection sampling as described in "Accelerating Large
+        Language Model Decoding with Speculative Sampling"
+        https://arxiv.org/pdf/2302.01318.pdf.
     """
 
     def __init__(self, strict_mode: bool = False):
         """Create a rejection sampler.
         Args:
-            strict_mode: Whetheror not to perform shape/device/dtype checks
+            strict_mode: Whether or not to perform shape/device/dtype checks
                 during sampling. This catches correctness issues but adds
                 nontrivial latency.
         """
@@ -87,18 +85,18 @@ class RejectionSampler(nn.Module):
             self._raise_if_out_of_bounds_vocab(target_probs.shape[-1],
                                                bonus_token_ids,
                                                draft_token_ids)
-            
+
         accepted, recovered_token_ids = self._batch_modified_rejection_sampling(
             target_probs,
             draft_probs,
-            draft_token_ids
+            draft_token_ids,
         )
 
         output_token_ids = self._create_output(
             accepted,
             recovered_token_ids,
             draft_token_ids,
-            bonus_token_ids
+            bonus_token_ids,
         )
         return output_token_ids
 
@@ -138,36 +136,35 @@ class RejectionSampler(nn.Module):
             draft_probs: torch.Tensor,  # [batch_size, k, vocab_size]
             draft_token_ids: torch.Tensor,  # [batch_size, k]
     ) -> torch.Tensor:
-        """Create a boolean matrix over the proposed draft tokens.
-            If True, then a token can be accepted, else it should
-            be rejected.
-            
-            Given `q(\hat{x}_{n+1}|x_1, \dots, x_n)`, the probability of
-            `\hat{x}_{n+1}` given context `x_1, \dots, x_n` according to 
-             the target model, and `\hat{x}_{n+1}|x_1, \dots, x_n`, the
-             same conditional probability according to the draft model, the
-             token is accepted with probability:
-             
-             \min\left(1, \frac{q(\hat{x}_{n+1}|x_1, \dots, x_n)}
-                {p(\hat{x}_{n+1}|x_1, \dots, x_n)}\right)
-                
-            This implementation does not apply causality. When using
-            the output, if a token is rejected, subsequent tokens
-            should not be used.
-            
-            Returns a boolean tensor of shape [batch_size, k] specifying which
-            tokens are accepted.
-            """
+        r"""Create bool matrix over the proposed draft tokens. If
+        True, then a token can be accepted, else it should be
+        rejected.
+        Given :math:`q(\hat{x}_{n+1}|x_1, \dots, x_n)`, the probability of
+        :math:`\hat{x}_{n+1}` given context :math:`x_1, \dots, x_n` according
+        to the target model, and :math:`p(\hat{x}_{n+1}|x_1, \dots, x_n)`, the
+        same conditional probability according to the draft model, the token
+        is accepted with probability:
+        .. math::
+            \min\left(1, \frac{q(\hat{x}_{n+1}|x_1, \dots, x_n)}
+                           {p(\hat{x}_{n+1}|x_1, \dots, x_n)}\right)
+        This implementation does not apply causality. When using the output,
+        if a token is rejected, subsequent tokens should not be used.
+        Returns a bool tensor of shape [batch_size, k] specifying which tokens
+        are accepted.
+        """
         batch_size, k, _ = draft_probs.shape
         batch_indices = torch.arange(batch_size,
                                      device=target_probs.device)[:, None]
         probs_indicies = torch.arange(k, device=target_probs.device)
+
         # shape [batch_size, k]
         selected_draft_probs = draft_probs[batch_indices, probs_indicies,
                                            draft_token_ids]
+
         # shape [batch_size, k]
         selected_target_probs = target_probs[batch_indices, probs_indicies,
                                              draft_token_ids]
+
         uniform_rand = torch.rand(batch_size,
                                   k,
                                   dtype=self.probs_dtype,
@@ -184,36 +181,34 @@ class RejectionSampler(nn.Module):
             target_probs: torch.Tensor,  # [k, vocab_size]
             draft_probs: torch.Tensor,  # [k, vocab_size]
     ) -> torch.Tensor:
-        """Create a probability distribution for each proposed token
-        which can be sampled if the proposed token is rejected.
-        When this routine is applied sequentially, the true distribution
-        of the target model is recovered (within hardware numerics).
+        r"""Create a probability distribution for each proposed token which can
+        be sampled if the proposed token is rejected.
+        When this routine is applied sequentially, the true distribution of the
+        target model is recovered (within hardware numerics).
         The probability distribution used in this rejection case is constructed
-        as follows:
-
-        Given `q(x|x_1, \dots, x_n)`, the probability of `x` given context
-        `x_1, \dots, x_n` according to the target model, and 
-        `p(x|x_1, \dots, x_n)`, the same conditional probability according
-        to the draft model:
-            `x_{n+1} \sim(q(x|x_1, \dots, x_n) - p(x|x_1, \dots, x_n))_+`
-        Where `(f(x))_+` is defined as:
-            `(f(x))_+ = \frac{\max(0, f(x))}{\sum_x \max(0, f(x)))}`
-        
+        as follows. Given :math:`q(x|x_1, \dots, x_n)`, the probability of
+        :math:`x` given context :math:`x_1, \dots, x_n` according to the target
+        model and :math:`p(x|x_1, \dots, x_n)`, the same conditional probability
+        according to the draft model:
+        .. math::
+            x_{n+1} \sim (q(x|x_1, \dots, x_n) - p(x|x_1, \dots, x_n))_+
+        where :math:`(f(x))_+` is defined as:
+        .. math::
+            (f(x))_+ = \frac{\max(0, f(x))}{\sum_x \max(0, f(x))}
+        See https://github.com/vllm-project/vllm/pull/2336 for a visualization
+        of the draft, target, and recovered probability distributions.
         Returns a tensor of shape [batch_size, k, vocab_size].
-
-        NOTE: This batches operations on GPU and thus constructs
-            the recovered distribution for all tokens, even if
-            they're accepted. This causes division-by-zero errors,
-            so we use self._smallest_positive_value to avoid that.
-            This introduces some drift to the distribution.
-
+        Note: This batches operations on GPU and thus constructs the recovered
+        distribution for all tokens, even if they are accepted. This causes
+        division-by-zero errors, so we use self._smallest_positive_value to
+        avoid that. This introduces some drift to the distribution.
         """
         _, k, _ = draft_probs.shape
 
         # shape [batch_size, k, vocab_size]
         difference = target_probs - draft_probs
 
-        # TODO: Can we use logprobs instead of probs, and avoid the
+        # TODO(cade): Can we use logprobs instead of probs, and avoid the
         # division-by-zero errors without introducing distribution drift?
 
         # shape [batch_size, k, vocab_size]
@@ -226,16 +221,13 @@ class RejectionSampler(nn.Module):
 
     @cached_property
     def _smallest_positive_value(self) -> float:
-        """Return the smallest positive value representable by the
-            probs datatype. This value is used when constructing a
-            distribution from which to sample recovered tokens
-            in the first rejection case.
-        
-        See _get_recovered_probs for details.
-
-        NOTE: THis isn't actually the smallest positive value representable
-            by float32, but the smallest positive *normal* value.
-            See: https://en.wikipedia.org/wiki/Subnormal_number
+        """Return the smallest positive value representable by the probs dtype.
+        This value is used when constructing a distribution from which to sample
+        recovered tokens in the first rejection case.
+        See _get_recovered_probs for more details
+        Note that this isn't actually the smallest positive value representable
+        by float32, but the smallest positive normal value.
+        See https://en.wikipedia.org/wiki/Subnormal_number for more information.
         """
         return torch.finfo(self.probs_dtype).tiny
 
@@ -246,10 +238,10 @@ class RejectionSampler(nn.Module):
             draft_token_ids: torch.Tensor,  # [batch_size, k]
             bonus_token_ids: torch.Tensor,  # [batch_size]
     ) -> torch.Tensor:
-        """Format output. Returns a matrix of token IDs. When
+        """Format output. Returns a matrix of token ids. When
         a token is rejected via rejection sampling, all subsequent
-        token IDs are set to -1 for the sequence.
-        Shape: (batch_size, k + num_bonus_tokens)
+        token ids are set to -1 for the sequence.
+        shape = [batch_size, k + num_bonus_tokens]
         """
         bonus_token_ids = bonus_token_ids.squeeze()
         batch_size, k = recovered_token_ids.shape
@@ -338,6 +330,7 @@ class RejectionSampler(nn.Module):
             t.device for t in
             [target_probs, bonus_token_ids, draft_probs, draft_token_ids]
         ]
+        # pylint: disable=use-a-generator
         assert all([devices[0] == device for device in devices])
 
     def _raise_if_out_of_bounds_vocab(
