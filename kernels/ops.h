@@ -93,4 +93,8 @@ void gptq_shuffle(
   torch::Tensor q_weight,
   torch::Tensor q_perm,
   int bit);
+
+void aphrodite_bincount(
+  torch::Tensor src,
+  torch::Tensor out);
   
