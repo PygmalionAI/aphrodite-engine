@@ -21,6 +21,9 @@ from pydantic import BaseModel
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
+from aphrodite.modeling.megatron.parallel_state import (
+    model_parallel_is_initialized,
+    destroy_model_parallel)
 from aphrodite.engine.metrics import add_global_metrics_labels
 from aphrodite.endpoints.openai.protocol import (
     CompletionRequest, CompletionResponse, CompletionResponseChoice,
@@ -40,6 +43,7 @@ TIMEOUT_KEEP_ALIVE = 5  # seconds
 
 logger = init_logger(__name__)
 served_model = None
+model_loaded = False
 app = fastapi.FastAPI()
 engine = None
 response_role = None
@@ -188,6 +192,67 @@ async def check_length(
     else:
         return input_ids, None
 
+class ModelName(BaseModel):
+    name: str
+
+async def load_model_logic(model_name: str):
+    engine_args = AsyncEngineArgs(model=model_name)
+    engine = AsyncAphrodite.from_engine_args(engine_args)
+    engine_model_config = await engine.get_model_config()
+    max_model_len = engine_model_config.max_model_len
+    tokenizer = get_tokenizer(
+        engine_model_config.tokenizer,
+        tokenizer_mode=engine_model_config.tokenizer_mode,
+        trust_remote_code=engine_model_config.trust_remote_code,
+    )
+    return engine, max_model_len, tokenizer
+
+@app.post("/v1/model/load")
+async def load_model(
+    model: ModelName,
+    api_key: str = Depends(_verify_api_key)):
+    global served_model, model_loaded, engine, max_model_len, tokenizer
+    if model_loaded:
+        return {"message": "A model is already loaded."}
+
+    try:
+        # Use 'await' to ensure the coroutine is executed and the results are unpacked
+        engine, max_model_len, tokenizer = await load_model_logic(model.name)
+        served_model = model.name
+        model_loaded = True
+        return {"message": "Model loaded successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/v1/model/unload")
+async def unload_model(api_key: str = Depends(_verify_api_key)):
+    global served_model, model_loaded, engine, max_model_len, tokenizer
+    if not model_loaded:
+        return {"message": "No model is currently loaded."}
+
+    try:
+        # Shutdown logic
+        if engine is not None:
+            if engine.is_running:
+                engine.background_loop.cancel()
+                
+                try:
+                    await engine.background_loop
+                except asyncio.CancelledError:
+                    pass
+        if model_parallel_is_initialized():
+            destroy_model_parallel()
+
+        served_model = None
+        model_loaded = False
+        engine = None
+        max_model_len = None
+        tokenizer = None
+        
+
+        return {"message": "Model unloaded successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 async def health() -> Response:
@@ -532,6 +597,11 @@ async def create_completion(
     if error_check_ret is not None:
         return error_check_ret
 
+    if not model_loaded:
+        raise HTTPException(
+            status_code=503,
+            detail="Model is not loaded.")
+
     if not request.logit_bias:
         logit_processors = []
     else:
@@ -812,8 +882,9 @@ async def create_completion(
 
 if __name__ == "__main__":
     args = parse_args()
-    global EXPECTED_API_KEYS  # pylint: disable=global-at-module-level
+    global EXPECTED_API_KEYS, max_model_len, tokenizer  # pylint: disable=global-at-module-level
     EXPECTED_API_KEYS = args.api_keys
+    response_role = args.response_role
     app.add_middleware(
         CORSMiddleware,
         allow_origins=args.allowed_origins,
@@ -824,27 +895,32 @@ if __name__ == "__main__":
 
     logger.debug(f"args: {args}")
 
-    if args.served_model_name is not None:
-        served_model = args.served_model_name
-    else:
+    if args.model:
         served_model = args.model
+        try:
+            # Use the load_model_logic function to load the model
+            loop = asyncio.get_event_loop()  # Get the event loop
+            engine, max_model_len, tokenizer = loop.run_until_complete(load_model_logic(served_model))
+            model_loaded = True  # Set the model_loaded flag
+            logger.info(f"Model {served_model} loaded successfully at startup.")
+        except Exception as e:
+            logger.error(f"Failed to load the model {served_model} at startup: {e}")
+            model_loaded = False  # Reset the model_loaded flag if loading fails
 
-    response_role = args.response_role
-
-    engine_args = AsyncEngineArgs.from_cli_args(args)
-    engine = AsyncAphrodite.from_engine_args(engine_args)
-    engine_model_config = asyncio.run(engine.get_model_config())
-    max_model_len = engine_model_config.max_model_len
+    # engine_args = AsyncEngineArgs.from_cli_args(args)
+    # engine = AsyncAphrodite.from_engine_args(engine_args)
+    # engine_model_config = asyncio.run(engine.get_model_config())
+    # max_model_len = engine_model_config.max_model_len
 
     # A separate tokenizer to map token IDs to strings.
-    tokenizer = get_tokenizer(
-        engine_model_config.tokenizer,
-        tokenizer_mode=engine_model_config.tokenizer_mode,
-        trust_remote_code=engine_model_config.trust_remote_code)
+    # tokenizer = get_tokenizer(
+    #     engine_model_config.tokenizer,
+    #     tokenizer_mode=engine_model_config.tokenizer_mode,
+    #     trust_remote_code=engine_model_config.trust_remote_code)
 
-    load_chat_template(args, tokenizer)
+    # load_chat_template(args, tokenizer)
 
-    add_global_metrics_labels(model_name=engine_args.model)
+    # add_global_metrics_labels(model_name=engine_args.model)
 
     uvicorn.run(app,
                 host=args.host,
