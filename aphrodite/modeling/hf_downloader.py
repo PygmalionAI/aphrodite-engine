@@ -43,6 +43,12 @@ def _shared_pointers(tensors):
             failing.append(names)
     return failing
 
+def set_attr(obj, names, val):
+    if len(names) == 1:
+        setattr(obj, names[0], val)
+    else:
+        set_attr(getattr(obj, names[0]), names[1:], val)
+
 
 def convert_bin_to_safetensor_file(
     pt_filename: str,
@@ -92,6 +98,10 @@ def get_quant_config(
     hf_quant_config = getattr(hf_config, "quantization_config", None)
     if hf_quant_config is not None:
         return quant_cls.from_config(hf_quant_config)
+
+    # If the quantization format is 'exl2', return the quantization class
+    if quantization == 'exl2':
+        return get_quant_class(quantization)
 
     is_local = os.path.isdir(model_name_or_path)
     if not is_local:

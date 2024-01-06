@@ -57,7 +57,8 @@ class ModelRunner:
         self.graph_block_tables = None  # Set after initial profiling.
 
     def load_model(self) -> None:
-        self.model = get_model(self.model_config)
+        self.model = get_model(self.model_config,
+                               self.scheduler_config.max_num_batched_tokens)
 
     def set_block_size(self, block_size: int) -> None:
         self.block_size = block_size
