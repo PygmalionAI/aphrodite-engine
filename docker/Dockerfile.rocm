@@ -1,4 +1,4 @@
-FROM rocm/pytorch:rocm5.7_ubuntu22.04_py3.10_pytorch_2.0.1
+FROM rocm/pytorch-nightly:latest22.04_py3.10_pytorch_2.0.1
 
 # Install some basic utilities
 RUN apt-get update && apt-get install python3 python3-pip -y
@@ -37,22 +37,22 @@ RUN mkdir libs \
     && cd libs \
     && git clone https://github.com/ROCmSoftwarePlatform/flash-attention.git \
     && cd flash-attention \
-    && git checkout 3d2b6f5 \
+    && git checkout howiejay/navi_support \
     && git submodule update --init \
     && export GPU_ARCHS=$(/opt/rocm/llvm/bin/amdgpu-offload-arch) \
-    && patch /opt/conda/envs/py_3.10/lib/python3.10/site-packages/torch/utils/hipify/hipify_python.py hipify_patch.patch \
+    # && patch /opt/conda/envs/py_3.10/lib/python3.10/site-packages/torch/utils/hipify/hipify_python.py hipify_python.patch \
     && python3 setup.py install \
     && cd ..
 
 COPY ./ /app/aphrodite-engine
 
 RUN python3 -m pip install --upgrade pip
-RUN pip install xformers==0.0.22.post7 --no-deps
+RUN pip install xformers==0.0.23 --no-deps
 
 RUN cd /app \
     && cd aphrodite-engine \
     && pip install -U -r requirements-rocm.txt \
-    && bash patch_xformers-0.0.22.post7.rocm.sh \
+    && bash patch_xformers.rocm.sh \
     && python3 setup.py install \
     && cd ..
 
