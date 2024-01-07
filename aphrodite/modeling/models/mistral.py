@@ -243,8 +243,12 @@ class MistralModel(nn.Module):
         positions: torch.Tensor,
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
+        input_embeds: Optional[torch.FloatTensor] = None,
     ) -> torch.Tensor:
-        hidden_states = self.embed_tokens(input_ids)
+        if inputs_embeds is None:
+            hidden_states = self.embed_tokens(input_ids)
+        else:
+            hidden_states = inputs_embeds
         residual = None
         for i in range(len(self.layers)):
             layer = self.layers[i]
@@ -273,15 +277,22 @@ class MistralForCausalLM(nn.Module):
         self.lm_head = ParallelLMHead(config.vocab_size, config.hidden_size)
         self.sampler = Sampler(config.vocab_size)
 
+    def get_input_embeddings(self):
+        return self.model.embed_tokens
+
     def forward(
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
+        input_embeds: Optional[torch.FloatTensor] = None,
     ) -> torch.Tensor:
-        hidden_states = self.model(input_ids, positions, kv_caches,
-                                   input_metadata)
+        hidden_states = self.model(input_ids,
+                                   positions,
+                                   kv_caches,
+                                   input_metadata,
+                                   inputs_embeds=inputs_embeds)
         return hidden_states
 
     def sample(

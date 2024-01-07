@@ -1,5 +1,6 @@
 import time
 from typing import Dict, List, Tuple, Union
+from collections import defaultdict
 
 import numpy as np
 import torch
@@ -366,6 +367,59 @@ class ModelRunner:
         return output
 
     @torch.inference_mode()
+    def execute_llava_model(
+        self,
+        seq_group_metadata_list: List[SequenceGroupMetadata],
+        kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
+    ) -> SamplerOutput:
+        # NOTE: We assume that all sequences in the group are all prompts or
+        # all decodes.
+        is_prompt = seq_group_metadata_list[0].is_prompt
+        # Prepare input tensors.
+        extra_kwargs = {}
+        if is_prompt:
+            inputs = self._prepare_prompt(seq_group_metadata_list)
+            input_tokens, input_positions, input_metadata = inputs
+
+            # Collect extra data for each prompt from seq_group_metadata_list.
+            # e.g. image pixel values, image features
+            if input_tokens.shape[1] > 1:
+                extra_kwargs = defaultdict(
+                    lambda: [None for _ in range(input_tokens.shape[0])])
+                # Not in the stage of  generation with cache
+                for i, seq_group_metadata in enumerate(
+                        seq_group_metadata_list):
+                    extra_data = seq_group_metadata.seq_data[list(
+                        seq_group_metadata.seq_data.keys())[0]].extra_data
+                    if extra_data is not None:
+                        for key, v in extra_data.items():
+                            extra_kwargs[key][i] = v
+        else:
+            inputs = self._prepare_decode(seq_group_metadata_list)
+            input_tokens, input_positions, input_metadata = inputs
+        sampling_metadata = self._prepare_sample(seq_group_metadata_list,
+                                                 input_metadata.prompt_lens)
+
+        # Execute the model.
+        if input_metadata.use_cuda_graph:
+            graph_batch_size = input_tokens.shape[0]
+            model_executable = self.graph_runners[graph_batch_size]
+        else:
+            model_executable = self.model
+        hidden_states = model_executable(input_ids=input_tokens,
+                                         positions=input_positions,
+                                         kv_caches=kv_caches,
+                                         input_metadata=input_metadata,
+                                         **extra_kwargs)
+
+        # Sample the next token.
+        output = self.model.sample(
+            hidden_states=hidden_states,
+            sampling_metadata=sampling_metadata,
+        )
+        return output
+
+    @torch.inference_mode()
     def profile_run(self) -> None:  # pylint: disable=useless-return
         # Enable top-k sampling to reflect the accurate memory usage.
         vocab_size = self.model_config.get_vocab_size()
@@ -507,6 +561,7 @@ class CUDAGraphRunner:
         positions: torch.Tensor,
         kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
         input_metadata: InputMetadata,
+        **kwargs,
     ) -> torch.Tensor:
         # KV caches are fixed tensors, so we don't need to copy them.
         del kv_caches
@@ -517,6 +572,14 @@ class CUDAGraphRunner:
         self.input_buffers["slot_mapping"].copy_(input_metadata.slot_mapping)
         self.input_buffers["context_lens"].copy_(input_metadata.context_lens)
         self.input_buffers["block_tables"].copy_(input_metadata.block_tables)
+        for key, value in kwargs.items():
+            # Hack, Only surrport values that do not change the graph.
+            #   The image_features is only used to substitute the input_ids
+            #   and won't change the graph.
+            if self.input_buffers.get(key, None) is not None:
+                self.input_buffers[key].copy_(value)
+            else:
+                self.input_buffers[key] = value
 
         # Run the graph.
         self.graph.replay()
