@@ -200,8 +200,8 @@ class SamplingTensors:
                 output_tokens.extend([] for _ in range(prompt_len - 1))
             for seq_id in seq_ids:
                 seq_data = sampling_metadata.seq_data[seq_id]
-                prompt_tokens.append(seq_data.prompt_tokens)
-                output_tokens.append(seq_data.output_tokens)
+                prompt_tokens.append(seq_data.prompt_token_ids)
+                output_tokens.append(seq_data.output_token_ids)
             temperatures += [temperature] * len(seq_ids)
             top_ps += [top_p] * len(seq_ids)
             top_ks += [top_k] * len(seq_ids)
