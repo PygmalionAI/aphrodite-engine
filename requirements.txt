@@ -17,4 +17,4 @@ fastapi
 colorlog
 einops # for phi
 aioprometheus[starlette] # for prometheus metrics
-pillow # image processing for llava
+pynvml == 11.5.0

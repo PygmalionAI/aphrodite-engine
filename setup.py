@@ -221,6 +221,7 @@ aphrodite_extension_sources = [
     "kernels/quantization/squeezellm/quant_cuda_kernel.cu",
     "kernels/quantization/gptq/q_gemm.cu",
     "kernels/cuda_utils_kernels.cu",
+    "kernels/fast_allreduce.cu",
     "kernels/pybind.cpp",
 ]
 
@@ -234,6 +235,7 @@ aphrodite_extension = CUDAExtension(
         "cxx": CXX_FLAGS,
         "nvcc": NVCC_FLAGS,
     },
+    libraries=["cuda"],
 )
 ext_modules.append(aphrodite_extension)
 

@@ -310,6 +310,9 @@ class ParallelConfig:
         worker_use_ray: Whether to use Ray for model workers. Will be set to
             True if either pipeline_parallel_size or tensor_parallel_size is
             greater than 1.
+        disable_fast_allreduce: Disable the custom all-reduce kernel and fall
+            back to NCCL. Note that custom kernel is only used with CUDA graph
+            and never in eager mode.
     """
 
     def __init__(
@@ -318,11 +321,13 @@ class ParallelConfig:
         tensor_parallel_size: int,
         worker_use_ray: bool,
         max_parallel_loading_workers: Optional[int] = None,
+        disable_fast_allreduce: bool = False,
     ) -> None:
         self.pipeline_parallel_size = pipeline_parallel_size
         self.tensor_parallel_size = tensor_parallel_size
         self.worker_use_ray = worker_use_ray
         self.max_parallel_loading_workers = max_parallel_loading_workers
+        self.disable_fast_allreduce = disable_fast_allreduce
 
         self.world_size = pipeline_parallel_size * tensor_parallel_size
         if self.world_size > 1:
@@ -333,6 +338,12 @@ class ParallelConfig:
         if self.pipeline_parallel_size > 1:
             raise NotImplementedError(
                 "Pipeline parallelism is not supported yet.")
+        if is_hip() or self.pipeline_parallel_size > 1:
+            self.disable_fast_allreduce = True
+            logger.info(
+                "Fast allreduce automatically disabled. Not supported on "
+                "HIP and pipeline parallel"
+            )
 
 
 class SchedulerConfig:

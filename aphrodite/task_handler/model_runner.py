@@ -12,6 +12,7 @@ from aphrodite.modeling import get_model, InputMetadata, SamplingMetadata
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (SamplerOutput, SequenceData,
                                        SequenceGroupMetadata)
+from aphrodite.modeling.megatron import fast_allreduce
 from aphrodite.modeling.sampling_metadata import PersistentMetadata
 
 logger = init_logger(__name__)
@@ -422,27 +423,29 @@ class ModelRunner:
 
         # NOTE: Capturing the largest batch size first may help reduce the
         # memory usage of CUDA graph.
-        for batch_size in reversed(_BATCH_SIZES_TO_CAPTURE):
-            # Create dummy input_metadata.
-            input_metadata = InputMetadata(
-                prompt_lens=[],
-                slot_mapping=slot_mapping[:batch_size],
-                max_context_len=self.max_context_len_to_capture,
-                context_lens=context_lens[:batch_size],
-                block_tables=block_tables[:batch_size],
-                use_cuda_graph=True,
-            )
+        with fast_allreduce.capture(
+                enable=not self.parallel_config.disable_fast_allreduce):
+            for batch_size in reversed(_BATCH_SIZES_TO_CAPTURE):
+                # Create dummy input_metadata.
+                input_metadata = InputMetadata(
+                    prompt_lens=[],
+                    slot_mapping=slot_mapping[:batch_size],
+                    max_context_len=self.max_context_len_to_capture,
+                    context_lens=context_lens[:batch_size],
+                    block_tables=block_tables[:batch_size],
+                    use_cuda_graph=True,
+                )
 
-            graph_runner = CUDAGraphRunner(self.model)
-            graph_runner.capture(
-                input_tokens[:batch_size],
-                input_positions[:batch_size],
-                kv_caches,
-                input_metadata,
-                memory_pool=self.graph_memory_pool,
-            )
-            self.graph_memory_pool = graph_runner.graph.pool()
-            self.graph_runners[batch_size] = graph_runner
+                graph_runner = CUDAGraphRunner(self.model)
+                graph_runner.capture(
+                    input_tokens[:batch_size],
+                    input_positions[:batch_size],
+                    kv_caches,
+                    input_metadata,
+                    memory_pool=self.graph_memory_pool,
+                )
+                self.graph_memory_pool = graph_runner.graph.pool()
+                self.graph_runners[batch_size] = graph_runner
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
