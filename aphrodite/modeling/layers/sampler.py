@@ -36,7 +36,6 @@ class Sampler(nn.Module):
     def __init__(self, vocab_size: int) -> None:
         super().__init__()
         self.vocab_size = vocab_size
-        self._copy_stream = torch.cuda.Stream = torch.cuda.Stream()
 
     def forward(
         self,
@@ -55,20 +54,45 @@ class Sampler(nn.Module):
 
         output_metadata = OutputMetadata()
 
-        # Prepare sampling tensors in another stream to overlap
-        # CPU<->GPU data transfer with GPU computation in forward pass.
-        with torch.cuda.stream(self._copy_stream):
-            (sampling_tensors, do_penalties, do_alphabet_soup,
-             do_cutoffs) = SamplingTensors.from_sampling_metadata(
-                 sampling_metadata, vocab_size, logits.device, logits.dtype)
-            torch.cuda.current_stream().wait_stream(self._copy_stream)
+        # Prepare sampling tensors with pinned memory to avoid blocking.
+        (sampling_tensors, do_temperatures, do_presence_penalties,
+            do_frequency_penalties, do_repetition_penalties, do_topks,
+            do_topps, do_topas, do_minps, do_tfss, do_eta_cutoffs,
+            do_epsilon_cutoffs, do_typical_ps) = (
+                SamplingTensors.from_sampling_metadata(
+                    sampling_metadata, vocab_size, logits.device,
+                    logits.dtype))
 
-        if do_penalties:
+        if do_temperatures:
+            # Apply temperature scaling.
+            # Use in-place division to avoid creating a new tensor.
+            logits.div_(sampling_tensors.temperatures.unsqueeze_(dim=1))
+
+        if do_presence_penalties or do_frequency_penalties or do_repetition_penalties:
             logits = _apply_penalties(logits, sampling_tensors.prompt_tokens,
-                                      sampling_tensors.output_tokens,
-                                      sampling_tensors.presence_penalties,
-                                      sampling_tensors.frequency_penalties,
-                                      sampling_tensors.repetition_penalties)
+                                        sampling_tensors.output_tokens,
+                                        sampling_tensors.presence_penalties,
+                                        sampling_tensors.frequency_penalties,
+                                        sampling_tensors.repetition_penalties)
+        if do_topks or do_topps or do_topas or do_minps:
+            logits = _apply_alphabet_soup(
+                logits, sampling_tensors.top_ps, sampling_tensors.top_ks,
+                sampling_tensors.top_as, sampling_tensors.min_ps)
+        # Apply Eta/epsilon cutoff, typical_p, and tail-free sampling,
+        # as described in:
+        # https://arxiv.org/abs/2210.15191
+        # https://arxiv.org/abs/2202.00666
+        # https://www.trentonbricken.com/Tail-Free-Sampling/        
+        if do_tfss:
+            logits = _apply_tfs(logits, sampling_tensors.tfss)
+        if do_eta_cutoffs:
+            logits = _apply_eta_cutoff(logits, sampling_tensors.eta_cutoffs)
+        if do_epsilon_cutoffs:
+            logits = _apply_epsilon_cutoff(logits,
+                                           sampling_tensors.epsilon_cutoffs)
+        if do_typical_ps:
+            logits = _apply_typical_sampling(logits,
+                                             sampling_tensors.typical_ps)
 
         banned_tokens = _get_custom_token_bans(sampling_metadata)
         assert len(banned_tokens) == logits.shape[0]
@@ -84,27 +108,6 @@ class Sampler(nn.Module):
         if sampler_mirostat.is_applicable(sampling_metadata):
             sampler_mirostat.apply(logits, sampling_metadata, output_metadata)
 
-        # Apply Eta/epsilon cutoff, typical_p, and tail-free sampling,
-        # as described in:
-        # https://arxiv.org/abs/2210.15191
-        # https://arxiv.org/abs/2202.00666
-        # https://www.trentonbricken.com/Tail-Free-Sampling/
-        if do_cutoffs:
-            logits = _apply_eta_cutoff(logits, sampling_tensors.eta_cutoffs)
-            logits = _apply_epsilon_cutoff(logits,
-                                           sampling_tensors.epsilon_cutoffs)
-            logits = _apply_typical_sampling(logits,
-                                             sampling_tensors.typical_ps)
-            logits = _apply_tfs(logits, sampling_tensors.tfss)
-
-        # Apply temperature scaling.
-        # Use in-place division to avoid creating a new tensor.
-        logits.div_(sampling_tensors.temperatures.unsqueeze_(dim=1))
-
-        if do_alphabet_soup:
-            logits = _apply_alphabet_soup(
-                logits, sampling_tensors.top_ps, sampling_tensors.top_ks,
-                sampling_tensors.top_as, sampling_tensors.min_ps)
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
@@ -165,27 +168,6 @@ def _prune_hidden_states(
                                           device=hidden_states.device)
     hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
     return hidden_states.index_select(0, selected_token_indices)
-
-
-def _get_prompt_and_output_tokens(
-        input_metadata: InputMetadata
-) -> Tuple[List[List[int]], List[List[int]]]:
-    prompt_tokens: List[List[int]] = []
-    output_tokens: List[List[int]] = []st[int]] = []
-    for i, seq_group in enumerate(sampling_metadata.seq_groups):
-        seq_ids, sampling_params = seq_group
-        if (i < sampling_metadata.num_prompts
-                and sampling_params.prompt_logprobs is not None):
-            # NOTE: prompt token positions do not need output tokens to
-            # compute penalties.
-            prompt_len = input_metadata.prompt_lens[i]
-            prompt_tokens.extend([] for _ in range(prompt_len - 1))
-            output_tokens.extend([] for _ in range(prompt_len - 1))
-        for seq_id in seq_ids:
-            seq_data = input_metadata.seq_data[seq_id]
-            prompt_tokens.append(seq_data.prompt_token_ids)
-            output_tokens.append(seq_data.output_token_ids)
-    return prompt_tokens, output_tokens
 
 
 def _get_bin_counts_and_mask(

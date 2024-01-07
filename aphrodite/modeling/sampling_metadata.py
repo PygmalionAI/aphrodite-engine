@@ -92,7 +92,8 @@ class SamplingTensors:
     def from_sampling_metadata(
         cls, sampling_metadata: "SamplingMetadata", vocab_size: int,
         device: torch.device, dtype: torch.dtype
-        ) -> Tuple["SamplingTensors", bool, bool, bool]:
+        ) -> Tuple["SamplingTensors", bool, bool, bool, bool, bool, bool, bool,
+                   bool, bool, bool, bool, bool]:
         prompt_tokens: List[List[int]] = []
         output_tokens: List[List[int]] = []
         top_ks: List[int] = []
@@ -107,9 +108,18 @@ class SamplingTensors:
         eta_cutoffs: List[float] = []
         epsilon_cutoffs: List[float] = []
         typical_ps: List[float] = []
-        do_penalties = False
-        do_alphabet_soup = False
-        do_cutoffs = False
+        do_temperatures = False
+        do_presence_penalties = False
+        do_frequency_penalties = False
+        do_repetition_penalties = False
+        do_topks = False
+        do_topps = False
+        do_topas = False
+        do_minps = False
+        do_tfss = False
+        do_eta_cutoffs = False
+        do_epsilon_cutoffs = False
+        do_typical_ps = False
         for i, seq_group in enumerate(sampling_metadata.seq_groups):
             seq_ids, sampling_params = seq_group
             temperature = sampling_params.temperature
@@ -126,25 +136,49 @@ class SamplingTensors:
             eta_cutoff = sampling_params.eta_cutoff
             epsilon_cutoff = sampling_params.epsilon_cutoff
             typical_p = sampling_params.typical_p
-            if temperature < _SAMPLING_EPS:
+            if do_temperatures is False and temperature != 1.0:
                 # NOTE: Zero temp means deterministic sampling
                 # i.e. greedy sampling or beam search
                 # Set the temperature to 1 to avoid division by zero.
                 temperature = 1.0
-            if not do_alphabet_soup and (top_p < 1.0 - _SAMPLING_EPS
-                                         or top_k != vocab_size
-                                         or top_a > 0.0
-                                         or min_p > _SAMPLING_EPS):
-                do_alphabet_soup = True
-            if not do_penalties and (abs(p) >= _SAMPLING_EPS
-                                     or abs(f) >= _SAMPLING_EPS
-                                     or abs(r - 1.0) >= _SAMPLING_EPS):
-                do_penalties = True
-            if not do_cutoffs and (eta_cutoff > _SAMPLING_EPS
-                                   or epsilon_cutoff > _SAMPLING_EPS
-                                   or typical_p < 1.0 - _SAMPLING_EPS
-                                   or tfs < 1.0 - _SAMPLING_EPS):
-                do_cutoffs = True
+            if do_presence_penalties is False and abs(p) >= _SAMPLING_EPS:
+                do_presence_penalties = True
+            if do_frequency_penalties is False and abs(f) >= _SAMPLING_EPS:
+                do_frequency_penalties = True
+            if do_repetition_penalties is False and abs(r - 1.0) >= _SAMPLING_EPS:
+                do_repetition_penalties = True
+            if do_topks is False and top_k != vocab_size:
+                do_topks = True
+            if do_topps is False and top_p < 1.0 - _SAMPLING_EPS:
+                do_topps = True
+            if do_topas is False and top_a > 0.0:
+                do_topas = True
+            if do_minps is False and min_p > _SAMPLING_EPS:
+                do_minps = True
+            if do_tfss is False and tfs < 1.0 - _SAMPLING_EPS:
+                do_tfss = True
+            if do_eta_cutoffs is False and eta_cutoff > _SAMPLING_EPS:
+                do_eta_cutoffs = True
+            if do_epsilon_cutoffs is False and epsilon_cutoff > _SAMPLING_EPS:
+                do_epsilon_cutoffs = True
+            if do_typical_ps is False and typical_p < 1.0 - _SAMPLING_EPS:
+                do_typical_ps = True
+
+            # if not do_alphabet_soup and (top_p < 1.0 - _SAMPLING_EPS
+            #                              or top_k != vocab_size
+            #                              or top_a > 0.0
+            #                              or min_p > _SAMPLING_EPS):
+            #     do_alphabet_soup = True
+            # if not do_penalties and (abs(p) >= _SAMPLING_EPS
+            #                          or abs(f) >= _SAMPLING_EPS
+            #                          or abs(r - 1.0) >= _SAMPLING_EPS):
+            #     do_penalties = True
+            # if not do_cutoffs and (eta_cutoff > _SAMPLING_EPS
+            #                        or epsilon_cutoff > _SAMPLING_EPS
+            #                        or typical_p < 1.0 - _SAMPLING_EPS
+            #                        or tfs < 1.0 - _SAMPLING_EPS):
+            #     do_cutoffs = True
+                
             if (i < sampling_metadata.num_prompts
                     and sampling_params.prompt_logprobs is not None):
                 # For tokens in the prompt that we only need to get their
@@ -186,7 +220,10 @@ class SamplingTensors:
             frequency_penalties, repetition_penalties, tfss, eta_cutoffs,
             epsilon_cutoffs, typical_ps, prompt_tokens, output_tokens,
             vocab_size, device, dtype)
-        return (sampling_tensors, do_penalties, do_alphabet_soup, do_cutoffs)
+        return (sampling_tensors, do_temperatures, do_presence_penalties,
+                do_frequency_penalties, do_repetition_penalties, do_topks,
+                do_topps, do_topas, do_minps, do_tfss, do_eta_cutoffs,
+                do_epsilon_cutoffs, do_typical_ps)
 
     @classmethod
     def from_lists(cls, temperatures: List[float], top_ps: List[float],
