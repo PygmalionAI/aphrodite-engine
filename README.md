@@ -12,6 +12,8 @@ Aphrodite is the official backend engine for PygmalionAI. It is designed to serv
 
 Aphrodite builds upon and integrates the exceptional work from [various projects](#acknowledgements).
 
+The compute necessary for Aphrodite's development is provided by [Arc Compute](https://www.arccompute.io).
+
 
 ## Features
 
