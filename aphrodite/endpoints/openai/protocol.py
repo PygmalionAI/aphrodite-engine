@@ -209,3 +209,6 @@ class ChatCompletionStreamResponse(BaseModel):
     choices: List[ChatCompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = Field(
         default=None, description="data about request and response")
+
+class Prompt(BaseModel):
+    prompt: str
