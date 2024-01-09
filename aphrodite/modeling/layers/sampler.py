@@ -102,7 +102,7 @@ class Sampler(nn.Module):
                                           sampling_tensors.output_tokens)
 
         if do_mirostat:
-            logits = sampler_mirostat.apply(logits, sampling_metadata, output_metadata)
+            logits = sampler_mirostat.apply(logits, sampling_tensors, output_metadata)
 
 
         # We use float32 for probabilities and log probabilities.
