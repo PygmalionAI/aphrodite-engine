@@ -3,7 +3,8 @@ from typing import Tuple, List
 import torch
 from torch import Tensor
 
-from aphrodite.modeling.sampling_metadata import OutputMetadata, SamplingMetadata, SamplingTensors
+from aphrodite.modeling.sampling_metadata import OutputMetadata, SamplingTensors
+from aphrodite.modeling.layers.sampler import _multinomial
 
 
 def _store_args(seqids: List[int], mus: List[float],
@@ -14,14 +15,10 @@ def _store_args(seqids: List[int], mus: List[float],
 
 def _apply_mirostat_v2(
         logits: Tensor,
-        taus: List[float],  # AKA the targeted surprise
-        etas: List[float],  # AKA the learning rate
-        mus: List[
-            float],  # AKA the accumulator that always tries to approach [tau]
+        taus: Tensor,  # AKA the targeted surprise
+        etas: Tensor,  # AKA the learning rate
+        mus: Tensor,  # AKA the accumulator that always tries to approach [tau]
 ) -> Tensor:
-    ttaus = torch.tensor(taus, dtype=logits.dtype, device=logits.device)
-    tetas = torch.tensor(etas, dtype=logits.dtype, device=logits.device)
-    tmus = torch.tensor(mus, dtype=logits.dtype, device=logits.device)
 
     logit_surprise = torch.softmax(
         logits, dim=-1).log2_().neg_()  # Calculate surprise value per token
@@ -31,7 +28,7 @@ def _apply_mirostat_v2(
     # elegance purposes.
     # logit_surprise = torch.log_softmax(logits, dim=-1).neg_()
 
-    miro_mask = logit_surprise > tmus.unsqueeze(
+    miro_mask = logit_surprise > mus.unsqueeze(
         dim=-1)  # Mask out "too-surprising" tokens (above mu)
     mininds = torch.argmin(logit_surprise, dim=-1)
     miro_mask.scatter_(
@@ -47,7 +44,7 @@ def _apply_mirostat_v2(
     # The silly approach here is to just sample it and make the logits one-hot.
     # This breaks fine grained seeding, but we don't have that yet.
     # TODO: FIX when it gets added
-    next_token_ids = torch.multinomial(probs, num_samples=1, replacement=True)
+    next_token_ids = _multinomial(probs, num_samples=1)
 
     # Calculation new `mu` values
     # NOTE: If we can know the logit values of the PREVIOUS iteration,
@@ -56,9 +53,8 @@ def _apply_mirostat_v2(
     picked_surprises = torch.gather(logit_surprise,
                                     dim=-1,
                                     index=next_token_ids)
-    eps = picked_surprises.squeeze() - ttaus
-    tmus = tmus - tetas * eps
-    mus[:] = tmus.tolist()
+    eps = picked_surprises.squeeze() - taus
+    mus.sub_(etas * eps)
 
     logits.fill_(-float("inf"))
     # This value doesn't actually matter, so long as it's not -inf.
