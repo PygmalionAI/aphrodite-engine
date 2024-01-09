@@ -58,7 +58,7 @@ class Sampler(nn.Module):
         (sampling_tensors, do_temperatures, do_presence_penalties,
             do_frequency_penalties, do_repetition_penalties, do_topks,
             do_topps, do_topas, do_minps, do_tfss, do_eta_cutoffs,
-            do_epsilon_cutoffs, do_typical_ps) = (
+            do_epsilon_cutoffs, do_typical_ps, do_mirostat) = (
                 SamplingTensors.from_sampling_metadata(
                     sampling_metadata, vocab_size, logits.device,
                     logits.dtype))
@@ -101,12 +101,8 @@ class Sampler(nn.Module):
         logits = _apply_logits_processors(sampling_metadata, logits,
                                           sampling_tensors.output_tokens)
 
-        # Apply Mirostat
-        # Note that we apply mirostat before temperature, not after
-        # like it maybe should be.
-        # To be fixed by implementing customizable sampling order
-        if sampler_mirostat.is_applicable(sampling_metadata):
-            sampler_mirostat.apply(logits, sampling_metadata, output_metadata)
+        if do_mirostat:
+            logits = sampler_mirostat.apply(logits, sampling_metadata, output_metadata)
 
 
         # We use float32 for probabilities and log probabilities.

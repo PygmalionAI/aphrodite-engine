@@ -3,43 +3,12 @@ from typing import Tuple, List
 import torch
 from torch import Tensor
 
-from aphrodite.modeling.sampling_metadata import OutputMetadata, SamplingMetadata
-
-
-def _fetch_args(
-    metadata: SamplingMetadata
-) -> Tuple[List[int], List[int], List[float], List[float], List[float]]:
-    logit_indices: List[int] = []
-    seqids: List[int] = []
-    taus: List[float] = []
-    etas: List[float] = []
-    mus: List[float] = []
-
-    index = 0
-    for i, (seq_ids, params) in enumerate(metadata.seq_groups):
-        # NOTE: If there are prompt logprobs here, SKIP THEM
-        #       Miro persists data via seq_id, which these lack.
-        #       In addition, mu is calculated using miro's chosen token,
-        #       which prompt processing would ignore entirely.
-        if (i < metadata.num_prompts and params.prompt_logprobs):
-            index += metadata.prompt_lens[i] - 1
-
-        if params.mirostat_mode == 2:
-            logit_indices += [(index + i) for i in range(len(seq_ids))]
-            seqids += seq_ids
-            taus += [params.mirostat_tau] * len(seq_ids)
-            etas += [params.mirostat_eta] * len(seq_ids)
-            mus += [
-                metadata.persistent_metadata.get(sid).get(
-                    "miro_mu", params.mirostat_tau * 2) for sid in seq_ids
-            ]
-        index += len(seq_ids)
-    return logit_indices, seqids, taus, etas, mus
+from aphrodite.modeling.sampling_metadata import OutputMetadata, SamplingMetadata, SamplingTensors
 
 
 def _store_args(seqids: List[int], mus: List[float],
                 output_metadata: OutputMetadata) -> None:
-    for sid, mu in zip(seqids, mus):
+    for sid, mu in zip(seqids, mus.tolist()): # tolist might be premature optimization
         output_metadata.add(sid, "miro_mu", mu)
 
 
@@ -98,15 +67,15 @@ def _apply_mirostat_v2(
     return logits
 
 
-def is_applicable(sampling_metadata: SamplingMetadata) -> bool:
-    return any((params.mirostat_mode == 2)
-               for _, params in sampling_metadata.seq_groups)
-
-
-def apply(logits: Tensor, sampling_metadata: SamplingMetadata,
+def apply(logits: Tensor, sampling_tensors: SamplingTensors,
           output_metadata: OutputMetadata) -> Tensor:
-    logit_index, seqids, taus, etas, mus = _fetch_args(sampling_metadata)
+    idx = sampling_tensors.miro_indices
+    seqids = sampling_tensors.miro_seqids
+    taus = sampling_tensors.miro_taus
+    etas = sampling_tensors.miro_etas
+    mus = sampling_tensors.miro_mus
 
-    logits[logit_index] = _apply_mirostat_v2(
-        logits[logit_index], taus, etas, mus)  # mus is an inout param, :vomit:
+    logits[idx] = _apply_mirostat_v2(
+        logits[idx], taus, etas, mus)  # mus is an inout param, :vomit:
     _store_args(seqids, mus, output_metadata)
+    return logits

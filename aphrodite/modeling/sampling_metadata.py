@@ -85,6 +85,11 @@ class SamplingTensors:
     eta_cutoffs: torch.Tensor
     epsilon_cutoffs: torch.Tensor
     typical_ps: torch.Tensor
+    miro_taus: torch.Tensor
+    miro_etas: torch.Tensor
+    miro_mus: torch.Tensor
+    miro_indices: torch.Tensor
+    miro_seqids: List[int] # state writeback done CPU side
     prompt_tokens: torch.Tensor
     output_tokens: torch.Tensor
 
@@ -93,7 +98,7 @@ class SamplingTensors:
         cls, sampling_metadata: "SamplingMetadata", vocab_size: int,
         device: torch.device, dtype: torch.dtype
         ) -> Tuple["SamplingTensors", bool, bool, bool, bool, bool, bool, bool,
-                   bool, bool, bool, bool, bool]:
+                   bool, bool, bool, bool, bool, bool]:
         prompt_tokens: List[List[int]] = []
         output_tokens: List[List[int]] = []
         top_ks: List[int] = []
@@ -108,6 +113,12 @@ class SamplingTensors:
         eta_cutoffs: List[float] = []
         epsilon_cutoffs: List[float] = []
         typical_ps: List[float] = []
+        miro_taus: List[float] = []
+        miro_etas: List[float] = []
+        miro_mus: List[float] = []
+        miro_indices: List[int] = []
+        miro_seqids: List[int] = []
+        index = 0 # temporary, needed for building miro_indices
         do_temperatures = False
         do_presence_penalties = False
         do_frequency_penalties = False
@@ -120,6 +131,7 @@ class SamplingTensors:
         do_eta_cutoffs = False
         do_epsilon_cutoffs = False
         do_typical_ps = False
+        do_mirostat = False
         for i, seq_group in enumerate(sampling_metadata.seq_groups):
             seq_ids, sampling_params = seq_group
             temperature = sampling_params.temperature
@@ -136,6 +148,8 @@ class SamplingTensors:
             eta_cutoff = sampling_params.eta_cutoff
             epsilon_cutoff = sampling_params.epsilon_cutoff
             typical_p = sampling_params.typical_p
+            miro_tau = sampling_params.mirostat_tau
+            miro_eta = sampling_params.mirostat_eta
             if do_temperatures is False and temperature != 1.0:
                 # NOTE: Zero temp means deterministic sampling
                 # i.e. greedy sampling or beam search
@@ -163,6 +177,8 @@ class SamplingTensors:
                 do_epsilon_cutoffs = True
             if do_typical_ps is False and typical_p < 1.0 - _SAMPLING_EPS:
                 do_typical_ps = True
+            if do_mirostat is False and sampling_params.mirostat_mode == 2:
+                do_mirostat = True
 
             # if not do_alphabet_soup and (top_p < 1.0 - _SAMPLING_EPS
             #                              or top_k != vocab_size
@@ -184,6 +200,7 @@ class SamplingTensors:
                 # For tokens in the prompt that we only need to get their
                 # logprobs
                 prompt_len = sampling_metadata.prompt_lens[i]
+                index += sampling_metadata.prompt_lens[i] - 1
                 temperatures += [temperature] * (prompt_len - 1)
                 top_ps += [top_p] * (prompt_len - 1)
                 top_ks += [top_k] * (prompt_len - 1)
@@ -214,16 +231,26 @@ class SamplingTensors:
             eta_cutoffs += [eta_cutoff] * len(seq_ids)
             epsilon_cutoffs += [epsilon_cutoff] * len(seq_ids)
             typical_ps += [typical_p] * len(seq_ids)
+            if sampling_params.mirostat_mode == 2:
+                miro_indices += [(index + i) for i in range(len(seq_ids))]
+                miro_seqids += seq_ids
+                miro_taus += [miro_tau] * len(seq_ids)
+                miro_etas += [miro_eta] * len(seq_ids)
+                miro_mus += [
+                    sampling_metadata.persistent_metadata.get(sid).get(
+                        "miro_mu", sampling_params.mirostat_tau * 2) for sid in seq_ids
+                ]
+            index += len(seq_ids)
 
         sampling_tensors = SamplingTensors.from_lists(
             temperatures, top_ps, top_ks, top_as, min_ps, presence_penalties,
             frequency_penalties, repetition_penalties, tfss, eta_cutoffs,
-            epsilon_cutoffs, typical_ps, prompt_tokens, output_tokens,
-            vocab_size, device, dtype)
+            epsilon_cutoffs, typical_ps, miro_taus, miro_etas, miro_mus, miro_indices,
+            miro_seqids, prompt_tokens, output_tokens, vocab_size, device, dtype)
         return (sampling_tensors, do_temperatures, do_presence_penalties,
                 do_frequency_penalties, do_repetition_penalties, do_topks,
                 do_topps, do_topas, do_minps, do_tfss, do_eta_cutoffs,
-                do_epsilon_cutoffs, do_typical_ps)
+                do_epsilon_cutoffs, do_typical_ps, do_mirostat)
 
     @classmethod
     def from_lists(cls, temperatures: List[float], top_ps: List[float],
@@ -232,7 +259,10 @@ class SamplingTensors:
                    frequency_penalties: List[float],
                    repetition_penalties: List[float], tfss: List[float],
                    eta_cutoffs: List[float], epsilon_cutoffs: List[float],
-                   typical_ps: List[float], prompt_tokens: List[List[int]],
+                   typical_ps: List[float], miro_taus: List[float], 
+                   miro_etas: List[float], miro_mus: List[float],
+                   miro_indices: List[int], miro_seqids: List[int],
+                   prompt_tokens: List[List[int]],
                    output_tokens: List[List[int]], vocab_size: int,
                    device: torch.device, dtype: torch.dtype
                    ) -> "SamplingTensors":
@@ -322,6 +352,30 @@ class SamplingTensors:
             dtype=dtype,
             pin_memory=pin_memory
         )
+        miro_taus_t = torch.tensor(
+            miro_taus,
+            device="cpu",
+            dtype=dtype,
+            pin_memory=pin_memory
+        )
+        miro_etas_t = torch.tensor(
+            miro_etas,
+            device="cpu",
+            dtype=dtype,
+            pin_memory=pin_memory
+        )
+        miro_mus_t = torch.tensor(
+            miro_mus,
+            device="cpu",
+            dtype=dtype,
+            pin_memory=pin_memory
+        )
+        miro_indices_t = torch.tensor(
+            miro_indices,
+            device="cpu",
+            dtype=torch.int,
+            pin_memory=pin_memory
+        )
         prompt_tensor = torch.tensor(
             prompt_padded_tokens,
             device=device,
@@ -352,6 +406,11 @@ class SamplingTensors:
             eta_cutoffs=eta_cutoffs_t.to(device=device, non_blocking=True),
             epsilon_cutoffs=epsilon_cutoffs_t.to(
                 device=device, non_blocking=True),
+            miro_taus=miro_taus_t.to(device=device, non_blocking=True),
+            miro_etas=miro_etas_t.to(device=device, non_blocking=True),
+            miro_mus=miro_mus_t.to(device=device, non_blocking=True),
+            miro_indices=miro_indices_t.to(device=device, non_blocking=True),
+            miro_seqids=miro_seqids,
             typical_ps=typical_ps_t.to(device=device, non_blocking=True),
             prompt_tokens=prompt_tensor.to(device=device, non_blocking=True),
             output_tokens=output_tensor.to(device=device, non_blocking=True),
