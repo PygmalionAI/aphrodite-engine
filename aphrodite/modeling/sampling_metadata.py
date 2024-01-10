@@ -98,7 +98,7 @@ class SamplingTensors:
         cls, sampling_metadata: "SamplingMetadata", vocab_size: int,
         device: torch.device, dtype: torch.dtype
         ) -> Tuple["SamplingTensors", bool, bool, bool, bool, bool, bool, bool,
-                   bool, bool, bool, bool, bool, bool]:
+                   bool, bool, bool, bool]:
         prompt_tokens: List[List[int]] = []
         output_tokens: List[List[int]] = []
         top_ks: List[int] = []
@@ -120,9 +120,7 @@ class SamplingTensors:
         miro_seqids: List[int] = []
         index = 0 # temporary, needed for building miro_indices
         do_temperatures = False
-        do_presence_penalties = False
-        do_frequency_penalties = False
-        do_repetition_penalties = False
+        do_penalties = False
         do_topks = False
         do_topps = False
         do_topas = False
@@ -155,12 +153,10 @@ class SamplingTensors:
                 # i.e. greedy sampling or beam search
                 # Set the temperature to 1 to avoid division by zero.
                 temperature = 1.0
-            if do_presence_penalties is False and abs(p) >= _SAMPLING_EPS:
-                do_presence_penalties = True
-            if do_frequency_penalties is False and abs(f) >= _SAMPLING_EPS:
-                do_frequency_penalties = True
-            if do_repetition_penalties is False and abs(r - 1.0) >= _SAMPLING_EPS:
-                do_repetition_penalties = True
+            if not do_penalties and (abs(p) >= _SAMPLING_EPS
+                                     or abs(f) >= _SAMPLING_EPS
+                                     or abs(r - 1.0) >= _SAMPLING_EPS):
+                do_penalties = True
             if do_topks is False and top_k != vocab_size:
                 do_topks = True
             if do_topps is False and top_p < 1.0 - _SAMPLING_EPS:
@@ -185,15 +181,6 @@ class SamplingTensors:
             #                              or top_a > 0.0
             #                              or min_p > _SAMPLING_EPS):
             #     do_alphabet_soup = True
-            # if not do_penalties and (abs(p) >= _SAMPLING_EPS
-            #                          or abs(f) >= _SAMPLING_EPS
-            #                          or abs(r - 1.0) >= _SAMPLING_EPS):
-            #     do_penalties = True
-            # if not do_cutoffs and (eta_cutoff > _SAMPLING_EPS
-            #                        or epsilon_cutoff > _SAMPLING_EPS
-            #                        or typical_p < 1.0 - _SAMPLING_EPS
-            #                        or tfs < 1.0 - _SAMPLING_EPS):
-            #     do_cutoffs = True
                 
             if (i < sampling_metadata.num_prompts
                     and sampling_params.prompt_logprobs is not None):
@@ -247,8 +234,7 @@ class SamplingTensors:
             frequency_penalties, repetition_penalties, tfss, eta_cutoffs,
             epsilon_cutoffs, typical_ps, miro_taus, miro_etas, miro_mus, miro_indices,
             miro_seqids, prompt_tokens, output_tokens, vocab_size, device, dtype)
-        return (sampling_tensors, do_temperatures, do_presence_penalties,
-                do_frequency_penalties, do_repetition_penalties, do_topks,
+        return (sampling_tensors, do_temperatures, do_penalties, do_topks,
                 do_topps, do_topas, do_minps, do_tfss, do_eta_cutoffs,
                 do_epsilon_cutoffs, do_typical_ps, do_mirostat)
 

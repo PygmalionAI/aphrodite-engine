@@ -54,8 +54,7 @@ class Sampler(nn.Module):
         output_metadata = OutputMetadata()
 
         # Prepare sampling tensors with pinned memory to avoid blocking.
-        (sampling_tensors, do_temperatures, do_presence_penalties,
-            do_frequency_penalties, do_repetition_penalties, do_topks,
+        (sampling_tensors, do_temperatures, do_penalties, do_topks,
             do_topps, do_topas, do_minps, do_tfss, do_eta_cutoffs,
             do_epsilon_cutoffs, do_typical_ps, do_mirostat) = (
                 SamplingTensors.from_sampling_metadata(
@@ -67,12 +66,13 @@ class Sampler(nn.Module):
             # Use in-place division to avoid creating a new tensor.
             logits.div_(sampling_tensors.temperatures.unsqueeze_(dim=1))
 
-        if do_presence_penalties or do_frequency_penalties or do_repetition_penalties:
+        if do_penalties:
             logits = _apply_penalties(logits, sampling_tensors.prompt_tokens,
-                                        sampling_tensors.output_tokens,
-                                        sampling_tensors.presence_penalties,
-                                        sampling_tensors.frequency_penalties,
-                                        sampling_tensors.repetition_penalties)
+                                      sampling_tensors.output_tokens,
+                                      sampling_tensors.presence_penalties,
+                                      sampling_tensors.frequency_penalties,
+                                      sampling_tensors.repetition_penalties)
+            
         if do_topks or do_topps or do_topas or do_minps:
             logits = _apply_alphabet_soup(
                 logits, sampling_tensors.top_ps, sampling_tensors.top_ks,
