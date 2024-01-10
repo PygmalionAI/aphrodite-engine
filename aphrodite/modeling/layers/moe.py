@@ -238,6 +238,7 @@ def grouped_matmul_kernel(
         num_n_tiles = tl.cdiv(gn, BLOCK_SIZE_N)
         num_tiles = num_m_tiles * num_n_tiles
         # iterate through the tiles in the current gemm problem
+        # pylint: disable=chained-comparison
         while (tile_idx >= last_problem_end
                and tile_idx < last_problem_end + num_tiles):
 
