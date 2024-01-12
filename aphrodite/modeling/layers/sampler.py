@@ -4,7 +4,6 @@ from typing import Dict, List, Tuple, Optional
 import torch
 import torch.nn as nn
 
-from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.sampling_metadata import (SamplingMetadata,
                                                   OutputMetadata,
                                                   SamplingTensors)
@@ -14,7 +13,6 @@ from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (PromptLogprobs, SampleLogprobs,
                                        SamplerOutput, SequenceData,
                                        SequenceGroupOutput, SequenceOutput)
-
 
 
 class Sampler(nn.Module):
@@ -54,12 +52,10 @@ class Sampler(nn.Module):
         output_metadata = OutputMetadata()
 
         # Prepare sampling tensors with pinned memory to avoid blocking.
-        (sampling_tensors, do_temperatures, do_penalties, do_topks,
-            do_topps, do_topas, do_minps, do_tfss, do_eta_cutoffs,
-            do_epsilon_cutoffs, do_typical_ps, do_mirostat) = (
-                SamplingTensors.from_sampling_metadata(
-                    sampling_metadata, vocab_size, logits.device,
-                    logits.dtype))
+        (sampling_tensors, do_temperatures, do_penalties, do_topks, do_topps,
+         do_topas, do_minps, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
+         do_typical_ps, do_mirostat) = (SamplingTensors.from_sampling_metadata(
+             sampling_metadata, vocab_size, logits.device, logits.dtype))
 
         if do_temperatures:
             # Apply temperature scaling.
@@ -72,16 +68,17 @@ class Sampler(nn.Module):
                                       sampling_tensors.presence_penalties,
                                       sampling_tensors.frequency_penalties,
                                       sampling_tensors.repetition_penalties)
-            
+
         if do_topks or do_topps or do_topas or do_minps:
-            logits = _apply_alphabet_soup(
-                logits, sampling_tensors.top_ps, sampling_tensors.top_ks,
-                sampling_tensors.top_as, sampling_tensors.min_ps)
+            logits = _apply_alphabet_soup(logits, sampling_tensors.top_ps,
+                                          sampling_tensors.top_ks,
+                                          sampling_tensors.top_as,
+                                          sampling_tensors.min_ps)
         # Apply Eta/epsilon cutoff, typical_p, and tail-free sampling,
         # as described in:
         # https://arxiv.org/abs/2210.15191
         # https://arxiv.org/abs/2202.00666
-        # https://www.trentonbricken.com/Tail-Free-Sampling/        
+        # https://www.trentonbricken.com/Tail-Free-Sampling/
         if do_tfss:
             logits = _apply_tfs(logits, sampling_tensors.tfss)
         if do_eta_cutoffs:
@@ -102,7 +99,6 @@ class Sampler(nn.Module):
 
         if do_mirostat:
             logits = _mirostat(logits, sampling_tensors, output_metadata)
-
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
@@ -261,8 +257,9 @@ def _apply_alphabet_soup(
     treshold = torch.maximum(min_p_thresholds, top_a_thresholds)
     mask = (probs_sort < treshold.unsqueeze(1)
             )  # Cull logits below the top-a threshold
-    mask.logical_or_(probs_sum > p.unsqueeze(
-        dim=1))  # Cull logits above the top-p summation threshold
+    mask.logical_or_(
+        probs_sum >
+        p.unsqueeze(dim=1))  # Cull logits above the top-p summation threshold
     mask[:, 0] = False  # Guarantee at least one token is pickable
     logits_sort[mask] = -float("inf")
 
@@ -479,6 +476,7 @@ def _beam_search_sample(
         sample_idx += num_parent_seqs
     assert sample_idx == logprobs.size(0)
     return results
+
 
 # torch.multinomial forces a GPU<->CPU sync.
 # Therefore, we use an optimized implementation instead.
@@ -719,8 +717,9 @@ def _build_sampler_output(
 
 
 def _miro_store_args(seqids: List[int], mus: List[float],
-                output_metadata: OutputMetadata) -> None:
-    for sid, mu in zip(seqids, mus.tolist()): # tolist might be premature optimization
+                     output_metadata: OutputMetadata) -> None:
+    for sid, mu in zip(seqids,
+                       mus.tolist()):  # tolist might be premature optimization
         output_metadata.add(sid, "miro_mu", mu)
 
 
@@ -728,7 +727,8 @@ def _apply_mirostat_v2(
         logits: torch.Tensor,
         taus: torch.Tensor,  # AKA the targeted surprise
         etas: torch.Tensor,  # AKA the learning rate
-        mus: torch.Tensor,  # AKA the accumulator that always tries to approach [tau]
+        mus: torch.
+    Tensor,  # AKA the accumulator that always tries to approach [tau]
 ) -> torch.Tensor:
 
     logit_surprise = torch.softmax(
@@ -775,14 +775,14 @@ def _apply_mirostat_v2(
 
 
 def _mirostat(logits: torch.Tensor, sampling_tensors: SamplingTensors,
-          output_metadata: OutputMetadata) -> torch.Tensor:
+              output_metadata: OutputMetadata) -> torch.Tensor:
     idx = sampling_tensors.miro_indices
     seqids = sampling_tensors.miro_seqids
     taus = sampling_tensors.miro_taus
     etas = sampling_tensors.miro_etas
     mus = sampling_tensors.miro_mus
 
-    logits[idx] = _apply_mirostat_v2(
-        logits[idx], taus, etas, mus)  # mus is an inout param, :vomit:
+    logits[idx] = _apply_mirostat_v2(logits[idx], taus, etas,
+                                     mus)  # mus is an inout param, :vomit:
     _miro_store_args(seqids, mus, output_metadata)
     return logits

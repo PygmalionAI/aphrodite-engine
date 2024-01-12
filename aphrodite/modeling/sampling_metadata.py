@@ -70,6 +70,7 @@ class SamplingMetadata:
             f"persistent_metadata={self.persistent_metadata}, "
             f"output_metadata={self.output_metadata})")
 
+
 @dataclass
 class SamplingTensors:
     """Tensors for sampling."""
@@ -89,7 +90,7 @@ class SamplingTensors:
     miro_etas: torch.Tensor
     miro_mus: torch.Tensor
     miro_indices: torch.Tensor
-    miro_seqids: List[int] # state writeback done CPU side
+    miro_seqids: List[int]  # state writeback done CPU side
     prompt_tokens: torch.Tensor
     output_tokens: torch.Tensor
 
@@ -97,8 +98,8 @@ class SamplingTensors:
     def from_sampling_metadata(
         cls, sampling_metadata: "SamplingMetadata", vocab_size: int,
         device: torch.device, dtype: torch.dtype
-        ) -> Tuple["SamplingTensors", bool, bool, bool, bool, bool, bool, bool,
-                   bool, bool, bool, bool]:
+    ) -> Tuple["SamplingTensors", bool, bool, bool, bool, bool, bool, bool,
+               bool, bool, bool, bool]:
         prompt_tokens: List[List[int]] = []
         output_tokens: List[List[int]] = []
         top_ks: List[int] = []
@@ -118,7 +119,7 @@ class SamplingTensors:
         miro_mus: List[float] = []
         miro_indices: List[int] = []
         miro_seqids: List[int] = []
-        index = 0 # temporary, needed for building miro_indices
+        index = 0  # temporary, needed for building miro_indices
         do_temperatures = False
         do_penalties = False
         do_topks = False
@@ -181,7 +182,7 @@ class SamplingTensors:
             #                              or top_a > 0.0
             #                              or min_p > _SAMPLING_EPS):
             #     do_alphabet_soup = True
-                
+
             if (i < sampling_metadata.num_prompts
                     and sampling_params.prompt_logprobs is not None):
                 # For tokens in the prompt that we only need to get their
@@ -225,15 +226,17 @@ class SamplingTensors:
                 miro_etas += [miro_eta] * len(seq_ids)
                 miro_mus += [
                     sampling_metadata.persistent_metadata.get(sid).get(
-                        "miro_mu", sampling_params.mirostat_tau * 2) for sid in seq_ids
+                        "miro_mu", sampling_params.mirostat_tau * 2)
+                    for sid in seq_ids
                 ]
             index += len(seq_ids)
 
         sampling_tensors = SamplingTensors.from_lists(
             temperatures, top_ps, top_ks, top_as, min_ps, presence_penalties,
             frequency_penalties, repetition_penalties, tfss, eta_cutoffs,
-            epsilon_cutoffs, typical_ps, miro_taus, miro_etas, miro_mus, miro_indices,
-            miro_seqids, prompt_tokens, output_tokens, vocab_size, device, dtype)
+            epsilon_cutoffs, typical_ps, miro_taus, miro_etas, miro_mus,
+            miro_indices, miro_seqids, prompt_tokens, output_tokens,
+            vocab_size, device, dtype)
         return (sampling_tensors, do_temperatures, do_penalties, do_topks,
                 do_topps, do_topas, do_minps, do_tfss, do_eta_cutoffs,
                 do_epsilon_cutoffs, do_typical_ps, do_mirostat)
@@ -245,13 +248,13 @@ class SamplingTensors:
                    frequency_penalties: List[float],
                    repetition_penalties: List[float], tfss: List[float],
                    eta_cutoffs: List[float], epsilon_cutoffs: List[float],
-                   typical_ps: List[float], miro_taus: List[float], 
+                   typical_ps: List[float], miro_taus: List[float],
                    miro_etas: List[float], miro_mus: List[float],
                    miro_indices: List[int], miro_seqids: List[int],
                    prompt_tokens: List[List[int]],
                    output_tokens: List[List[int]], vocab_size: int,
-                   device: torch.device, dtype: torch.dtype
-                   ) -> "SamplingTensors":
+                   device: torch.device,
+                   dtype: torch.dtype) -> "SamplingTensors":
         # Note that the performance will be very bad without
         # pinned memory.
         pin_memory = not in_wsl()
@@ -266,114 +269,78 @@ class SamplingTensors:
             for tokens in output_tokens
         ]
 
-        temperatures_t = torch.tensor(
-            temperatures,
-            device="cpu",
-            dtype=dtype,
-            pin_memory=pin_memory
-        )
-        top_ps_t = torch.tensor(
-            top_ps,
-            device="cpu",
-            dtype=dtype,
-            pin_memory=pin_memory
-        )
-        top_ks_t = torch.tensor(
-            top_ks,
-            device="cpu",
-            dtype=torch.int,
-            pin_memory=pin_memory
-        )
-        top_as_t = torch.tensor(
-            top_as,
-            device="cpu",
-            dtype=dtype,
-            pin_memory=pin_memory
-        )
-        min_ps_t = torch.tensor(
-            min_ps,
-            device="cpu",
-            dtype=dtype,
-            pin_memory=pin_memory
-        )
-        presence_penalties_t = torch.tensor(
-            presence_penalties,
-            device="cpu",
-            dtype=dtype,
-            pin_memory=pin_memory
-        )
-        frequency_penalties_t = torch.tensor(
-            frequency_penalties,
-            device="cpu",
-            dtype=dtype,
-            pin_memory=pin_memory
-        )
-        repetition_penalties_t = torch.tensor(
-            repetition_penalties,
-            device="cpu",
-            dtype=dtype,
-            pin_memory=pin_memory
-        )
-        tfss_t = torch.tensor(
-            tfss,
-            device="cpu",
-            dtype=dtype,
-            pin_memory=pin_memory
-        )
-        eta_cutoffs_t = torch.tensor(
-            eta_cutoffs,
-            device="cpu",
-            dtype=dtype,
-            pin_memory=pin_memory
-        )
-        epsilon_cutoffs_t = torch.tensor(
-            epsilon_cutoffs,
-            device="cpu",
-            dtype=dtype,
-            pin_memory=pin_memory
-        )
-        typical_ps_t = torch.tensor(
-            typical_ps,
-            device="cpu",
-            dtype=dtype,
-            pin_memory=pin_memory
-        )
-        miro_taus_t = torch.tensor(
-            miro_taus,
-            device="cpu",
-            dtype=dtype,
-            pin_memory=pin_memory
-        )
-        miro_etas_t = torch.tensor(
-            miro_etas,
-            device="cpu",
-            dtype=dtype,
-            pin_memory=pin_memory
-        )
-        miro_mus_t = torch.tensor(
-            miro_mus,
-            device="cpu",
-            dtype=dtype,
-            pin_memory=pin_memory
-        )
-        miro_indices_t = torch.tensor(
-            miro_indices,
-            device="cpu",
-            dtype=torch.int,
-            pin_memory=pin_memory
-        )
-        prompt_tensor = torch.tensor(
-            prompt_padded_tokens,
-            device=device,
-            dtype=torch.long,
-            pin_memory=pin_memory
-        )
-        output_tensor = torch.tensor(
-            output_padded_tokens,
-            device=device,
-            dtype=torch.long,
-            pin_memory=pin_memory
-        )
+        temperatures_t = torch.tensor(temperatures,
+                                      device="cpu",
+                                      dtype=dtype,
+                                      pin_memory=pin_memory)
+        top_ps_t = torch.tensor(top_ps,
+                                device="cpu",
+                                dtype=dtype,
+                                pin_memory=pin_memory)
+        top_ks_t = torch.tensor(top_ks,
+                                device="cpu",
+                                dtype=torch.int,
+                                pin_memory=pin_memory)
+        top_as_t = torch.tensor(top_as,
+                                device="cpu",
+                                dtype=dtype,
+                                pin_memory=pin_memory)
+        min_ps_t = torch.tensor(min_ps,
+                                device="cpu",
+                                dtype=dtype,
+                                pin_memory=pin_memory)
+        presence_penalties_t = torch.tensor(presence_penalties,
+                                            device="cpu",
+                                            dtype=dtype,
+                                            pin_memory=pin_memory)
+        frequency_penalties_t = torch.tensor(frequency_penalties,
+                                             device="cpu",
+                                             dtype=dtype,
+                                             pin_memory=pin_memory)
+        repetition_penalties_t = torch.tensor(repetition_penalties,
+                                              device="cpu",
+                                              dtype=dtype,
+                                              pin_memory=pin_memory)
+        tfss_t = torch.tensor(tfss,
+                              device="cpu",
+                              dtype=dtype,
+                              pin_memory=pin_memory)
+        eta_cutoffs_t = torch.tensor(eta_cutoffs,
+                                     device="cpu",
+                                     dtype=dtype,
+                                     pin_memory=pin_memory)
+        epsilon_cutoffs_t = torch.tensor(epsilon_cutoffs,
+                                         device="cpu",
+                                         dtype=dtype,
+                                         pin_memory=pin_memory)
+        typical_ps_t = torch.tensor(typical_ps,
+                                    device="cpu",
+                                    dtype=dtype,
+                                    pin_memory=pin_memory)
+        miro_taus_t = torch.tensor(miro_taus,
+                                   device="cpu",
+                                   dtype=dtype,
+                                   pin_memory=pin_memory)
+        miro_etas_t = torch.tensor(miro_etas,
+                                   device="cpu",
+                                   dtype=dtype,
+                                   pin_memory=pin_memory)
+        miro_mus_t = torch.tensor(miro_mus,
+                                  device="cpu",
+                                  dtype=dtype,
+                                  pin_memory=pin_memory)
+        miro_indices_t = torch.tensor(miro_indices,
+                                      device="cpu",
+                                      dtype=torch.int,
+                                      pin_memory=pin_memory)
+        prompt_tensor = torch.tensor(prompt_padded_tokens,
+                                     device=device,
+                                     dtype=torch.long,
+                                     pin_memory=pin_memory)
+        output_tensor = torch.tensor(output_padded_tokens,
+                                     device=device,
+                                     dtype=torch.long,
+                                     pin_memory=pin_memory)
         # Because the memory is pinned, we can do non-blocking
         # transfer to device.
         return cls(
@@ -382,16 +349,16 @@ class SamplingTensors:
             top_ks=top_ks_t.to(device=device, non_blocking=True),
             top_as=top_as_t.to(device=device, non_blocking=True),
             min_ps=min_ps_t.to(device=device, non_blocking=True),
-            presence_penalties=presence_penalties_t.to(
-                device=device, non_blocking=True),
-            frequency_penalties=frequency_penalties_t.to(
-                device=device, non_blocking=True),
-            repetition_penalties=repetition_penalties_t.to(
-                device=device, non_blocking=True),
+            presence_penalties=presence_penalties_t.to(device=device,
+                                                       non_blocking=True),
+            frequency_penalties=frequency_penalties_t.to(device=device,
+                                                         non_blocking=True),
+            repetition_penalties=repetition_penalties_t.to(device=device,
+                                                           non_blocking=True),
             tfss=tfss_t.to(device=device, non_blocking=True),
             eta_cutoffs=eta_cutoffs_t.to(device=device, non_blocking=True),
-            epsilon_cutoffs=epsilon_cutoffs_t.to(
-                device=device, non_blocking=True),
+            epsilon_cutoffs=epsilon_cutoffs_t.to(device=device,
+                                                 non_blocking=True),
             miro_taus=miro_taus_t.to(device=device, non_blocking=True),
             miro_etas=miro_etas_t.to(device=device, non_blocking=True),
             miro_mus=miro_mus_t.to(device=device, non_blocking=True),

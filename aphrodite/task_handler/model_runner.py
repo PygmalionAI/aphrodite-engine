@@ -568,6 +568,7 @@ def _get_graph_batch_size(batch_size: int) -> int:
     else:
         return (batch_size + 7) // 8 * 8
 
+
 def _async_h2d(data: list, dtype, pin_memory):
     t = torch.tensor(data, dtype=dtype, pin_memory=pin_memory)
     return t.to(device="cuda", non_blocking=True)
