@@ -1,3 +1,4 @@
+import os
 from typing import List, Optional, Tuple
 
 import pytest
@@ -7,21 +8,33 @@ from transformers import AutoModelForCausalLM
 from aphrodite import LLM, SamplingParams
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 
-_TEST_PROMPTS = [
-    # pylint: disable=line-too-long
-    "Develop a detailed method for integrating a blockchain-based distributed ledger system into a pre-existing finance management application. The focus should be on ensuring security, transparency, and real-time updates of transactions.",
-    "Design an AI-powered predictive analytics engine capable of identifying trends and patterns from unstructured data sets. The engine should be adaptable to different industry requirements such as healthcare, finance, and marketing.",
-    "Construct a comprehensive model for a multi-cloud architecture that can smoothly transition between different cloud platforms (AWS, Google Cloud, Azure) without any interruption in service or loss of data.",
-    "Propose a strategy for integrating Quantum Computing capabilities into existing high-performance computing (HPC) systems. The approach should consider potential challenges and solutions of Quantum-HPC integration.",
-    "Create a robust cybersecurity framework for an Internet of Things (IoT) ecosystem. The framework should be capable of detecting, preventing, and mitigating potential security breaches.",
-    "Develop a scalable high-frequency trading algorithm that uses machine learning to predict and respond to microtrends in financial markets. The algorithm should be capable of processing real-time data and executing trades within milliseconds.",
-    "Translate the following English sentence into Japanese, French, and Swahili: 'The early bird catches the worm.'",
-]
+_TEST_DIR = os.path.dirname(__file__)
+_TEST_PROMPTS = [os.path.join(_TEST_DIR, "prompts", "example.txt")]
+_LONG_PROMPTS = [os.path.join(_TEST_DIR, "prompts", "summary.txt")]
+
+
+def _read_prompts(filename: str) -> str:
+    prompts = []
+    with open(filename, "r") as f:
+        prompt = f.readline()
+        prompts.append(prompt)
+    return prompts
 
 
 @pytest.fixture
 def example_prompts() -> List[str]:
-    return _TEST_PROMPTS
+    prompts = []
+    for filename in _TEST_PROMPTS:
+        prompts += _read_prompts(filename)
+    return prompts
+
+
+@pytest.fixture
+def example_long_prompts() -> List[str]:
+    prompts = []
+    for filename in _LONG_PROMPTS:
+        prompts += _read_prompts(filename)
+    return prompts
 
 
 _STR_DTYPE_TO_TORCH_DTYPE = {
