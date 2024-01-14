@@ -1,4 +1,4 @@
-"""API server with some extra logging for testing."""
+"""aphrodite.endpoints.ooba.api_server with some extra logging for testing."""
 import argparse
 from typing import Any, Dict
 
@@ -14,7 +14,6 @@ app = aphrodite.endpoints.ooba.api_server.app
 
 class AsyncAphroditeWithStats(AsyncAphrodite):
 
-    # pylint: disable=redefined-outer-name
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._num_aborts = 0
@@ -36,7 +35,7 @@ def stats() -> Response:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", type=str, default="localhost")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=2242)
     parser = AsyncEngineArgs.add_cli_args(parser)
     args = parser.parse_args()
 

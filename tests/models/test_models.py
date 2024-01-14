@@ -2,6 +2,10 @@ import pytest
 
 MODELS = [
     "EleutherAI/pythia-70m-deduped",
+    "meta-llama/Llama-2-7b-hf",
+    "Deci/DeciLM-7b",
+    "tiiuae/falcon-7b",
+    "microsoft/phi-2",
 ]
 
 
