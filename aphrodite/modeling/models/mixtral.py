@@ -22,12 +22,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only Mixtral model."""
-from typing import Any, Dict, List, Optional, Tuple
-
-import numpy as np
+from typing import List, Optional, Tuple, Dict, Any
 
 import torch
-import torch.nn.functional as F
 
 from torch import nn
 from transformers import MixtralConfig
@@ -39,151 +36,19 @@ from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               ReplicatedLinear,
                                               QKVParallelLinear,
                                               RowParallelLinear)
+from aphrodite.modeling.layers.moe import MoE
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding, ParallelLMHead)
-from aphrodite.modeling.megatron.communication_op import (
-    tensor_model_parallel_all_reduce)
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
+    get_tensor_model_parallel_world_size)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (default_weight_loader,
                                               hf_model_weights_iterator)
-from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.common.sequence import SamplerOutput
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
-
-
-class MixtralMLP(nn.Module):
-
-    def __init__(
-        self,
-        num_experts: int,
-        hidden_size: int,
-        intermediate_size: int,
-        linear_method: Optional[LinearMethodBase] = None,
-    ) -> None:
-        super().__init__()
-        self.num_experts = num_experts
-        self.ffn_dim = intermediate_size
-        self.hidden_dim = hidden_size
-
-        self.w1 = ReplicatedLinear(self.hidden_dim,
-                                   self.ffn_dim,
-                                   bias=False,
-                                   linear_method=linear_method)
-        self.w2 = ReplicatedLinear(self.ffn_dim,
-                                   self.hidden_dim,
-                                   bias=False,
-                                   linear_method=linear_method)
-        self.w3 = ReplicatedLinear(self.hidden_dim,
-                                   self.ffn_dim,
-                                   bias=False,
-                                   linear_method=linear_method)
-
-        # TODO: Use aphrodite's SiluAndMul
-        self.act_fn = nn.SiLU()
-
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        w1_out, _ = self.w1(hidden_states)
-        w1_out = self.act_fn(w1_out)
-        w3_out, _ = self.w3(hidden_states)
-        current_hidden_states = w1_out * w3_out
-        current_hidden_states, _ = self.w2(current_hidden_states)
-        return current_hidden_states
-
-
-class DummyModule(nn.Module):
-
-    def __init__(self) -> None:
-        super().__init__()
-
-        self.w1 = nn.Linear(0, 0, bias=False)
-        self.w2 = nn.Linear(0, 0, bias=False)
-        self.w3 = nn.Linear(0, 0, bias=False)
-
-        set_weight_attrs(self.w1.weight,
-                         {"weight_loader": self.dummy_weight_loader})
-        set_weight_attrs(self.w2.weight,
-                         {"weight_loader": self.dummy_weight_loader})
-        set_weight_attrs(self.w3.weight,
-                         {"weight_loader": self.dummy_weight_loader})
-
-    def forward(self, *args, **kwargs) -> None:
-        raise NotImplementedError()
-
-    def dummy_weight_loader(self, *args, **kwargs) -> None:  # pylint: disable=unused-argument
-        # Noop
-        return
-
-
-class MixtralMoE(nn.Module):
-
-    def __init__(
-        self,
-        config: MixtralConfig,
-        linear_method: Optional[LinearMethodBase] = None,
-    ):
-        super().__init__()
-        self.config = config
-        self.rank = get_tensor_model_parallel_rank()
-        self.tp_size = get_tensor_model_parallel_world_size()
-        self.num_total_experts = config.num_local_experts
-        self.top_k = config.num_experts_per_tok
-        if self.tp_size > self.num_total_experts:
-            raise ValueError(
-                f"Tensor parallel size {self.tp_size} is greater than "
-                f"the number of experts {self.num_total_experts}.")
-        # Split experts equally between ranks
-        self.expert_indicies = np.array_split(range(
-            self.num_total_experts), self.tp_size)[self.rank].tolist()
-        if not self.expert_indicies:
-            raise ValueError(
-                f"Rank {self.rank} has no experts assigned to it.")
-
-        self.experts = nn.ModuleList([
-            MixtralMLP(self.num_total_experts,
-                       config.hidden_size,
-                       config.intermediate_size,
-                       linear_method=linear_method)
-            if idx in self.expert_indicies else DummyModule()
-            for idx in range(self.num_total_experts)
-        ])
-        self.gate = ReplicatedLinear(config.hidden_size,
-                                     self.num_total_experts,
-                                     bias=False,
-                                     linear_method=None)
-
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        batch_size, sequence_length, hidden_dim = hidden_states.shape
-        hidden_states = hidden_states.view(-1, hidden_dim)
-        # router_logits: (batch * sequence_length, n_experts)
-        router_logits, _ = self.gate(hidden_states)
-
-        routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
-        routing_weights, selected_experts = torch.topk(routing_weights,
-                                                       self.top_k,
-                                                       dim=-1)
-        routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
-
-        final_hidden_states = None
-        for expert_idx in self.expert_indicies:
-            expert_layer = self.experts[expert_idx]
-            expert_mask = (selected_experts == expert_idx)
-            expert_weights = (routing_weights * expert_mask).sum(dim=-1,
-                                                                 keepdim=True)
-
-            current_hidden_states = expert_layer(hidden_states).mul_(
-                expert_weights)
-            if final_hidden_states is None:
-                final_hidden_states = current_hidden_states
-            else:
-                final_hidden_states.add_(current_hidden_states)
-
-        return tensor_model_parallel_all_reduce(final_hidden_states).view(
-            batch_size, sequence_length, hidden_dim)
 
 
 class MixtralAttention(nn.Module):
@@ -288,8 +153,10 @@ class MixtralDecoderLayer(nn.Module):
             rope_scaling=rope_scaling,
             sliding_window=config.sliding_window,
             linear_method=linear_method)
-        self.block_sparse_moe = MixtralMoE(config=config,
-                                           linear_method=linear_method)
+        self.block_sparse_moe = MoE(num_experts=config.num_local_experts,
+                                    top_k=config.num_experts_per_tok,
+                                    hidden_size=config.hidden_size,
+                                    intermediate_size=config.intermediate_size)
         self.input_layernorm = RMSNorm(config.hidden_size,
                                        eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(config.hidden_size,
@@ -409,6 +276,13 @@ class MixtralForCausalLM(nn.Module):
             ("qkv_proj", "v_proj", "v"),
         ]
 
+        expert_params_mapping = [
+            # (param_name, weight_name, expert_id)
+            (f"{weight_name}s", f"experts.{expert_id}.{weight_name}.weight",
+             expert_id) for expert_id in range(self.config.num_local_experts)
+            for weight_name in ["w1", "w2", "w3"]
+        ]
+
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
                 model_name_or_path,
@@ -430,10 +304,23 @@ class MixtralForCausalLM(nn.Module):
                 weight_loader(param, loaded_weight, shard_id)
                 break
             else:
-                # Skip loading extra bias for GPTQ models.
-                if name.endswith(".bias") and name not in params_dict:
-                    continue
-                param = params_dict[name]
-                weight_loader = getattr(param, "weight_loader",
-                                        default_weight_loader)
-                weight_loader(param, loaded_weight)
+                for param_name, weight_name, expert_id in expert_params_mapping:
+                    if weight_name not in name:
+                        continue
+                    name = name.replace(weight_name, param_name)
+                    param = params_dict[name]
+                    weight_loader = param.weight_loader
+                    weight_loader(param, loaded_weight, expert_id=expert_id)
+                    break
+                else:
+                    # Skip loading extra bias for GPTQ models.
+                    if name.endswith(".bias") and name not in params_dict:
+                        continue
+                    # Skip experts that are not assigned to this worker.
+                    if ("block_sparse_moe.experts." in name
+                            and name not in params_dict):
+                        continue
+                    param = params_dict[name]
+                    weight_loader = getattr(param, "weight_loader",
+                                            default_weight_loader)
+                    weight_loader(param, loaded_weight)

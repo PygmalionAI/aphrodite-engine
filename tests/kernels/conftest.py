@@ -12,6 +12,7 @@ def create_kv_caches(
     head_size: int,
     dtype: torch.dtype,
     seed: int,
+    device: str,
 ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
     torch.random.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -23,19 +24,19 @@ def create_kv_caches(
     for _ in range(num_layers):
         key_cache = torch.empty(size=key_cache_shape,
                                 dtype=dtype,
-                                device='cuda')
+                                device=device)
         key_cache.uniform_(-scale, scale)
         key_caches.append(key_cache)
 
     value_cache_shape = (num_blocks, num_heads, head_size, block_size)
-    values_caches = []
+    value_caches = []
     for _ in range(num_layers):
-        values_cache = torch.empty(size=value_cache_shape,
-                                   dtype=dtype,
-                                   device='cuda')
-        values_cache.uniform_(-scale, scale)
-        values_caches.append(values_cache)
-    return key_caches, values_caches
+        value_cache = torch.empty(size=value_cache_shape,
+                                  dtype=dtype,
+                                  device=device)
+        value_cache.uniform_(-scale, scale)
+        value_caches.append(value_cache)
+    return key_caches, value_caches
 
 
 @pytest.fixture()

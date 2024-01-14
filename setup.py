@@ -213,6 +213,7 @@ elif _is_hip():
 ext_modules = []
 
 aphrodite_extension_sources = [
+    "kernels/misc_kernels.cu",
     "kernels/cache_kernels.cu",
     "kernels/attention/attention_kernels.cu",
     "kernels/pos_encoding_kernels.cu",
@@ -236,7 +237,6 @@ aphrodite_extension = CUDAExtension(
     },
 )
 ext_modules.append(aphrodite_extension)
-
 
 def get_path(*filepath) -> str:
     return os.path.join(ROOT_DIR, *filepath)
@@ -333,4 +333,5 @@ setuptools.setup(
     cmdclass={"build_ext": BuildExtension},
     package_data={"aphrodite-engine": ["aphrodite/endpoints/kobold/klite.embd",
                                        "py.typed"]},
+    include_package_data=True,
 )

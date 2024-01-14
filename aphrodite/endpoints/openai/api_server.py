@@ -17,6 +17,7 @@ from fastapi import Request, Response, Header, HTTPException, Depends
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
@@ -87,6 +88,14 @@ def parse_args():
                         default="assistant",
                         help="The role name to return if "
                         "`request.add_generation_prompt=True.")
+    parser.add_argument("--ssl-keyfile",
+                        type=str,
+                        default=None,
+                        help="SSL key file path.")
+    parser.add_argument("--ssl-certfile",
+                        type=str,
+                        default=None,
+                        help="SSL cert file path.")
 
     parser = AsyncEngineArgs.add_cli_args(parser)
     return parser.parse_args()
@@ -184,6 +193,28 @@ async def check_length(
 async def health() -> Response:
     """Health check route for K8s"""
     return Response(status_code=200)
+
+
+class Prompt(BaseModel):
+    prompt: str
+
+
+@app.post("/v1/tokenize")
+async def tokenize_text(
+    prompt: Prompt,
+    # pylint: disable=unused-argument
+    api_key: str = Depends(_verify_api_key)):
+    """Tokenize prompt using the tokenizer.
+    Returns:
+        value: The number of tokens in the prompt.
+        ids: The token IDs of the prompt.
+    """
+    try:
+        tokenized_prompt = tokenizer.tokenize(prompt.prompt)
+        token_ids = tokenizer.convert_tokens_to_ids(tokenized_prompt)
+        return {"value": len(tokenized_prompt), "ids": token_ids}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.get("/v1/models")
@@ -819,4 +850,6 @@ if __name__ == "__main__":
                 host=args.host,
                 port=args.port,
                 log_level="info",
-                timeout_keep_alive=TIMEOUT_KEEP_ALIVE)
+                timeout_keep_alive=TIMEOUT_KEEP_ALIVE,
+                ssl_keyfile=args.ssl_keyfile,
+                ssl_certfile=args.ssl_certfile)

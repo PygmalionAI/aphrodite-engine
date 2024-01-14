@@ -56,6 +56,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   #endif
   ops.def("squeezellm_gemm", &squeezellm_gemm, "Quantized GEMM for SqueezeLLM");
 
+  // misc
+  ops.def(
+    "bincount",
+    &aphrodite_bincount,
+    "CUDA Graph compatible bincount implementation.");
+
   // Cache ops
   pybind11::module cache_ops = m.def_submodule("cache_ops", "Aphrodite Engine cache ops");
   cache_ops.def(
@@ -74,6 +80,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     "gather_cached_kv",
     &gather_cached_kv,
     "Gather key and value from the cache into contiguous QKV tensors");
+  cache_ops.def(
+    "convert_fp8",
+    &convert_fp8,
+    "Convert the KV cache to FP8 datatype");
+    
 
   // Cuda utils
   pybind11::module cuda_utils = m.def_submodule("cuda_utils", "Aphrodite Engine cuda utils");
