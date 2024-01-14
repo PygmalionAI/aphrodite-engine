@@ -33,7 +33,6 @@ from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.attention import PagedAttention
 from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              ReplicatedLinear,
                                               QKVParallelLinear,
                                               RowParallelLinear)
 from aphrodite.modeling.layers.moe import MoE
