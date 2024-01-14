@@ -7,8 +7,8 @@ import torch
 
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.utils import set_random_seed
-from aphrodite.common.sequence import (
-    SamplingParams, SequenceData, SequenceGroupMetadata)
+from aphrodite.common.sequence import (SamplingParams, SequenceData,
+                                       SequenceGroupMetadata)
 from aphrodite.task_handler.model_runner import ModelRunner
 
 

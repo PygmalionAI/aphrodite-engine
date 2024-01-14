@@ -12,8 +12,8 @@ MODEL_TEMPLATE_GENERATON_OUTPUT = [
      "Hello</s>Hi there!</s>What is the capital of</s>"),
     ("EleutherAI/pythia-70m-deduped", None, False,
      "Hello</s>Hi there!</s>What is the capital of</s>"),
-    ("EleutherAI/pythia-70m-deduped", "../../examples/template_chatml.jinja", True,
-     """<|im_start|>user
+    ("EleutherAI/pythia-70m-deduped", "../../examples/template_chatml.jinja",
+     True, """<|im_start|>user
 Hello<|im_end|>
 <|im_start|>assistant
 Hi there!<|im_end|>
@@ -21,8 +21,8 @@ Hi there!<|im_end|>
 What is the capital of<|im_end|>
 <|im_start|>assistant
 """),
-    ("EleutherAI/pythia-70m-deduped", "../../examples/template_chatml.jinja", False,
-     """<|im_start|>user
+    ("EleutherAI/pythia-70m-deduped", "../../examples/template_chatml.jinja",
+     False, """<|im_start|>user
 Hello<|im_end|>
 <|im_start|>assistant
 Hi there!<|im_end|>

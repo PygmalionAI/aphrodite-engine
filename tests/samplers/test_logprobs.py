@@ -25,9 +25,9 @@ def test_get_prompt_logprobs(
 
     aphrodite_model = aphrodite_runner(model, dtype=dtype)
     aphrodite_sampling_params = SamplingParams(max_tokens=max_tokens,
-                                          logprobs=5,
-                                          prompt_logprobs=5,
-                                          temperature=0.0)
+                                               logprobs=5,
+                                               prompt_logprobs=5,
+                                               temperature=0.0)
     aphrodite_results = aphrodite_model.model.generate(
         example_prompts, sampling_params=aphrodite_sampling_params)
 
@@ -55,4 +55,3 @@ def test_get_prompt_logprobs(
                                            hf_logprob[i][-1][token_id].item(),
                                            atol=1e-2,
                                            rtol=1e-2)
-                

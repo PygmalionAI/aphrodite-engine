@@ -1,8 +1,8 @@
 import random
 import torch
 
-from aphrodite.common.sequence import (
-    SamplingParams, SequenceData, SequenceGroupMetadata)
+from aphrodite.common.sequence import (SamplingParams, SequenceData,
+                                       SequenceGroupMetadata)
 from aphrodite.task_handler.model_runner import ModelRunner
 
 

@@ -2,7 +2,7 @@ import argparse
 import json
 from typing import AsyncGenerator
 
-from fastapi import (BackgroundTasks, Header, FastAPI, HTTPException, Request)
+from fastapi import (BackgroundTasks, FastAPI, HTTPException, Request)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 import uvicorn
@@ -43,8 +43,7 @@ else:
 
 
 @app.post("/api/v1/generate")
-async def generate(
-    request: Request) -> Response:
+async def generate(request: Request) -> Response:
     """Generate completion for the request.
 
     The request should be a JSON object with the following fields:
