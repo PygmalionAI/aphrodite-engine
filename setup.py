@@ -13,7 +13,7 @@ from torch.utils.cpp_extension import (
 
 ROOT_DIR = os.path.dirname(__file__)
 
-MAIN_CUDA_VERSION = "11.8"
+MAIN_CUDA_VERSION = "12.1"
 
 # Supported NVIDIA GPU architectures.
 NVIDIA_SUPPORTED_ARCHS = {
