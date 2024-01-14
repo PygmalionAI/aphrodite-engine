@@ -16,3 +16,7 @@ sudo apt clean
 # Test nvcc
 PATH=/usr/local/cuda-$1/bin:${PATH}
 nvcc --version
+
+gcc --version
+g++ --version
+c++ --version

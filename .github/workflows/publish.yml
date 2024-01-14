@@ -49,8 +49,8 @@ jobs:
       matrix:
           os: ['ubuntu-20.04']
           python-version: ['3.8', '3.9', '3.10', '3.11']
-          pytorch-version: ['2.0.1']
-          cuda-version: ['11.8'] # Github runner can't build anything older than 11.8
+          pytorch-version: ['2.1.2']
+          cuda-version: ['12.1']
 
     steps:
       - name: Checkout
@@ -92,11 +92,3 @@ jobs:
           asset_path: ./dist/${{ env.wheel_name }}
           asset_name: ${{ env.asset_name }}
           asset_content_type: application/*
-
-      # (Danielkinz): This last step will publish the .whl to pypi. Warning: untested
-      # - name: Publish package
-      #   uses: pypa/gh-action-pypi-publish@release/v1.8
-      #   with:
-      #     repository-url: https://test.pypi.org/legacy/
-      #     password: ${{ secrets.PYPI_API_TOKEN }}
-      #     skip-existing: true
