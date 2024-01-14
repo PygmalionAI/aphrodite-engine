@@ -195,7 +195,7 @@ class RejectionSampler(nn.Module):
         where :math:`(f(x))_+` is defined as:
         .. math::
             (f(x))_+ = \frac{\max(0, f(x))}{\sum_x \max(0, f(x))}
-        See for a visualization
+        See https://github.com/vllm-project/vllm/pull/2336 for a visualization
         of the draft, target, and recovered probability distributions.
         Returns a tensor of shape [batch_size, k, vocab_size].
         Note: This batches operations on GPU and thus constructs the recovered
