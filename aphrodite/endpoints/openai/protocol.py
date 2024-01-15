@@ -128,6 +128,7 @@ class CompletionRequest(BaseModel):
     custom_token_bans: Optional[List[int]] = Field(default_factory=list)
     skip_special_tokens: Optional[bool] = True
     spaces_between_special_tokens: Optional[bool] = True
+    grammar: Optional[str] = None
 
 
 class LogProbs(BaseModel):
