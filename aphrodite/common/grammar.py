@@ -213,8 +213,7 @@ class IncrementalParserState:
     _full_seq_trie: Trie
 
     def __repr__(self):
-        return f"{self.__class__.__name__}(
-            {self.interactive_parser.parser_state.state_stack})"
+        return (f"{self.__class__.__name__}({self.interactive_parser.parser_state.state_stack})"
 
     @classmethod
     @functools.lru_cache(1000)
