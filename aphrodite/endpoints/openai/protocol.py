@@ -78,6 +78,9 @@ class ChatCompletionRequest(BaseModel):
     mirostat_mode: Optional[int] = 0
     mirostat_tau: Optional[float] = 0.0
     mirostat_eta: Optional[float] = 0.0
+    dynatemp_min: Optional[float] = 0.0
+    dynatemp_max: Optional[float] = 0.0
+    dynatemp_exponent: Optional[float] = 1.0
     ignore_eos: Optional[bool] = False
     use_beam_search: Optional[bool] = False
     logprobs: Optional[int] = None
@@ -120,6 +123,9 @@ class CompletionRequest(BaseModel):
     mirostat_mode: Optional[int] = 0
     mirostat_tau: Optional[float] = 0.0
     mirostat_eta: Optional[float] = 0.0
+    dynatemp_min: Optional[float] = 0.0
+    dynatemp_max: Optional[float] = 0.0
+    dynatemp_exponent: Optional[float] = 1.0
     ignore_eos: Optional[bool] = False
     use_beam_search: Optional[bool] = False
     logprobs: Optional[int] = None

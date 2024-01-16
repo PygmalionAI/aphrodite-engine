@@ -60,7 +60,10 @@ class Sampler(nn.Module):
         if do_temperatures:
             # Apply temperature scaling.
             # Use in-place division to avoid creating a new tensor.
-            logits.div_(sampling_tensors.temperatures.unsqueeze_(dim=1))
+            logits = _apply_temperature(logits, sampling_tensors.temperatures,
+                                        sampling_tensors.dynatemp_mins,
+                                        sampling_tensors.dynatemp_maxs,
+                                        sampling_tensors.dynatemp_exps)
 
         if do_penalties:
             logits = _apply_penalties(logits, sampling_tensors.prompt_tokens,
@@ -377,6 +380,31 @@ def _apply_typical_sampling(
     typ_mask = typ_mask_sorted.scatter(1, indices, typ_mask_sorted)
     logits[typ_mask] = -float("inf")
     return logits
+
+# pulls double duty for temperature and dynatemp
+def _apply_temperature(
+    logits: torch.Tensor,
+    temperatures: torch.Tensor,
+    dynatemp_mins: torch.Tensor,
+    dynatemp_maxs: torch.Tensor,
+    dynatemp_exps: torch.Tensor,
+) -> torch.Tensor:
+    dynatemp_mask = torch.logical_or(dynatemp_mins > 0, dynatemp_maxs > 0)
+    
+    dynatemp_logits = logits[dynatemp_mask]
+    dynatemp_shifted_logits = torch.log_softmax(dynatemp_logits, dim=-1)
+    dynatemp_probs = dynatemp_shifted_logits.exp()
+    dynatemp_entropies = -(dynatemp_probs * dynatemp_shifted_logits).nansum(dim=-1)
+    dynatemp_max_entropies = torch.log_((dynatemp_logits > float("-inf")).sum(dim=-1))
+    normalized_entropies = dynatemp_entropies.div_(dynatemp_max_entropies)
+    dyn_temp = dynatemp_mins + (dynatemp_maxs - dynatemp_mins) * normalized_entropies.pow_(dynatemp_exps)
+
+    temperatures[dynatemp_mask] = dyn_temp
+
+    logits.div_(temperatures.unsqueeze_(dim=1))
+    return logits
+
+
 
 
 def _greedy_sample(
