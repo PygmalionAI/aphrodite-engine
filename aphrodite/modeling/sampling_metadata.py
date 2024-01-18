@@ -381,7 +381,7 @@ class SamplingTensors:
             epsilon_cutoffs=epsilon_cutoffs_t.to(device=device,
                                                  non_blocking=True),
             dynatemp_ranges=dynatemp_ranges_t.to(device=device,
-                                                  non_blocking=True),
+                                                 non_blocking=True),
             dynatemp_exps=dynatemp_exps_t.to(device=device, non_blocking=True),
             miro_taus=miro_taus_t.to(device=device, non_blocking=True),
             miro_etas=miro_etas_t.to(device=device, non_blocking=True),
