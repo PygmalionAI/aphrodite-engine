@@ -380,6 +380,7 @@ def _apply_typical_sampling(
     logits[typ_mask] = -float("inf")
     return logits
 
+
 # pulls double duty for temperature and dynatemp
 def _apply_temperature(
     logits: torch.Tensor,
@@ -391,27 +392,22 @@ def _apply_temperature(
     dynatemp_mins = (temperatures - dynatemp_range)[dynatemp_mask]
     dynatemp_maxs = (temperatures + dynatemp_range)[dynatemp_mask]
     dynatemp_exps = dynatemp_exps[dynatemp_mask]
-    
+
     dynatemp_logits = logits[dynatemp_mask]
     dynatemp_shifted_logits = torch.log_softmax(dynatemp_logits, dim=-1)
     dynatemp_probs = dynatemp_shifted_logits.exp()
-    dynatemp_entropies = -(dynatemp_probs * dynatemp_shifted_logits).nansum(
-        dim=-1)
-    dynatemp_max_entropies = torch.log_((dynatemp_logits > float("-inf")
-                                         ).sum(dim=-1).float())
+    dynatemp_entropies = -(dynatemp_probs *
+                           dynatemp_shifted_logits).nansum(dim=-1)
+    dynatemp_max_entropies = torch.log_(
+        (dynatemp_logits > float("-inf")).sum(dim=-1).float())
     normalized_entropies = dynatemp_entropies.div_(dynatemp_max_entropies)
-    dyn_temp = (
-        dynatemp_mins 
-        + (dynatemp_maxs - dynatemp_mins) 
-        * normalized_entropies.pow_(dynatemp_exps)
-    )
+    dyn_temp = (dynatemp_mins + (dynatemp_maxs - dynatemp_mins) *
+                normalized_entropies.pow_(dynatemp_exps))
 
     temperatures[dynatemp_mask] = dyn_temp
 
     logits.div_(temperatures.unsqueeze_(dim=1))
     return logits
-
-
 
 
 def _greedy_sample(

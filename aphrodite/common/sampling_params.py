@@ -253,13 +253,11 @@ class SamplingParams:
             raise ValueError(
                 f"typical_p must be in (0, 1], got {self.typical_p}.")
         if not self.dynatemp_range >= 0:
-            raise ValueError(
-                "dynatemp_range must be non negative, got "
-                f"{self.dynatemp_range}.")
+            raise ValueError("dynatemp_range must be non negative, got "
+                             f"{self.dynatemp_range}.")
         if not self.dynatemp_exponent >= 0:
-            raise ValueError(
-                f"dynatemp_exponent must be non negative, got "
-                f"{self.dynatemp_exponent}.")
+            raise ValueError(f"dynatemp_exponent must be non negative, got "
+                             f"{self.dynatemp_exponent}.")
         if self.mirostat_mode:
             if not self.mirostat_mode == 2:
                 raise ValueError(

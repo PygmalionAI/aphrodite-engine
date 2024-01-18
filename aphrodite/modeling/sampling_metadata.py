@@ -155,7 +155,7 @@ class SamplingTensors:
             miro_eta = sampling_params.mirostat_eta
             dynatemp_range = sampling_params.dynatemp_range
             dynatemp_exp = sampling_params.dynatemp_exponent
-            
+
             if do_temperatures is False and temperature < _SAMPLING_EPS:
                 # NOTE: Zero temp means deterministic sampling
                 # i.e. greedy sampling or beam search
@@ -330,13 +330,13 @@ class SamplingTensors:
                                     dtype=dtype,
                                     pin_memory=pin_memory)
         dynatemp_ranges_t = torch.tensor(dynatemp_ranges,
-                                        device="cpu",
-                                        dtype=dtype,
-                                        pin_memory=pin_memory)
+                                         device="cpu",
+                                         dtype=dtype,
+                                         pin_memory=pin_memory)
         dynatemp_exps_t = torch.tensor(dynatemp_exps,
-                                        device="cpu",
-                                        dtype=dtype,
-                                        pin_memory=pin_memory)
+                                       device="cpu",
+                                       dtype=dtype,
+                                       pin_memory=pin_memory)
         miro_taus_t = torch.tensor(miro_taus,
                                    device="cpu",
                                    dtype=dtype,
