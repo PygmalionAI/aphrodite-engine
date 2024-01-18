@@ -70,6 +70,12 @@ class SamplingParams:
             Range [0, inf).
         mirostat_eta: Rate at which mirostat updates its internal surprisal
             value. Range [0, inf).
+        dynatemp_range: The range to use for dynamic temperature.  When used,
+            the actual temperature is allowed to be automatically adjusted
+            dynamically between DynaTemp ± DynaTempRange. For example,
+            setting `temperature=0.4` and `dynatemp_range=0.1` will result
+            in a minimum temp of 0.3 and max of 0.5.
+        dynatemp_exponent: Exponent for dynatemp sampling. Range [0, inf).
         use_beam_search: Whether to use beam search instead of sampling.
         length_penalty: Float that penalizes sequences based on their length.
             Used in beam search.
@@ -125,6 +131,8 @@ class SamplingParams:
         mirostat_mode: int = 0,
         mirostat_tau: float = 0,
         mirostat_eta: float = 0,
+        dynatemp_range: float = 0,
+        dynatemp_exponent: float = 1,
         use_beam_search: bool = False,
         length_penalty: float = 1.0,
         early_stopping: Union[bool, str] = False,
@@ -157,6 +165,8 @@ class SamplingParams:
         self.mirostat_mode = mirostat_mode
         self.mirostat_tau = mirostat_tau
         self.mirostat_eta = mirostat_eta
+        self.dynatemp_range = dynatemp_range
+        self.dynatemp_exponent = dynatemp_exponent
         self.use_beam_search = use_beam_search
         self.length_penalty = length_penalty
         self.early_stopping = early_stopping
@@ -242,6 +252,12 @@ class SamplingParams:
         if not 0.0 <= self.typical_p <= 1.0:
             raise ValueError(
                 f"typical_p must be in (0, 1], got {self.typical_p}.")
+        if not self.dynatemp_range >= 0:
+            raise ValueError("dynatemp_range must be non negative, got "
+                             f"{self.dynatemp_range}.")
+        if not self.dynatemp_exponent >= 0:
+            raise ValueError(f"dynatemp_exponent must be non negative, got "
+                             f"{self.dynatemp_exponent}.")
         if self.mirostat_mode:
             if not self.mirostat_mode == 2:
                 raise ValueError(
@@ -323,6 +339,8 @@ class SamplingParams:
                 f"mirostat_mode={self.mirostat_mode}, "
                 f"mirostat_tau={self.mirostat_tau}, "
                 f"mirostat_eta={self.mirostat_eta}, "
+                f"dynatemp_range={self.dynatemp_range}, "
+                f"dynatemp_exponent={self.dynatemp_exponent}, "
                 f"use_beam_search={self.use_beam_search}, "
                 f"length_penalty={self.length_penalty}, "
                 f"early_stopping={self.early_stopping}, "
