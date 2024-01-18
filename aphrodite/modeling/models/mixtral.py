@@ -45,8 +45,7 @@ from aphrodite.modeling.layers.vocab_parallel_embedding import (
 from aphrodite.modeling.megatron.communication_op import (
     tensor_model_parallel_all_reduce)
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_rank,
-    get_tensor_model_parallel_world_size)
+    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (default_weight_loader,
                                               hf_model_weights_iterator)
@@ -264,10 +263,11 @@ class MixtralDecoderLayer(nn.Module):
             sliding_window=config.sliding_window,
             linear_method=linear_method)
         if linear_method is None:
-            self.block_sparse_moe = MoE(num_experts=config.num_local_experts,
-                                        top_k=config.num_experts_per_tok,
-                                        hidden_size=config.hidden_size,
-                                        intermediate_size=config.intermediate_size)
+            self.block_sparse_moe = MoE(
+                num_experts=config.num_local_experts,
+                top_k=config.num_experts_per_tok,
+                hidden_size=config.hidden_size,
+                intermediate_size=config.intermediate_size)
         else:
             self.block_sparse_moe = MixtralMoE(config,
                                                linear_method=linear_method)
