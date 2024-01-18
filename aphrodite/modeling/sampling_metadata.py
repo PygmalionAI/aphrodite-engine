@@ -161,6 +161,7 @@ class SamplingTensors:
                 # i.e. greedy sampling or beam search
                 # Set the temperature to 1 to avoid division by zero.
                 temperature = 1.0
+                do_temperatures = True
             if not do_penalties and (abs(p) >= _SAMPLING_EPS
                                      or abs(f) >= _SAMPLING_EPS
                                      or abs(r - 1.0) >= _SAMPLING_EPS):

@@ -405,7 +405,6 @@ def _apply_temperature(
                 normalized_entropies.pow_(dynatemp_exps))
 
     temperatures[dynatemp_mask] = dyn_temp
-
     logits.div_(temperatures.unsqueeze_(dim=1))
     return logits
 
