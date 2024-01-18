@@ -29,6 +29,7 @@ class MoE(nn.Module):
         top_k: int,
         hidden_size: int,
         intermediate_size: int,
+        temperature: float,
     ):
         super().__init__()
         tp_size = get_tensor_model_parallel_world_size()
@@ -36,6 +37,7 @@ class MoE(nn.Module):
         self.top_k = top_k
         self.hidden_size = hidden_size
         self.intermediate_size = intermediate_size // tp_size
+        self.temperature = temperature
 
         self.gate = ReplicatedLinear(self.hidden_size,
                                      self.num_total_experts,
@@ -86,13 +88,20 @@ class MoE(nn.Module):
         assert param_data[expert_id].shape == loaded_weight.shape
         param_data[expert_id].copy_(loaded_weight)
 
+    def gumbel_softmax(logits, temperature, dim):
+        gumbels = torch.empty_like(logits).exponential_().log()
+        gumbels = (logits + gumbels) / temperature
+        y_soft = gumbels.softmax(dim)
+        return y_soft
+
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         batch_size, sequence_length, hidden_size = hidden_states.shape
         hidden_states = hidden_states.view(-1, self.hidden_size)
         # router_logits: (batch * sequence_length, n_experts)
         router_logits, _ = self.gate(hidden_states)
 
-        routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
+        routing_weights = self.gumbel_softmax(router_logits,
+                                              dim=1, dtype=torch.float)
         routing_weights, selected_experts = torch.topk(routing_weights,
                                                        self.top_k,
                                                        dim=-1)
