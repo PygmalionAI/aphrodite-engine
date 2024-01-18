@@ -158,7 +158,8 @@ class SamplingTensors:
             dynatemp_min = sampling_params.dynatemp_min
             dynatemp_max = sampling_params.dynatemp_max
             dynatemp_exp = sampling_params.dynatemp_exponent
-            if do_temperatures is False and temperature != 1.0:
+            
+            if do_temperatures is False and temperature < _SAMPLING_EPS:
                 # NOTE: Zero temp means deterministic sampling
                 # i.e. greedy sampling or beam search
                 # Set the temperature to 1 to avoid division by zero.
