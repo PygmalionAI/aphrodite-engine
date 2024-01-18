@@ -389,44 +389,23 @@ def _apply_temperature(
     dynatemp_exps: torch.Tensor,
 ) -> torch.Tensor:
     dynatemp_mask = dynatemp_range > 0
-    print("dynatemp_mask:", dynatemp_mask)
-
     dynatemp_mins = (temperatures - dynatemp_range)[dynatemp_mask]
-    print("dynatemp_mins:", dynatemp_mins)
-
     dynatemp_maxs = (temperatures + dynatemp_range)[dynatemp_mask]
-    print("dynatemp_maxs:", dynatemp_maxs)
-
     dynatemp_exps = dynatemp_exps[dynatemp_mask]
-    print("dynatemp_exps:", dynatemp_exps)
 
     dynatemp_logits = logits[dynatemp_mask]
-    print("dynatemp_logits:", dynatemp_logits)
-
     dynatemp_shifted_logits = torch.log_softmax(dynatemp_logits, dim=-1)
-    print("dynatemp_shifted_logits:", dynatemp_shifted_logits)
-
     dynatemp_probs = dynatemp_shifted_logits.exp()
-    print("dynatemp_probs:", dynatemp_probs)
-
-    dynatemp_entropies = -(dynatemp_probs * dynatemp_shifted_logits).nansum(dim=-1)
-    print("dynatemp_entropies:", dynatemp_entropies)
-
-    dynatemp_max_entropies = torch.log_((dynatemp_logits > float("-inf")).sum(dim=-1).float())
-    print("dynatemp_max_entropies:", dynatemp_max_entropies)
-
+    dynatemp_entropies = -(dynatemp_probs *
+                           dynatemp_shifted_logits).nansum(dim=-1)
+    dynatemp_max_entropies = torch.log_(
+        (dynatemp_logits > float("-inf")).sum(dim=-1).float())
     normalized_entropies = dynatemp_entropies.div_(dynatemp_max_entropies)
-    print("normalized_entropies:", normalized_entropies)
-
-    dyn_temp = (dynatemp_mins + (dynatemp_maxs - dynatemp_mins) * normalized_entropies.pow_(dynatemp_exps))
-    print("dyn_temp:", dyn_temp)
+    dyn_temp = (dynatemp_mins + (dynatemp_maxs - dynatemp_mins) *
+                normalized_entropies.pow_(dynatemp_exps))
 
     temperatures[dynatemp_mask] = dyn_temp
-    print("temperatures:", temperatures)
-
     logits.div_(temperatures.unsqueeze_(dim=1))
-    print("logits:", logits)
-
     return logits
 
 
