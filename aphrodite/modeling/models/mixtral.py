@@ -51,7 +51,7 @@ from aphrodite.modeling.megatron.parallel_state import (
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (default_weight_loader,
                                               hf_model_weights_iterator)
-from aphrodite.sequence import SamplerOutput
+from aphrodite.common.sequence import SamplerOutput
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
