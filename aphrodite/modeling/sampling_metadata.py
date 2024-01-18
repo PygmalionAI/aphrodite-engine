@@ -208,7 +208,7 @@ class SamplingTensors:
                 eta_cutoffs += [0] * (prompt_len - 1)
                 epsilon_cutoffs += [0] * (prompt_len - 1)
                 typical_ps += [1] * (prompt_len - 1)
-                dynatemp_mins += [dynatemp_range] * (prompt_len - 1)
+                dynatemp_rangess += [dynatemp_range] * (prompt_len - 1)
                 dynatemp_exps += [dynatemp_exp] * (prompt_len - 1)
                 prompt_tokens.extend([] for _ in range(prompt_len - 1))
                 output_tokens.extend([] for _ in range(prompt_len - 1))
@@ -228,7 +228,7 @@ class SamplingTensors:
             eta_cutoffs += [eta_cutoff] * len(seq_ids)
             epsilon_cutoffs += [epsilon_cutoff] * len(seq_ids)
             typical_ps += [typical_p] * len(seq_ids)
-            dynatemp_mins += [dynatemp_range] * len(seq_ids)
+            dynatemp_ranges += [dynatemp_range] * len(seq_ids)
             dynatemp_exps += [dynatemp_exp] * len(seq_ids)
             if sampling_params.mirostat_mode == 2:
                 miro_indices += [(index + i) for i in range(len(seq_ids))]
