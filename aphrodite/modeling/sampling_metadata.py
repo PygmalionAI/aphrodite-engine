@@ -149,7 +149,7 @@ class SamplingTensors:
             typical_p = sampling_params.typical_p
             miro_tau = sampling_params.mirostat_tau
             miro_eta = sampling_params.mirostat_eta
-            if do_temperatures is False and temperature != 1.0:
+            if do_temperatures is False and temperature < _SAMPLING_EPS:
                 # NOTE: Zero temp means deterministic sampling
                 # i.e. greedy sampling or beam search
                 # Set the temperature to 1 to avoid division by zero.
