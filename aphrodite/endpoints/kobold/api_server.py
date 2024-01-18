@@ -104,6 +104,8 @@ def prepare_engine_payload(
         best_of=kai_payload.n,
         repetition_penalty=kai_payload.rep_pen,
         temperature=kai_payload.temperature,
+        dynatemp_range=kai_payload.dynatemp_range,
+        dynatemp_exponent=kai_payload.dynatemp_exponent,
         tfs=kai_payload.tfs,
         top_p=kai_payload.top_p,
         top_k=kai_payload.top_k,
