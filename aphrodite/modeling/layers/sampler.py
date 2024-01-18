@@ -392,6 +392,7 @@ def _apply_temperature(
     dynatemp_mins = (temperatures - dynatemp_range)[dynatemp_mask]
     dynatemp_maxs = (temperatures + dynatemp_range)[dynatemp_mask]
     dynatemp_exps = dynatemp_exps[dynatemp_mask]
+    dynatemp_mins = dynatemp_mins.clamp_(min=0)
 
     dynatemp_logits = logits[dynatemp_mask]
     dynatemp_shifted_logits = torch.log_softmax(dynatemp_logits, dim=-1)
