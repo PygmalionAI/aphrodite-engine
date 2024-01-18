@@ -390,7 +390,7 @@ class MixtralForCausalLM(nn.Module):
         ]
 
         expert_params_mapping = []
-        if self.linear_method is not None:
+        if self.linear_method is None:
             expert_params_mapping = [
                 # (param_name, weight_name, expert_id)
                 (f"{weight_name}s", f"experts.{expert_id}.{weight_name}.weight",
@@ -419,7 +419,7 @@ class MixtralForCausalLM(nn.Module):
                 weight_loader(param, loaded_weight, shard_id)
                 break
             else:
-                if self.linear_method is not None:
+                if self.linear_method is None:
                     for param_name, weight_name, expert_id in expert_params_mapping:
                         if weight_name not in name:
                             continue
