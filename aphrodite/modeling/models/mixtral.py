@@ -155,7 +155,8 @@ class MixtralDecoderLayer(nn.Module):
         self.block_sparse_moe = MoE(num_experts=config.num_local_experts,
                                     top_k=config.num_experts_per_tok,
                                     hidden_size=config.hidden_size,
-                                    intermediate_size=config.intermediate_size)
+                                    intermediate_size=config.intermediate_size,
+                                    temperature=config.temperature)
         self.input_layernorm = RMSNorm(config.hidden_size,
                                        eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(config.hidden_size,
