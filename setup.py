@@ -226,7 +226,10 @@ aphrodite_extension_sources = [
 ]
 
 if _is_cuda():
-    aphrodite_extension_sources.append("kernels/quantization/awq/gemm_kernels.cu")
+    aphrodite_extension_sources.append(
+        "kernels/quantization/awq/gemm_kernels.cu")
+    aphrodite_extension_sources.append(
+        "kernels/quantization/marlin/marlin_cuda_kernel.cu")
 
 aphrodite_extension = CUDAExtension(
     name="aphrodite._C",
