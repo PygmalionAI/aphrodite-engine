@@ -13,7 +13,9 @@ _QUANTIZATION_CONFIG_REGISTRY = {
 
 if not is_hip():
     from aphrodite.modeling.layers.quantization.awq import AWQConfig
+    from aphrodite.modeling.layers.quantization.marlin import MarlinConfig
     _QUANTIZATION_CONFIG_REGISTRY["awq"] = AWQConfig
+    _QUANTIZATION_CONFIG_REGISTRY["marlin"] = MarlinConfig
 
 
 def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:

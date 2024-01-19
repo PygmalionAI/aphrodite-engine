@@ -128,8 +128,8 @@ class ModelConfig:
         self.tokenizer_mode = tokenizer_mode
 
     def _verify_quantization(self) -> None:
-        supported_quantization = ["awq", "squeezellm", "gptq"]
-        rocm_not_supported_quantization = ["awq"]
+        supported_quantization = ["awq", "squeezellm", "gptq", "marlin"]
+        rocm_not_supported_quantization = ["awq", "marlin"]
         if self.quantization is not None:
             self.quantization = self.quantization.lower()
 
@@ -153,7 +153,7 @@ class ModelConfig:
                 raise ValueError(
                     f"{self.quantization} quantization method is currently "
                     "not supported in ROCm.")
-        if self.quantization is not None:
+        if self.quantization != "marlin":
             logger.warning(f"{self.quantization} quantization is not fully "
                            "optimized yet. The speed can be slower than "
                            "non-quantized models (16/32bit).")

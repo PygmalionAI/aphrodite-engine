@@ -280,6 +280,13 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                 if packed_dim == output_dim:
                     shard_size = shard_size // param.pack_factor
                     shard_offset = shard_offset // param.pack_factor
+                    # If marlin, we need to adjust the offset and size to
+                    # account for the tiling
+                    marlin_tile_size = getattr(param, "tile_size", None)
+                    if marlin_tile_size is not None:
+                        shard_size = shard_size * marlin_tile_size
+                        shard_offset = shard_offset * marlin_tile_size
+
                 loaded_weight_shard = loaded_weight.narrow(
                     output_dim, shard_offset, shard_size)
                 self.weight_loader(param, loaded_weight_shard, shard_id)
@@ -297,6 +304,14 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
             if packed_dim == output_dim:
                 shard_size = shard_size // param.pack_factor
                 shard_offset = shard_offset // param.pack_factor
+
+                # If marlin, we need to adjust the offset and size to account
+                # for the tiling.
+                marlin_tile_size = getattr(param, "tile_size", None)
+                if marlin_tile_size is not None:
+                    shard_size = shard_size * marlin_tile_size
+                    shard_offset = shard_offset * marlin_tile_size
+
             param_data = param_data.narrow(output_dim, shard_offset,
                                            shard_size)
             start_idx = tp_rank * shard_size
@@ -397,6 +412,14 @@ class QKVParallelLinear(ColumnParallelLinear):
                 if packed_dim == output_dim:
                     shard_size = shard_size // param.pack_factor
                     shard_offset = shard_offset // param.pack_factor
+
+                    # If marlin, we need to adjust the offset and size to account
+                    # for the tiling.
+                    marlin_tile_size = getattr(param, "tile_size", None)
+                    if marlin_tile_size is not None:
+                        shard_size = shard_size * marlin_tile_size
+                        shard_offset = shard_offset * marlin_tile_size
+
                 loaded_weight_shard = loaded_weight.narrow(
                     output_dim, shard_offset, shard_size)
                 self.weight_loader(param, loaded_weight_shard, shard_id)
@@ -421,6 +444,14 @@ class QKVParallelLinear(ColumnParallelLinear):
             if packed_dim == output_dim:
                 shard_size = shard_size // param.pack_factor
                 shard_offset = shard_offset // param.pack_factor
+                
+                # If marlin, we need to adjust the offset and size to account 
+                # for the tiling
+                marlin_tile_size = getattr(param, "tile_size", None)
+                if marlin_tile_size is not None:
+                    shard_size = shard_size * marlin_tile_size
+                    shard_offset = shard_offset * marlin_tile_size
+
             param_data = param_data.narrow(output_dim, shard_offset,
                                            shard_size)
             shard_id = tp_rank // self.num_kv_head_replicas
