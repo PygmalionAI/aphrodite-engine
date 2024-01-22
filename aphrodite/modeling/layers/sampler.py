@@ -131,8 +131,12 @@ class Sampler(nn.Module):
                                                             sampling_tensors.typical_ps[indices]))
                     else:
                         raise ValueError(f"Unsupported sampler: {sampler}")
-                final_mask = torch.logical_or(*masks)
-                logits[indices][final_mask] = float("-inf")
+                mask = None
+                if len(masks) > 1:
+                    mask = torch.logical_or(*masks)
+                else:
+                    mask = masks[0]
+                logits[indices][mask] = float("-inf")
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
