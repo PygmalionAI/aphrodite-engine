@@ -124,7 +124,7 @@ class SamplingTensors:
         miro_seqids: List[int] = []
         dynatemp_ranges: List[float] = []
         dynatemp_exps: List[float] = []
-        sampler_orders: List[Any]
+        sampler_orders: List[Any] = []
         index = 0  # temporary, needed for building miro_indices
         #do_temperatures = False
         #do_penalties = False
