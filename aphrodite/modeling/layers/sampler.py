@@ -306,7 +306,7 @@ def _apply_top_p(logits: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
 def _apply_top_a(logits: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
     logits_sort, logits_idx = logits.sort(dim=-1, descending=True)
     probs_sort = logits_sort.softmax(dim=-1)
-    top_a_mask = probs_sort < torch.pow(probs_sort[:, 0], 2) * a
+    top_a_mask = probs_sort < (torch.pow(probs_sort[:, 0], 2) * a).unsqueeze_(dim=1)
     top_a_mask[:, 0] = False
     mask = torch.zeros_like(logits, dtype=torch.bool).scatter_(1, logits_idx, top_a_mask)
     return mask
@@ -314,7 +314,7 @@ def _apply_top_a(logits: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
 def _apply_min_p(logits: torch.Tensor, m: torch.Tensor) -> torch.Tensor:
     logits_sort, logits_idx = logits.sort(dim=-1, descending=True)
     probs_sort = logits_sort.softmax(dim=-1)
-    min_p_mask = probs_sort < probs_sort[:, 0] * m
+    min_p_mask = probs_sort < (probs_sort[:, 0] * m).unsqueeze_(dim=1)
     min_p_mask[:, 0] = False
     mask = torch.zeros_like(logits, dtype=torch.bool).scatter_(1, logits_idx, min_p_mask)
     return mask
