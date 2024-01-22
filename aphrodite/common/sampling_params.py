@@ -76,6 +76,10 @@ class SamplingParams:
             setting `temperature=0.4` and `dynatemp_range=0.1` will result
             in a minimum temp of 0.3 and max of 0.5.
         dynatemp_exponent: Exponent for dynatemp sampling. Range [0, inf).
+        sampler_order: List of lists specifying the order in which samplers are applied.
+            All samplers in a sublist are applied in parallel, and the results are combined.
+            Combinator is hardcoded to be "and" for now.
+            Samplers are specified as strings, see "sampler.py" for sampler codes.
         use_beam_search: Whether to use beam search instead of sampling.
         length_penalty: Float that penalizes sequences based on their length.
             Used in beam search.
@@ -133,6 +137,7 @@ class SamplingParams:
         mirostat_eta: float = 0,
         dynatemp_range: float = 0,
         dynatemp_exponent: float = 1,
+        sampler_order: List[List[str]] = None,
         use_beam_search: bool = False,
         length_penalty: float = 1.0,
         early_stopping: Union[bool, str] = False,
@@ -167,6 +172,7 @@ class SamplingParams:
         self.mirostat_eta = mirostat_eta
         self.dynatemp_range = dynatemp_range
         self.dynatemp_exponent = dynatemp_exponent
+        self.sampler_order = sampler_order
         self.use_beam_search = use_beam_search
         self.length_penalty = length_penalty
         self.early_stopping = early_stopping
@@ -189,8 +195,13 @@ class SamplingParams:
         self.spaces_between_special_tokens = spaces_between_special_tokens
         self.logits_processors = logits_processors or []
         self.include_stop_str_in_output = include_stop_str_in_output
-
+        if self.sampler_order is None:
+            self.sampler_order = ["pens", "temp", "miro", "typ", "tfs", "minp", "eta", "topa", "topp", "eps", "topk"]
+        self.sampler_order = [[s] if isinstance(s, str) else s for s in self.sampler_order]
         self.verify()
+
+    def verify(self) -> None:
+        self._verify_args()
         if self.use_beam_search:
             self._verify_beam_search()
         else:
@@ -201,16 +212,6 @@ class SamplingParams:
                 self.top_k = -1
                 self.min_p = 0.0
                 self.top_a = 0.0
-                self._verify_greedy_sampling()
-
-    def verify(self) -> None:
-        self._verify_args()
-        if self.use_beam_search:
-            self._verify_beam_search()
-        else:
-            self._verify_non_beam_search()
-            if self.temperature < _SAMPLING_EPS:
-                # Zero temperature means greedy sampling.
                 self._verify_greedy_sampling()
 
     def _verify_args(self) -> None:
@@ -278,6 +279,11 @@ class SamplingParams:
         if self.prompt_logprobs is not None and self.prompt_logprobs < 0:
             raise ValueError("prompt_logprobs must be non-negative, got "
                              f"{self.prompt_logprobs}.")
+        for subgroup in self.sampler_order:
+            if len(subgroup) > 1:
+                if any([s in ["temp", "pens", "miro"] for s in subgroup]):
+                    raise ValueError("temp, pens and miro must be alone"
+                                    f"in their own subgroup, got {subgroup}")
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:
@@ -341,6 +347,7 @@ class SamplingParams:
                 f"mirostat_eta={self.mirostat_eta}, "
                 f"dynatemp_range={self.dynatemp_range}, "
                 f"dynatemp_exponent={self.dynatemp_exponent}, "
+                f"sampler_order={self.sampler_order}, "
                 f"use_beam_search={self.use_beam_search}, "
                 f"length_penalty={self.length_penalty}, "
                 f"early_stopping={self.early_stopping}, "

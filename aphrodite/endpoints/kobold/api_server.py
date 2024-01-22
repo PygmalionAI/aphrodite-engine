@@ -31,6 +31,16 @@ gen_cache: dict = {}
 
 badwordsids: List[int] = []
 
+_sampler_map = {
+            0: "topk",
+            1: "topa",
+            2: "topp",
+            3: "tfs",
+            4: "typ",
+            5: "temp",
+            6: "pens",
+        }
+
 
 def _set_badwords(tokenizer, hf_config):  # pylint: disable=redefined-outer-name
     global badwordsids
@@ -99,6 +109,14 @@ def prepare_engine_payload(
         kai_payload.top_p = 1.0
         kai_payload.top_k = -1
 
+    
+    sampler_order = []
+    if kai_payload.mirostat == 2:
+        sampler_order = ["pens", "temp", "miro"]
+    else:
+        # On KAI we don't expose parallel sampler ordering, so no double lists
+        sampler_order = [_sampler_map[i] for i in kai_payload.sampler_order]
+
     sampling_params = SamplingParams(
         n=kai_payload.n,
         best_of=kai_payload.n,
@@ -122,6 +140,7 @@ def prepare_engine_payload(
         custom_token_bans=badwordsids
         if kai_payload.use_default_badwordsids else [],
         max_tokens=kai_payload.max_length,
+        sampler_order=sampler_order
     )
 
     max_input_tokens = max(
