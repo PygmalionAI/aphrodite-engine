@@ -291,7 +291,7 @@ def _apply_top_k(logits: torch.Tensor, k: torch.Tensor) -> torch.Tensor:
     top_k_mask = top_k_mask.expand(logits_idx.shape[0], -1)
     top_k_mask = top_k_mask >= k.unsqueeze_(dim=1)
     top_k_mask[:, 0] = False
-    mask = torch.zeros_like(logits, dtype=torch.bool).scatter_(True, logits_idx, top_k_mask)
+    mask = torch.zeros_like(logits, dtype=torch.bool).scatter_(1, logits_idx, top_k_mask)
     return mask
 
 def _apply_top_p(logits: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
@@ -300,7 +300,7 @@ def _apply_top_p(logits: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
     probs_sum = probs_sort.cumsum(dim=-1).sub_(probs_sort)
     top_p_mask = probs_sum > p.unsqueeze(dim=1)
     top_p_mask[:, 0] = False
-    mask = torch.zeros_like(logits, dtype=torch.bool).scatter_(True, logits_idx, top_p_mask)
+    mask = torch.zeros_like(logits, dtype=torch.bool).scatter_(1, logits_idx, top_p_mask)
     return mask
 
 def _apply_top_a(logits: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
@@ -308,7 +308,7 @@ def _apply_top_a(logits: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
     probs_sort = logits_sort.softmax(dim=-1)
     top_a_mask = probs_sort < torch.pow(probs_sort[:, 0], 2) * a
     top_a_mask[:, 0] = False
-    mask = torch.zeros_like(logits, dtype=torch.bool).scatter_(True, logits_idx, top_a_mask)
+    mask = torch.zeros_like(logits, dtype=torch.bool).scatter_(1, logits_idx, top_a_mask)
     return mask
 
 def _apply_min_p(logits: torch.Tensor, m: torch.Tensor) -> torch.Tensor:
@@ -316,7 +316,7 @@ def _apply_min_p(logits: torch.Tensor, m: torch.Tensor) -> torch.Tensor:
     probs_sort = logits_sort.softmax(dim=-1)
     min_p_mask = probs_sort < probs_sort[:, 0] * m
     min_p_mask[:, 0] = False
-    mask = torch.zeros_like(logits, dtype=torch.bool).scatter_(True, logits_idx, min_p_mask)
+    mask = torch.zeros_like(logits, dtype=torch.bool).scatter_(1, logits_idx, min_p_mask)
     return mask
 
 
@@ -342,7 +342,7 @@ def _apply_tfs(
         dim=-1,
     )
 
-    mask = torch.zeros_like(logits, dtype=torch.bool).scatter_(True, logits_idx, tfs_mask)
+    mask = torch.zeros_like(logits, dtype=torch.bool).scatter_(1, logits_idx, tfs_mask)
     return mask
 
 
@@ -400,7 +400,7 @@ def _apply_typical_sampling(
 
     typ_mask_sorted[:, 0] = False
 
-    mask = torch.zeros_like(logits, dtype=torch.bool).scatter_(True, indices, typ_mask_sorted)
+    mask = torch.zeros_like(logits, dtype=torch.bool).scatter_(1, indices, typ_mask_sorted)
     return mask
 
 
