@@ -354,7 +354,7 @@ def _apply_eta_cutoff(
 
     neg_entropy = (probs * shifted_logits).nansum(dim=-1)
     eps = torch.min(eta,
-                    torch.sqrt(eta) * torch.exp(neg_entropy)).unsqueeze(dim=1)
+                    torch.sqrt(eta) * neg_entropy.exp_()).unsqueeze_(dim=1)
 
     eta_mask = probs < eps
 
@@ -372,7 +372,7 @@ def _apply_epsilon_cutoff(
     eps.mul_(1e-4)
     probs = logits.softmax(dim=-1)
 
-    eps_mask = probs < (eps)
+    eps_mask = probs < eps.unsqueeze_(dim=1)
 
     if torch.all(eps_mask):  # guard against nulling out all the logits
         topk_prob, _ = torch.max(probs, dim=-1)
