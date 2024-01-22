@@ -401,8 +401,7 @@ def _apply_typical_sampling(
 
     typ_mask_sorted[:, 0] = False
 
-    mask = torch.zeros_like(indices, dtype=torch.bool)
-    mask[indices] = typ_mask_sorted
+    mask = typ_mask_sorted.scatter(1, indices, typ_mask_sorted)
     return mask
 
 
