@@ -93,10 +93,7 @@ class Sampler(nn.Module):
                     continue
                 elif "miro" in subgroup:
                     assert len(subgroup) == 1
-                    _apply_mirostat_v2(logits, indices,
-                                       sampling_tensors.taus,
-                                       sampling_tensors.etas,
-                                       sampling_tensors.mus)
+                    _mirostat(logits, indices, sampling_tensors, output_metadata)
                     continue
                 elif "pens" in subgroup:
                     assert len(subgroup) == 1
