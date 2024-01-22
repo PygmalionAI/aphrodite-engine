@@ -273,7 +273,7 @@ class SamplingTensors:
                    dynatemp_exps: List[float], miro_taus: List[float],
                    miro_etas: List[float], miro_mus: List[float],
                    miro_indices: List[int], miro_seqids: List[int],
-                   sampler_orders: List[List[List[List[str]], int]],
+                   sampler_orders: List[List[Any]],
                    prompt_tokens: List[List[int]],
                    output_tokens: List[List[int]], vocab_size: int,
                    device: torch.device,
