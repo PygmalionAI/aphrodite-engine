@@ -37,19 +37,31 @@ This will create a [OpenAI](https://platform.openai.com/docs/api-reference/)-com
 ## Performance
 Speeds vary with different GPUs, model sizes, quantization schemes, batch sizes, etc. Here are some baseline benchmarks conducted by requesting as many completions as possible from the [API server](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/endpoints/openai/api_server.py). Keep in mind that these are the theoritical peak throughput with parallel decoding, with as high a batch size as possible. **Per-request generation speed is a fraction of this, at 30-40 t/s**.
 
-> [!NOTE]  
-> 16bit models can achieve much higher throughput if they have access to more VRAM, either by using larger GPUs, or tensor parallelism over many GPUs. The numbers below are purely for output tokens.
+### High Batch Size Performance
 
-| Model      | Quantization | GPU      | Throughput (output t/s) |
-| ---------- | ------------ | -------- | ----------------------- |
-| Llama-2 7B | None         | RTX 4090 | 2576.2                  |
-|            | AWQ          | RTX 4090 | 3551.3                  |
-|            | GPTQ         | RTX 4090 | 2919.1                  |
-|            | SqueezeLLM   | RTX 4090 | 580.3                   |
-| Mistral 7B | None         | RTX 4090 | 5489.3                  |
-|            | AWQ          | RTX 4090 | 4078.8                  |
-|            | GPTQ         | RTX 4090 | 4516.2                  |
-|            | SqueezeLLM   | RTX 4090 | 549.5                   |
+> [!NOTE]  
+> The numbers below are the theoritical peak achieved by *only* requesting output tokens at very high batch sizes. At lower batch sizes with much larger prompts, the results will be vastly different.
+
+Throughput refers to output tokens per second.
+
+| Model      | Quantization | bits | GPU      | Throughput (T/s) |
+| ---------- | ------------ | ---- | -------- | ---------------- |
+| Llama-2 7B | None         | 16   | RTX 4090 | 2576.2           |
+|            | AWQ          | 4    | RTX 4090 | 3551.3           |
+|            | GPTQ         | 4    | RTX 4090 | 2919.1           |
+|            | GGUF         | Q4KM | RTX 4090 | 2726.6           |
+|            |              | Q5KM | RTX 4090 | 2763.4           |
+|            |              | Q6KM | RTX 4090 | 2694.7           |
+|            |              | Q8   | RTX 4090 | 2647.0           |
+|            | SqueezeLLM   | 4    | RTX 4090 | 580.3            |
+| Mistral 7B | None         | 16   | RTX 4090 | 5489.3           |
+|            | AWQ          | 4    | RTX 4090 | 4078.8           |
+|            | GPTQ         | 4    | RTX 4090 | 4516.2           |
+|            | GGUF         | Q4KM | RTX 4090 | 5815.8           |
+|            |              | Q5KM | RTX 4090 | 5786.2           |
+|            |              | Q6KM | RTX 4090 | 5791.7           |
+|            |              | Q8   | RTX 4090 | 5141.2           |
+|            | SqueezeLLM   | 4    | RTX 4090 | 549.5            |
 
 ## Requirements
 
