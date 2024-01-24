@@ -19,3 +19,4 @@ einops # for phi
 aioprometheus[starlette] # for prometheus metrics
 triton >= 2.1.0
 fast-hadamard-transform
+scipy # for fast-hadamard-transform
