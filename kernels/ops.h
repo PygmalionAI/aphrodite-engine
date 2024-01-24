@@ -72,6 +72,24 @@ torch::Tensor awq_gemm(
   torch::Tensor _scaling_factors,
   torch::Tensor _zeros,
   int split_k_iters);
+
+void marlin_gemm(
+  const torch::Tensor& input,
+  const torch::Tensor& weights,
+        torch::Tensor& output,
+  const torch::Tensor& scales,
+        torch::Tensor& workspace);
+
+at::Tensor e8p_mm_origorder(
+    const at::Tensor& A,
+    const at::Tensor& B,
+    const at::Tensor& CB);
+
+void decompress_e8p_origorder(
+    torch::Tensor YIs,
+    torch::Tensor CB,
+    torch::Tensor &Y
+);
 #endif
 
 void squeezellm_gemm(
@@ -106,6 +124,20 @@ torch::Tensor ggml_mul_mat_vec(
     torch::Tensor X,  // input
     int8_t type,
     int64_t m
+);
+
+torch::Tensor ggml_mul_mat_vec_a8(
+    torch::Tensor W,  // quant weight
+    torch::Tensor X,  // input
+    int8_t type,
+    int64_t row
+);
+
+torch::Tensor ggml_mul_mat_a8(
+    torch::Tensor W,  // quant weight
+    torch::Tensor X,  // input
+    int8_t type,
+    int64_t row
 );
 
 void aphrodite_bincount(
