@@ -3,12 +3,12 @@ from typing import Any, Dict, List, Optional
 import torch
 from torch.nn.parameter import Parameter
 
-from vllm._C import ops
-from vllm.model_executor.layers.linear import (LinearMethodBase,
-                                               set_weight_attrs)
-from vllm.model_executor.layers.quantization.base_config import (
+from aphrodite._C import ops
+from aphrodite.modeling.layers.linear import (LinearMethodBase,
+                                              set_weight_attrs)
+from aphrodite.modeling.layers.quantization.base_config import (
     QuantizationConfig)
-from vllm.model_executor.layers.quantization.quip_utils import (
+from aphrodite.modeling.layers.quantization.quip_utils import (
     get_packed_abs_grid,
     get_hadK,
     matmul_hadUt_cuda,
