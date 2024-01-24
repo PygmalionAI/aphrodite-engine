@@ -98,3 +98,15 @@ class QuantizationConfig(ABC):
         """"Returns the activation function names that should be post-scaled.
             Currently AWQ only."""
         raise NotImplementedError
+    
+    @abstractmethod
+    def merge_weight(self) -> bool:
+        """whether fuse qkv and up/gate."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def rope_style(self) -> Optional[bool]:
+        raise NotImplementedError
+
+    def quant_vocab(self) -> Optional[bool]:
+        return False
