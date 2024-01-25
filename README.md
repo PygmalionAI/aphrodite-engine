@@ -46,6 +46,15 @@ Throughput refers to output tokens per second.
 
 | Model      | Quantization | bits | GPU      | Throughput (T/s) |
 | ---------- | ------------ | ---- | -------- | ---------------- |
+| Mistral 7B | None         | 16   | RTX 4090 | 5489.3           |
+|            | AWQ          | 4    | RTX 4090 | 4078.8           |
+|            | GPTQ         | 4    | RTX 4090 | **7850.4**       |
+|            |              | 8    | RTX 4090 | 7658.0           |
+|            | GGUF         | Q8   | RTX 4090 | 5141.2           |
+|            |              | Q6KM | RTX 4090 | 5791.7           |
+|            |              | Q5KM | RTX 4090 | 5786.2           |
+|            |              | Q4KM | RTX 4090 | 5815.8           |
+|            | SqueezeLLM   | 4    | RTX 4090 | 549.5            |
 | Llama-2 7B | None         | 16   | RTX 4090 | 2576.2           |
 |            | AWQ          | 4    | RTX 4090 | 3551.3           |
 |            | GPTQ         | 4    | RTX 4090 | 2919.1           |
@@ -54,14 +63,31 @@ Throughput refers to output tokens per second.
 |            |              | Q6KM | RTX 4090 | 2694.7           |
 |            |              | Q8   | RTX 4090 | 2647.0           |
 |            | SqueezeLLM   | 4    | RTX 4090 | 580.3            |
-| Mistral 7B | None         | 16   | RTX 4090 | 5489.3           |
-|            | AWQ          | 4    | RTX 4090 | 4078.8           |
-|            | GPTQ         | 4    | RTX 4090 | 4516.2           |
-|            | GGUF         | Q4KM | RTX 4090 | 5815.8           |
-|            |              | Q5KM | RTX 4090 | 5786.2           |
-|            |              | Q6KM | RTX 4090 | 5791.7           |
-|            |              | Q8   | RTX 4090 | 5141.2           |
-|            | SqueezeLLM   | 4    | RTX 4090 | 549.5            |
+
+### Batch Size 1
+These are the speeds a user would normally get if they request a single output with a sizable prompt and output length. Essentially, normal chatting experience.
+
+The following results were gathered by sending a request with 2000 prompt tokens and requesting 1024 tokens with `ignore_eos=True`.
+
+| Model      | Quantization | bits | GPU      | Throughput (T/s) |
+| ---------- | ------------ | ---- | -------- | ---------------- |
+| Mistral 7B | None         | 16   | RTX 4090 | 54.0             |
+|            | AWQ          | 4    | RTX 4090 | 128.2            |
+|            | GPTQ         | 8    | RTX 4090 | 92.8             |
+|            |              | 4    | RTX 4090 | **146.8**        |
+|            | GGUF         | Q8   | RTX 4090 | 91.0             |
+|            |              | Q6KM | RTX 4090 | 105.4            |
+|            |              | Q5KM | RTX 4090 | 117.8            |
+|            |              | Q4KM | RTX 4090 | 128.9            |
+| Llama-2 7B | None         | 16   | RTX 4090 | 55.2             |
+|            | GPTQ         | 8    | RTX 4090 | 90.2             |
+|            |              | 4    | RTX 4090 | **128.0**        |
+|            | AWQ          | 4    | RTX 4090 | 116.3            |
+|            | GGUF         | Q8   | RTX 4090 | 88.1             |
+|            |              | Q6KM | RTX 4090 | 99.4             |
+|            |              | Q5KM | RTX 4090 | 109.9            |
+|            |              | Q4KM | RTX 4090 | 118.9            |
+
 
 ## Requirements
 
