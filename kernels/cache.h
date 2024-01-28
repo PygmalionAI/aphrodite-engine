@@ -20,8 +20,7 @@ void reshape_and_cache(
   torch::Tensor& value,
   torch::Tensor& key_cache,
   torch::Tensor& value_cache,
-  torch::Tensor& slot_mapping,
-  const std::string& kv_cache_dtype);
+  torch::Tensor& slot_mapping);
 
 void gather_cached_kv(
   torch::Tensor& key,
@@ -29,7 +28,3 @@ void gather_cached_kv(
   torch::Tensor& key_cache,
   torch::Tensor& value_cache,
   torch::Tensor& slot_mapping);
-
-void convert_fp8_e5m2(
-  torch::Tensor& src_cache,
-  torch::Tensor& dst_cache);
