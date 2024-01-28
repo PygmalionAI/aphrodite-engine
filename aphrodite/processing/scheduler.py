@@ -309,10 +309,12 @@ class Scheduler:
         for seq_group in scheduler_outputs.scheduled_seq_groups:
             seq_data: Dict[int, SequenceData] = {}
             block_tables: Dict[int, List[int]] = {}
+            persistent_data: Dict[int, dict] = {}
             for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
                 seq_id = seq.seq_id
                 seq_data[seq_id] = seq.data
                 block_tables[seq_id] = self.block_manager.get_block_table(seq)
+                persistent_data[seq_id] = seq.persistent_data
 
             seq_group_metadata = SequenceGroupMetadata(
                 request_id=seq_group.request_id,
@@ -320,6 +322,7 @@ class Scheduler:
                 seq_data=seq_data,
                 sampling_params=seq_group.sampling_params,
                 block_tables=block_tables,
+                persistent_data=persistent_data,
                 prefix=seq_group.prefix,
             )
             seq_group_metadata_list.append(seq_group_metadata)
