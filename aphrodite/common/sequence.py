@@ -38,6 +38,9 @@ class SequenceStatus(enum.Enum):
         elif status == SequenceStatus.FINISHED_ABORTED:
             finish_reason = "abort"
         elif status == SequenceStatus.FINISHED_IGNORED:
+            # The ignored sequences are the sequences whose prompt lengths
+            # are longer than the model's length cap. Therefore, the stop
+            # reason should also be "length" as in OpenAI API.
             finish_reason = "length"
         else:
             finish_reason = None
@@ -129,7 +132,6 @@ class Sequence:
         self.read_offset = 0
         # Input + output tokens
         self.tokens: Optional[List[str]] = None
-        self.persistent_data = {}
 
     def _append_logical_block(self) -> None:
         block = LogicalTokenBlock(
@@ -197,7 +199,7 @@ class Sequence:
         """
         if seq_len is None:
             seq_len = self.get_len()
-            # Note: HF implementation does not count the EOS token
+            # NOTE: HF implementation does not count the EOS token
             # towards the length, we align with that here for testing.
             if (eos_token_id is not None
                     and self.get_last_token_id() == eos_token_id):
@@ -342,14 +344,12 @@ class SequenceGroupMetadata:
         seq_data: Dict[int, SequenceData],
         sampling_params: SamplingParams,
         block_tables: Dict[int, List[int]],
-        persistent_data: Dict[int, dict],
     ) -> None:
         self.request_id = request_id
         self.is_prompt = is_prompt
         self.seq_data = seq_data
         self.sampling_params = sampling_params
         self.block_tables = block_tables
-        self.persistent_data = persistent_data
 
 
 class SequenceOutput:
@@ -363,30 +363,31 @@ class SequenceOutput:
             (Token id -> logP(x_i+1 | x_0, ..., x_i))
     """
 
-    def __init__(self, parent_seq_id: int, output_token: int,
-                 logprobs: Dict[int, float], persistent_data: dict) -> None:
+    def __init__(
+        self,
+        parent_seq_id: int,
+        output_token: int,
+        logprobs: Dict[int, float],
+    ) -> None:
         self.parent_seq_id = parent_seq_id
         self.output_token = output_token
         self.logprobs = logprobs
-        self.persistent_data = persistent_data
 
     def __repr__(self) -> str:
         return (f"SequenceOutput(parent_seq_id={self.parent_seq_id}, "
-                f"output_token={self.output_token}), "
-                f"logprobs={self.logprobs}, "
-                f"persistent_data={self.persistent_data}")
+                f"output_token={self.output_token}, "
+                f"logprobs={self.logprobs})")
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SequenceOutput):
             raise NotImplementedError()
         return (self.parent_seq_id == other.parent_seq_id
                 and self.output_token == other.output_token
-                and self.logprobs == other.logprobs
-                and self.persistent_data == other.persistent_data)
+                and self.logprobs == other.logprobs)
 
 
 class SequenceGroupOutput:
-    """The model outputs associated with a sequence group."""
+    """The model output associated with a sequence group."""
 
     def __init__(
         self,

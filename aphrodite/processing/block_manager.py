@@ -55,14 +55,14 @@ class BlockAllocator:
 
 
 class AllocStatus(enum.Enum):
-    """Result for BlockSpaceManager.can_allocate().
-    1. OK: seq_grouop can be allocated.
+    """Result for BlockSpaceManager.can_allocate
+
+    1. OK: seq_group can be allocated now.
     2. LATER: seq_group cannot be allocated.
-        The capacity of the allocator is larger
-        than seq_group required.
+      The capacity of allocator is larger than seq_group required.
     3. NEVER: seq_group can never be allocated.
-        The seq_group is too large to allocate in
-        GPU."""
+      The seq_group is too large to allocated in GPU.
+    """
     OK = enum.auto()
     LATER = enum.auto()
     NEVER = enum.auto()
@@ -109,6 +109,7 @@ class BlockSpaceManager:
             num_required_blocks = min(num_required_blocks,
                                       self.block_sliding_window)
         num_free_gpu_blocks = self.gpu_allocator.get_num_free_blocks()
+
         # Use watermark to avoid frequent cache eviction.
         if (self.num_total_gpu_blocks - num_required_blocks <
                 self.watermark_blocks):
@@ -152,13 +153,14 @@ class BlockSpaceManager:
         block_table = self.block_tables[seq.seq_id]
 
         if len(block_table) < len(logical_blocks):
-            # The sequence has a new logical block.
-            # Allocate a new physical block.
             if (self.block_sliding_window
                     and len(block_table) >= self.block_sliding_window):
+                # re-use a block
                 block_table.append(block_table[len(block_table) %
                                                self.block_sliding_window])
             else:
+                # The sequence has a new logical block.
+                # Allocate a new physical block.
                 block = self.gpu_allocator.allocate()
                 block_table.append(block)
                 return None

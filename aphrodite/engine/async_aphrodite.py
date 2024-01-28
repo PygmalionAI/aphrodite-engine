@@ -1,7 +1,8 @@
 import asyncio
 import time
 from functools import partial
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Type, Union
+from typing import (Any, Dict, Iterable, List, Optional, Set, Tuple, Type,
+                    Union, AsyncIterator)
 
 from aphrodite.common.config import ModelConfig
 from aphrodite.engine.args_tools import AsyncEngineArgs
@@ -184,14 +185,21 @@ class _AsyncAphrodite(AphroditeEngine):
         """
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
 
-        # Execute the model.
-        output = (await self._run_workers_async(
-            "execute_model",
-            seq_group_metadata_list=seq_group_metadata_list,
-            blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,
-            blocks_to_swap_out=scheduler_outputs.blocks_to_swap_out,
-            blocks_to_copy=scheduler_outputs.blocks_to_copy,
-        )) if not scheduler_outputs.is_empty() else []
+        if not scheduler_outputs.is_empty():
+            # Execute the model.
+            all_outputs = await self._run_workers_async(
+                "execute_model",
+                driver_kwargs={
+                    "seq_group_metadata_list": seq_group_metadata_list,
+                    "blocks_to_swap_in": scheduler_outputs.blocks_to_swap_in,
+                    "blocks_to_swap_out": scheduler_outputs.blocks_to_swap_out,
+                    "blocks_to_copy": scheduler_outputs.blocks_to_copy,
+                })
+
+            # Only the driver worker returns the sampling results.
+            output = all_outputs[0]
+        else:
+            output = []
 
         return self._process_model_outputs(output, scheduler_outputs)
 
@@ -199,42 +207,39 @@ class _AsyncAphrodite(AphroditeEngine):
         self,
         method: str,
         *args,
-        get_all_outputs: bool = False,
+        driver_args: Optional[List[Any]] = None,
+        driver_kwargs: Optional[Dict[str, Any]] = None,
         **kwargs,
     ) -> Any:
         """Runs the given method on all workers."""
-        all_outputs = []
+        coros = []
+
+        if driver_args is None:
+            driver_args = args
+        if driver_kwargs is None:
+            driver_kwargs = kwargs
+
+        # Run the driver worker asynchronously.
+        driver_executor = getattr(self.driver_worker, method)
+        coros.append(asyncio.get_event_loop().run_in_executor(
+            None, partial(driver_executor, *driver_args, **driver_kwargs)))
+
+        # Run the ray workers asynchronously.
         for worker in self.workers:
-            if self.parallel_config.worker_use_ray:
-                executor = partial(worker.execute_method.remote, method)
-            else:
-                executor = getattr(worker, method)
+            coros.append(worker.execute_method.remote(method, *args, **kwargs))
 
-            output = executor(*args, **kwargs)
-            all_outputs.append(output)
-
-        if self.parallel_config.worker_use_ray:
-            all_outputs = await asyncio.gather(*all_outputs)
-
-        if get_all_outputs:
-            return all_outputs
-
-        # Make sure all workers have the same results.
-        output = all_outputs[0]
-        for other_output in all_outputs[1:]:
-            assert output == other_output
-        return output
+        all_outputs = await asyncio.gather(*coros)
+        return all_outputs
 
 
 class AsyncAphrodite:
     """An asynchronous wrapper for AphroditeEngine.
 
-    This class is used to wrap the AphroditeEngine class to make it
-    asynchronous. It uses asyncio to create a background loop that
-    keeps processing incoming requests. The AphroditeEngine is kicked
-    by the generate method when there are requests in the waiting queue.
-    The generate method yields the outputs from the AphroditeEngine to
-    the caller.
+    This class is used to wrap the AphroditeEngine class to make it asynchronous. It
+    uses asyncio to create a background loop that keeps processing incoming
+    requests. The AphroditeEngine is kicked by the generate method when there
+    are requests in the waiting queue. The generate method yields the outputs
+    from the AphroditeEngine to the caller.
 
     NOTE: For the comprehensive list of arguments, see `AphroditeEngine`.
 
@@ -248,7 +253,8 @@ class AsyncAphrodite:
         log_requests: Whether to log the requests.
         start_engine_loop: If True, the background task to run the engine
             will be automatically started in the generate call.
-        *args, *kwargs: Arguments for AphroditeEngine.
+        *args: Arguments for AphroditeEngine.
+        *kwargs: Arguments for AphroditeEngine.
     """
 
     _engine_class: Type[_AsyncAphrodite] = _AsyncAphrodite
@@ -400,16 +406,17 @@ class AsyncAphrodite:
         return stream
 
     async def generate(
-            self,
-            prompt: Optional[str],
-            sampling_params: SamplingParams,
-            request_id: str,
-            prompt_token_ids: Optional[List[int]] = None) -> RequestOutput:
+        self,
+        prompt: Optional[str],
+        sampling_params: SamplingParams,
+        request_id: str,
+        prompt_token_ids: Optional[List[int]] = None
+    ) -> AsyncIterator[RequestOutput]:
         """Generate outputs for a request.
 
         Generate outputs for a request. This method is a coroutine. It adds the
-        request into the waiting queue of the AphroditeEngine and streams the
-        outputs from the AphroditeEngine to the caller.
+        request into the waiting queue of the AphroditeEngine and streams the outputs
+        from the AphroditeEngine to the caller.
 
         Args:
             prompt: The prompt string. Can be None if prompt_token_ids is
@@ -422,9 +429,53 @@ class AsyncAphrodite:
         Yields:
             The output `RequestOutput` objects from the AphroditeEngine for the
             request.
+
+        Details:
+            - If the engine is not running, start the background loop,
+              which iteratively invokes
+              :meth:`~aphrodite.engine.async_llm_engine.AsyncAphrodite.engine_step`
+              to process the waiting requests.
+            - Add the request to the engine's `RequestTracker`.
+              On the next background loop, this request will be sent to
+              the underlying engine.
+              Also, a corresponding `AsyncStream` will be created.
+            - Wait for the request outputs from `AsyncStream` and yield them.
+
+        Example:
+            >>> # Please refer to entrypoints/api_server.py for
+            >>> # the complete example.
+            >>>
+            >>> # initialize the engine and the example input
+            >>> engine = AsyncAphrodite.from_engine_args(engine_args)
+            >>> example_input = {
+            >>>     "prompt": "What is LLM?",
+            >>>     "stream": False, # assume the non-streaming case
+            >>>     "temperature": 0.0,
+            >>>     "request_id": 0,
+            >>> }
+            >>>
+            >>> # start the generation
+            >>> results_generator = engine.generate(
+            >>>    example_input["prompt"],
+            >>>    SamplingParams(temperature=example_input["temperature"]),
+            >>>    example_input["request_id"])
+            >>>
+            >>> # get the results
+            >>> final_output = None
+            >>> async for request_output in results_generator:
+            >>>     if await request.is_disconnected():
+            >>>         # Abort the request if the client disconnects.
+            >>>         await engine.abort(request_id)
+            >>>         # Return or raise an error
+            >>>         ...
+            >>>     final_output = request_output
+            >>>
+            >>> # Process and return the final output
+            >>> ...
         """
         # Preprocess the request.
-        arrival_time = time.time()
+        # This should not be used for logging, as it is monotonic time.
+        arrival_time = time.monotonic()
 
         try:
             stream = await self.add_request(request_id,
@@ -487,16 +538,21 @@ class AsyncAphrodite:
         engine_configs = engine_args.create_engine_configs()
         parallel_config = engine_configs[2]
         # Initialize the cluster.
-        distributed_init_method, placement_group = initialize_cluster(
-            parallel_config, engine_args.engine_use_ray)
+        placement_group = initialize_cluster(parallel_config,
+                                             engine_args.engine_use_ray)
         # Create the async LLM engine.
         engine = cls(parallel_config.worker_use_ray,
                      engine_args.engine_use_ray,
                      *engine_configs,
-                     distributed_init_method,
                      placement_group,
                      log_requests=not engine_args.disable_log_requests,
                      log_stats=not engine_args.disable_log_stats,
                      max_log_len=engine_args.max_log_len,
                      start_engine_loop=start_engine_loop)
         return engine
+
+    async def do_log_stats(self) -> None:
+        if self.engine_use_ray:
+            await self.engine.do_log_stats.remote()
+        else:
+            self.engine.do_log_stats()

@@ -3,8 +3,8 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
-                                     SchedulerConfig)
+from aphrodite.common.config import (CacheConfig, ModelConfig,
+                                     ParallelConfig, SchedulerConfig)
 
 
 @dataclass
@@ -31,10 +31,10 @@ class EngineArgs:
     max_paddings: int = 256
     disable_log_stats: bool = False
     revision: Optional[str] = None
+    tokenizer_revision: Optional[str] = None
     quantization: Optional[str] = None
     enforce_eager: bool = False
     max_context_len_to_capture: int = 8192
-    kv_cache_dtype: Optional[str] = None
 
     def __post_init__(self):
         if self.tokenizer is None:
@@ -44,6 +44,10 @@ class EngineArgs:
     def add_cli_args(
             parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         """Shared CLI arguments for the Aphrodite engine."""
+
+        # NOTE: If you update any of the arguments below, please also
+        # make sure to update docs/source/models/engine_args.rst
+
         # Model arguments
         parser.add_argument(
             '--model',
@@ -60,6 +64,13 @@ class EngineArgs:
             type=str,
             default=None,
             help='the specific model version to use. It can be a branch '
+            'name, a tag name, or a commit id. If unspecified, will use '
+            'the default version.')
+        parser.add_argument(
+            '--tokenizer-revision',
+            type=str,
+            default=None,
+            help='the specific tokenizer version to use. It can be a branch '
             'name, a tag name, or a commit id. If unspecified, will use '
             'the default version.')
         parser.add_argument('--tokenizer-mode',
@@ -84,11 +95,11 @@ class EngineArgs:
             default=EngineArgs.load_format,
             choices=['auto', 'pt', 'safetensors', 'npcache', 'dummy'],
             help='The format of the model weights to load. '
-            '"auto" will try to load the weights in the safetensors '
-            'and fall back to the pytorch bin format if safetensors '
+            '"auto" will try to load the weights in the safetensors format '
+            'and fall back to the pytorch bin format if safetensors format '
             'is not available. '
             '"pt" will load the weights in the pytorch bin format. '
-            '"safetensors" will load the weights in the safetensors. '
+            '"safetensors" will load the weights in the safetensors format. '
             '"npcache" will load the weights in pytorch format and store '
             'a numpy cache to speed up the loading. '
             '"dummy" will initialize the weights with random values, '
@@ -126,11 +137,10 @@ class EngineArgs:
                             help='number of tensor parallel replicas')
         parser.add_argument(
             '--max-parallel-loading-workers',
-            '-mplw',
             type=int,
             help='load model sequentially in multiple batches, '
-            'to avoid CPU OOM when using tensor parallel '
-            'with large models.')
+            'to avoid RAM OOM when using tensor '
+            'parallel and large models')
         # KV cache arguments
         parser.add_argument('--block-size',
                             type=int,
@@ -146,14 +156,15 @@ class EngineArgs:
                             type=int,
                             default=EngineArgs.swap_space,
                             help='CPU swap space size (GiB) per GPU')
-        parser.add_argument('--gpu-memory-utilization',
-                            '-gmu',
-                            type=float,
-                            default=EngineArgs.gpu_memory_utilization,
-                            help='the percentage of GPU memory to be used for'
-                            'the model executor')
+        parser.add_argument(
+            '--gpu-memory-utilization',
+            '-gmu',
+            type=float,
+            default=EngineArgs.gpu_memory_utilization,
+            help='the fraction of GPU memory to be used for '
+            'the model executor, which can range from 0 to 1.'
+            'If unspecified, will use the default value of 0.9.')
         parser.add_argument('--max-num-batched-tokens',
-                            '-mnbt',
                             type=int,
                             default=EngineArgs.max_num_batched_tokens,
                             help='maximum number of batched tokens per '
@@ -173,25 +184,25 @@ class EngineArgs:
         parser.add_argument('--quantization',
                             '-q',
                             type=str,
-                            choices=['awq', 'squeezellm', 'gptq', None],
+                            choices=['awq', 'gptq', 'squeezellm', None],
                             default=None,
-                            help='Method used to quantize the weights')
+                            help='Method used to quantize the weights. If '
+                            'None, we first check the `quantization_config` '
+                            'attribute in the model config file. If that is '
+                            'None, we assume the model weights are not '
+                            'quantized and use `dtype` to determine the data '
+                            'type of the weights.')
         parser.add_argument('--enforce-eager',
                             action='store_true',
                             help='Always use eager-mode PyTorch. If False, '
                             'will use eager mode and CUDA graph in hybrid '
-                            'for maximum performance and flexibility.')
+                            'for maximal performance and flexibility.')
         parser.add_argument('--max-context-len-to-capture',
                             type=int,
                             default=EngineArgs.max_context_len_to_capture,
                             help='maximum context length covered by CUDA '
                             'graphs. When a sequence has context length '
                             'larger than this, we fall back to eager mode.')
-        parser.add_argument('--kv-cache-dtype',
-                            type=str,
-                            choices=['fp8', None],
-                            default=None,
-                            help='Data type for the KV cache.')
         return parser
 
     @classmethod
@@ -209,12 +220,12 @@ class EngineArgs:
                                    self.tokenizer_mode, self.trust_remote_code,
                                    self.download_dir, self.load_format,
                                    self.dtype, self.seed, self.revision,
-                                   self.max_model_len, self.quantization,
-                                   self.enforce_eager,
+                                   self.tokenizer_revision, self.max_model_len,
+                                   self.quantization, self.enforce_eager,
                                    self.max_context_len_to_capture)
         cache_config = CacheConfig(self.block_size,
                                    self.gpu_memory_utilization,
-                                   self.swap_space, self.kv_cache_dtype,
+                                   self.swap_space,
                                    model_config.get_sliding_window())
         parallel_config = ParallelConfig(self.pipeline_parallel_size,
                                          self.tensor_parallel_size,
@@ -229,7 +240,7 @@ class EngineArgs:
 
 @dataclass
 class AsyncEngineArgs(EngineArgs):
-    """Arguments for asynchronous Aohrodite engine."""
+    """Arguments for asynchronous Aphrodite engine."""
     engine_use_ray: bool = False
     disable_log_requests: bool = False
     max_log_len: Optional[int] = None

@@ -22,13 +22,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Rotary Positional Embeddings."""
-from typing import Any, Dict, Optional, Tuple, Union
 import math
+from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 
-from aphrodite._C import ops as pos_encoding_ops
+from aphrodite._C import ops
 
 
 def _rotate_neox(x: torch.Tensor) -> torch.Tensor:
@@ -103,7 +103,7 @@ class RotaryEmbedding(nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """PyTorch-native implementation. Equivalent to forward()."""
+        """PyTorch-native implementation equivalent to forward()."""
         query = query.view(*query.shape[:-1], -1, self.head_size)
         key = key.view(*key.shape[:-1], -1, self.head_size)
 
@@ -144,11 +144,10 @@ class RotaryEmbedding(nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        # pos_encoding_ops.rotary_embedding() is an in-place operation that
+        # ops.rotary_embedding() is an in-place operation that
         # updates the query and key tensors.
-        pos_encoding_ops.rotary_embedding(positions, query, key,
-                                          self.head_size, self.cos_sin_cache,
-                                          self.is_neox_style)
+        ops.rotary_embedding(positions, query, key, self.head_size,
+                             self.cos_sin_cache, self.is_neox_style)
         return query, key
 
 
@@ -248,7 +247,7 @@ def _yarn_find_correction_range(low_rot: int,
     high = math.ceil(
         _yarn_find_correction_dim(high_rot, dim, base,
                                   max_position_embeddings))
-    return max(low, 0), min(high, dim - 1)  # clamp values just in case
+    return max(low, 0), min(high, dim - 1)  # Clamp values just in case
 
 
 def _yarn_linear_ramp_mask(low: float, high: float, dim: int,
@@ -270,7 +269,10 @@ def _yarn_get_mscale(scale: float = 1) -> float:
 
 
 class YaRNScalingRotaryEmbedding(RotaryEmbedding):
-    """Rotary embedding extended with YaRN method (Peng et al.)"""
+    """RotaryEmbedding extended with YaRN method.
+
+    Credits to Peng et al. github.com/jquesnelle/yarn
+    """
 
     def __init__(
         self,
@@ -342,6 +344,7 @@ def get_rope(
            tuple(rope_scaling.items()) if rope_scaling is not None else None)
     if key in _ROPE_DICT:
         return _ROPE_DICT[key]
+
     if rope_scaling is None:
         rotary_emb = RotaryEmbedding(head_size, rotary_dim, max_position, base,
                                      is_neox_style)

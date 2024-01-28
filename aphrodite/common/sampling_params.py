@@ -1,8 +1,10 @@
 """Sampling parameters for text generation."""
 from enum import IntEnum
 from functools import cached_property
-from typing import List, Optional, Union
-from aphrodite.common.logits_processor import LogitsProcessor
+from typing import Callable, List, Optional, Union
+
+import torch
+
 
 _SAMPLING_EPS = 1e-5
 
@@ -12,6 +14,10 @@ class SamplingType(IntEnum):
     RANDOM = 1
     BEAM = 2
 
+LogitsProcessor = Callable[[List[int], torch.Tensor], torch.Tensor]
+"""LogitsProcessor is a function that takes a list of previously generated
+tokens and a tensor of the logits for the next token, and returns a modified
+tensor of logits to sample from."""
 
 class SamplingParams:
     """Sampling parameters for text generation.
@@ -146,7 +152,7 @@ class SamplingParams:
         custom_token_bans: Optional[List[int]] = None,
         skip_special_tokens: bool = True,
         spaces_between_special_tokens: bool = True,
-        logits_processors: List[LogitsProcessor] = None,
+        logits_processors: Optional[List[LogitsProcessor]] = None,
     ) -> None:
         self.n = n
         self.best_of = best_of if best_of is not None else n
@@ -190,7 +196,7 @@ class SamplingParams:
         self.logits_processors = logits_processors or []
         self.include_stop_str_in_output = include_stop_str_in_output
 
-        self.verify()
+        self._verify_args()
         if self.use_beam_search:
             self._verify_beam_search()
         else:
@@ -201,16 +207,6 @@ class SamplingParams:
                 self.top_k = -1
                 self.min_p = 0.0
                 self.top_a = 0.0
-                self._verify_greedy_sampling()
-
-    def verify(self) -> None:
-        self._verify_args()
-        if self.use_beam_search:
-            self._verify_beam_search()
-        else:
-            self._verify_non_beam_search()
-            if self.temperature < _SAMPLING_EPS:
-                # Zero temperature means greedy sampling.
                 self._verify_greedy_sampling()
 
     def _verify_args(self) -> None:

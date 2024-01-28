@@ -7,11 +7,11 @@ from collections import defaultdict
 from typing import Any, Iterator, List, Optional, Tuple
 
 from huggingface_hub import snapshot_download
-from safetensors.torch import load_file, save_file, safe_open
 import numpy as np
+from safetensors.torch import load_file, save_file, safe_open
 import torch
-from tqdm.auto import tqdm
 from transformers import PretrainedConfig
+from tqdm.auto import tqdm
 
 from aphrodite.common.logger import init_logger
 from aphrodite.modeling.layers.quantization import (get_quantization_config,
@@ -20,7 +20,7 @@ from aphrodite.modeling.layers.quantization import (get_quantization_config,
 logger = init_logger(__name__)
 
 
-class Disabledtqdm(tqdm):  # pylint: disable=inconsistent-mro
+class Disabledtqdm(tqdm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs, disable=True)
@@ -89,6 +89,7 @@ def get_quant_config(
     cache_dir: Optional[str] = None,
 ) -> QuantizationConfig:
     quant_cls = get_quantization_config(quantization)
+    # Read the quantization config from the HF model config, if available.
     hf_quant_config = getattr(hf_config, "quantization_config", None)
     if hf_quant_config is not None:
         return quant_cls.from_config(hf_quant_config)
@@ -131,7 +132,7 @@ def prepare_hf_model_weights(
     # Download model weights from huggingface.
     is_local = os.path.isdir(model_name_or_path)
     use_safetensors = False
-    # Some quantized models use .pt files for storing the weights
+    # Some quantized models use .pt files for storing the weights.
     if load_format == "auto":
         allow_patterns = ["*.safetensors", "*.bin"]
     elif load_format == "safetensors":
@@ -145,7 +146,7 @@ def prepare_hf_model_weights(
         raise ValueError(f"Unknown load_format: {load_format}")
 
     if fall_back_to_pt:
-        allow_patterns += [".pt"]
+        allow_patterns += ["*.pt"]
 
     if not is_local:
         # Use file lock to prevent multiple processes from
@@ -195,7 +196,6 @@ def hf_model_weights_iterator(
     revision: Optional[str] = None,
     fall_back_to_pt: Optional[bool] = True,
 ) -> Iterator[Tuple[str, torch.Tensor]]:
-
     hf_folder, hf_weights_files, use_safetensors = prepare_hf_model_weights(
         model_name_or_path,
         cache_dir=cache_dir,
@@ -238,7 +238,7 @@ def hf_model_weights_iterator(
     elif use_safetensors:
         for st_file in hf_weights_files:
             with safe_open(st_file, framework="pt") as f:
-                for name in f.keys():
+                for name in f.keys():  # noqa: SIM118
                     param = f.get_tensor(name)
                     yield name, param
     else:
@@ -252,6 +252,7 @@ def hf_model_weights_iterator(
 
 def convert_pyslice_to_tensor(x: Any) -> torch.Tensor:
     """convert PySafeSlice object from safetensors to torch.Tensor
+
     PySafeSlice object supports indexing, which is done before loading the
     actual tensor and can reduce the amount of memory being read into the
     memory. However, it does not support more advanced functionalities
@@ -286,29 +287,3 @@ def initialize_dummy_weights(
     for param in model.state_dict().values():
         if torch.is_floating_point(param):
             param.data.uniform_(low, high)
-
-
-def get_parallel_weight(model: torch.nn.Module):
-    if model.quant_config is None:
-        column_weight_suffixes = ["weight", "bias"]
-        row_weight_suffixes = ["weight"]
-    else:
-        column_weight_suffixes = (
-            model.quant_config.get_col_parallel_tensor_names())
-        row_weight_suffixes = (
-            model.quant_config.get_row_parallel_tensor_names())
-
-    column_parallel_weights: List[str] = []
-    for layer in model.column_parallel_layers:
-        for suffix in column_weight_suffixes:
-            column_parallel_weights.append(f"{layer}.{suffix}")
-    row_parallel_weights: List[str] = []
-    for layer in model.row_parallel_layers:
-        for suffix in row_weight_suffixes:
-            row_parallel_weights.append(f"{layer}.{suffix}")
-
-    if hasattr(model, "parallel_vocab_layers"):
-        for layer in model.parallel_vocab_layers:
-            for suffix in ["weight", "bias"]:
-                column_parallel_weights.append(f"{layer}.{suffix}")
-    return column_parallel_weights, row_parallel_weights

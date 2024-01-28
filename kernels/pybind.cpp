@@ -48,19 +48,13 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     &rotary_embedding,
     "Apply GPT-NeoX or GPT-J style rotary embedding to query and key");
 
+#ifndef USE_ROCM
   // Quantization ops
-  #ifndef USE_ROCM
+  ops.def("awq_gemm", &awq_gemm, "Quantized GEMM for AWQ");
+#endif
   ops.def("gptq_gemm", &gptq_gemm, "Quantized GEMM for GPTQ");
   ops.def("gptq_shuffle", &gptq_shuffle, "Post processing for GPTQ");
-  ops.def("awq_gemm", &awq_gemm, "Quantized GEMM for AWQ");
-  #endif
   ops.def("squeezellm_gemm", &squeezellm_gemm, "Quantized GEMM for SqueezeLLM");
-
-  // misc
-  ops.def(
-    "bincount",
-    &aphrodite_bincount,
-    "CUDA Graph compatible bincount implementation.");
 
   // Cache ops
   pybind11::module cache_ops = m.def_submodule("cache_ops", "Aphrodite Engine cache ops");
@@ -80,11 +74,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     "gather_cached_kv",
     &gather_cached_kv,
     "Gather key and value from the cache into contiguous QKV tensors");
-  cache_ops.def(
-    "convert_fp8",
-    &convert_fp8,
-    "Convert the KV cache to FP8 datatype");
-    
 
   // Cuda utils
   pybind11::module cuda_utils = m.def_submodule("cuda_utils", "Aphrodite Engine cuda utils");
