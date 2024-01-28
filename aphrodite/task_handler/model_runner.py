@@ -32,13 +32,11 @@ class ModelRunner:
         model_config: ModelConfig,
         parallel_config: ParallelConfig,
         scheduler_config: SchedulerConfig,
-        kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
     ):
         self.model_config = model_config
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
-        self.kv_cache_dtype = kv_cache_dtype
         self.is_driver_worker = is_driver_worker
 
         # model_config can be None in tests/samplers/test_sampler.py.
@@ -149,7 +147,6 @@ class ModelRunner:
             context_lens=None,
             block_tables=None,
             use_cuda_graph=False,
-            kv_cache_dtype=self.kv_cache_dtype,
         )
         return input_tokens, input_positions, input_metadata, prompt_lens
 
@@ -257,7 +254,6 @@ class ModelRunner:
             context_lens=context_lens,
             block_tables=block_tables,
             use_cuda_graph=use_captured_graph,
-            kv_cache_dtype=self.kv_cache_dtype,
         )
         return input_tokens, input_positions, input_metadata
 
@@ -373,8 +369,6 @@ class ModelRunner:
                 get_size_or_none(input_metadata.block_tables),
                 "use_cuda_graph":
                 input_metadata.use_cuda_graph,
-                "kv_cache_dtype":
-                input_metadata.kv_cache_dtype,
                 "selected_token_indices_size":
                 sampling_metadata.selected_token_indices.size(),
             }
@@ -434,7 +428,6 @@ class ModelRunner:
                 context_lens=context_lens,
                 block_tables=block_tables,
                 use_cuda_graph=py_data["use_cuda_graph"],
-                kv_cache_dtype=py_data["kv_cache_dtype"],
             )
             sampling_metadata = SamplingMetadata(
                 seq_groups=None,
@@ -546,7 +539,6 @@ class ModelRunner:
                 context_lens=context_lens[:batch_size],
                 block_tables=block_tables[:batch_size],
                 use_cuda_graph=True,
-                kv_cache_dtype=self.kv_cache_dtype,
             )
 
             graph_runner = CUDAGraphRunner(self.model)

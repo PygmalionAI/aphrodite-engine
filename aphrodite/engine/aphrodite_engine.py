@@ -84,7 +84,6 @@ class AphroditeEngine:
             f"Sampler Seed = {model_config.seed}\n"
             f"Context Length = {model_config.max_model_len}\n"
             f"Enforce Eager Mode = {model_config.enforce_eager}\n"
-            f"KV Cache Data Type = {cache_config.cache_dtype}\n"
             f"Seed = {model_config.seed}")
         # TODO: Print more configs in debug mode.
 
@@ -143,7 +142,6 @@ class AphroditeEngine:
             local_rank=0,
             rank=0,
             distributed_init_method=distributed_init_method,
-            kv_cache_dtype=self.cache_config.cache_dtype,
             is_driver_worker=True,
         )
         self._run_workers("init_model")
@@ -221,7 +219,6 @@ class AphroditeEngine:
         model_config = copy.deepcopy(self.model_config)
         parallel_config = copy.deepcopy(self.parallel_config)
         scheduler_config = copy.deepcopy(self.scheduler_config)
-        cache_config = copy.deepcopy(self.cache_config)
 
         for rank, (worker, (node_id,
                             _)) in enumerate(zip(self.workers,
@@ -236,7 +233,6 @@ class AphroditeEngine:
                     local_rank,
                     rank,
                     distributed_init_method,
-                    cache_config=cache_config,
                 ))
 
         driver_rank = 0
@@ -248,7 +244,6 @@ class AphroditeEngine:
             driver_local_rank,
             driver_rank,
             distributed_init_method,
-            cache_config=cache_config,
             is_driver_worker=True,
         )
 
@@ -290,7 +285,6 @@ class AphroditeEngine:
             block_size=self.cache_config.block_size,
             gpu_memory_utilization=self.cache_config.gpu_memory_utilization,
             cpu_swap_space=self.cache_config.swap_space_bytes,
-            cache_dtype=self.cache_config.cache_dtype,
         )
 
         # Since we use a shared centralized controller, we take the minimum

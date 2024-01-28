@@ -17,7 +17,6 @@ class EngineArgs:
     download_dir: Optional[str] = None
     load_format: str = 'auto'
     dtype: str = 'auto'
-    kv_cache_dtype: str = 'auto'
     seed: int = 0
     max_model_len: Optional[int] = None
     worker_use_ray: bool = False
@@ -116,14 +115,6 @@ class EngineArgs:
             'The "auto" option will use FP16 precision '
             'for FP32 and FP16 models, and BF16 precision '
             'for BF16 models.')
-        parser.add_argument(
-            '--kv-cache-dtype',
-            type=str,
-            choices=['auto', 'fp8_e5m2'],
-            default='auto',
-            help='Data type for KV cache storage. If "auto", will use '
-            'model dtype. Note that FP8 is not supported when cuda version '
-            'is lower than 11.8')
         parser.add_argument('--max-model-len',
                             type=int,
                             default=None,
@@ -234,7 +225,7 @@ class EngineArgs:
                                    self.max_context_len_to_capture)
         cache_config = CacheConfig(self.block_size,
                                    self.gpu_memory_utilization,
-                                   self.swap_space, self.kv_cache_dtype,
+                                   self.swap_space,
                                    model_config.get_sliding_window())
         parallel_config = ParallelConfig(self.pipeline_parallel_size,
                                          self.tensor_parallel_size,
