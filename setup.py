@@ -202,6 +202,9 @@ if _is_cuda():
     if nvcc_cuda_version >= Version("11.2"):
         num_threads = min(os.cpu_count(), 8)
         NVCC_FLAGS += ["--threads", str(num_threads)]
+    
+    if nvcc_cuda_version >= Version("11.8"):
+        NVCC_FLAGS += ["-DENABLE_FP8_E5M2"]
 
 elif _is_hip():
     amd_arch = get_amdgpu_offload_arch()
