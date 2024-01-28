@@ -339,6 +339,7 @@ class SequenceGroupMetadata:
         block_tables: The block tables. (Seq id -> list of physical block
             numbers)
         prefix: The prefix of the prompt of the sequence group.
+        persistent_data: The persistent data of the sequence group.
     """
 
     def __init__(
@@ -348,6 +349,7 @@ class SequenceGroupMetadata:
         seq_data: Dict[int, SequenceData],
         sampling_params: SamplingParams,
         block_tables: Dict[int, List[int]],
+        persistent_data: Dict[int, dict],
         prefix: Optional[Prefix] = None,
     ) -> None:
         self.request_id = request_id
@@ -355,6 +357,7 @@ class SequenceGroupMetadata:
         self.seq_data = seq_data
         self.sampling_params = sampling_params
         self.block_tables = block_tables
+        self.persistent_data = persistent_data
         self.prefix = prefix
 
 
@@ -367,6 +370,7 @@ class SequenceOutput:
         output_token: The output token ID.
         logprobs: The logprobs of the output token.
             (Token id -> logP(x_i+1 | x_0, ..., x_i))
+        persistent_data: The persistent data of the sequence.
     """
 
     def __init__(
@@ -374,22 +378,26 @@ class SequenceOutput:
         parent_seq_id: int,
         output_token: int,
         logprobs: Dict[int, float],
+        persistent_data: dict,
     ) -> None:
         self.parent_seq_id = parent_seq_id
         self.output_token = output_token
         self.logprobs = logprobs
+        self.persistent_data = persistent_data
 
     def __repr__(self) -> str:
         return (f"SequenceOutput(parent_seq_id={self.parent_seq_id}, "
                 f"output_token={self.output_token}, "
-                f"logprobs={self.logprobs})")
+                f"logprobs={self.logprobs}, "
+                f"persistent_data={self.persistent_data})")
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SequenceOutput):
             raise NotImplementedError()
         return (self.parent_seq_id == other.parent_seq_id
                 and self.output_token == other.output_token
-                and self.logprobs == other.logprobs)
+                and self.logprobs == other.logprobs
+                and self.persistent_data == other.persistent_data)
 
 
 class SequenceGroupOutput:

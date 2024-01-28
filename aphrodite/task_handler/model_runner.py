@@ -14,6 +14,7 @@ from aphrodite.modeling.megatron.communication_op import (
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (
     SamplerOutput, SequenceData, SequenceGroupMetadata)
+from aphrodite.modeling.sampling_metadata import PersistentMetadata
 from aphrodite.common.utils import in_wsl
 
 logger = init_logger(__name__)
@@ -364,6 +365,10 @@ class ModelRunner:
         seq_data: Dict[int, SequenceData] = {}
         for seq_group_metadata in seq_group_metadata_list:
             seq_data.update(seq_group_metadata.seq_data)
+        
+        seq_persistence_data: Dict[int, dict] = {}
+        for grp in seq_group_metadata_list:
+            seq_persistence_data.update(grp.persistent_data)
 
         sampling_metadata = SamplingMetadata(
             seq_groups=seq_groups,
@@ -371,6 +376,7 @@ class ModelRunner:
             prompt_lens=prompt_lens,
             selected_token_indices=selected_token_indices,
             categorized_sample_indices=categorized_sample_indices,
+            persistent_metadata=PersistentMetadata(seq_persistence_data),
         )
         return sampling_metadata
 
@@ -487,6 +493,7 @@ class ModelRunner:
                 seq_data={group_id: seq_data},
                 sampling_params=sampling_params,
                 block_tables=None,
+                persistent_data={},
             )
             seqs.append(seq)
 
