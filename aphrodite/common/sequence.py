@@ -133,6 +133,7 @@ class Sequence:
         self.read_offset = 0
         # Input + output tokens
         self.tokens: Optional[List[str]] = None
+        self.persistent_data = {}
 
     def _append_logical_block(self) -> None:
         block = LogicalTokenBlock(
