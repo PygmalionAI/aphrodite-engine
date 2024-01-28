@@ -235,11 +235,12 @@ class _AsyncAphrodite(AphroditeEngine):
 class AsyncAphrodite:
     """An asynchronous wrapper for AphroditeEngine.
 
-    This class is used to wrap the AphroditeEngine class to make it asynchronous. It
-    uses asyncio to create a background loop that keeps processing incoming
-    requests. The AphroditeEngine is kicked by the generate method when there
-    are requests in the waiting queue. The generate method yields the outputs
-    from the AphroditeEngine to the caller.
+    This class is used to wrap the AphroditeEngine class to make it
+    asynchronous. It uses asyncio to create a background loop that keeps
+    processing incoming requests. The AphroditeEngine is kicked by the
+    generate method when there are requests in the waiting queue.
+    The generate method yields the outputs from the AphroditeEngine
+    to the caller.
 
     NOTE: For the comprehensive list of arguments, see `AphroditeEngine`.
 
@@ -404,7 +405,8 @@ class AsyncAphrodite:
             sampling_params=sampling_params,
             prompt_token_ids=prompt_token_ids,
             arrival_time=arrival_time,
-            prefix_pos=prefix_pos,)
+            prefix_pos=prefix_pos,
+        )
 
         return stream
 
@@ -419,8 +421,8 @@ class AsyncAphrodite:
         """Generate outputs for a request.
 
         Generate outputs for a request. This method is a coroutine. It adds the
-        request into the waiting queue of the AphroditeEngine and streams the outputs
-        from the AphroditeEngine to the caller.
+        request into the waiting queue of the AphroditeEngine and streams the
+        outputs from the AphroditeEngine to the caller.
 
         Args:
             prompt: The prompt string. Can be None if prompt_token_ids is
@@ -442,6 +444,7 @@ class AsyncAphrodite:
         Details:
             - If the engine is not running, start the background loop,
               which iteratively invokes
+              # pylint: disable=line-too-long
               :meth:`~aphrodite.engine.async_llm_engine.AsyncAphrodite.engine_step`
               to process the waiting requests.
             - Add the request to the engine's `RequestTracker`.

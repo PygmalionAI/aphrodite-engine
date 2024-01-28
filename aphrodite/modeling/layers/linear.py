@@ -9,8 +9,8 @@ from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from aphrodite.modeling.megatron.communication_op import (
     tensor_model_parallel_all_reduce, tensor_model_parallel_all_gather)
-from aphrodite.modeling.megatron.utils import (
-    divide, split_tensor_along_last_dim)
+from aphrodite.modeling.megatron.utils import (divide,
+                                               split_tensor_along_last_dim)
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.common.logger import init_logger
 

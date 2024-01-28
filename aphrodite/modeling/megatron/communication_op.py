@@ -120,6 +120,7 @@ def broadcast_object_list(obj_list: List[Any],
     torch.distributed.broadcast_object_list(obj_list, src=src, group=group)
     return obj_list
 
+
 TensorMetadata = namedtuple("TensorMetadata", ["dtype", "size"])
 
 
@@ -168,7 +169,7 @@ def broadcast_tensor_dict(
         metadata_list = recv_metadata_list[0]
         tensor_dict = {}
         async_handles = []
-        for key, value in metadata_list:
+        for key, value in metadata_list:  # pylint: disable=not-an-iterable
             if isinstance(value, TensorMetadata):
                 tensor = torch.empty(value.size,
                                      dtype=value.dtype,

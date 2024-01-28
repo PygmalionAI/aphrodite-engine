@@ -21,7 +21,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Inference-only Yi model (https://01.ai) compatible with HuggingFace weights."""
+"""Inference-only Yi model compatible with HuggingFace weights."""
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -33,9 +33,9 @@ from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.modeling.layers.attention import PagedAttention
 from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                               MergedColumnParallelLinear,
-                                               QKVParallelLinear,
-                                               RowParallelLinear)
+                                              MergedColumnParallelLinear,
+                                              QKVParallelLinear,
+                                              RowParallelLinear)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (

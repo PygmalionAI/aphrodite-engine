@@ -9,6 +9,7 @@ from aphrodite.common.utils import in_wsl
 
 _SAMPLING_EPS = 1e-5
 
+
 class PersistentMetadata:
 
     def __init__(self, metadata: Optional[Dict[int, dict]] = None):
@@ -24,6 +25,7 @@ class OutputMetadata(PersistentMetadata):
         if seq_id not in self._metadata:
             self._metadata[seq_id] = {}
         self._metadata[seq_id][key] = val
+
 
 class SamplingMetadata:
     """Metadata for input sequences. Used in sampler.
@@ -185,7 +187,7 @@ class SamplingTensors:
                 do_typical_ps = True
             if do_mirostat is False and sampling_params.mirostat_mode == 2:
                 do_mirostat = True
-            
+
             if (i < sampling_metadata.num_prompts
                     and sampling_params.prompt_logprobs is not None):
                 # For tokens in the prompt that we only need to get their

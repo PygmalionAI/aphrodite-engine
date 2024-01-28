@@ -5,7 +5,6 @@ from typing import Callable, List, Optional, Union
 
 import torch
 
-
 _SAMPLING_EPS = 1e-5
 
 
@@ -14,10 +13,12 @@ class SamplingType(IntEnum):
     RANDOM = 1
     BEAM = 2
 
+
 LogitsProcessor = Callable[[List[int], torch.Tensor], torch.Tensor]
 """LogitsProcessor is a function that takes a list of previously generated
 tokens and a tensor of the logits for the next token, and returns a modified
 tensor of logits to sample from."""
+
 
 class SamplingParams:
     """Sampling parameters for text generation.

@@ -263,10 +263,10 @@ def create_logprobs(
                 for i, p in step_top_logprobs.items()
             } if step_top_logprobs else None)
 
-    logprobs.top_logprobs = [
-        {k: v if v > -1000 else -1000 for k, v in top_logprob.items()}
-        for top_logprob in logprobs.top_logprobs if top_logprob is not None
-    ]
+    logprobs.top_logprobs = [{
+        k: v if v > -1000 else -1000
+        for k, v in top_logprob.items()
+    } for top_logprob in logprobs.top_logprobs if top_logprob is not None]
 
     return logprobs
 

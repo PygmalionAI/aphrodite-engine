@@ -8,8 +8,8 @@ import torch.distributed
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig)
 from aphrodite.modeling import set_random_seed
-from aphrodite.modeling.megatron.communication_op import (
-    broadcast_tensor_dict)
+from aphrodite.modeling.megatron.communication_op import (broadcast_tensor_dict
+                                                          )
 from aphrodite.modeling.megatron.parallel_state import (
     initialize_model_parallel)
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
@@ -158,7 +158,7 @@ class Worker:
         # Wait for cache operations to finish.
         # TODO: Profile swapping overhead and optimize if needed.
         if cache_events is not None:
-            for event in cache_events:
+            for event in cache_events:  # pylint: disable=not-an-iterable
                 event.wait()
 
     @torch.inference_mode()

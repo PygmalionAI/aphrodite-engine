@@ -134,7 +134,6 @@ def _get_logits(hidden_states: torch.Tensor, embedding: torch.Tensor,
     return logits
 
 
-
 def _prune_hidden_states(
     hidden_states: torch.Tensor,
     sampling_metadata: SamplingMetadata,
@@ -725,6 +724,7 @@ def _build_sampler_output(
         sampler_output.append(
             SequenceGroupOutput(seq_outputs, group_prompt_logprobs))
     return sampler_output
+
 
 def _miro_store_args(seqids: List[int], mus: List[float],
                      output_metadata: OutputMetadata) -> None:

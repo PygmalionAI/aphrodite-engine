@@ -32,7 +32,7 @@ from transformers import PretrainedConfig
 from aphrodite.modeling.layers.linear import LinearMethodBase
 from aphrodite.modeling.models.llama import LlamaForCausalLM
 from aphrodite.modeling.weight_utils import (default_weight_loader,
-                                              hf_model_weights_iterator)
+                                             hf_model_weights_iterator)
 
 
 class DeciLMForCausalLM(LlamaForCausalLM):

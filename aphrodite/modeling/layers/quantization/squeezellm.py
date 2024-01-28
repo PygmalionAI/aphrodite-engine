@@ -5,7 +5,7 @@ from torch.nn.parameter import Parameter
 
 from aphrodite._C import ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                               set_weight_attrs)
+                                              set_weight_attrs)
 from aphrodite.modeling.layers.quantization.base_config import QuantizationConfig
 from aphrodite.common.utils import is_hip
 

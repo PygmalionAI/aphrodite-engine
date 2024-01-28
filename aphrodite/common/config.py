@@ -87,7 +87,8 @@ class ModelConfig:
         self.enforce_eager = enforce_eager
         self.max_context_len_to_capture = max_context_len_to_capture
 
-        if os.environ.get("APHRODITE_USE_MODELSCOPE", "False").lower() == "true":
+        if os.environ.get("APHRODITE_USE_MODELSCOPE",
+                          "False").lower() == "true":
             # download model from ModelScope hub,
             # lazy import so that modelscope is not required for normal use.
             from modelscope.hub.snapshot_download import snapshot_download  # pylint: disable=C
@@ -170,8 +171,8 @@ class ModelConfig:
             if is_hip(
             ) and self.quantization in rocm_not_supported_quantization:
                 raise ValueError(
-                    f"{self.quantization} quantization is currently not supported "
-                    f"in ROCm.")
+                    f"{self.quantization} quantization is currently not "
+                    "supported in ROCm.")
             logger.warning(f"{self.quantization} quantization is not fully "
                            "optimized yet. The speed can be slower than "
                            "non-quantized models.")

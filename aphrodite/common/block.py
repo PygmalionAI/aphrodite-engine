@@ -66,5 +66,6 @@ class PhysicalTokenBlock:
                 f'block_number={self.block_number}, '
                 f'ref_count={self.ref_count})')
 
+
 # Mapping: logical block number -> physical block.
 BlockTable = List[PhysicalTokenBlock]

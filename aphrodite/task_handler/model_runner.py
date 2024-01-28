@@ -5,15 +5,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from aphrodite.common.config import (
-    ModelConfig, ParallelConfig, SchedulerConfig)
+from aphrodite.common.config import (ModelConfig, ParallelConfig,
+                                     SchedulerConfig)
 from aphrodite.common.logger import init_logger
 from aphrodite.modeling import get_model, InputMetadata, SamplingMetadata
-from aphrodite.modeling.megatron.communication_op import (
-    broadcast_tensor_dict)
+from aphrodite.modeling.megatron.communication_op import (broadcast_tensor_dict
+                                                          )
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
-from aphrodite.common.sequence import (
-    SamplerOutput, SequenceData, SequenceGroupMetadata)
+from aphrodite.common.sequence import (SamplerOutput, SequenceData,
+                                       SequenceGroupMetadata)
 from aphrodite.modeling.sampling_metadata import PersistentMetadata
 from aphrodite.common.utils import in_wsl
 
@@ -161,7 +161,7 @@ class ModelRunner:
                                              dtype=torch.long)
         context_lens_tensor = torch.tensor(context_lens,
                                            dtype=torch.int,
-                                           device='cuda')
+                                           device="cuda")
         # Prepare prefix block tables
         max_prompt_block_table_len = max(len(t) for t in prefix_block_tables)
         block_tables = _make_tensor_with_pad(
@@ -174,10 +174,10 @@ class ModelRunner:
                                         len(prompt_lens) * max_prompt_len,
                                         max_prompt_len,
                                         dtype=torch.long,
-                                        device='cuda')
+                                        device="cuda")
         prompt_lens_tensor = torch.tensor(prompt_lens,
                                           dtype=torch.long,
-                                          device='cuda')
+                                          device="cuda")
 
         input_metadata = InputMetadata(
             is_prompt=True,
@@ -365,7 +365,7 @@ class ModelRunner:
         seq_data: Dict[int, SequenceData] = {}
         for seq_group_metadata in seq_group_metadata_list:
             seq_data.update(seq_group_metadata.seq_data)
-        
+
         seq_persistence_data: Dict[int, dict] = {}
         for grp in seq_group_metadata_list:
             seq_persistence_data.update(grp.persistent_data)
@@ -473,7 +473,7 @@ class ModelRunner:
         return output
 
     @torch.inference_mode()
-    def profile_run(self) -> None:
+    def profile_run(self) -> None:  # pylint: disable=useless-return
         # Enable top-k sampling to reflect the accurate memory usage.
         vocab_size = self.model_config.get_vocab_size()
         sampling_params = SamplingParams(top_p=0.99, top_k=vocab_size - 1)
@@ -574,7 +574,7 @@ class CUDAGraphRunner:
         self.input_buffers: Dict[str, torch.Tensor] = {}
         self.output_buffers: Dict[str, torch.Tensor] = {}
 
-    def capture(
+    def capture(  # pylint: disable=useless-return
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,

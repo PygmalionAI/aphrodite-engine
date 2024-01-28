@@ -18,9 +18,9 @@ from aphrodite.common.sequence import (SamplerOutput, Sequence, SequenceGroup,
                                        SequenceGroupOutput, SequenceOutput,
                                        SequenceStatus)
 from aphrodite.transformers_utils.tokenizer import (detokenize_incrementally,
-                                               get_tokenizer)
-from aphrodite.common.utils import (
-    Counter, set_cuda_visible_devices, get_ip, get_open_port)
+                                                    get_tokenizer)
+from aphrodite.common.utils import (Counter, set_cuda_visible_devices, get_ip,
+                                    get_open_port)
 
 if ray:
     from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
@@ -128,6 +128,7 @@ class AphroditeEngine:
     def _init_workers(self):
         # Lazy import the Worker to avoid importing torch.cuda/xformers
         # before CUDA_VISIBLE_DEVICES is set in the Worker
+        # pylint: disable=import-outside-toplevel
         from aphrodite.task_handler.worker import Worker
 
         assert self.parallel_config.world_size == 1, (
@@ -213,6 +214,7 @@ class AphroditeEngine:
 
         # Lazy import the Worker to avoid importing torch.cuda/xformers
         # before CUDA_VISIBLE_DEVICES is set in the Worker
+        # pylint: disable=import-outside-toplevel
         from aphrodite.task_handler.worker import Worker
 
         # Initialize torch distributed process group for the workers.
@@ -265,6 +267,7 @@ class AphroditeEngine:
         Then, it calculate the maximum possible number of GPU and CPU blocks
         that can be allocated with the remaining free memory.
         More details can be found in the
+        # pylint: disable=line-too-long
         :meth:`~aphrodite.task_handler.worker.Worker.profile_num_available_blocks` method
         from class :class:`~aphrodite.task_handler.Worker`.
 
