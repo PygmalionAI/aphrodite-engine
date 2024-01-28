@@ -38,6 +38,7 @@ class ModelRunner:
         self.model_config = model_config
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
+        self.kv_cache_dtype = kv_cache_dtype
         self.is_driver_worker = is_driver_worker
 
         # model_config can be None in tests/samplers/test_sampler.py.
@@ -62,7 +63,6 @@ class ModelRunner:
         self.graph_block_tables = None  # Set after initial profiling.
         # cache in_wsl result
         self.in_wsl = in_wsl()
-        self.kv_cache_dtype = kv_cache_dtype
 
     def load_model(self) -> None:
         self.model = get_model(self.model_config)
