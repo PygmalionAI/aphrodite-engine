@@ -236,7 +236,7 @@ class AphroditeEngine:
                     local_rank,
                     rank,
                     distributed_init_method,
-                    cache_config=cache_config,
+                    kv_cache_dtype=cache_config.cache_dtype,
                 ))
 
         driver_rank = 0
@@ -248,7 +248,7 @@ class AphroditeEngine:
             driver_local_rank,
             driver_rank,
             distributed_init_method,
-            cache_config=cache_config,
+            kv_cache_dtype=cache_config.cache_dtype,
             is_driver_worker=True,
         )
 
