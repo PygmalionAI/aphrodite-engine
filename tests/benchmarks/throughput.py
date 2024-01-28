@@ -65,6 +65,7 @@ def run_aphrodite(
     use_beam_search: bool,
     trust_remote_code: bool,
     dtype: str,
+    kv_cache_dtype: str,
 ) -> float:
     llm = LLM(
         model=model,
@@ -74,6 +75,7 @@ def run_aphrodite(
         seed=seed,
         trust_remote_code=trust_remote_code,
         dtype=dtype,
+        kv_cache_dtype=kv_cache_dtype,
     )
 
     # Add the requests to the engine.
@@ -174,7 +176,8 @@ def main(args: argparse.Namespace):  # pylint: disable=redefined-outer-name
                                      args.quantization,
                                      args.tensor_parallel_size, args.seed,
                                      args.n, args.use_beam_search,
-                                     args.trust_remote_code, args.dtype)
+                                     args.trust_remote_code, args.dtype,
+                                     args.kv_cache_dtype)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -225,6 +228,13 @@ if __name__ == "__main__":
     parser.add_argument("--trust-remote-code",
                         action="store_true",
                         help="trust remote code from huggingface")
+    parser.add_argument(
+        "--kv-cache-dtype",
+        type=str,
+        choices=["auto", "fp8_e5m2"],
+        default="auto",
+        help=
+        'Data type for kv cache storage. If "auto", will use model data type.')
     parser.add_argument(
         "--dtype",
         type=str,
