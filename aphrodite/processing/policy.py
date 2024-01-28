@@ -1,5 +1,4 @@
-from collections import deque
-from typing import Deque
+from typing import List
 
 from aphrodite.common.sequence import SequenceGroup
 
@@ -16,14 +15,13 @@ class Policy:
     def sort_by_priority(
         self,
         now: float,
-        seq_groups: Deque[SequenceGroup],
-    ) -> Deque[SequenceGroup]:
-        return deque(
-            sorted(
-                seq_groups,
-                key=lambda seq_group: self.get_priority(now, seq_group),
-                reverse=True,
-            ))
+        seq_groups: List[SequenceGroup],
+    ) -> List[SequenceGroup]:
+        return sorted(
+            seq_groups,
+            key=lambda seq_group: self.get_priority(now, seq_group),
+            reverse=True,
+        )
 
 
 class FCFS(Policy):

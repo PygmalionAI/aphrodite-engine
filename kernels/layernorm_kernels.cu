@@ -1,6 +1,6 @@
 #include <torch/extension.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <ATen/cuda/CUDAContext.h>
 
 #include "dispatch_utils.h"
 #include "reduction.cuh"
@@ -35,7 +35,6 @@ __global__ void rms_norm_kernel(
   }
 }
 
-// TODO: Further optimize this kernel.
 template<typename scalar_t>
 __global__ void fused_add_rms_norm_kernel(
   scalar_t* __restrict__ input,           // [..., hidden_size]

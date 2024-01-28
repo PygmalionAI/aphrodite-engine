@@ -1,5 +1,3 @@
-#pragma once
-
 #include <torch/extension.h>
 
 #include <map>
@@ -28,3 +26,7 @@ void gather_cached_kv(
   torch::Tensor& key_cache,
   torch::Tensor& value_cache,
   torch::Tensor& slot_mapping);
+
+void convert_fp8(
+  torch::Tensor& src_cache,
+  torch::Tensor& dst_cache);

@@ -1,5 +1,4 @@
-#pragma once
-
+#include <cstdint>
 #include <torch/extension.h>
 
 void paged_attention_v1(
@@ -13,7 +12,8 @@ void paged_attention_v1(
   torch::Tensor& context_lens,
   int block_size,
   int max_context_len,
-  const c10::optional<torch::Tensor>& alibi_slopes);
+  const c10::optional<torch::Tensor>& alibi_slopes,
+  const bool enable_fp8_kv_cache);
 
 void paged_attention_v2(
   torch::Tensor& out,
@@ -29,7 +29,8 @@ void paged_attention_v2(
   torch::Tensor& context_lens,
   int block_size,
   int max_context_len,
-  const c10::optional<torch::Tensor>& alibi_slopes);
+  const c10::optional<torch::Tensor>& alibi_slopes,
+  const bool enable_fp8_kv_cache);
 
 void rms_norm(
   torch::Tensor& out,
@@ -63,6 +64,7 @@ void gelu_fast(
   torch::Tensor& out,
   torch::Tensor& input);
 
+// The AWQ kernels are only available on CUDA
 #ifndef USE_ROCM
 torch::Tensor awq_gemm(
   torch::Tensor _in_feats,

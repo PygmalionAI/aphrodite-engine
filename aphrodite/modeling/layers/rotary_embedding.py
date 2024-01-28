@@ -22,13 +22,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Rotary Positional Embeddings."""
-import math
 from typing import Any, Dict, Optional, Tuple, Union
+import math
 
 import torch
 import torch.nn as nn
 
-from aphrodite._C import ops
+from aphrodite._C import ops as pos_encoding_ops
 
 
 def _rotate_neox(x: torch.Tensor) -> torch.Tensor:
@@ -103,7 +103,7 @@ class RotaryEmbedding(nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """PyTorch-native implementation equivalent to forward()."""
+        """PyTorch-native implementation. Equivalent to forward()."""
         query = query.view(*query.shape[:-1], -1, self.head_size)
         key = key.view(*key.shape[:-1], -1, self.head_size)
 
@@ -144,10 +144,11 @@ class RotaryEmbedding(nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        # ops.rotary_embedding() is an in-place operation that
+        # pos_encoding_ops.rotary_embedding() is an in-place operation that
         # updates the query and key tensors.
-        ops.rotary_embedding(positions, query, key, self.head_size,
-                             self.cos_sin_cache, self.is_neox_style)
+        pos_encoding_ops.rotary_embedding(positions, query, key,
+                                          self.head_size, self.cos_sin_cache,
+                                          self.is_neox_style)
         return query, key
 
 
@@ -269,10 +270,7 @@ def _yarn_get_mscale(scale: float = 1) -> float:
 
 
 class YaRNScalingRotaryEmbedding(RotaryEmbedding):
-    """RotaryEmbedding extended with YaRN method.
-
-    Credits to Peng et al. github.com/jquesnelle/yarn
-    """
+    """Rotary embedding extended with YaRN method (Peng et al.)"""
 
     def __init__(
         self,
@@ -344,7 +342,6 @@ def get_rope(
            tuple(rope_scaling.items()) if rope_scaling is not None else None)
     if key in _ROPE_DICT:
         return _ROPE_DICT[key]
-
     if rope_scaling is None:
         rotary_emb = RotaryEmbedding(head_size, rotary_dim, max_position, base,
                                      is_neox_style)

@@ -1,5 +1,4 @@
 from typing import Optional, Union
-import os
 
 import torch
 from transformers import PretrainedConfig
@@ -42,19 +41,16 @@ class ModelConfig:
         revision: The specific model version to use. It can be a branch name,
             a tag name, or a commit id. If unspecified, will use the default
             version.
-        tokenizer_revision: The specific tokenizer version to use. It can be a
-            branch name, a tag name, or a commit id. If unspecified, will use
-            the default version.
         max_model_len: Maximum length of a sequence (including prompt and
             output). If None, will be derived from the model.
         quantization: Quantization method that was used to quantize the model
-            weights. If None, we assume the model weights are not quantized.
+            weights. If None, we assume the model weights are not quantized
         enforce_eager: Whether to enforce eager execution. If True, we will
             disable CUDA graph and always execute the model in eager mode.
             If False, we will use CUDA graph and eager execution in hybrid.
         max_context_len_to_capture: Maximum context len covered by CUDA graphs.
-            When a sequence has context length larger than this, we fall back
-            to eager mode.
+            When a sequence has context length larger than this, we will fall
+            back to eager mode.
     """
 
     def __init__(
@@ -68,7 +64,6 @@ class ModelConfig:
         dtype: Union[str, torch.dtype],
         seed: int,
         revision: Optional[str] = None,
-        tokenizer_revision: Optional[str] = None,
         max_model_len: Optional[int] = None,
         quantization: Optional[str] = None,
         enforce_eager: bool = False,
@@ -82,12 +77,11 @@ class ModelConfig:
         self.load_format = load_format
         self.seed = seed
         self.revision = revision
-        self.tokenizer_revision = tokenizer_revision
         self.quantization = quantization
         self.enforce_eager = enforce_eager
         self.max_context_len_to_capture = max_context_len_to_capture
 
-        self.hf_config = get_config(self.model, trust_remote_code, revision)
+        self.hf_config = get_config(model, trust_remote_code, revision)
         self.dtype = _get_and_verify_dtype(self.hf_config, dtype)
         self.max_model_len = _get_and_verify_max_len(self.hf_config,
                                                      max_model_len)
@@ -122,6 +116,7 @@ class ModelConfig:
             raise ValueError(
                 "Currently, the 'pt' format is not supported for Mixtral. "
                 "Please use the 'safetensors' format instead. ")
+
         self.load_format = load_format
 
     def _verify_tokenizer_mode(self) -> None:
@@ -133,13 +128,12 @@ class ModelConfig:
         self.tokenizer_mode = tokenizer_mode
 
     def _verify_quantization(self) -> None:
-        supported_quantization = ["awq", "gptq", "squeezellm"]
+        supported_quantization = ["awq", "squeezellm", "gptq"]
         rocm_not_supported_quantization = ["awq"]
         if self.quantization is not None:
             self.quantization = self.quantization.lower()
 
-        # Parse quantization method from the HF model config, if available.
-        hf_quant_config = getattr(self.hf_config, "quantization_config", None)
+        hf_quant_config = getattr(self.hf_config, "quant_config", None)
         if hf_quant_config is not None:
             hf_quant_method = str(hf_quant_config["quant_method"]).lower()
             if self.quantization is None:
@@ -152,13 +146,14 @@ class ModelConfig:
         if self.quantization is not None:
             if self.quantization not in supported_quantization:
                 raise ValueError(
-                    f"Unknown quantization method: {self.quantization}. Must "
-                    f"be one of {supported_quantization}.")
+                    f"Unknown quantization method: {self.quantization}. "
+                    f"Must be one of {supported_quantization}.")
             if is_hip(
             ) and self.quantization in rocm_not_supported_quantization:
                 raise ValueError(
-                    f"{self.quantization} quantization is currently not supported "
-                    f"in ROCm.")
+                    f"{self.quantization} quantization method is currently "
+                    "not supported in ROCm.")
+        if self.quantization is not None:
             logger.warning(f"{self.quantization} quantization is not fully "
                            "optimized yet. The speed can be slower than "
                            "non-quantized models (16/32bit).")
@@ -255,6 +250,7 @@ class CacheConfig:
         gpu_memory_utilization: Fraction of GPU memory to use for the
             Aphrodite execution.
         swap_space: Size of the CPU swap space per GPU (in GiB).
+        cache_dtype: Data type fro the KV cache.
     """
 
     def __init__(
@@ -262,11 +258,17 @@ class CacheConfig:
         block_size: int,
         gpu_memory_utilization: float,
         swap_space: int,
+        cache_dtype: str,
         sliding_window: Optional[int] = None,
     ) -> None:
         self.block_size = block_size
         self.gpu_memory_utilization = gpu_memory_utilization
         self.swap_space_bytes = swap_space * _GB
+        self.cache_dtype = cache_dtype
+        if cache_dtype and "fp8" in cache_dtype.lower():
+            # As FP8 is not a formal data type, we use
+            # torch.uint8 instead.
+            self.cache_dtype = torch.uint8
         self.sliding_window = sliding_window
         self._verify_args()
 
@@ -356,8 +358,6 @@ class SchedulerConfig:
         if max_num_batched_tokens is not None:
             self.max_num_batched_tokens = max_num_batched_tokens
         else:
-            # If max_model_len is too short, use 2048 as the default value for
-            # higher throughput.
             self.max_num_batched_tokens = max(max_model_len, 2048)
         self.max_num_seqs = max_num_seqs
         self.max_model_len = max_model_len
@@ -405,8 +405,6 @@ def _get_and_verify_dtype(
         dtype = dtype.lower()
         if dtype == "auto":
             if config_dtype == torch.float32:
-                # Following the common practice, we use float16 for float32
-                # models.
                 torch_dtype = torch.float16
             else:
                 torch_dtype = config_dtype
@@ -455,7 +453,6 @@ def _get_and_verify_max_len(
         "max_position_embeddings",
         "n_positions",
         "max_seq_len",
-        "seq_length",
         "max_sequence_length",
         "max_seq_length",
         "seq_len",
@@ -468,7 +465,6 @@ def _get_and_verify_max_len(
         if max_model_len is not None:
             # If max_model_len is specified, we use it.
             return max_model_len
-
         default_max_len = 2048
         logger.warning(
             "The model's config.json does not contain any of the following "

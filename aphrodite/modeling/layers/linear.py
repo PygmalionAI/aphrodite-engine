@@ -9,8 +9,8 @@ from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from aphrodite.modeling.megatron.communication_op import (
     tensor_model_parallel_all_reduce, tensor_model_parallel_all_gather)
-from aphrodite.modeling.megatron.utils import (
-    divide, split_tensor_along_last_dim)
+from aphrodite.modeling.megatron.utils import (divide,
+                                               split_tensor_along_last_dim)
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.common.logger import init_logger
 
@@ -275,8 +275,8 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                 current_shard_offset += output_size
             packed_dim = getattr(param, "packed_dim", None)
             for shard_id, shard_offset, shard_size in shard_offsets:
-                # If quantized, we need to adjust the offset and size to account
-                # for the packing.
+                # If quantized, we need to adjust the offset and size to
+                # account for the packing.
                 if packed_dim == output_dim:
                     shard_size = shard_size // param.pack_factor
                     shard_offset = shard_offset // param.pack_factor
@@ -423,10 +423,7 @@ class QKVParallelLinear(ColumnParallelLinear):
                 shard_offset = shard_offset // param.pack_factor
             param_data = param_data.narrow(output_dim, shard_offset,
                                            shard_size)
-            if loaded_shard_id == "q":
-                shard_id = tp_rank
-            else:
-                shard_id = tp_rank // self.num_kv_head_replicas
+            shard_id = tp_rank // self.num_kv_head_replicas
             start_idx = shard_id * shard_size
             loaded_weight = loaded_weight.narrow(output_dim, start_idx,
                                                  shard_size)

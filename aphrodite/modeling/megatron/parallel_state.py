@@ -1,9 +1,9 @@
 # Copyright 2023 The PygmalionAI team.
 # Copyright 2023 The vLLM team.
-# Adapted from
-# https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/parallel_state.py
+# pylint: disable=line-too-long
+# Adapted from https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/parallel_state.py
 # Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
-"""Tensor and pipeline parallel groups."""
+"""Model and data parallel groups."""
 
 import torch
 
@@ -85,7 +85,7 @@ def initialize_model_parallel(
 
 
 def model_parallel_is_initialized():
-    """Check if tensor and pipeline parallel groups are initialized."""
+    """Check if model and data parallel groups are initialized."""
     return (_TENSOR_MODEL_PARALLEL_GROUP is not None
             and _PIPELINE_MODEL_PARALLEL_GROUP is not None)
 

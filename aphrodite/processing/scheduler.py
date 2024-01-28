@@ -1,14 +1,13 @@
-from collections import deque
 import enum
 import time
-from typing import Deque, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 from aphrodite.common.config import CacheConfig, SchedulerConfig
 from aphrodite.processing.block_manager import AllocStatus, BlockSpaceManager
 from aphrodite.processing.policy import PolicyFactory
 from aphrodite.common.logger import init_logger
 from aphrodite.common.sequence import (Sequence, SequenceData, SequenceGroup,
-                           SequenceGroupMetadata, SequenceStatus)
+                                       SequenceGroupMetadata, SequenceStatus)
 
 logger = init_logger(__name__)
 
@@ -30,7 +29,7 @@ class SchedulerOutputs:
 
     def __init__(
         self,
-        scheduled_seq_groups: Iterable[SequenceGroup],
+        scheduled_seq_groups: List[SequenceGroup],
         prompt_run: bool,
         num_batched_tokens: int,
         blocks_to_swap_in: Dict[int, int],
@@ -76,52 +75,38 @@ class Scheduler:
             num_cpu_blocks=self.cache_config.num_cpu_blocks,
             sliding_window=self.cache_config.sliding_window)
 
+        # TODO: Use deque instead of list for better performance.
         # Sequence groups in the WAITING state.
-        self.waiting: Deque[SequenceGroup] = deque()
+        self.waiting: List[SequenceGroup] = []
         # Sequence groups in the RUNNING state.
-        self.running: Deque[SequenceGroup] = deque()
+        self.running: List[SequenceGroup] = []
         # Sequence groups in the SWAPPED state.
-        self.swapped: Deque[SequenceGroup] = deque()
+        self.swapped: List[SequenceGroup] = []
 
     def add_seq_group(self, seq_group: SequenceGroup) -> None:
         # Add sequence groups to the waiting queue.
         self.waiting.append(seq_group)
 
     def abort_seq_group(self, request_id: Union[str, Iterable[str]]) -> None:
-        """Aborts a sequence group with the given ID.
-
-        Check if the sequence group with the given ID
-            is present in any of the state queue.
-        If present, remove the sequence group from the state queue.
-            Also, if any of the sequences in the sequence group is not finished,
-                free the sequence with status `FINISHED_ABORTED`.
-        Otherwise, do nothing.
-
-        Args:
-            request_id: The ID(s) of the sequence group to abort.
-        """
         if isinstance(request_id, str):
             request_id = (request_id, )
         request_ids = set(request_id)
         for state_queue in [self.waiting, self.running, self.swapped]:
-            aborted_groups = []
-            for seq_group in state_queue:
-                if not request_ids:
-                    # Using 'break' here may add two extra iterations,
-                    # but is acceptable to reduce complexity .
-                    break
+            # We need to reverse the list as we are removing elements
+            # from it as we iterate over it. If we don't do it,
+            # indices will get messed up and we will skip over elements.
+            for seq_group in reversed(state_queue):
                 if seq_group.request_id in request_ids:
-                    # Appending aborted group into pending list.
-                    aborted_groups.append(seq_group)
+                    # Remove the sequence group from the state queue.
+                    state_queue.remove(seq_group)
+                    for seq in seq_group.get_seqs():
+                        if seq.is_finished():
+                            continue
+                        seq.status = SequenceStatus.FINISHED_ABORTED
+                        self.free_seq(seq)
                     request_ids.remove(seq_group.request_id)
-            for aborted_group in aborted_groups:
-                # Remove the sequence group from the state queue.
-                state_queue.remove(aborted_group)
-                for seq in seq_group.get_seqs():
-                    if seq.is_finished():
-                        continue
-                    seq.status = SequenceStatus.FINISHED_ABORTED
-                    self.free_seq(seq)
+                    if not request_ids:
+                        return
 
     def has_unfinished_seqs(self) -> bool:
         return self.waiting or self.running or self.swapped
@@ -167,7 +152,7 @@ class Scheduler:
                     for seq in waiting_seqs:
                         seq.status = SequenceStatus.FINISHED_IGNORED
                     ignored_seq_groups.append(seq_group)
-                    self.waiting.popleft()
+                    self.waiting.pop(0)
                     continue
 
                 # If the sequence group cannot be allocated, stop.
@@ -181,7 +166,7 @@ class Scheduler:
                     for seq in waiting_seqs:
                         seq.status = SequenceStatus.FINISHED_IGNORED
                     ignored_seq_groups.append(seq_group)
-                    self.waiting.popleft()
+                    self.waiting.pop(0)
                     continue
 
                 # If the number of batched tokens exceeds the limit, stop.
@@ -203,7 +188,7 @@ class Scheduler:
                     break
                 seq_lens = new_seq_lens
 
-                seq_group = self.waiting.popleft()
+                seq_group = self.waiting.pop(0)
                 self._allocate(seq_group)
                 self.running.append(seq_group)
                 num_curr_seqs += num_new_seqs
@@ -229,14 +214,14 @@ class Scheduler:
         self.running = self.policy.sort_by_priority(now, self.running)
 
         # Reserve new token slots for the running sequence groups.
-        running: Deque[SequenceGroup] = deque()
+        running: List[SequenceGroup] = []
         preempted: List[SequenceGroup] = []
         while self.running:
-            seq_group = self.running.popleft()
+            seq_group = self.running.pop(0)
             while not self.block_manager.can_append_slot(seq_group):
                 if self.running:
                     # Preempt the lowest-priority sequence groups.
-                    victim_seq_group = self.running.pop()
+                    victim_seq_group = self.running.pop(-1)
                     self._preempt(victim_seq_group, blocks_to_swap_out)
                     preempted.append(victim_seq_group)
                 else:
@@ -270,7 +255,7 @@ class Scheduler:
                         self.scheduler_config.max_num_seqs):
                     break
 
-                seq_group = self.swapped.popleft()
+                seq_group = self.swapped.pop(0)
                 self._swap_in(seq_group, blocks_to_swap_in)
                 self._append_slot(seq_group, blocks_to_copy)
                 num_curr_seqs += num_new_seqs
@@ -305,12 +290,12 @@ class Scheduler:
         for seq_group in scheduler_outputs.scheduled_seq_groups:
             seq_data: Dict[int, SequenceData] = {}
             block_tables: Dict[int, List[int]] = {}
-            # persistent_data: Dict[int, dict] = {}
+            persistent_data: Dict[int, dict] = {}
             for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
                 seq_id = seq.seq_id
                 seq_data[seq_id] = seq.data
                 block_tables[seq_id] = self.block_manager.get_block_table(seq)
-                # persistent_data[seq_id] = seq.persistent_data
+                persistent_data[seq_id] = seq.persistent_data
 
             seq_group_metadata = SequenceGroupMetadata(
                 request_id=seq_group.request_id,
@@ -318,7 +303,7 @@ class Scheduler:
                 seq_data=seq_data,
                 sampling_params=seq_group.sampling_params,
                 block_tables=block_tables,
-                # persistent_data=persistent_data,
+                persistent_data=persistent_data,
             )
             seq_group_metadata_list.append(seq_group_metadata)
         return seq_group_metadata_list, scheduler_outputs
@@ -381,7 +366,7 @@ class Scheduler:
         elif preemption_mode == PreemptionMode.SWAP:
             self._preempt_by_swap(seq_group, blocks_to_swap_out)
         else:
-            raise AssertionError("Invalid preemption mode.")
+            assert False, "Invalid preemption mode."
 
     def _preempt_by_recompute(
         self,
@@ -394,7 +379,7 @@ class Scheduler:
             self.block_manager.free(seq)
         # NOTE: For FCFS, we insert the preempted sequence group to the front
         # of the waiting queue.
-        self.waiting.appendleft(seq_group)
+        self.waiting.insert(0, seq_group)
 
     def _preempt_by_swap(
         self,

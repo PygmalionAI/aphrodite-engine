@@ -13,6 +13,16 @@
   AT_DISPATCH_SWITCH(                                                       \
     TYPE, NAME, APHRODITE_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__))
 
+#define APHRODITE_DISPATCH_CASE_FLOATING_BYTE_TYPES(...)                    \
+  AT_DISPATCH_CASE(at::ScalarType::Float, __VA_ARGS__)                      \
+  AT_DISPATCH_CASE(at::ScalarType::Half, __VA_ARGS__)                       \
+  AT_DISPATCH_CASE(at::ScalarType::BFloat16, __VA_ARGS__)                   \
+  AT_DISPATCH_CASE(at::ScalarType::Byte, __VA_ARGS__)
+
+#define APHRODITE_DISPATCH_FLOATING_BYTE_TYPES(TYPE, NAME, ...)             \
+  AT_DISPATCH_SWITCH(                                                       \
+    TYPE, NAME, APHRODITE_DISPATCH_CASE_FLOATING_BYTE_TYPES(__VA_ARGS__))
+
 #define APHRODITE_DISPATCH_CASE_INTEGRAL_TYPES(...)                         \
   AT_DISPATCH_CASE(at::ScalarType::Byte, __VA_ARGS__)                       \
   AT_DISPATCH_CASE(at::ScalarType::Char, __VA_ARGS__)                       \
