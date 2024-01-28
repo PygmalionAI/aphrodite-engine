@@ -82,7 +82,7 @@ class MixtralMLP(nn.Module):
                                    bias=False,
                                    linear_method=linear_method)
 
-        # TODO: Use vllm's SiluAndMul
+        # TODO: Use aphrodite's SiluAndMul
         self.act_fn = nn.SiLU()
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
