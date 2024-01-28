@@ -96,6 +96,7 @@ class PagedAttention(nn.Module):
                 key_cache,
                 value_cache,
                 input_metadata.slot_mapping.flatten(),
+                input_metadata.kv_cache_dtype,
             )
 
         if input_metadata.is_prompt:
@@ -243,6 +244,7 @@ def _paged_attention(
             block_size,
             input_metadata.max_context_len,
             alibi_slopes,
+            input_metadata.kv_cache_dtype,
         )
     else:
         # Run PagedAttention V2.
@@ -273,5 +275,6 @@ def _paged_attention(
             block_size,
             input_metadata.max_context_len,
             alibi_slopes,
+            input_metadata.kv_cache_dtype,
         )
     return output
