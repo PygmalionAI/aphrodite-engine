@@ -109,6 +109,7 @@ class BlockSpaceManager:
             num_required_blocks = min(num_required_blocks,
                                       self.block_sliding_window)
         num_free_gpu_blocks = self.gpu_allocator.get_num_free_blocks()
+
         # Use watermark to avoid frequent cache eviction.
         if (self.num_total_gpu_blocks - num_required_blocks <
                 self.watermark_blocks):
@@ -152,13 +153,14 @@ class BlockSpaceManager:
         block_table = self.block_tables[seq.seq_id]
 
         if len(block_table) < len(logical_blocks):
-            # The sequence has a new logical block.
-            # Allocate a new physical block.
             if (self.block_sliding_window
                     and len(block_table) >= self.block_sliding_window):
+                # re-use a block
                 block_table.append(block_table[len(block_table) %
                                                self.block_sliding_window])
             else:
+                # The sequence has a new logical block.
+                # Allocate a new physical block.
                 block = self.gpu_allocator.allocate()
                 block_table.append(block)
                 return None

@@ -1,7 +1,4 @@
-"""
-Multi-head Paged Attention by Woosuk et al. (vLLM) Copyright (c) 2023.
-https://vllm.ai/
-"""
+"""Multi-head attention."""
 from typing import List, Optional
 
 import torch
@@ -10,7 +7,7 @@ from xformers import ops as xops
 from xformers.ops.fmha.attn_bias import (BlockDiagonalCausalMask,
                                          LowerTriangularMaskWithTensorBias)
 
-from aphrodite._C import ops as attention_ops
+from aphrodite._C import ops
 from aphrodite._C import cache_ops
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.common.utils import is_hip
@@ -132,7 +129,8 @@ class PagedAttention(nn.Module):
                     input_metadata.attn_bias = attn_bias
                 else:
                     input_metadata.attn_bias = _make_alibi_bias(
-                        self.alibi_slopes, batch_size, seq_len, query.dtype)
+                        self.alibi_slopes, self.num_kv_heads, batch_size,
+                        seq_len, query.dtype)
 
             # TODO: Too many view operations. Let's try to reduce them
             # in the future for code readability.
@@ -158,20 +156,15 @@ class PagedAttention(nn.Module):
             output = out.view_as(query)
         else:
             # Decoding run.
-            if key_cache is not None and value_cache is not None:
-                output = _paged_attention(
-                    query,
-                    key_cache,
-                    value_cache,
-                    input_metadata,
-                    self.num_kv_heads,
-                    self.scale,
-                    self.alibi_slopes,
-                )
-            else:
-                # This happens during the initial memory profiling run
-                # for CUDA graphs.
-                output = torch.zeros_like(query)
+            output = _paged_attention(
+                query,
+                key_cache,
+                value_cache,
+                input_metadata,
+                self.num_kv_heads,
+                self.scale,
+                self.alibi_slopes,
+            )
 
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
@@ -179,31 +172,34 @@ class PagedAttention(nn.Module):
 
 def _make_alibi_bias(
     alibi_slopes: torch.Tensor,
+    num_kv_heads: int,
     batch_size: int,
     seq_len: int,
     dtype: torch.dtype,
 ) -> LowerTriangularMaskWithTensorBias:
-    bias = torch.arange(seq_len, dtype=dtype)
+    bias = torch.arange(seq_len, dtype=dtype, device="cuda")
     # NOTE: HF uses
     #     `bias = bias[None, :].repeat(prompt_len, 1)`
-    # here. It that both biases give the same results, but
+    # here. We find that both biases give the same results, but
     # the bias below more accurately follows the original ALiBi
     # paper.
     bias = bias[None, :] - bias[:, None]
-    bias = bias.to(alibi_slopes.device)
 
     # When using custom attention bias, xformers requires the bias to
     # be sliced from a tensor whose length is a multiple of 8.
     padded_len = (seq_len + 7) // 8 * 8
+    num_heads = alibi_slopes.shape[0]
     bias = torch.empty(
         batch_size,
-        alibi_slopes.shape[0],
+        num_heads,
         seq_len,
         padded_len,
         device=alibi_slopes.device,
         dtype=dtype,
     )[:, :, :, :seq_len].copy_(bias)
     bias.mul_(alibi_slopes[:, None, None])
+    if num_heads != num_kv_heads:
+        bias = bias.unflatten(1, (num_kv_heads, num_heads // num_kv_heads))
     attn_bias = LowerTriangularMaskWithTensorBias(bias)
     return attn_bias
 
@@ -219,7 +215,6 @@ def _paged_attention(
 ) -> torch.Tensor:
     output = torch.empty_like(query)
 
-    enable_fp8_kv_cache = key_cache.dtype == torch.uint8
     block_size = value_cache.shape[3]
     num_seqs, num_heads, head_size = query.shape
     max_num_partitions = (
@@ -236,7 +231,7 @@ def _paged_attention(
         max_num_partitions == 1 or num_seqs * num_heads > 512)
     if use_v1:
         # Run PagedAttention V1.
-        attention_ops.paged_attention_v1(
+        ops.paged_attention_v1(
             output,
             query,
             key_cache,
@@ -248,7 +243,6 @@ def _paged_attention(
             block_size,
             input_metadata.max_context_len,
             alibi_slopes,
-            enable_fp8_kv_cache,
         )
     else:
         # Run PagedAttention V2.
@@ -264,7 +258,7 @@ def _paged_attention(
             device=output.device,
         )
         max_logits = torch.empty_like(exp_sums)
-        attention_ops.paged_attention_v2(
+        ops.paged_attention_v2(
             output,
             exp_sums,
             max_logits,
@@ -279,6 +273,5 @@ def _paged_attention(
             block_size,
             input_metadata.max_context_len,
             alibi_slopes,
-            enable_fp8_kv_cache,
         )
     return output

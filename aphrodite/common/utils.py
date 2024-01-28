@@ -1,9 +1,9 @@
-"""Utils."""
-from os import path
 import enum
+import os
 import socket
-from platform import uname
 import uuid
+from platform import uname
+from typing import List
 
 import psutil
 import torch
@@ -37,7 +37,6 @@ def is_hip() -> bool:
 def get_max_shared_memory_bytes(gpu: int = 0) -> int:
     """Returns the maximum shared memory per thread block in bytes."""
     # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html
-    # pylint: disable=invalid-name
     cudaDevAttrMaxSharedMemoryPerBlockOptin = 97 if not is_hip() else 74
     max_shared_mem = cuda_utils.get_device_attribute(
         cudaDevAttrMaxSharedMemoryPerBlockOptin, gpu)
@@ -45,21 +44,8 @@ def get_max_shared_memory_bytes(gpu: int = 0) -> int:
 
 
 def get_cpu_memory() -> int:
-    """Returns the total CPU memory of the node or container in bytes."""
-
-    memory_limit = psutil.virtual_memory().total
-
-    for limit_file in [
-            "/sys/fs/cgroup/memory/memory.limit_in_bytes",  # v1
-            "/sys/fs/cgroup/memory.max"  # v2
-    ]:
-        if path.exists(limit_file):
-            with open(limit_file) as f:
-                content = f.read().strip()
-                if content.isnumeric():  # v2 can have "max" as limit
-                    memory_limit = min(memory_limit, int(content))
-
-    return memory_limit
+    """Returns the total CPU memory of the node in bytes."""
+    return psutil.virtual_memory().total
 
 
 def random_uuid() -> str:
@@ -71,7 +57,17 @@ def in_wsl() -> bool:
     return "microsoft" in " ".join(uname()).lower()
 
 
-def get_open_port():
+def get_ip() -> str:
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect(("8.8.8.8", 80))  # Doesn't need to be reachable
+    return s.getsockname()[0]
+
+
+def get_open_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         return s.getsockname()[1]
+
+
+def set_cuda_visible_devices(device_ids: List[int]) -> None:
+    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, device_ids))
