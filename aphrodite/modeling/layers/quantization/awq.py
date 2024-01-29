@@ -66,6 +66,12 @@ class AWQConfig(QuantizationConfig):
     def get_scaled_act_names(self) -> List[str]:
         return ["gelu", "gelu_fast", "gelu_new", "gelu_pytorch_tanh"]
 
+    def merge_weight(self) -> bool:
+        return True
+
+    def rope_style(self) -> Optional[bool]:
+        return None
+
 
 class AWQLinearMethod(LinearMethodBase):
     """Linear method for AWQ.
