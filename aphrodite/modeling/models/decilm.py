@@ -31,24 +31,26 @@ from transformers import PretrainedConfig
 
 from aphrodite.modeling.layers.linear import LinearMethodBase
 from aphrodite.modeling.models.llama import LlamaForCausalLM
-from aphrodite.modeling.hf_downloader import (default_weight_loader,
-                                              hf_model_weights_iterator)
-
-DECI_LM_MODEL_NAME = "Deci/DeciLM-7b-instruct"
+from aphrodite.modeling.weight_utils import (default_weight_loader,
+                                             hf_model_weights_iterator)
 
 
 class DeciLMForCausalLM(LlamaForCausalLM):
     """
     Implementation for https://huggingface.co/Deci/DeciLM-7b-instruct.
-    Based on the llama modeling code..
+    Based on the llama executor.
+
     The main difference is that DeciLM uses Variable Grouped Query Attention.
     The constant number of GQA heads in the decoder is overriden with a value
-    per layer. Usually, in the HuggingFace implementation, Instead of
-    `config.num_key_value_heads`, we use
-    `config.num_key_value_heads_per_layer[i]` which varies.
-    Currently, PagedAttention does not work well with variable GQA,
-    so we normalize the weights upon loading, and use uniform GQA with the max
-    value instead.
+    per layer.
+
+    Usually, in the HuggingFace implementation, instead of
+    "config.num_key_value_heads", we use
+    "config.num_key_value_heads_per_layer[i]" which varies.
+
+    Currently, PagedAttention does not work well with variable GQA, so we
+    normalize the weights upon loading, and use uniform GQA with the max value
+    instead.
     """
 
     def __init__(
@@ -78,28 +80,31 @@ class DeciLMForCausalLM(LlamaForCausalLM):
                 model_name_or_path, cache_dir, load_format, revision):
             if "rotary_emb.inv_freq" in name:
                 continue
-            if "rotary_emb.cos_cached" in name:
-                continue
-            if "rotary_emb.sin_cached" in name:
-                continue
 
             if "k_proj" in name or "v_proj" in name:
-                loaded_weight = self.degroup_weight(loaded_weight)
+                loaded_weight = self._degroup_weight(loaded_weight)
 
             for (param_name, weight_name, shard_id) in stacked_params_mapping:
                 if weight_name not in name:
                     continue
-                param = params_dict[name.replace(weight_name, param_name)]
+                name = name.replace(weight_name, param_name)
+                # Skip loading extra bias for GPTQ models.
+                if name.endswith(".bias") and name not in params_dict:
+                    continue
+                param = params_dict[name]
                 weight_loader = param.weight_loader
                 weight_loader(param, loaded_weight, shard_id)
                 break
             else:
+                # Skip loading extra bias for GPTQ models.
+                if name.endswith(".bias") and name not in params_dict:
+                    continue
                 param = params_dict[name]
                 weight_loader = getattr(param, "weight_loader",
                                         default_weight_loader)
                 weight_loader(param, loaded_weight)
 
-    def degroup_weight(self, loaded_weight: torch.Tensor) -> torch.Tensor:
+    def _degroup_weight(self, loaded_weight: torch.Tensor) -> torch.Tensor:
         hidden_size = self.config.hidden_size
         head_size = self.config.hidden_size // self.config.num_attention_heads
         target_num_kv_heads = self.config.num_key_value_heads

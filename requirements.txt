@@ -1,6 +1,6 @@
 ninja
 psutil
-ray ~= 2.5.1
+ray >= 2.9
 sentencepiece
 numpy
 torch >= 2.1.2
@@ -11,11 +11,10 @@ xformers >= 0.0.23.post1
 einops  # Required for phi-1_5
 fschat >= 0.2.23
 pydantic == 1.10.13
-pyarrow # needed for ray
-pandas
 fastapi
 colorlog
 einops # for phi
 aioprometheus[starlette] # for prometheus metrics
 triton >= 2.1.0
 lark == 1.1.8 # for grammars
+pynvml == 11.5.0

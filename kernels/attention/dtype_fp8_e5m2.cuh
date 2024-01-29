@@ -3,10 +3,13 @@
 #include "attention_generic.cuh"
 
 #include <stdint.h>
+#ifdef ENABLE_FP8_E5M2
 #include <cuda_fp8.h>
+#endif
 
 namespace aphrodite {
-// FP8 vector types for quantization of KV Cache
+#ifdef ENABLE_FP8_E5M2
+// fp8 vector types for quantization of kv cache
 
 template<>
 struct Vec<uint8_t, 1> {
@@ -27,5 +30,6 @@ template<>
 struct Vec<uint8_t, 8> {
     using Type = uint2;
 };
+#endif // ENABLE_FP8_E5M2
 
 } // namespace aphrodite

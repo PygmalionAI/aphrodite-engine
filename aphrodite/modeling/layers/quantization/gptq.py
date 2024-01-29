@@ -6,7 +6,7 @@ from fractions import Fraction
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite._C import ops as quantization_ops
+from aphrodite._C import ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.modeling.layers.quantization.base_config import (
@@ -207,13 +207,13 @@ class GPTQLinearMethod(LinearMethodBase):
             else:
                 weights["g_idx"] = torch.empty((1, 1), device="meta")
             weights["exllama_state"] = ExllamaState.READY
-            quantization_ops.gptq_shuffle(weights["qweight"], weights["g_idx"],
-                                          self.quant_config.weight_bits)
-        output = quantization_ops.gptq_gemm(
-            reshaped_x, weights["qweight"], weights["qzeros"],
-            weights["scales"], weights["g_idx"],
-            weights["exllama_state"] == ExllamaState.READY,
-            self.quant_config.weight_bits)
+            ops.gptq_shuffle(weights["qweight"], weights["g_idx"],
+                             self.quant_config.weight_bits)
+        output = ops.gptq_gemm(reshaped_x, weights["qweight"],
+                               weights["qzeros"], weights["scales"],
+                               weights["g_idx"],
+                               weights["exllama_state"] == ExllamaState.READY,
+                               self.quant_config.weight_bits)
         if bias is not None:
             output = output + bias
         return output.reshape(out_shape)

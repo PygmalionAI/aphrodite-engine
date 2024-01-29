@@ -265,6 +265,12 @@ def create_logprobs(
                 tokenizer.convert_ids_to_tokens(i): p
                 for i, p in step_top_logprobs.items()
             } if step_top_logprobs else None)
+
+    logprobs.top_logprobs = [{
+        k: v if v > -1000 else -1000
+        for k, v in top_logprob.items()
+    } for top_logprob in logprobs.top_logprobs if top_logprob is not None]
+
     return logprobs
 
 
@@ -335,6 +341,8 @@ async def create_chat_completion(
             mirostat_mode=request.mirostat_mode,
             mirostat_tau=request.mirostat_tau,
             mirostat_eta=request.mirostat_eta,
+            dynatemp_range=request.dynatemp_range,
+            dynatemp_exponent=request.dynatemp_exponent,
             stop=request.stop,
             stop_token_ids=request.stop_token_ids,
             include_stop_str_in_output=request.include_stop_str_in_output,
@@ -617,6 +625,8 @@ async def create_completion(
             mirostat_mode=request.mirostat_mode,
             mirostat_tau=request.mirostat_tau,
             mirostat_eta=request.mirostat_eta,
+            dynatemp_range=request.dynatemp_range,
+            dynatemp_exponent=request.dynatemp_exponent,
             stop=request.stop,
             stop_token_ids=request.stop_token_ids,
             include_stop_str_in_output=request.include_stop_str_in_output,

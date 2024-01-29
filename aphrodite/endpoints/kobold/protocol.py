@@ -8,6 +8,8 @@ class SamplingParams(BaseModel):
     presence_penalty: float = Field(0.0, alias="presence_penalty")
     frequency_penalty: float = Field(0.0, alias="rep_pen")
     temperature: float = Field(1.0, alias="temperature")
+    dynatemp_range: Optional[float] = 0.0
+    dynatemp_exponent: Optional[float] = 1.0
     top_p: float = Field(1.0, alias="top_p")
     top_k: float = Field(-1, alias="top_k")
     min_p: float = Field(0.0, alias="min_p")
@@ -55,6 +57,8 @@ class KAIGenerationInputSchema(BaseModel):
     eta_cutoff: Optional[NonNegativeFloat] = 0.0
     typical: Optional[confloat(ge=0, le=1)] = 1.0
     temperature: Optional[NonNegativeFloat] = 1.0
+    dynatemp_range: Optional[NonNegativeFloat] = 0.0
+    dynatemp_exponent: Optional[NonNegativeFloat] = 1.0
     use_memory: Optional[bool]
     use_story: Optional[bool]
     use_authors_note: Optional[bool]

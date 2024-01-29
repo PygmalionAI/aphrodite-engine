@@ -21,11 +21,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Inference-only LLaMA model compatible with HuggingFace weights.
-
-The input of the model is flattened to a 1D tensor of tokens. The model uses
-InputMetadata to extract the original 2D shape of the input.
-"""
+"""Inference-only LLaMA model compatible with HuggingFace weights."""
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -43,13 +39,14 @@ from aphrodite.modeling.layers.linear import (LinearMethodBase,
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding, ParallelLMHead)
+    VocabParallelEmbedding, ParallelLMHead, DEFAULT_VOCAB_PADDING_SIZE)
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_world_size)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (default_weight_loader,
                                               hf_model_weights_iterator)
 from aphrodite.common.sequence import SamplerOutput
+from aphrodite.common.config import LoRAConfig
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
@@ -133,6 +130,7 @@ class LlamaAttention(nn.Module):
             bias=False,
             linear_method=linear_method,
         )
+
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.head_dim,
@@ -229,14 +227,19 @@ class LlamaModel(nn.Module):
         self,
         config: LlamaConfig,
         linear_method: Optional[LinearMethodBase] = None,
+        lora_config: Optional[LoRAConfig] = None,
     ) -> None:
         super().__init__()
         self.config = config
         self.padding_idx = config.pad_token_id
-        self.vocab_size = config.vocab_size
+        lora_vocab = (lora_config.lora_extra_vocab_size *
+                      (lora_config.max_loras or 1)) if lora_config else 0
+        self.vocab_size = config.vocab_size + lora_vocab
+        self.org_vocab_size = config.vocab_size
         self.embed_tokens = VocabParallelEmbedding(
-            config.vocab_size,
+            self.vocab_size,
             config.hidden_size,
+            org_num_embeddings=config.vocab_size,
         )
         self.layers = nn.ModuleList([
             LlamaDecoderLayer(config, linear_method)
@@ -267,18 +270,31 @@ class LlamaModel(nn.Module):
 
 
 class LlamaForCausalLM(nn.Module):
+    supports_lora = True
 
     def __init__(
         self,
         config: LlamaConfig,
         linear_method: Optional[LinearMethodBase] = None,
+        lora_config: Optional[LoRAConfig] = None,
     ) -> None:
         super().__init__()
         self.config = config
         self.linear_method = linear_method
-        self.model = LlamaModel(config, linear_method)
-        self.lm_head = ParallelLMHead(config.vocab_size, config.hidden_size)
-        self.sampler = Sampler(config.vocab_size)
+        self.model = LlamaModel(config, linear_method, lora_config=lora_config)
+        unpadded_vocab_size = config.vocab_size
+        if lora_config:
+            unpadded_vocab_size += lora_config.lora_extra_vocab_size
+        self.lm_head = ParallelLMHead(
+            unpadded_vocab_size,
+            config.hidden_size,
+            org_num_embeddings=config.vocab_size,
+            padding_size=DEFAULT_VOCAB_PADDING_SIZE
+            # We need bigger padding if using lora for kernel
+            # compatibility
+            if not lora_config else lora_config.lora_vocab_padding_size,
+        )
+        self.sampler = Sampler(unpadded_vocab_size, config.vocab_size)
 
     def forward(
         self,
@@ -286,7 +302,7 @@ class LlamaForCausalLM(nn.Module):
         positions: torch.Tensor,
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
-    ) -> SamplerOutput:
+    ) -> torch.Tensor:
         hidden_states = self.model(input_ids, positions, kv_caches,
                                    input_metadata)
         return hidden_states
@@ -295,7 +311,7 @@ class LlamaForCausalLM(nn.Module):
         self,
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
-    ) -> SamplerOutput:
+    ) -> Optional[SamplerOutput]:
         next_tokens = self.sampler(self.lm_head.weight, hidden_states,
                                    sampling_metadata)
         return next_tokens
@@ -318,24 +334,25 @@ class LlamaForCausalLM(nn.Module):
                 model_name_or_path, cache_dir, load_format, revision):
             if "rotary_emb.inv_freq" in name:
                 continue
-            if "rotary_emb.cos_cached" in name:
-                continue
-            if "rotary_emb.sin_cached" in name:
+            if ("rotary_emb.cos_cached" in name
+                    or "rotary_emb.sin_cached" in name):
+                # Models trained using ColossalAI may include these tensors in
+                # the checkpoint. Skip them.
                 continue
             for (param_name, weight_name, shard_id) in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)
-                # skip loading extra bias for GPTQ models
-                if name.endswith("bias") and name not in params_dict:
+                # Skip loading extra bias for GPTQ models.
+                if name.endswith(".bias") and name not in params_dict:
                     continue
                 param = params_dict[name]
                 weight_loader = param.weight_loader
                 weight_loader(param, loaded_weight, shard_id)
                 break
             else:
-                # skip loading extra bias for GPTQ models
-                if name.endswith("bias") and name not in params_dict:
+                # Skip loading extra bias for GPTQ models.
+                if name.endswith(".bias") and name not in params_dict:
                     continue
                 param = params_dict[name]
                 weight_loader = getattr(param, "weight_loader",

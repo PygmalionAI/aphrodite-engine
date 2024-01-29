@@ -1,4 +1,5 @@
-#include <cstdint>
+#pragma once
+
 #include <torch/extension.h>
 
 void paged_attention_v1(
@@ -13,7 +14,7 @@ void paged_attention_v1(
   int block_size,
   int max_context_len,
   const c10::optional<torch::Tensor>& alibi_slopes,
-  const bool enable_fp8_kv_cache);
+  const std::string& kv_cache_dtype);
 
 void paged_attention_v2(
   torch::Tensor& out,
@@ -30,7 +31,7 @@ void paged_attention_v2(
   int block_size,
   int max_context_len,
   const c10::optional<torch::Tensor>& alibi_slopes,
-  const bool enable_fp8_kv_cache);
+  const std::string& kv_cache_dtype);
 
 void rms_norm(
   torch::Tensor& out,
@@ -64,7 +65,6 @@ void gelu_fast(
   torch::Tensor& out,
   torch::Tensor& input);
 
-// The AWQ kernels are only available on CUDA
 #ifndef USE_ROCM
 torch::Tensor awq_gemm(
   torch::Tensor _in_feats,
@@ -72,6 +72,14 @@ torch::Tensor awq_gemm(
   torch::Tensor _scaling_factors,
   torch::Tensor _zeros,
   int split_k_iters);
+
+torch::Tensor awq_dequantize(
+    torch::Tensor _kernel,
+    torch::Tensor _scaling_factors,
+    torch::Tensor _zeros,
+    int split_k_iters,
+    int thx,
+    int thy);
 #endif
 
 void squeezellm_gemm(
@@ -94,7 +102,23 @@ void gptq_shuffle(
   torch::Tensor q_perm,
   int bit);
 
-void aphrodite_bincount(
-  torch::Tensor src,
-  torch::Tensor out);
-  
+#ifndef USE_ROCM
+using fptr_t = uint64_t;
+fptr_t init_custom_ar(torch::Tensor &meta, torch::Tensor &rank_data,
+                    const std::vector<std::string> &handles,
+                    const std::vector<int64_t> &offsets, int rank,
+                    bool full_nvlink);
+bool should_custom_ar(torch::Tensor &inp, int max_size, int world_size,
+                      bool full_nvlink);
+void all_reduce_reg(fptr_t _fa, torch::Tensor &inp, torch::Tensor &out);
+void all_reduce_unreg(fptr_t _fa, torch::Tensor &inp, torch::Tensor &reg_buffer,
+                      torch::Tensor &out);
+void dispose(fptr_t _fa);
+int meta_size();
+void register_buffer(fptr_t _fa, torch::Tensor &t,
+                     const std::vector<std::string> &handles,
+                     const std::vector<int64_t> &offsets);
+std::pair<std::vector<uint8_t>, std::vector<int64_t>> get_graph_buffer_ipc_meta(fptr_t _fa);
+void register_graph_buffers(fptr_t _fa, const std::vector<std::string> &handles,
+                            const std::vector<std::vector<int64_t>> &offsets);
+#endif

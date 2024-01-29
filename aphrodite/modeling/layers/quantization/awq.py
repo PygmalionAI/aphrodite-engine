@@ -2,18 +2,11 @@ from typing import Any, Dict, List, Optional
 
 import torch
 from torch.nn.parameter import Parameter
+
+from aphrodite._C import ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.modeling.layers.quantization.base_config import QuantizationConfig
-from aphrodite.common.logger import init_logger
-from aphrodite.common.utils import is_hip
-
-logger = init_logger(__name__)
-
-if is_hip():
-    logger.warning("AWQ is not supported on ROCm.")
-else:
-    from aphrodite._C import ops as quantization_ops
 
 
 class AWQConfig(QuantizationConfig):
@@ -87,7 +80,7 @@ class AWQLinearMethod(LinearMethodBase):
     def create_weights(self, input_size_per_partition: int,
                        output_size_per_partition: int, input_size: int,
                        output_size: int,
-                       params_dtype: torch.dtype) -> Dict[str, torch.Tensor]:
+                       params_dtype: torch.dtype) -> Dict[str, Any]:
         if input_size_per_partition % self.quant_config.group_size != 0:
             raise ValueError(
                 "The input size is not aligned with the quantized "
@@ -160,8 +153,15 @@ class AWQLinearMethod(LinearMethodBase):
         pack_factor = self.quant_config.pack_factor
         out_shape = (x.shape[:-1] + (qweight.shape[-1] * pack_factor, ))
         reshaped_x = x.reshape(-1, x.shape[-1])
-        out = quantization_ops.awq_gemm(reshaped_x, qweight, scales, qzeros,
-                                        pack_factor)
+        # num_tokens >= threshold
+        FP16_MATMUL_HEURISTIC_CONDITION = x.shape[:-1].numel() >= 256
+
+        if FP16_MATMUL_HEURISTIC_CONDITION:
+            out = ops.awq_dequantize(qweight, scales, qzeros, 0, 0, 0)
+            out = torch.matmul(reshaped_x, out)
+        else:
+            out = ops.awq_gemm(reshaped_x, qweight, scales, qzeros,
+                               pack_factor)
         if bias is not None:
             out = out + bias
         return out.reshape(out_shape)
