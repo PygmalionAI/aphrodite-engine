@@ -9,11 +9,11 @@ import torch.distributed
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig, LoRAConfig)
 from aphrodite.modeling import set_random_seed
-from aphrodite.modeling.megatron.communication_op import (broadcast_tensor_dict
-                                                          )
+from aphrodite.modeling.megatron.communication_op import (
+    broadcast_tensor_dict)
 from aphrodite.modeling.megatron.custom_all_reduce import init_custom_ar
 from aphrodite.modeling.megatron.parallel_state import (
-    initialize_model_parallel)
+    ensure_model_parallel_initialized)
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 from aphrodite.task_handler.cache_engine import CacheEngine
 from aphrodite.task_handler.model_runner import ModelRunner
@@ -85,7 +85,6 @@ class Worker:
                                      self.distributed_init_method)
         if not self.parallel_config.disable_custom_all_reduce:
             init_custom_ar()
-
         # Initialize the model.
         set_random_seed(self.model_config.seed)
 
@@ -252,8 +251,8 @@ def init_distributed_environment(
 
     # A small all_reduce for warmup.
     torch.distributed.all_reduce(torch.zeros(1).cuda())
-    initialize_model_parallel(parallel_config.tensor_parallel_size,
-                              parallel_config.pipeline_parallel_size)
+    ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
+                                      parallel_config.pipeline_parallel_size)
 
 
 def _check_if_gpu_supports_dtype(torch_dtype: torch.dtype):
