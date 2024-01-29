@@ -240,8 +240,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--disable-custom-all-reduce",
         action="store_true",
-        help="disable custom all reduce for the Aphrodite backend"
-    )
+        help="disable custom all reduce for the Aphrodite backend")
     args = parser.parse_args()
 
     if args.backend == "aphrodite":

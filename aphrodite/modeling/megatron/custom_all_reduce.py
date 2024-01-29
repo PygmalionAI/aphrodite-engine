@@ -75,6 +75,7 @@ def capture():
             handle.register_graph_buffers()
 
 
+# pylint: disable=redefined-builtin
 def custom_all_reduce(input: torch.Tensor) -> Optional[torch.Tensor]:
     ca_handle = get_handle()
     # when custom allreduce is disabled, this will be None
@@ -167,6 +168,7 @@ class CustomAllreduce:
         self.register_buffer(self.buffer)
 
     def _get_ipc_meta(self, inp: torch.Tensor):
+        # pylint: disable=protected-access
         data = inp.untyped_storage()._share_cuda_()
         shard_data = (
             data[1],  # ipc handle to base ptr

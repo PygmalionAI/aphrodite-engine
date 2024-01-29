@@ -354,7 +354,8 @@ class ModelRunner:
             block_tables=block_tables,
             use_cuda_graph=use_captured_graph,
         )
-        return input_tokens, input_positions, input_metadata, lora_index_mapping, lora_prompt_mapping, lora_requests
+        return (input_tokens, input_positions, input_metadata,
+                lora_index_mapping, lora_prompt_mapping, lora_requests)
 
     def _prepare_sample(
         self,
@@ -513,7 +514,8 @@ class ModelRunner:
                 perform_sampling=False,
             )
 
-        return input_tokens, input_positions, input_metadata, sampling_metadata, lora_requests, lora_mapping
+        return (input_tokens, input_positions, input_metadata,
+                sampling_metadata, lora_requests, lora_mapping)
 
     @torch.inference_mode()
     def execute_model(
@@ -521,8 +523,9 @@ class ModelRunner:
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
         kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
     ) -> Optional[SamplerOutput]:
-        input_tokens, input_positions, input_metadata, sampling_metadata, lora_requests, lora_mapping = (
-            self.prepare_input_tensors(seq_group_metadata_list))
+        (input_tokens, input_positions, input_metadata, sampling_metadata,
+         lora_requests,
+         lora_mapping) = (self.prepare_input_tensors(seq_group_metadata_list))
 
         if self.lora_config:
             self.set_active_loras(lora_requests, lora_mapping)
