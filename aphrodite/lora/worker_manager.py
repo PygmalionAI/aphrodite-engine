@@ -4,8 +4,9 @@ from typing import Any, List, Optional, Set, Type, Union
 
 import torch
 
-from aphrodite.lora.models import (TARGET_MODULES_QKV, LoRAModel, LoRAModelManager,
-                              LRUCacheLoRAModelManager, create_lora_manager)
+from aphrodite.lora.models import (TARGET_MODULES_QKV, LoRAModel,
+                                   LoRAModelManager, LRUCacheLoRAModelManager,
+                                   create_lora_manager)
 from aphrodite.lora.request import LoRARequest
 from aphrodite.lora.layers import LoRAMapping
 from aphrodite.common.config import LoRAConfig

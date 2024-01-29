@@ -447,7 +447,7 @@ class AsyncAphrodite:
                     "inspect the output to find the stacktrace of the "
                     "error that caused the background loop to stop "
                     "(AsyncEngineDeadError).")
-        
+
         if arrival_time is None:
             arrival_time = time.time()
         prompt_token_ids = await self.engine.encode_request_async(

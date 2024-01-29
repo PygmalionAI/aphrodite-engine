@@ -398,6 +398,7 @@ class SchedulerConfig:
                 "be greater than or equal to max_num_seqs "
                 f"({self.max_num_seqs}).")
 
+
 @dataclass
 class LoRAConfig:
     max_lora_rank: int
@@ -444,6 +445,7 @@ class LoRAConfig:
                 "Due to limitations of the custom LoRA CUDA kernel, "
                 "max_num_batched_tokens must be <= 65528 when "
                 "LoRA is enabled.")
+
 
 _STR_DTYPE_TO_TORCH_DTYPE = {
     "half": torch.float16,

@@ -3,19 +3,14 @@ import os
 import socket
 import uuid
 from platform import uname
-from typing import List
 
 import psutil
 import torch
 import asyncio
 from functools import partial
-from typing import (
-    Awaitable,
-    Callable,
-    TypeVar,
-)
+from typing import (Any, Awaitable, Callable, Hashable, Optional, TypeVar,
+                    List)
 from collections import OrderedDict
-from typing import Any, Hashable, Optional
 
 from aphrodite._C import cuda_utils
 
@@ -39,6 +34,7 @@ class Counter:
 
     def reset(self) -> None:
         self.counter = 0
+
 
 class LRUCache:
 
@@ -102,6 +98,7 @@ class LRUCache:
             self.remove_oldest()
         self.cache.clear()
 
+
 def is_hip() -> bool:
     return torch.version.hip is not None
 
@@ -128,6 +125,7 @@ def in_wsl() -> bool:
     # Reference: https://github.com/microsoft/WSL/issues/4071
     return "microsoft" in " ".join(uname()).lower()
 
+
 def make_async(func: Callable[..., T]) -> Callable[..., Awaitable[T]]:
     """Take a blocking function, and run it on in an executor thread.
     This function prevents the blocking function from blocking the
@@ -141,6 +139,7 @@ def make_async(func: Callable[..., T]) -> Callable[..., Awaitable[T]]:
         return loop.run_in_executor(executor=None, func=p_func)
 
     return _async_wrapper
+
 
 def get_ip() -> str:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

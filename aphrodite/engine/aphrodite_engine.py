@@ -125,7 +125,7 @@ class AphroditeEngine:
 
     def get_tokenizer_for_seq(self, sequence: Sequence):
         return self.tokenizer.get_lora_tokenizer(sequence.lora_request)
-    
+
     def _init_workers(self):
         # Lazy import the Worker to avoid importing torch.cuda/xformers
         # before CUDA_VISIBLE_DEVICES is set in the Worker
@@ -354,7 +354,7 @@ class AphroditeEngine:
                      placement_group,
                      log_stats=not engine_args.disable_log_stats)
         return engine
-    
+
     def encode_request(
         self,
         request_id: str,
@@ -934,7 +934,7 @@ class AphroditeEngine:
                 == self.get_tokenizer_for_seq(seq).eos_token_id):
             seq.status = SequenceStatus.FINISHED_STOPPED
             return
-        
+
     def add_lora(self, lora_request: LoRARequest) -> bool:
         assert lora_request.lora_int_id > 0, "lora_id must be greater than 0."
         return self._run_workers(

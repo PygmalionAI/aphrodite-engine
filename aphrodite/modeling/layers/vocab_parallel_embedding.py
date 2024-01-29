@@ -15,6 +15,7 @@ from aphrodite.modeling.utils import set_weight_attrs
 
 DEFAULT_VOCAB_PADDING_SIZE = 64
 
+
 def pad_vocab_size(vocab_size: int,
                    pad_to: int = DEFAULT_VOCAB_PADDING_SIZE) -> int:
     """Pad the vocab size to the given value."""

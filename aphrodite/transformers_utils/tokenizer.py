@@ -68,6 +68,7 @@ def get_tokenizer(
             "slowdown. Consider using a fast tokenizer instead.")
     return tokenizer
 
+
 def get_lora_tokenizer(lora_request: LoRARequest, *args,
                        **kwargs) -> Optional[PreTrainedTokenizer]:
     if lora_request is None:
@@ -104,18 +105,21 @@ class TokenizerGroup:
         else:
             self.lora_tokenizers = None
 
-    def encode(self,
-               prompt: str,
-               request_id: Optional[str] = None,
-               lora_request: Optional[LoRARequest] = None) -> List[int]:
+    def encode(
+        self,
+        prompt: str,
+        request_id: Optional[str] = None,  # pylint: disable=unused-argument
+        lora_request: Optional[LoRARequest] = None
+    ) -> List[int]:
         tokenizer = self.get_lora_tokenizer(lora_request)
         return tokenizer.encode(prompt)
 
     async def encode_async(
-            self,
-            prompt: str,
-            request_id: Optional[str] = None,
-            lora_request: Optional[LoRARequest] = None) -> List[int]:
+        self,
+        prompt: str,
+        request_id: Optional[str] = None,  # pylint: disable=unused-argument
+        lora_request: Optional[LoRARequest] = None
+    ) -> List[int]:
         tokenizer = await self.get_lora_tokenizer_async(lora_request)
         return tokenizer.encode(prompt)
 

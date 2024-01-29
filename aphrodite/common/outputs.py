@@ -4,6 +4,7 @@ from aphrodite.common.sequence import (PromptLogprobs, SampleLogprobs,
                                        SequenceGroup, SequenceStatus)
 from aphrodite.lora.request import LoRARequest
 
+
 class CompletionOutput:
     """The output data of one completion output of a request.
 

@@ -208,7 +208,7 @@ class Worker:
         output = self.model_runner.execute_model(seq_group_metadata_list,
                                                  self.gpu_cache)
         return output
-    
+
     def add_lora(self, lora_request: LoRARequest) -> bool:
         return self.model_runner.add_lora(lora_request)
 

@@ -136,7 +136,7 @@ class ModelRunner:
             # is always the first token in the sequence.
             input_positions.append(
                 list(range(prefix_len, prefix_len + len(prompt_tokens))))
-            
+
             lora_id = seq_group_metadata.lora_int_id
 
             if lora_id > 0:
@@ -337,7 +337,7 @@ class ModelRunner:
                 dtype=torch.int,
                 device="cuda",
             )
-        
+
         lora_index_mapping = [
             _pad_to_max(mapping, 1, pad=0) for mapping in lora_index_mapping
         ]
@@ -353,7 +353,8 @@ class ModelRunner:
             block_tables=block_tables,
             use_cuda_graph=use_captured_graph,
         )
-        return input_tokens, input_positions, input_metadata, lora_index_mapping, lora_prompt_mapping, lora_requests
+        return (input_tokens, input_positions, input_metadata,
+                lora_index_mapping, lora_prompt_mapping, lora_requests)
 
     def _prepare_sample(
         self,
@@ -512,7 +513,8 @@ class ModelRunner:
                 perform_sampling=False,
             )
 
-        return input_tokens, input_positions, input_metadata, sampling_metadata, lora_requests, lora_mapping
+        return (input_tokens, input_positions, input_metadata,
+                sampling_metadata, lora_requests, lora_mapping)
 
     @torch.inference_mode()
     def execute_model(
@@ -520,8 +522,9 @@ class ModelRunner:
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
         kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
     ) -> Optional[SamplerOutput]:
-        input_tokens, input_positions, input_metadata, sampling_metadata, lora_requests, lora_mapping = (
-            self.prepare_input_tensors(seq_group_metadata_list))
+        (input_tokens, input_positions, input_metadata, sampling_metadata,
+         lora_requests,
+         lora_mapping) = (self.prepare_input_tensors(seq_group_metadata_list))
         if self.lora_config:
             self.set_active_loras(lora_requests, lora_mapping)
         # Execute the model.
@@ -599,7 +602,7 @@ class ModelRunner:
         self.execute_model(seqs, kv_caches)
         torch.cuda.synchronize()
         return
-    
+
     def remove_all_loras(self) -> bool:
         if not self.lora_manager:
             raise RuntimeError("LoRA is not enabled.")
