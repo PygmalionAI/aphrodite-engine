@@ -1,13 +1,16 @@
+import contextlib
 import io
 import os
 import re
 import subprocess
 from typing import List, Set
 import warnings
+from pathlib import Path
 
 from packaging.version import parse, Version
 import setuptools
 import torch
+import torch.utils.cpp_extension as torch_cpp_ext
 from torch.utils.cpp_extension import (
     BuildExtension, CUDAExtension, CUDA_HOME, ROCM_HOME)
 
@@ -88,6 +91,10 @@ def get_hipcc_rocm_version():
         print("Could not find HIP version in the output")
         return None
 
+def glob(pattern: str):
+    root = Path(__name__).parent
+    return [str(p) for p in root.glob(pattern)]
+
 def get_nvcc_cuda_version(cuda_dir: str) -> Version:
     """Get the CUDA version from nvcc.
 
@@ -152,6 +159,8 @@ if _is_cuda() and not compute_capabilities:
                 "GPUs with compute capability below 6.0 are not supported.")
         compute_capabilities.add(f"{major}.{minor}")
 
+ext_modules = []
+
 if _is_cuda():
     nvcc_cuda_version = get_nvcc_cuda_version(CUDA_HOME)
     if not compute_capabilities:
@@ -189,6 +198,8 @@ if _is_cuda():
             raise RuntimeError(
                 "CUDA 11.8 or higher is required for compute capability 9.0.")
 
+    NVCC_FLAGS_PUNICA = NVCC_FLAGS.copy()
+
     # Add target compute capabilities to NVCC flags.
     for capability in compute_capabilities:
         num = capability[0] + capability[2]
@@ -197,11 +208,51 @@ if _is_cuda():
             NVCC_FLAGS += [
                 "-gencode", f"arch=compute_{num},code=compute_{num}"
             ]
+        if int(capability[0]) >= 8:
+            NVCC_FLAGS_PUNICA += [
+                "-gencode", f"arch=compute_{num},code=sm_{num}"
+            ]
+            if capability.endswith("+PTX"):
+                NVCC_FLAGS_PUNICA += [
+                    "-gencode", f"arch=compute_{num},code=compute_{num}"
+                ]
 
     # Use NVCC threads to parallelize the build.
     if nvcc_cuda_version >= Version("11.2"):
-        num_threads = min(os.cpu_count(), 8)
+        nvcc_threads = int(os.getenv("NVCC_THREADS", 8))
+        num_threads = min(os.cpu_count(), nvcc_threads)
         NVCC_FLAGS += ["--threads", str(num_threads)]
+
+    # changes for punica kernels
+    NVCC_FLAGS += torch_cpp_ext.COMMON_NVCC_FLAGS
+    REMOVE_NVCC_FLAGS = [
+        '-D__CUDA_NO_HALF_OPERATORS__',
+        '-D__CUDA_NO_HALF_CONVERSIONS__',
+        '-D__CUDA_NO_BFLOAT16_CONVERSIONS__',
+        '-D__CUDA_NO_HALF2_OPERATORS__',
+    ]
+    for flag in REMOVE_NVCC_FLAGS:
+        with contextlib.suppress(ValueError):
+            torch_cpp_ext.COMMON_NVCC_FLAGS.remove(flag)
+
+    install_punica = bool(int(os.getenv("VLLM_INSTALL_PUNICA_KERNELS", "1")))
+    device_count = torch.cuda.device_count()
+    for i in range(device_count):
+        major, minor = torch.cuda.get_device_capability(i)
+        if major < 8:
+            install_punica = False
+            break
+    if install_punica:
+        ext_modules.append(
+            CUDAExtension(
+                name="aphrodite._punica_C",
+                sources=["kernels/punica/punica_ops.cc"] +
+                glob("kernels/punica/bgmv/*.cu"),
+                extra_compile_args={
+                    "cxx": CXX_FLAGS,
+                    "nvcc": NVCC_FLAGS_PUNICA,
+                },
+            ))
 
 elif _is_hip():
     amd_arch = get_amdgpu_offload_arch()
@@ -210,7 +261,6 @@ elif _is_hip():
             f"Only the following arch is supported: {ROCM_SUPPORTED_ARCHS}"
             f"amdgpu_arch_found: {amd_arch}")
 
-ext_modules = []
 
 aphrodite_extension_sources = [
     "kernels/cache_kernels.cu",
