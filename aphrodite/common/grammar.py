@@ -213,7 +213,9 @@ class IncrementalParserState:
     _full_seq_trie: Trie
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({self.interactive_parser.parser_state.state_stack})"
+        class_name = self.__class__.__name__
+        state_stack = self.interactive_parser.parser_state.state_stack
+        return f"{class_name}({state_stack})"
 
     @classmethod
     @functools.lru_cache(1000)
@@ -222,7 +224,7 @@ class IncrementalParserState:
             grammar,
             regex=True,  # use `regex` not `re`
             start=start,
-            parser='lalr',
+            parser="lalr",
             cache=True,  # results in 2-3x faster loading
         )
         base_interactive_parser = lark_parser.parse_interactive()
@@ -262,6 +264,7 @@ class IncrementalParserState:
 
     def __getitem__(self, full_seq):
         """Get the parser state, given a full sequence"""
+        # pylint: disable=unused-variable
         match_seq, parser, remainder_seq = self._full_seq_trie.get_best(
             full_seq)
         if parser is None:
@@ -333,7 +336,7 @@ class IncrementalParserState:
     @memoize_by_instance
     def get_stepped_parser_state(self, new_token_str):
         ip = copy(self.interactive_parser)
-        ip.feed_token(Token(new_token_str, ''))
+        ip.feed_token(Token(new_token_str, ""))
         return ip
 
     @memoize_by_instance
@@ -440,7 +443,7 @@ class GrammarLogitsProcessor(NextTokenValidator):
         N = len(logits)
         mask = torch.zeros(N, dtype=torch.bool)
         mask[valid] = True
-        logits[~mask] = float('-inf')
+        logits[~mask] = float("-inf")
         return logits
 
 
@@ -465,4 +468,3 @@ class RayRemoteGrammarLogitsProcessor:
         logits_cpu = logits.cpu()
         result_id = self.actor.process_logits.remote(token_ids, logits_cpu)
         return ray.get(result_id)
-    
