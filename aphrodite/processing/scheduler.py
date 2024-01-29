@@ -250,7 +250,6 @@ class Scheduler:
                     curr_loras.add(lora_int_id)
                 self.waiting.popleft()
 
-                seq_group = self.waiting.popleft()
                 self._allocate(seq_group)
                 self.running.append(seq_group)
                 num_curr_seqs += num_new_seqs

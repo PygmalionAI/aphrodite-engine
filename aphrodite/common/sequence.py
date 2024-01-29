@@ -367,8 +367,8 @@ class SequenceGroupMetadata:
         seq_data: Dict[int, SequenceData],
         sampling_params: SamplingParams,
         block_tables: Dict[int, List[int]],
-        lora_request: Optional[LoRARequest] = None,
         persistent_data: Dict[int, dict],
+        lora_request: Optional[LoRARequest] = None,
         prefix: Optional[Prefix] = None,
     ) -> None:
         self.request_id = request_id
@@ -376,8 +376,8 @@ class SequenceGroupMetadata:
         self.seq_data = seq_data
         self.sampling_params = sampling_params
         self.block_tables = block_tables
-        self.lora_request = lora_request
         self.persistent_data = persistent_data
+        self.lora_request = lora_request
         self.prefix = prefix
     
     @property
