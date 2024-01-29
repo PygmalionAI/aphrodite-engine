@@ -65,6 +65,7 @@ def run_aphrodite(
     use_beam_search: bool,
     trust_remote_code: bool,
     dtype: str,
+    disable_custom_all_reduce: bool,
 ) -> float:
     llm = LLM(
         model=model,
@@ -74,6 +75,7 @@ def run_aphrodite(
         seed=seed,
         trust_remote_code=trust_remote_code,
         dtype=dtype,
+        disable_custom_all_reduce=disable_custom_all_reduce,
     )
 
     # Add the requests to the engine.
@@ -174,7 +176,8 @@ def main(args: argparse.Namespace):  # pylint: disable=redefined-outer-name
                                      args.quantization,
                                      args.tensor_parallel_size, args.seed,
                                      args.n, args.use_beam_search,
-                                     args.trust_remote_code, args.dtype)
+                                     args.trust_remote_code, args.dtype,
+                                     args.disable_custom_all_reduce)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -234,6 +237,10 @@ if __name__ == "__main__":
         "The 'auto' option will use FP16 precision "
         "for FP32 and FP16 models, and BF16 precision "
         "for BF16 models.")
+    parser.add_argument(
+        "--disable-custom-all-reduce",
+        action="store_true",
+        help="disable custom all reduce for the Aphrodite backend")
     args = parser.parse_args()
 
     if args.backend == "aphrodite":

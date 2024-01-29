@@ -18,3 +18,4 @@ colorlog
 einops # for phi
 aioprometheus[starlette] # for prometheus metrics
 triton >= 2.1.0
+pynvml == 11.5.0

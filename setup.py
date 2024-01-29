@@ -276,6 +276,7 @@ aphrodite_extension_sources = [
 
 if _is_cuda():
     aphrodite_extension_sources.append("kernels/quantization/awq/gemm_kernels.cu")
+    aphrodite_extension_sources.append("kernels/all_reduce/custom_all_reduce.cu")
 
 aphrodite_extension = CUDAExtension(
     name="aphrodite._C",
@@ -284,6 +285,10 @@ aphrodite_extension = CUDAExtension(
         "cxx": CXX_FLAGS,
         "nvcc": NVCC_FLAGS,
     },
+    libraries=["cuda", "conda/envs/aphrodite-runtime/lib",
+               "conda/envs/aphrodite-runtime/lib/stubs"] if _is_cuda() else [],
+    library_dirs=["conda/envs/aphrodite-runtime/lib",
+                  "conda/envs/aphrodite-runtime/lib/stubs"] if _is_cuda() else [],
 )
 ext_modules.append(aphrodite_extension)
 
