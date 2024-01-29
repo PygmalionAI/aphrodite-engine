@@ -83,6 +83,8 @@ class AphroditeEngine:
             f"Download Directory = {model_config.download_dir!r}\n"
             f"Model Load Format = {model_config.load_format}\n"
             f"Number of GPUs = {parallel_config.tensor_parallel_size}\n"
+            f"Disable Custom All-Reduce = "
+            f"{parallel_config.disable_custom_all_reduce}\n"
             f"Quantization Format = {model_config.quantization}\n"
             f"Sampler Seed = {model_config.seed}\n"
             f"Context Length = {model_config.max_model_len}\n"
