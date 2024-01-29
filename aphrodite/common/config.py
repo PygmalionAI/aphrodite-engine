@@ -316,8 +316,7 @@ class CacheConfig:
                 raise ValueError(
                     "FP8 is not supported when cuda version is lower than "
                     "11.8. If you think you have the correct cuda version, "
-                    "please make sure you've properly exported CUDA_HOME."
-                )
+                    "please make sure you've properly exported CUDA_HOME.")
             device_name = torch.cuda.get_device_name()
             if "AMD" in device_name:
                 raise NotImplementedError(
