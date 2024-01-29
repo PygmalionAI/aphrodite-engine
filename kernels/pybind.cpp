@@ -5,7 +5,7 @@
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   // Aphrodite custom ops
-  pybind11::module ops = m.def_submodule("ops", "Aphrodite Engine custom operators");
+  pybind11::module ops = m.def_submodule("ops", "Aphrodite custom operators");
 
   // Attention ops
   ops.def(
@@ -58,7 +58,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   ops.def("squeezellm_gemm", &squeezellm_gemm, "Quantized GEMM for SqueezeLLM");
 
   // Cache ops
-  pybind11::module cache_ops = m.def_submodule("cache_ops", "Aphrodite Engine cache ops");
+  pybind11::module cache_ops = m.def_submodule("cache_ops", "Aphrodite cache ops");
   cache_ops.def(
     "swap_blocks",
     &swap_blocks,
@@ -81,11 +81,16 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     "Convert the key and value cache to fp8_e5m2 data type");
 
   // Cuda utils
-  pybind11::module cuda_utils = m.def_submodule("cuda_utils", "Aphrodite Engine cuda utils");
+  pybind11::module cuda_utils = m.def_submodule("cuda_utils", "Aphrodite cuda utils");
   cuda_utils.def(
     "get_device_attribute",
     &get_device_attribute,
     "Gets the specified device attribute.");
+
+  cuda_utils.def(
+    "get_max_shared_memory_per_block_device_attribute",
+    &get_max_shared_memory_per_block_device_attribute,
+    "Gets the maximum shared memory per block device attribute.");
 
 #ifndef USE_ROCM
   // Custom all-reduce kernels
@@ -104,4 +109,3 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 #endif
 
 }
-

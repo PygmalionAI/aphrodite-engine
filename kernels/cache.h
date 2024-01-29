@@ -20,7 +20,8 @@ void reshape_and_cache(
   torch::Tensor& value,
   torch::Tensor& key_cache,
   torch::Tensor& value_cache,
-  torch::Tensor& slot_mapping);
+  torch::Tensor& slot_mapping,
+  const std::string& kv_cache_dtype);
 
 void gather_cached_kv(
   torch::Tensor& key,
