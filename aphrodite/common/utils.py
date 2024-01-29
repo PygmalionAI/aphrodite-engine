@@ -10,7 +10,7 @@ import torch
 import asyncio
 from functools import partial
 from typing import (Any, Awaitable, Callable, Hashable, Optional, TypeVar,
-                    List, List, Tuple, Union)
+                    List, Tuple, Union)
 from collections import OrderedDict
 from packaging.version import parse, Version
 
@@ -167,15 +167,22 @@ def get_open_port() -> int:
 def set_cuda_visible_devices(device_ids: List[int]) -> None:
     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, device_ids))
 
+
 def get_nvcc_cuda_version() -> Version:
-    cuda_home = os.environ.get('CUDA_HOME')
+    cuda_home = os.environ.get("CUDA_HOME")
     if not cuda_home:
-        cuda_home = '/usr/local/cuda'
+        cuda_home = "/usr/local/cuda"
         logger.info(
-            f'CUDA_HOME is not found in the environment. Using {cuda_home} as CUDA_HOME.'
-        )
-    nvcc_output = subprocess.check_output([cuda_home + "/bin/nvcc", "-V"],
-                                          universal_newlines=True)
+            f"CUDA_HOME is not found in the environment. Using {cuda_home} as "
+            "CUDA_HOME.")
+    try:
+        nvcc_output = subprocess.check_output([cuda_home + "/bin/nvcc", "-V"],
+                                              universal_newlines=True)
+    except subprocess.CalledProcessError:
+        print("An error occurred while trying to get nvcc output. "
+              "Please make sure to export CUDA_HOME.")
+        return None
+
     output = nvcc_output.split()
     release_idx = output.index("release") + 1
     nvcc_cuda_version = parse(output[release_idx].split(",")[0])
@@ -245,7 +252,7 @@ def create_kv_caches_with_random(
                                 device=device)
         if cache_dtype in ["auto", "half", "bfloat16", "float"]:
             key_cache.uniform_(-scale, scale)
-        elif cache_dtype == 'fp8_e5m2':
+        elif cache_dtype == "fp8_e5m2":
             _generate_random_fp8_e5m2(key_cache, -scale, scale)
         key_caches.append(key_cache)
 
@@ -257,7 +264,7 @@ def create_kv_caches_with_random(
                                   device=device)
         if cache_dtype in ["auto", "half", "bfloat16", "float"]:
             value_cache.uniform_(-scale, scale)
-        elif cache_dtype == 'fp8_e5m2':
+        elif cache_dtype == "fp8_e5m2":
             _generate_random_fp8_e5m2(value_cache, -scale, scale)
         value_caches.append(value_cache)
     return key_caches, value_caches

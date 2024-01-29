@@ -173,13 +173,11 @@ def main(args: argparse.Namespace):  # pylint: disable=redefined-outer-name
     requests = sample_requests(args.dataset, args.num_prompts, tokenizer)
 
     if args.backend == "aphrodite":
-        elapsed_time = run_aphrodite(requests, args.model, args.tokenizer,
-                                     args.quantization,
-                                     args.tensor_parallel_size, args.seed,
-                                     args.n, args.use_beam_search,
-                                     args.trust_remote_code, args.dtype,
-                                     args.kv_cache_dtype,
-                                     args.disable_custom_all_reduce)
+        elapsed_time = run_aphrodite(
+            requests, args.model, args.tokenizer, args.quantization,
+            args.tensor_parallel_size, args.seed, args.n, args.use_beam_search,
+            args.trust_remote_code, args.dtype, args.kv_cache_dtype,
+            args.disable_custom_all_reduce)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -239,12 +237,11 @@ if __name__ == "__main__":
         "The 'auto' option will use FP16 precision "
         "for FP32 and FP16 models, and BF16 precision "
         "for BF16 models.")
-    parser.add_argument(
-        "--kv-cache-dtype",
-        type=str,
-        default="auto",
-        choices=["auto", "fp8_e5m2"],
-        help="The Data Type for the KV cache.")
+    parser.add_argument("--kv-cache-dtype",
+                        type=str,
+                        default="auto",
+                        choices=["auto", "fp8_e5m2"],
+                        help="The Data Type for the KV cache.")
     parser.add_argument(
         "--disable-custom-all-reduce",
         action="store_true",

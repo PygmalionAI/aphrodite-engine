@@ -8,8 +8,8 @@ from transformers import PretrainedConfig
 
 from aphrodite.common.logger import init_logger
 from aphrodite.transformers_utils.config import get_config
-from aphrodite.common.utils import (
-    get_cpu_memory, is_hip, get_nvcc_cuda_version)
+from aphrodite.common.utils import (get_cpu_memory, is_hip,
+                                    get_nvcc_cuda_version)
 
 logger = init_logger(__name__)
 
@@ -306,7 +306,7 @@ class CacheConfig:
             raise ValueError(
                 "GPU memory utilization must be less than 1.0. Got "
                 f"{self.gpu_memory_utilization}.")
-    
+
     def _verify_cache_dtype(self) -> None:
         if self.cache_dtype == "auto":
             pass
