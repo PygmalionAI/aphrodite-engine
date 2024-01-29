@@ -314,7 +314,9 @@ class CacheConfig:
             nvcc_cuda_version = get_nvcc_cuda_version()
             if nvcc_cuda_version < Version("11.8"):
                 raise ValueError(
-                    "FP8 is not supported when cuda version is lower than 11.8."
+                    "FP8 is not supported when cuda version is lower than "
+                    "11.8. If you think you have the correct cuda version, "
+                    "please make sure you've properly exported CUDA_HOME."
                 )
             device_name = torch.cuda.get_device_name()
             if "AMD" in device_name:

@@ -178,10 +178,13 @@ def get_nvcc_cuda_version() -> Version:
     try:
         nvcc_output = subprocess.check_output([cuda_home + "/bin/nvcc", "-V"],
                                               universal_newlines=True)
+    except FileNotFoundError:
+        print("nvcc is not found. Please make sure to export CUDA_HOME.")
+        return Version("0.0.0")  # return a default Version object
     except subprocess.CalledProcessError:
-        print("An error occurred while trying to get nvcc output. "
-              "Please make sure to export CUDA_HOME.")
-        return None
+        print("An error occurred while trying to get nvcc output. Please "
+              "make sure to export CUDA_HOME.")
+        return Version("0.0.0")
 
     output = nvcc_output.split()
     release_idx = output.index("release") + 1
