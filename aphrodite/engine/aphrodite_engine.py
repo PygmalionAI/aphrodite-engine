@@ -5,8 +5,9 @@ import time
 from typing import (TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple,
                     Union)
 
+from aphrodite.lora.request import LoRARequest
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
-                                     SchedulerConfig)
+                                     SchedulerConfig, LoRAConfig)
 from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.metrics import record_metrics
@@ -18,7 +19,7 @@ from aphrodite.common.sequence import (SamplerOutput, Sequence, SequenceGroup,
                                        SequenceGroupOutput, SequenceOutput,
                                        SequenceStatus)
 from aphrodite.transformers_utils.tokenizer import (detokenize_incrementally,
-                                                    get_tokenizer)
+                                                    TokenizerGroup)
 from aphrodite.common.utils import (Counter, set_cuda_visible_devices, get_ip,
                                     get_open_port)
 
@@ -55,6 +56,7 @@ class AphroditeEngine:
             management.
         parallel_config: The configuration related to distributed execution.
         scheduler_config: The configuration related to the request scheduler.
+        lora_config: The configuration related to LoRA.
         placement_group: Ray placement group for distributed execution.
             Required for distributed execution.
         log_stats: Whether to log statistics.
@@ -66,6 +68,7 @@ class AphroditeEngine:
         cache_config: CacheConfig,
         parallel_config: ParallelConfig,
         scheduler_config: SchedulerConfig,
+        lora_config: Optional[LoRAConfig],
         placement_group: Optional["PlacementGroup"],
         log_stats: bool,
     ) -> None:
@@ -89,17 +92,13 @@ class AphroditeEngine:
 
         self.model_config = model_config
         self.cache_config = cache_config
+        self.lora_config = lora_config
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
         self.log_stats = log_stats
         self._verify_args()
 
-        self.tokenizer = get_tokenizer(
-            model_config.tokenizer,
-            tokenizer_mode=model_config.tokenizer_mode,
-            trust_remote_code=model_config.trust_remote_code,
-            tokenizer_revision=model_config.tokenizer_revision,
-            revision=model_config.revision)
+        self._init_tokenizer()
         self.seq_counter = Counter()
 
         # Create the parallel GPU workers.
@@ -116,8 +115,7 @@ class AphroditeEngine:
         self._init_cache()
 
         # Create the scheduler.
-        self.scheduler = Scheduler(scheduler_config, cache_config)
-
+        self.scheduler = Scheduler(scheduler_config, cache_config, lora_config)
         # Logging.
         self.last_logging_time = 0.0
         # List of (timestamp, num_tokens)
@@ -125,6 +123,9 @@ class AphroditeEngine:
         # List of (timestamp, num_tokens)
         self.num_generation_tokens: List[Tuple[float, int]] = []
 
+    def get_tokenizer_for_seq(self, sequence: Sequence):
+        return self.tokenizer.get_lora_tokenizer(sequence.lora_request)
+    
     def _init_workers(self):
         # Lazy import the Worker to avoid importing torch.cuda/xformers
         # before CUDA_VISIBLE_DEVICES is set in the Worker
@@ -143,10 +144,23 @@ class AphroditeEngine:
             local_rank=0,
             rank=0,
             distributed_init_method=distributed_init_method,
+            lora_config=self.lora_config,
             is_driver_worker=True,
         )
         self._run_workers("init_model")
         self._run_workers("load_model")
+
+    def _init_tokenizer(self, **tokenizer_init_kwargs):
+        init_kwargs = dict(
+            enable_lora=bool(self.lora_config),
+            max_num_seqs=self.scheduler_config.max_num_seqs,
+            max_input_length=None,
+            tokenizer_mode=self.model_config.tokenizer_mode,
+            trust_remote_code=self.model_config.trust_remote_code,
+            revision=self.model_config.tokenizer_revision)
+        init_kwargs.update(tokenizer_init_kwargs)
+        self.tokenizer: TokenizerGroup = TokenizerGroup(
+            self.model_config.tokenizer, **init_kwargs)
 
     def _init_workers_ray(self, placement_group: "PlacementGroup",
                           **ray_remote_kwargs):
@@ -235,6 +249,7 @@ class AphroditeEngine:
                     local_rank,
                     rank,
                     distributed_init_method,
+                    lora_config=self.lora_config,
                 ))
 
         driver_rank = 0
@@ -246,6 +261,7 @@ class AphroditeEngine:
             driver_local_rank,
             driver_rank,
             distributed_init_method,
+            lora_config=self.lora_config,
             is_driver_worker=True,
         )
 
@@ -259,6 +275,10 @@ class AphroditeEngine:
     def _verify_args(self) -> None:
         self.model_config.verify_with_parallel_config(self.parallel_config)
         self.cache_config.verify_with_parallel_config(self.parallel_config)
+        if self.lora_config:
+            self.lora_config.verify_with_model_config(self.model_config)
+            self.lora_config.verify_with_scheduler_config(
+                self.scheduler_config)
 
     def _init_cache(self) -> None:
         """Profiles the memory usage and initializes the KV cache.
@@ -334,6 +354,20 @@ class AphroditeEngine:
                      placement_group,
                      log_stats=not engine_args.disable_log_stats)
         return engine
+    
+    def encode_request(
+        self,
+        request_id: str,
+        prompt: Optional[str],
+        prompt_token_ids: Optional[List[int]] = None,
+        lora_request: Optional[LoRARequest] = None,
+    ):
+        if prompt_token_ids is None:
+            assert prompt is not None
+            prompt_token_ids = self.tokenizer.encode(request_id=request_id,
+                                                     prompt=prompt,
+                                                     lora_request=lora_request)
+        return prompt_token_ids
 
     def add_request(
         self,
@@ -342,6 +376,7 @@ class AphroditeEngine:
         sampling_params: SamplingParams,
         prompt_token_ids: Optional[List[int]] = None,
         arrival_time: Optional[float] = None,
+        lora_request: Optional[LoRARequest] = None,
         prefix_pos: Optional[int] = None,
     ) -> None:
         """Add a request to the engine's request pool.
@@ -389,24 +424,31 @@ class AphroditeEngine:
             >>> # continue the request processing
             >>> ...
         """
+        if lora_request is not None and not self.lora_config:
+            raise ValueError(f"Got lora_request {lora_request} but LoRA is "
+                             "not enabled!")
         if arrival_time is None:
             arrival_time = time.monotonic()
-        if prompt_token_ids is None:
-            assert prompt is not None
-            prompt_token_ids = self.tokenizer.encode(prompt)
+        prompt_token_ids = self.encode_request(
+            request_id=request_id,
+            prompt=prompt,
+            prompt_token_ids=prompt_token_ids,
+            lora_request=lora_request)
 
         # Create the sequences.
         block_size = self.cache_config.block_size
         seq_id = next(self.seq_counter)
-        seq = Sequence(seq_id, prompt, prompt_token_ids, block_size)
+        seq = Sequence(seq_id, prompt, prompt_token_ids, block_size,
+                       lora_request)
 
         # Check whether the input specifies prefix
         prefix = self.scheduler.prefix_pool.add_or_get_prefix(
-            prompt_token_ids[:prefix_pos]) if prefix_pos is not None else None
+            prompt_token_ids[:prefix_pos], lora_request.lora_int_id
+            if lora_request else 0) if prefix_pos is not None else None
 
         # Create the sequence group.
         seq_group = SequenceGroup(request_id, [seq], sampling_params,
-                                  arrival_time, prefix)
+                                  arrival_time, lora_request, prefix)
 
         # Add the sequence group to the scheduler.
         self.scheduler.add_seq_group(seq_group)
@@ -456,11 +498,13 @@ class AphroditeEngine:
 
         current_worst_score = (current_worst_seq.get_beam_search_score(
             length_penalty=length_penalty,
-            eos_token_id=self.tokenizer.eos_token_id))
+            eos_token_id=self.get_tokenizer_for_seq(
+                current_worst_seq).eos_token_id))
         if early_stopping is False:
             highest_attainable_score = (best_running_seq.get_beam_search_score(
                 length_penalty=length_penalty,
-                eos_token_id=self.tokenizer.eos_token_id))
+                eos_token_id=self.get_tokenizer_for_seq(
+                    best_running_seq).eos_token_id))
         else:
             assert early_stopping == "never"
             if length_penalty > 0.0:
@@ -474,7 +518,8 @@ class AphroditeEngine:
                 highest_attainable_score = (
                     best_running_seq.get_beam_search_score(
                         length_penalty=length_penalty,
-                        eos_token_id=self.tokenizer.eos_token_id,
+                        eos_token_id=self.get_tokenizer_for_seq(
+                            best_running_seq).eos_token_id,
                         seq_len=max_possible_length))
             else:
                 # Otherwise, beam search will prefer shorter sequences. The
@@ -483,7 +528,8 @@ class AphroditeEngine:
                 highest_attainable_score = (
                     best_running_seq.get_beam_search_score(
                         length_penalty=length_penalty,
-                        eos_token_id=self.tokenizer.eos_token_id))
+                        eos_token_id=self.get_tokenizer_for_seq(
+                            best_running_seq).eos_token_id))
         return current_worst_score >= highest_attainable_score
 
     def _process_sequence_group_outputs(self, seq_group: SequenceGroup,
@@ -576,7 +622,7 @@ class AphroditeEngine:
         # Sort the finished sequences by their scores.
         all_finished_seqs.sort(key=lambda x: x[0].get_beam_search_score(
             length_penalty=length_penalty,
-            eos_token_id=self.tokenizer.eos_token_id),
+            eos_token_id=self.get_tokenizer_for_seq(x[0]).eos_token_id),
                                reverse=True)
         for seq, parent, is_new in all_finished_seqs[:beam_width]:
             if is_new:
@@ -604,7 +650,7 @@ class AphroditeEngine:
         # Sort the running sequences by their scores.
         running_child_seqs.sort(key=lambda x: x[0].get_beam_search_score(
             length_penalty=length_penalty,
-            eos_token_id=self.tokenizer.eos_token_id),
+            eos_token_id=self.get_tokenizer_for_seq(x[0]).eos_token_id),
                                 reverse=True)
 
         # Check if we can stop the beam search.
@@ -842,7 +888,7 @@ class AphroditeEngine:
         """Decodes the new token for a sequence."""
         (new_tokens, new_output_text, prefix_offset,
          read_offset) = detokenize_incrementally(
-             self.tokenizer,
+             self.get_tokenizer_for_seq(seq),
              all_input_ids=seq.get_token_ids(),
              prev_tokens=seq.tokens,
              prefix_offset=seq.prefix_offset,
@@ -884,10 +930,27 @@ class AphroditeEngine:
             return
 
         # Check if the sequence has generated the EOS token.
-        if ((not sampling_params.ignore_eos)
-                and seq.get_last_token_id() == self.tokenizer.eos_token_id):
+        if ((not sampling_params.ignore_eos) and seq.get_last_token_id()
+                == self.get_tokenizer_for_seq(seq).eos_token_id):
             seq.status = SequenceStatus.FINISHED_STOPPED
             return
+        
+    def add_lora(self, lora_request: LoRARequest) -> bool:
+        assert lora_request.lora_int_id > 0, "lora_id must be greater than 0."
+        return self._run_workers(
+            "add_lora",
+            lora_request=lora_request,
+        )
+
+    def remove_lora(self, lora_id: int) -> bool:
+        assert lora_id > 0, "lora_id must be greater than 0."
+        return self._run_workers(
+            "remove_lora",
+            lora_id=lora_id,
+        )
+
+    def list_loras(self) -> List[int]:
+        return self._run_workers("list_loras")
 
     def _run_workers(
         self,
