@@ -13,7 +13,7 @@ from aphrodite.modeling.megatron.communication_op import (broadcast_tensor_dict
                                                           )
 from aphrodite.modeling.megatron.custom_all_reduce import init_custom_ar
 from aphrodite.modeling.megatron.parallel_state import (
-    initialize_model_parallel)
+    ensure_model_parallel_initialized)
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 from aphrodite.task_handler.cache_engine import CacheEngine
 from aphrodite.task_handler.model_runner import ModelRunner
@@ -37,6 +37,7 @@ class Worker:
         rank: int,
         distributed_init_method: str,
         lora_config: Optional[LoRAConfig] = None,
+        kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
     ) -> None:
         self.model_config = model_config
@@ -54,6 +55,7 @@ class Worker:
                                         parallel_config,
                                         scheduler_config,
                                         lora_config=self.lora_config,
+                                        kv_cache_dtype=kv_cache_dtype,
                                         is_driver_worker=is_driver_worker)
         # Uninitialized cache engine. Will be initialized by
         # self.init_cache_engine().
@@ -83,7 +85,6 @@ class Worker:
                                      self.distributed_init_method)
         if not self.parallel_config.disable_custom_all_reduce:
             init_custom_ar()
-
         # Initialize the model.
         set_random_seed(self.model_config.seed)
 
@@ -96,6 +97,7 @@ class Worker:
         block_size: int,
         gpu_memory_utilization: float,
         cpu_swap_space: int,
+        cache_dtype: str,
     ) -> Tuple[int, int]:
         """Profiles the peak memory usage of the model and returns the maximum
         number of GPU and CPU cache blocks that can be allocated.
@@ -120,7 +122,7 @@ class Worker:
         peak_memory = total_gpu_memory - free_gpu_memory
 
         cache_block_size = CacheEngine.get_cache_block_size(
-            block_size, self.model_config, self.parallel_config)
+            block_size, cache_dtype, self.model_config, self.parallel_config)
         num_gpu_blocks = int(
             (total_gpu_memory * gpu_memory_utilization - peak_memory) //
             cache_block_size)
@@ -249,8 +251,8 @@ def init_distributed_environment(
 
     # A small all_reduce for warmup.
     torch.distributed.all_reduce(torch.zeros(1).cuda())
-    initialize_model_parallel(parallel_config.tensor_parallel_size,
-                              parallel_config.pipeline_parallel_size)
+    ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
+                                      parallel_config.pipeline_parallel_size)
 
 
 def _check_if_gpu_supports_dtype(torch_dtype: torch.dtype):
