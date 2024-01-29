@@ -285,7 +285,10 @@ aphrodite_extension = CUDAExtension(
         "cxx": CXX_FLAGS,
         "nvcc": NVCC_FLAGS,
     },
-    libraries=["cuda"] if _is_cuda() else [],
+    libraries=["cuda", "conda/envs/aphrodite-runtime/lib",
+               "conda/envs/aphrodite-runtime/lib/stubs"] if _is_cuda() else [],
+    library_dirs=["conda/envs/aphrodite-runtime/lib",
+                  "conda/envs/aphrodite-runtime/lib/stubs"] if _is_cuda() else [],
 )
 ext_modules.append(aphrodite_extension)
 
