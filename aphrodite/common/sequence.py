@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Union
 from aphrodite.common.block import LogicalTokenBlock
 from aphrodite.common.prefix import Prefix
 from aphrodite.common.sampling_params import SamplingParams
+from aphrodite.lora.request import LoRARequest
 
 PromptLogprobs = List[Optional[Dict[int, float]]]
 SampleLogprobs = List[Dict[int, float]]
@@ -106,6 +107,7 @@ class Sequence:
         prompt_token_ids: The token IDs of the prompt.
         block_size: The block size of the sequence. Should be the same as the
             block size used by the block manager and cache engine.
+        lora_request: LoRA request.
     """
 
     def __init__(
@@ -114,10 +116,12 @@ class Sequence:
         prompt: str,
         prompt_token_ids: List[int],
         block_size: int,
+        lora_request: Optional[LoRARequest] = None,
     ) -> None:
         self.seq_id = seq_id
         self.prompt = prompt
         self.block_size = block_size
+        self.lora_request = lora_request
 
         self.data = SequenceData(prompt_token_ids)
         self.output_logprobs: SampleLogprobs = []
@@ -134,6 +138,10 @@ class Sequence:
         # Input + output tokens
         self.tokens: Optional[List[str]] = None
         self.persistent_data = {}
+
+    @property
+    def lora_int_id(self) -> int:
+        return self.lora_request.lora_int_id if self.lora_request else 0
 
     def _append_logical_block(self) -> None:
         block = LogicalTokenBlock(
@@ -230,6 +238,8 @@ class SequenceGroup:
         seqs: The list of sequences.
         sampling_params: The sampling parameters used to generate the outputs.
         arrival_time: The arrival time of the request.
+        lora_request: LoRA request.
+        prefix: The prefix of the prompt of the sequence group.
     """
 
     def __init__(
@@ -238,12 +248,14 @@ class SequenceGroup:
         seqs: List[Sequence],
         sampling_params: SamplingParams,
         arrival_time: float,
+        lora_request: Optional[LoRARequest] = None,
         prefix: Optional[Prefix] = None,
     ) -> None:
         self.request_id = request_id
         self.seqs_dict = {seq.seq_id: seq for seq in seqs}
         self.sampling_params = sampling_params
         self.arrival_time = arrival_time
+        self.lora_request = lora_request
         self.prefix: Optional[Prefix] = prefix
         self.prompt_logprobs: Optional[PromptLogprobs] = None
 
@@ -258,6 +270,10 @@ class SequenceGroup:
         # All sequences in the group should have the same prompt.
         # We use the prompt of an arbitrary sequence.
         return next(iter(self.seqs_dict.values())).data.prompt_token_ids
+
+    @property
+    def lora_int_id(self) -> int:
+        return self.lora_request.lora_int_id if self.lora_request else 0
 
     def get_max_num_running_seqs(self) -> int:
         """The maximum number of sequences running in parallel in the remaining
@@ -339,6 +355,7 @@ class SequenceGroupMetadata:
         sampling_params: The sampling parameters used to generate the outputs.
         block_tables: The block tables. (Seq id -> list of physical block
             numbers)
+        lora_request: LoRA request.
         prefix: The prefix of the prompt of the sequence group.
         persistent_data: The persistent data of the sequence group.
     """
@@ -351,6 +368,7 @@ class SequenceGroupMetadata:
         sampling_params: SamplingParams,
         block_tables: Dict[int, List[int]],
         persistent_data: Dict[int, dict],
+        lora_request: Optional[LoRARequest] = None,
         prefix: Optional[Prefix] = None,
     ) -> None:
         self.request_id = request_id
@@ -359,7 +377,12 @@ class SequenceGroupMetadata:
         self.sampling_params = sampling_params
         self.block_tables = block_tables
         self.persistent_data = persistent_data
+        self.lora_request = lora_request
         self.prefix = prefix
+
+    @property
+    def lora_int_id(self) -> int:
+        return self.lora_request.lora_int_id if self.lora_request else 0
 
 
 class SequenceOutput:
