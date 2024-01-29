@@ -239,7 +239,6 @@ class AphroditeEngine:
         model_config = copy.deepcopy(self.model_config)
         parallel_config = copy.deepcopy(self.parallel_config)
         scheduler_config = copy.deepcopy(self.scheduler_config)
-        cache_config = copy.deepcopy(self.cache_config)
 
         for rank, (worker, (node_id,
                             _)) in enumerate(zip(self.workers,
@@ -255,7 +254,7 @@ class AphroditeEngine:
                     rank,
                     distributed_init_method,
                     lora_config=self.lora_config,
-                    cache_config=cache_config,
+                    kv_cache_dtype=self.cache_config.cache_dtype,
                 ))
 
         driver_rank = 0
@@ -268,7 +267,7 @@ class AphroditeEngine:
             driver_rank,
             distributed_init_method,
             lora_config=self.lora_config,
-            cache_config=cache_config,
+            kv_cache_dtype=self.cache_config.cache_dtype,
             is_driver_worker=True,
         )
 
