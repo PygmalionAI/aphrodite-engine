@@ -3,6 +3,7 @@ from typing import List, Optional, Union
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
+from aphrodite.lora.request import LoRARequest
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.common.outputs import RequestOutput
@@ -117,6 +118,7 @@ class LLM:
         prompt_token_ids: Optional[List[List[int]]] = None,
         prefix_pos: Optional[Union[int, List[int]]] = None,
         use_tqdm: bool = True,
+        lora_request: Optional[LoRARequest] = None,
     ) -> List[RequestOutput]:
         """Generates the completions for the input prompts.
 
@@ -136,6 +138,7 @@ class LLM:
                 This is an experimental feature, and may be replaced with
                 automatic prefix caching in the future.
             use_tqdm: Whether to use tqdm to display the progress bar.
+            lora_request: LoRA request to use for generation, if any.
 
         Returns:
             A list of `RequestOutput` objects containing the generated
@@ -163,7 +166,11 @@ class LLM:
             prefix_pos_i = prefix_pos[i] if prefix_pos is not None else None
             token_ids = None if prompt_token_ids is None else prompt_token_ids[
                 i]
-            self._add_request(prompt, sampling_params, token_ids, prefix_pos_i)
+            self._add_request(prompt,
+                              sampling_params,
+                              token_ids,
+                              lora_request=lora_request,
+                              prefix_pos=prefix_pos_i)
         return self._run_engine(use_tqdm)
 
     def _add_request(
@@ -172,12 +179,14 @@ class LLM:
         sampling_params: SamplingParams,
         prompt_token_ids: Optional[List[int]],
         prefix_pos: Optional[int] = None,
+        lora_request: Optional[LoRARequest] = None,
     ) -> None:
         request_id = str(next(self.request_counter))
         self.llm_engine.add_request(request_id,
                                     prompt,
                                     sampling_params,
                                     prompt_token_ids,
+                                    lora_request=lora_request,
                                     prefix_pos=prefix_pos)
 
     def _run_engine(self, use_tqdm: bool) -> List[RequestOutput]:
