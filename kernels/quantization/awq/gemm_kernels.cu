@@ -598,7 +598,7 @@ torch::Tensor awq_dequantize(
     dim3 threads_per_block(x_thread, y_thread);
 
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-    vllm::awq::dequantize_weights<<<num_blocks, threads_per_block, 0, stream>>>(
+    aphrodite::awq::dequantize_weights<<<num_blocks, threads_per_block, 0, stream>>>(
         kernel, scaling_factors, zeros, de_kernel, G);
 
     return _de_kernel;
