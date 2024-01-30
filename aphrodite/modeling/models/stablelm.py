@@ -27,21 +27,19 @@ from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.modeling.layers.attention import PagedAttention
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              MergedColumnParallelLinear,
-                                              QKVParallelLinear,
-                                              RowParallelLinear,
-                                              ColumnParallelLinear)
+                                               MergedColumnParallelLinear,
+                                               QKVParallelLinear,
+                                               RowParallelLinear)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding, ParallelLMHead, DEFAULT_VOCAB_PADDING_SIZE)
+    VocabParallelEmbedding, ParallelLMHead)
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_world_size)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (default_weight_loader,
                                               hf_model_weights_iterator)
 from aphrodite.common.sequence import SamplerOutput
-from aphrodite.common.config import LoRAConfig
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
@@ -55,35 +53,17 @@ class StablelmMLP(nn.Module):
         self.config = config
         self.hidden_size = config.hidden_size
         self.intermediate_size = config.intermediate_size
-        if linear_method is not None and not linear_method.quant_config.merge_weight(
-        ):
-            self.merge_weight = False
-            self.gate_proj = ColumnParallelLinear(config.hidden_size,
-                                                  config.intermediate_size,
-                                                  bias=False,
-                                                  linear_method=linear_method)
-            self.up_proj = ColumnParallelLinear(config.hidden_size,
-                                                config.intermediate_size,
-                                                bias=False,
-                                                linear_method=linear_method)
-        else:
-            self.merge_weight = True
-            self.gate_up_proj = MergedColumnParallelLinear(
-                config.hidden_size, [config.intermediate_size] * 2,
-                bias=False,
-                linear_method=linear_method)
+        self.gate_up_proj = MergedColumnParallelLinear(
+            config.hidden_size, [config.intermediate_size] * 2,
+            bias=False,
+            linear_method=linear_method)
         self.down_proj = RowParallelLinear(config.intermediate_size,
                                            config.hidden_size,
                                            bias=False)
         self.act_fn = SiluAndMul()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.merge_weight:
-            gate_up, _ = self.gate_up_proj(x)
-        else:
-            up, _ = self.up_proj(x)
-            gate, _ = self.gate_proj(x)
-            gate_up = torch.cat([gate, up], dim=-1)
+        gate_up, _ = self.gate_up_proj(x)
         x = self.act_fn(gate_up)
         x, _ = self.down_proj(x)
         return x
@@ -123,43 +103,23 @@ class StablelmAttention(nn.Module):
             raise ValueError(
                 f"hidden_size must be divisible by num_heads (got `hidden_size`: {self.hidden_size}"
                 f" and `num_heads`: {self.num_heads}).")
-        if linear_method is not None and not linear_method.quant_config.merge_weight(
-        ):
-            self.merge_weight = False
-            self.q_proj = ColumnParallelLinear(self.hidden_size,
-                                               self.q_size,
-                                               self.qkv_bias,
-                                               linear_method=linear_method)
-            self.k_proj = ColumnParallelLinear(self.hidden_size,
-                                               self.kv_size,
-                                               bias=False,
-                                               linear_method=linear_method)
-            self.v_proj = ColumnParallelLinear(self.hidden_size,
-                                               self.kv_size,
-                                               self.qkv_bias,
-                                               linear_method=linear_method)
-        else:
-            self.merge_weight = True
-            self.qkv_proj = QKVParallelLinear(
-                self.hidden_size,
-                self.head_dim,
-                self.total_num_heads,
-                bias=False,
-                linear_method=linear_method,
-            )
+
+        self.qkv_proj = QKVParallelLinear(self.hidden_size,
+                                          self.head_dim,
+                                          self.total_num_heads,
+                                          self.total_num_key_value_heads,
+                                          self.qkv_bias,
+                                          linear_method=linear_method)
         self.o_proj = RowParallelLinear(self.total_num_heads * self.head_dim,
                                         self.hidden_size,
                                         bias=False,
                                         linear_method=linear_method)
         self.rotary_ndims = int(self.head_dim * self.config.rope_pct)
-        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
-        ) is None else linear_method.quant_config.rope_style()
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.rotary_ndims,
             max_position=self.config.max_position_embeddings,
             base=self.config.rope_theta,
-            is_neox_style=is_neox_style,
         )
         self.attn = PagedAttention(self.num_heads,
                                    self.head_dim,
@@ -173,14 +133,8 @@ class StablelmAttention(nn.Module):
         kv_cache: KVCache,
         input_metadata: InputMetadata,
     ) -> torch.Tensor:
-        if self.merge_weight:
-            qkv, _ = self.qkv_proj(hidden_states)
-            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size],
-                                dim=-1)
-        else:
-            q, _ = self.q_proj(hidden_states)
-            k, _ = self.k_proj(hidden_states)
-            v, _ = self.v_proj(hidden_states)
+        qkv, _ = self.qkv_proj(hidden_states)
+        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         q, k = self.rotary_emb(positions, q, k)
         k_cache, v_cache = kv_cache
         attn_output = self.attn(q, k, v, k_cache, v_cache, input_metadata)
@@ -234,19 +188,12 @@ class StableLMEpochModel(nn.Module):
 
     def __init__(self,
                  config: PretrainedConfig,
-                 linear_method: Optional[LinearMethodBase] = None,
-                 lora_config: Optional[LoRAConfig] = None) -> None:
+                 linear_method: Optional[LinearMethodBase] = None) -> None:
         super().__init__()
-        lora_vocab = (lora_config.lora_extra_vocab_size *
-                      (lora_config.max_loras or 1)) if lora_config else 0
-        self.vocab_size = config.vocab_size + lora_vocab
-        self.org_vocab_size = config.vocab_size
         # self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
         self.embed_tokens = VocabParallelEmbedding(
-            self.vocab_size,
+            config.vocab_size,
             config.hidden_size,
-            linear_method=linear_method,
-            org_num_embeddings=config.vocab_size,
         )
         self.layers = nn.ModuleList([
             StablelmDecoderLayer(config, linear_method)
@@ -275,34 +222,18 @@ class StableLMEpochModel(nn.Module):
 
 
 class StablelmForCausalLM(nn.Module):
-    supports_lora = True
 
     def __init__(
         self,
         config: PretrainedConfig,
         linear_method: Optional[LinearMethodBase] = None,
-        lora_config: Optional[LoRAConfig] = None,
     ) -> None:
         super().__init__()
         self.config = config
         self.linear_method = linear_method
-        self.model = StableLMEpochModel(config, linear_method,
-                                        lora_config=lora_config)
-
-        unpadded_vocab_size = config.vocab_size
-        if lora_config:
-            unpadded_vocab_size += lora_config.lora_extra_vocab_size
-        self.lm_head = ParallelLMHead(
-            unpadded_vocab_size,
-            config.hidden_size,
-            linear_method=linear_method,
-            org_num_embeddings=config.vocab_size,
-            padding_size=DEFAULT_VOCAB_PADDING_SIZE
-            # We need bigger padding if using lora for kernel
-            # compatibility
-            if not lora_config else lora_config.lora_vocab_padding_size,
-        )
-        self.sampler = Sampler(unpadded_vocab_size, config.vocab_size)
+        self.model = StableLMEpochModel(config, linear_method)
+        self.lm_head = ParallelLMHead(config.vocab_size, config.hidden_size)
+        self.sampler = Sampler(config.vocab_size)
 
     def forward(
         self,
@@ -320,7 +251,7 @@ class StablelmForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(self.lm_head(hidden_states),
+        next_tokens = self.sampler(self.lm_head.weight, hidden_states,
                                    sampling_metadata)
         return next_tokens
 
@@ -337,9 +268,6 @@ class StablelmForCausalLM(nn.Module):
             ("gate_up_proj", "gate_proj", 0),
             ("gate_up_proj", "up_proj", 1),
         ]
-        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
-        ):
-            stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
                 model_name_or_path, cache_dir, load_format, revision):
