@@ -12,7 +12,6 @@ dist*
 conda/
 umamba.exe
 bin/
-models/
 *.whl
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -670,6 +670,8 @@ class ModelRunner:
         # memory usage of CUDA graph.
         with custom_all_reduce.capture():
             for batch_size in reversed(batch_size_capture_list):
+                if batch_size > self.scheduler_config.max_num_seqs:
+                    continue
                 # Create dummy input_metadata.
                 input_metadata = InputMetadata(
                     is_prompt=False,

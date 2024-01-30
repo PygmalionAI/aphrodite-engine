@@ -90,6 +90,9 @@ def get_quant_config(
     cache_dir: Optional[str] = None,
 ) -> QuantizationConfig:
     quant_cls = get_quantization_config(quantization)
+    # No need for extra config
+    if quantization == "gguf":
+        return quant_cls()
     # Read the quantization config from the HF model config, if available.
     hf_quant_config = getattr(hf_config, "quantization_config", None)
     if hf_quant_config is not None:
@@ -281,6 +284,8 @@ def convert_pyslice_to_tensor(x: Any) -> torch.Tensor:
 def default_weight_loader(param: torch.Tensor,
                           loaded_weight: torch.Tensor) -> None:
     """Default weight loader."""
+    if isinstance(param, torch.nn.parameter.UninitializedParameter):
+        param.materialize(loaded_weight.shape, dtype=loaded_weight.dtype)
     assert param.size() == loaded_weight.size()
     param.data.copy_(loaded_weight)
 

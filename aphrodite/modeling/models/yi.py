@@ -35,7 +35,8 @@ from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               MergedColumnParallelLinear,
                                               QKVParallelLinear,
-                                              RowParallelLinear)
+                                              RowParallelLinear,
+                                              ColumnParallelLinear)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
@@ -60,10 +61,23 @@ class YiMLP(nn.Module):
         linear_method: Optional[LinearMethodBase] = None,
     ) -> None:
         super().__init__()
-        self.gate_up_proj = MergedColumnParallelLinear(
-            hidden_size, [intermediate_size] * 2,
-            bias=False,
-            linear_method=linear_method)
+        if linear_method is not None and not linear_method.quant_config.merge_weight(
+        ):
+            self.merge_weight = False
+            self.gate_proj = ColumnParallelLinear(hidden_size,
+                                                  intermediate_size,
+                                                  bias=False,
+                                                  linear_method=linear_method)
+            self.up_proj = ColumnParallelLinear(hidden_size,
+                                                intermediate_size,
+                                                bias=False,
+                                                linear_method=linear_method)
+        else:
+            self.merge_weight = True
+            self.gate_up_proj = MergedColumnParallelLinear(
+                hidden_size, [intermediate_size] * 2,
+                bias=False,
+                linear_method=linear_method)
         self.down_proj = RowParallelLinear(intermediate_size,
                                            hidden_size,
                                            bias=False,
@@ -74,7 +88,12 @@ class YiMLP(nn.Module):
         self.act_fn = SiluAndMul()
 
     def forward(self, x):
-        gate_up, _ = self.gate_up_proj(x)
+        if self.merge_weight:
+            gate_up, _ = self.gate_up_proj(x)
+        else:
+            up, _ = self.up_proj(x)
+            gate, _ = self.gate_proj(x)
+            gate_up = torch.cat([gate, up], dim=-1)
         x = self.act_fn(gate_up)
         x, _ = self.down_proj(x)
         return x
@@ -115,26 +134,46 @@ class YiAttention(nn.Module):
         self.rope_theta = rope_theta
         self.max_position_embeddings = max_position_embeddings
 
-        self.qkv_proj = QKVParallelLinear(
-            hidden_size,
-            self.head_dim,
-            self.total_num_heads,
-            self.total_num_kv_heads,
-            bias=False,
-            linear_method=linear_method,
-        )
+        if linear_method is not None and not linear_method.quant_config.merge_weight(
+        ):
+            self.merge_weight = False
+            self.q_proj = ColumnParallelLinear(hidden_size,
+                                               self.q_size,
+                                               bias=False,
+                                               linear_method=linear_method)
+            self.k_proj = ColumnParallelLinear(hidden_size,
+                                               self.kv_size,
+                                               bias=False,
+                                               linear_method=linear_method)
+            self.v_proj = ColumnParallelLinear(hidden_size,
+                                               self.kv_size,
+                                               bias=False,
+                                               linear_method=linear_method)
+        else:
+            self.merge_weight = True
+            self.qkv_proj = QKVParallelLinear(
+                hidden_size,
+                self.head_dim,
+                self.total_num_heads,
+                self.total_num_kv_heads,
+                bias=False,
+                linear_method=linear_method,
+            )
         self.o_proj = RowParallelLinear(
             self.total_num_heads * self.head_dim,
             hidden_size,
             bias=False,
             linear_method=linear_method,
         )
+        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
+        ) is None else linear_method.quant_config.rope_style()
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.head_dim,
             max_position=max_position_embeddings,
             base=self.rope_theta,
             rope_scaling=rope_scaling,
+            is_neox_style=is_neox_style,
         )
         self.attn = PagedAttention(self.num_heads,
                                    self.head_dim,
@@ -148,8 +187,14 @@ class YiAttention(nn.Module):
         kv_cache: KVCache,
         input_metadata: InputMetadata,
     ) -> torch.Tensor:
-        qkv, _ = self.qkv_proj(hidden_states)
-        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        if self.merge_weight:
+            qkv, _ = self.qkv_proj(hidden_states)
+            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size],
+                                dim=-1)
+        else:
+            q, _ = self.q_proj(hidden_states)
+            k, _ = self.k_proj(hidden_states)
+            v, _ = self.v_proj(hidden_states)
         q, k = self.rotary_emb(positions, q, k)
         k_cache, v_cache = kv_cache
         attn_output = self.attn(q, k, v, k_cache, v_cache, input_metadata)
@@ -226,10 +271,9 @@ class YiModel(nn.Module):
         self.config = config
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
-        self.embed_tokens = VocabParallelEmbedding(
-            config.vocab_size,
-            config.hidden_size,
-        )
+        self.embed_tokens = VocabParallelEmbedding(config.vocab_size,
+                                                   config.hidden_size,
+                                                   linear_method=linear_method)
         self.layers = nn.ModuleList([
             YiDecoderLayer(config, linear_method)
             for _ in range(config.num_hidden_layers)
@@ -269,7 +313,9 @@ class YiForCausalLM(nn.Module):
         self.config = config
         self.linear_method = linear_method
         self.model = YiModel(config, linear_method)
-        self.lm_head = ParallelLMHead(config.vocab_size, config.hidden_size)
+        self.lm_head = ParallelLMHead(config.vocab_size,
+                                      config.hidden_size,
+                                      linear_method=linear_method)
         self.sampler = Sampler(config.vocab_size)
 
     def forward(
@@ -288,7 +334,7 @@ class YiForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(self.lm_head.weight, hidden_states,
+        next_tokens = self.sampler(self.lm_head(hidden_states),
                                    sampling_metadata)
         return next_tokens
 
@@ -305,6 +351,9 @@ class YiForCausalLM(nn.Module):
             ("gate_up_proj", "gate_proj", 0),
             ("gate_up_proj", "up_proj", 1),
         ]
+        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
+        ):
+            stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
                 model_name_or_path, cache_dir, load_format, revision):

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch
 
@@ -62,3 +62,15 @@ class QuantizationConfig(ABC):
         For now, this is only used by AWQ.
         """
         raise NotImplementedError
+
+    @abstractmethod
+    def merge_weight(self) -> bool:
+        """whether fuse qkv and up/gate."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def rope_style(self) -> Optional[bool]:
+        raise NotImplementedError
+
+    def quant_vocab(self) -> Optional[bool]:
+        return False

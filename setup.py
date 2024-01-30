@@ -272,6 +272,7 @@ aphrodite_extension_sources = [
     "kernels/activation_kernels.cu",
     "kernels/layernorm_kernels.cu",
     "kernels/quantization/squeezellm/quant_cuda_kernel.cu",
+    "kernels/quantization/gguf/gguf_kernel.cu",
     "kernels/quantization/gptq/q_gemm.cu",
     "kernels/cuda_utils_kernels.cu",
     "kernels/pybind.cpp",
@@ -279,6 +280,8 @@ aphrodite_extension_sources = [
 
 if _is_cuda():
     aphrodite_extension_sources.append("kernels/quantization/awq/gemm_kernels.cu")
+    aphrodite_extension_sources.append("kernels/quantization/quip/origin_order.cu")
+    aphrodite_extension_sources.append("kernels/quantization/marlin/marlin_cuda_kernel.cu")
     aphrodite_extension_sources.append("kernels/all_reduce/custom_all_reduce.cu")
 
 aphrodite_extension = CUDAExtension(
@@ -389,6 +392,7 @@ setuptools.setup(
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
     package_data={"aphrodite-engine": ["aphrodite/endpoints/kobold/klite.embd",
+                                       "aphrodite/modeling/layers/quantization/hadamard.safetensors",
                                        "py.typed"]},
     include_package_data=True,
 )

@@ -39,9 +39,10 @@ class LLM:
             However, if the `torch_dtype` in the config is `float32`, we will
             use `float16` instead.
         quantization: The method used to quantize the model weights. Currently,
-            we support "awq", "squeezellm", and "gptq". If None, we assume the
-            model weights are not quantized and use `dtype` to determine the
-            data type of the weights.
+            we support "awq", "gptq", "quip" and "squeezellm". If None,
+            we first check the `quantization_config` attribute in the model
+            config file. If that is None, we assume the model weights are not
+            quantized and use `dtype` to determine the data type of the weights.
         revision: The specific model version to use. It can be a branch name,
             a tag name, or a commit id.
         seed: The seed to initialize the random number generator for sampling.
