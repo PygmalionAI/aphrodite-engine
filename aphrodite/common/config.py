@@ -68,7 +68,7 @@ class ModelConfig:
         trust_remote_code: bool,
         download_dir: Optional[str],
         load_format: str,
-        dtype: Union[str, torch.dtype],
+        dtype: str,
         seed: int,
         revision: Optional[str] = None,
         tokenizer_revision: Optional[str] = None,
@@ -148,7 +148,8 @@ class ModelConfig:
         self.tokenizer_mode = tokenizer_mode
 
     def _verify_quantization(self) -> None:
-        supported_quantization = ["awq", "gguf", "gptq", "quip", "squeezellm"]
+        supported_quantization = ["awq", "gguf", "gptq", "quip", "squeezellm",
+                                  "smoothquant"]
         rocm_not_supported_quantization = ["awq", "quip"]
         if self.quantization is not None:
             self.quantization = self.quantization.lower()
@@ -493,6 +494,7 @@ class LoRAConfig:
 
 
 _STR_DTYPE_TO_TORCH_DTYPE = {
+    "int8": torch.int8,
     "half": torch.float16,
     "float16": torch.float16,
     "float": torch.float32,
