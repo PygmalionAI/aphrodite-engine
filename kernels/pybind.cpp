@@ -1,6 +1,7 @@
 #include "cache.h"
 #include "cuda_utils.h"
 #include "ops.h"
+#include "quantization/smoothquant/int8gemm/int8_gemm.h"
 #include <torch/extension.h>
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -30,6 +31,25 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     "gelu_fast",
     &gelu_fast,
     "Approximate GELU implementation.");
+  ops.def(
+    "dequant_silu_and_mul_quant",
+    py::overload_cast<
+    torch::Tensor&,
+    torch::Tensor&,
+    float,
+    float,
+    float>(&dequant_silu_and_mul_quant),
+    "Dequant input, apply silu act and quant output.");
+  ops.def(
+    "dequant_silu_and_mul_quant",
+    py::overload_cast<
+    torch::Tensor&,
+    torch::Tensor&,
+    float,
+    float,
+    torch::Tensor&,
+    torch::Tensor&>(&dequant_silu_and_mul_quant),
+    "Dequant input, apply silu act and per-token quant output.");
 
   // Layernorm
   ops.def(
@@ -41,12 +61,95 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     "fused_add_rms_norm",
     &fused_add_rms_norm,
     "In-place fused Add and RMS Normalization");
+  
+  ops.def(
+    "rms_norm_quant",
+    &rms_norm_quant,
+    "Apply RMS norm and quant output.");
+  ops.def(
+    "dequant_add_residual_rms_norm_quant",
+    py::overload_cast<
+    torch::Tensor&,
+    torch::Tensor&,
+    torch::Tensor&,
+    torch::Tensor&,
+    float,
+    float>(&dequant_add_residual_rms_norm_quant),
+    "Add the dequanted result and residual, then use RMS norm and quant output.");
+  ops.def(
+    "dequant_add_residual_rms_norm_quant",
+    py::overload_cast<
+    torch::Tensor&,
+    torch::Tensor&,
+    torch::Tensor&,
+    torch::Tensor&,
+    torch::Tensor&,
+    float,
+    float>(&dequant_add_residual_rms_norm_quant),
+    "Add the per-token dequanted result and residual, then use RMS norm and quant output.");
+  ops.def(
+    "add_residual_rms_norm_quant",
+    &add_residual_rms_norm_quant,
+    "Add input and residual, and quant output.");
+
+  // Fused ops
+  ops.def(
+    "dequant_add_residual",
+    py::overload_cast<
+    torch::Tensor&,
+    torch::Tensor&,
+    torch::Tensor&,
+    float>(&dequant_add_residual),
+    "Add the dequanted result and residual.");
+  ops.def(
+    "dequant_add_residual",
+    py::overload_cast<
+    torch::Tensor&,
+    torch::Tensor&,
+    torch::Tensor&,
+    torch::Tensor&,
+    float>(&dequant_add_residual),
+    "Add the per-token dequanted result and residual.");
+  ops.def(
+    "dequant",
+    py::overload_cast<
+    torch::Tensor&,
+    torch::Tensor&,
+    float>(&dequant),
+    "Dequant.");
+  ops.def(
+    "dequant",
+    py::overload_cast<
+    torch::Tensor&,
+    torch::Tensor&,
+    torch::Tensor&,
+    float>(&dequant),
+    "Per-token dequant.");
+  ops.def(
+    "quant",
+    py::overload_cast<
+    torch::Tensor&,
+    torch::Tensor&,
+    float>(&quant),
+    "Quant.");
+  ops.def(
+    "quant",
+    py::overload_cast<
+    torch::Tensor&,
+    torch::Tensor&,
+    torch::Tensor&>(
+    &quant),
+    "Per-token quant.");
 
   // Rotary embedding
   ops.def(
     "rotary_embedding",
     &rotary_embedding,
     "Apply GPT-NeoX or GPT-J style rotary embedding to query and key");
+  ops.def(
+    "dequant_rotary_embedding",
+    &dequant_rotary_embedding,
+    "Dequant query and key, then apply GPT-NeoX or GPT-J style rotary embedding to the dequanted query and the dequanted key");
 
 #ifndef USE_ROCM
   // Quantization ops
@@ -63,6 +166,13 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   ops.def("ggml_mul_mat_vec", &ggml_mul_mat_vec, "ggml_mul_mat_vec");
   ops.def("ggml_mul_mat_vec_a8", &ggml_mul_mat_vec_a8, "ggml_mul_mat_vec_a8");
   ops.def("ggml_mul_mat_a8", &ggml_mul_mat_a8, "ggml_mul_mat_a8");
+  
+  pybind11::class_<I8CUGEMM>(ops, "I8CUGEMM")
+    .def(pybind11::init<>())
+    .def("linear_a8_w8_o32", &I8CUGEMM::linear_a8_w8_o32)
+    .def("linear_a8_w8_o8", &I8CUGEMM::linear_a8_w8_o8)
+    .def("linear_a8_w8_o8_", &I8CUGEMM::linear_a8_w8_o8_)
+    .def("linear_a8_w8_o32_", &I8CUGEMM::linear_a8_w8_o32_);
 
   // Cache ops
   pybind11::module cache_ops = m.def_submodule("cache_ops", "Aphrodite cache ops");
