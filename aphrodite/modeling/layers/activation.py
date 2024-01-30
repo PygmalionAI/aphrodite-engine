@@ -1,6 +1,6 @@
 """Custom activation functions."""
 import math
-from typing import Optional
+from typing import Optional, Union, Tuple
 
 import torch
 import torch.nn as nn
@@ -36,6 +36,43 @@ class SiluAndMul(nn.Module):
         ops.silu_and_mul(out, x)
         return out
 
+class DequantSiluAndMulQuant(nn.Module):
+    """An activation function for SwiGLU in SmoothQuant.
+    The function dequantizes x and computes x -> silu(x[:d]) * x[d:] where d = x.shape[-1] // 2 in kernel function,
+    finally quantizes output into int8.
+    """
+
+    # TODO(: use_per_token_quant
+    def __init__(self, use_per_token_quant: bool = True) -> None:
+        super().__init__()
+        self.use_per_token_quant = use_per_token_quant
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        gate_dequant_scale: float,
+        up_dequant_scale: float,
+        quant_scale: float = 1.0
+    ) -> Union[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor]]:
+        num_tokens = x.numel() // x.shape[-1]
+        d = x.shape[-1] // 2
+        out = torch.empty(*x.shape[:-1], d, dtype=torch.int8, device=x.device)
+        if self.use_per_token_quant:
+            scale = torch.empty(num_tokens,
+                                dtype=torch.float32,
+                                device=x.device)
+            # tmp is used in kernel func
+            tmp = torch.empty(num_tokens,
+                              d,
+                              dtype=torch.float32,
+                              device=x.device)
+            ops.dequant_silu_and_mul_quant(out, x, gate_dequant_scale,
+                                           up_dequant_scale, scale, tmp)
+            return out, scale
+        else:
+            ops.dequant_silu_and_mul_quant(out, x, gate_dequant_scale,
+                                           up_dequant_scale, quant_scale)
+            return (out, )
 
 class NewGELU(nn.Module):
 
