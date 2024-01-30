@@ -76,6 +76,7 @@ class UnquantizedLinearMethod(LinearMethodBase):
         weight = weights["weight"]
         return F.embedding(x, weight)
 
+
 class ReplicatedLinear(torch.nn.Module):
     """Replicated linear layer.
 

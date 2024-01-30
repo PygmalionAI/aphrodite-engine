@@ -1,11 +1,8 @@
 from typing import Optional, Sequence
 
 import torch
-import torch.nn.functional as F
 from torch.nn.parameter import Parameter
 
-from aphrodite.modeling.megatron.communication_op import (
-    tensor_model_parallel_gather)
 from aphrodite.modeling.layers.linear import UnquantizedLinearMethod
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_rank,
@@ -57,7 +54,7 @@ class VocabParallelEmbedding(torch.nn.Module):
                  num_embeddings: int,
                  embedding_dim: int,
                  params_dtype: Optional[torch.dtype] = None,
-                 linear_method = None,
+                 linear_method=None,
                  org_num_embeddings: Optional[int] = None,
                  padding_size: int = DEFAULT_VOCAB_PADDING_SIZE):
         super().__init__()
@@ -78,7 +75,8 @@ class VocabParallelEmbedding(torch.nn.Module):
                 self.tp_size))
         self.num_embeddings_per_partition = (self.vocab_end_index -
                                              self.vocab_start_index)
-        if linear_method is None or not linear_method.quant_config.quant_vocab():
+        if linear_method is None or not linear_method.quant_config.quant_vocab(
+        ):
             linear_method = UnquantizedLinearMethod()
         self.linear_method = linear_method
         self.linear_weights = self.linear_method.create_weights(
@@ -96,7 +94,9 @@ class VocabParallelEmbedding(torch.nn.Module):
             loaded_weight = loaded_weight[self.vocab_start_index:self.
                                           vocab_end_index]
         if isinstance(param, torch.nn.parameter.UninitializedParameter):
-            param.materialize((self.num_embeddings_per_partition, loaded_weight.shape[1]), dtype=loaded_weight.dtype)
+            param.materialize(
+                (self.num_embeddings_per_partition, loaded_weight.shape[1]),
+                dtype=loaded_weight.dtype)
         if output_dim is not None:
             param[:loaded_weight.shape[0]].data.copy_(loaded_weight)
         else:
@@ -144,7 +144,7 @@ class ParallelLMHead(VocabParallelEmbedding):
                  embedding_dim: int,
                  bias: bool = False,
                  params_dtype: Optional[torch.dtype] = None,
-                 linear_method = None,
+                 linear_method=None,
                  org_num_embeddings: Optional[int] = None,
                  padding_size: int = DEFAULT_VOCAB_PADDING_SIZE):
         super().__init__(num_embeddings, embedding_dim, params_dtype,
@@ -162,8 +162,7 @@ class ParallelLMHead(VocabParallelEmbedding):
             self.register_parameter("bias", None)
 
     def forward(self, input_):
-        logits = self.linear_method.apply_weights(
-            self.linear_weights, input_)
+        logits = self.linear_method.apply_weights(self.linear_weights, input_)
         if self.bias is not None:
             logits += self.bias
         return logits

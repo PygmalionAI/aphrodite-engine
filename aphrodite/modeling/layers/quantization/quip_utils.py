@@ -6,9 +6,8 @@ import torch
 import fast_hadamard_transform
 from safetensors.torch import load_file
 
-
-HADA_TENSORS = load_file(Path(
-    __file__).resolve().parent / "hadamard.safetensors")
+HADA_TENSORS = load_file(
+    Path(__file__).resolve().parent / "hadamard.safetensors")
 
 
 def int2mask(i, int_map):
@@ -63,12 +62,12 @@ def get_packed_abs_grid():
     norm12 = get_norm12()
     cba = torch.concat([d8abs, norm12], dim=0)
     cba = cba[:, [0, 2, 1, 3, 4, 6, 5, 7]]
-    cba[:,7] *= (1 - 2 * (cba.sum(1) % 2))
+    cba[:, 7] *= (1 - 2 * (cba.sum(1) % 2))
     cba = cba * 4
     cba = cba.to(torch.int64)
-    acc = cba[:,0]
+    acc = cba[:, 0]
     for i in range(7):
-        acc = acc | (cba[:,(i+1)] << ((i+1)*8))
+        acc = acc | (cba[:, (i + 1)] << ((i + 1) * 8))
     return acc
 
 
@@ -92,17 +91,16 @@ def get_hadK(n, use_rand=True):
     if base == 1:
         return None, 1, n
     if use_rand:
-        rand_mat = torch.tensor(scipy.stats.special_ortho_group.rvs(
-            base)).to(torch.float32)
+        rand_mat = torch.tensor(scipy.stats.special_ortho_group.rvs(base)).to(
+            torch.float32)
         return rand_mat, base, n
 
     # Use hadamad only and add padding if cannot find one
     pad_n = next_power_of_2(n)
     if exp < 2 or str(base * 4) not in HADA_TENSORS:
         return None, 1, pad_n
-    base_mat = HADA_TENSORS[str(base * 4)]/math.sqrt(base * 4)
+    base_mat = HADA_TENSORS[str(base * 4)] / math.sqrt(base * 4)
     return base_mat, base * 4, n
-
 
 
 def matmul_hadU_cuda(X, hadK, K, n, scale=None, transpose=False):
@@ -117,7 +115,7 @@ def matmul_hadU_cuda(X, hadK, K, n, scale=None, transpose=False):
 
     if transpose:
         hadK = hadK.T.contiguous()
-    input = X.view(-1, K, n // K)
+    input = X.view(-1, K, n // K)  # pylint: disable=redefined-builtin
     input = fast_hadamard_transform.hadamard_transform(input.contiguous(),
                                                        scale=had_scale)
     input = hadK @ input

@@ -62,7 +62,7 @@ class QuantizationConfig(ABC):
         For now, this is only used by AWQ.
         """
         raise NotImplementedError
-    
+
     @abstractmethod
     def merge_weight(self) -> bool:
         """whether fuse qkv and up/gate."""

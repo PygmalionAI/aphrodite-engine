@@ -56,20 +56,21 @@ class GPTJAttention(nn.Module):
         self.hidden_size = config.hidden_size
         self.head_size = self.hidden_size // self.total_num_heads
 
-        if linear_method is not None and not linear_method.quant_config.merge_weight():
+        if linear_method is not None and not linear_method.quant_config.merge_weight(
+        ):
             self.merge_weight = False
-            self.q_proj = ColumnParallelLinear(
-                config.hidden_size, config.hidden_size,
-                bias=False,
-                linear_method=linear_method)
-            self.k_proj = ColumnParallelLinear(
-                config.hidden_size, config.hidden_size,
-                bias=False,
-                linear_method=linear_method)
-            self.v_proj = ColumnParallelLinear(
-                config.hidden_size, config.hidden_size,
-                bias=False,
-                linear_method=linear_method)
+            self.q_proj = ColumnParallelLinear(config.hidden_size,
+                                               config.hidden_size,
+                                               bias=False,
+                                               linear_method=linear_method)
+            self.k_proj = ColumnParallelLinear(config.hidden_size,
+                                               config.hidden_size,
+                                               bias=False,
+                                               linear_method=linear_method)
+            self.v_proj = ColumnParallelLinear(config.hidden_size,
+                                               config.hidden_size,
+                                               bias=False,
+                                               linear_method=linear_method)
         else:
             self.merge_weight = True
             self.qkv_proj = QKVParallelLinear(
@@ -283,7 +284,8 @@ class GPTJForCausalLM(nn.Module):
             ("gate_up_proj", "gate_proj", 0),
             ("gate_up_proj", "up_proj", 1),
         ]
-        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight():
+        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
+        ):
             stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(

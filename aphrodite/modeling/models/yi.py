@@ -61,16 +61,17 @@ class YiMLP(nn.Module):
         linear_method: Optional[LinearMethodBase] = None,
     ) -> None:
         super().__init__()
-        if linear_method is not None and not linear_method.quant_config.merge_weight():
+        if linear_method is not None and not linear_method.quant_config.merge_weight(
+        ):
             self.merge_weight = False
-            self.gate_proj = ColumnParallelLinear(
-                hidden_size, intermediate_size,
-                bias=False,
-                linear_method=linear_method)
-            self.up_proj = ColumnParallelLinear(
-                hidden_size, intermediate_size,
-                bias=False,
-                linear_method=linear_method)
+            self.gate_proj = ColumnParallelLinear(hidden_size,
+                                                  intermediate_size,
+                                                  bias=False,
+                                                  linear_method=linear_method)
+            self.up_proj = ColumnParallelLinear(hidden_size,
+                                                intermediate_size,
+                                                bias=False,
+                                                linear_method=linear_method)
         else:
             self.merge_weight = True
             self.gate_up_proj = MergedColumnParallelLinear(
@@ -133,20 +134,21 @@ class YiAttention(nn.Module):
         self.rope_theta = rope_theta
         self.max_position_embeddings = max_position_embeddings
 
-        if linear_method is not None and not linear_method.quant_config.merge_weight():
+        if linear_method is not None and not linear_method.quant_config.merge_weight(
+        ):
             self.merge_weight = False
-            self.q_proj = ColumnParallelLinear(
-                hidden_size, self.q_size,
-                bias=False,
-                linear_method=linear_method)
-            self.k_proj = ColumnParallelLinear(
-                hidden_size, self.kv_size,
-                bias=False,
-                linear_method=linear_method)
-            self.v_proj = ColumnParallelLinear(
-                hidden_size, self.kv_size,
-                bias=False,
-                linear_method=linear_method)
+            self.q_proj = ColumnParallelLinear(hidden_size,
+                                               self.q_size,
+                                               bias=False,
+                                               linear_method=linear_method)
+            self.k_proj = ColumnParallelLinear(hidden_size,
+                                               self.kv_size,
+                                               bias=False,
+                                               linear_method=linear_method)
+            self.v_proj = ColumnParallelLinear(hidden_size,
+                                               self.kv_size,
+                                               bias=False,
+                                               linear_method=linear_method)
         else:
             self.merge_weight = True
             self.qkv_proj = QKVParallelLinear(
@@ -163,7 +165,8 @@ class YiAttention(nn.Module):
             bias=False,
             linear_method=linear_method,
         )
-        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style() is None else linear_method.quant_config.rope_style()
+        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
+        ) is None else linear_method.quant_config.rope_style()
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.head_dim,
@@ -268,11 +271,9 @@ class YiModel(nn.Module):
         self.config = config
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
-        self.embed_tokens = VocabParallelEmbedding(
-            config.vocab_size,
-            config.hidden_size,
-            linear_method=linear_method
-        )
+        self.embed_tokens = VocabParallelEmbedding(config.vocab_size,
+                                                   config.hidden_size,
+                                                   linear_method=linear_method)
         self.layers = nn.ModuleList([
             YiDecoderLayer(config, linear_method)
             for _ in range(config.num_hidden_layers)
@@ -312,7 +313,8 @@ class YiForCausalLM(nn.Module):
         self.config = config
         self.linear_method = linear_method
         self.model = YiModel(config, linear_method)
-        self.lm_head = ParallelLMHead(config.vocab_size, config.hidden_size,
+        self.lm_head = ParallelLMHead(config.vocab_size,
+                                      config.hidden_size,
                                       linear_method=linear_method)
         self.sampler = Sampler(config.vocab_size)
 
@@ -349,7 +351,8 @@ class YiForCausalLM(nn.Module):
             ("gate_up_proj", "gate_proj", 0),
             ("gate_up_proj", "up_proj", 1),
         ]
-        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight():
+        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
+        ):
             stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
@@ -375,4 +378,3 @@ class YiForCausalLM(nn.Module):
                 weight_loader = getattr(param, "weight_loader",
                                         default_weight_loader)
                 weight_loader(param, loaded_weight)
-
