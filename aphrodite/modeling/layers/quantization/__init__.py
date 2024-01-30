@@ -5,6 +5,7 @@ from aphrodite.modeling.layers.quantization.awq import AWQConfig
 from aphrodite.modeling.layers.quantization.gguf import GGUFConfig
 from aphrodite.modeling.layers.quantization.gptq import GPTQConfig
 from aphrodite.modeling.layers.quantization.quip import QuipConfig
+from aphrodite.modeling.layers.quantization.smoothquant import SmoothQuantConfig
 from aphrodite.modeling.layers.quantization.squeezellm import SqueezeLLMConfig
 
 _QUANTIZATION_CONFIG_REGISTRY = {
@@ -12,6 +13,7 @@ _QUANTIZATION_CONFIG_REGISTRY = {
     "gguf": GGUFConfig,
     "gptq": GPTQConfig,
     "quip": QuipConfig,
+    "smoothquant": SmoothQuantConfig,
     "squeezellm": SqueezeLLMConfig,
 }
 
