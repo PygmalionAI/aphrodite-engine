@@ -13,6 +13,7 @@ from aphrodite.modeling.megatron.utils import (divide,
                                                split_tensor_along_last_dim)
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.common.logger import init_logger
+from aphrodite._C import ops
 
 logger = init_logger(__name__)
 
@@ -564,6 +565,42 @@ class RowParallelLinear(torch.nn.Module):
         # Matrix multiply.
         output_parallel = self.linear_method.apply_weights(
             self.linear_weights, input_parallel)
+        if self.reduce_results and self.tp_size > 1:
+            output_ = tensor_model_parallel_all_reduce(output_parallel)
+        else:
+            output_ = output_parallel
+
+        if not self.skip_bias_add:
+            output = output_ + self.bias if self.bias is not None else output_
+            output_bias = None
+        else:
+            output = output_
+            output_bias = self.bias
+        return output, output_bias
+
+class SQRowParallelLinear(RowParallelLinear):
+    """SmoothQuant linear layer with row parallelism.
+    It applies dequant on output_parallel before all_reduce if tp_size > 1.
+    """
+
+    def forward(self, input_, scale=None):
+        # Set up backprop all-reduce.
+        if self.input_is_parallel:
+            input_parallel = input_
+        else:
+            tp_rank = get_tensor_model_parallel_rank()
+            splitted_input = split_tensor_along_last_dim(
+                input_, num_partitions=self.tp_size)
+            input_parallel = splitted_input[tp_rank].contiguous()
+
+        # Matrix multiply.
+        output_parallel = self.linear_method.apply_weights(
+            self.linear_weights, input_parallel)
+        if self.tp_size > 1 and scale is not None:
+            out = torch.empty_like(output_parallel, dtype=self.params_dtype)
+            scale = self.dequant_scale.item() * scale
+            ops.dequant(out, output_parallel, scale)
+            output_parallel = out
         if self.reduce_results and self.tp_size > 1:
             output_ = tensor_model_parallel_all_reduce(output_parallel)
         else:
