@@ -141,7 +141,7 @@ class StablelmAttention(nn.Module):
         else:
             self.merge_weight = True
             self.qkv_proj = QKVParallelLinear(
-                hidden_size,
+                self.hidden_size,
                 self.head_dim,
                 self.total_num_heads,
                 self.total_num_kv_heads,
