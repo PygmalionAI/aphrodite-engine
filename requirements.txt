@@ -18,4 +18,5 @@ aioprometheus[starlette] # for prometheus metrics
 triton >= 2.1.0
 lark == 1.1.8 # for grammars
 pynvml == 11.5.0
-gguf
+gguf # for gguf
+scipy # for quip
