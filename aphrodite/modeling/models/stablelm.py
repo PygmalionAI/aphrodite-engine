@@ -144,7 +144,6 @@ class StablelmAttention(nn.Module):
                 self.hidden_size,
                 self.head_dim,
                 self.total_num_heads,
-                self.total_num_kv_heads,
                 bias=False,
                 linear_method=linear_method,
             )
