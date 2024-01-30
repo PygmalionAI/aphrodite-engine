@@ -1,5 +1,5 @@
 """Multi-head attention."""
-from typing import List, Optional
+from typing import List, Optional, Union, Tuple
 
 import torch
 import torch.nn as nn
@@ -300,3 +300,86 @@ def _paged_attention(
             input_metadata.kv_cache_dtype,
         )
     return output
+
+class DequantPagedAttentionQuant(PagedAttention):
+    """MHA/MQA/GQA layer with PagedAttention in SmoothQuant.
+    It dequantizes query, key and value, then applies PagedAttention,
+    finally quantize attention output into int8.
+    """
+
+    # TODO: use_per_token_quant
+    def __init__(self,
+                 *args,
+                 use_per_token_quant: bool = True,
+                 **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.use_per_token_quant = use_per_token_quant
+        self.default_dtype = torch.get_default_dtype()
+
+    def forward(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        key_cache: Optional[torch.Tensor],
+        value_cache: Optional[torch.Tensor],
+        input_metadata: InputMetadata,
+        q_dequant_scale: float,
+        k_dequant_scale: float,
+        v_dequant_scale: float,
+        quant_scale: float = 1.0
+    ) -> Union[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor]]:
+        """PagedAttention forward pass.
+        Args:
+            query: shape = [batch_size, seq_len, num_heads * head_size]
+            key: shape = [batch_size, seq_len, num_kv_heads * head_size]
+            value: shape = [batch_size, seq_len, num_kv_heads * head_size]
+            key_cache: shape = [num_blocks, num_kv_heads, head_size/x,
+                block_size, x]
+            value_cache: shape = [num_blocks, num_kv_heads, head_size,
+                block_size]
+            input_metadata: metadata for the inputs.
+            q_dequant_scale: dequant scale for query.
+            k_dequant_scale: dequant scale for key.
+            v_dequant_scale: dequant scale for value.
+            quant_scale: dequant scale for output if using activation per-tensor quant.
+        Returns:
+            shape = [batch_size, seq_len, num_heads * head_size]
+        """
+
+        # Apply rotary embedding to the query and key before passing them
+        # to the attention op.
+        if query.dtype != self.default_dtype:
+            query_dequant = torch.empty_like(query, dtype=self.default_dtype)
+            key_dequant = torch.empty_like(key, dtype=self.default_dtype)
+            value_dequant = torch.empty_like(value, dtype=self.default_dtype)
+            ops.dequant(query_dequant, query, q_dequant_scale)
+            ops.dequant(key_dequant, key, k_dequant_scale)
+            ops.dequant(value_dequant, value, v_dequant_scale)
+            out = super().forward(
+                query_dequant,
+                key_dequant,
+                value_dequant,
+                key_cache,
+                value_cache,
+                input_metadata,
+            )
+        else:
+            out = super().forward(
+                query,
+                key,
+                value,
+                key_cache,
+                value_cache,
+                input_metadata,
+            )
+        quant_out = torch.empty_like(out, dtype=torch.int8)
+        if self.use_per_token_quant:
+            scale = torch.empty(out.numel() // out.shape[-1],
+                                dtype=torch.float32,
+                                device=out.device)
+            ops.quant(quant_out, out, scale)
+            return quant_out, scale
+        else:
+            ops.quant(quant_out, out, quant_scale)
+            return (quant_out, )
