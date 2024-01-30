@@ -12,7 +12,7 @@ from aioprometheus import MetricsMiddleware
 from aioprometheus.asgi.starlette import metrics
 import uvicorn
 import fastapi
-from fastapi import FastAPI, APIRouter, Request, Response
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -38,6 +38,7 @@ badwordsids: List[int] = []
 
 app.add_middleware(MetricsMiddleware)  # trace HTTP server metrics
 app.add_route("/metrics", metrics)
+
 
 def _set_badwords(tokenizer, hf_config):  # pylint: disable=redefined-outer-name
     global badwordsids
