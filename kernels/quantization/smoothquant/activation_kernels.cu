@@ -31,9 +31,9 @@ __global__ void dequant_silu_and_mul_quant_kernel(
 
     for (int64_t idx = threadIdx.x; idx < d; idx += blockDim.x) {
       const float x =
-          (float)VLLM_LDG(&input[token_idx * 2 * d + idx]) * gate_scale;
+          (float)APHRODITE_LDG(&input[token_idx * 2 * d + idx]) * gate_scale;
       const float y =
-          (float)VLLM_LDG(&input[token_idx * 2 * d + d + idx]) * up_scale;
+          (float)APHRODITE_LDG(&input[token_idx * 2 * d + d + idx]) * up_scale;
       float t = silu(x) * y;
       tmp[token_idx * d + idx] = t;
       t = t > zero ? t : -t;
@@ -57,9 +57,9 @@ __global__ void dequant_silu_and_mul_quant_kernel(
   } else {
     for (int64_t idx = threadIdx.x; idx < d; idx += blockDim.x) {
       const float x =
-          (float)VLLM_LDG(&input[token_idx * 2 * d + idx]) * gate_scale;
+          (float)APHRODITE_LDG(&input[token_idx * 2 * d + idx]) * gate_scale;
       const float y =
-          (float)VLLM_LDG(&input[token_idx * 2 * d + d + idx]) * up_scale;
+          (float)APHRODITE_LDG(&input[token_idx * 2 * d + d + idx]) * up_scale;
       out[token_idx * d + idx] = float_to_int8_rn(silu(x) * y / out_scale);
     }
   }
