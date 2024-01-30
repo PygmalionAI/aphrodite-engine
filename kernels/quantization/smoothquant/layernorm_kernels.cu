@@ -3,7 +3,7 @@
 #include <c10/cuda/CUDAGuard.h>
 
 #include "../../dispatch_utils.h"
-#include "../../reduction_utils.cuh"
+#include "../../reduction.cuh"
 #include "quant_utils.cuh"
 
 namespace aphrodite {
