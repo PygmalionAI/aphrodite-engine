@@ -203,11 +203,12 @@ if __name__ == "__main__":
                         type=str,
                         required=True,
                         help="Path to the dataset.")
-    parser.add_argument("--model", type=str, default="facebook/opt-125m")
+    parser.add_argument("--model", type=str,
+                        default="EleutherAI/pythia-70m-deduped")
     parser.add_argument("--tokenizer", type=str, default=None)
     parser.add_argument("--quantization",
                         "-q",
-                        choices=["awq", None],
+                        choices=["awq", "gguf", "gptq", "squeezellm", None],
                         default=None)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.88)
     parser.add_argument("--tensor-parallel-size", "-tp", type=int, default=1)

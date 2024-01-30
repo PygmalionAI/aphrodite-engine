@@ -80,6 +80,24 @@ torch::Tensor awq_dequantize(
     int split_k_iters,
     int thx,
     int thy);
+
+void marlin_gemm(
+  const torch::Tensor& input,
+  const torch::Tensor& weights,
+        torch::Tensor& output,
+  const torch::Tensor& scales,
+        torch::Tensor& workspace);
+
+at::Tensor e8p_mm_origorder(
+    const at::Tensor& A,
+    const at::Tensor& B,
+    const at::Tensor& CB);
+
+void decompress_e8p_origorder(
+    torch::Tensor YIs,
+    torch::Tensor CB,
+    torch::Tensor &Y
+);
 #endif
 
 void squeezellm_gemm(
@@ -101,6 +119,34 @@ void gptq_shuffle(
   torch::Tensor q_weight,
   torch::Tensor q_perm,
   int bit);
+
+torch::Tensor ggml_dequantize(
+    torch::Tensor X,
+    int8_t type,
+    int64_t m,
+    int64_t n
+);
+
+torch::Tensor ggml_mul_mat_vec(
+    torch::Tensor W,  // quant weight
+    torch::Tensor X,  // input
+    int8_t type,
+    int64_t m
+);
+
+torch::Tensor ggml_mul_mat_vec_a8(
+    torch::Tensor W,  // quant weight
+    torch::Tensor X,  // input
+    int8_t type,
+    int64_t row
+);
+
+torch::Tensor ggml_mul_mat_a8(
+    torch::Tensor W,  // quant weight
+    torch::Tensor X,  // input
+    int8_t type,
+    int64_t row
+);
 
 #ifndef USE_ROCM
 using fptr_t = uint64_t;
