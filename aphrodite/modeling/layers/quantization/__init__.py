@@ -4,7 +4,7 @@ from aphrodite.modeling.layers.quantization.base_config import QuantizationConfi
 from aphrodite.modeling.layers.quantization.awq import AWQConfig
 from aphrodite.modeling.layers.quantization.gguf import GGUFConfig
 from aphrodite.modeling.layers.quantization.gptq import GPTQConfig
-from aphrodite.modeling.layers.quantization.quip import QuipConfig
+# from aphrodite.modeling.layers.quantization.quip import QuipConfig
 from aphrodite.modeling.layers.quantization.squeezellm import SqueezeLLMConfig
 
 _QUANTIZATION_CONFIG_REGISTRY = {

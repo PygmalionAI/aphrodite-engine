@@ -81,23 +81,23 @@ torch::Tensor awq_dequantize(
     int thx,
     int thy);
 
-void marlin_gemm(
-  const torch::Tensor& input,
-  const torch::Tensor& weights,
-        torch::Tensor& output,
-  const torch::Tensor& scales,
-        torch::Tensor& workspace);
+// void marlin_gemm(
+//   const torch::Tensor& input,
+//   const torch::Tensor& weights,
+//         torch::Tensor& output,
+//   const torch::Tensor& scales,
+//         torch::Tensor& workspace);
 
-at::Tensor e8p_mm_origorder(
-    const at::Tensor& A,
-    const at::Tensor& B,
-    const at::Tensor& CB);
+// at::Tensor e8p_mm_origorder(
+//     const at::Tensor& A,
+//     const at::Tensor& B,
+//     const at::Tensor& CB);
 
-void decompress_e8p_origorder(
-    torch::Tensor YIs,
-    torch::Tensor CB,
-    torch::Tensor &Y
-);
+// void decompress_e8p_origorder(
+//     torch::Tensor YIs,
+//     torch::Tensor CB,
+//     torch::Tensor &Y
+// );
 #endif
 
 void squeezellm_gemm(

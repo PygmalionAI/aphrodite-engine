@@ -20,7 +20,7 @@ MAIN_CUDA_VERSION = "12.1"
 
 # Supported NVIDIA GPU architectures.
 NVIDIA_SUPPORTED_ARCHS = {
-    "6.0", "6.1", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"
+    "6.1", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"
 }
 ROCM_SUPPORTED_ARCHS = {
     "gfx90a", "gfx908", "gfx906", "gfx1030", "gfx1100"
@@ -280,8 +280,6 @@ aphrodite_extension_sources = [
 
 if _is_cuda():
     aphrodite_extension_sources.append("kernels/quantization/awq/gemm_kernels.cu")
-    aphrodite_extension_sources.append("kernels/quantization/quip/origin_order.cu")
-    aphrodite_extension_sources.append("kernels/quantization/marlin/marlin_cuda_kernel.cu")
     aphrodite_extension_sources.append("kernels/all_reduce/custom_all_reduce.cu")
 
 aphrodite_extension = CUDAExtension(

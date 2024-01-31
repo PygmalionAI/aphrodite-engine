@@ -52,9 +52,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   // Quantization ops
   ops.def("awq_gemm", &awq_gemm, "Quantized GEMM for AWQ");
   ops.def("awq_dequantize", &awq_dequantize, "Dequantization for AWQ");
-  ops.def("quip_decompress", &decompress_e8p_origorder, "decompress_packed_e8p");
-  ops.def("quip_gemv", &e8p_mm_origorder, "e8p_mm_origorder");
-  ops.def("marlin_gemm", &marlin_gemm, "Marlin Optimized Quantized GEMM for GPTQ");
+  // ops.def("quip_decompress", &decompress_e8p_origorder, "decompress_packed_e8p");
+  // ops.def("quip_gemv", &e8p_mm_origorder, "e8p_mm_origorder");
+  // ops.def("marlin_gemm", &marlin_gemm, "Marlin Optimized Quantized GEMM for GPTQ");
 #endif
   ops.def("gptq_gemm", &gptq_gemm, "Quantized GEMM for GPTQ");
   ops.def("gptq_shuffle", &gptq_shuffle, "Post processing for GPTQ");

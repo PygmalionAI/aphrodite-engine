@@ -19,5 +19,3 @@ triton >= 2.1.0
 lark == 1.1.8 # for grammars
 pynvml == 11.5.0
 gguf # for gguf
-scipy # for quip
-fast-hadamard-transform # for quip
