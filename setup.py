@@ -53,6 +53,7 @@ if _is_cuda() and CUDA_HOME is None:
 ABI = 1 if torch._C._GLIBCXX_USE_CXX11_ABI else 0
 CXX_FLAGS += [f"-D_GLIBCXX_USE_CXX11_ABI={ABI}"]
 NVCC_FLAGS += [f"-D_GLIBCXX_USE_CXX11_ABI={ABI}"]
+FORCE_CXX11_ABI = os.getenv("APHRODITE_FORCE_CXX11_ABI", "FALSE") == "TRUE"
 
 def get_amdgpu_offload_arch():
     command = "/opt/rocm/llvm/bin/amdgpu-offload-arch"
@@ -256,6 +257,92 @@ if _is_cuda():
                     "nvcc": NVCC_FLAGS_PUNICA,
                 },
             ))
+    
+    install_hadamard = bool(int(os.getenv("APHRODITE_INSTALL_HADAMARD_KERNELS", "1")))
+    device_count = torch.cuda.device_count()
+    for i in range(device_count):
+        major, minor = torch.cuda.get_device_capability(i)
+        if major < 7:
+            install_hadamard = False
+            break
+    if install_hadamard:
+        ext_modules.append(
+            CUDAExtension(
+                name="aphrodite._hadamard_C",
+                sources=["kernels/hadamard/fast_hadamard_transform.cpp",
+                         "kernels/hadamard/fast_hadamard_transform_cuda.cu"],
+                extra_compile_args={
+                    "cxx": CXX_FLAGS,
+                    "nvcc": NVCC_FLAGS,
+                },
+            ))
+
+    # # ninja build does not work unless include_dirs are abs path
+    # this_dir = os.path.dirname(os.path.abspath(__file__))
+    # cc_flag = []
+    # if CUDA_HOME is not None:
+    #     _, bare_metal_version = get_nvcc_cuda_version(CUDA_HOME)
+    #     if bare_metal_version < Version("11.6"):
+    #         raise RuntimeError(
+    #             "fast_hadamard_transform is only supported on CUDA 11.6 and above.  "
+    #             "Note: make sure nvcc has a supported version by running nvcc -V."
+    #         )
+
+    # cc_flag.append("-gencode")
+    # cc_flag.append("arch=compute_70,code=sm_70")
+    # cc_flag.append("-gencode")
+    # cc_flag.append("arch=compute_80,code=sm_80")
+    # if bare_metal_version >= Version("11.8"):
+    #     cc_flag.append("-gencode")
+    #     cc_flag.append("arch=compute_90,code=sm_90")
+
+    # # HACK: The compiler flag -D_GLIBCXX_USE_CXX11_ABI is set to be the same as
+    # # torch._C._GLIBCXX_USE_CXX11_ABI
+    # # https://github.com/pytorch/pytorch/blob/8472c24e3b5b60150096486616d98b7bea01500b/torch/utils/cpp_extension.py#L920
+    # if FORCE_CXX11_ABI:
+    #     torch._C._GLIBCXX_USE_CXX11_ABI = True
+
+    # def append_nvcc_threads(nvcc_extra_args):
+    #     return nvcc_extra_args + ["--threads", "4"]
+    
+    # install_hadamard = bool(int(os.getenv("APHRODITE_INSTALL_HADAMARD_KERNELS", "1")))
+    # device_count = torch.cuda.device_count()
+    # for i in range(device_count):
+    #     major, minor = torch.cuda.get_device_capability(i)
+    #     if major < 7:
+    #         install_hadamard = False
+    #         break
+    # if install_hadamard:
+    #     ext_modules.append(
+    #         CUDAExtension(
+    #             name="aphrodite._hadamard_C",
+    #             sources=[
+    #                 "kernels/hadamard/fast_hadamard_transform.cpp"
+    #                 "kernels/hadamard/fast_hadamard_transform_cuda.cu"
+    #             ],
+    #             extra_compile_args={
+    #                 "cxx": ["-O3"],
+    #                 "nvcc": append_nvcc_threads(
+    #                     [
+    #                         "-O3",
+    #                         "-U__CUDA_NO_HALF_OPERATORS__",
+    #                         "-U__CUDA_NO_HALF_CONVERSIONS__",
+    #                         "-U__CUDA_NO_BFLOAT16_OPERATORS__",
+    #                         "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
+    #                         "-U__CUDA_NO_BFLOAT162_OPERATORS__",
+    #                         "-U__CUDA_NO_BFLOAT162_CONVERSIONS__",
+    #                         "--expt-relaxed-constexpr",
+    #                         "--expt-extended-lambda",
+    #                         "--use_fast_math",
+    #                         "--ptxas-options=-v",
+    #                         "-lineinfo",
+    #                     ]
+    #                     + cc_flag
+    #                 ),
+    #             },
+    #             include_dirs=[this_dir],
+    #         )
+    #     )
 
 elif _is_hip():
     amd_arch = get_amdgpu_offload_arch()

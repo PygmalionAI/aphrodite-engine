@@ -3,7 +3,7 @@ from pathlib import Path
 
 import scipy
 import torch
-import fast_hadamard_transform
+import aphrodite._hadamard_C
 from safetensors.torch import load_file
 
 HADA_TENSORS = load_file(
@@ -110,13 +110,13 @@ def matmul_hadU_cuda(X, hadK, K, n, scale=None, transpose=False):
     had_scale = 1 / math.sqrt(n // K) if scale is None else scale / math.sqrt(
         n // K)
     if K == 1:
-        return fast_hadamard_transform.hadamard_transform(X.contiguous(),
+        return aphrodite._hadamard_C.hadamard_transform(X.contiguous(),
                                                           scale=had_scale)
 
     if transpose:
         hadK = hadK.T.contiguous()
     input = X.view(-1, K, n // K)  # pylint: disable=redefined-builtin
-    input = fast_hadamard_transform.hadamard_transform(input.contiguous(),
+    input = aphrodite._hadamard_C.hadamard_transform(input.contiguous(),
                                                        scale=had_scale)
     input = hadK @ input
     return input.reshape(X.shape)
