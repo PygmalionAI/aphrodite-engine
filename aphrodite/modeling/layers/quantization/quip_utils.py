@@ -14,6 +14,16 @@ HADA_TENSORS = load_file(
     Path(__file__).resolve().parent / "hadamard.safetensors")
 
 
+class HadamardTransformFn(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, x, scale=1.0):
+        ctx._hadamard_transform_scale = scale
+        return hadamard_C.hadamard_transform(x, scale=scale)
+
+def hadamard_transform(x, scale=1.0):
+    return HadamardTransformFn.apply(x, scale)
+
 def int2mask(i, int_map):
     return ((i & int_map) > 0).int()
 
@@ -108,20 +118,18 @@ def get_hadK(n, use_rand=True):
 
 
 def matmul_hadU_cuda(X, hadK, K, n, scale=None, transpose=False):
-    if HADAMARD_IMPORT is None:
-        raise ImportError("Hadamard transform not available.")
     if n != X.shape[-1]:
         X = torch.nn.functional.pad(X, (0, n - X.shape[-1]))
 
     had_scale = 1 / math.sqrt(n // K) if scale is None else scale / math.sqrt(
         n // K)
     if K == 1:
-        return hadamard_C.hadamard_transform(X.contiguous(), scale=had_scale)
+        return hadamard_transform(X.contiguous(), scale=had_scale)
 
     if transpose:
         hadK = hadK.T.contiguous()
     input = X.view(-1, K, n // K)  # pylint: disable=redefined-builtin
-    input = hadamard_C.hadamard_transform(input.contiguous(), scale=had_scale)
+    input = hadamard_transform(input.contiguous(), scale=had_scale)
     input = hadK @ input
     return input.reshape(X.shape)
 
