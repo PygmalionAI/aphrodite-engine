@@ -1,5 +1,6 @@
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include "dispatch_utils.h"
 #include "reduction.cuh"
@@ -34,6 +35,7 @@ __global__ void rms_norm_kernel(
   }
 }
 
+// TODO: Further optimize this kernel.
 template<typename scalar_t>
 __global__ void fused_add_rms_norm_kernel(
   scalar_t* __restrict__ input,           // [..., hidden_size]
@@ -75,6 +77,7 @@ void rms_norm(
 
   dim3 grid(num_tokens);
   dim3 block(std::min(hidden_size, 1024));
+  const at::cuda::OptionalCUDAGuard device_guard(device_of(input));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   APHRODITE_DISPATCH_FLOATING_TYPES(
     input.scalar_type(),
@@ -100,6 +103,7 @@ void fused_add_rms_norm(
 
   dim3 grid(num_tokens);
   dim3 block(std::min(hidden_size, 1024));
+  const at::cuda::OptionalCUDAGuard device_guard(device_of(input));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   APHRODITE_DISPATCH_FLOATING_TYPES(
     input.scalar_type(),

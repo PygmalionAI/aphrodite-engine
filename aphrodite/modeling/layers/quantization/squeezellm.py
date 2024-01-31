@@ -3,10 +3,11 @@ from typing import Any, Dict, List, Optional
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite._C import ops as quantization_ops
+from aphrodite._C import ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.modeling.layers.quantization.base_config import QuantizationConfig
+from aphrodite.common.utils import is_hip
 
 
 class SqueezeLLMConfig(QuantizationConfig):
@@ -55,6 +56,12 @@ class SqueezeLLMConfig(QuantizationConfig):
     def get_scaled_act_names(self) -> List[str]:
         return []
 
+    def merge_weight(self) -> bool:
+        return True
+
+    def rope_style(self) -> Optional[bool]:
+        return None
+
 
 class SqueezeLLMLinearMethod(LinearMethodBase):
     """Linear method for SqueezeLLM.
@@ -66,20 +73,19 @@ class SqueezeLLMLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: SqueezeLLMConfig):
         self.quant_config = quant_config
 
-    def create_weights(self,
-                       input_size: int,
+    def create_weights(self, input_size_per_partition: int,
+                       output_size_per_partition: int, input_size: int,
                        output_size: int,
-                       params_dtype: torch.dtype,
-                       parallel_type: str = "none") -> Dict[str, torch.Tensor]:
-        if input_size % self.quant_config.pack_factor != 0:
+                       params_dtype: torch.dtype) -> Dict[str, Any]:
+        if input_size_per_partition % self.quant_config.pack_factor != 0:
             raise ValueError(
                 "The input size is not aligned with the quantized "
                 "weight shape. This can be caused by too large "
                 "tensor parallel size.")
         qweight = Parameter(
             torch.empty(
-                input_size // self.quant_config.pack_factor,
-                output_size,
+                input_size_per_partition // self.quant_config.pack_factor,
+                output_size_per_partition,
                 device="cuda",
                 dtype=torch.int32,
             ),
@@ -110,17 +116,21 @@ class SqueezeLLMLinearMethod(LinearMethodBase):
         }
 
     def apply_weights(self,
-                      weights: Dict[str, torch.Tensor],
+                      weights: Dict[str, Any],
                       x: torch.Tensor,
                       bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         qweight = weights["qweight"]
         lookup_table = weights["lookup_table"]
         out_shape = x.shape[:-1] + (qweight.shape[-1], )
         reshaped_x = x.reshape(-1, x.shape[-1])
-        # NOTE: The output tensor should be zero-initialized.
-        out = torch.zeros(out_shape, device="cuda", dtype=torch.float16)
-        quantization_ops.squeezellm_gemm(reshaped_x, qweight, out,
-                                         lookup_table)
+        if is_hip():
+            out_f = torch.zeros(out_shape, device="cuda", dtype=torch.float)
+            ops.squeezellm_gemm(reshaped_x, qweight, out_f, lookup_table)
+            out = out_f.to(dtype=torch.float16)
+        else:
+            # NOTE: The output tensor should be zero-initialized.
+            out = torch.zeros(out_shape, device="cuda", dtype=torch.float16)
+            ops.squeezellm_gemm(reshaped_x, qweight, out, lookup_table)
 
         if bias is not None:
             out = out + bias

@@ -64,6 +64,7 @@ class ChatCompletionRequest(BaseModel):
     n: Optional[int] = 1
     max_tokens: Optional[int] = None
     stop: Optional[Union[str, List[str]]] = Field(default_factory=list)
+    include_stop_str_in_output: Optional[bool] = False
     stream: Optional[bool] = False
     presence_penalty: Optional[float] = 0.0
     frequency_penalty: Optional[float] = 0.0
@@ -77,6 +78,8 @@ class ChatCompletionRequest(BaseModel):
     mirostat_mode: Optional[int] = 0
     mirostat_tau: Optional[float] = 0.0
     mirostat_eta: Optional[float] = 0.0
+    dynatemp_range: Optional[float] = 0.0
+    dynatemp_exponent: Optional[float] = 1.0
     ignore_eos: Optional[bool] = False
     use_beam_search: Optional[bool] = False
     logprobs: Optional[int] = None
@@ -85,6 +88,8 @@ class ChatCompletionRequest(BaseModel):
     custom_token_bans: Optional[List[int]] = Field(default_factory=list)
     skip_special_tokens: Optional[bool] = True
     spaces_between_special_tokens: Optional[bool] = True
+    add_generation_prompt: Optional[bool] = True
+    echo: Optional[bool] = False
 
 
 class CompletionRequest(BaseModel):
@@ -104,6 +109,7 @@ class CompletionRequest(BaseModel):
     logprobs: Optional[int] = None
     echo: Optional[bool] = False
     stop: Optional[Union[str, List[str]]] = Field(default_factory=list)
+    include_stop_str_in_output: Optional[bool] = False
     presence_penalty: Optional[float] = 0.0
     frequency_penalty: Optional[float] = 0.0
     repetition_penalty: Optional[float] = 1.0
@@ -116,6 +122,8 @@ class CompletionRequest(BaseModel):
     mirostat_mode: Optional[int] = 0
     mirostat_tau: Optional[float] = 0.0
     mirostat_eta: Optional[float] = 0.0
+    dynatemp_range: Optional[float] = 0.0
+    dynatemp_exponent: Optional[float] = 1.0
     ignore_eos: Optional[bool] = False
     use_beam_search: Optional[bool] = False
     logprobs: Optional[int] = None
@@ -124,6 +132,7 @@ class CompletionRequest(BaseModel):
     custom_token_bans: Optional[List[int]] = Field(default_factory=list)
     skip_special_tokens: Optional[bool] = True
     spaces_between_special_tokens: Optional[bool] = True
+    grammar: Optional[str] = None
 
 
 class LogProbs(BaseModel):

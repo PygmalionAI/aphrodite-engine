@@ -1,13 +1,13 @@
 from abc import ABC, abstractmethod
 import torch
-from typing import Dict
+from typing import Dict, List
 
 
 class LogitsProcessor(ABC):
 
     @abstractmethod
     def __call__(self, logits: torch.Tensor,
-                 output_tokens: list[list[int]]) -> None:
+                 output_tokens: List[List[int]]) -> None:
         """Logits are edited in-place"""
         pass
 
@@ -23,6 +23,7 @@ class BiasLogitsProcessor(LogitsProcessor):
     """
 
     def __init__(self, biases: Dict[int, float]):
+        super().__init__()
         self.biases = biases
 
         if not biases:
@@ -52,6 +53,7 @@ class BanEOSUntil(LogitsProcessor):
     parameters can be handled gracefully."""
 
     def __init__(self, min_tokens: int, eos_token_id: int):
+        super().__init__()
         self._min_tokens = min_tokens
         self._eos_token_id = eos_token_id
 

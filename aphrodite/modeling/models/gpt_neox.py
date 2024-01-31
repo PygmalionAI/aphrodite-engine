@@ -16,11 +16,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Inference-only GPT-NeoX model compatible with HuggingFace weights.
-
-The input of the model is flattened to a 1D tensor of tokens. The model uses
-InputMetadata to extract the original 2D shape of the input.
-"""
+"""Inference-only GPT-NeoX model compatible with HuggingFace weights."""
 from typing import List, Optional, Tuple
 
 import torch
@@ -40,6 +36,7 @@ from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding, ParallelLMHead)
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_world_size)
+from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (default_weight_loader,
                                               hf_model_weights_iterator)
 from aphrodite.common.sequence import SamplerOutput
@@ -58,6 +55,7 @@ class GPTNeoXAttention(nn.Module):
         self.total_num_heads = config.num_attention_heads
         self.hidden_size = config.hidden_size
         self.head_size = self.hidden_size // self.total_num_heads
+        self.bias = getattr(config, "attention_bias", True)
 
         tensor_model_parallel_world_size = (
             get_tensor_model_parallel_world_size())
@@ -69,25 +67,29 @@ class GPTNeoXAttention(nn.Module):
             config.hidden_size,
             self.head_size,
             self.total_num_heads,
+            bias=self.bias,
             linear_method=linear_method,
         )
         self.dense = RowParallelLinear(
             config.hidden_size,
             config.hidden_size,
+            bias=self.bias,
             linear_method=linear_method,
         )
-
         scaling = self.head_size**-0.5
         rotary_dim = int(self.head_size * config.rotary_pct)
         assert rotary_dim % 2 == 0
         rope_theta = getattr(config, "rope_theta", 10000)
         max_position_embeddings = getattr(config, "max_position_embeddings",
                                           8192)
+        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
+        ) is None else linear_method.quant_config.rope_style()
         self.rotary_emb = get_rope(
             self.head_size,
             rotary_dim=rotary_dim,
             max_position=max_position_embeddings,
             base=rope_theta,
+            is_neox_style=is_neox_style,
         )
         self.attn = PagedAttention(self.num_heads, self.head_size, scaling)
 
@@ -97,14 +99,12 @@ class GPTNeoXAttention(nn.Module):
         hidden_states: torch.Tensor,
         kv_cache: KVCache,
         input_metadata: InputMetadata,
-        cache_event: Optional[torch.cuda.Event],
     ) -> torch.Tensor:
         qkv, _ = self.query_key_value(hidden_states)
         q, k, v = qkv.chunk(chunks=3, dim=-1)
         q, k = self.rotary_emb(position_ids, q, k)
         k_cache, v_cache = kv_cache
-        attn_output = self.attn(q, k, v, k_cache, v_cache, input_metadata,
-                                cache_event)
+        attn_output = self.attn(q, k, v, k_cache, v_cache, input_metadata)
         output, _ = self.dense(attn_output)
         return output
 
@@ -160,7 +160,6 @@ class GPTNeoXLayer(nn.Module):
         hidden_states: torch.Tensor,
         kv_cache: KVCache,
         input_metadata: InputMetadata,
-        cache_event: Optional[torch.cuda.Event],
     ) -> torch.Tensor:
         attn_input = self.input_layernorm(hidden_states)
         attn_output = self.attention(
@@ -168,7 +167,6 @@ class GPTNeoXLayer(nn.Module):
             hidden_states=attn_input,
             kv_cache=kv_cache,
             input_metadata=input_metadata,
-            cache_event=cache_event,
         )
 
         if self.use_parallel_residual:
@@ -201,6 +199,7 @@ class GPTNeoXModel(nn.Module):
         self.embed_in = VocabParallelEmbedding(
             config.vocab_size,
             config.hidden_size,
+            linear_method=linear_method,
         )
         self.layers = nn.ModuleList([
             GPTNeoXLayer(config, linear_method)
@@ -215,21 +214,15 @@ class GPTNeoXModel(nn.Module):
         position_ids: torch.Tensor,
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
-        cache_events: Optional[List[torch.cuda.Event]],
     ) -> torch.Tensor:
         hidden_states = self.embed_in(input_ids)
         for i in range(len(self.layers)):
-            if cache_events is None:
-                cache_event = None
-            else:
-                cache_event = cache_events[i]
             layer = self.layers[i]
             hidden_states = layer(
                 position_ids,
                 hidden_states,
                 kv_caches[i],
                 input_metadata,
-                cache_event,
             )
         hidden_states = self.final_layer_norm(hidden_states)
         return hidden_states
@@ -249,6 +242,7 @@ class GPTNeoXForCausalLM(nn.Module):
         self.embed_out = ParallelLMHead(
             config.vocab_size,
             config.hidden_size,
+            linear_method=linear_method,
         )
         self.sampler = Sampler(config.vocab_size)
 
@@ -258,12 +252,18 @@ class GPTNeoXForCausalLM(nn.Module):
         positions: torch.Tensor,
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
-        cache_events: Optional[List[torch.cuda.Event]],
-    ) -> SamplerOutput:
+    ) -> torch.Tensor:
         hidden_states = self.gpt_neox(input_ids, positions, kv_caches,
-                                      input_metadata, cache_events)
-        next_tokens = self.sampler(self.embed_out.weight, hidden_states,
-                                   input_metadata)
+                                      input_metadata)
+        return hidden_states
+
+    def sample(
+        self,
+        hidden_states: torch.Tensor,
+        sampling_metadata: SamplingMetadata,
+    ) -> Optional[SamplerOutput]:
+        next_tokens = self.sampler(self.embed_out(hidden_states),
+                                   sampling_metadata)
         return next_tokens
 
     def load_weights(self,

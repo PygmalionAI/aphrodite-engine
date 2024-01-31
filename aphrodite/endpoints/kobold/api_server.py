@@ -8,13 +8,17 @@ import os
 from http import HTTPStatus
 from typing import List, Tuple, AsyncGenerator
 
+from aioprometheus import MetricsMiddleware
+from aioprometheus.asgi.starlette import metrics
 import uvicorn
-from fastapi import FastAPI, APIRouter, Request, Response
+import fastapi
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
+from aphrodite.engine.metrics import add_global_metrics_labels
 from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams, _SAMPLING_EPS
@@ -28,8 +32,12 @@ logger = init_logger(__name__)
 served_model: str = "Read Only"
 engine: AsyncAphrodite = None
 gen_cache: dict = {}
+app = fastapi.FastAPI()
 
 badwordsids: List[int] = []
+
+app.add_middleware(MetricsMiddleware)  # trace HTTP server metrics
+app.add_route("/metrics", metrics)
 
 
 def _set_badwords(tokenizer, hf_config):  # pylint: disable=redefined-outer-name
@@ -47,7 +55,6 @@ def _set_badwords(tokenizer, hf_config):  # pylint: disable=redefined-outer-name
     badwordsids.append(tokenizer.eos_token_id)
 
 
-app = FastAPI()
 kai_api = APIRouter()
 extra_api = APIRouter()
 kobold_lite_ui = ""
@@ -104,6 +111,8 @@ def prepare_engine_payload(
         best_of=kai_payload.n,
         repetition_penalty=kai_payload.rep_pen,
         temperature=kai_payload.temperature,
+        dynatemp_range=kai_payload.dynatemp_range,
+        dynatemp_exponent=kai_payload.dynatemp_exponent,
         tfs=kai_payload.tfs,
         top_p=kai_payload.top_p,
         top_k=kai_payload.top_k,
@@ -116,6 +125,7 @@ def prepare_engine_payload(
         mirostat_tau=kai_payload.mirostat_tau,
         mirostat_eta=kai_payload.mirostat_eta,
         stop=kai_payload.stop_sequence,
+        include_stop_str_in_output=kai_payload.include_stop_str_in_output,
         custom_token_bans=badwordsids
         if kai_payload.use_default_badwordsids else [],
         max_tokens=kai_payload.max_length,
@@ -270,7 +280,7 @@ async def get_preloaded_story() -> JSONResponse:
 @extra_api.get("/version")
 async def get_extra_version():
     """Impersonate KoboldCpp"""
-    return JSONResponse({"result": "KoboldCpp", "version": "1.42.1"})
+    return JSONResponse({"result": "KoboldCpp", "version": "1.55.1"})
 
 
 @app.get("/")
@@ -333,7 +343,7 @@ if __name__ == "__main__":
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = AsyncAphrodite.from_engine_args(engine_args)
     engine_model_config = asyncio.run(engine.get_model_config())
-    max_model_len = engine_model_config.get_max_model_len()
+    max_model_len = engine_model_config.max_model_len
 
     # A separate tokenizer to map token IDs to strings.
     tokenizer = get_tokenizer(engine_args.tokenizer,
@@ -341,6 +351,8 @@ if __name__ == "__main__":
                               trust_remote_code=engine_args.trust_remote_code)
 
     _set_badwords(tokenizer, engine_model_config.hf_config)
+
+    add_global_metrics_labels(model_name=engine_args.model)
 
     uvicorn.run(app,
                 host=args.host,

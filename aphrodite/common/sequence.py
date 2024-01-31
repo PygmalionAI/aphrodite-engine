@@ -4,7 +4,9 @@ import enum
 from typing import Dict, List, Optional, Union
 
 from aphrodite.common.block import LogicalTokenBlock
+from aphrodite.common.prefix import Prefix
 from aphrodite.common.sampling_params import SamplingParams
+from aphrodite.lora.request import LoRARequest
 
 PromptLogprobs = List[Optional[Dict[int, float]]]
 SampleLogprobs = List[Dict[int, float]]
@@ -38,6 +40,9 @@ class SequenceStatus(enum.Enum):
         elif status == SequenceStatus.FINISHED_ABORTED:
             finish_reason = "abort"
         elif status == SequenceStatus.FINISHED_IGNORED:
+            # The ignored sequences are the sequences whose prompt lengths
+            # are longer than the model's length cap. Therefore, the stop
+            # reason should also be "length" as in OpenAI API.
             finish_reason = "length"
         else:
             finish_reason = None
@@ -102,6 +107,7 @@ class Sequence:
         prompt_token_ids: The token IDs of the prompt.
         block_size: The block size of the sequence. Should be the same as the
             block size used by the block manager and cache engine.
+        lora_request: LoRA request.
     """
 
     def __init__(
@@ -110,10 +116,12 @@ class Sequence:
         prompt: str,
         prompt_token_ids: List[int],
         block_size: int,
+        lora_request: Optional[LoRARequest] = None,
     ) -> None:
         self.seq_id = seq_id
         self.prompt = prompt
         self.block_size = block_size
+        self.lora_request = lora_request
 
         self.data = SequenceData(prompt_token_ids)
         self.output_logprobs: SampleLogprobs = []
@@ -130,6 +138,10 @@ class Sequence:
         # Input + output tokens
         self.tokens: Optional[List[str]] = None
         self.persistent_data = {}
+
+    @property
+    def lora_int_id(self) -> int:
+        return self.lora_request.lora_int_id if self.lora_request else 0
 
     def _append_logical_block(self) -> None:
         block = LogicalTokenBlock(
@@ -197,7 +209,7 @@ class Sequence:
         """
         if seq_len is None:
             seq_len = self.get_len()
-            # Note: HF implementation does not count the EOS token
+            # NOTE: HF implementation does not count the EOS token
             # towards the length, we align with that here for testing.
             if (eos_token_id is not None
                     and self.get_last_token_id() == eos_token_id):
@@ -226,6 +238,8 @@ class SequenceGroup:
         seqs: The list of sequences.
         sampling_params: The sampling parameters used to generate the outputs.
         arrival_time: The arrival time of the request.
+        lora_request: LoRA request.
+        prefix: The prefix of the prompt of the sequence group.
     """
 
     def __init__(
@@ -234,11 +248,15 @@ class SequenceGroup:
         seqs: List[Sequence],
         sampling_params: SamplingParams,
         arrival_time: float,
+        lora_request: Optional[LoRARequest] = None,
+        prefix: Optional[Prefix] = None,
     ) -> None:
         self.request_id = request_id
         self.seqs_dict = {seq.seq_id: seq for seq in seqs}
         self.sampling_params = sampling_params
         self.arrival_time = arrival_time
+        self.lora_request = lora_request
+        self.prefix: Optional[Prefix] = prefix
         self.prompt_logprobs: Optional[PromptLogprobs] = None
 
     @property
@@ -252,6 +270,10 @@ class SequenceGroup:
         # All sequences in the group should have the same prompt.
         # We use the prompt of an arbitrary sequence.
         return next(iter(self.seqs_dict.values())).data.prompt_token_ids
+
+    @property
+    def lora_int_id(self) -> int:
+        return self.lora_request.lora_int_id if self.lora_request else 0
 
     def get_max_num_running_seqs(self) -> int:
         """The maximum number of sequences running in parallel in the remaining
@@ -333,6 +355,9 @@ class SequenceGroupMetadata:
         sampling_params: The sampling parameters used to generate the outputs.
         block_tables: The block tables. (Seq id -> list of physical block
             numbers)
+        lora_request: LoRA request.
+        prefix: The prefix of the prompt of the sequence group.
+        persistent_data: The persistent data of the sequence group.
     """
 
     def __init__(
@@ -342,7 +367,9 @@ class SequenceGroupMetadata:
         seq_data: Dict[int, SequenceData],
         sampling_params: SamplingParams,
         block_tables: Dict[int, List[int]],
-        persistent_data: dict[int, dict],
+        persistent_data: Dict[int, dict],
+        lora_request: Optional[LoRARequest] = None,
+        prefix: Optional[Prefix] = None,
     ) -> None:
         self.request_id = request_id
         self.is_prompt = is_prompt
@@ -350,6 +377,12 @@ class SequenceGroupMetadata:
         self.sampling_params = sampling_params
         self.block_tables = block_tables
         self.persistent_data = persistent_data
+        self.lora_request = lora_request
+        self.prefix = prefix
+
+    @property
+    def lora_int_id(self) -> int:
+        return self.lora_request.lora_int_id if self.lora_request else 0
 
 
 class SequenceOutput:
@@ -361,10 +394,16 @@ class SequenceOutput:
         output_token: The output token ID.
         logprobs: The logprobs of the output token.
             (Token id -> logP(x_i+1 | x_0, ..., x_i))
+        persistent_data: The persistent data of the sequence.
     """
 
-    def __init__(self, parent_seq_id: int, output_token: int,
-                 logprobs: Dict[int, float], persistent_data: dict) -> None:
+    def __init__(
+        self,
+        parent_seq_id: int,
+        output_token: int,
+        logprobs: Dict[int, float],
+        persistent_data: dict,
+    ) -> None:
         self.parent_seq_id = parent_seq_id
         self.output_token = output_token
         self.logprobs = logprobs
@@ -372,9 +411,9 @@ class SequenceOutput:
 
     def __repr__(self) -> str:
         return (f"SequenceOutput(parent_seq_id={self.parent_seq_id}, "
-                f"output_token={self.output_token}), "
+                f"output_token={self.output_token}, "
                 f"logprobs={self.logprobs}, "
-                f"persistent_data={self.persistent_data}")
+                f"persistent_data={self.persistent_data})")
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SequenceOutput):
@@ -386,7 +425,7 @@ class SequenceOutput:
 
 
 class SequenceGroupOutput:
-    """The model outputs associated with a sequence group."""
+    """The model output associated with a sequence group."""
 
     def __init__(
         self,

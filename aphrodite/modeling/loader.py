@@ -1,26 +1,15 @@
 """Utilities for selecting and loading models."""
 import contextlib
-from typing import Type
+from typing import Optional, Type
 
 import torch
 import torch.nn as nn
 from transformers import PretrainedConfig
 
-from aphrodite.common.config import ModelConfig
-from aphrodite.modeling.models import *  # pylint: disable=wildcard-import
+from aphrodite.common.config import ModelConfig, LoRAConfig
+from aphrodite.modeling.models import ModelRegistry
 from aphrodite.modeling.hf_downloader import (get_quant_config,
                                               initialize_dummy_weights)
-
-# TODO: Lazy-load the model classes.
-_MODEL_REGISTRY = {
-    "GPTJForCausalLM": GPTJForCausalLM,
-    "GPTNeoXForCausalLM": GPTNeoXForCausalLM,
-    "LlamaForCausalLM": LlamaForCausalLM,
-    "LLaMAForCausalLM": LlamaForCausalLM,  # For decapoda-research/llama-*
-    "MistralForCausalLM": MistralForCausalLM,
-    "YiForCausalLM": YiForCausalLM,
-    "PhiForCausalLM": PhiForCausalLM,
-}
 
 
 @contextlib.contextmanager
@@ -35,14 +24,16 @@ def _set_default_torch_dtype(dtype: torch.dtype):
 def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
     architectures = getattr(config, "architectures", [])
     for arch in architectures:
-        if arch in _MODEL_REGISTRY:
-            return _MODEL_REGISTRY[arch]
+        model_cls = ModelRegistry.load_model_cls(arch)
+        if model_cls is not None:
+            return model_cls
     raise ValueError(
         f"Model architectures {architectures} are not supported for now. "
-        f"Supported architectures: {list(_MODEL_REGISTRY.keys())}")
+        f"Supported architectures: {ModelRegistry.get_supported_archs()}")
 
 
-def get_model(model_config: ModelConfig) -> nn.Module:
+def get_model(model_config: ModelConfig,
+              lora_config: Optional[LoRAConfig] = None) -> nn.Module:
     model_class = _get_model_architecture(model_config.hf_config)
 
     # Get the (maybe quantized) linear method.
@@ -72,7 +63,17 @@ def get_model(model_config: ModelConfig) -> nn.Module:
         # Create a model instance.
         # The weights will be initialized as empty tensors.
         with torch.device("cuda"):
-            model = model_class(model_config.hf_config, linear_method)
+            if getattr(model_class, "supports_lora", False):
+                model = model_class(model_config.hf_config, linear_method,
+                                    lora_config)
+            elif lora_config:
+                raise ValueError(
+                    f"Model {model_class.__name__} does not support LoRA, "
+                    "but LoRA is enabled. Support for this model may "
+                    "be added in the future. If this is important to you, "
+                    "please open an issue on github.")
+            else:
+                model = model_class(model_config.hf_config, linear_method)
         if model_config.load_format == "dummy":
             # NOTE: For accurate performance evaluation, we assign
             # random values to the weights.

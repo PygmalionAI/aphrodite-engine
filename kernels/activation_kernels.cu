@@ -1,6 +1,8 @@
-#include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <torch/extension.h>
+#include <c10/cuda/CUDAGuard.h>
 
+#include "cuda_compat.h"
 #include "dispatch_utils.h"
 
 namespace aphrodite {
@@ -18,8 +20,8 @@ __global__ void silu_and_mul_kernel(
   const int d) {
   const int64_t token_idx = blockIdx.x;
   for (int64_t idx = threadIdx.x; idx < d; idx += blockDim.x) {
-    const scalar_t x = __ldg(&input[token_idx * 2 * d + idx]);
-    const scalar_t y = __ldg(&input[token_idx * 2 * d + d + idx]);
+    const scalar_t x = APHRODITE_LDG(&input[token_idx * 2 * d + idx]);
+    const scalar_t y = APHRODITE_LDG(&input[token_idx * 2 * d + d + idx]);
     out[token_idx * d + idx] = silu(x) * y;
   }
 }
@@ -35,6 +37,7 @@ void silu_and_mul(
 
   dim3 grid(num_tokens);
   dim3 block(std::min(d, 1024));
+  const at::cuda::OptionalCUDAGuard device_guard(device_of(input));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   APHRODITE_DISPATCH_FLOATING_TYPES(
     input.scalar_type(),
@@ -57,7 +60,7 @@ __global__ void activation_kernel(
   const int d) {
   const int64_t token_idx = blockIdx.x;
   for (int64_t idx = threadIdx.x; idx < d; idx += blockDim.x) {
-    const scalar_t x = __ldg(&input[token_idx * d + idx]);
+    const scalar_t x = APHRODITE_LDG(&input[token_idx * d + idx]);
     out[token_idx * d + idx] = ACT_FN(x);
   }
 }
@@ -67,9 +70,10 @@ __global__ void activation_kernel(
 // Launch element-wise activation kernel.
 #define LAUNCH_ACTIVATION_KERNEL(KERNEL)                                                  \
   int d = input.size(-1);                                                                 \
-  int64_t num_tokens = input.numel() / d;                                                     \
+  int64_t num_tokens = input.numel() / d;                                                 \
   dim3 grid(num_tokens);                                                                  \
   dim3 block(std::min(d, 1024));                                                          \
+  const at::cuda::OptionalCUDAGuard device_guard(device_of(input));                       \
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();                           \
   APHRODITE_DISPATCH_FLOATING_TYPES(                                                           \
     input.scalar_type(),                                                                  \

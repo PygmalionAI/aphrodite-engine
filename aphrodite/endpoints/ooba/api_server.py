@@ -2,7 +2,7 @@ import argparse
 import json
 from typing import AsyncGenerator
 
-from fastapi import (BackgroundTasks, Header, FastAPI, HTTPException, Request)
+from fastapi import (BackgroundTasks, FastAPI, HTTPException, Request)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 import uvicorn
@@ -12,10 +12,12 @@ from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.utils import random_uuid
 from aphrodite.common.logits_processor import BanEOSUntil
+from aphrodite.common.logger import init_logger
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds.
 TIMEOUT_TO_PREVENT_DEADLOCK = 1  # seconds.
 
+logger = init_logger(__name__)
 app = FastAPI()
 engine = None
 
@@ -30,12 +32,10 @@ app.add_middleware(
 parser = argparse.ArgumentParser()
 parser.add_argument("--host", type=str, default="localhost")
 parser.add_argument("--port", type=int, default=2242)
-parser.add_argument("--api-keys", nargs="*", default=["EMPTY"])
 parser.add_argument("--served-model-name", type=str, default=None)
 parser = AsyncEngineArgs.add_cli_args(parser)
 args = parser.parse_args()
 engine_args = AsyncEngineArgs.from_cli_args(args)
-valid_api_keys = args.api_keys
 if args.served_model_name is not None:
     served_model = args.served_model_name
 else:
@@ -43,8 +43,7 @@ else:
 
 
 @app.post("/api/v1/generate")
-async def generate(
-    request: Request, x_api_key: str = Header(None)) -> Response:
+async def generate(request: Request) -> Response:
     """Generate completion for the request.
 
     The request should be a JSON object with the following fields:
@@ -52,9 +51,6 @@ async def generate(
     - stream: whether to stream the results or not.
     - other fields: the sampling parameters (See `SamplingParams` for details).
     """
-    if x_api_key is None or x_api_key not in valid_api_keys:
-        raise HTTPException(status_code=401,
-                            detail="Unauthorized. Please acquire an API key.")
 
     request_dict = await request.json()
     prompt = request_dict.pop("prompt")
@@ -133,11 +129,9 @@ async def generate(
 
 
 @app.get("/api/v1/model")
-async def get_model_name(x_api_key: str = Header(None)) -> JSONResponse:
+async def get_model_name() -> JSONResponse:
     """Return the model name based on the EngineArgs configuration."""
-    if x_api_key is None or x_api_key not in valid_api_keys:
-        raise HTTPException(status_code=401,
-                            detail="Unauthorized. Please acquire an API key.")
+
     if engine is not None:
         result = {"result": f"aphrodite/{served_model}"}
         return JSONResponse(content=result)
@@ -154,6 +148,9 @@ async def health() -> Response:
 if __name__ == "__main__":
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = AsyncAphrodite.from_engine_args(engine_args)
+
+    logger.warning("Deprecation warning: The legacy oobabooga API"
+                   " is deprecated and will be removed in a future release.")
 
     uvicorn.run(app,
                 host=args.host,

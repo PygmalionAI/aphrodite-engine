@@ -8,6 +8,8 @@ class SamplingParams(BaseModel):
     presence_penalty: float = Field(0.0, alias="presence_penalty")
     frequency_penalty: float = Field(0.0, alias="rep_pen")
     temperature: float = Field(1.0, alias="temperature")
+    dynatemp_range: Optional[float] = 0.0
+    dynatemp_exponent: Optional[float] = 1.0
     top_p: float = Field(1.0, alias="top_p")
     top_k: float = Field(-1, alias="top_k")
     min_p: float = Field(0.0, alias="min_p")
@@ -20,6 +22,7 @@ class SamplingParams(BaseModel):
     length_penalty: float = Field(1.0, alias="length_penalty")
     early_stopping: Union[bool, str] = Field(False, alias="early_stopping")
     stop: Union[None, str, List[str]] = Field(None, alias="stop_sequence")
+    include_stop_str_in_output: Optional[bool] = False
     ignore_eos: bool = Field(False, alias="ignore_eos")
     max_tokens: int = Field(16, alias="max_length")
     logprobs: Optional[int] = Field(None, alias="logprobs")
@@ -54,6 +57,8 @@ class KAIGenerationInputSchema(BaseModel):
     eta_cutoff: Optional[NonNegativeFloat] = 0.0
     typical: Optional[confloat(ge=0, le=1)] = 1.0
     temperature: Optional[NonNegativeFloat] = 1.0
+    dynatemp_range: Optional[NonNegativeFloat] = 0.0
+    dynatemp_exponent: Optional[NonNegativeFloat] = 1.0
     use_memory: Optional[bool]
     use_story: Optional[bool]
     use_authors_note: Optional[bool]
@@ -71,10 +76,12 @@ class KAIGenerationInputSchema(BaseModel):
     disable_input_formatting: Optional[bool]
     frmtadsnsp: Optional[bool]
     quiet: Optional[bool]
+    # pylint: disable=unexpected-keyword-arg
     sampler_order: Optional[conlist(int, min_items=6)]
     sampler_seed: Optional[conint(ge=0, le=2**64 - 1)]
     sampler_full_determinism: Optional[bool]
     stop_sequence: Optional[List[str]]
+    include_stop_str_in_output: Optional[bool] = False
 
     @root_validator
     def check_context(cls, values):  # pylint: disable=no-self-argument
