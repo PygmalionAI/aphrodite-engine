@@ -8,7 +8,7 @@ from safetensors.torch import load_file
 try:
     import aphrodite._hadamard_C as hadamard_C
 except ImportError:
-    HADAMARD_IMPORT = None
+    pass
 
 HADA_TENSORS = load_file(
     Path(__file__).resolve().parent / "hadamard.safetensors")
@@ -18,11 +18,13 @@ class HadamardTransformFn(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, x, scale=1.0):
-        ctx._hadamard_transform_scale = scale
+        ctx._hadamard_transform_scale = scale  # pylint: disable=protected-access
         return hadamard_C.hadamard_transform(x, scale=scale)
+
 
 def hadamard_transform(x, scale=1.0):
     return HadamardTransformFn.apply(x, scale)
+
 
 def int2mask(i, int_map):
     return ((i & int_map) > 0).int()
