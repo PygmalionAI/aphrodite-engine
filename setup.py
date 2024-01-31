@@ -32,6 +32,9 @@ def _is_hip() -> bool:
 def _is_cuda() -> bool:
     return torch.version.cuda is not None
 
+def get_path(*filepath) -> str:
+    return os.path.join(ROOT_DIR, *filepath)
+
 
 # Compiler flags.
 CXX_FLAGS = ["-g", "-O2", "-std=c++17"]
@@ -53,6 +56,13 @@ if _is_cuda() and CUDA_HOME is None:
 ABI = 1 if torch._C._GLIBCXX_USE_CXX11_ABI else 0
 CXX_FLAGS += [f"-D_GLIBCXX_USE_CXX11_ABI={ABI}"]
 NVCC_FLAGS += [f"-D_GLIBCXX_USE_CXX11_ABI={ABI}"]
+
+install_paged_attn = bool(int(os.getenv("APHRODITE_INSTALL_PAGED_ATTN_KERNELS", "0")))
+if install_paged_attn:
+    cutlass_include_path = get_path("kernels/attention/flash_attn_v2/third_party/cutlass/include")
+    if (not os.path.exists(cutlass_include_path)) and (not ROOT_DIR == ""):
+        raise RuntimeError(f"Cannot find {cutlass_include_path}. Did you run git submodule update?")
+    NVCC_FLAGS += [f"-I{cutlass_include_path}"]
 
 def get_amdgpu_offload_arch():
     command = "/opt/rocm/llvm/bin/amdgpu-offload-arch"
@@ -275,6 +285,23 @@ if _is_cuda():
                     "nvcc": NVCC_FLAGS,
                 },
             ))
+    
+    device_count = torch.cuda.device_count()
+    for i in range(device_count):
+        major, minor = torch.cuda.get_device_capability(i)
+        if major < 8:
+            install_paged_attn = False
+            break
+    if install_paged_attn:
+        ext_modules.append(
+            CUDAExtension(
+                name="aphrodite._paged_attn_C",
+                sources=["kernels/attention/flash_attn_v2/paged_flash/flash_api.cu"],
+                extra_compile_args={
+                    "cxx": CXX_FLAGS,
+                    "nvcc": NVCC_FLAGS,
+                },
+            ))
 
 elif _is_hip():
     amd_arch = get_amdgpu_offload_arch()
@@ -317,8 +344,6 @@ aphrodite_extension = CUDAExtension(
 )
 ext_modules.append(aphrodite_extension)
 
-def get_path(*filepath) -> str:
-    return os.path.join(ROOT_DIR, *filepath)
 
 
 def find_version(filepath: str) -> str:
