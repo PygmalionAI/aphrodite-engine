@@ -256,6 +256,25 @@ if _is_cuda():
                     "nvcc": NVCC_FLAGS_PUNICA,
                 },
             ))
+    
+    install_hadamard = bool(int(os.getenv("APHRODITE_INSTALL_HADAMARD_KERNELS", "1")))
+    device_count = torch.cuda.device_count()
+    for i in range(device_count):
+        major, minor = torch.cuda.get_device_capability(i)
+        if major < 7:
+            install_hadamard = False
+            break
+    if install_hadamard:
+        ext_modules.append(
+            CUDAExtension(
+                name="aphrodite._hadamard_C",
+                sources=["kernels/hadamard/fast_hadamard_transform.cpp",
+                         "kernels/hadamard/fast_hadamard_transform_cuda.cu"],
+                extra_compile_args={
+                    "cxx": CXX_FLAGS,
+                    "nvcc": NVCC_FLAGS,
+                },
+            ))
 
 elif _is_hip():
     amd_arch = get_amdgpu_offload_arch()
