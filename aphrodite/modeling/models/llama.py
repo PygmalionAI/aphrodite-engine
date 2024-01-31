@@ -62,17 +62,16 @@ class LlamaMLP(nn.Module):
         linear_method: Optional[LinearMethodBase] = None,
     ) -> None:
         super().__init__()
-        if linear_method is not None and not linear_method.quant_config.merge_weight(
-        ):
+        if linear_method is not None and not linear_method.quant_config.merge_weight():
             self.merge_weight = False
-            self.gate_proj = ColumnParallelLinear(hidden_size,
-                                                  intermediate_size,
-                                                  bias=False,
-                                                  linear_method=linear_method)
-            self.up_proj = ColumnParallelLinear(hidden_size,
-                                                intermediate_size,
-                                                bias=False,
-                                                linear_method=linear_method)
+            self.gate_proj = ColumnParallelLinear(
+                hidden_size, intermediate_size,
+                bias=False,
+                linear_method=linear_method)
+            self.up_proj = ColumnParallelLinear(
+                hidden_size, intermediate_size,
+                bias=False,
+                linear_method=linear_method)
         else:
             self.merge_weight = True
             self.gate_up_proj = MergedColumnParallelLinear(
@@ -135,21 +134,20 @@ class LlamaAttention(nn.Module):
         self.rope_theta = rope_theta
         self.max_position_embeddings = max_position_embeddings
 
-        if linear_method is not None and not linear_method.quant_config.merge_weight(
-        ):
+        if linear_method is not None and not linear_method.quant_config.merge_weight():
             self.merge_weight = False
-            self.q_proj = ColumnParallelLinear(hidden_size,
-                                               self.q_size,
-                                               bias=False,
-                                               linear_method=linear_method)
-            self.k_proj = ColumnParallelLinear(hidden_size,
-                                               self.kv_size,
-                                               bias=False,
-                                               linear_method=linear_method)
-            self.v_proj = ColumnParallelLinear(hidden_size,
-                                               self.kv_size,
-                                               bias=False,
-                                               linear_method=linear_method)
+            self.q_proj = ColumnParallelLinear(
+                hidden_size, self.q_size,
+                bias=False,
+                linear_method=linear_method)
+            self.k_proj = ColumnParallelLinear(
+                hidden_size, self.kv_size,
+                bias=False,
+                linear_method=linear_method)
+            self.v_proj = ColumnParallelLinear(
+                hidden_size, self.kv_size,
+                bias=False,
+                linear_method=linear_method)
         else:
             self.merge_weight = True
             self.qkv_proj = QKVParallelLinear(
@@ -284,7 +282,6 @@ class LlamaModel(nn.Module):
         self.embed_tokens = VocabParallelEmbedding(
             self.vocab_size,
             config.hidden_size,
-            linear_method=linear_method,
             org_num_embeddings=config.vocab_size,
         )
         self.layers = nn.ModuleList([
@@ -334,7 +331,6 @@ class LlamaForCausalLM(nn.Module):
         self.lm_head = ParallelLMHead(
             unpadded_vocab_size,
             config.hidden_size,
-            linear_method=linear_method,
             org_num_embeddings=config.vocab_size,
             padding_size=DEFAULT_VOCAB_PADDING_SIZE
             # We need bigger padding if using lora for kernel
@@ -359,7 +355,7 @@ class LlamaForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(self.lm_head(hidden_states),
+        next_tokens = self.sampler(self.lm_head.weight, hidden_states,
                                    sampling_metadata)
         return next_tokens
 
@@ -376,8 +372,7 @@ class LlamaForCausalLM(nn.Module):
             ("gate_up_proj", "gate_proj", 0),
             ("gate_up_proj", "up_proj", 1),
         ]
-        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
-        ):
+        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight():
             stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(

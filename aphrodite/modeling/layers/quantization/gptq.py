@@ -68,6 +68,12 @@ class GPTQConfig(QuantizationConfig):
 
     def get_scaled_act_names(self) -> List[str]:
         return []
+    
+    def merge_weight(self) -> bool:
+            return True
+
+    def rope_style(self) -> Optional[bool]:
+        return None
 
 
 class ExllamaState(Enum):

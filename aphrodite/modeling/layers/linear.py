@@ -71,11 +71,6 @@ class UnquantizedLinearMethod(LinearMethodBase):
             return F.linear(x, weight)
         return F.linear(x, weight, bias)
 
-    def apply_embedding(self, weights: Dict[str, torch.Tensor],
-                        x: torch.Tensor) -> torch.Tensor:
-        weight = weights["weight"]
-        return F.embedding(x, weight)
-
 
 class ReplicatedLinear(torch.nn.Module):
     """Replicated linear layer.
@@ -114,7 +109,7 @@ class ReplicatedLinear(torch.nn.Module):
             self.input_size, self.output_size, self.input_size,
             self.output_size, self.params_dtype)
         for name, weight in self.linear_weights.items():
-            if isinstance(weight, torch.nn.parameter.Parameter):
+            if isinstance(weight, torch.Tensor):
                 self.register_parameter(name, weight)
         if bias:
             self.bias = Parameter(
@@ -182,7 +177,7 @@ class ColumnParallelLinear(torch.nn.Module):
             self.input_size, self.output_size_per_partition, self.input_size,
             self.output_size, self.params_dtype)
         for name, weight in self.linear_weights.items():
-            if isinstance(weight, torch.nn.parameter.Parameter):
+            if isinstance(weight, torch.Tensor):
                 self.register_parameter(name, weight)
                 set_weight_attrs(weight, {"weight_loader": self.weight_loader})
         if bias:
@@ -204,8 +199,8 @@ class ColumnParallelLinear(torch.nn.Module):
         param_data = param.data
         if output_dim is not None:
             if loaded_weight.shape[output_dim] % tp_size != 0:
-                raise ValueError("Size is not aligned with the "
-                                 "quantized weight shape")
+                raise ValueError("Size is not aligned with the quantized "
+                                 "weight shape")
             shard_size = loaded_weight.shape[output_dim] // tp_size
             start_idx = tp_rank * shard_size
             loaded_weight = loaded_weight.narrow(output_dim, start_idx,
@@ -511,7 +506,7 @@ class RowParallelLinear(torch.nn.Module):
             self.input_size_per_partition, self.output_size, self.input_size,
             self.output_size, self.params_dtype)
         for name, weight in self.linear_weights.items():
-            if isinstance(weight, torch.nn.parameter.Parameter):
+            if isinstance(weight, torch.Tensor):
                 self.register_parameter(name, weight)
                 set_weight_attrs(weight, {"weight_loader": self.weight_loader})
 
@@ -540,7 +535,6 @@ class RowParallelLinear(torch.nn.Module):
             if loaded_weight.shape[input_dim] % tp_size != 0:
                 raise ValueError("Size is not aligned with the quantized "
                                  "weight shape")
-
             shard_size = loaded_weight.shape[input_dim] // tp_size
             start_idx = tp_rank * shard_size
             loaded_weight = loaded_weight.narrow(input_dim, start_idx,

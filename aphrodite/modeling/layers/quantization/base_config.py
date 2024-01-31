@@ -63,6 +63,7 @@ class QuantizationConfig(ABC):
         """
         raise NotImplementedError
 
+
     @abstractmethod
     def merge_weight(self) -> bool:
         """whether fuse qkv and up/gate."""
@@ -71,6 +72,3 @@ class QuantizationConfig(ABC):
     @abstractmethod
     def rope_style(self) -> Optional[bool]:
         raise NotImplementedError
-
-    def quant_vocab(self) -> Optional[bool]:
-        return False
