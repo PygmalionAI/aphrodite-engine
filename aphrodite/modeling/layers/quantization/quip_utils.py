@@ -3,8 +3,12 @@ from pathlib import Path
 
 import scipy
 import torch
-import aphrodite._hadamard_C as hadamard_C
 from safetensors.torch import load_file
+
+try:
+    import aphrodite._hadamard_C as hadamard_C
+except ImportError:
+    HADAMARD_IMPORT = None
 
 HADA_TENSORS = load_file(
     Path(__file__).resolve().parent / "hadamard.safetensors")
@@ -104,6 +108,8 @@ def get_hadK(n, use_rand=True):
 
 
 def matmul_hadU_cuda(X, hadK, K, n, scale=None, transpose=False):
+    if HADAMARD_IMPORT is None:
+        raise ImportError("Hadamard transform not available.")
     if n != X.shape[-1]:
         X = torch.nn.functional.pad(X, (0, n - X.shape[-1]))
 
