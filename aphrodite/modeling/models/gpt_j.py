@@ -56,30 +56,13 @@ class GPTJAttention(nn.Module):
         self.hidden_size = config.hidden_size
         self.head_size = self.hidden_size // self.total_num_heads
 
-        if linear_method is not None and not linear_method.quant_config.merge_weight(
-        ):
-            self.merge_weight = False
-            self.q_proj = ColumnParallelLinear(config.hidden_size,
-                                               config.hidden_size,
-                                               bias=False,
-                                               linear_method=linear_method)
-            self.k_proj = ColumnParallelLinear(config.hidden_size,
-                                               config.hidden_size,
-                                               bias=False,
-                                               linear_method=linear_method)
-            self.v_proj = ColumnParallelLinear(config.hidden_size,
-                                               config.hidden_size,
-                                               bias=False,
-                                               linear_method=linear_method)
-        else:
-            self.merge_weight = True
-            self.qkv_proj = QKVParallelLinear(
-                config.hidden_size,
-                self.head_dim,
-                self.total_num_heads,
-                bias=False,
-                linear_method=linear_method,
-            )
+        self.qkv_proj = QKVParallelLinear(
+            config.hidden_size,
+            self.head_size,
+            self.total_num_heads,
+            bias=False,
+            linear_method=linear_method,
+        )
         self.out_proj = RowParallelLinear(
             config.hidden_size,
             config.hidden_size,
@@ -113,13 +96,8 @@ class GPTJAttention(nn.Module):
         kv_cache: KVCache,
         input_metadata: InputMetadata,
     ) -> torch.Tensor:
-        if self.merge_weight:
-            qkv, _ = self.qkv_proj(hidden_states)
-            q, k, v = qkv.chunk(chunks=3, dim=-1)
-        else:
-            q, _ = self.q_proj(hidden_states)
-            k, _ = self.k_proj(hidden_states)
-            v, _ = self.v_proj(hidden_states)
+        qkv, _ = self.qkv_proj(hidden_states)
+        q, k, v = qkv.chunk(chunks=3, dim=-1)
         q, k = self.rotary_emb(position_ids, q, k)
         k_cache, v_cache = kv_cache
         attn_output = self.attn(q, k, v, k_cache, v_cache, input_metadata)
@@ -205,7 +183,6 @@ class GPTJModel(nn.Module):
         self.wte = VocabParallelEmbedding(
             config.vocab_size,
             self.embed_dim,
-            linear_method=linear_method,
         )
         self.h = nn.ModuleList(
             [GPTJBlock(config, linear_method) for _ in range(config.n_layer)])
@@ -247,7 +224,6 @@ class GPTJForCausalLM(nn.Module):
             config.vocab_size,
             config.n_embd,
             bias=True,
-            linear_method=linear_method,
         )
         self.sampler = Sampler(config.vocab_size)
 
@@ -267,7 +243,7 @@ class GPTJForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(self.lm_head(hidden_states),
+        next_tokens = self.sampler(self.lm_head.weight, hidden_states,
                                    sampling_metadata, self.lm_head.bias)
         return next_tokens
 
@@ -284,9 +260,6 @@ class GPTJForCausalLM(nn.Module):
             ("gate_up_proj", "gate_proj", 0),
             ("gate_up_proj", "up_proj", 1),
         ]
-        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
-        ):
-            stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
                 model_name_or_path, cache_dir, load_format, revision):

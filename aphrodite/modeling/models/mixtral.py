@@ -38,8 +38,7 @@ from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               ReplicatedLinear,
                                               QKVParallelLinear,
-                                              RowParallelLinear,
-                                              ColumnParallelLinear)
+                                              RowParallelLinear)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
@@ -195,21 +194,20 @@ class MixtralAttention(nn.Module):
         self.rope_theta = rope_theta
         self.sliding_window = sliding_window
 
-        if linear_method is not None and not linear_method.quant_config.merge_weight(
-        ):
+        if linear_method is not None and not linear_method.quant_config.merge_weight():
             self.merge_weight = False
-            self.q_proj = ColumnParallelLinear(hidden_size,
-                                               self.q_size,
-                                               bias=False,
-                                               linear_method=linear_method)
-            self.k_proj = ColumnParallelLinear(hidden_size,
-                                               self.kv_size,
-                                               bias=False,
-                                               linear_method=linear_method)
-            self.v_proj = ColumnParallelLinear(hidden_size,
-                                               self.kv_size,
-                                               bias=False,
-                                               linear_method=linear_method)
+            self.q_proj = ColumnParallelLinear(
+                hidden_size, self.q_size,
+                bias=False,
+                linear_method=linear_method)
+            self.k_proj = ColumnParallelLinear(
+                hidden_size, self.kv_size,
+                bias=False,
+                linear_method=linear_method)
+            self.v_proj = ColumnParallelLinear(
+                hidden_size, self.kv_size,
+                bias=False,
+                linear_method=linear_method)
         else:
             self.merge_weight = True
             self.qkv_proj = QKVParallelLinear(
@@ -226,8 +224,7 @@ class MixtralAttention(nn.Module):
             bias=False,
             linear_method=linear_method,
         )
-        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
-        ) is None else linear_method.quant_config.rope_style()
+        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style() is None else linear_method.quant_config.rope_style()
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.head_dim,
@@ -334,7 +331,6 @@ class MixtralModel(nn.Module):
         self.embed_tokens = VocabParallelEmbedding(
             config.vocab_size,
             config.hidden_size,
-            linear_method=linear_method,
         )
         self.layers = nn.ModuleList([
             MixtralDecoderLayer(config, linear_method=linear_method)
@@ -371,9 +367,7 @@ class MixtralForCausalLM(nn.Module):
         self.config = config
         self.linear_method = linear_method
         self.model = MixtralModel(config, linear_method)
-        self.lm_head = ParallelLMHead(config.vocab_size,
-                                      config.hidden_size,
-                                      linear_method=linear_method)
+        self.lm_head = ParallelLMHead(config.vocab_size, config.hidden_size)
         self.sampler = Sampler(config.vocab_size)
 
     def forward(
@@ -392,7 +386,7 @@ class MixtralForCausalLM(nn.Module):
         hidden_states: Optional[torch.Tensor],
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(self.lm_head(hidden_states),
+        next_tokens = self.sampler(self.lm_head.weight, hidden_states,
                                    sampling_metadata)
         return next_tokens
 
@@ -407,8 +401,7 @@ class MixtralForCausalLM(nn.Module):
             ("qkv_proj", "k_proj", "k"),
             ("qkv_proj", "v_proj", "v"),
         ]
-        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
-        ):
+        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight():
             stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
