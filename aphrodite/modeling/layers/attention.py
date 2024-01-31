@@ -175,28 +175,15 @@ class PagedAttention(nn.Module):
             output = out.view_as(query)
         else:
             # Decoding run.
-            if input_metadata.draft_lens is not None:
-                output = _multi_query_paged_attention(
-                    query,
-                    key_cache,
-                    value_cache,
-                    input_metadata,
-                    self.head_mapping,
-                    self.scale,
-                    self.alibi_slopes,
-                )
-            else:
-                # Normal single query run
-                # Compute the attention op for generation tokens.
-                output = _paged_attention(
-                    query,
-                    key_cache,
-                    value_cache,
-                    input_metadata,
-                    self.head_mapping,
-                    self.scale,
-                    self.alibi_slopes,
-                )
+            output = _paged_attention(
+                query,
+                key_cache,
+                value_cache,
+                input_metadata,
+                self.head_mapping,
+                self.scale,
+                self.alibi_slopes,
+            )
 
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
@@ -303,73 +290,4 @@ def _paged_attention(
             input_metadata.max_context_len,
             alibi_slopes,
         )
-    return output
-
-def _multi_query_paged_attention(
-    query: torch.Tensor,
-    key_cache: torch.Tensor,
-    value_cache: torch.Tensor,
-    input_metadata: InputMetadata,
-    head_mapping: torch.Tensor,
-    scale: float,
-    alibi_slopes: Optional[torch.Tensor],
-) -> torch.Tensor:
-    """Flash PagedAttention for the generation tokens assuming multiple
-    draft tokens. Assumes that the key and value have already been cached.
-    
-    Args:
-        output: shape = [num_generation_tokens * max_num_query,
-                         num_heads, head_size]
-        query: shape = [num_generation_tokens * max_num_query,
-                        num_heads, head_size]
-        key_cache: shape = [num_blocks, num_kv_heads, head_size/x,
-            block_size, x]
-        value_cache: shape = [num_blocks, num_kv_heads, head_size,
-            block_size]
-        input_metadata: metadata for paged attention.
-        alibi_slopes: shape = [num_heads]
-    """
-    output = torch.empty_like(query)
-    max_num_query = max(input_metadata.draft_lens)
-
-    block_size = value_cache.shape[3]
-    num_seqs = input_metadata.context_lens.shape[0]
-    assert num_seqs * max_num_query == query.shape[0]
-
-
-    # duplicate block tables
-    block_tables = torch.repeat_interleave(input_metadata.block_tables,
-                                           max_num_query,
-                                           dim=0)
-
-    # interpolate context lens from context_len to context_len + draft_len
-    context_lens = torch.repeat_interleave(input_metadata.context_lens,
-                                           max_num_query,
-                                           dim=0)
-    # TODO: vectorize
-    for i in range(context_lens.shape[0]):
-        if input_metadata.draft_lens[i // max_num_query] <= i % max_num_query:
-            context_lens[i] = -1
-        else:
-            context_lens[i] += i % max_num_query
-
-    # TODO: add grid stride over sequences to kernel to increase cache locality,
-    # in effect enabling pseudo matrix blocking
-    # TODO: exit from block early if seq_len is -1
-    __import__('pdb').set_trace()
-    attention_ops.paged_flash_attention(
-        output,
-        query,
-        key_cache,
-        value_cache,
-        head_mapping,
-        scale,
-        block_tables,
-        context_lens,
-        block_size,
-        input_metadata.max_context_len,
-        max_num_query,
-        alibi_slopes,
-    )
-
     return output
