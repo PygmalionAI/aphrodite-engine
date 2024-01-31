@@ -11,7 +11,7 @@ _QUANTIZATION_CONFIG_REGISTRY = {
     "awq": AWQConfig,
     "gguf": GGUFConfig,
     "gptq": GPTQConfig,
-    "quip": QuipConfig,
+    # "quip": QuipConfig,
     "squeezellm": SqueezeLLMConfig,
 }
 

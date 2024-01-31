@@ -17,7 +17,7 @@ The compute necessary for Aphrodite's development is provided by [Arc Compute](h
 - Continuous Batching
 - Efficient K/V management with [PagedAttention](./aphrodite/modeling/layers/attention.py)
 - Optimized CUDA kernels for improved inference
-- Quantization support via GPTQ, GGUF, AWQ, QuIP#, and SqueezeLLM.
+- Quantization support via GPTQ, GGUF, AWQ, and SqueezeLLM.
 - Distributed inference
 - Variety of sampling methods ([Mirostat](https://arxiv.org/abs/2007.14966), [Locally Typical Sampling](https://arxiv.org/abs/2202.00666), Tail-Free Sampling, etc)
 - 8-bit KV Cache for higher context lengths and throughput.
