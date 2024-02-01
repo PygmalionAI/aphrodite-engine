@@ -415,10 +415,7 @@ def _apply_quadratic_sampling(
     max_logits = logits.max(dim=-1, keepdim=True).values
     transformed_logits = -(smoothing_factors *
                            (logits - max_logits).pow(2)) + max_logits
-    quadratic_mask = transformed_logits < float("-inf")
-    logits[quadratic_mask] = -float("inf")
-    logits[~quadratic_mask] = transformed_logits[~quadratic_mask]
-    return logits
+    return transformed_logits
 
 
 def _greedy_sample(
