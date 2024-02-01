@@ -10,6 +10,7 @@ class SamplingParams(BaseModel):
     temperature: float = Field(1.0, alias="temperature")
     dynatemp_range: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
+    smoothing_factor: Optional[float] = 0.0
     top_p: float = Field(1.0, alias="top_p")
     top_k: float = Field(-1, alias="top_k")
     min_p: float = Field(0.0, alias="min_p")
@@ -59,6 +60,7 @@ class KAIGenerationInputSchema(BaseModel):
     temperature: Optional[NonNegativeFloat] = 1.0
     dynatemp_range: Optional[NonNegativeFloat] = 0.0
     dynatemp_exponent: Optional[NonNegativeFloat] = 1.0
+    smoothing_factor: Optional[NonNegativeFloat] = 0.0
     use_memory: Optional[bool]
     use_story: Optional[bool]
     use_authors_note: Optional[bool]

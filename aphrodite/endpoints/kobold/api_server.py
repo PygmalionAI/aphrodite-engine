@@ -113,6 +113,7 @@ def prepare_engine_payload(
         temperature=kai_payload.temperature,
         dynatemp_range=kai_payload.dynatemp_range,
         dynatemp_exponent=kai_payload.dynatemp_exponent,
+        smoothing_factor=kai_payload.smoothing_factor,
         tfs=kai_payload.tfs,
         top_p=kai_payload.top_p,
         top_k=kai_payload.top_k,
