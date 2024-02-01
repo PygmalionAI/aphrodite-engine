@@ -143,8 +143,8 @@ class SamplingTensors:
         do_eta_cutoffs = False
         do_epsilon_cutoffs = False
         do_typical_ps = False
-        do_mirostat = False
         do_quadratic = False
+        do_mirostat = False
         for i, seq_group in enumerate(sampling_metadata.seq_groups):
             seq_ids, sampling_params = seq_group
             temperature = sampling_params.temperature
@@ -189,10 +189,10 @@ class SamplingTensors:
                 do_epsilon_cutoffs = True
             if do_typical_ps is False and typical_p < 1.0 - _SAMPLING_EPS:
                 do_typical_ps = True
-            if do_mirostat is False and sampling_params.mirostat_mode == 2:
-                do_mirostat = True
             if do_quadratic is False and smoothing_factor > _SAMPLING_EPS:
                 do_quadratic = True
+            if do_mirostat is False and sampling_params.mirostat_mode == 2:
+                do_mirostat = True
 
             if (i < sampling_metadata.num_prompts
                     and sampling_params.prompt_logprobs is not None):
@@ -257,7 +257,7 @@ class SamplingTensors:
             device, dtype)
         return (sampling_tensors, do_temperatures, do_penalties, do_topks,
                 do_topps, do_topas, do_minps, do_tfss, do_eta_cutoffs,
-                do_epsilon_cutoffs, do_typical_ps, do_mirostat, do_quadratic)
+                do_epsilon_cutoffs, do_typical_ps, do_quadratic, do_mirostat)
 
     @classmethod
     def from_lists(cls, temperatures: List[float], top_ps: List[float],

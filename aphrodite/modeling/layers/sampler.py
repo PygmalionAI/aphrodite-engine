@@ -111,7 +111,6 @@ class Sampler(nn.Module):
         if do_typical_ps:
             logits = _apply_typical_sampling(logits,
                                              sampling_tensors.typical_ps)
-
         if do_quadratic:
             logits = _apply_quadratic_sampling(
                 logits, sampling_tensors.smoothing_factors)
@@ -413,7 +412,6 @@ def _apply_quadratic_sampling(
 
     Credits: @kalomaze
     """
-
     max_logits = logits.max(dim=-1, keepdim=True).values
     transformed_logits = -(smoothing_factors *
                            (logits - max_logits).pow(2)) + max_logits
