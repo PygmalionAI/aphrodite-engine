@@ -3,11 +3,11 @@ psutil
 ray >= 2.9
 sentencepiece
 numpy
-torch ~= 2.1.2
+torch == 2.2.0
 transformers >= 4.36.0 # for mixtral
 uvicorn
 openai # for fastapi's openai proxy emulation
-xformers >= 0.0.23.post1
+xformers >= 0.0.24
 einops  # Required for phi-1_5
 fschat >= 0.2.23
 pydantic == 1.10.13
