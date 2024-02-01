@@ -294,6 +294,7 @@ aphrodite_extension_sources = [
     "kernels/quantization/gguf/gguf_kernel.cu",
     "kernels/quantization/gptq/q_gemm.cu",
     "kernels/cuda_utils_kernels.cu",
+    "kernels/moe/align_block_size_kernel.cu",
     "kernels/pybind.cpp",
 ]
 

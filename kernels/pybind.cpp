@@ -63,6 +63,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   ops.def("ggml_mul_mat_vec", &ggml_mul_mat_vec, "ggml_mul_mat_vec");
   ops.def("ggml_mul_mat_vec_a8", &ggml_mul_mat_vec_a8, "ggml_mul_mat_vec_a8");
   ops.def("ggml_mul_mat_a8", &ggml_mul_mat_a8, "ggml_mul_mat_a8");
+  
+  ops.def("moe_align_block_size",
+          &moe_align_block_size,
+          "Aligning the number of tokens to be processed by each expert such that it is divisible by the block size.");
 
   // Cache ops
   pybind11::module cache_ops = m.def_submodule("cache_ops", "Aphrodite cache ops");
