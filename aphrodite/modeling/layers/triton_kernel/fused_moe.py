@@ -169,7 +169,7 @@ def moe_align_block_size(
     - Then append padding tokens [12, 12, 12, 12] for each block.
     - After sorting by expert index, we obtain token_ids [3, 6, 9, 12, 0, 4,
                                                           10, 12, 1, 7, 11,
-                                                          12, 2, 5, 8, 12]. 
+                                                          12, 2, 5, 8, 12].
         Tokens 12 are non-existent (padding) and are ignored in the subsequent
         matrix multiplication.
     - The padding ensures that the total number of tokens is now divisible by
@@ -240,7 +240,7 @@ def fused_moe(hidden_states: torch.Tensor,
     """
     This function computes a Mixture of Experts (MoE) layer using two sets of
     weights, w1 and w2, and top-k gating mechanism.
-    
+
     Parameters:
     - hidden_states (torch.Tensor): The input tensor to the MoE layer.
     - w1 (torch.Tensor): The first set of expert weights.
@@ -249,7 +249,7 @@ def fused_moe(hidden_states: torch.Tensor,
     - topk_ids (torch.Tensor): The indices of the top-k selected experts.
     - inplace (bool): If True, perform the operation in-place. Defaults to
         False.
-    
+
     Returns:
     - torch.Tensor: The output tensor after applying the MoE layer.
     """

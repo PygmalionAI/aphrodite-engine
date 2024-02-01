@@ -34,12 +34,9 @@ from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.modeling.layers.attention import PagedAttention
 from aphrodite.modeling.layers.triton_kernel.fused_moe import fused_moe
 from aphrodite.modeling.layers.layernorm import RMSNorm
-from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                               MergedColumnParallelLinear,
-                                               ReplicatedLinear,
-                                               QKVParallelLinear,
-                                               RowParallelLinear,
-                                               ColumnParallelLinear)
+from aphrodite.modeling.layers.linear import (
+    LinearMethodBase, MergedColumnParallelLinear, ReplicatedLinear,
+    QKVParallelLinear, RowParallelLinear, ColumnParallelLinear)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
@@ -267,7 +264,7 @@ class DeepseekAttention(nn.Module):
             bias=False,
             linear_method=linear_method,
         )
-        
+
         is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
         ) is None else linear_method.quant_config.rope_style()
         self.rotary_emb = get_rope(
@@ -425,10 +422,9 @@ class DeepseekForCausalLM(nn.Module):
         self.config = config
         self.linear_method = linear_method
         self.model = DeepseekModel(config, linear_method)
-        self.lm_head = ParallelLMHead(
-            config.vocab_size,
-            config.hidden_size,
-            linear_method=linear_method)
+        self.lm_head = ParallelLMHead(config.vocab_size,
+                                      config.hidden_size,
+                                      linear_method=linear_method)
         self.sampler = Sampler(config.vocab_size)
 
     def forward(
