@@ -94,7 +94,7 @@ void moe_align_block_size(
     torch::Tensor num_tokens_post_pad) {
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     assert(num_experts <= NUM_MAX_EXPERTS);
-    aphrodite_DISPATCH_INTEGRAL_TYPES(
+    APHRODITE_DISPATCH_INTEGRAL_TYPES(
         topk_ids.scalar_type(), "moe_alig_block_size_kernel", [&] {
         aphrodite::moe_align_block_size_kernel<scalar_t><<<1, num_experts, 0, stream>>>(
             topk_ids.data_ptr<scalar_t>(), 
