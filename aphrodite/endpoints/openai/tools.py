@@ -152,7 +152,7 @@ class ChatPromptCapture:
             if len(v_call):
                 try:
                     call_dict = json.loads(v_call)
-                    if "call" in call_dict:
+                    if "name" in call_dict:
                         self.calls_list.append(call_dict)
                 except json.decoder.JSONDecodeError:
                     # Simply ignore invalid functions calls...
@@ -162,16 +162,18 @@ class ChatPromptCapture:
             self, call_id: int) -> Union[ChatCompletionMessageToolCall, None]:
         if len(self.calls_list) and call_id < len(self.calls_list):
             call = self.calls_list[call_id]
-            arguments = call["arguments"] if "arguments" in call else None
-            function_call = Function(name=call["call"],
+            arguments = call.get("arguments") or call.get("parameters")
+            if arguments is not None:
+                arguments = json.dumps(arguments)
+            function_call = Function(name=call["name"],
                                      arguments=json.dumps(arguments)
                                      if arguments is not None else "")
-            return ChatCompletionMessageToolCall(id="call_" + call["call"] +
+            return ChatCompletionMessageToolCall(id="call_" + call["name"] +
                                                  "_" + str(call_id),
                                                  type="function",
                                                  function=function_call)
         return None
-    
+
     def to_ChatCompletionMessageToolCallList(
             self) -> [ChatCompletionMessageToolCall]:
         calls_count = self.num_calls()
