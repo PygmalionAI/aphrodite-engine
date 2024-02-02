@@ -168,7 +168,7 @@ class OpenAIServingChat(OpenAIServing):
         if self.openai_tools_prompter is not None and request.tools is not None:
             tools_capture_texts = [ChatPromptCapture()] * request.n
         else:
-            tools_capture_texts = 
+            tools_capture_texts = None
 
         # Send response for each token for each request.n (index)
         previous_texts = [""] * request.n
@@ -257,8 +257,7 @@ class OpenAIServingChat(OpenAIServing):
                                 created=created_time,
                                 choices=[choice_data],
                                 model=model_name)
-                            data = chunk.json(exclude_unset=True,
-                                              ensure_ascii=False)
+                            data = chunk.model_dump_json(exclude_unset=True)
                             yield f"data: {data}\n\n"
                     else:
                         if output.finish_reason == "stop" and (
@@ -284,9 +283,8 @@ class OpenAIServingChat(OpenAIServing):
                                 total_tokens=len(res.prompt_token_ids) +
                                 len(output.token_ids),
                             )
-                            data = chunk.json(exclude_unset=True,
-                                              exclude_none=True,
-                                              ensure_ascii=False)
+                            data = chunk.model_dump_json(exclude_unset=True,
+                                              exclude_none=True)
                             yield f"data: {data}\n\n"
                         else:
                             # Send the finish response for each request.n only once
@@ -309,9 +307,8 @@ class OpenAIServingChat(OpenAIServing):
                                 model=model_name)
                             if final_usage is not None:
                                 chunk.usage = final_usage
-                            data = chunk.json(exclude_unset=True,
-                                              exclude_none=True,
-                                              ensure_ascii=False)
+                            data = chunk.model_dump_json(exclude_unset=True,
+                                                         exclude_none=True)
                             yield f"data: {data}\n\n"
                             finish_reason_sent[i] = True
         # Send the final done message after all response.n are finished
