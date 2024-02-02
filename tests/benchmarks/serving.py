@@ -7,6 +7,7 @@ from typing import AsyncGenerator, List, Tuple
 
 import aiohttp
 import numpy as np
+from tqdm.asyncio import tqdm
 from transformers import PreTrainedTokenizerBase
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 
@@ -76,6 +77,7 @@ async def get_request(
 
 async def send_request(
     backend: str,
+    model: str,
     api_url: str,
     prompt: str,
     prompt_len: int,
@@ -98,6 +100,8 @@ async def send_request(
             "ignore_eos": True,
             "stream": False,
         }
+        if model is not None:
+            pload["model"] = model
     elif backend == "tgi":
         assert not use_beam_search
         params = {
@@ -134,6 +138,7 @@ async def send_request(
 
 async def benchmark(
     backend: str,
+    model: str,
     api_url: str,
     input_requests: List[Tuple[str, int, int]],
     best_of: int,
@@ -144,10 +149,10 @@ async def benchmark(
     async for request in get_request(input_requests, request_rate):
         prompt, prompt_len, output_len = request
         task = asyncio.create_task(
-            send_request(backend, api_url, prompt, prompt_len, output_len,
-                         best_of, use_beam_search))
+            send_request(backend, model, api_url, prompt, prompt_len,
+                         output_len, best_of, use_beam_search))
         tasks.append(task)
-    await asyncio.gather(*tasks)
+    await tqdm.gather(*tasks)
 
 
 def main(args: argparse.Namespace):  # pylint: disable=redefined-outer-name
@@ -155,15 +160,15 @@ def main(args: argparse.Namespace):  # pylint: disable=redefined-outer-name
     random.seed(args.seed)
     np.random.seed(args.seed)
 
-    api_url = f"http://{args.host}:{args.port}/api/v1/generate"
+    api_url = f"http://{args.host}:{args.port}{args.endpoint}"
     tokenizer = get_tokenizer(args.tokenizer,
                               trust_remote_code=args.trust_remote_code)
     input_requests = sample_requests(args.dataset, args.num_prompts, tokenizer)
 
     benchmark_start_time = time.perf_counter()
     asyncio.run(
-        benchmark(args.backend, api_url, input_requests, args.best_of,
-                  args.use_beam_search, args.request_rate))
+        benchmark(args.backend, args.model, api_url, input_requests,
+                  args.best_of, args.use_beam_search, args.request_rate))
     benchmark_end_time = time.perf_counter()
     benchmark_time = benchmark_end_time - benchmark_start_time
     print(f"Total time: {benchmark_time:.2f} s")
@@ -192,6 +197,8 @@ if __name__ == "__main__":
                         choices=["aphrodite", "tgi"])
     parser.add_argument("--host", type=str, default="localhost")
     parser.add_argument("--port", type=int, default=2242)
+    parser.add_argument("--endpoint", type=str, default="/v1/completions")
+    parser.add_argument("--model", type=str, default=None)
     parser.add_argument("--dataset",
                         type=str,
                         required=True,
