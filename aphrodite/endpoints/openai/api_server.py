@@ -9,8 +9,7 @@ import time
 from http import HTTPStatus
 from typing import AsyncGenerator, Dict, List, Optional, Tuple, Union
 
-from aioprometheus import MetricsMiddleware
-from aioprometheus.asgi.starlette import metrics
+from prometheus_client import make_asgi_app
 import fastapi
 import uvicorn
 from fastapi import Request, Response, Header, HTTPException, Depends
@@ -21,7 +20,6 @@ from pydantic import BaseModel
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
-from aphrodite.engine.metrics import add_global_metrics_labels
 from aphrodite.endpoints.openai.protocol import (
     CompletionRequest, CompletionResponse, CompletionResponseChoice,
     CompletionResponseStreamChoice, CompletionStreamResponse,
@@ -103,8 +101,9 @@ def parse_args():
     return parser.parse_args()
 
 
-app.add_middleware(MetricsMiddleware)  # trace HTTP server metrics
-app.add_route("/metrics", metrics)
+# Add prometheus asgi middleware to route /metrics requests
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
 
 
 def _verify_api_key(x_api_key: str = Header(None),
@@ -869,7 +868,6 @@ if __name__ == "__main__":
 
     load_chat_template(args, tokenizer)
 
-    add_global_metrics_labels(model_name=engine_args.model)
 
     uvicorn.run(app,
                 host=args.host,
