@@ -88,6 +88,7 @@ class WorkerLoRAManager(WorkerLoRAManager):
                          lora_config, device)
 
     @property
+    # pylint: disable=invalid-overridden-method
     def is_enabled(self) -> bool:
         return True
 

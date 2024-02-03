@@ -31,8 +31,8 @@ from transformers import PretrainedConfig
 
 from aphrodite.modeling.layers.linear import LinearMethodBase
 from aphrodite.modeling.models.llama import LlamaForCausalLM
-from aphrodite.modeling.weight_utils import (default_weight_loader,
-                                             hf_model_weights_iterator)
+from aphrodite.modeling.hf_downloader import (default_weight_loader,
+                                              hf_model_weights_iterator)
 
 
 class DeciLMForCausalLM(LlamaForCausalLM):
@@ -77,7 +77,8 @@ class DeciLMForCausalLM(LlamaForCausalLM):
         ]
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision):
+                model_name_or_path, cache_dir, load_format, revision,
+                self.config):
             if "rotary_emb.inv_freq" in name:
                 continue
 

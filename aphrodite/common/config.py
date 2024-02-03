@@ -153,6 +153,13 @@ class ModelConfig:
         if self.quantization is not None:
             self.quantization = self.quantization.lower()
 
+        if self.model.endswith("gguf"):
+            if self.quantization is None:
+                self.quantization = "gguf"
+            elif self.quantization != "gguf":
+                raise ValueError(
+                    f"GGUF file cannot be used in ({self.quantization}).")
+
         # Parse quantization method from the HF model config, if available.
         hf_quant_config = getattr(self.hf_config, "quantization_config", None)
         if hf_quant_config is not None:

@@ -416,6 +416,7 @@ class MixtralForCausalLM(nn.Module):
                 cache_dir,
                 load_format,
                 revision,
+                self.config,
                 fall_back_to_pt=False):
             if "rotary_emb.inv_freq" in name:
                 continue
