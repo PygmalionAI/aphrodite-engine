@@ -58,7 +58,6 @@ class BanEOSUntil(LogitsProcessor):
         self._min_tokens = min_tokens
         self._eos_token_id = eos_token_id
 
-
     def __call__(self, logits: torch.Tensor,
                  output_tokens: List[List[int]]) -> None:
         for i in range(len(output_tokens)):

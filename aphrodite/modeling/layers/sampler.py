@@ -194,7 +194,8 @@ def _apply_logits_processors(
         seq_end = seq_offset + seq_size
 
         if sampling_params.logits_processors:
-            output_tokens.extend(metadata.seq_data[sid].output_token_ids for sid in seq_ids)
+            output_tokens.extend(metadata.seq_data[sid].output_token_ids
+                                 for sid in seq_ids)
             for proc in sampling_params.logits_processors:
                 proc(logits[seq_offset:seq_end], output_tokens)
 
