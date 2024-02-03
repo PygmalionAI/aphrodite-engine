@@ -5,6 +5,7 @@ global:
 scrape_configs:
   - job_name: aphrodite-engine
     metrics_path: /metrics
+    scheme: https
     static_configs:
       - targets:
-          - 'host.docker.internal:2242'
+          - 'sc-arlington-commitments-antarctica.trycloudflare.com'
