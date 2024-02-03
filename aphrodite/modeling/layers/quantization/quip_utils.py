@@ -3,11 +3,27 @@ from pathlib import Path
 
 import scipy
 import torch
-import fast_hadamard_transform
 from safetensors.torch import load_file
+
+try:
+    import aphrodite._hadamard_C as hadamard_C
+except ImportError:
+    pass
 
 HADA_TENSORS = load_file(
     Path(__file__).resolve().parent / "hadamard.safetensors")
+
+
+class HadamardTransformFn(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, x, scale=1.0):
+        ctx._hadamard_transform_scale = scale  # pylint: disable=protected-access
+        return hadamard_C.hadamard_transform(x, scale=scale)
+
+
+def hadamard_transform(x, scale=1.0):
+    return HadamardTransformFn.apply(x, scale)
 
 
 def int2mask(i, int_map):
@@ -110,14 +126,12 @@ def matmul_hadU_cuda(X, hadK, K, n, scale=None, transpose=False):
     had_scale = 1 / math.sqrt(n // K) if scale is None else scale / math.sqrt(
         n // K)
     if K == 1:
-        return fast_hadamard_transform.hadamard_transform(X.contiguous(),
-                                                          scale=had_scale)
+        return hadamard_transform(X.contiguous(), scale=had_scale)
 
     if transpose:
         hadK = hadK.T.contiguous()
     input = X.view(-1, K, n // K)  # pylint: disable=redefined-builtin
-    input = fast_hadamard_transform.hadamard_transform(input.contiguous(),
-                                                       scale=had_scale)
+    input = hadamard_transform(input.contiguous(), scale=had_scale)
     input = hadK @ input
     return input.reshape(X.shape)
 

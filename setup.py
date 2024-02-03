@@ -20,7 +20,7 @@ MAIN_CUDA_VERSION = "12.1"
 
 # Supported NVIDIA GPU architectures.
 NVIDIA_SUPPORTED_ARCHS = {
-    "6.0", "6.1", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"
+    "6.1", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"
 }
 ROCM_SUPPORTED_ARCHS = {
     "gfx90a", "gfx908", "gfx906", "gfx1030", "gfx1100"
@@ -256,6 +256,25 @@ if _is_cuda():
                     "nvcc": NVCC_FLAGS_PUNICA,
                 },
             ))
+    
+    install_hadamard = bool(int(os.getenv("APHRODITE_INSTALL_HADAMARD_KERNELS", "1")))
+    device_count = torch.cuda.device_count()
+    for i in range(device_count):
+        major, minor = torch.cuda.get_device_capability(i)
+        if major < 7:
+            install_hadamard = False
+            break
+    if install_hadamard:
+        ext_modules.append(
+            CUDAExtension(
+                name="aphrodite._hadamard_C",
+                sources=["kernels/hadamard/fast_hadamard_transform.cpp",
+                         "kernels/hadamard/fast_hadamard_transform_cuda.cu"],
+                extra_compile_args={
+                    "cxx": CXX_FLAGS,
+                    "nvcc": NVCC_FLAGS,
+                },
+            ))
 
 elif _is_hip():
     amd_arch = get_amdgpu_offload_arch()
@@ -282,6 +301,7 @@ aphrodite_extension_sources = [
     "kernels/quantization/smoothquant/layernorm_kernels.cu",
     "kernels/quantization/smoothquant/pos_encoding_kernels.cu",
     "kernels/cuda_utils_kernels.cu",
+    "kernels/moe/align_block_size_kernel.cu",
     "kernels/pybind.cpp",
 ]
 
@@ -398,8 +418,12 @@ setuptools.setup(
     install_requires=get_requirements(),
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
-    package_data={"aphrodite-engine": ["aphrodite/endpoints/kobold/klite.embd",
-                                       "aphrodite/modeling/layers/quantization/hadamard.safetensors",
-                                       "py.typed"]},
+    package_data={
+        "aphrodite": [
+            "endpoints/kobold/klite.embd",
+            "modeling/layers/quantization/hadamard.safetensors",
+            "py.typed"
+        ]
+    },
     include_package_data=True,
 )

@@ -154,6 +154,13 @@ class ModelConfig:
         if self.quantization is not None:
             self.quantization = self.quantization.lower()
 
+        if self.model.endswith("gguf"):
+            if self.quantization is None:
+                self.quantization = "gguf"
+            elif self.quantization != "gguf":
+                raise ValueError(
+                    f"GGUF file cannot be used in ({self.quantization}).")
+
         # Parse quantization method from the HF model config, if available.
         hf_quant_config = getattr(self.hf_config, "quantization_config", None)
         if hf_quant_config is not None:
@@ -443,6 +450,12 @@ class SchedulerConfig:
                 f"max_num_batched_tokens ({self.max_num_batched_tokens}) must "
                 "be greater than or equal to max_num_seqs "
                 f"({self.max_num_seqs}).")
+
+
+class DeviceConfig:
+
+    def __init__(self, device: str = "cuda") -> None:
+        self.device = torch.device(device)
 
 
 @dataclass

@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from transformers import PretrainedConfig
 
-from aphrodite.common.config import ModelConfig, LoRAConfig
+from aphrodite.common.config import DeviceConfig, ModelConfig, LoRAConfig
 from aphrodite.modeling.models import ModelRegistry
 from aphrodite.modeling.hf_downloader import (get_quant_config,
                                               initialize_dummy_weights)
@@ -37,6 +37,7 @@ def _is_support_smoothquant(config: PretrainedConfig) -> bool:
     return any(arch in supported_archs for arch in architectures)
 
 def get_model(model_config: ModelConfig,
+              device_config: DeviceConfig,
               lora_config: Optional[LoRAConfig] = None) -> nn.Module:
     model_class = _get_model_architecture(model_config.hf_config)
 
@@ -44,10 +45,7 @@ def get_model(model_config: ModelConfig,
     linear_method = None
     quant_config = None
     if model_config.quantization is not None:
-        quant_config = get_quant_config(model_config.quantization,
-                                        model_config.model,
-                                        model_config.hf_config,
-                                        model_config.download_dir)
+        quant_config = get_quant_config(model_config)
         capability = torch.cuda.get_device_capability()
         capability = capability[0] * 10 + capability[1]
         if capability < quant_config.get_min_capability():
@@ -67,7 +65,7 @@ def get_model(model_config: ModelConfig,
     with _set_default_torch_dtype(model_config.dtype):
         # Create a model instance.
         # The weights will be initialized as empty tensors.
-        with torch.device("cuda"):
+        with torch.device(device_config.device):
             if getattr(model_class, "supports_lora", False):
                 if _is_support_smoothquant(model_config.hf_config):
                     model = model_class(model_config.hf_config, linear_method,
