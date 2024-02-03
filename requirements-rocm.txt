@@ -12,4 +12,4 @@ einops  # Required for phi-1_5
 transformers >= 4.34.0  # Required for Mistral.
 fastapi
 uvicorn[standard]
-pydantic == 1.10.13  # Required for OpenAI server.
+pydantic >= 2.0  # Required for OpenAI server.
