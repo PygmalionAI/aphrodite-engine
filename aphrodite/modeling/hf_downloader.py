@@ -245,7 +245,7 @@ def convert_gguf_to_state_dict(checkpoint, config):
                     mapping[fk] = (fv, v[1])
 
     state_dict = {}
-    for ts in result.tensors:
+    for ts in tqdm(result.tensors, desc="Converting GGUF tensors to PyTorch"):
         weight_type = torch.tensor(int(ts.tensor_type), dtype=torch.int)
         layer, suffix = ts.name.rsplit(".", 1)
         new_key, output_dim = mapping[layer]
