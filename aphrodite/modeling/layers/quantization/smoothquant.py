@@ -18,22 +18,24 @@ class SmoothQuantConfig(QuantizationConfig):
 
     def __init__(self,
                  weight_bits: int = 8,
-                 quant_type: str = "tensor") -> None:
+                 quant_map: dict[str:str] = None) -> None:
         self.weight_bits = weight_bits
-        self.quant_type = quant_type
+        self.quant_map = quant_map
 
         if self.weight_bits != 8:
             raise ValueError(
                 "Currently, only w8a8 quantization is supported for "
                 f"SmoothQuant, but got {self.weight_bits} bits.")
-        if self.quant_type != "tensor":
+        if self.quant_map is None or self.quant_map == {}:
             raise ValueError(
-                "Currently, only tensor wise quantization is supported for "
-                f"SmoothQuant, but got {self.quant_type} type quantization.")
+                'Quant_map for SmoothQuant should not be None or an empty dict. '
+                'For example, when using llama, you should set a quant_config.json in model directory, like '
+                '{ "qkv": "per-tensor", "out": "per-token", "fc1": "per-tensor", "fc2": "per-token" }'
+            )
 
     def __repr__(self) -> str:
         return (f"SmoothQuantConfig(weight_bits={self.weight_bits}, "
-                f"quant_type={self.quant_type})")
+                f"quant_map={self.quant_map})")
 
     def get_name(self) -> str:
         return "smoothquant"
@@ -55,9 +57,17 @@ class SmoothQuantConfig(QuantizationConfig):
 
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "SmoothQuantConfig":
-        weight_bits = cls.get_from_keys(config, ["w_bit", "bits"])
-        quant_type = cls.get_from_keys(config, ["quant_type", "q_type"])
-        return cls(weight_bits, quant_type)
+        try:
+            weight_bits = cls.get_from_keys(config, ["w_bit", "bits"])
+        except ValueError as e:
+            weight_bits = 8
+            print(str(e) + " Set weight_bits = 8 by default.")
+
+        quant_map = {}
+        for key, value in config.items():
+            if value in ["per-tensor", "per-token"]:
+                quant_map[key] = value
+        return cls(weight_bits, quant_map)
 
     def get_linear_method(self) -> "SQLinearMethod":
         return SQLinearMethod(Int8GEMM)
@@ -111,29 +121,29 @@ class SQLinearMethod(LinearMethodBase):
         })
         # q k v dequant_scales are used in QKVParallelLinear
         q_dequant_scale = Parameter(
-            torch.tensor(1.0, dtype=torch.float32, device="cpu"),
+            torch.tensor(1.0, dtype=torch.float32, device='cpu'),
             requires_grad=False,
         )
         k_dequant_scale = Parameter(
-            torch.tensor(1.0, dtype=torch.float32, device="cpu"),
+            torch.tensor(1.0, dtype=torch.float32, device='cpu'),
             requires_grad=False,
         )
         v_dequant_scale = Parameter(
-            torch.tensor(1.0, dtype=torch.float32, device="cpu"),
+            torch.tensor(1.0, dtype=torch.float32, device='cpu'),
             requires_grad=False,
         )
         # gate up dequant_scales are used in MergedColumnParallelLinear
         gate_dequant_scale = Parameter(
-            torch.tensor(1.0, dtype=torch.float32, device="cpu"),
+            torch.tensor(1.0, dtype=torch.float32, device='cpu'),
             requires_grad=False,
         )
         up_dequant_scale = Parameter(
-            torch.tensor(1.0, dtype=torch.float32, device="cpu"),
+            torch.tensor(1.0, dtype=torch.float32, device='cpu'),
             requires_grad=False,
         )
         # dequant_scale is used in RowParallelLinear
         dequant_scale = Parameter(
-            torch.tensor(1.0, dtype=torch.float32, device="cpu"),
+            torch.tensor(1.0, dtype=torch.float32, device='cpu'),
             requires_grad=False,
         )
         return {

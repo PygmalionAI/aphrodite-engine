@@ -31,6 +31,10 @@ def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
         f"Model architectures {architectures} are not supported for now. "
         f"Supported architectures: {ModelRegistry.get_supported_archs()}")
 
+def _is_support_smoothquant(config: PretrainedConfig) -> bool:
+    architectures = getattr(config, "architectures", [])
+    supported_archs = ModelRegistry.get_supported_smoothquant_archs()
+    return any(arch in supported_archs for arch in architectures)
 
 def get_model(model_config: ModelConfig,
               lora_config: Optional[LoRAConfig] = None) -> nn.Module:
@@ -38,6 +42,7 @@ def get_model(model_config: ModelConfig,
 
     # Get the (maybe quantized) linear method.
     linear_method = None
+    quant_config = None
     if model_config.quantization is not None:
         quant_config = get_quant_config(model_config.quantization,
                                         model_config.model,
@@ -64,8 +69,12 @@ def get_model(model_config: ModelConfig,
         # The weights will be initialized as empty tensors.
         with torch.device("cuda"):
             if getattr(model_class, "supports_lora", False):
-                model = model_class(model_config.hf_config, linear_method,
-                                    lora_config)
+                if _is_support_smoothquant(model_config.hf_config):
+                    model = model_class(model_config.hf_config, linear_method,
+                                        lora_config, quant_config)
+                else:
+                    model = model_class(model_config.hf_config, linear_method,
+                                        lora_config)
             elif lora_config:
                 raise ValueError(
                     f"Model {model_class.__name__} does not support LoRA, "
