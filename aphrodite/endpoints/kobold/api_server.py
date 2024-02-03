@@ -8,8 +8,10 @@ import os
 from http import HTTPStatus
 from typing import List, Tuple, AsyncGenerator
 
+from prometheus_client import make_asgi_app
 import uvicorn
-from fastapi import FastAPI, APIRouter, Request, Response
+import fastapi
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -28,9 +30,10 @@ logger = init_logger(__name__)
 served_model: str = "Read Only"
 engine: AsyncAphrodite = None
 gen_cache: dict = {}
+app = fastapi.FastAPI()
 
 badwordsids: List[int] = []
-
+  
 _sampler_map = {
             0: "topk",
             1: "topa",
@@ -40,6 +43,9 @@ _sampler_map = {
             5: "temp",
             6: "pens",
         }
+# Add prometheus asgi middleware to route /metrics/ requests
+metrics_app = make_asgi_app()
+app.mount("/metrics/", metrics_app)
 
 
 def _set_badwords(tokenizer, hf_config):  # pylint: disable=redefined-outer-name
@@ -57,7 +63,6 @@ def _set_badwords(tokenizer, hf_config):  # pylint: disable=redefined-outer-name
     badwordsids.append(tokenizer.eos_token_id)
 
 
-app = FastAPI()
 kai_api = APIRouter()
 extra_api = APIRouter()
 kobold_lite_ui = ""
@@ -124,6 +129,7 @@ def prepare_engine_payload(
         temperature=kai_payload.temperature,
         dynatemp_range=kai_payload.dynatemp_range,
         dynatemp_exponent=kai_payload.dynatemp_exponent,
+        smoothing_factor=kai_payload.smoothing_factor,
         tfs=kai_payload.tfs,
         top_p=kai_payload.top_p,
         top_k=kai_payload.top_k,
@@ -355,7 +361,7 @@ if __name__ == "__main__":
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = AsyncAphrodite.from_engine_args(engine_args)
     engine_model_config = asyncio.run(engine.get_model_config())
-    max_model_len = engine_model_config.get_max_model_len()
+    max_model_len = engine_model_config.max_model_len
 
     # A separate tokenizer to map token IDs to strings.
     tokenizer = get_tokenizer(engine_args.tokenizer,

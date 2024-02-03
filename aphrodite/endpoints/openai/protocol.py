@@ -82,6 +82,7 @@ class ChatCompletionRequest(BaseModel):
     dynatemp_exponent: Optional[float] = 1.0
     sampler_order: Optional[Union[List[str], List[List[str]]]] = Field(default_factory=list)
     temperature_last: Optional[bool] = False
+    smoothing_factor: Optional[float] = 0.0
     ignore_eos: Optional[bool] = False
     use_beam_search: Optional[bool] = False
     logprobs: Optional[int] = None
@@ -128,6 +129,7 @@ class CompletionRequest(BaseModel):
     dynatemp_exponent: Optional[float] = 1.0
     sampler_order: Optional[Union[List[str], List[List[str]]]] = Field(default_factory=list)
     temperature_last: Optional[bool] = False
+    smoothing_factor: Optional[float] = 0.0
     ignore_eos: Optional[bool] = False
     use_beam_search: Optional[bool] = False
     logprobs: Optional[int] = None
@@ -136,6 +138,7 @@ class CompletionRequest(BaseModel):
     custom_token_bans: Optional[List[int]] = Field(default_factory=list)
     skip_special_tokens: Optional[bool] = True
     spaces_between_special_tokens: Optional[bool] = True
+    grammar: Optional[str] = None
 
 
 class LogProbs(BaseModel):

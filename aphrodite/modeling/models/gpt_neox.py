@@ -16,11 +16,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Inference-only GPT-NeoX model compatible with HuggingFace weights.
-
-The input of the model is flattened to a 1D tensor of tokens. The model uses
-InputMetadata to extract the original 2D shape of the input.
-"""
+"""Inference-only GPT-NeoX model compatible with HuggingFace weights."""
 from typing import List, Optional, Tuple
 
 import torch
@@ -80,18 +76,20 @@ class GPTNeoXAttention(nn.Module):
             bias=self.bias,
             linear_method=linear_method,
         )
-
         scaling = self.head_size**-0.5
         rotary_dim = int(self.head_size * config.rotary_pct)
         assert rotary_dim % 2 == 0
         rope_theta = getattr(config, "rope_theta", 10000)
         max_position_embeddings = getattr(config, "max_position_embeddings",
                                           8192)
+        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
+        ) is None else linear_method.quant_config.rope_style()
         self.rotary_emb = get_rope(
             self.head_size,
             rotary_dim=rotary_dim,
             max_position=max_position_embeddings,
             base=rope_theta,
+            is_neox_style=is_neox_style,
         )
         self.attn = PagedAttention(self.num_heads, self.head_size, scaling)
 
@@ -201,6 +199,7 @@ class GPTNeoXModel(nn.Module):
         self.embed_in = VocabParallelEmbedding(
             config.vocab_size,
             config.hidden_size,
+            linear_method=linear_method,
         )
         self.layers = nn.ModuleList([
             GPTNeoXLayer(config, linear_method)
@@ -243,6 +242,7 @@ class GPTNeoXForCausalLM(nn.Module):
         self.embed_out = ParallelLMHead(
             config.vocab_size,
             config.hidden_size,
+            linear_method=linear_method,
         )
         self.sampler = Sampler(config.vocab_size)
 
@@ -261,8 +261,8 @@ class GPTNeoXForCausalLM(nn.Module):
         self,
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
-    ) -> SamplerOutput:
-        next_tokens = self.sampler(self.embed_out.weight, hidden_states,
+    ) -> Optional[SamplerOutput]:
+        next_tokens = self.sampler(self.embed_out(hidden_states),
                                    sampling_metadata)
         return next_tokens
 
@@ -273,7 +273,8 @@ class GPTNeoXForCausalLM(nn.Module):
                      revision: Optional[str] = None):
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision):
+                model_name_or_path, cache_dir, load_format, revision,
+                self.config):
             if ("attention.bias" in name or "attention.masked_bias" in name
                     or "rotary_emb.inv_freq" in name):
                 continue

@@ -6,7 +6,7 @@ from fractions import Fraction
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite._C import ops as quantization_ops
+from aphrodite._C import ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.modeling.layers.quantization.base_config import (
@@ -69,6 +69,12 @@ class GPTQConfig(QuantizationConfig):
     def get_scaled_act_names(self) -> List[str]:
         return []
 
+    def merge_weight(self) -> bool:
+        return True
+
+    def rope_style(self) -> Optional[bool]:
+        return None
+
 
 class ExllamaState(Enum):
 
@@ -129,7 +135,6 @@ class GPTQLinearMethod(LinearMethodBase):
             torch.empty(
                 input_size_per_partition // self.quant_config.pack_factor,
                 output_size_per_partition,
-                device="cuda",
                 dtype=torch.int32,
             ),
             requires_grad=False,
@@ -147,7 +152,6 @@ class GPTQLinearMethod(LinearMethodBase):
                     i // self.quant_config.group_size
                     for i in range(input_size_per_partition)
                 ],
-                device="cuda",
                 dtype=torch.int32,
             ),
             requires_grad=False,
@@ -158,7 +162,6 @@ class GPTQLinearMethod(LinearMethodBase):
             torch.empty(
                 scale_and_zero_size,
                 output_size_per_partition // self.quant_config.pack_factor,
-                device="cuda",
                 dtype=torch.int32,
             ),
             requires_grad=False,
@@ -174,7 +177,6 @@ class GPTQLinearMethod(LinearMethodBase):
             torch.empty(
                 scale_and_zero_size,
                 output_size_per_partition,
-                device="cuda",
                 dtype=params_dtype,
             ),
             requires_grad=False,
@@ -207,13 +209,13 @@ class GPTQLinearMethod(LinearMethodBase):
             else:
                 weights["g_idx"] = torch.empty((1, 1), device="meta")
             weights["exllama_state"] = ExllamaState.READY
-            quantization_ops.gptq_shuffle(weights["qweight"], weights["g_idx"],
-                                          self.quant_config.weight_bits)
-        output = quantization_ops.gptq_gemm(
-            reshaped_x, weights["qweight"], weights["qzeros"],
-            weights["scales"], weights["g_idx"],
-            weights["exllama_state"] == ExllamaState.READY,
-            self.quant_config.weight_bits)
+            ops.gptq_shuffle(weights["qweight"], weights["g_idx"],
+                             self.quant_config.weight_bits)
+        output = ops.gptq_gemm(reshaped_x, weights["qweight"],
+                               weights["qzeros"], weights["scales"],
+                               weights["g_idx"],
+                               weights["exllama_state"] == ExllamaState.READY,
+                               self.quant_config.weight_bits)
         if bias is not None:
             output = output + bias
         return output.reshape(out_shape)

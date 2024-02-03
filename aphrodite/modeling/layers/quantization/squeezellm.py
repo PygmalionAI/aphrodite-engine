@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite._C import ops as quantization_ops
+from aphrodite._C import ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.modeling.layers.quantization.base_config import QuantizationConfig
@@ -56,6 +56,12 @@ class SqueezeLLMConfig(QuantizationConfig):
     def get_scaled_act_names(self) -> List[str]:
         return []
 
+    def merge_weight(self) -> bool:
+        return True
+
+    def rope_style(self) -> Optional[bool]:
+        return None
+
 
 class SqueezeLLMLinearMethod(LinearMethodBase):
     """Linear method for SqueezeLLM.
@@ -70,7 +76,7 @@ class SqueezeLLMLinearMethod(LinearMethodBase):
     def create_weights(self, input_size_per_partition: int,
                        output_size_per_partition: int, input_size: int,
                        output_size: int,
-                       params_dtype: torch.dtype) -> Dict[str, torch.Tensor]:
+                       params_dtype: torch.dtype) -> Dict[str, Any]:
         if input_size_per_partition % self.quant_config.pack_factor != 0:
             raise ValueError(
                 "The input size is not aligned with the quantized "
@@ -80,7 +86,6 @@ class SqueezeLLMLinearMethod(LinearMethodBase):
             torch.empty(
                 input_size_per_partition // self.quant_config.pack_factor,
                 output_size_per_partition,
-                device="cuda",
                 dtype=torch.int32,
             ),
             requires_grad=False,
@@ -96,7 +101,6 @@ class SqueezeLLMLinearMethod(LinearMethodBase):
             torch.empty(
                 output_size,
                 self.quant_config.weight_bits**2,
-                device="cuda",
                 dtype=params_dtype,
             ),
             requires_grad=False,
@@ -118,16 +122,13 @@ class SqueezeLLMLinearMethod(LinearMethodBase):
         out_shape = x.shape[:-1] + (qweight.shape[-1], )
         reshaped_x = x.reshape(-1, x.shape[-1])
         if is_hip():
-            out_f = torch.zeros(out_shape, device="cuda", dtype=torch.float)
-            quantization_ops.squeezellm_gemm(reshaped_x, qweight, out_f,
-                                             lookup_table)
+            out_f = torch.zeros(out_shape, dtype=torch.float)
+            ops.squeezellm_gemm(reshaped_x, qweight, out_f, lookup_table)
             out = out_f.to(dtype=torch.float16)
-            # do something specific for HIP
         else:
             # NOTE: The output tensor should be zero-initialized.
-            out = torch.zeros(out_shape, device="cuda", dtype=torch.float16)
-            quantization_ops.squeezellm_gemm(reshaped_x, qweight, out,
-                                             lookup_table)
+            out = torch.zeros(out_shape, dtype=torch.float16)
+            ops.squeezellm_gemm(reshaped_x, qweight, out, lookup_table)
 
         if bias is not None:
             out = out + bias

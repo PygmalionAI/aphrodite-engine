@@ -29,23 +29,28 @@ class OutputMetadata(PersistentMetadata):
 
 class SamplingMetadata:
     """Metadata for input sequences. Used in sampler.
+
     Args:
         seq_groups: List of (seq_ids, sampling_params).
         seq_data: Seq_id -> SequenceData.
         prompt_lens: Lengths of prompts.
         selected_token_indices: Token indices selected for sampling.
-        categorized_sample_indices: SamplingType -> token indicies to sample.
+        categorized_sample_indices: SamplingType -> token indices to sample.
+        perform_sampling: Whether to perform sampling. This option is used to
+            make the sampling only happens in the driver worker, and disable
+            sampling in other worker processes.
         persistent_metadata: Metadata that persists across iterations.
-        output_metadata: the metadata of the output.
+        output_metadata: the output metadata.
     """
 
     def __init__(
         self,
-        seq_groups: List[Tuple[List[int], SamplingParams]],
-        seq_data: Dict[int, SequenceData],
-        prompt_lens: List[int],
+        seq_groups: Optional[List[Tuple[List[int], SamplingParams]]],
+        seq_data: Optional[Dict[int, SequenceData]],
+        prompt_lens: Optional[List[int]],
         selected_token_indices: torch.Tensor,
-        categorized_sample_indices: Dict[SamplingType, torch.Tensor],
+        categorized_sample_indices: Optional[Dict[SamplingType, torch.Tensor]],
+        perform_sampling: bool = True,
         persistent_metadata: Optional[PersistentMetadata] = None,
         output_metadata: Optional[OutputMetadata] = None,
     ) -> None:
@@ -54,10 +59,11 @@ class SamplingMetadata:
         self.prompt_lens = prompt_lens
         self.selected_token_indices = selected_token_indices
         self.categorized_sample_indices = categorized_sample_indices
+        self.perform_sampling = perform_sampling
         self.persistent_metadata = persistent_metadata or PersistentMetadata()
         self.output_metadata = output_metadata or OutputMetadata()
 
-        self.num_prompts = len(prompt_lens)
+        self.num_prompts = len(prompt_lens) if prompt_lens is not None else 0
 
     def __repr__(self) -> str:
         return (
@@ -67,8 +73,9 @@ class SamplingMetadata:
             f"prompt_lens={self.prompt_lens}, "
             f"selected_token_indices={self.selected_token_indices}, "
             f"categorized_sample_indices={self.categorized_sample_indices}, "
+            f"perform_sampling={self.perform_sampling}, "
             f"persistent_metadata={self.persistent_metadata}, "
-            f"output_metadata={self.output_metadata})")
+            f"output_metadata={self.output_metadata}) ")
 
 
 @dataclass
@@ -94,6 +101,7 @@ class SamplingTensors:
     dynatemp_ranges: torch.Tensor
     dynatemp_exps: torch.Tensor
     sampler_orders: List[Any] # logically, a List[Tuple[List[List[str]], int]] except that Tuple is actually a List too
+    smoothing_factors: torch.Tensor
     prompt_tokens: torch.Tensor
     output_tokens: torch.Tensor
 
@@ -102,7 +110,7 @@ class SamplingTensors:
         cls, sampling_metadata: "SamplingMetadata", vocab_size: int,
         device: torch.device, dtype: torch.dtype
     ) -> Tuple["SamplingTensors", bool, bool, bool, bool, bool, bool, bool,
-               bool, bool, bool, bool]:
+               bool, bool, bool, bool, bool]:
         prompt_tokens: List[List[int]] = []
         output_tokens: List[List[int]] = []
         top_ks: List[int] = []
@@ -137,6 +145,7 @@ class SamplingTensors:
         #do_epsilon_cutoffs = False
         #do_typical_ps = False
         #do_mirostat = False
+
         for i, seq_group in enumerate(sampling_metadata.seq_groups):
             seq_ids, sampling_params = seq_group
             temperature = sampling_params.temperature
@@ -184,12 +193,6 @@ class SamplingTensors:
             # if do_mirostat is False and sampling_params.mirostat_mode == 2:
             #     do_mirostat = True
 
-            # if not do_alphabet_soup and (top_p < 1.0 - _SAMPLING_EPS
-            #                              or top_k != vocab_size
-            #                              or top_a > 0.0
-            #                              or min_p > _SAMPLING_EPS):
-            #     do_alphabet_soup = True
-
             if (i < sampling_metadata.num_prompts
                     and sampling_params.prompt_logprobs is not None):
                 # For tokens in the prompt that we only need to get their
@@ -210,6 +213,7 @@ class SamplingTensors:
                 typical_ps += [1] * (prompt_len - 1)
                 dynatemp_ranges += [dynatemp_range] * (prompt_len - 1)
                 dynatemp_exps += [dynatemp_exp] * (prompt_len - 1)
+                smoothing_factors += [smoothing_factor] * (prompt_len - 1)
                 prompt_tokens.extend([] for _ in range(prompt_len - 1))
                 output_tokens.extend([] for _ in range(prompt_len - 1))
                 if not sampler_orders or sampler_orders[-1][0] != sampler_order:
@@ -348,6 +352,10 @@ class SamplingTensors:
                                        device="cpu",
                                        dtype=dtype,
                                        pin_memory=pin_memory)
+        smoothing_factors_t = torch.tensor(smoothing_factors,
+                                           device="cpu",
+                                           dtype=dtype,
+                                           pin_memory=pin_memory)
         miro_taus_t = torch.tensor(miro_taus,
                                    device="cpu",
                                    dtype=dtype,
@@ -393,6 +401,8 @@ class SamplingTensors:
             dynatemp_ranges=dynatemp_ranges_t.to(device=device,
                                                  non_blocking=True),
             dynatemp_exps=dynatemp_exps_t.to(device=device, non_blocking=True),
+            smoothing_factors=smoothing_factors_t.to(device=device,
+                                                     non_blocking=True),
             miro_taus=miro_taus_t.to(device=device, non_blocking=True),
             miro_etas=miro_etas_t.to(device=device, non_blocking=True),
             miro_mus=miro_mus_t.to(device=device, non_blocking=True),

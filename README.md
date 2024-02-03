@@ -17,7 +17,7 @@ The compute necessary for Aphrodite's development is provided by [Arc Compute](h
 - Continuous Batching
 - Efficient K/V management with [PagedAttention](./aphrodite/modeling/layers/attention.py)
 - Optimized CUDA kernels for improved inference
-- Quantization support via GPTQ, AWQ, and SqueezeLLM.
+- Quantization support via GPTQ, GGUF, AWQ, QuIP#, and SqueezeLLM.
 - Distributed inference
 - Variety of sampling methods ([Mirostat](https://arxiv.org/abs/2007.14966), [Locally Typical Sampling](https://arxiv.org/abs/2202.00666), Tail-Free Sampling, etc)
 - 8-bit KV Cache for higher context lengths and throughput.
@@ -31,25 +31,69 @@ pip install aphrodite-engine
 python -m aphrodite.endpoints.openai.api_server --model PygmalionAI/pygmalion-2-7b
 ```
 
+> [!CAUTION]
+> If the installation reports CUDA kernel errors, please run `pip install aphrodite-engine=0.4.5` instead.
+
 This will create a [OpenAI](https://platform.openai.com/docs/api-reference/)-compatible API server that can be accessed at port 2242 of the localhost. You can plug in the API into a UI that supports Kobold, such as [SillyTavern](https://github.com/SillyTavern/SillyTavern).
 
+#### Docker
+```
+sudo mkdir ~/workspace
+sudo docker run --gpus '"all"' --shm-size 10g -p 2242:2242 -p 7650:7650 -p 8080:8080 --rm -it -v '/home/workspace' alignmentlabai/aphrodite-engine:latest
+```
 
 ## Performance
 Speeds vary with different GPUs, model sizes, quantization schemes, batch sizes, etc. Here are some baseline benchmarks conducted by requesting as many completions as possible from the [API server](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/endpoints/openai/api_server.py). Keep in mind that these are the theoritical peak throughput with parallel decoding, with as high a batch size as possible. **Per-request generation speed is a fraction of this, at 30-40 t/s**.
 
-> [!NOTE]  
-> 16bit models can achieve much higher throughput if they have access to more VRAM, either by using larger GPUs, or tensor parallelism over many GPUs. The numbers below are purely for output tokens.
+### High Batch Size Performance
 
-| Model      | Quantization | GPU      | Throughput (output t/s) |
-| ---------- | ------------ | -------- | ----------------------- |
-| Llama-2 7B | None         | RTX 4090 | 2576.2                  |
-|            | AWQ          | RTX 4090 | 3551.3                  |
-|            | GPTQ         | RTX 4090 | 2919.1                  |
-|            | SqueezeLLM   | RTX 4090 | 580.3                   |
-| Mistral 7B | None         | RTX 4090 | 5489.3                  |
-|            | AWQ          | RTX 4090 | 4078.8                  |
-|            | GPTQ         | RTX 4090 | 4516.2                  |
-|            | SqueezeLLM   | RTX 4090 | 549.5                   |
+> [!NOTE]  
+> The numbers below are the theoritical peak achieved by *only* requesting output tokens at very high batch sizes. At lower batch sizes with much larger prompts, the results will be vastly different.
+Throughput refers to output tokens per second.
+
+| Model      | Quantization | bits | GPU      | Throughput (T/s) |
+| ---------- | ------------ | ---- | -------- | ---------------- |
+| Mistral 7B | None         | 16   | RTX 4090 | 5489.3           |
+|            | AWQ          | 4    | RTX 4090 | 4078.8           |
+|            | GPTQ         | 4    | RTX 4090 | **7850.4**       |
+|            |              | 8    | RTX 4090 | 7658.0           |
+|            | GGUF         | Q8   | RTX 4090 | 5141.2           |
+|            |              | Q6KM | RTX 4090 | 5791.7           |
+|            |              | Q5KM | RTX 4090 | 5786.2           |
+|            |              | Q4KM | RTX 4090 | 5815.8           |
+|            | SqueezeLLM   | 4    | RTX 4090 | 549.5            |
+| Llama-2 7B | None         | 16   | RTX 4090 | 2576.2           |
+|            | AWQ          | 4    | RTX 4090 | 3551.3           |
+|            | GPTQ         | 4    | RTX 4090 | 2919.1           |
+|            | GGUF         | Q4KM | RTX 4090 | 2726.6           |
+|            |              | Q5KM | RTX 4090 | 2763.4           |
+|            |              | Q6KM | RTX 4090 | 2694.7           |
+|            |              | Q8   | RTX 4090 | 2647.0           |
+|            | SqueezeLLM   | 4    | RTX 4090 | 580.3            |
+
+### Batch Size 1
+These are the speeds a user would normally get if they request a single output with a sizable prompt and output length. Essentially, normal chatting experience.
+
+The following results were gathered by sending a request with 2000 prompt tokens and requesting 1024 tokens with `ignore_eos=True`.
+
+| Model      | Quantization | bits | GPU      | Throughput (T/s) |
+| ---------- | ------------ | ---- | -------- | ---------------- |
+| Mistral 7B | None         | 16   | RTX 4090 | 54.0             |
+|            | AWQ          | 4    | RTX 4090 | 128.2            |
+|            | GPTQ         | 8    | RTX 4090 | 92.8             |
+|            |              | 4    | RTX 4090 | **146.8**        |
+|            | GGUF         | Q8   | RTX 4090 | 91.0             |
+|            |              | Q6KM | RTX 4090 | 105.4            |
+|            |              | Q5KM | RTX 4090 | 117.8            |
+|            |              | Q4KM | RTX 4090 | 128.9            |
+| Llama-2 7B | None         | 16   | RTX 4090 | 55.2             |
+|            | GPTQ         | 8    | RTX 4090 | 90.2             |
+|            |              | 4    | RTX 4090 | **128.0**        |
+|            | AWQ          | 4    | RTX 4090 | 116.3            |
+|            | GGUF         | Q8   | RTX 4090 | 88.1             |
+|            |              | Q6KM | RTX 4090 | 99.4             |
+|            |              | Q5KM | RTX 4090 | 109.9            |
+|            |              | Q4KM | RTX 4090 | 118.9            |
 
 ## Requirements
 
