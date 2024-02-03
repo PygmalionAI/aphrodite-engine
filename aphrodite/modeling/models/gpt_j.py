@@ -289,8 +289,8 @@ class GPTJForCausalLM(nn.Module):
             stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir,
-                load_format, revision, self.config):
+                model_name_or_path, cache_dir, load_format, revision,
+                self.config):
             if "attn.bias" in name or "attn.masked_bias" in name:
                 continue
             for (param_name, weight_name, shard_id) in stacked_params_mapping:

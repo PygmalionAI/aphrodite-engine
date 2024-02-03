@@ -4,7 +4,6 @@ import glob
 import fnmatch
 import json
 import os
-import sys
 from collections import defaultdict
 from typing import Any, Iterator, List, Optional, Tuple
 
@@ -207,9 +206,11 @@ def prepare_hf_model_weights(
 
     return hf_folder, hf_weights_files, use_safetensors
 
+
 def convert_gguf_to_state_dict(checkpoint, config):
     if not os.path.isfile(checkpoint):
-        raise RuntimeError(f"Cannot find any model weights with `{checkpoint}`")
+        raise RuntimeError(
+            f"Cannot find any model weights with `{checkpoint}`")
 
     result = gguf.GGUFReader(checkpoint)
     # write tensor
@@ -219,19 +220,34 @@ def convert_gguf_to_state_dict(checkpoint, config):
         "output": ("lm_head", config.vocab_size),
         "output_norm": ("model.norm", -1),
         "blk.{bid}.attn_norm": ("model.layers.{bid}.input_layernorm", -1),
-        "blk.{bid}.attn_q": ("model.layers.{bid}.self_attn.q_proj", config.hidden_size),
+        "blk.{bid}.attn_q": ("model.layers.{bid}.self_attn.q_proj",
+                             config.hidden_size),
         "blk.{bid}.attn_k": ("model.layers.{bid}.self_attn.k_proj", kv_dim),
         "blk.{bid}.attn_v": ("model.layers.{bid}.self_attn.v_proj", kv_dim),
-        "blk.{bid}.attn_output": ("model.layers.{bid}.self_attn.o_proj", config.hidden_size),
-        "blk.{bid}.attn_rot_embd": ("model.layers.{bid}.self_attn.rotary_emb.inv_freq", -1),
-        "blk.{bid}.ffn_norm": ("model.layers.{bid}.post_attention_layernorm", -1),
-        "blk.{bid}.ffn_up": ("model.layers.{bid}.mlp.up_proj", config.intermediate_size),
-        "blk.{bid}.ffn_down": ("model.layers.{bid}.mlp.down_proj", config.hidden_size),
-        "blk.{bid}.ffn_gate": ("model.layers.{bid}.mlp.gate_proj", config.intermediate_size),
-        "blk.{bid}.ffn_up.{xid}": ("model.layers.{bid}.block_sparse_moe.experts.{xid}.w3", config.intermediate_size),
-        "blk.{bid}.ffn_down.{xid}": ("model.layers.{bid}.block_sparse_moe.experts.{xid}.w2", config.hidden_size),
-        "blk.{bid}.ffn_gate.{xid}": ("model.layers.{bid}.block_sparse_moe.experts.{xid}.w1", config.intermediate_size),
-        "blk.{bid}.ffn_gate_inp": ("model.layers.{bid}.block_sparse_moe.gate", config.num_local_experts if hasattr(config, 'num_local_experts') else -1),
+        "blk.{bid}.attn_output": ("model.layers.{bid}.self_attn.o_proj",
+                                  config.hidden_size),
+        "blk.{bid}.attn_rot_embd":
+        ("model.layers.{bid}.self_attn.rotary_emb.inv_freq", -1),
+        "blk.{bid}.ffn_norm": ("model.layers.{bid}.post_attention_layernorm",
+                               -1),
+        "blk.{bid}.ffn_up": ("model.layers.{bid}.mlp.up_proj",
+                             config.intermediate_size),
+        "blk.{bid}.ffn_down": ("model.layers.{bid}.mlp.down_proj",
+                               config.hidden_size),
+        "blk.{bid}.ffn_gate": ("model.layers.{bid}.mlp.gate_proj",
+                               config.intermediate_size),
+        "blk.{bid}.ffn_up.{xid}":
+        ("model.layers.{bid}.block_sparse_moe.experts.{xid}.w3",
+         config.intermediate_size),
+        "blk.{bid}.ffn_down.{xid}":
+        ("model.layers.{bid}.block_sparse_moe.experts.{xid}.w2",
+         config.hidden_size),
+        "blk.{bid}.ffn_gate.{xid}":
+        ("model.layers.{bid}.block_sparse_moe.experts.{xid}.w1",
+         config.intermediate_size),
+        "blk.{bid}.ffn_gate_inp": ("model.layers.{bid}.block_sparse_moe.gate",
+                                   config.num_local_experts if hasattr(
+                                       config, "num_local_experts") else -1),
     }
     mapping = {}
     # This is how llama.cpp handles name mapping,
@@ -248,7 +264,8 @@ def convert_gguf_to_state_dict(checkpoint, config):
 
     state_dict = {}
     with Progress() as progress:
-        task = progress.add_task("[cyan]Converting GGUF tensors to PyTorch...", total=len(result.tensors))
+        task = progress.add_task("[cyan]Converting GGUF tensors to PyTorch...",
+                                 total=len(result.tensors))
         for ts in result.tensors:
             weight_type = torch.tensor(int(ts.tensor_type), dtype=torch.int)
             layer, suffix = ts.name.rsplit(".", 1)
@@ -258,10 +275,12 @@ def convert_gguf_to_state_dict(checkpoint, config):
             if output_dim != -1:
                 data = data.view(output_dim, -1)
             if weight_type > 1:
-                state_dict[new_key.replace("weight", "weight_type")] = weight_type
+                state_dict[new_key.replace("weight",
+                                           "weight_type")] = weight_type
             state_dict[new_key] = data
             progress.update(task, advance=1)
     return state_dict
+
 
 def hf_model_weights_iterator(
     model_name_or_path: str,
@@ -272,11 +291,11 @@ def hf_model_weights_iterator(
     fall_back_to_pt: Optional[bool] = True,
 ) -> Iterator[Tuple[str, torch.Tensor]]:
     if model_name_or_path.endswith("gguf"):
-            for name, param in convert_gguf_to_state_dict(model_name_or_path,
-                                                        config).items():
-                yield name, param
-            return
-   
+        for name, param in convert_gguf_to_state_dict(model_name_or_path,
+                                                      config).items():
+            yield name, param
+        return
+
     hf_folder, hf_weights_files, use_safetensors = prepare_hf_model_weights(
         model_name_or_path,
         cache_dir=cache_dir,
