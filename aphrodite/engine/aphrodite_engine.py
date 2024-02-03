@@ -7,7 +7,7 @@ from typing import (TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple,
 
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
-                                     SchedulerConfig, LoRAConfig)
+                                     SchedulerConfig, LoRAConfig, DeviceConfig)
 from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.metrics import StatLogger, Stats
@@ -56,6 +56,7 @@ class AphroditeEngine:
             management.
         parallel_config: The configuration related to distributed execution.
         scheduler_config: The configuration related to the request scheduler.
+        device_config: The configuration related to the device.
         lora_config: The configuration related to LoRA.
         placement_group: Ray placement group for distributed execution.
             Required for distributed execution.
@@ -68,6 +69,7 @@ class AphroditeEngine:
         cache_config: CacheConfig,
         parallel_config: ParallelConfig,
         scheduler_config: SchedulerConfig,
+        device_config: DeviceConfig,
         lora_config: Optional[LoRAConfig],
         placement_group: Optional["PlacementGroup"],
         log_stats: bool,
@@ -90,6 +92,7 @@ class AphroditeEngine:
             f"Context Length = {model_config.max_model_len}\n"
             f"Enforce Eager Mode = {model_config.enforce_eager}\n"
             f"KV Cache Data Type = {cache_config.cache_dtype}\n"
+            f"Device = {device_config.device}\n"
             f"Seed = {model_config.seed}")
         # TODO: Print more configs in debug mode.
 
@@ -98,6 +101,7 @@ class AphroditeEngine:
         self.lora_config = lora_config
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
+        self.device_config = device_config
         self.log_stats = log_stats
         self._verify_args()
 
@@ -144,6 +148,7 @@ class AphroditeEngine:
             self.model_config,
             self.parallel_config,
             self.scheduler_config,
+            self.device_config,
             local_rank=0,
             rank=0,
             distributed_init_method=distributed_init_method,
@@ -239,6 +244,7 @@ class AphroditeEngine:
         model_config = copy.deepcopy(self.model_config)
         parallel_config = copy.deepcopy(self.parallel_config)
         scheduler_config = copy.deepcopy(self.scheduler_config)
+        device_config = copy.deepcopy(self.device_config)
 
         for rank, (worker, (node_id,
                             _)) in enumerate(zip(self.workers,
@@ -250,6 +256,7 @@ class AphroditeEngine:
                     model_config,
                     parallel_config,
                     scheduler_config,
+                    device_config,
                     local_rank,
                     rank,
                     distributed_init_method,
@@ -263,6 +270,7 @@ class AphroditeEngine:
             model_config,
             parallel_config,
             scheduler_config,
+            device_config,
             driver_local_rank,
             driver_rank,
             distributed_init_method,
