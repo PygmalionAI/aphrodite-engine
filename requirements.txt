@@ -14,7 +14,7 @@ pydantic == 1.10.13
 fastapi
 colorlog
 einops # for phi
-aioprometheus[starlette] # for prometheus metrics
+prometheus_client # for prometheus metrics
 triton >= 2.1.0
 lark == 1.1.8 # for grammars
 pynvml == 11.5.0
