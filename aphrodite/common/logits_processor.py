@@ -33,7 +33,8 @@ class BiasLogitsProcessor(LogitsProcessor):
         self.values = torch.tensor(list(self.biases.values()),
                                    dtype=torch.long)
 
-    def __call__(self, logits, output_tokens):
+    def __call__(self, logits: torch.Tensor,
+                 output_tokens: List[List[int]]) -> None:
         if not self.biases:
             return
 
@@ -57,7 +58,9 @@ class BanEOSUntil(LogitsProcessor):
         self._min_tokens = min_tokens
         self._eos_token_id = eos_token_id
 
-    def __call__(self, logits, output_tokens):
+
+    def __call__(self, logits: torch.Tensor,
+                 output_tokens: List[List[int]]) -> None:
         for i in range(len(output_tokens)):
             if len(output_tokens[i]) < self._min_tokens:
                 logits[i][self._eos_token_id] = -float("inf")

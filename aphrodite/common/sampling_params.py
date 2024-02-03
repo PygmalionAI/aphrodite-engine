@@ -14,10 +14,9 @@ class SamplingType(IntEnum):
     BEAM = 2
 
 
-LogitsProcessor = Callable[[List[int], torch.Tensor], torch.Tensor]
-"""LogitsProcessor is a function that takes a list of previously generated
-tokens and a tensor of the logits for the next token, and returns a modified
-tensor of logits to sample from."""
+LogitsProcessorFunc = Callable[[torch.Tensor, List[List[int]]], None]
+"""LogitsProcessorFunc takes a logits tensor and corresponding lists of 
+previously generated output tokens, and modifies the logits tensor."""
 
 
 class SamplingParams:
@@ -146,7 +145,7 @@ class SamplingParams:
         length_penalty: float = 1.0,
         early_stopping: Union[bool, str] = False,
         stop: Union[None, str, List[str]] = None,
-        stop_token_ids: List[int] = None,
+        stop_token_ids: Optional[List[int]] = None,
         include_stop_str_in_output: bool = False,
         ignore_eos: bool = False,
         max_tokens: Optional[int] = 16,
@@ -155,7 +154,7 @@ class SamplingParams:
         custom_token_bans: Optional[List[int]] = None,
         skip_special_tokens: bool = True,
         spaces_between_special_tokens: bool = True,
-        logits_processors: Optional[List[LogitsProcessor]] = None,
+        logits_processors: Optional[List[LogitsProcessorFunc]] = None,
     ) -> None:
         self.n = n
         self.best_of = best_of if best_of is not None else n
@@ -186,10 +185,7 @@ class SamplingParams:
             self.stop = [stop]
         else:
             self.stop = list(stop)
-        if stop_token_ids is None:
-            self.stop_token_ids = []
-        else:
-            self.stop_token_ids = list(stop_token_ids)
+        self.stop_token_ids = stop_token_ids or []
         self.ignore_eos = ignore_eos
         self.max_tokens = max_tokens
         self.logprobs = logprobs
