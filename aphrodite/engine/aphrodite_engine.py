@@ -880,7 +880,7 @@ class AphroditeEngine:
                 time_to_first_tokens=time_to_first_tokens,
                 time_per_output_tokens=time_per_output_tokens,
                 time_e2e_requests=time_e2e_requests,
-        )
+            )
 
     def _decode_sequence(self, seq: Sequence, prms: SamplingParams) -> None:
         """Decodes the new token for a sequence."""

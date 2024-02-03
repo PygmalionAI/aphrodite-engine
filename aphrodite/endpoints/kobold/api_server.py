@@ -8,7 +8,6 @@ import os
 from http import HTTPStatus
 from typing import List, Tuple, AsyncGenerator
 
-
 from prometheus_client import make_asgi_app
 import uvicorn
 import fastapi
@@ -352,7 +351,6 @@ if __name__ == "__main__":
                               trust_remote_code=engine_args.trust_remote_code)
 
     _set_badwords(tokenizer, engine_model_config.hf_config)
-
 
     uvicorn.run(app,
                 host=args.host,

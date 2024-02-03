@@ -868,7 +868,6 @@ if __name__ == "__main__":
 
     load_chat_template(args, tokenizer)
 
-
     uvicorn.run(app,
                 host=args.host,
                 port=args.port,

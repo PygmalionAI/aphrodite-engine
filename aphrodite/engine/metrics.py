@@ -173,7 +173,7 @@ class StatLogger:
 
     def log(self, stats: Stats) -> None:
         """Called by AphroditeEngine.
-           Logs to prometheus and tracked stats every iteration. 
+           Logs to prometheus and tracked stats every iteration.
            Logs to Stdout every self.local_interval seconds."""
 
         # Log to prometheus.

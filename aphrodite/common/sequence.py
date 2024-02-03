@@ -275,7 +275,7 @@ class SequenceGroup:
     @property
     def lora_int_id(self) -> int:
         return self.lora_request.lora_int_id if self.lora_request else 0
-    
+
     def get_last_latency(self, now: float) -> float:
         """Gets last token latency for Request level timings."""
         latency = now - self.last_token_time
