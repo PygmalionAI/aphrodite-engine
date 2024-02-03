@@ -86,8 +86,7 @@ class RotaryEmbedding(nn.Module):
     def _compute_cos_sin_cache(self) -> torch.Tensor:
         """Compute the cos and sin cache."""
         inv_freq = self._compute_inv_freq(self.base)
-        t = torch.arange(self.max_position_embeddings,
-                         dtype=torch.float)
+        t = torch.arange(self.max_position_embeddings, dtype=torch.float)
 
         freqs = torch.einsum("i,j -> ij", t, inv_freq)
         cos = freqs.cos()
@@ -308,6 +307,8 @@ class YaRNScalingRotaryEmbedding(RotaryEmbedding):
                                                 self.rotary_dim, self.base,
                                                 self.max_position_embeddings)
         # Get n-d rotational scaling corrected for extrapolation
+        # FIXME: Add device here.
+        # pylint: disable=no-value-for-parameter
         inv_freq_mask = (1 - _yarn_linear_ramp_mask(
             low, high, self.rotary_dim // 2,
             dtype=torch.float)) * self.extrapolation_factor

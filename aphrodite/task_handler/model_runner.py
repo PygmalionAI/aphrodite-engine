@@ -5,8 +5,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from aphrodite.common.config import (
-    DeviceConfig, ModelConfig, LoRAConfig, ParallelConfig, SchedulerConfig)
+from aphrodite.common.config import (DeviceConfig, ModelConfig, LoRAConfig,
+                                     ParallelConfig, SchedulerConfig)
 from aphrodite.common.logger import init_logger
 from aphrodite.modeling import get_model, InputMetadata, SamplingMetadata
 from aphrodite.modeling.megatron.communication_op import (broadcast_tensor_dict

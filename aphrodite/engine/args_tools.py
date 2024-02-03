@@ -259,14 +259,12 @@ class EngineArgs:
             help=('Maximum number of LoRAs to store in CPU memory. '
                   'Must be >= than max_num_seqs. '
                   'Defaults to max_num_seqs.'))
-        parser.add_argument(
-            '--device',
-            type=str,
-            default=EngineArgs.device,
-            choices=['cuda'],
-            help=('Device to use for model execution. '
-                  'Currently, only "cuda" is supported.')
-        )
+        parser.add_argument('--device',
+                            type=str,
+                            default=EngineArgs.device,
+                            choices=['cuda'],
+                            help=('Device to use for model execution. '
+                                  'Currently, only "cuda" is supported.'))
         return parser
 
     @classmethod

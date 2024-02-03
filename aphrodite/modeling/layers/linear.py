@@ -117,8 +117,7 @@ class ReplicatedLinear(torch.nn.Module):
                 self.register_parameter(name, weight)
         if bias:
             self.bias = Parameter(
-                torch.empty(self.output_size,
-                            dtype=self.params_dtype))
+                torch.empty(self.output_size, dtype=self.params_dtype))
             set_weight_attrs(self.bias, {"output_dim": 0})
         else:
             self.register_parameter("bias", None)
@@ -518,8 +517,7 @@ class RowParallelLinear(torch.nn.Module):
 
         if bias:
             self.bias = Parameter(
-                torch.empty(self.output_size,
-                            dtype=params_dtype))
+                torch.empty(self.output_size, dtype=params_dtype))
             set_weight_attrs(self.bias, {
                 "output_dim": 0,
                 "weight_loader": self.weight_loader,
