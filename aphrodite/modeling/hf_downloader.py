@@ -4,6 +4,7 @@ import glob
 import fnmatch
 import json
 import os
+import sys
 from collections import defaultdict
 from typing import Any, Iterator, List, Optional, Tuple
 
@@ -14,6 +15,7 @@ from safetensors.torch import load_file, save_file, safe_open
 import torch
 from transformers import PretrainedConfig
 from tqdm.auto import tqdm
+from rich.progress import Progress
 
 from aphrodite.common.config import ModelConfig
 from aphrodite.common.logger import init_logger
@@ -245,17 +247,20 @@ def convert_gguf_to_state_dict(checkpoint, config):
                     mapping[fk] = (fv, v[1])
 
     state_dict = {}
-    for ts in tqdm(result.tensors, desc="Converting GGUF tensors to PyTorch"):
-        weight_type = torch.tensor(int(ts.tensor_type), dtype=torch.int)
-        layer, suffix = ts.name.rsplit(".", 1)
-        new_key, output_dim = mapping[layer]
-        new_key += f".{suffix}"
-        data = torch.tensor(ts.data)
-        if output_dim != -1:
-            data = data.view(output_dim, -1)
-        if weight_type > 1:
-            state_dict[new_key.replace("weight", "weight_type")] = weight_type
-        state_dict[new_key] = data
+    with Progress() as progress:
+        task = progress.add_task("[cyan]Converting GGUF tensors to PyTorch...", total=len(result.tensors))
+        for ts in result.tensors:
+            weight_type = torch.tensor(int(ts.tensor_type), dtype=torch.int)
+            layer, suffix = ts.name.rsplit(".", 1)
+            new_key, output_dim = mapping[layer]
+            new_key += f".{suffix}"
+            data = torch.tensor(ts.data)
+            if output_dim != -1:
+                data = data.view(output_dim, -1)
+            if weight_type > 1:
+                state_dict[new_key.replace("weight", "weight_type")] = weight_type
+            state_dict[new_key] = data
+            progress.update(task, advance=1)
     return state_dict
 
 def hf_model_weights_iterator(
