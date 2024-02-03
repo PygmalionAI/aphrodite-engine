@@ -173,6 +173,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     .def("linear_a8_w8_o8", &I8CUGEMM::linear_a8_w8_o8)
     .def("linear_a8_w8_o8_", &I8CUGEMM::linear_a8_w8_o8_)
     .def("linear_a8_w8_o32_", &I8CUGEMM::linear_a8_w8_o32_);
+  
+  ops.def("moe_align_block_size",
+          &moe_align_block_size,
+          "Aligning the number of tokens to be processed by each expert such that it is divisible by the block size.");
 
   // Cache ops
   pybind11::module cache_ops = m.def_submodule("cache_ops", "Aphrodite cache ops");

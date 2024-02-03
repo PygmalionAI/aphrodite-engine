@@ -64,6 +64,7 @@ class WorkerLoRAManager(ABC):
         ...
 
 
+# pylint: disable=function-redefined
 class WorkerLoRAManager(WorkerLoRAManager):
     """WorkerLoRAManager that manages LoRA models on the worker side.
 
@@ -87,6 +88,7 @@ class WorkerLoRAManager(WorkerLoRAManager):
                          lora_config, device)
 
     @property
+    # pylint: disable=invalid-overridden-method
     def is_enabled(self) -> bool:
         return True
 
