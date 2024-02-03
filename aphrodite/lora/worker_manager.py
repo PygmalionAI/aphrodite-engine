@@ -64,6 +64,7 @@ class WorkerLoRAManager(ABC):
         ...
 
 
+# pylint: disable=function-redefined
 class WorkerLoRAManager(WorkerLoRAManager):
     """WorkerLoRAManager that manages LoRA models on the worker side.
 
