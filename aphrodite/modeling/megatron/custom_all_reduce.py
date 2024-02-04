@@ -29,10 +29,12 @@ def init_custom_ar() -> None:
         return
     rank = get_tensor_model_parallel_rank()
     world_size = get_tensor_model_parallel_world_size()
+    if world_size == 1:
+        return
     if world_size not in _SUPPORTED_WORLD_SIZES:
         logger.warning(
             "Custom allreduce is disabled due to an unsupported world size: "
-            "%d. Supported world sizes: %s. To slience this warning, specify"
+            "%d. Supported world sizes: %s. To slience this warning, specify "
             "disable_custom_all_reduce=True explicitly.", world_size,
             str(_SUPPORTED_WORLD_SIZES))
         return

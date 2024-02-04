@@ -80,7 +80,8 @@ class Sampler(nn.Module):
         # Prepare sampling tensors with pinned memory to avoid blocking.
         (sampling_tensors, do_temperatures, do_penalties, do_topks, do_topps,
          do_topas, do_minps, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
-         do_typical_ps, do_mirostat) = (SamplingTensors.from_sampling_metadata(
+         do_typical_ps, do_quadratic,
+         do_mirostat) = (SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype))
 
         if do_penalties:
@@ -110,6 +111,9 @@ class Sampler(nn.Module):
         if do_typical_ps:
             logits = _apply_typical_sampling(logits,
                                              sampling_tensors.typical_ps)
+        if do_quadratic:
+            logits = _apply_quadratic_sampling(
+                logits, sampling_tensors.smoothing_factors)
 
         banned_tokens = _get_custom_token_bans(sampling_metadata)
         assert len(banned_tokens) == logits.shape[0]
@@ -176,25 +180,27 @@ def _get_custom_token_bans(
 
 def _apply_logits_processors(
     logits: torch.Tensor,
-    sampling_metadata: SamplingMetadata,
+    metadata: SamplingMetadata,
 ) -> torch.Tensor:
-    logits_row_idx = 0
-    found_logits_processors = False
-    for seq_ids, sampling_params in sampling_metadata.seq_groups:
-        logits_processors = sampling_params.logits_processors
-        if logits_processors:
-            found_logits_processors = True
-            for seq_id in seq_ids:
-                logits_row = logits[logits_row_idx]
-                token_ids = sampling_metadata.seq_data[seq_id].output_token_ids
-                for logits_processor in logits_processors:
-                    logits_row = logits_processor(token_ids, logits_row)
-                logits[logits_row_idx] = logits_row
-                logits_row_idx += 1
-        else:
-            logits_row_idx += len(seq_ids)
-    if found_logits_processors:
-        assert logits_row_idx == logits.shape[0]
+    seq_offset = 0
+    for i, (seq_ids, sampling_params) in enumerate(metadata.seq_groups):
+        seq_size = len(seq_ids)
+        output_tokens = []
+        if (i < metadata.num_prompts
+                and sampling_params.prompt_logprobs is not None):
+            prompt_seqs = metadata.prompt_lens[i] - 1
+            seq_size += prompt_seqs
+            output_tokens.extend([[]] * prompt_seqs)
+        seq_end = seq_offset + seq_size
+
+        if sampling_params.logits_processors:
+            output_tokens.extend(metadata.seq_data[sid].output_token_ids
+                                 for sid in seq_ids)
+            for proc in sampling_params.logits_processors:
+                proc(logits[seq_offset:seq_end], output_tokens)
+
+        seq_offset = seq_end
+
     return logits
 
 
@@ -394,8 +400,25 @@ def _apply_temperature(
                 normalized_entropies.pow_(dynatemp_exps))
 
     temperatures[dynatemp_mask] = dyn_temp
+    temperatures[temperatures == 0.0] = 1.0
     logits.div_(temperatures.unsqueeze_(dim=1))
     return logits
+
+
+def _apply_quadratic_sampling(
+    logits: torch.Tensor,
+    smoothing_factors: torch.Tensor,
+) -> torch.Tensor:
+    """Applies a quadratic transformation to the logits based on the
+    provided smoothing factor. The transformation is centered around
+    the maximum logit value in the batch.
+
+    Credits: @kalomaze
+    """
+    max_logits = logits.max(dim=-1, keepdim=True).values
+    transformed_logits = -(smoothing_factors *
+                           (logits - max_logits).pow(2)) + max_logits
+    return transformed_logits
 
 
 def _greedy_sample(
@@ -534,12 +557,10 @@ def _sample(
     sample_results_dict: Dict[int, Tuple[List[int], List[int]]] = {}
     sample_metadata = {}
 
-    # Counterintiutively, having two loops here is actually faster.
+    # Counterintuitively, having two loops here is actually faster.
     # The first loop can run without waiting on GPU<->CPU sync.
-    for sampling_type in SamplingType:
-        sample_indices = categorized_sample_indices[sampling_type]
-        num_tokens = len(sample_indices)
-        if num_tokens == 0:
+    for sampling_type, sample_indices in categorized_sample_indices.items():
+        if len(sample_indices) == 0:
             continue
         seq_group_ids = categorized_seq_group_ids[sampling_type]
         seq_groups = [sampling_metadata.seq_groups[i] for i in seq_group_ids]
@@ -563,11 +584,8 @@ def _sample(
 
     # GPU<->CPU sync happens in the loop below.
 
-    for sampling_type in SamplingType:
-        if sampling_type not in sample_metadata:
-            continue
-        seq_group_ids, seq_groups, is_prompts, sample_indices = sample_metadata[
-            sampling_type]
+    for sampling_type, metadata in sample_metadata.items():
+        seq_group_ids, seq_groups, is_prompts, sample_indices = metadata
         if sampling_type == SamplingType.GREEDY:
             sample_results = _greedy_sample(seq_groups, greedy_samples)
         elif sampling_type == SamplingType.RANDOM:

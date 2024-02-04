@@ -8,8 +8,7 @@ import os
 from http import HTTPStatus
 from typing import List, Tuple, AsyncGenerator
 
-from aioprometheus import MetricsMiddleware
-from aioprometheus.asgi.starlette import metrics
+from prometheus_client import make_asgi_app
 import uvicorn
 import fastapi
 from fastapi import APIRouter, Request, Response
@@ -18,7 +17,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
-from aphrodite.engine.metrics import add_global_metrics_labels
 from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams, _SAMPLING_EPS
@@ -36,8 +34,9 @@ app = fastapi.FastAPI()
 
 badwordsids: List[int] = []
 
-app.add_middleware(MetricsMiddleware)  # trace HTTP server metrics
-app.add_route("/metrics", metrics)
+# Add prometheus asgi middleware to route /metrics/ requests
+metrics_app = make_asgi_app()
+app.mount("/metrics/", metrics_app)
 
 
 def _set_badwords(tokenizer, hf_config):  # pylint: disable=redefined-outer-name
@@ -113,6 +112,7 @@ def prepare_engine_payload(
         temperature=kai_payload.temperature,
         dynatemp_range=kai_payload.dynatemp_range,
         dynatemp_exponent=kai_payload.dynatemp_exponent,
+        smoothing_factor=kai_payload.smoothing_factor,
         tfs=kai_payload.tfs,
         top_p=kai_payload.top_p,
         top_k=kai_payload.top_k,
@@ -351,8 +351,6 @@ if __name__ == "__main__":
                               trust_remote_code=engine_args.trust_remote_code)
 
     _set_badwords(tokenizer, engine_model_config.hf_config)
-
-    add_global_metrics_labels(model_name=engine_args.model)
 
     uvicorn.run(app,
                 host=args.host,

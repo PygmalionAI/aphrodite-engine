@@ -3,21 +3,21 @@ psutil
 ray >= 2.9
 sentencepiece
 numpy
-torch ~= 2.1.2
+torch == 2.2.0
 transformers >= 4.36.0 # for mixtral
 uvicorn
 openai # for fastapi's openai proxy emulation
-xformers >= 0.0.23.post1
+xformers >= 0.0.24
 einops  # Required for phi-1_5
 fschat >= 0.2.23
 pydantic == 1.10.13
 fastapi
 colorlog
 einops # for phi
-aioprometheus[starlette] # for prometheus metrics
+prometheus_client # for prometheus metrics
 triton >= 2.1.0
 lark == 1.1.8 # for grammars
 pynvml == 11.5.0
 gguf # for gguf
 scipy # for quip
-fast-hadamard-transform # for quip
+rich

@@ -20,7 +20,7 @@ MAIN_CUDA_VERSION = "12.1"
 
 # Supported NVIDIA GPU architectures.
 NVIDIA_SUPPORTED_ARCHS = {
-    "6.0", "6.1", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"
+    "6.1", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"
 }
 ROCM_SUPPORTED_ARCHS = {
     "gfx90a", "gfx908", "gfx906", "gfx1030", "gfx1100"
@@ -321,6 +321,7 @@ aphrodite_extension_sources = [
     "kernels/quantization/gguf/gguf_kernel.cu",
     "kernels/quantization/gptq/q_gemm.cu",
     "kernels/cuda_utils_kernels.cu",
+    "kernels/moe/align_block_size_kernel.cu",
     "kernels/pybind.cpp",
 ]
 
@@ -435,8 +436,12 @@ setuptools.setup(
     install_requires=get_requirements(),
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
-    package_data={"aphrodite-engine": ["aphrodite/endpoints/kobold/klite.embd",
-                                       "aphrodite/modeling/layers/quantization/hadamard.safetensors",
-                                       "py.typed"]},
+    package_data={
+        "aphrodite": [
+            "endpoints/kobold/klite.embd",
+            "modeling/layers/quantization/hadamard.safetensors",
+            "py.typed"
+        ]
+    },
     include_package_data=True,
 )

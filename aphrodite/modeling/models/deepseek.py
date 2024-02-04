@@ -3,7 +3,7 @@
 # https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/models/llama/modeling_llama.py
 # Copyright 2023 The PygmalionAI team.
 # Copyright 2023 The vLLM team.
-# Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
+# Copyright 2023 DeepSeek-AI and the HuggingFace Inc. team. All rights reserved.
 #
 # This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
 # and OPT implementations in this library. It has been modified from its
@@ -21,25 +21,22 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Inference-only Mixtral model."""
-from typing import List, Optional, Tuple
-
-import numpy as np
+"""Inference-only Deepseek model."""
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
-import torch.nn.functional as F
-
 from torch import nn
-from transformers import MixtralConfig
+import torch.nn.functional as F
+from transformers import PretrainedConfig
 
 from aphrodite.modeling.metadata import InputMetadata
+from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.modeling.layers.attention import PagedAttention
+from aphrodite.modeling.layers.triton_kernel.fused_moe import fused_moe
 from aphrodite.modeling.layers.layernorm import RMSNorm
-from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              ReplicatedLinear,
-                                              QKVParallelLinear,
-                                              RowParallelLinear,
-                                              ColumnParallelLinear)
+from aphrodite.modeling.layers.linear import (
+    LinearMethodBase, MergedColumnParallelLinear, ReplicatedLinear,
+    QKVParallelLinear, RowParallelLinear, ColumnParallelLinear)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
@@ -56,85 +53,123 @@ from aphrodite.common.sequence import SamplerOutput
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 
-class MixtralMLP(nn.Module):
+class DeepseekMLP(nn.Module):
 
     def __init__(
         self,
-        num_experts: int,
         hidden_size: int,
         intermediate_size: int,
+        hidden_act: str,
         linear_method: Optional[LinearMethodBase] = None,
+        reduce_results: bool = True,
     ) -> None:
         super().__init__()
-        self.num_experts = num_experts
-        self.ffn_dim = intermediate_size
-        self.hidden_dim = hidden_size
+        if linear_method is not None and not linear_method.quant_config.merge_weight(
+        ):
+            self.merge_weight = False
+            self.gate_proj = ColumnParallelLinear(hidden_size,
+                                                  intermediate_size,
+                                                  bias=False,
+                                                  linear_method=linear_method)
+            self.up_proj = ColumnParallelLinear(hidden_size,
+                                                intermediate_size,
+                                                bias=False,
+                                                linear_method=linear_method)
+        else:
+            self.merge_weight = True
+            self.gate_up_proj = MergedColumnParallelLinear(
+                hidden_size, [intermediate_size] * 2,
+                bias=False,
+                linear_method=linear_method)
+        self.down_proj = RowParallelLinear(intermediate_size,
+                                           hidden_size,
+                                           bias=False,
+                                           linear_method=linear_method,
+                                           reduce_results=reduce_results)
+        if hidden_act != "silu":
+            raise ValueError(f"Unsupported activation: {hidden_act}. "
+                             "Only silu is supported for now.")
+        self.act_fn = SiluAndMul()
 
-        self.w1 = ReplicatedLinear(self.hidden_dim,
-                                   self.ffn_dim,
-                                   bias=False,
-                                   linear_method=linear_method)
-        self.w2 = ReplicatedLinear(self.ffn_dim,
-                                   self.hidden_dim,
-                                   bias=False,
-                                   linear_method=linear_method)
-        self.w3 = ReplicatedLinear(self.hidden_dim,
-                                   self.ffn_dim,
-                                   bias=False,
-                                   linear_method=linear_method)
-
-        # TODO: Use Aphrodite's SiluAndMul
-        self.act_fn = nn.SiLU()
-
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        w1_out, _ = self.w1(hidden_states)
-        w1_out = self.act_fn(w1_out)
-        w3_out, _ = self.w3(hidden_states)
-        current_hidden_states = w1_out * w3_out
-        current_hidden_states, _ = self.w2(current_hidden_states)
-        return current_hidden_states
+    def forward(self, x):
+        if self.merge_weight:
+            gate_up, _ = self.gate_up_proj(x)
+        else:
+            up, _ = self.up_proj(x)
+            gate, _ = self.gate_proj(x)
+            gate_up = torch.cat([gate, up], dim=-1)
+        x = self.act_fn(gate_up)
+        x, _ = self.down_proj(x)
+        return x
 
 
-class MixtralMoE(nn.Module):
+class DeepseekMoE(nn.Module):
 
     def __init__(
         self,
-        config: MixtralConfig,
+        config: PretrainedConfig,
         linear_method: Optional[LinearMethodBase] = None,
     ):
         super().__init__()
         self.config = config
         self.rank = get_tensor_model_parallel_rank()
         self.tp_size = get_tensor_model_parallel_world_size()
-        self.num_total_experts = config.num_local_experts
+        self.n_routed_experts = config.n_routed_experts
         self.top_k = config.num_experts_per_tok
-        if self.tp_size > self.num_total_experts:
+        if self.tp_size > self.n_routed_experts:
             raise ValueError(
                 f"Tensor parallel size {self.tp_size} is greater than "
-                f"the number of experts {self.num_total_experts}.")
-        # Split experts equally between ranks
-        self.expert_indicies = np.array_split(range(
-            self.num_total_experts), self.tp_size)[self.rank].tolist()
-        if not self.expert_indicies:
-            raise ValueError(
-                f"Rank {self.rank} has no experts assigned to it.")
+                f"the number of experts {self.n_routed_experts}.")
 
         self.experts = nn.ModuleList([
-            MixtralMLP(self.num_total_experts,
-                       config.hidden_size,
-                       config.intermediate_size,
-                       linear_method=linear_method)
-            if idx in self.expert_indicies else None
-            for idx in range(self.num_total_experts)
+            DeepseekMLP(hidden_size=config.hidden_size,
+                        intermediate_size=config.moe_intermediate_size,
+                        hidden_act=config.hidden_act,
+                        linear_method=linear_method,
+                        reduce_results=False)
+            for idx in range(self.n_routed_experts)
         ])
+        self.pack_params()
+
         self.gate = ReplicatedLinear(config.hidden_size,
-                                     self.num_total_experts,
+                                     self.n_routed_experts,
                                      bias=False,
                                      linear_method=None)
+
+        if config.n_shared_experts is not None:
+            intermediate_size = config.moe_intermediate_size * config.n_shared_experts
+            self.shared_experts = DeepseekMLP(
+                hidden_size=config.hidden_size,
+                intermediate_size=intermediate_size,
+                hidden_act=config.hidden_act,
+                linear_method=linear_method,
+                reduce_results=False,
+            )
+
+    def pack_params(self):
+        w1 = []
+        w2 = []
+        for expert in self.experts:
+            w1.append(expert.gate_up_proj.weight)
+            w2.append(expert.down_proj.weight)
+        self.w1 = torch._utils._flatten_dense_tensors(w1)
+        w1s = torch._utils._unflatten_dense_tensors(self.w1, w1)
+        for data, param in zip(w1s, w1):
+            param.data = data
+        self.w1 = self.w1.view(len(w1), *w1s[0].shape)
+
+        self.w2 = torch._utils._flatten_dense_tensors(w2)
+        w2s = torch._utils._unflatten_dense_tensors(self.w2, w2)
+        for data, param in zip(w2s, w2):
+            param.data = data
+
+        self.w2 = self.w2.view(len(w2), *w2s[0].shape)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         batch_size, sequence_length, hidden_dim = hidden_states.shape
         hidden_states = hidden_states.view(-1, hidden_dim)
+        if self.config.n_shared_experts is not None:
+            shared_output = self.shared_experts(hidden_states)
         # router_logits: (batch * sequence_length, n_experts)
         router_logits, _ = self.gate(hidden_states)
 
@@ -142,36 +177,38 @@ class MixtralMoE(nn.Module):
         routing_weights, selected_experts = torch.topk(routing_weights,
                                                        self.top_k,
                                                        dim=-1)
-        routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
 
-        final_hidden_states = None
-        for expert_idx in self.expert_indicies:
-            expert_layer = self.experts[expert_idx]
-            expert_mask = (selected_experts == expert_idx)
-            expert_weights = (routing_weights * expert_mask).sum(dim=-1,
-                                                                 keepdim=True)
+        if self.config.norm_topk_prob:
+            routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
 
-            current_hidden_states = expert_layer(hidden_states).mul_(
-                expert_weights)
-            if final_hidden_states is None:
-                final_hidden_states = current_hidden_states
-            else:
-                final_hidden_states.add_(current_hidden_states)
+        final_hidden_states = fused_moe(hidden_states,
+                                        self.w1,
+                                        self.w2,
+                                        routing_weights,
+                                        selected_experts,
+                                        inplace=True)
 
-        return tensor_model_parallel_all_reduce(final_hidden_states).view(
-            batch_size, sequence_length, hidden_dim)
+        if self.config.n_shared_experts is not None:
+            final_hidden_states = final_hidden_states + shared_output
+        final_hidden_states = tensor_model_parallel_all_reduce(
+            final_hidden_states)
+
+        return final_hidden_states.view(batch_size, sequence_length,
+                                        hidden_dim)
 
 
-class MixtralAttention(nn.Module):
+class DeepseekAttention(nn.Module):
 
-    def __init__(self,
-                 hidden_size: int,
-                 num_heads: int,
-                 num_kv_heads: int,
-                 max_position: int = 4096 * 32,
-                 rope_theta: float = 10000,
-                 linear_method: Optional[LinearMethodBase] = None,
-                 sliding_window: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        hidden_size: int,
+        num_heads: int,
+        num_kv_heads: int,
+        rope_theta: float = 10000,
+        rope_scaling: Optional[Dict[str, Any]] = None,
+        max_position_embeddings: int = 8192,
+        linear_method: Optional[LinearMethodBase] = None,
+    ) -> None:
         super().__init__()
         self.hidden_size = hidden_size
         tp_size = get_tensor_model_parallel_world_size()
@@ -193,7 +230,7 @@ class MixtralAttention(nn.Module):
         self.kv_size = self.num_kv_heads * self.head_dim
         self.scaling = self.head_dim**-0.5
         self.rope_theta = rope_theta
-        self.sliding_window = sliding_window
+        self.max_position_embeddings = max_position_embeddings
 
         if linear_method is not None and not linear_method.quant_config.merge_weight(
         ):
@@ -220,28 +257,28 @@ class MixtralAttention(nn.Module):
                 bias=False,
                 linear_method=linear_method,
             )
+
         self.o_proj = RowParallelLinear(
             self.total_num_heads * self.head_dim,
             hidden_size,
             bias=False,
             linear_method=linear_method,
         )
+
         is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
         ) is None else linear_method.quant_config.rope_style()
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.head_dim,
-            max_position=max_position,
-            base=int(self.rope_theta),
+            max_position=max_position_embeddings,
+            base=rope_theta,
+            rope_scaling=rope_scaling,
             is_neox_style=is_neox_style,
         )
-        self.attn = PagedAttention(
-            self.num_heads,
-            self.head_dim,
-            self.scaling,
-            num_kv_heads=self.num_kv_heads,
-            sliding_window=self.sliding_window,
-        )
+        self.attn = PagedAttention(self.num_heads,
+                                   self.head_dim,
+                                   self.scaling,
+                                   num_kv_heads=self.num_kv_heads)
 
     def forward(
         self,
@@ -265,27 +302,39 @@ class MixtralAttention(nn.Module):
         return output
 
 
-class MixtralDecoderLayer(nn.Module):
+class DeepseekDecoderLayer(nn.Module):
 
     def __init__(
         self,
-        config: MixtralConfig,
+        config: PretrainedConfig,
+        layer_idx: int,
         linear_method: Optional[LinearMethodBase] = None,
     ) -> None:
         super().__init__()
         self.hidden_size = config.hidden_size
-        # Requires transformers > 4.32.0
         rope_theta = getattr(config, "rope_theta", 10000)
-        self.self_attn = MixtralAttention(
+        rope_scaling = getattr(config, "rope_scaling", None)
+        max_position_embeddings = getattr(config, "max_position_embeddings",
+                                          8192)
+        self.self_attn = DeepseekAttention(
             hidden_size=self.hidden_size,
             num_heads=config.num_attention_heads,
-            max_position=config.max_position_embeddings,
             num_kv_heads=config.num_key_value_heads,
             rope_theta=rope_theta,
-            sliding_window=config.sliding_window,
-            linear_method=linear_method)
-        self.block_sparse_moe = MixtralMoE(config=config,
-                                           linear_method=linear_method)
+            rope_scaling=rope_scaling,
+            max_position_embeddings=max_position_embeddings,
+            linear_method=linear_method,
+        )
+        if (config.n_routed_experts is not None and  \
+            layer_idx >= config.first_k_dense_replace and layer_idx % config.moe_layer_freq == 0):
+            self.mlp = DeepseekMoE(config=config, linear_method=linear_method)
+        else:
+            self.mlp = DeepseekMLP(
+                hidden_size=config.hidden_size,
+                intermediate_size=config.intermediate_size,
+                hidden_act=config.hidden_act,
+                linear_method=linear_method,
+            )
         self.input_layernorm = RMSNorm(config.hidden_size,
                                        eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(config.hidden_size,
@@ -316,15 +365,15 @@ class MixtralDecoderLayer(nn.Module):
         # Fully Connected
         hidden_states, residual = self.post_attention_layernorm(
             hidden_states, residual)
-        hidden_states = self.block_sparse_moe(hidden_states)
+        hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
 
 
-class MixtralModel(nn.Module):
+class DeepseekModel(nn.Module):
 
     def __init__(
         self,
-        config: MixtralConfig,
+        config: PretrainedConfig,
         linear_method: Optional[LinearMethodBase] = None,
     ) -> None:
         super().__init__()
@@ -337,8 +386,10 @@ class MixtralModel(nn.Module):
             linear_method=linear_method,
         )
         self.layers = nn.ModuleList([
-            MixtralDecoderLayer(config, linear_method=linear_method)
-            for _ in range(config.num_hidden_layers)
+            DeepseekDecoderLayer(config,
+                                 layer_idx,
+                                 linear_method=linear_method)
+            for layer_idx in range(config.num_hidden_layers)
         ])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
@@ -360,17 +411,17 @@ class MixtralModel(nn.Module):
         return hidden_states
 
 
-class MixtralForCausalLM(nn.Module):
+class DeepseekForCausalLM(nn.Module):
 
     def __init__(
         self,
-        config: MixtralConfig,
+        config: PretrainedConfig,
         linear_method: Optional[LinearMethodBase] = None,
     ) -> None:
         super().__init__()
         self.config = config
         self.linear_method = linear_method
-        self.model = MixtralModel(config, linear_method)
+        self.model = DeepseekModel(config, linear_method)
         self.lm_head = ParallelLMHead(config.vocab_size,
                                       config.hidden_size,
                                       linear_method=linear_method)
@@ -406,6 +457,8 @@ class MixtralForCausalLM(nn.Module):
             ("qkv_proj", "q_proj", "q"),
             ("qkv_proj", "k_proj", "k"),
             ("qkv_proj", "v_proj", "v"),
+            ("gate_up_proj", "gate_proj", 0),
+            ("gate_up_proj", "up_proj", 1),
         ]
         if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
         ):
@@ -427,6 +480,10 @@ class MixtralForCausalLM(nn.Module):
                 # Skip loading extra bias for GPTQ models.
                 if name.endswith(".bias") and name not in params_dict:
                     continue
+                # Skip experts that are not assigned to this worker.
+                if (("mlp.experts." in name or "mlp.shared_experts." in name)
+                        and name not in params_dict):
+                    continue
                 param = params_dict[name]
                 weight_loader = param.weight_loader
                 weight_loader(param, loaded_weight, shard_id)
@@ -436,7 +493,7 @@ class MixtralForCausalLM(nn.Module):
                 if name.endswith(".bias") and name not in params_dict:
                     continue
                 # Skip experts that are not assigned to this worker.
-                if ("block_sparse_moe.experts." in name
+                if (("mlp.experts." in name or "mlp.shared_experts." in name)
                         and name not in params_dict):
                     continue
                 param = params_dict[name]
