@@ -39,7 +39,7 @@ This will create a [OpenAI](https://platform.openai.com/docs/api-reference/)-com
 ### Docker
 Additionally, we provide a docker image for easy deployment. Here's a base command to get you started:
 ```
-sudo docker run --gpus '"all"' --shm-size 10g -it alpindale/aphrodite-engine
+sudo docker run --gpus '"all"' --shm-size 10g -p 2242:2242 -it alpindale/aphrodite-engine
 ```
 
 This will pull the Aphrodite Engine image (~9GiB download), and throw you in a bash commandline. From there, follow the instructions [here](https://github.com/PygmalionAI/aphrodite-engine/wiki/2.-Usage) to
