@@ -36,11 +36,14 @@ python -m aphrodite.endpoints.openai.api_server --model PygmalionAI/pygmalion-2-
 
 This will create a [OpenAI](https://platform.openai.com/docs/api-reference/)-compatible API server that can be accessed at port 2242 of the localhost. You can plug in the API into a UI that supports Kobold, such as [SillyTavern](https://github.com/SillyTavern/SillyTavern).
 
-#### Docker
+### Docker
+Additionally, we provide a docker image for easy deployment. Here's a base command to get you started:
 ```
-sudo mkdir ~/workspace
-sudo docker run --gpus '"all"' --shm-size 10g -p 2242:2242 -p 7650:7650 -p 8080:8080 --rm -it -v '/home/workspace' alignmentlabai/aphrodite-engine:latest
+sudo docker run --gpus '"all"' --shm-size 10g -it alpindale/aphrodite-engine
 ```
+
+This will pull the Aphrodite Engine image (~9GiB download), and throw you in a bash commandline. From there, follow the instructions [here](https://github.com/PygmalionAI/aphrodite-engine/wiki/2.-Usage) to
+create an OpenAI-compatible API.
 
 ## Performance
 Speeds vary with different GPUs, model sizes, quantization schemes, batch sizes, etc. Here are some baseline benchmarks conducted by requesting as many completions as possible from the [API server](https://github.com/PygmalionAI/aphrodite-engine/blob/main/aphrodite/endpoints/openai/api_server.py). Keep in mind that these are the theoritical peak throughput with parallel decoding, with as high a batch size as possible. **Per-request generation speed is a fraction of this, at 30-40 t/s**.

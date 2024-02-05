@@ -1,6 +1,6 @@
 FROM nvidia/cuda:12.1.1-devel-ubuntu22.04
 
-WORKDIR /app/aphrodite-engine
+WORKDIR /workspace/aphrodite-engine
 
 # Upgrade OS Packages
 RUN set -eux; \
@@ -14,14 +14,17 @@ RUN apt-get update \
     && apt-get install python3 python3-pip -y \
     && rm -fr /var/lib/apt/lists/*
 
-COPY entrypoint.sh /app/aphrodite-engine
+COPY entrypoint.sh /workspace/aphrodite-engine
 
 ENV PATH /opt/conda/envs/aphrodite-engine/bin:$PATH
+
+# alias python3 to python
+RUN ln -s /usr/bin/python3 /usr/bin/python
 
 RUN python3 -m pip install --upgrade pip
 
 RUN git clone https://github.com/PygmalionAI/aphrodite-engine.git /tmp/aphrodite-engine
-RUN mv /tmp/aphrodite-engine/* /app/aphrodite-engine/
+RUN mv /tmp/aphrodite-engine/* /workspace/aphrodite-engine/
 RUN rm -rf /tmp/aphrodite-engine
 
 # Export the CUDA_HOME variable correctly
