@@ -4,8 +4,11 @@ import os
 import torch
 import gguf
 from sentencepiece import sentencepiece_model_pb2
+from safetensors.torch import save_file as safe_save_file
+from transformers.modeling_utils import shard_checkpoint
+from transformers.utils import WEIGHTS_NAME, WEIGHTS_INDEX_NAME, SAFE_WEIGHTS_NAME, SAFE_WEIGHTS_INDEX_NAME
 
-def convert_to_state_dict(checkpoint, save_dir):
+def convert_to_state_dict(checkpoint, save_dir, max_shard_size, safe_serialization):
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     state_dict = {}
@@ -137,7 +140,25 @@ def convert_to_state_dict(checkpoint, save_dir):
         if weight_type > 1:
             state_dict[new_key.replace("weight", "weight_type")] = weight_type
         state_dict[new_key] = data
-    torch.save(state_dict, os.path.join(save_dir, "pytorch_model.bin"))
+    if max_shard_size == "0":
+        if safe_serialization:
+            safe_save_file(state_dict, os.path.join(save_dir, SAFE_WEIGHTS_NAME), metadata={"format": "pt"})
+        else:
+            torch.save(state_dict, os.path.join(save_dir, WEIGHTS_NAME))
+    else:
+        shards, index = shard_checkpoint(state_dict, max_shard_size, SAFE_WEIGHTS_NAME if safe_serialization else WEIGHTS_NAME)
+        for shard_file, shard in shards.items():
+            if safe_serialization:
+                safe_save_file(shard, os.path.join(save_dir, shard_file), metadata={"format": "pt"})
+            else:
+                torch.save(shard, os.path.join(save_dir, shard_file))
+        if index is not None:
+            save_index_file = SAFE_WEIGHTS_INDEX_NAME if safe_serialization else WEIGHTS_INDEX_NAME
+            save_index_file = os.path.join(save_dir, save_index_file)
+            # Save the index as well
+            with open(save_index_file, "w", encoding="utf-8") as f:
+                content = json.dumps(index, indent=2, sort_keys=True) + "\n"
+                f.write(content)
 
 
 
@@ -147,5 +168,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--input', type=str, help='The path to GGUF file')
     parser.add_argument('--output', type=str, help='The path to output directory')
+    parser.add_argument('--max-shard-size', default="0", type=str, help='Shard the model in specified shard size, e.g. 10GB. 0 to disable')
+    parser.add_argument('--safetensors', action='store_true', help='Save in .safetensors format')
     args = parser.parse_args()
-    convert_to_state_dict(args.input, args.output)
+    convert_to_state_dict(args.input, args.output, args.max_shard_size, args.safetensors)
