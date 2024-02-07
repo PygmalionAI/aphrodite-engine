@@ -13,6 +13,16 @@ class SamplingType(IntEnum):
     RANDOM = 1
     BEAM = 2
 
+# We also accept KoboldAI's sampler IDs and convert to strings
+_sampler_map = {
+            0: "topk",
+            1: "topa",
+            2: "topp",
+            3: "tfs",
+            4: "typ",
+            5: "temp",
+            6: "pens",
+}
 
 LogitsProcessorFunc = Callable[[torch.Tensor, List[List[int]]], None]
 """LogitsProcessorFunc takes a logits tensor and corresponding lists of
@@ -203,7 +213,8 @@ class SamplingParams:
         self.include_stop_str_in_output = include_stop_str_in_output
         if self.sampler_order is None:
             self.sampler_order = ["pens", "temp", "miro", "typ", "tfs", "minp", "eta", "topa", "topp", "eps", "topk"]
-        self.sampler_order = [[s] if isinstance(s, str) else s for s in self.sampler_order]
+        self.sampler_order = [[s] if (isinstance(s, str) or isinstance(s, int)) else s for s in self.sampler_order]
+        self.sampler_order = [[_sampler_map[s] if isinstance(s, int) else s for s in sub] for sub in self.sampler_order]
         self.verify()
 
     def verify(self) -> None:

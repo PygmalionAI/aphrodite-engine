@@ -34,15 +34,7 @@ app = fastapi.FastAPI()
 
 badwordsids: List[int] = []
   
-_sampler_map = {
-            0: "topk",
-            1: "topa",
-            2: "topp",
-            3: "tfs",
-            4: "typ",
-            5: "temp",
-            6: "pens",
-        }
+
 # Add prometheus asgi middleware to route /metrics/ requests
 metrics_app = make_asgi_app()
 app.mount("/metrics/", metrics_app)
@@ -115,12 +107,8 @@ def prepare_engine_payload(
         kai_payload.top_k = -1
 
     
-    sampler_order = []
     if kai_payload.mirostat == 2:
-        sampler_order = ["pens", "temp", "miro"]
-    else:
-        # On KAI we don't expose parallel sampler ordering, so no double lists
-        sampler_order = [_sampler_map[i] for i in kai_payload.sampler_order]
+        kai_payload.sampler_order = ["pens", "temp", "miro"]
 
     sampling_params = SamplingParams(
         n=kai_payload.n,
@@ -146,7 +134,7 @@ def prepare_engine_payload(
         custom_token_bans=badwordsids
         if kai_payload.use_default_badwordsids else [],
         max_tokens=kai_payload.max_length,
-        sampler_order=sampler_order
+        sampler_order=kai_payload.sampler_order
     )
 
     max_input_tokens = max(
