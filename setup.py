@@ -411,8 +411,12 @@ setuptools.setup(
     install_requires=get_requirements(),
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
-    package_data={"aphrodite-engine": ["aphrodite/endpoints/kobold/klite.embd",
-                                       "aphrodite/modeling/layers/quantization/hadamard.safetensors",
-                                       "py.typed"]},
+    package_data={
+        "aphrodite": [
+            "endpoints/kobold/klite.embd",
+            "modeling/layers/quantization/hadamard.safetensors",
+            "py.typed"
+        ]
+    },
     include_package_data=True,
 )

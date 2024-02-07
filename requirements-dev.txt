@@ -7,7 +7,6 @@ mypy==0.991
 types-PyYAML
 types-requests
 types-setuptools
-wrapt==1.16.0
 
 # testing
 pytest
