@@ -145,7 +145,7 @@ class SamplingParams:
         dynatemp_range: float = 0,
         dynatemp_exponent: float = 1,
         sampler_order: List[List[str]] = None,
-        smoothing_factor: float = 0.0,in
+        smoothing_factor: float = 0.0,
         use_beam_search: bool = False,
         length_penalty: float = 1.0,
         early_stopping: Union[bool, str] = False,
