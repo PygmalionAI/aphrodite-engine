@@ -6,14 +6,20 @@ services:
     environment:
       - NUM_GPUS=${NUM_GPUS}
       - MODEL_NAME=${MODEL_NAME}
+      - REVISION=${REVISION}
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
       - QUANTIZATION=${QUANTIZATION}
-      - DATATYPE=${DATATYPE}
+      - KVCACHE=${KVCACHE}
+      - API_KEY=${API_KEY}
+      - CONTEXT_LENGTH=${CONTEXT_LENGTH}
+      - GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION}
+      - ENFORCE_EAGER=${ENFORCE_EAGER}
     volumes:
       - ${HOME}/.cache:/root/.cache/
-    shm_size: 1g
+    shm_size: 10g
     ports:
       - "7860:7860"
+      - "2242:2242"
     deploy:
       resources:
         reservations:
