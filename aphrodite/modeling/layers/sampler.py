@@ -121,6 +121,11 @@ class Sampler(nn.Module):
                     assert len(subgroup) == 1
                     _mirostat(logits, indices, sampling_tensors, output_metadata)
                     continue
+                elif "quad" in subgroup:
+                    assert len(subgroup) == 1
+                    logits[indices] = _apply_quadratic_sampling(logits[indices],
+                                                                sampling_tensors.smoothing_factors[indices])
+                    continue
                 elif "pens" in subgroup:
                     assert len(subgroup) == 1
                     logits[indices] = _apply_penalties(logits[indices],
