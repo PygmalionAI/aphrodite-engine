@@ -1,11 +1,67 @@
+import os
+import tempfile
 from typing import List, Tuple, Union, Optional
 
+import gguf
 from transformers import (AutoTokenizer, PreTrainedTokenizer,
-                          PreTrainedTokenizerFast)
+                          PreTrainedTokenizerFast, LlamaTokenizer)
+from transformers.convert_slow_tokenizer import import_protobuf
 
 from aphrodite.common.logger import init_logger
+from aphrodite.lora.request import LoRARequest
+from aphrodite.common.utils import make_async, LRUCache
 
 logger = init_logger(__name__)
+
+
+def convert_gguf_to_tokenizer(checkpoint):
+    result = gguf.GGUFReader(checkpoint)
+    # write vocab
+    sentencepiece_model_pb2 = import_protobuf()
+    vocab = sentencepiece_model_pb2.ModelProto()
+    vocab_size = len(result.fields["tokenizer.ggml.token_type"].data)
+    vocab.trainer_spec.model_type = 2  # BPE
+    vocab.trainer_spec.vocab_size = vocab_size
+    vocab.trainer_spec.byte_fallback = True
+    vocab.normalizer_spec.remove_extra_whitespaces = False
+    tokens = result.fields["tokenizer.ggml.tokens"]
+    scores = result.fields["tokenizer.ggml.scores"]
+    types = result.fields["tokenizer.ggml.token_type"]
+    for i in range(vocab_size):
+        new_token = vocab.SentencePiece()
+        new_token.piece = str(bytes(tokens.parts[tokens.data[i]]),
+                              encoding="utf-8")
+        new_token.score = scores.parts[scores.data[i]]
+        # llama.cpp tokentype is the same with sentencepiece token type
+        new_token.type = int(types.parts[types.data[i]])
+        vocab.pieces.append(new_token)
+    with tempfile.NamedTemporaryFile(mode="wb", delete=False) as temp_file:
+        temp_file.write(vocab.SerializeToString())
+        temp_file_filename = temp_file.name
+    tokenizer_args = {"vocab_file": temp_file_filename}
+
+    if "tokenizer.ggml.bos_token_id" in result.fields:
+        tokenizer_args["bos_token"] = vocab.pieces[int(
+            result.fields["tokenizer.ggml.bos_token_id"].parts[-1])].piece
+    if "tokenizer.ggml.eos_token_id" in result.fields:
+        tokenizer_args["eos_token"] = vocab.pieces[int(
+            result.fields["tokenizer.ggml.eos_token_id"].parts[-1])].piece
+    if "tokenizer.ggml.padding_token_id" in result.fields:
+        tokenizer_args["pad_token"] = vocab.pieces[int(
+            result.fields["tokenizer.ggml.padding_token_id"].parts[-1])].piece
+    if "tokenizer.ggml.unknown_token_id" in result.fields:
+        tokenizer_args["unk_token"] = vocab.pieces[int(
+            result.fields["tokenizer.ggml.unknown_token_id"].parts[-1])].piece
+    if "tokenizer.ggml.add_bos_token" in result.fields:
+        tokenizer_args["add_bos_token"] = bool(
+            result.fields["tokenizer.ggml.add_bos_token"].parts[-1])
+    if "tokenizer.ggml.add_eos_token" in result.fields:
+        tokenizer_args["add_eos_token"] = bool(
+            result.fields["tokenizer.ggml.add_eos_token"].parts[-1])
+    tokenizer = LlamaTokenizer(**tokenizer_args, legacy=False)
+    os.unlink(temp_file_filename)
+    return tokenizer
+
 
 # A fast LLaMA tokenizer with the pre-processed `tokenizer.json` file.
 _FAST_LLAMA_TOKENIZER = "hf-internal-testing/llama-tokenizer"
@@ -19,6 +75,8 @@ def get_tokenizer(
     **kwargs,
 ) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
     """Gets a tokenizer for the given model name via Huggingface."""
+    if tokenizer_name.endswith("gguf"):
+        return convert_gguf_to_tokenizer(tokenizer_name)
     if tokenizer_mode == "slow":
         if kwargs.get("use_fast", False):
             raise ValueError(
@@ -65,6 +123,87 @@ def get_tokenizer(
             "Using a slow tokenizer. This might cause a significant "
             "slowdown. Consider using a fast tokenizer instead.")
     return tokenizer
+
+
+def get_lora_tokenizer(lora_request: LoRARequest, *args,
+                       **kwargs) -> Optional[PreTrainedTokenizer]:
+    if lora_request is None:
+        return None
+    try:
+        tokenizer = get_tokenizer(lora_request.lora_local_path, *args,
+                                  **kwargs)
+    except OSError as e:
+        # No tokenizer was found in the LoRA folder,
+        # use base model tokenizer
+        logger.warning(
+            f"No tokenizer found in {lora_request.lora_local_path}, "
+            "using base model tokenizer instead. "
+            f"(Exception: {str(e)})")
+        tokenizer = None
+    return tokenizer
+
+
+get_lora_tokenizer_async = make_async(get_lora_tokenizer)
+
+
+class TokenizerGroup:
+    """A group of tokenizers that can be used for LoRA adapters."""
+
+    def __init__(self, tokenizer_id: str, enable_lora: bool, max_num_seqs: int,
+                 max_input_length: Optional[int], **tokenizer_config):
+        self.tokenizer_id = tokenizer_id
+        self.tokenizer_config = tokenizer_config
+        self.enable_lora = enable_lora
+        self.max_input_length = max_input_length
+        self.tokenizer = get_tokenizer(self.tokenizer_id, **tokenizer_config)
+        if enable_lora:
+            self.lora_tokenizers = LRUCache(capacity=max_num_seqs)
+        else:
+            self.lora_tokenizers = None
+
+    def encode(
+        self,
+        prompt: str,
+        request_id: Optional[str] = None,  # pylint: disable=unused-argument
+        lora_request: Optional[LoRARequest] = None
+    ) -> List[int]:
+        tokenizer = self.get_lora_tokenizer(lora_request)
+        return tokenizer.encode(prompt)
+
+    async def encode_async(
+        self,
+        prompt: str,
+        request_id: Optional[str] = None,  # pylint: disable=unused-argument
+        lora_request: Optional[LoRARequest] = None
+    ) -> List[int]:
+        tokenizer = await self.get_lora_tokenizer_async(lora_request)
+        return tokenizer.encode(prompt)
+
+    def get_lora_tokenizer(
+            self,
+            lora_request: Optional[LoRARequest]) -> "PreTrainedTokenizer":
+        if not lora_request or not self.enable_lora:
+            return self.tokenizer
+        if lora_request.lora_int_id not in self.lora_tokenizers:
+            tokenizer = (get_lora_tokenizer(
+                lora_request, **self.tokenizer_config) or self.tokenizer)
+            self.lora_tokenizers.put(lora_request.lora_int_id, tokenizer)
+            return tokenizer
+        else:
+            return self.lora_tokenizers.get(lora_request.lora_int_id)
+
+    async def get_lora_tokenizer_async(
+            self,
+            lora_request: Optional[LoRARequest]) -> "PreTrainedTokenizer":
+        if not lora_request or not self.enable_lora:
+            return self.tokenizer
+        if lora_request.lora_int_id not in self.lora_tokenizers:
+            tokenizer = (await get_lora_tokenizer_async(
+                lora_request, **self.tokenizer_config) or self.tokenizer)
+            self.lora_tokenizers.put(lora_request.lora_int_id, tokenizer)
+            return tokenizer
+        else:
+            return self.lora_tokenizers.get(lora_request.lora_int_id)
 
 
 def _convert_tokens_to_string_with_added_encoders(

@@ -54,7 +54,6 @@ class UnquantizedLinearMethod(LinearMethodBase):
                        params_dtype: torch.dtype) -> Dict[str, Any]:
         weight = Parameter(torch.empty(output_size_per_partition,
                                        input_size_per_partition,
-                                       device=torch.cuda.current_device(),
                                        dtype=params_dtype),
                            requires_grad=False)
         set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})
@@ -70,6 +69,11 @@ class UnquantizedLinearMethod(LinearMethodBase):
                 return F.linear(x, weight) + bias
             return F.linear(x, weight)
         return F.linear(x, weight, bias)
+
+    def apply_embedding(self, weights: Dict[str, torch.Tensor],
+                        x: torch.Tensor) -> torch.Tensor:
+        weight = weights["weight"]
+        return F.embedding(x, weight)
 
 
 class ReplicatedLinear(torch.nn.Module):
@@ -109,13 +113,11 @@ class ReplicatedLinear(torch.nn.Module):
             self.input_size, self.output_size, self.input_size,
             self.output_size, self.params_dtype)
         for name, weight in self.linear_weights.items():
-            if isinstance(weight, torch.Tensor):
+            if isinstance(weight, torch.nn.parameter.Parameter):
                 self.register_parameter(name, weight)
         if bias:
             self.bias = Parameter(
-                torch.empty(self.output_size,
-                            device=torch.cuda.current_device(),
-                            dtype=self.params_dtype))
+                torch.empty(self.output_size, dtype=self.params_dtype))
             set_weight_attrs(self.bias, {"output_dim": 0})
         else:
             self.register_parameter("bias", None)
@@ -177,13 +179,12 @@ class ColumnParallelLinear(torch.nn.Module):
             self.input_size, self.output_size_per_partition, self.input_size,
             self.output_size, self.params_dtype)
         for name, weight in self.linear_weights.items():
-            if isinstance(weight, torch.Tensor):
+            if isinstance(weight, torch.nn.parameter.Parameter):
                 self.register_parameter(name, weight)
                 set_weight_attrs(weight, {"weight_loader": self.weight_loader})
         if bias:
             self.bias = Parameter(
                 torch.empty(self.output_size_per_partition,
-                            device=torch.cuda.current_device(),
                             dtype=params_dtype))
             set_weight_attrs(self.bias, {
                 "output_dim": 0,
@@ -194,13 +195,20 @@ class ColumnParallelLinear(torch.nn.Module):
 
     def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
         tp_rank = get_tensor_model_parallel_rank()
+        tp_size = get_tensor_model_parallel_world_size()
         output_dim = getattr(param, "output_dim", None)
         param_data = param.data
         if output_dim is not None:
-            shard_size = param_data.shape[output_dim]
+            if loaded_weight.shape[output_dim] % tp_size != 0:
+                raise ValueError("Size is not aligned with the "
+                                 "quantized weight shape")
+            shard_size = loaded_weight.shape[output_dim] // tp_size
             start_idx = tp_rank * shard_size
             loaded_weight = loaded_weight.narrow(output_dim, start_idx,
                                                  shard_size)
+        if isinstance(param, torch.nn.parameter.UninitializedParameter):
+            param.materialize(loaded_weight.shape, dtype=loaded_weight.dtype)
+            param_data = param.data
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
 
@@ -275,8 +283,8 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                 current_shard_offset += output_size
             packed_dim = getattr(param, "packed_dim", None)
             for shard_id, shard_offset, shard_size in shard_offsets:
-                # If quantized, we need to adjust the offset and size to
-                # account for the packing.
+                # If quantized, we need to adjust the offset and size to account
+                # for the packing.
                 if packed_dim == output_dim:
                     shard_size = shard_size // param.pack_factor
                     shard_offset = shard_offset // param.pack_factor
@@ -423,7 +431,10 @@ class QKVParallelLinear(ColumnParallelLinear):
                 shard_offset = shard_offset // param.pack_factor
             param_data = param_data.narrow(output_dim, shard_offset,
                                            shard_size)
-            shard_id = tp_rank // self.num_kv_head_replicas
+            if loaded_shard_id == "q":
+                shard_id = tp_rank
+            else:
+                shard_id = tp_rank // self.num_kv_head_replicas
             start_idx = shard_id * shard_size
             loaded_weight = loaded_weight.narrow(output_dim, start_idx,
                                                  shard_size)
@@ -496,7 +507,7 @@ class RowParallelLinear(torch.nn.Module):
             self.input_size_per_partition, self.output_size, self.input_size,
             self.output_size, self.params_dtype)
         for name, weight in self.linear_weights.items():
-            if isinstance(weight, torch.Tensor):
+            if isinstance(weight, torch.nn.parameter.Parameter):
                 self.register_parameter(name, weight)
                 set_weight_attrs(weight, {"weight_loader": self.weight_loader})
 
@@ -506,9 +517,7 @@ class RowParallelLinear(torch.nn.Module):
 
         if bias:
             self.bias = Parameter(
-                torch.empty(self.output_size,
-                            device=torch.cuda.current_device(),
-                            dtype=params_dtype))
+                torch.empty(self.output_size, dtype=params_dtype))
             set_weight_attrs(self.bias, {
                 "output_dim": 0,
                 "weight_loader": self.weight_loader,
@@ -518,13 +527,21 @@ class RowParallelLinear(torch.nn.Module):
 
     def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
         tp_rank = get_tensor_model_parallel_rank()
+        tp_size = get_tensor_model_parallel_world_size()
         input_dim = getattr(param, "input_dim", None)
         param_data = param.data
         if input_dim is not None:
-            shard_size = param_data.shape[input_dim]
+            if loaded_weight.shape[input_dim] % tp_size != 0:
+                raise ValueError("Size is not aligned with the quantized "
+                                 "weight shape")
+
+            shard_size = loaded_weight.shape[input_dim] // tp_size
             start_idx = tp_rank * shard_size
             loaded_weight = loaded_weight.narrow(input_dim, start_idx,
                                                  shard_size)
+        if isinstance(param, torch.nn.parameter.UninitializedParameter):
+            param.materialize(loaded_weight.shape, dtype=loaded_weight.dtype)
+            param_data = param.data
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
 

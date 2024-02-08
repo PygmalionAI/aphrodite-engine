@@ -1,13 +1,16 @@
+import contextlib
 import io
 import os
 import re
 import subprocess
 from typing import List, Set
 import warnings
+from pathlib import Path
 
 from packaging.version import parse, Version
 import setuptools
 import torch
+import torch.utils.cpp_extension as torch_cpp_ext
 from torch.utils.cpp_extension import (
     BuildExtension, CUDAExtension, CUDA_HOME, ROCM_HOME)
 
@@ -17,7 +20,7 @@ MAIN_CUDA_VERSION = "12.1"
 
 # Supported NVIDIA GPU architectures.
 NVIDIA_SUPPORTED_ARCHS = {
-    "6.0", "6.1", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"
+    "6.1", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"
 }
 ROCM_SUPPORTED_ARCHS = {
     "gfx90a", "gfx908", "gfx906", "gfx1030", "gfx1100"
@@ -88,6 +91,10 @@ def get_hipcc_rocm_version():
         print("Could not find HIP version in the output")
         return None
 
+def glob(pattern: str):
+    root = Path(__name__).parent
+    return [str(p) for p in root.glob(pattern)]
+
 def get_nvcc_cuda_version(cuda_dir: str) -> Version:
     """Get the CUDA version from nvcc.
 
@@ -152,6 +159,8 @@ if _is_cuda() and not compute_capabilities:
                 "GPUs with compute capability below 6.0 are not supported.")
         compute_capabilities.add(f"{major}.{minor}")
 
+ext_modules = []
+
 if _is_cuda():
     nvcc_cuda_version = get_nvcc_cuda_version(CUDA_HOME)
     if not compute_capabilities:
@@ -189,6 +198,8 @@ if _is_cuda():
             raise RuntimeError(
                 "CUDA 11.8 or higher is required for compute capability 9.0.")
 
+    NVCC_FLAGS_PUNICA = NVCC_FLAGS.copy()
+
     # Add target compute capabilities to NVCC flags.
     for capability in compute_capabilities:
         num = capability[0] + capability[2]
@@ -197,11 +208,73 @@ if _is_cuda():
             NVCC_FLAGS += [
                 "-gencode", f"arch=compute_{num},code=compute_{num}"
             ]
+        if int(capability[0]) >= 8:
+            NVCC_FLAGS_PUNICA += [
+                "-gencode", f"arch=compute_{num},code=sm_{num}"
+            ]
+            if capability.endswith("+PTX"):
+                NVCC_FLAGS_PUNICA += [
+                    "-gencode", f"arch=compute_{num},code=compute_{num}"
+                ]
 
     # Use NVCC threads to parallelize the build.
     if nvcc_cuda_version >= Version("11.2"):
-        num_threads = min(os.cpu_count(), 8)
+        nvcc_threads = int(os.getenv("NVCC_THREADS", 8))
+        num_threads = min(os.cpu_count(), nvcc_threads)
         NVCC_FLAGS += ["--threads", str(num_threads)]
+    
+    if nvcc_cuda_version >= Version("11.8"):
+        NVCC_FLAGS += ["-DENABLE_FP8_E5M2"]
+
+    # changes for punica kernels
+    NVCC_FLAGS += torch_cpp_ext.COMMON_NVCC_FLAGS
+    REMOVE_NVCC_FLAGS = [
+        '-D__CUDA_NO_HALF_OPERATORS__',
+        '-D__CUDA_NO_HALF_CONVERSIONS__',
+        '-D__CUDA_NO_BFLOAT16_CONVERSIONS__',
+        '-D__CUDA_NO_HALF2_OPERATORS__',
+    ]
+    for flag in REMOVE_NVCC_FLAGS:
+        with contextlib.suppress(ValueError):
+            torch_cpp_ext.COMMON_NVCC_FLAGS.remove(flag)
+
+    install_punica = bool(int(os.getenv("APHRODITE_INSTALL_PUNICA_KERNELS", "1")))
+    device_count = torch.cuda.device_count()
+    for i in range(device_count):
+        major, minor = torch.cuda.get_device_capability(i)
+        if major < 8:
+            install_punica = False
+            break
+    if install_punica:
+        ext_modules.append(
+            CUDAExtension(
+                name="aphrodite._punica_C",
+                sources=["kernels/punica/punica_ops.cc"] +
+                glob("kernels/punica/bgmv/*.cu"),
+                extra_compile_args={
+                    "cxx": CXX_FLAGS,
+                    "nvcc": NVCC_FLAGS_PUNICA,
+                },
+            ))
+    
+    install_hadamard = bool(int(os.getenv("APHRODITE_INSTALL_HADAMARD_KERNELS", "1")))
+    device_count = torch.cuda.device_count()
+    for i in range(device_count):
+        major, minor = torch.cuda.get_device_capability(i)
+        if major < 7:
+            install_hadamard = False
+            break
+    if install_hadamard:
+        ext_modules.append(
+            CUDAExtension(
+                name="aphrodite._hadamard_C",
+                sources=["kernels/hadamard/fast_hadamard_transform.cpp",
+                         "kernels/hadamard/fast_hadamard_transform_cuda.cu"],
+                extra_compile_args={
+                    "cxx": CXX_FLAGS,
+                    "nvcc": NVCC_FLAGS,
+                },
+            ))
 
 elif _is_hip():
     amd_arch = get_amdgpu_offload_arch()
@@ -210,23 +283,26 @@ elif _is_hip():
             f"Only the following arch is supported: {ROCM_SUPPORTED_ARCHS}"
             f"amdgpu_arch_found: {amd_arch}")
 
-ext_modules = []
 
 aphrodite_extension_sources = [
-    "kernels/misc_kernels.cu",
     "kernels/cache_kernels.cu",
     "kernels/attention/attention_kernels.cu",
     "kernels/pos_encoding_kernels.cu",
     "kernels/activation_kernels.cu",
     "kernels/layernorm_kernels.cu",
     "kernels/quantization/squeezellm/quant_cuda_kernel.cu",
+    "kernels/quantization/gguf/gguf_kernel.cu",
     "kernels/quantization/gptq/q_gemm.cu",
     "kernels/cuda_utils_kernels.cu",
+    "kernels/moe/align_block_size_kernel.cu",
     "kernels/pybind.cpp",
 ]
 
 if _is_cuda():
     aphrodite_extension_sources.append("kernels/quantization/awq/gemm_kernels.cu")
+    aphrodite_extension_sources.append("kernels/quantization/quip/origin_order.cu")
+    aphrodite_extension_sources.append("kernels/quantization/marlin/marlin_cuda_kernel.cu")
+    aphrodite_extension_sources.append("kernels/all_reduce/custom_all_reduce.cu")
 
 aphrodite_extension = CUDAExtension(
     name="aphrodite._C",
@@ -235,6 +311,10 @@ aphrodite_extension = CUDAExtension(
         "cxx": CXX_FLAGS,
         "nvcc": NVCC_FLAGS,
     },
+    libraries=["cuda", "conda/envs/aphrodite-runtime/lib",
+               "conda/envs/aphrodite-runtime/lib/stubs"] if _is_cuda() else [],
+    library_dirs=["conda/envs/aphrodite-runtime/lib",
+                  "conda/envs/aphrodite-runtime/lib/stubs"] if _is_cuda() else [],
 )
 ext_modules.append(aphrodite_extension)
 
@@ -331,7 +411,12 @@ setuptools.setup(
     install_requires=get_requirements(),
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
-    package_data={"aphrodite-engine": ["aphrodite/endpoints/kobold/klite.embd",
-                                       "py.typed"]},
+    package_data={
+        "aphrodite": [
+            "endpoints/kobold/klite.embd",
+            "modeling/layers/quantization/hadamard.safetensors",
+            "py.typed"
+        ]
+    },
     include_package_data=True,
 )

@@ -1,8 +1,9 @@
 """Sampling parameters for text generation."""
 from enum import IntEnum
 from functools import cached_property
-from typing import List, Optional, Union
-from aphrodite.common.logits_processor import LogitsProcessor
+from typing import Callable, List, Optional, Union
+
+import torch
 
 _SAMPLING_EPS = 1e-5
 
@@ -11,6 +12,11 @@ class SamplingType(IntEnum):
     GREEDY = 0
     RANDOM = 1
     BEAM = 2
+
+
+LogitsProcessorFunc = Callable[[torch.Tensor, List[List[int]]], None]
+"""LogitsProcessorFunc takes a logits tensor and corresponding lists of
+previously generated output tokens, and modifies the logits tensor."""
 
 
 class SamplingParams:
@@ -76,6 +82,7 @@ class SamplingParams:
             setting `temperature=0.4` and `dynatemp_range=0.1` will result
             in a minimum temp of 0.3 and max of 0.5.
         dynatemp_exponent: Exponent for dynatemp sampling. Range [0, inf).
+        smoothing_factor: Smoothing factor for Quadratic Sampling.
         use_beam_search: Whether to use beam search instead of sampling.
         length_penalty: Float that penalizes sequences based on their length.
             Used in beam search.
@@ -133,20 +140,21 @@ class SamplingParams:
         mirostat_eta: float = 0,
         dynatemp_range: float = 0,
         dynatemp_exponent: float = 1,
+        smoothing_factor: float = 0.0,
         use_beam_search: bool = False,
         length_penalty: float = 1.0,
         early_stopping: Union[bool, str] = False,
         stop: Union[None, str, List[str]] = None,
-        stop_token_ids: List[int] = None,
+        stop_token_ids: Optional[List[int]] = None,
         include_stop_str_in_output: bool = False,
         ignore_eos: bool = False,
-        max_tokens: int = 16,
+        max_tokens: Optional[int] = 16,
         logprobs: Optional[int] = None,
         prompt_logprobs: Optional[int] = None,
         custom_token_bans: Optional[List[int]] = None,
         skip_special_tokens: bool = True,
         spaces_between_special_tokens: bool = True,
-        logits_processors: List[LogitsProcessor] = None,
+        logits_processors: Optional[List[LogitsProcessorFunc]] = None,
     ) -> None:
         self.n = n
         self.best_of = best_of if best_of is not None else n
@@ -167,6 +175,7 @@ class SamplingParams:
         self.mirostat_eta = mirostat_eta
         self.dynatemp_range = dynatemp_range
         self.dynatemp_exponent = dynatemp_exponent
+        self.smoothing_factor = smoothing_factor
         self.use_beam_search = use_beam_search
         self.length_penalty = length_penalty
         self.early_stopping = early_stopping
@@ -176,10 +185,7 @@ class SamplingParams:
             self.stop = [stop]
         else:
             self.stop = list(stop)
-        if stop_token_ids is None:
-            self.stop_token_ids = []
-        else:
-            self.stop_token_ids = list(stop_token_ids)
+        self.stop_token_ids = stop_token_ids or []
         self.ignore_eos = ignore_eos
         self.max_tokens = max_tokens
         self.logprobs = logprobs
@@ -190,7 +196,7 @@ class SamplingParams:
         self.logits_processors = logits_processors or []
         self.include_stop_str_in_output = include_stop_str_in_output
 
-        self.verify()
+        self._verify_args()
         if self.use_beam_search:
             self._verify_beam_search()
         else:
@@ -201,16 +207,6 @@ class SamplingParams:
                 self.top_k = -1
                 self.min_p = 0.0
                 self.top_a = 0.0
-                self._verify_greedy_sampling()
-
-    def verify(self) -> None:
-        self._verify_args()
-        if self.use_beam_search:
-            self._verify_beam_search()
-        else:
-            self._verify_non_beam_search()
-            if self.temperature < _SAMPLING_EPS:
-                # Zero temperature means greedy sampling.
                 self._verify_greedy_sampling()
 
     def _verify_args(self) -> None:
@@ -258,6 +254,9 @@ class SamplingParams:
         if not self.dynatemp_exponent >= 0:
             raise ValueError(f"dynatemp_exponent must be non negative, got "
                              f"{self.dynatemp_exponent}.")
+        if not self.smoothing_factor >= 0:
+            raise ValueError(f"smoothing_factor must be non negative, got "
+                             f"{self.smoothing_factor}.")
         if self.mirostat_mode:
             if not self.mirostat_mode == 2:
                 raise ValueError(
@@ -269,7 +268,7 @@ class SamplingParams:
             if not self.mirostat_tau >= 0:
                 raise ValueError(
                     f"mirostat_tau must be positive, got {self.mirostat_tau}")
-        if self.max_tokens < 1:
+        if self.max_tokens is not None and self.max_tokens < 1:
             raise ValueError(
                 f"max_tokens must be at least 1, got {self.max_tokens}.")
         if self.logprobs is not None and self.logprobs < 0:
@@ -341,6 +340,7 @@ class SamplingParams:
                 f"mirostat_eta={self.mirostat_eta}, "
                 f"dynatemp_range={self.dynatemp_range}, "
                 f"dynatemp_exponent={self.dynatemp_exponent}, "
+                f"smoothing_factor={self.smoothing_factor}, "
                 f"use_beam_search={self.use_beam_search}, "
                 f"length_penalty={self.length_penalty}, "
                 f"early_stopping={self.early_stopping}, "

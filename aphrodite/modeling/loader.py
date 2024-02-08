@@ -1,12 +1,12 @@
 """Utilities for selecting and loading models."""
 import contextlib
-from typing import Type
+from typing import Optional, Type
 
 import torch
 import torch.nn as nn
 from transformers import PretrainedConfig
 
-from aphrodite.common.config import ModelConfig
+from aphrodite.common.config import DeviceConfig, ModelConfig, LoRAConfig
 from aphrodite.modeling.models import ModelRegistry
 from aphrodite.modeling.hf_downloader import (get_quant_config,
                                               initialize_dummy_weights)
@@ -32,16 +32,15 @@ def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
         f"Supported architectures: {ModelRegistry.get_supported_archs()}")
 
 
-def get_model(model_config: ModelConfig) -> nn.Module:
+def get_model(model_config: ModelConfig,
+              device_config: DeviceConfig,
+              lora_config: Optional[LoRAConfig] = None) -> nn.Module:
     model_class = _get_model_architecture(model_config.hf_config)
 
     # Get the (maybe quantized) linear method.
     linear_method = None
     if model_config.quantization is not None:
-        quant_config = get_quant_config(model_config.quantization,
-                                        model_config.model,
-                                        model_config.hf_config,
-                                        model_config.download_dir)
+        quant_config = get_quant_config(model_config)
         capability = torch.cuda.get_device_capability()
         capability = capability[0] * 10 + capability[1]
         if capability < quant_config.get_min_capability():
@@ -61,8 +60,18 @@ def get_model(model_config: ModelConfig) -> nn.Module:
     with _set_default_torch_dtype(model_config.dtype):
         # Create a model instance.
         # The weights will be initialized as empty tensors.
-        with torch.device("cuda"):
-            model = model_class(model_config.hf_config, linear_method)
+        with torch.device(device_config.device):
+            if getattr(model_class, "supports_lora", False):
+                model = model_class(model_config.hf_config, linear_method,
+                                    lora_config)
+            elif lora_config:
+                raise ValueError(
+                    f"Model {model_class.__name__} does not support LoRA, "
+                    "but LoRA is enabled. Support for this model may "
+                    "be added in the future. If this is important to you, "
+                    "please open an issue on github.")
+            else:
+                model = model_class(model_config.hf_config, linear_method)
         if model_config.load_format == "dummy":
             # NOTE: For accurate performance evaluation, we assign
             # random values to the weights.

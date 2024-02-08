@@ -22,13 +22,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only Mixtral model."""
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple
+
+import numpy as np
 
 import torch
-from torch import nn
 import torch.nn.functional as F
+
+from torch import nn
 from transformers import MixtralConfig
-import numpy as np
 
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.attention import PagedAttention
@@ -36,8 +38,8 @@ from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               ReplicatedLinear,
                                               QKVParallelLinear,
-                                              RowParallelLinear)
-from aphrodite.modeling.layers.moe import MoE
+                                              RowParallelLinear,
+                                              ColumnParallelLinear)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
@@ -81,7 +83,7 @@ class MixtralMLP(nn.Module):
                                    bias=False,
                                    linear_method=linear_method)
 
-        # TODO: Use aphrodite's SiluAndMul
+        # TODO: Use Aphrodite's SiluAndMul
         self.act_fn = nn.SiLU()
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
@@ -168,7 +170,6 @@ class MixtralAttention(nn.Module):
                  num_kv_heads: int,
                  max_position: int = 4096 * 32,
                  rope_theta: float = 10000,
-                 rope_scaling: Optional[Dict[str, Any]] = None,
                  linear_method: Optional[LinearMethodBase] = None,
                  sliding_window: Optional[int] = None) -> None:
         super().__init__()
@@ -191,31 +192,48 @@ class MixtralAttention(nn.Module):
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
         self.scaling = self.head_dim**-0.5
-        self.rope_scaling = rope_scaling
         self.rope_theta = rope_theta
         self.sliding_window = sliding_window
 
-        self.qkv_proj = QKVParallelLinear(
-            hidden_size,
-            self.head_dim,
-            self.total_num_heads,
-            self.total_num_kv_heads,
-            bias=False,
-            linear_method=linear_method,
-        )
+        if linear_method is not None and not linear_method.quant_config.merge_weight(
+        ):
+            self.merge_weight = False
+            self.q_proj = ColumnParallelLinear(hidden_size,
+                                               self.q_size,
+                                               bias=False,
+                                               linear_method=linear_method)
+            self.k_proj = ColumnParallelLinear(hidden_size,
+                                               self.kv_size,
+                                               bias=False,
+                                               linear_method=linear_method)
+            self.v_proj = ColumnParallelLinear(hidden_size,
+                                               self.kv_size,
+                                               bias=False,
+                                               linear_method=linear_method)
+        else:
+            self.merge_weight = True
+            self.qkv_proj = QKVParallelLinear(
+                hidden_size,
+                self.head_dim,
+                self.total_num_heads,
+                self.total_num_kv_heads,
+                bias=False,
+                linear_method=linear_method,
+            )
         self.o_proj = RowParallelLinear(
             self.total_num_heads * self.head_dim,
             hidden_size,
             bias=False,
             linear_method=linear_method,
         )
+        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
+        ) is None else linear_method.quant_config.rope_style()
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.head_dim,
             max_position=max_position,
             base=int(self.rope_theta),
-            is_neox_style=True,
-            rope_scaling=rope_scaling,
+            is_neox_style=is_neox_style,
         )
         self.attn = PagedAttention(
             self.num_heads,
@@ -232,8 +250,14 @@ class MixtralAttention(nn.Module):
         kv_cache: KVCache,
         input_metadata: InputMetadata,
     ) -> torch.Tensor:
-        qkv, _ = self.qkv_proj(hidden_states)
-        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        if self.merge_weight:
+            qkv, _ = self.qkv_proj(hidden_states)
+            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size],
+                                dim=-1)
+        else:
+            q, _ = self.q_proj(hidden_states)
+            k, _ = self.k_proj(hidden_states)
+            v, _ = self.v_proj(hidden_states)
         q, k = self.rotary_emb(positions, q, k)
         k_cache, v_cache = kv_cache
         attn_output = self.attn(q, k, v, k_cache, v_cache, input_metadata)
@@ -252,25 +276,16 @@ class MixtralDecoderLayer(nn.Module):
         self.hidden_size = config.hidden_size
         # Requires transformers > 4.32.0
         rope_theta = getattr(config, "rope_theta", 10000)
-        rope_scaling = getattr(config, "rope_scaling", None)
         self.self_attn = MixtralAttention(
             hidden_size=self.hidden_size,
             num_heads=config.num_attention_heads,
             max_position=config.max_position_embeddings,
             num_kv_heads=config.num_key_value_heads,
             rope_theta=rope_theta,
-            rope_scaling=rope_scaling,
             sliding_window=config.sliding_window,
             linear_method=linear_method)
-        if linear_method is None:
-            self.block_sparse_moe = MoE(
-                num_experts=config.num_local_experts,
-                top_k=config.num_experts_per_tok,
-                hidden_size=config.hidden_size,
-                intermediate_size=config.intermediate_size)
-        else:
-            self.block_sparse_moe = MixtralMoE(config,
-                                               linear_method=linear_method)
+        self.block_sparse_moe = MixtralMoE(config=config,
+                                           linear_method=linear_method)
         self.input_layernorm = RMSNorm(config.hidden_size,
                                        eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(config.hidden_size,
@@ -319,6 +334,7 @@ class MixtralModel(nn.Module):
         self.embed_tokens = VocabParallelEmbedding(
             config.vocab_size,
             config.hidden_size,
+            linear_method=linear_method,
         )
         self.layers = nn.ModuleList([
             MixtralDecoderLayer(config, linear_method=linear_method)
@@ -332,7 +348,7 @@ class MixtralModel(nn.Module):
         positions: torch.Tensor,
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
-    ) -> SamplerOutput:
+    ) -> torch.Tensor:
         hidden_states = self.embed_tokens(input_ids)
         residual = None
         for i in range(len(self.layers)):
@@ -355,7 +371,9 @@ class MixtralForCausalLM(nn.Module):
         self.config = config
         self.linear_method = linear_method
         self.model = MixtralModel(config, linear_method)
-        self.lm_head = ParallelLMHead(config.vocab_size, config.hidden_size)
+        self.lm_head = ParallelLMHead(config.vocab_size,
+                                      config.hidden_size,
+                                      linear_method=linear_method)
         self.sampler = Sampler(config.vocab_size)
 
     def forward(
@@ -373,8 +391,8 @@ class MixtralForCausalLM(nn.Module):
         self,
         hidden_states: Optional[torch.Tensor],
         sampling_metadata: SamplingMetadata,
-    ) -> SamplerOutput:
-        next_tokens = self.sampler(self.lm_head.weight, hidden_states,
+    ) -> Optional[SamplerOutput]:
+        next_tokens = self.sampler(self.lm_head(hidden_states),
                                    sampling_metadata)
         return next_tokens
 
@@ -389,20 +407,16 @@ class MixtralForCausalLM(nn.Module):
             ("qkv_proj", "k_proj", "k"),
             ("qkv_proj", "v_proj", "v"),
         ]
-
-        expert_params_mapping = [
-            # (param_name, weight_name, expert_id)
-            (f"{weight_name}s", f"experts.{expert_id}.{weight_name}.weight",
-             expert_id) for expert_id in range(self.config.num_local_experts)
-            for weight_name in ["w1", "w2", "w3"]
-        ]
-
+        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
+        ):
+            stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
                 model_name_or_path,
                 cache_dir,
                 load_format,
                 revision,
+                self.config,
                 fall_back_to_pt=False):
             if "rotary_emb.inv_freq" in name:
                 continue
@@ -418,23 +432,14 @@ class MixtralForCausalLM(nn.Module):
                 weight_loader(param, loaded_weight, shard_id)
                 break
             else:
-                for param_name, weight_name, expert_id in expert_params_mapping:
-                    if weight_name not in name:
-                        continue
-                    name = name.replace(weight_name, param_name)
-                    param = params_dict[name]
-                    weight_loader = param.weight_loader
-                    weight_loader(param, loaded_weight, expert_id=expert_id)
-                    break
-                else:
-                    # Skip loading extra bias for GPTQ models.
-                    if name.endswith(".bias") and name not in params_dict:
-                        continue
-                    # Skip experts that are not assigned to this worker.
-                    if ("block_sparse_moe.experts." in name
-                            and name not in params_dict):
-                        continue
-                    param = params_dict[name]
-                    weight_loader = getattr(param, "weight_loader",
-                                            default_weight_loader)
-                    weight_loader(param, loaded_weight)
+                # Skip loading extra bias for GPTQ models.
+                if name.endswith(".bias") and name not in params_dict:
+                    continue
+                # Skip experts that are not assigned to this worker.
+                if ("block_sparse_moe.experts." in name
+                        and name not in params_dict):
+                    continue
+                param = params_dict[name]
+                weight_loader = getattr(param, "weight_loader",
+                                        default_weight_loader)
+                weight_loader(param, loaded_weight)

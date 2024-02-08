@@ -9,15 +9,17 @@
 #include "../../attention/dtype_float16.cuh"
 #include "../../attention/dtype_bfloat16.cuh"
 
-using namespace aphrodite;
+#pragma once
 
+namespace aphrodite {
+#ifdef ENABLE_FP8_E5M2
+namespace fp8_e5m2_unscaled {
 
 template<typename Tout, typename Tin>
 __inline__ __device__ Tout vec_conversion(const Tin& x)
 {
     return x;
 }
-
 
 // fp8 -> half
 template<>
@@ -174,8 +176,12 @@ __inline__ __device__ uint8_t vec_conversion<uint8_t, uint16_t>(const uint16_t& 
 template<>
 __inline__ __device__ uint8_t vec_conversion<uint8_t, __nv_bfloat16>(const __nv_bfloat16& a)
 {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 800
+    assert(false);
+#else
     __nv_fp8_storage_t res = __nv_cvt_bfloat16raw_to_fp8(__nv_bfloat16_raw(a), __NV_SATFINITE, __NV_E5M2);
     return (uint8_t)res;
+#endif
 }
 
 // float -> fp8
@@ -248,23 +254,25 @@ __inline__ __device__ uint4 vec_conversion<uint4, Float8_>(const Float8_& a)
 
 template<>
 __inline__ __device__ __nv_bfloat162 vec_conversion<__nv_bfloat162, float2>(const float2 &a) {
-    return __float22bfloat162_rn(a);
+    __nv_bfloat162 b;
+    from_float(b, a);
+    return b;
 }
 
 template<>
 __inline__ __device__ bf16_4_t vec_conversion<bf16_4_t, Float4_>(const Float4_ &a) {
     bf16_4_t b;
-    b.x = vec_conversion<__nv_bfloat162, float2>(a.x);
-    b.y = vec_conversion<__nv_bfloat162, float2>(a.y);
+    from_float(b, a);
     return b;
 }
 
 template<>
 __inline__ __device__ bf16_8_t vec_conversion<bf16_8_t, Float8_>(const Float8_ &a) {
     bf16_8_t b;
-    b.x = vec_conversion<__nv_bfloat162, float2>(a.x);
-    b.y = vec_conversion<__nv_bfloat162, float2>(a.y);
-    b.z = vec_conversion<__nv_bfloat162, float2>(a.z);
-    b.w = vec_conversion<__nv_bfloat162, float2>(a.w);
+    from_float(b, a);
     return b;
 }
+
+} // namespace fp8_e5m2_unscaled
+#endif // ENABLE_FP8_E5M2
+} // namespace aphrodite

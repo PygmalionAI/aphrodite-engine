@@ -8,7 +8,7 @@ from aphrodite.modeling.sampling_metadata import (SamplingMetadata,
                                                   OutputMetadata,
                                                   SamplingTensors)
 from aphrodite.modeling.megatron.communication_op import (
-    tensor_model_parallel_all_gather)
+    tensor_model_parallel_gather)
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (PromptLogprobs, SampleLogprobs,
                                        SamplerOutput, SequenceData,
@@ -30,39 +30,59 @@ class Sampler(nn.Module):
     parameters (e.g., sampling method, temperature, top-p, top-k, etc.).
     """
 
-    def __init__(self, vocab_size: int) -> None:
+    def __init__(self,
+                 vocab_size: int,
+                 org_vocab_size: Optional[int] = None) -> None:
         super().__init__()
         self.vocab_size = vocab_size
+        # original vocabulary size (without LoRA).
+        self.org_vocab_size = org_vocab_size or vocab_size
+
+    def _get_logits(self, hidden_states: torch.Tensor, embedding: torch.Tensor,
+                    embedding_bias: Optional[torch.Tensor]) -> torch.Tensor:
+        # Get the logits for the next tokens.
+        logits = torch.matmul(hidden_states, embedding.t())
+        if embedding_bias is not None:
+            logits += embedding_bias
+        logits = tensor_model_parallel_gather(logits)
+        # Remove paddings in vocab (if any).
+        if logits is not None:
+            logits = logits[:, :self.org_vocab_size]
+        return logits
 
     def forward(
         self,
-        embedding: torch.Tensor,
-        hidden_states: torch.Tensor,
+        logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
-        embedding_bias: Optional[torch.Tensor] = None,
-    ) -> SamplerOutput:
+    ) -> Optional[SamplerOutput]:
         # Get the hidden states that we use for sampling.
-        hidden_states = _prune_hidden_states(hidden_states, sampling_metadata)
+        logits = _prune_hidden_states(logits, sampling_metadata)
+        logits = tensor_model_parallel_gather(logits)
+        # Remove paddings in vocab (if any).
+        if logits is not None:
+            logits = logits[:, :self.vocab_size]
 
-        # Get the logits for the next tokens.
-        logits = _get_logits(hidden_states, embedding, embedding_bias,
-                             self.vocab_size)
+        # Only perform sampling in the driver worker.
+        # Note: `_get_logits` is still distributed across TP workers because
+        # the `embedding` weight is distributed across TP workers.
+        # TODO: Change the get_logits part to a separate stage.
+        if not sampling_metadata.perform_sampling:
+            return None
+
+        assert logits is not None
         _, vocab_size = logits.shape
 
         output_metadata = OutputMetadata()
 
+        # Apply logits processors (if any)
+        logits = _apply_logits_processors(logits, sampling_metadata)
+
         # Prepare sampling tensors with pinned memory to avoid blocking.
         (sampling_tensors, do_temperatures, do_penalties, do_topks, do_topps,
          do_topas, do_minps, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
-         do_typical_ps, do_mirostat) = (SamplingTensors.from_sampling_metadata(
+         do_typical_ps, do_quadratic,
+         do_mirostat) = (SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype))
-
-        if do_temperatures:
-            # Apply temperature scaling.
-            # Use in-place division to avoid creating a new tensor.
-            logits = _apply_temperature(logits, sampling_tensors.temperatures,
-                                        sampling_tensors.dynatemp_ranges,
-                                        sampling_tensors.dynatemp_exps)
 
         if do_penalties:
             logits = _apply_penalties(logits, sampling_tensors.prompt_tokens,
@@ -71,16 +91,16 @@ class Sampler(nn.Module):
                                       sampling_tensors.frequency_penalties,
                                       sampling_tensors.repetition_penalties)
 
+        if do_temperatures:
+            logits = _apply_temperature(logits, sampling_tensors.temperatures,
+                                        sampling_tensors.dynatemp_ranges,
+                                        sampling_tensors.dynatemp_exps)
+
         if do_topks or do_topps or do_topas or do_minps:
             logits = _apply_alphabet_soup(logits, sampling_tensors.top_ps,
                                           sampling_tensors.top_ks,
                                           sampling_tensors.top_as,
                                           sampling_tensors.min_ps)
-        # Apply Eta/epsilon cutoff, typical_p, and tail-free sampling,
-        # as described in:
-        # https://arxiv.org/abs/2210.15191
-        # https://arxiv.org/abs/2202.00666
-        # https://www.trentonbricken.com/Tail-Free-Sampling/
         if do_tfss:
             logits = _apply_tfs(logits, sampling_tensors.tfss)
         if do_eta_cutoffs:
@@ -91,14 +111,13 @@ class Sampler(nn.Module):
         if do_typical_ps:
             logits = _apply_typical_sampling(logits,
                                              sampling_tensors.typical_ps)
+        if do_quadratic:
+            logits = _apply_quadratic_sampling(
+                logits, sampling_tensors.smoothing_factors)
 
         banned_tokens = _get_custom_token_bans(sampling_metadata)
         assert len(banned_tokens) == logits.shape[0]
         logits = _apply_token_bans(logits, banned_tokens)
-
-        logits = _apply_logits_processors(sampling_metadata, logits,
-                                          sampling_tensors.output_tokens)
-
         if do_mirostat:
             logits = _mirostat(logits, sampling_tensors, output_metadata)
 
@@ -119,48 +138,13 @@ class Sampler(nn.Module):
                                      output_metadata)
 
 
-def _get_logits(hidden_states: torch.Tensor, embedding: torch.Tensor,
-                embedding_bias: Optional[torch.Tensor],
-                vocab_size: int) -> torch.Tensor:
-    # Get the logits for the next tokens.
-    logits = torch.matmul(hidden_states, embedding.t())
-    if embedding_bias is not None:
-        logits += embedding_bias
-    logits = tensor_model_parallel_all_gather(logits)
-    # Remove paddings in vocab (if any).
-    logits = logits[:, :vocab_size]
-    return logits
-
-
 def _prune_hidden_states(
     hidden_states: torch.Tensor,
     sampling_metadata: SamplingMetadata,
 ) -> torch.Tensor:
-    selected_token_indices: List[int] = []
-    start_idx = 0
-    max_prompt_len = max(
-        sampling_metadata.prompt_lens) if sampling_metadata.prompt_lens else 1
-    for i, seq_group in enumerate(sampling_metadata.seq_groups):
-        seq_ids, sampling_params = seq_group
-        if i < sampling_metadata.num_prompts:
-            assert len(seq_ids) == 1, "Prompt input should have only one seq."
-            prompt_len = sampling_metadata.prompt_lens[i]
-            if sampling_params.prompt_logprobs is not None:
-                selected_token_indices.extend(
-                    range(start_idx, start_idx + prompt_len - 1))
-            selected_token_indices.append(start_idx + prompt_len - 1)
-            start_idx += max_prompt_len
-        else:
-            num_seqs = len(seq_ids)
-            selected_token_indices.extend(
-                range(start_idx, start_idx + num_seqs))
-            start_idx += num_seqs
-
-    selected_token_indices = torch.tensor(selected_token_indices,
-                                          dtype=torch.long,
-                                          device=hidden_states.device)
     hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-    return hidden_states.index_select(0, selected_token_indices)
+    return hidden_states.index_select(0,
+                                      sampling_metadata.selected_token_indices)
 
 
 def _get_bin_counts_and_mask(
@@ -194,16 +178,26 @@ def _get_custom_token_bans(
     return banned_tokens
 
 
-def _apply_logits_processors(sampling_metadata: SamplingMetadata,
-                             logits: torch.Tensor,
-                             output_tokens: List[List[int]]) -> torch.Tensor:
+def _apply_logits_processors(
+    logits: torch.Tensor,
+    metadata: SamplingMetadata,
+) -> torch.Tensor:
     seq_offset = 0
+    for i, (seq_ids, sampling_params) in enumerate(metadata.seq_groups):
+        seq_size = len(seq_ids)
+        output_tokens = []
+        if (i < metadata.num_prompts
+                and sampling_params.prompt_logprobs is not None):
+            prompt_seqs = metadata.prompt_lens[i] - 1
+            seq_size += prompt_seqs
+            output_tokens.extend([[]] * prompt_seqs)
+        seq_end = seq_offset + seq_size
 
-    for seq_ids, sampling_params in sampling_metadata.seq_groups:
-        seq_end = seq_offset + len(seq_ids)
-
-        for proc in sampling_params.logits_processors:
-            proc(logits[seq_offset:seq_end], output_tokens[seq_offset:seq_end])
+        if sampling_params.logits_processors:
+            output_tokens.extend(metadata.seq_data[sid].output_token_ids
+                                 for sid in seq_ids)
+            for proc in sampling_params.logits_processors:
+                proc(logits[seq_offset:seq_end], output_tokens)
 
         seq_offset = seq_end
 
@@ -406,8 +400,25 @@ def _apply_temperature(
                 normalized_entropies.pow_(dynatemp_exps))
 
     temperatures[dynatemp_mask] = dyn_temp
+    temperatures[temperatures == 0.0] = 1.0
     logits.div_(temperatures.unsqueeze_(dim=1))
     return logits
+
+
+def _apply_quadratic_sampling(
+    logits: torch.Tensor,
+    smoothing_factors: torch.Tensor,
+) -> torch.Tensor:
+    """Applies a quadratic transformation to the logits based on the
+    provided smoothing factor. The transformation is centered around
+    the maximum logit value in the batch.
+
+    Credits: @kalomaze
+    """
+    max_logits = logits.max(dim=-1, keepdim=True).values
+    transformed_logits = -(smoothing_factors.unsqueeze_(dim=1) *
+                           (logits - max_logits).pow(2)) + max_logits
+    return transformed_logits
 
 
 def _greedy_sample(
@@ -537,30 +548,19 @@ def _sample(
     sampling_metadata: SamplingMetadata,
 ) -> List[Tuple[List[int], List[int]]]:
     categorized_seq_group_ids = {t: [] for t in SamplingType}
-    categorized_sample_indices = {t: [] for t in SamplingType}
-    start_idx = 0
+    categorized_sample_indices = sampling_metadata.categorized_sample_indices
     for i, seq_group in enumerate(sampling_metadata.seq_groups):
-        seq_ids, sampling_params = seq_group
+        _, sampling_params = seq_group
         sampling_type = sampling_params.sampling_type
-        if (i < sampling_metadata.num_prompts
-                and sampling_params.prompt_logprobs is not None):
-            prompt_len = sampling_metadata.prompt_lens[i]
-            start_idx += prompt_len - 1
         categorized_seq_group_ids[sampling_type].append(i)
-        num_seqs = len(seq_ids)
-        categorized_sample_indices[sampling_type].extend(
-            range(start_idx, start_idx + num_seqs))
-        start_idx += num_seqs
 
     sample_results_dict: Dict[int, Tuple[List[int], List[int]]] = {}
     sample_metadata = {}
 
-    # Counterintiutively, having two loops here is actually faster.
+    # Counterintuitively, having two loops here is actually faster.
     # The first loop can run without waiting on GPU<->CPU sync.
-    for sampling_type in SamplingType:
-        sample_indices = categorized_sample_indices[sampling_type]
-        num_tokens = len(sample_indices)
-        if num_tokens == 0:
+    for sampling_type, sample_indices in categorized_sample_indices.items():
+        if len(sample_indices) == 0:
             continue
         seq_group_ids = categorized_seq_group_ids[sampling_type]
         seq_groups = [sampling_metadata.seq_groups[i] for i in seq_group_ids]
@@ -584,11 +584,8 @@ def _sample(
 
     # GPU<->CPU sync happens in the loop below.
 
-    for sampling_type in SamplingType:
-        if sampling_type not in sample_metadata:
-            continue
-        seq_group_ids, seq_groups, is_prompts, sample_indices = sample_metadata[
-            sampling_type]
+    for sampling_type, metadata in sample_metadata.items():
+        seq_group_ids, seq_groups, is_prompts, sample_indices = metadata
         if sampling_type == SamplingType.GREEDY:
             sample_results = _greedy_sample(seq_groups, greedy_samples)
         elif sampling_type == SamplingType.RANDOM:

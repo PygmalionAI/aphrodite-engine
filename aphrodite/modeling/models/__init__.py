@@ -11,13 +11,14 @@ logger = init_logger(__name__)
 # Architecture -> (module, class)
 _MODELS = {
     "DeciLMForCausalLM": ("decilm", "DeciLMForCausalLM"),
+    "DeepseekForCausalLM": ("deepseek", "DeepseekForCausalLM"),
     "GPTJForCausalLM": ("gpt_j", "GPTJForCausalLM"),
     "GPTNeoXForCausalLM": ("gpt_neox", "GPTNeoXForCausalLM"),
     "LlamaForCausalLM": ("llama", "LlamaForCausalLM"),
     "LLaMAForCausalLM": ("llama", "LlamaForCausalLM"),
     "MistralForCausalLM": ("mistral", "MistralForCausalLM"),
     "MixtralForCausalLM": ("mixtral", "MixtralForCausalLM"),
-    "PhiForCausalLM": ("phi_1_5", "PhiForCausalLM"),
+    "PhiForCausalLM": ("phi", "PhiForCausalLM"),
     "YiForCausalLM": ("yi", "YiForCausalLM"),
 }
 

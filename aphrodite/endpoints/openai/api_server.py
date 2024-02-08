@@ -9,8 +9,7 @@ import time
 from http import HTTPStatus
 from typing import AsyncGenerator, Dict, List, Optional, Tuple, Union
 
-from aioprometheus import MetricsMiddleware
-from aioprometheus.asgi.starlette import metrics
+from prometheus_client import make_asgi_app
 import fastapi
 import uvicorn
 from fastapi import Request, Response, Header, HTTPException, Depends
@@ -21,7 +20,6 @@ from pydantic import BaseModel
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
-from aphrodite.engine.metrics import add_global_metrics_labels
 from aphrodite.endpoints.openai.protocol import (
     CompletionRequest, CompletionResponse, CompletionResponseChoice,
     CompletionResponseStreamChoice, CompletionStreamResponse,
@@ -35,6 +33,8 @@ from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.common.utils import random_uuid
 from aphrodite.common.logits_processor import BiasLogitsProcessor
+from aphrodite.common.grammar import (GrammarLogitsProcessor,
+                                      RayRemoteGrammarLogitsProcessor)
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
@@ -101,8 +101,9 @@ def parse_args():
     return parser.parse_args()
 
 
-app.add_middleware(MetricsMiddleware)  # trace HTTP server metrics
-app.add_route("/metrics", metrics)
+# Add prometheus asgi middleware to route /metrics requests
+metrics_app = make_asgi_app()
+app.mount("/metrics/", metrics_app)
 
 
 def _verify_api_key(x_api_key: str = Header(None),
@@ -262,6 +263,12 @@ def create_logprobs(
                 tokenizer.convert_ids_to_tokens(i): p
                 for i, p in step_top_logprobs.items()
             } if step_top_logprobs else None)
+
+    logprobs.top_logprobs = [{
+        k: v if v > -1000 else -1000
+        for k, v in top_logprob.items()
+    } for top_logprob in logprobs.top_logprobs if top_logprob is not None]
+
     return logprobs
 
 
@@ -334,6 +341,7 @@ async def create_chat_completion(
             mirostat_eta=request.mirostat_eta,
             dynatemp_range=request.dynatemp_range,
             dynatemp_exponent=request.dynatemp_exponent,
+            smoothing_factor=request.smoothing_factor,
             stop=request.stop,
             stop_token_ids=request.stop_token_ids,
             include_stop_str_in_output=request.include_stop_str_in_output,
@@ -542,6 +550,17 @@ async def create_completion(
                 request.logit_bias.items()))
         logit_processors = [BiasLogitsProcessor(biases)]
 
+    if request.grammar:
+        if engine.worker_use_ray:
+            grammar_logits_processor = RayRemoteGrammarLogitsProcessor(
+                tokenizer=tokenizer, grammar=request.grammar)
+        else:
+            grammar_logits_processor = GrammarLogitsProcessor(
+                tokenizer=tokenizer, grammar=request.grammar)
+        logit_processors = [grammar_logits_processor]
+    else:
+        logit_processors = []
+
     # OpenAI API supports echoing the prompt when max_tokens is 0.
     echo_without_generation = request.echo and request.max_tokens == 0
 
@@ -607,6 +626,7 @@ async def create_completion(
             mirostat_eta=request.mirostat_eta,
             dynatemp_range=request.dynatemp_range,
             dynatemp_exponent=request.dynatemp_exponent,
+            smoothing_factor=request.smoothing_factor,
             stop=request.stop,
             stop_token_ids=request.stop_token_ids,
             include_stop_str_in_output=request.include_stop_str_in_output,
@@ -847,8 +867,6 @@ if __name__ == "__main__":
         trust_remote_code=engine_model_config.trust_remote_code)
 
     load_chat_template(args, tokenizer)
-
-    add_global_metrics_labels(model_name=engine_args.model)
 
     uvicorn.run(app,
                 host=args.host,
