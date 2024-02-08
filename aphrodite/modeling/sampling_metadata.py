@@ -133,6 +133,7 @@ class SamplingTensors:
         dynatemp_ranges: List[float] = []
         dynatemp_exps: List[float] = []
         sampler_orders: List[Any] = []
+        smoothing_factors: List[float] = []
         index = 0  # temporary, needed for building miro_indices
         #do_temperatures = False
         #do_penalties = False
