@@ -103,8 +103,6 @@ class Sampler(nn.Module):
         assert len(banned_tokens) == logits.shape[0]
         logits = _apply_token_bans(logits, banned_tokens)
 
-        logits = _apply_logits_processors(sampling_metadata, logits,
-                                          sampling_tensors.output_tokens)
         
         for indices, order in _get_orders_and_indices(sampling_tensors.sampler_orders):
             masks = []
