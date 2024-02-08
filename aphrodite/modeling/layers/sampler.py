@@ -447,8 +447,9 @@ def _apply_quadratic_sampling(
     """
     mask = smoothing_factors > 0
     max_logits = logits.max(dim=-1, keepdim=True).values
-    transformed_logits = torch.where(mask, -(smoothing_factors.unsqueeze(dim=1) *
-                                             (logits - max_logits).pow(2)), logits)
+    transformed_logits = -(smoothing_factors.unsqueeze(dim=1) *
+                            (logits - max_logits).pow(2))
+    logits[mask, :] = transformed_logits[mask, :]
     return transformed_logits
 
 
