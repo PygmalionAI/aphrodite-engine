@@ -389,7 +389,6 @@ def _apply_typical_sampling(
     logits: torch.Tensor,
     typical_p: torch.Tensor,
 ) -> torch.Tensor:
-    typ_p = torch.tensor(typical_p, dtype=logits.dtype, device=logits.device)
     shifted_logits = torch.log_softmax(logits, dim=-1)
     probs = shifted_logits.exp()
 
@@ -398,7 +397,7 @@ def _apply_typical_sampling(
     surprisal_deviations = (neg_entropy - shifted_logits).abs()
     _, indices = torch.sort(surprisal_deviations)
     reordered_probs = probs.gather(-1, indices)
-    typ_mask_sorted = reordered_probs.cumsum(dim=-1) >= typ_p.unsqueeze(dim=1)
+    typ_mask_sorted = reordered_probs.cumsum(dim=-1) >= typical_p.unsqueeze(dim=1)
 
     typ_mask_sorted[:, 0] = False
 
