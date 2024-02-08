@@ -229,7 +229,11 @@ async def show_available_models(
                   permission=[ModelPermission()])
     ]
     return ModelList(data=model_cards)
-
+            
+@app.get("/")
+async def root() -> Response:
+    """Root route for checking server status"""
+    return Response(status_code=200)
 
 def create_logprobs(
     token_ids: List[int],
