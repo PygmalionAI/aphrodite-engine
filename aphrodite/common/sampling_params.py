@@ -211,8 +211,8 @@ class SamplingParams:
         self.spaces_between_special_tokens = spaces_between_special_tokens
         self.logits_processors = logits_processors or []
         self.include_stop_str_in_output = include_stop_str_in_output
-        if self.sampler_order is None:
-            self.sampler_order = ["pens", "temp", "miro", "typ", "tfs", "minp", "eta", "topa", "topp", "eps", "topk"]
+        if not self.sampler_order:
+            self.sampler_order = ["pens", "temp", "miro", "typ", "quad", "tfs", "minp", "eta", "topa", "topp", "eps", "topk"]
         self.sampler_order = [[s] if (isinstance(s, str) or isinstance(s, int)) else s for s in self.sampler_order]
         self.sampler_order = [[_sampler_map[s] if isinstance(s, int) else s for s in sub] for sub in self.sampler_order]
         self.verify()
