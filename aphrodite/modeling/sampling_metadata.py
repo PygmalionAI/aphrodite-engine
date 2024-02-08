@@ -167,6 +167,7 @@ class SamplingTensors:
             dynatemp_range = sampling_params.dynatemp_range
             dynatemp_exp = sampling_params.dynatemp_exponent
             sampler_order = sampling_params.sampler_order
+            smoothing_factor = sampling_params.smoothing_factor
 
             # if do_temperatures is False and temperature > _SAMPLING_EPS:
             #     do_temperatures = True
@@ -238,6 +239,7 @@ class SamplingTensors:
             typical_ps += [typical_p] * len(seq_ids)
             dynatemp_ranges += [dynatemp_range] * len(seq_ids)
             dynatemp_exps += [dynatemp_exp] * len(seq_ids)
+            smoothing_factors += [smoothing_factor] * len(seq_ids)
             if not sampler_orders or sampler_orders[-1][0] != sampler_order:
                 sampler_orders.append([sampler_order, len(seq_ids)])
             else:
@@ -259,8 +261,8 @@ class SamplingTensors:
             frequency_penalties, repetition_penalties, tfss, eta_cutoffs,
             epsilon_cutoffs, typical_ps, dynatemp_ranges, dynatemp_exps,
             miro_taus, miro_etas, miro_mus, miro_indices, miro_seqids,
-            sampler_orders, prompt_tokens, output_tokens, vocab_size,
-            device, dtype)
+            sampler_orders, smoothing_factors, prompt_tokens, output_tokens,
+            vocab_size, device, dtype)
         #return (sampling_tensors, do_temperatures, do_penalties, do_topks,
         #        do_topps, do_topas, do_minps, do_tfss, do_eta_cutoffs,
         #        do_epsilon_cutoffs, do_typical_ps, do_mirostat)
@@ -278,6 +280,7 @@ class SamplingTensors:
                    miro_etas: List[float], miro_mus: List[float],
                    miro_indices: List[int], miro_seqids: List[int],
                    sampler_orders: List[List[Any]],
+                   smoothing_factors: List[float], 
                    prompt_tokens: List[List[int]],
                    output_tokens: List[List[int]], vocab_size: int,
                    device: torch.device,
