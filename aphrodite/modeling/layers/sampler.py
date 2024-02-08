@@ -450,7 +450,7 @@ def _apply_quadratic_sampling(
     transformed_logits = -(smoothing_factors.unsqueeze(dim=1) *
                             (logits - max_logits).pow(2))
     logits[mask, :] = transformed_logits[mask, :]
-    return transformed_logits
+    return logits
 
 
 def _greedy_sample(
