@@ -336,7 +336,7 @@ def find_version(filepath: str) -> str:
 
 
 def get_aphrodite_version() -> str:
-    version = find_version(get_path("aphrodite-engine", "__init__.py"))
+    version = find_version(get_path("aphrodite", "__init__.py"))
     
     if _is_hip():
         # get the HIP version
@@ -347,19 +347,11 @@ def get_aphrodite_version() -> str:
             version += f"+rocm{rocm_version_str}"
     else:
         cuda_version = str(nvcc_cuda_version)
-        # Split the version into numerical and suffix parts
-        version_parts = version.split('-')
-        version_num = version_parts[0]
-        version_suffix = version_parts[1] if len(version_parts) > 1 else ''
-        
         if cuda_version != MAIN_CUDA_VERSION:
             cuda_version_str = cuda_version.replace(".", "")[:3]
-            version_num += f"+cu{cuda_version_str}"
-        
-        # Reassemble the version string with the suffix, if any
-        version = version_num + ('-' + version_suffix if version_suffix else '')
-        
-        return version
+            version += f"+cu{cuda_version_str}"
+
+    return version
 
 
 def read_readme() -> str:
@@ -384,7 +376,7 @@ def get_requirements() -> List[str]:
 
 setuptools.setup(
     name="aphrodite-engine",
-    version=find_version(get_path("aphrodite", "__init__.py")),
+    version=get_aphrodite_version(),
     author="PygmalionAI",
     license="AGPL 3.0",
     description="The inference engine for PygmalionAI models",
