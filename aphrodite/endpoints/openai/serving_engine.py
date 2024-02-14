@@ -6,10 +6,10 @@ from aphrodite.common.logger import init_logger
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.endpoints.openai.protocol import (CompletionRequest,
-                                              ChatCompletionRequest,
-                                              ErrorResponse, LogProbs,
-                                              ModelCard, ModelList,
-                                              ModelPermission, Prompt)
+                                                 ChatCompletionRequest,
+                                                 ErrorResponse, LogProbs,
+                                                 ModelCard, ModelList,
+                                                 ModelPermission, Prompt)
 
 logger = init_logger(__name__)
 
@@ -52,7 +52,7 @@ class OpenAIServing:
                       permission=[ModelPermission()])
         ]
         return ModelList(data=model_cards)
-    
+
     async def tokenize(self, prompt: Prompt):
         """Tokenize a given prompt."""
         tokenized_prompt = self.tokenizer.tokenize(prompt.prompt)

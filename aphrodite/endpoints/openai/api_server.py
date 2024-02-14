@@ -33,6 +33,7 @@ logger = init_logger(__name__)
 API_KEY_NAME = "Authorization"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=True)
 
+
 @asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):
 
@@ -129,14 +130,14 @@ def parse_args():
 metrics_app = make_asgi_app()
 app.mount("/metrics", metrics_app)
 
+
 async def get_api_key(api_key_header: str = Depends(api_key_header)):
     api_key = os.environ.get("APHRODITE_API_KEY") or args.api_keys
     if api_key_header != "Bearer " + api_key:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API Key"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Invalid API Key")
     return api_key_header
+
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(_, exc):
@@ -155,10 +156,12 @@ async def show_available_models(api_key: str = Depends(get_api_key)):
     models = await openai_serving_chat.show_available_models()
     return JSONResponse(content=models.model_dump())
 
+
 @app.post("/v1/tokenize")
 async def tokenize(prompt: Prompt, api_key: str = Depends(get_api_key)):
     tokenized = await openai_serving_chat.tokenize(prompt)
     return JSONResponse(content=tokenized)
+
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,
@@ -175,8 +178,9 @@ async def create_chat_completion(request: ChatCompletionRequest,
     else:
         return JSONResponse(content=generator.model_dump())
 
+
 @app.post("/v1/completions")
-async def create_completion(request: CompletionRequest, 
+async def create_completion(request: CompletionRequest,
                             raw_request: Request,
                             api_key: str = Depends(get_api_key)):
     generator = await openai_serving_completion.create_completion(
@@ -227,7 +231,6 @@ if __name__ == "__main__":
                                             args.response_role,
                                             args.chat_template)
     openai_serving_completion = OpenAIServingCompletion(engine, served_model)
-
 
     app.root_path = args.root_path
     uvicorn.run(app,
