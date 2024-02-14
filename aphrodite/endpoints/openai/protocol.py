@@ -80,7 +80,8 @@ class ChatCompletionRequest(BaseModel):
     mirostat_eta: Optional[float] = 0.0
     dynatemp_range: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
-    sampler_order: Optional[Union[List[str], List[List[str]]]] = Field(default_factory=list)
+    sampler_order: Optional[Union[List[str], List[List[str]]]] = Field(
+        default_factory=list)
     temperature_last: Optional[bool] = False
     smoothing_factor: Optional[float] = 0.0
     ignore_eos: Optional[bool] = False
@@ -127,7 +128,8 @@ class CompletionRequest(BaseModel):
     mirostat_eta: Optional[float] = 0.0
     dynatemp_range: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
-    sampler_order: Optional[Union[List[str], List[List[str]]]] = Field(default_factory=list)
+    sampler_order: Optional[Union[List[str], List[List[str]]]] = Field(
+        default_factory=list)
     temperature_last: Optional[bool] = False
     smoothing_factor: Optional[float] = 0.0
     ignore_eos: Optional[bool] = False

@@ -100,7 +100,8 @@ class SamplingTensors:
     miro_seqids: List[int]  # state writeback done CPU side
     dynatemp_ranges: torch.Tensor
     dynatemp_exps: torch.Tensor
-    sampler_orders: List[Any] # logically, a List[Tuple[List[List[str]], int]] except that Tuple is actually a List too
+    sampler_orders: List[
+        Any]  # logically, a List[Tuple[List[List[str]], int]] except that Tuple is actually a List too
     smoothing_factors: torch.Tensor
     prompt_tokens: torch.Tensor
     output_tokens: torch.Tensor
@@ -281,7 +282,7 @@ class SamplingTensors:
                    miro_etas: List[float], miro_mus: List[float],
                    miro_indices: List[int], miro_seqids: List[int],
                    sampler_orders: List[List[Any]],
-                   smoothing_factors: List[float], 
+                   smoothing_factors: List[float],
                    prompt_tokens: List[List[int]],
                    output_tokens: List[List[int]], vocab_size: int,
                    device: torch.device,
@@ -411,7 +412,8 @@ class SamplingTensors:
             miro_etas=miro_etas_t.to(device=device, non_blocking=True),
             miro_mus=miro_mus_t.to(device=device, non_blocking=True),
             miro_indices=miro_indices_t.to(device=device, non_blocking=True),
-            miro_seqids=miro_seqids, sampler_orders=sampler_orders,
+            miro_seqids=miro_seqids,
+            sampler_orders=sampler_orders,
             typical_ps=typical_ps_t.to(device=device, non_blocking=True),
             prompt_tokens=prompt_tensor.to(device=device, non_blocking=True),
             output_tokens=output_tensor.to(device=device, non_blocking=True),

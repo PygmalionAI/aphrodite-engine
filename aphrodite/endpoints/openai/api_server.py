@@ -332,7 +332,7 @@ async def create_chat_completion(
                         request.sampler_order[i].pop(j)
                         break
         request.sampler_order.append("temp")
-        
+
     try:
         sampling_params = SamplingParams(
             n=request.n,
