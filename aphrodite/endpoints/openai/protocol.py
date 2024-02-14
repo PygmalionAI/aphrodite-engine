@@ -14,7 +14,7 @@ class ErrorResponse(BaseModel):
     message: str
     type: str
     param: Optional[str] = None
-    code: Optional[str] = None
+    code: int
 
 
 class ModelPermission(BaseModel):
@@ -124,7 +124,6 @@ class ChatCompletionRequest(BaseModel):
             custom_token_bans=self.custom_token_bans,
             skip_special_tokens=self.skip_special_tokens,
             spaces_between_special_tokens=self.spaces_between_special_tokens,
-            length_penalty=self.length_penalty,
             stop=self.stop,
             best_of=self.best_of,
             include_stop_str_in_output=self.include_stop_str_in_output,
@@ -206,7 +205,6 @@ class CompletionRequest(BaseModel):
             custom_token_bans=self.custom_token_bans,
             skip_special_tokens=self.skip_special_tokens,
             spaces_between_special_tokens=self.spaces_between_special_tokens,
-            length_penalty=self.length_penalty,
             stop=self.stop,
             best_of=self.best_of,
             include_stop_str_in_output=self.include_stop_str_in_output,
@@ -249,7 +247,7 @@ class CompletionStreamResponse(BaseModel):
     created: int = Field(default_factory=lambda: int(time.time()))
     model: str
     choices: List[CompletionResponseStreamChoice]
-    usage: Optional[UsageInfo]
+    usage: Optional[UsageInfo] = Field(default=None)
 
 
 class ChatMessage(BaseModel):
@@ -289,8 +287,7 @@ class ChatCompletionStreamResponse(BaseModel):
     created: int = Field(default_factory=lambda: int(time.time()))
     model: str
     choices: List[ChatCompletionResponseStreamChoice]
-    usage: Optional[UsageInfo] = Field(
-        default=None, description="data about request and response")
+    usage: Optional[UsageInfo] = Field(default=None)
 
 class Prompt(BaseModel):
     prompt: str
