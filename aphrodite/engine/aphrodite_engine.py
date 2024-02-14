@@ -876,19 +876,19 @@ class AphroditeEngine:
             time_to_first_tokens = time_last_iters if prompt_run else []
             time_per_output_tokens = [] if prompt_run else time_last_iters
 
-            return Stats(
-                now=now,
-                num_running=num_running,
-                num_swapped=num_swapped,
-                num_waiting=num_waiting,
-                gpu_cache_usage=gpu_cache_usage,
-                cpu_cache_usage=cpu_cache_usage,
-                num_prompt_tokens=num_prompt_tokens,
-                num_generation_tokens=num_generation_tokens,
-                time_to_first_tokens=time_to_first_tokens,
-                time_per_output_tokens=time_per_output_tokens,
-                time_e2e_requests=time_e2e_requests,
-            )
+        return Stats(
+            now=now,
+            num_running=num_running,
+            num_swapped=num_swapped,
+            num_waiting=num_waiting,
+            gpu_cache_usage=gpu_cache_usage,
+            cpu_cache_usage=cpu_cache_usage,
+            num_prompt_tokens=num_prompt_tokens,
+            num_generation_tokens=num_generation_tokens,
+            time_to_first_tokens=time_to_first_tokens,
+            time_per_output_tokens=time_per_output_tokens,
+            time_e2e_requests=time_e2e_requests,
+        )
 
     def _decode_sequence(self, seq: Sequence, prms: SamplingParams) -> None:
         """Decodes the new token for a sequence."""

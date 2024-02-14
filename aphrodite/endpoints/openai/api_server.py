@@ -21,6 +21,7 @@ from aphrodite.endpoints.openai.protocol import CompletionRequest, ChatCompletio
 from aphrodite.common.logger import init_logger
 from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
 from aphrodite.endpoints.openai.serving_completions import OpenAIServingCompletion
+from aphrodite.endpoints.openai.protocol import Prompt
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
@@ -143,6 +144,10 @@ async def show_available_models():
     models = await openai_serving_chat.show_available_models()
     return JSONResponse(content=models.model_dump())
 
+@app.post("/v1/tokenize")
+async def tokenize(prompt: Prompt):
+    tokenized = await openai_serving_chat.tokenize(prompt)
+    return JSONResponse(content=tokenized)
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,
