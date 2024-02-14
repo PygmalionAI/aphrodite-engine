@@ -10,7 +10,7 @@ openai # for fastapi's openai proxy emulation
 xformers >= 0.0.24
 einops  # Required for phi-1_5
 fschat >= 0.2.23
-pydantic == 1.10.13
+pydantic >= 2.0
 fastapi
 colorlog
 einops # for phi

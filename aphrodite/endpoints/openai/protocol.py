@@ -6,6 +6,7 @@ from typing import Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field
 
 from aphrodite.common.utils import random_uuid
+from aphrodite.common.sampling_params import SamplingParams
 
 
 class ErrorResponse(BaseModel):
@@ -91,6 +92,43 @@ class ChatCompletionRequest(BaseModel):
     spaces_between_special_tokens: Optional[bool] = True
     add_generation_prompt: Optional[bool] = True
     echo: Optional[bool] = False
+    length_penalty: Optional[float] = 1.0
+
+    def to_sampling_params(self) -> SamplingParams:
+        return SamplingParams(
+            n=self.n,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            tfs=self.tfs,
+            eta_cutoff=self.eta_cutoff,
+            epsilon_cutoff=self.epsilon_cutoff,
+            typical_p=self.typical_p,
+            presence_penalty=self.presence_penalty,
+            frequency_penalty=self.frequency_penalty,
+            repetition_penalty=self.repetition_penalty,
+            top_k=self.top_k,
+            top_a=self.top_a,
+            min_p=self.min_p,
+            mirostat_mode=self.mirostat_mode,
+            mirostat_tau=self.mirostat_tau,
+            mirostat_eta=self.mirostat_eta,
+            dynatemp_range=self.dynatemp_range,
+            dynatemp_exponent=self.dynatemp_exponent,
+            smoothing_factor=self.smoothing_factor,
+            ignore_eos=self.ignore_eos,
+            use_beam_search=self.use_beam_search,
+            logprobs=self.logprobs,
+            prompt_logprobs=self.prompt_logprobs,
+            stop_token_ids=self.stop_token_ids,
+            custom_token_bans=self.custom_token_bans,
+            skip_special_tokens=self.skip_special_tokens,
+            spaces_between_special_tokens=self.spaces_between_special_tokens,
+            length_penalty=self.length_penalty,
+            stop=self.stop,
+            best_of=self.best_of,
+            include_stop_str_in_output=self.include_stop_str_in_output,
+        )
 
 
 class CompletionRequest(BaseModel):
@@ -135,14 +173,51 @@ class CompletionRequest(BaseModel):
     skip_special_tokens: Optional[bool] = True
     spaces_between_special_tokens: Optional[bool] = True
     grammar: Optional[str] = None
+    length_penalty: Optional[float] = 1.0
+
+    def to_sampling_params(self) -> SamplingParams:
+        echo_without_generation = self.echo and self.max_tokens == 0
+        return SamplingParams(
+            n=self.n,
+            max_tokens=self.max_tokens if not echo_without_generation else 1,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            tfs=self.tfs,
+            eta_cutoff=self.eta_cutoff,
+            epsilon_cutoff=self.epsilon_cutoff,
+            typical_p=self.typical_p,
+            presence_penalty=self.presence_penalty,
+            frequency_penalty=self.frequency_penalty,
+            repetition_penalty=self.repetition_penalty,
+            top_k=self.top_k,
+            top_a=self.top_a,
+            min_p=self.min_p,
+            mirostat_mode=self.mirostat_mode,
+            mirostat_tau=self.mirostat_tau,
+            mirostat_eta=self.mirostat_eta,
+            dynatemp_range=self.dynatemp_range,
+            dynatemp_exponent=self.dynatemp_exponent,
+            smoothing_factor=self.smoothing_factor,
+            ignore_eos=self.ignore_eos,
+            use_beam_search=self.use_beam_search,
+            logprobs=self.logprobs,
+            prompt_logprobs=self.prompt_logprobs if self.echo else None,
+            stop_token_ids=self.stop_token_ids,
+            custom_token_bans=self.custom_token_bans,
+            skip_special_tokens=self.skip_special_tokens,
+            spaces_between_special_tokens=self.spaces_between_special_tokens,
+            length_penalty=self.length_penalty,
+            stop=self.stop,
+            best_of=self.best_of,
+            include_stop_str_in_output=self.include_stop_str_in_output,
+        )
 
 
 class LogProbs(BaseModel):
     text_offset: List[int] = Field(default_factory=list)
     token_logprobs: List[Optional[float]] = Field(default_factory=list)
     tokens: List[str] = Field(default_factory=list)
-    top_logprobs: List[Optional[Dict[str,
-                                     float]]] = Field(default_factory=list)
+    top_logprobs: Optional[List[Optional[Dict[int, float]]]] = None
 
 
 class CompletionResponseChoice(BaseModel):
