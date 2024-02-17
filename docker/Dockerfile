@@ -14,8 +14,6 @@ RUN apt-get update \
     && apt-get install python3 python3-pip -y \
     && rm -fr /var/lib/apt/lists/*
 
-COPY entrypoint.sh /workspace/aphrodite-engine
-
 ENV PATH /opt/conda/envs/aphrodite-engine/bin:$PATH
 
 # alias python3 to python
@@ -31,5 +29,3 @@ RUN rm -rf /tmp/aphrodite-engine
 ENV CUDA_HOME=/usr/local/cuda
 
 RUN python3 -m pip install --no-cache-dir -e .
-
-ENTRYPOINT [ "/app/aphrodite-engine/entrypoint.sh" ]
