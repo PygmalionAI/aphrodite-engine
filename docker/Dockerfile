@@ -28,7 +28,8 @@ ENV HF_HOME=/tmp
 
 RUN python3 -m pip install --no-cache-dir -e .
 
-ENTRYPOINT ["$HOME/docker/entrypoint.sh"]
+# Entrypoint exec form doesn't do variable substitution automatically ($HOME)
+ENTRYPOINT ["/app/aphrodite-engine/docker/entrypoint.sh"]
 
 EXPOSE 5000
 
