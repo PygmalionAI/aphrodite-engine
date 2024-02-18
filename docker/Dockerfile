@@ -6,7 +6,8 @@ WORKDIR $HOME
 
 # Upgrade OS Packages + Prepare Python Environment
 RUN set -eux; \
-    apt-get update \
+    export DEBIAN_FRONTEND=noninteractive \
+    && apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y build-essential git python3-pip tzdata \
     && rm -fr /var/lib/apt/lists/*
