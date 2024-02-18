@@ -89,11 +89,32 @@ class WorkerMonitor(threading.Thread):
         if self._close:
             return
         self._close = True
+
+        # Kill / cleanup all workers
+        for worker in self.workers:
+            if worker.sentinel in dead_sentinels:
+                worker.join(1)
+            if worker.exitcode is not None and worker.exitcode != 0:
+                logger.error(f"Worker {worker.name} pid {worker.pid} died, "
+                             f"exit code: {worker.exitcode}")
+        # Cleanup any remaining workers
+        logger.info("Killing local Aphrodite worker processes")
+        for worker in self.workers:
+            worker.kill_worker()
+        # Must be done after worker task queues are all closed
+        self.result_handler.close()
+
+
+
+    def close(self):
+        if self._close:
+            return
+        self._close = True
         logger.info("Terminating local Aphrodite worker processes")
         for worker in self.workers:
             worker.terminate_worker()
+        # Must be done after worker task queues are all closed
         self.result_handler.close()
-
 
 class LocalWorkerAphrodite(mp.Process):
     """Local process wrapper for aphrodite.task_handler.worker
