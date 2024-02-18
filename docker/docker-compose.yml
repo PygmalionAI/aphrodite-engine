@@ -2,21 +2,7 @@ version: "3.7"
 
 services:
   aphrodite-engine:
-    command: --host 0.0.0.0
-             --port 2242
-             ${API_KEY:+--api-keys ${API_KEY-}}
-             ${SSL_KEYFILE:+--ssl-keyfile /etc/ssl/private/server.key}
-             ${SSL_CERTFILE:+--ssl-certfile /etc/ssl/certs/server.crt}
-             ${MODEL_NAME:+--model ${MODEL_NAME-}}
-             ${REVISION:+--revision ${REVISION-}}
-             ${DATATYPE:+--dtype ${DATATYPE-}}
-             ${KVCACHE:+--kv-cache-dtype ${KVCACHE-}}
-             ${CONTEXT_LENGTH:+--max-model-len ${CONTEXT_LENGTH-}}
-             ${NUM_GPUS:+--tensor-parallel-size ${NUM_GPUS-}}
-             ${GPU_MEMORY_UTILIZATION:+-gmu ${GPU_MEMORY_UTILIZATION-}}
-             ${QUANTIZATION:+--quantization ${QUANTIZATION-} --dtype half}
-             ${ENFORCE_EAGER:+--enforce-eager}
-             ${CMD_ADDITIONAL_ARGUMENTS-}
+    #container_name: aphrodite-engine
     deploy:
       resources:
         reservations:
@@ -24,18 +10,18 @@ services:
             - capabilities: [gpu]
               count: all
               driver: nvidia
-    entrypoint: python3 -m aphrodite.endpoints.openai.api_server
-    environment:
-      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN-}
+    env_file: .env
     hostname: aphrodite-engine
     image: alpindale/aphrodite-engine
     ipc: host
     ports:
-      - "${PORT:-7860}:2242"
+      - "${PORT:-5000}:5000"
     restart: on-failure:5
+    user: "${UID:-1000}:${GID:-0}"
     volumes:
-      - ${HOME:?err}/.cache/huggingface/hub:/root/.cache/huggingface/hub
+      - ${HF_CACHE:-hf-cache}:/tmp
       - ${SSL_CERTFILE:-/dev/null}:/etc/ssl/certs/server.crt:ro
       - ${SSL_KEYFILE:-/dev/null}:/etc/ssl/private/server.key:ro
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
+
+volumes:
+  hf-cache:

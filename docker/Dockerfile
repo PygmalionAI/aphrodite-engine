@@ -1,31 +1,36 @@
 FROM nvidia/cuda:12.1.1-devel-ubuntu22.04
 
-WORKDIR /workspace/aphrodite-engine
+ENV HOME=/app/aphrodite-engine
 
-# Upgrade OS Packages
+WORKDIR $HOME
+
+# Upgrade OS Packages + Prepare Python Environment
 RUN set -eux; \
     apt-get update \
-    && apt-get upgrade -y \
-    && rm -rf /var/lib/apt/lists/*
-
-# Preparing Conda Environment
-RUN apt-get update \
-    && apt-get install -y git build-essential \
-    && apt-get install python3 python3-pip -y \
+    && apt-get upgrade -y
+    && apt-get install -y build-essential git python3-pip tzdata \
     && rm -fr /var/lib/apt/lists/*
 
-ENV PATH /opt/conda/envs/aphrodite-engine/bin:$PATH
-
-# alias python3 to python
+# Alias python3 to python
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
-RUN python3 -m pip install --upgrade pip
+RUN python3 -m pip install --no-cache-dir --upgrade pip
 
-RUN git clone https://github.com/PygmalionAI/aphrodite-engine.git /tmp/aphrodite-engine
-RUN mv /tmp/aphrodite-engine/* /workspace/aphrodite-engine/
-RUN rm -rf /tmp/aphrodite-engine
+RUN git clone https://github.com/PygmalionAI/aphrodite-engine.git /tmp/aphrodite-engine \
+    && mv /tmp/aphrodite-engine/* .
+    && rm -fr /tmp/aphrodite-engine
 
 # Export the CUDA_HOME variable correctly
 ENV CUDA_HOME=/usr/local/cuda
 
+ENV HF_HOME=/tmp
+
 RUN python3 -m pip install --no-cache-dir -e .
+
+ENTRYPOINT ["/app/docker/entrypoint.sh"]
+
+EXPOSE 5000
+
+USER 1000:0
+
+VOLUME ["/tmp"]
