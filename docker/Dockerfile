@@ -7,7 +7,7 @@ WORKDIR $HOME
 # Upgrade OS Packages + Prepare Python Environment
 RUN set -eux; \
     apt-get update \
-    && apt-get upgrade -y
+    && apt-get upgrade -y \
     && apt-get install -y build-essential git python3-pip tzdata \
     && rm -fr /var/lib/apt/lists/*
 
@@ -17,7 +17,7 @@ RUN ln -s /usr/bin/python3 /usr/bin/python
 RUN python3 -m pip install --no-cache-dir --upgrade pip
 
 RUN git clone https://github.com/PygmalionAI/aphrodite-engine.git /tmp/aphrodite-engine \
-    && mv /tmp/aphrodite-engine/* .
+    && mv /tmp/aphrodite-engine/* . \
     && rm -fr /tmp/aphrodite-engine
 
 # Export the CUDA_HOME variable correctly
