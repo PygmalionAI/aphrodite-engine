@@ -27,7 +27,7 @@ ENV HF_HOME=/tmp
 
 RUN python3 -m pip install --no-cache-dir -e .
 
-ENTRYPOINT ["/app/docker/entrypoint.sh"]
+ENTRYPOINT ["$HOME/docker/entrypoint.sh"]
 
 EXPOSE 5000
 
