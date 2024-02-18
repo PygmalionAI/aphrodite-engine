@@ -19,6 +19,7 @@ class ProcessLogger(logging.LoggerAdapter):
         msg = f"[{self.extra['process_name']} pid {self.extra['pid']}] {msg}"
         return msg, kwargs
 
+
 class ColoredFormatter(colorlog.ColoredFormatter):
     """Adds logging prefix to newlines to align multi-line messages."""
 
@@ -82,8 +83,9 @@ def init_logger(name: str):
     logger.addHandler(_default_handler)
     logger.propagate = False
     if mp.parent_process() is not None:
-        logger = ProcessLogger(logger, {
-            'process_name': mp.current_process().name,
-            'pid': mp.current_process().pid
-        })
+        logger = ProcessLogger(
+            logger, {
+                "process_name": mp.current_process().name,
+                "pid": mp.current_process().pid
+            })
     return logger

@@ -6,7 +6,7 @@ import multiprocessing as mp
 import uuid
 from multiprocessing.connection import wait
 from dataclasses import dataclass
-from typing import Any, Dict, List, TypeVar, Generic, Optional, Tuple, Union
+from typing import Dict, List, TypeVar, Generic, Optional, Union
 
 from aphrodite.common.logger import init_logger
 
@@ -15,6 +15,7 @@ logger = init_logger(__name__)
 T = TypeVar("T")
 
 _TERMINATE = "TERMINATE"
+
 
 @dataclass
 class Result(Generic[T]):
@@ -27,7 +28,7 @@ class Result(Generic[T]):
 
 class ResultFuture(threading.Event, Generic[T]):
     """Synchronous future for non-async case"""
-    
+
     def __init__(self) -> None:
         super().__init__()
         self.result: Optional[Result[T]] = None
@@ -41,7 +42,8 @@ class ResultFuture(threading.Event, Generic[T]):
         if self.result.exception is not None:
             raise self.result.exception
         return self.result.value
-    
+
+
 def _set_future_result(future: Union[ResultFuture, asyncio.Future],
                        result: Result):
     if isinstance(future, ResultFuture):
@@ -68,8 +70,10 @@ class ResultHandler(threading.Thread):
             _set_future_result(future, result)
         for future in self.tasks.values():
             _set_future_result(
-                future, Result(exception=ChildProcessError("Worker Has Been Terminated")))
-            
+                future,
+                Result(
+                    exception=ChildProcessError("Worker Has Been Terminated")))
+
     def close(self):
         self.result_queue.put(_TERMINATE)
 
@@ -77,7 +81,7 @@ class ResultHandler(threading.Thread):
 class WorkerMonitor(threading.Thread):
     """Monitor worker status in the background thread"""
 
-    def __init__(self, workers: List['LocalWorkerAphrodite'],
+    def __init__(self, workers: List["LocalWorkerAphrodite"],
                  result_handler: ResultHandler):
         super().__init__(daemon=True)
         self.workers = workers
@@ -104,8 +108,6 @@ class WorkerMonitor(threading.Thread):
         # Must be done after worker task queues are all closed
         self.result_handler.close()
 
-
-
     def close(self):
         if self._close:
             return
@@ -115,6 +117,7 @@ class WorkerMonitor(threading.Thread):
             worker.terminate_worker()
         # Must be done after worker task queues are all closed
         self.result_handler.close()
+
 
 class LocalWorkerAphrodite(mp.Process):
     """Local process wrapper for aphrodite.task_handler.worker
@@ -138,12 +141,12 @@ class LocalWorkerAphrodite(mp.Process):
         except Exception as e:
             del self.tasks[task_id]
             raise ChildProcessError("Worker Has Been Terminated") from e
-        
+
     def execute_method(self, method: str, *args, **kwargs):
         future = ResultFuture()
         self._enqueue_task(future, method, args, kwargs)
         return future
-    
+
     async def execute_method_async(self, method: str, *args, **kwargs):
         future = asyncio.get_running_loop().create_future()
         self._enqueue_task(future, method, args, kwargs)
@@ -155,11 +158,11 @@ class LocalWorkerAphrodite(mp.Process):
         except ValueError:
             self.kill()
         self._task_queue.close()
-    
+
     def kill_worker(self):
         self._task_queue.close()
         self.kill()
-    
+
     def run(self) -> None:
         del self.tasks
         from aphrodite.task_handler.worker import Worker
@@ -185,6 +188,6 @@ class LocalWorkerAphrodite(mp.Process):
                 exception = e
             self.result_queue.put(
                 Result(task_id=task_id, value=output, exception=exception))
-        
+
         logger.info(
             f"Worker {mp.current_process().name} pid {os.getpid()} terminated")

@@ -5,14 +5,14 @@ import subprocess
 import uuid
 from collections.abc import Iterable
 from platform import uname
-
-import psutil
-import torch
-import asyncio
 from functools import partial
 from typing import (Any, Awaitable, Callable, Hashable, Optional, TypeVar,
                     List, Tuple, Union)
 from collections import OrderedDict
+
+import psutil
+import torch
+import asyncio
 from packaging.version import parse, Version
 
 from aphrodite.common.logger import init_logger

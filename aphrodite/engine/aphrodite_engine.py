@@ -139,13 +139,13 @@ class AphroditeEngine:
         world_size = self.parallel_config.tensor_parallel_size
         if "CUDA_VISIBLE_DEVICES" not in os.environ:
             set_cuda_visible_devices(range(world_size))
-        
+
         from torch.cuda import device_count
         assert world_size <= device_count(), (
             "The number of GPUs requested is greater than the number of "
             "available GPUs. Please set the CUDA_VISIBLE_DEVICES environment "
             "variable to the desired GPU IDs.")
-        
+
         distributed_init_method = f"tcp://{get_ip()}:{get_open_port()}"
 
         if world_size == 1:
@@ -175,7 +175,7 @@ class AphroditeEngine:
             self.worker_monitor.start()
 
         self._init_driver_worker_and_model(0, 0, distributed_init_method)
-    
+
     def __del__(self):
         if self.worker_monitor is not None:
             self.worker_monitor.close()
@@ -1025,6 +1025,5 @@ class AphroditeEngine:
                 worker_outputs = [output.get() for output in worker_outputs]
             else:
                 worker_outputs = ray.get(worker_outputs)
-            
 
         return [driver_worker_output] + worker_outputs
