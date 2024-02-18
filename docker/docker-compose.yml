@@ -2,7 +2,9 @@ version: "3.7"
 
 services:
   aphrodite-engine:
-    #container_name: aphrodite-engine
+    #build:
+    #  context: .
+    container_name: aphrodite-engine
     deploy:
       resources:
         reservations:
