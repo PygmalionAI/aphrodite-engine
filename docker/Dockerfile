@@ -9,7 +9,7 @@ RUN set -eux; \
     export DEBIAN_FRONTEND=noninteractive \
     && apt-get update \
     && apt-get upgrade -y \
-    && apt-get install -y build-essential git python3-pip tzdata \
+    && apt-get install -y bzip2 g++ git make python3-pip tzdata \
     && rm -fr /var/lib/apt/lists/*
 
 # Alias python3 to python
