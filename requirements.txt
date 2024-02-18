@@ -1,6 +1,5 @@
 ninja
 psutil
-ray >= 2.9
 sentencepiece
 numpy
 torch == 2.2.0
