@@ -1,3 +1,4 @@
+import importlib.util
 from typing import Optional, Union, ClassVar
 from dataclasses import dataclass
 import os
@@ -373,7 +374,7 @@ class ParallelConfig:
         self,
         pipeline_parallel_size: int,
         tensor_parallel_size: int,
-        worker_use_ray: bool,
+        worker_use_ray: Optional[bool] = False,
         max_parallel_loading_workers: Optional[int] = None,
         disable_custom_all_reduce: bool = False,
     ) -> None:
@@ -384,8 +385,10 @@ class ParallelConfig:
         self.disable_custom_all_reduce = disable_custom_all_reduce
 
         self.world_size = pipeline_parallel_size * tensor_parallel_size
-        if self.world_size > 1:
-            self.worker_use_ray = True
+        if self.worker_use_ray is None:
+            ray_found = importlib.util.find_spec("ray") is not None
+            self.worker_use_ray = ray_found and self.world_size > 1
+
         self._verify_args()
 
     def _verify_args(self) -> None:

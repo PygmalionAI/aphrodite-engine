@@ -6,11 +6,18 @@ https://github.com/skypilot-org/skypilot/blob/master/sky/sky_logging.py
 import logging
 import sys
 import colorlog
+import multiprocessing as mp
 
 # pylint: disable=line-too-long
 _FORMAT = "%(log_color)s%(levelname)s %(asctime)s %(filename)s:%(lineno)d] %(message)s"
 _DATE_FORMAT = "%m-%d %H:%M:%S"
 
+
+class ProcessLogger(logging.LoggerAdapter):
+
+    def process(self, msg, kwargs):
+        msg = f"[{self.extra['process_name']} pid {self.extra['pid']}] {msg}"
+        return msg, kwargs
 
 class ColoredFormatter(colorlog.ColoredFormatter):
     """Adds logging prefix to newlines to align multi-line messages."""
@@ -74,4 +81,9 @@ def init_logger(name: str):
     logger.setLevel(logging.DEBUG)
     logger.addHandler(_default_handler)
     logger.propagate = False
+    if mp.parent_process() is not None:
+        logger = ProcessLogger(logger, {
+            'process_name': mp.current_process().name,
+            'pid': mp.current_process().pid
+        })
     return logger

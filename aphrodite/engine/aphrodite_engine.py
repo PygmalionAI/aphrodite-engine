@@ -12,6 +12,7 @@ from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.metrics import StatLogger, Stats
 from aphrodite.engine.ray_tools import RayWorkerAphrodite, initialize_cluster, ray
+from aphrodite.engine.local_worker_utils import LocalWorkerAphrodite, WorkerMonitor, ResultHandler
 from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
@@ -109,6 +110,7 @@ class AphroditeEngine:
         self.seq_counter = Counter()
 
         # Create the parallel GPU workers.
+        self.worker_monitor = None
         if self.parallel_config.worker_use_ray:
             # Disable Ray usage stats collection.
             ray_usage = os.environ.get("RAY_USAGE_STATS_ENABLED", "0")
@@ -134,30 +136,70 @@ class AphroditeEngine:
         return self.tokenizer.get_lora_tokenizer(sequence.lora_request)
 
     def _init_workers(self):
-        # Lazy import the Worker to avoid importing torch.cuda/xformers
-        # before CUDA_VISIBLE_DEVICES is set in the Worker
-        # pylint: disable=import-outside-toplevel
-        from aphrodite.task_handler.worker import Worker
-
-        assert self.parallel_config.world_size == 1, (
-            "Ray is required if parallel_config.world_size > 1.")
-
-        self.workers: List[Worker] = []
+        world_size = self.parallel_config.tensor_parallel_size
+        if "CUDA_VISIBLE_DEVICES" not in os.environ:
+            set_cuda_visible_devices(range(world_size))
+        
+        from torch.cuda import device_count
+        assert world_size <= device_count(), (
+            "The number of GPUs requested is greater than the number of "
+            "available GPUs. Please set the CUDA_VISIBLE_DEVICES environment "
+            "variable to the desired GPU IDs.")
+        
         distributed_init_method = f"tcp://{get_ip()}:{get_open_port()}"
+
+        if world_size == 1:
+            self.workers = []
+        else:
+            result_handler = ResultHandler()
+            self.workers = [
+                LocalWorkerAphrodite(
+                    result_handler,
+                    self.model_config,
+                    self.parallel_config,
+                    self.scheduler_config,
+                    self.device_config,
+                    local_rank=rank,
+                    rank=rank,
+                    distributed_init_method=distributed_init_method,
+                    lora_config=self.lora_config,
+                    kv_cache_dtype=self.cache_config.cache_dtype,
+                ) for rank in range(1, world_size)
+            ]
+
+            for worker in self.workers:
+                worker.start()
+
+            self.worker_monitor = WorkerMonitor(self.workers, result_handler)
+            result_handler.start()
+            self.worker_monitor.start()
+
+        self._init_driver_worker_and_model(0, 0, distributed_init_method)
+    
+    def __del__(self):
+        if self.worker_monitor is not None:
+            self.worker_monitor.close()
+
+    def _init_driver_worker_and_model(self, rank: int, local_rank: int,
+                                      distributed_init_method: str):
+        # Lazily import the worker
+        from aphrodite.task_handler.worker import Worker
         self.driver_worker = Worker(
             self.model_config,
             self.parallel_config,
             self.scheduler_config,
             self.device_config,
-            local_rank=0,
-            rank=0,
+            local_rank=local_rank,
+            rank=rank,
             distributed_init_method=distributed_init_method,
             lora_config=self.lora_config,
             kv_cache_dtype=self.cache_config.cache_dtype,
             is_driver_worker=True,
         )
         self._run_workers("init_model")
-        self._run_workers("load_model")
+        self._run_workers("load_model",
+                          max_concurrent_workers=self.parallel_config.
+                          max_parallel_loading_workers)
 
     def _init_tokenizer(self, **tokenizer_init_kwargs):
         init_kwargs = dict(
@@ -266,25 +308,8 @@ class AphroditeEngine:
 
         driver_rank = 0
         driver_local_rank = node_workers[driver_node_id].index(driver_rank)
-        self.driver_worker = Worker(
-            model_config,
-            parallel_config,
-            scheduler_config,
-            device_config,
-            driver_local_rank,
-            driver_rank,
-            distributed_init_method,
-            lora_config=self.lora_config,
-            kv_cache_dtype=self.cache_config.cache_dtype,
-            is_driver_worker=True,
-        )
-
-        self._run_workers("init_model")
-        self._run_workers(
-            "load_model",
-            max_concurrent_workers=self.parallel_config.
-            max_parallel_loading_workers,
-        )
+        self._init_driver_worker_and_model(driver_rank, driver_local_rank,
+                                           distributed_init_method)
 
     def _verify_args(self) -> None:
         self.model_config.verify_with_parallel_config(self.parallel_config)
@@ -973,11 +998,17 @@ class AphroditeEngine:
             raise NotImplementedError(
                 "max_concurrent_workers is not supported yet.")
 
-        # Start the ray workers first.
-        ray_worker_outputs = [
-            worker.execute_method.remote(method, *args, **kwargs)
-            for worker in self.workers
-        ]
+        if not self.parallel_config.worker_use_ray:
+            worker_outputs = [
+                worker.execute_method(method, *args, **kwargs)
+                for worker in self.workers
+            ]
+        else:
+            # Start the ray workers first.
+            worker_outputs = [
+                worker.execute_method.remote(method, *args, **kwargs)
+                for worker in self.workers
+            ]
 
         if driver_args is None:
             driver_args = args
@@ -990,6 +1021,10 @@ class AphroditeEngine:
 
         # Get the results of the ray workers.
         if self.workers:
-            ray_worker_outputs = ray.get(ray_worker_outputs)
+            if not self.parallel_config.worker_use_ray:
+                worker_outputs = [output.get() for output in worker_outputs]
+            else:
+                worker_outputs = ray.get(worker_outputs)
+            
 
-        return [driver_worker_output] + ray_worker_outputs
+        return [driver_worker_output] + worker_outputs

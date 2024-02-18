@@ -273,6 +273,18 @@ class _AsyncAphrodite(AphroditeEngine):
         for worker in self.workers:
             coros.append(worker.execute_method.remote(method, *args, **kwargs))
 
+        # Run workers async
+        if self.parallel_config.worker_use_ray:
+            for worker in self.workers:
+                coros.append(
+                    worker.execute_method.remote(method, *args, **kwargs)
+                )
+        else:
+            for worker in self.workers:
+                coros.append(
+                    worker.execute_method_async(method, *args, **kwargs)
+                )
+
         all_outputs = await asyncio.gather(*coros)
         return all_outputs
 

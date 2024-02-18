@@ -36,7 +36,7 @@ class ResultFuture(threading.Event, Generic[T]):
         self.result = result
         self.set()
 
-    def get_result(self) -> T:
+    def get(self) -> T:
         self.wait()
         if self.result.exception is not None:
             raise self.result.exception
@@ -99,7 +99,7 @@ class LocalWorkerAphrodite(mp.Process):
     """Local process wrapper for aphrodite.task_handler.worker
     for handling single-node multi-GPU tensor parallelism"""
 
-    def __init__(self, result_handler: ResultHandler, *args, **kwargs) -> NOne:
+    def __init__(self, result_handler: ResultHandler, *args, **kwargs) -> None:
         super().__init__(daemon=True)
         self._task_queue = mp.Queue()
         self.result_queue = result_handler.result_queue

@@ -3,6 +3,7 @@ import os
 import socket
 import subprocess
 import uuid
+from collections.abc import Iterable
 from platform import uname
 
 import psutil
@@ -164,7 +165,7 @@ def get_open_port() -> int:
         return s.getsockname()[1]
 
 
-def set_cuda_visible_devices(device_ids: List[int]) -> None:
+def set_cuda_visible_devices(device_ids: Iterable[int]) -> None:
     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, device_ids))
 
 
