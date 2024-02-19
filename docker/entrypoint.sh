@@ -19,7 +19,7 @@ CMD="python3 -m aphrodite.endpoints.${ENDPOINT:-openai}.api_server
 
 # Only the 'openai' endpoint currently supports api-keys and ssl
 if [ "$ENDPOINT" = "openai" ]; then
-  CMD+=" ${API_KEY:+--api-keys "$API_KEY"} ${SSL_KEYFILE:+--ssl-keyfile /etc/ssl/private/server.key} ${SSL_CERTFILE:+--ssl-certfile /etc/ssl/certs/server.crt}"
+  CMD+=" ${API_KEY:+--api-keys "$API_KEY"} ${SSL_KEYFILE:+--ssl-keyfile server.key} ${SSL_CERTFILE:+--ssl-certfile server.crt}"
 fi
 
 # set umask to ensure group read / write at runtime
