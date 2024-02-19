@@ -22,8 +22,8 @@ services:
     user: "${UID:-1000}:${GID:-0}"
     volumes:
       - ${HF_CACHE:-hf-cache}:/tmp
-      - ${SSL_CERTFILE:-/dev/null}:/etc/ssl/certs/server.crt:ro
-      - ${SSL_KEYFILE:-/dev/null}:/etc/ssl/private/server.key:ro
+      - ${SSL_CERTFILE:-/dev/null}:/app/aphrodite-engine/server.crt:ro
+      - ${SSL_KEYFILE:-/dev/null}:/app/aphrodite-engine/server.key:ro
 
 volumes:
   hf-cache:
