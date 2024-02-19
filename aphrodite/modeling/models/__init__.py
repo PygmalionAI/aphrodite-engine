@@ -20,6 +20,7 @@ _MODELS = {
     "MixtralForCausalLM": ("mixtral", "MixtralForCausalLM"),
     "PhiForCausalLM": ("phi", "PhiForCausalLM"),
     "YiForCausalLM": ("yi", "YiForCausalLM"),
+    "OPTForCausalLM": ("opt", "OPTForCausalLM"),
 }
 
 # Models not supported by ROCm
