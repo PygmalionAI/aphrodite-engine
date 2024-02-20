@@ -102,9 +102,11 @@ class Sampler(nn.Module):
         assert len(banned_tokens) == logits.shape[0]
         logits = _apply_token_bans(logits, banned_tokens)
 
-        for indices, order in _get_orders_and_indices(
+        for int_indices, order in _get_orders_and_indices(
                 sampling_tensors.sampler_orders):
             masks = []
+            indices = torch.zeros(logits.shape[0], dtype=torch.bool, device="cuda")
+            indices[int_indices] = True
             for subgroup in order:
                 # The special ones
                 if "temp" in subgroup:
@@ -177,7 +179,9 @@ class Sampler(nn.Module):
                 mask = torch.zeros_like(logits[indices], dtype=torch.bool)
                 for m in masks:
                     mask |= m
-                logits[indices][mask] = float("-inf")
+                real_mask = torch.zeros_like(logits, dtype=torch.bool)
+                real_mask[int_indices] = mask
+                logits[real_mask] = float("-inf")
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
@@ -811,11 +815,11 @@ def _build_sampler_output(
     return sampler_output
 
 
-def _miro_store_args(seqids: List[int], mus: List[float],
+def _miro_store_args(seqids: List[int], mus: torch.Tensor, mask: torch.Tensor,
                      output_metadata: OutputMetadata) -> None:
-    for sid, mu in zip(seqids,
-                       mus.tolist()):  # tolist might be premature optimization
-        output_metadata.add(sid, "miro_mu", mu)
+    for sid, mu, do_write in zip(seqids, mus.tolist(), mask.tolist()):
+        if do_write:
+            output_metadata.add(sid, "miro_mu", mu)
 
 
 def _apply_mirostat_v2(
@@ -869,7 +873,7 @@ def _apply_mirostat_v2(
     return logits
 
 
-def _mirostat(logits: torch.Tensor, indices: torch.Tensor,
+def _mirostat(logits: torch.Tensor, mask: torch.Tensor,
               sampling_tensors: SamplingTensors,
               output_metadata: OutputMetadata) -> torch.Tensor:
     miro_idx = sampling_tensors.miro_indices
@@ -878,17 +882,10 @@ def _mirostat(logits: torch.Tensor, indices: torch.Tensor,
     etas = sampling_tensors.miro_etas
     mus = sampling_tensors.miro_mus
 
-    # Find intersection of miro_idx and indicies from order, those are the ones we need to apply mirostat to
-    combined = torch.cat((miro_idx, indices))
-    uniques, counts = combined.unique(return_counts=True)
-    indices_intersection = uniques[counts > 1]
-    # miro_param_indices contains positions of the intersection indices in miro_idx
-    # we need this to index into taus, etas, and mus
-    miro_param_indices = torch.nonzero(
-        torch.isin(miro_idx, indices_intersection)).squeeze()
+    seqs_mask = mask[miro_idx]
+    logits_mask = torch.zeros(logits.shape[0], dtype=torch.bool, device="cuda")
+    logits_mask[miro_idx] = mask[miro_idx]
 
-    logits[indices_intersection] = _apply_mirostat_v2(
-        logits[indices_intersection], taus[miro_param_indices],
-        etas[miro_param_indices],
-        mus[miro_param_indices])  # mus is an inout param, :vomit:
-    _miro_store_args(seqids, mus, output_metadata)
+    logits[logits_mask] = _apply_mirostat_v2(logits[logits_mask], taus[seqs_mask],
+                                       etas[seqs_mask], mus[seqs_mask])
+    _miro_store_args(seqids, mus, seqs_mask, output_metadata)
