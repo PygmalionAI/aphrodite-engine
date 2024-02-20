@@ -18,7 +18,7 @@ CMD="python3 -m aphrodite.endpoints.${ENDPOINT:-openai}.api_server
              ${CMD_ADDITIONAL_ARGUMENTS}"
 
 # Only the 'openai' endpoint currently supports api-keys and ssl
-if [ "$ENDPOINT" = "openai" ]; then
+if [ "${ENDPOINT:-openai}" = "openai" ]; then
   CMD+=" ${API_KEY:+--api-keys "$API_KEY"} ${SSL_KEYFILE:+--ssl-keyfile server.key} ${SSL_CERTFILE:+--ssl-certfile server.crt}"
 fi
 
