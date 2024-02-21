@@ -148,6 +148,100 @@ torch::Tensor ggml_mul_mat_a8(
     int64_t row
 );
 
+// Smooth quant kernels
+void rms_norm_quant(
+  torch::Tensor& out,
+  torch::Tensor& input,
+  torch::Tensor& weight,
+  float epsilon);
+
+void dequant_add_residual_rms_norm_quant(
+  torch::Tensor& out,
+  torch::Tensor& input,
+  torch::Tensor& residual,
+  torch::Tensor& gamma,
+  float scale,
+  float epsilon);
+
+void dequant_add_residual_rms_norm_quant(
+  torch::Tensor& out,
+  torch::Tensor& input,
+  torch::Tensor& residual,
+  torch::Tensor& gamma,
+  torch::Tensor& scale,
+  float epsilon,
+  float weight_dequant_scale);
+
+void add_residual_rms_norm_quant(
+  torch::Tensor& out,
+  torch::Tensor& input,
+  torch::Tensor& residual,
+  torch::Tensor& weight,
+  float epsilon);
+
+void dequant_rotary_embedding(
+  torch::Tensor& positions,
+  torch::Tensor& query,
+  torch::Tensor& key,
+  int head_size,
+  torch::Tensor& cos_sin_cache,
+  bool is_neox,
+  torch::Tensor& query_out,
+  torch::Tensor& key_out,
+  float query_scale,
+  float key_scale);
+
+void dequant_silu_and_mul_quant(
+  torch::Tensor& out,
+  torch::Tensor& input,
+  float gate_scale,
+  float up_scale,
+  float out_scale);
+
+void dequant_silu_and_mul_quant(
+  torch::Tensor& out,
+  torch::Tensor& input,
+  float gate_scale,
+  float up_scale,
+  torch::Tensor& out_scale,
+  torch::Tensor& tmp);
+
+void dequant_add_residual(
+  torch::Tensor& out,
+  torch::Tensor& input,
+  torch::Tensor& residual,
+  float scale);
+
+void dequant_add_residual(
+  torch::Tensor& out,
+  torch::Tensor& input,
+  torch::Tensor& residual,
+  torch::Tensor& scale,
+  float weight_dequant_scale);
+
+void dequant(
+  torch::Tensor& out,
+  torch::Tensor& input,
+  float scale);
+
+void dequant(
+  torch::Tensor& out,
+  torch::Tensor& input,
+  torch::Tensor& scale,
+  float weight_dequant_scale);
+
+void quant(
+  torch::Tensor& out,
+  torch::Tensor& input,
+  float scale);
+
+void quant(
+  torch::Tensor& out,
+  torch::Tensor& input,
+  torch::Tensor& scale);
+
+
+// all reduce kernels
 #ifndef USE_ROCM
 using fptr_t = uint64_t;
 fptr_t init_custom_ar(torch::Tensor &meta, torch::Tensor &rank_data,
