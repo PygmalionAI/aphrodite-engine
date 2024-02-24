@@ -8,8 +8,6 @@ from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 from typing import Optional, List, Set, Union
 import weakref
 
-import ray
-
 from lark import Lark
 from lark.parsers.lalr_interactive_parser import InteractiveParser
 from lark.parsers.lalr_parser_state import ParserState
