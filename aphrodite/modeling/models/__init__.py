@@ -18,6 +18,7 @@ _MODELS = {
     "LLaMAForCausalLM": ("llama", "LlamaForCausalLM"),
     "MistralForCausalLM": ("mistral", "MistralForCausalLM"),
     "MixtralForCausalLM": ("mixtral", "MixtralForCausalLM"),
+    "QuantMixtralForCausalLM": ("mixtral_quant", "MixtralForCausalLM"),
     "PhiForCausalLM": ("phi", "PhiForCausalLM"),
     "YiForCausalLM": ("yi", "YiForCausalLM"),
     "OPTForCausalLM": ("opt", "OPTForCausalLM"),

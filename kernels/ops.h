@@ -148,6 +148,15 @@ torch::Tensor ggml_mul_mat_a8(
     int64_t row
 );
 
+void moe_align_block_size(
+  torch::Tensor topk_ids,
+  int num_experts,
+  int block_size,
+  torch::Tensor sorted_token_ids,
+  torch::Tensor expert_ids,
+  torch::Tensor num_tokens_post_pad
+);
+
 #ifndef USE_ROCM
 using fptr_t = uint64_t;
 fptr_t init_custom_ar(torch::Tensor &meta, torch::Tensor &rank_data,
@@ -169,11 +178,3 @@ void register_graph_buffers(fptr_t _fa, const std::vector<std::string> &handles,
                             const std::vector<std::vector<int64_t>> &offsets);
 #endif
 
-void moe_align_block_size(
-  torch::Tensor topk_ids,
-  int num_experts,
-  int block_size,
-  torch::Tensor sorted_token_ids,
-  torch::Tensor expert_ids,
-  torch::Tensor num_tokens_post_pad
-);
