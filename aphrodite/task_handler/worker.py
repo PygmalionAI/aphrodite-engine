@@ -8,6 +8,7 @@ import torch.distributed
 
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig, LoRAConfig, DeviceConfig)
+from aphrodite.common.utils import in_wsl
 from aphrodite.modeling import set_random_seed
 from aphrodite.modeling.megatron.communication_op import (broadcast_tensor_dict
                                                           )
@@ -79,6 +80,10 @@ class Worker:
 
             # This env var set by Ray causes exceptions with graph building.
             os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
+
+            # Patch for torch.cuda.is_available() unexpected error in WSL; always call torch.cuda.device_count() before initialising device
+            if in_wsl():
+                torch.cuda.device_count()
             self.device = torch.device(f"cuda:{self.local_rank}")
             torch.cuda.set_device(self.device)
 
