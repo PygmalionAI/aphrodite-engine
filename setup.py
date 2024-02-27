@@ -22,7 +22,7 @@ MAIN_CUDA_VERSION = "12.1"
 NVIDIA_SUPPORTED_ARCHS = {
     "6.1", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"
 }
-ROCM_SUPPORTED_ARCHS = {"gfx90a", "gfx942"}
+ROCM_SUPPORTED_ARCHS = {"gfx90a", "gfx942", "gfx1100"}
 
 def _is_hip() -> bool:
     return torch.version.hip is not None
