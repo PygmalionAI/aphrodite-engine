@@ -8,8 +8,6 @@ from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 from typing import Optional, List, Set, Union
 import weakref
 
-import ray
-
 from lark import Lark
 from lark.parsers.lalr_interactive_parser import InteractiveParser
 from lark.parsers.lalr_parser_state import ParserState
@@ -432,39 +430,16 @@ class GrammarLogitsProcessor(NextTokenValidator):
     Apply NextTokenValidator in __call__ and set excluded tokens logits to -inf
     """
 
-    def __call__(self, token_ids: List[int],
-                 logits: torch.Tensor) -> torch.Tensor:
-        # get valid token IDs given prior tokens
-        sequence = self.tokenizer.decode(token_ids)
-        valid_token_ids = self.get_valid_next_token_ids(sequence)
-        valid = torch.tensor(list(valid_token_ids), dtype=torch.long)
+    def __call__(self, logits: torch.Tensor,
+                 token_ids: List[List[int]]) -> None:
+        for i in range(len(token_ids)):
+            # get valid token IDs given prior tokens
+            sequence = self.tokenizer.decode(token_ids[i])
+            valid_token_ids = self.get_valid_next_token_ids(sequence)
+            valid = torch.tensor(list(valid_token_ids), dtype=torch.long)
 
-        # modify logits given valid token IDs
-        N = len(logits)
-        mask = torch.zeros(N, dtype=torch.bool)
-        mask[valid] = True
-        logits[~mask] = float("-inf")
-        return logits
-
-
-@ray.remote
-class GrammarLogitsProcessorActor:
-
-    def __init__(self, *args, **kwargs):
-        self.processor = GrammarLogitsProcessor(*args, **kwargs)
-
-    def process_logits(self, token_ids: List[int],
-                       logits: torch.Tensor) -> torch.Tensor:
-        return self.processor(token_ids, logits)
-
-
-class RayRemoteGrammarLogitsProcessor:
-
-    def __init__(self, *args, **kwargs):
-        self.actor = GrammarLogitsProcessorActor.remote(*args, **kwargs)
-
-    def __call__(self, token_ids: List[int],
-                 logits: torch.Tensor) -> torch.Tensor:
-        logits_cpu = logits.cpu()
-        result_id = self.actor.process_logits.remote(token_ids, logits_cpu)
-        return ray.get(result_id)
+            # modify logits given valid token IDs
+            N = len(logits[i])
+            mask = torch.zeros(N, dtype=torch.bool)
+            mask[valid] = True
+            logits[i][~mask] = float("-inf")
