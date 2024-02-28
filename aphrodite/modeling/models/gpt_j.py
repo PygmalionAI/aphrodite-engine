@@ -27,9 +27,9 @@ from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.attention import PagedAttention
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
-                                              LinearMethodBase,
-                                              QKVParallelLinear,
-                                              RowParallelLinear)
+                                               LinearMethodBase,
+                                               QKVParallelLinear,
+                                               RowParallelLinear)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
@@ -56,21 +56,20 @@ class GPTJAttention(nn.Module):
         self.hidden_size = config.hidden_size
         self.head_size = self.hidden_size // self.total_num_heads
 
-        if linear_method is not None and not linear_method.quant_config.merge_weight(
-        ):
+        if linear_method is not None and not linear_method.quant_config.merge_weight():
             self.merge_weight = False
-            self.q_proj = ColumnParallelLinear(config.hidden_size,
-                                               config.hidden_size,
-                                               bias=False,
-                                               linear_method=linear_method)
-            self.k_proj = ColumnParallelLinear(config.hidden_size,
-                                               config.hidden_size,
-                                               bias=False,
-                                               linear_method=linear_method)
-            self.v_proj = ColumnParallelLinear(config.hidden_size,
-                                               config.hidden_size,
-                                               bias=False,
-                                               linear_method=linear_method)
+            self.q_proj = ColumnParallelLinear(
+                config.hidden_size, config.hidden_size,
+                bias=False,
+                linear_method=linear_method)
+            self.k_proj = ColumnParallelLinear(
+                config.hidden_size, config.hidden_size,
+                bias=False,
+                linear_method=linear_method)
+            self.v_proj = ColumnParallelLinear(
+                config.hidden_size, config.hidden_size,
+                bias=False,
+                linear_method=linear_method)
         else:
             self.merge_weight = True
             self.qkv_proj = QKVParallelLinear(
@@ -166,8 +165,7 @@ class GPTJBlock(nn.Module):
         linear_method: Optional[LinearMethodBase] = None,
     ):
         super().__init__()
-        inner_dim = (4 * config.n_embd
-                     if config.n_inner is None else config.n_inner)
+        inner_dim = 4 * config.n_embd if config.n_inner is None else config.n_inner
         self.ln_1 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
         self.attn = GPTJAttention(config, linear_method)
         self.mlp = GPTJMLP(inner_dim, config, linear_method)
@@ -205,7 +203,7 @@ class GPTJModel(nn.Module):
         self.wte = VocabParallelEmbedding(
             config.vocab_size,
             self.embed_dim,
-            linear_method=linear_method,
+            linear_method=linear_method
         )
         self.h = nn.ModuleList(
             [GPTJBlock(config, linear_method) for _ in range(config.n_layer)])
@@ -247,7 +245,7 @@ class GPTJForCausalLM(nn.Module):
             config.vocab_size,
             config.n_embd,
             bias=True,
-            linear_method=linear_method,
+            linear_method=linear_method
         )
         self.sampler = Sampler(config.vocab_size)
 
@@ -284,13 +282,11 @@ class GPTJForCausalLM(nn.Module):
             ("gate_up_proj", "gate_proj", 0),
             ("gate_up_proj", "up_proj", 1),
         ]
-        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
-        ):
+        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight():
             stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision,
-                self.config):
+                model_name_or_path, cache_dir, load_format, revision, self.config):
             if "attn.bias" in name or "attn.masked_bias" in name:
                 continue
             for (param_name, weight_name, shard_id) in stacked_params_mapping:

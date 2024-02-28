@@ -29,6 +29,7 @@ from typing import Optional
 import torch
 from transformers import PretrainedConfig
 
+from aphrodite.common.config import LoRAConfig
 from aphrodite.modeling.layers.linear import LinearMethodBase
 from aphrodite.modeling.models.llama import LlamaForCausalLM
 from aphrodite.modeling.hf_downloader import (default_weight_loader,
@@ -41,7 +42,7 @@ class DeciLMForCausalLM(LlamaForCausalLM):
     Based on the llama executor.
 
     The main difference is that DeciLM uses Variable Grouped Query Attention.
-    The constant number of GQA heads in the decoder is overriden with a value
+    The constant number of GQA heads in the decoder is overridden with a value
     per layer.
 
     Usually, in the HuggingFace implementation, instead of
@@ -57,10 +58,13 @@ class DeciLMForCausalLM(LlamaForCausalLM):
         self,
         config: Optional[PretrainedConfig] = None,
         linear_method: Optional[LinearMethodBase] = None,
+        lora_config: Optional[LoRAConfig] = None,
     ) -> None:
         config.num_key_value_heads = max(config.num_key_value_heads_per_layer)
         delattr(config, "num_key_value_heads_per_layer")
-        super().__init__(config=config, linear_method=linear_method)
+        super().__init__(config=config,
+                         linear_method=linear_method,
+                         lora_config=lora_config)
 
     def load_weights(self,
                      model_name_or_path: str,
@@ -77,8 +81,7 @@ class DeciLMForCausalLM(LlamaForCausalLM):
         ]
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision,
-                self.config):
+                model_name_or_path, cache_dir, load_format, revision, self.config):
             if "rotary_emb.inv_freq" in name:
                 continue
 

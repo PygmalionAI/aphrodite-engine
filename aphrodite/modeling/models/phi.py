@@ -46,9 +46,9 @@ from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.attention import PagedAttention
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
-                                              LinearMethodBase,
-                                              QKVParallelLinear,
-                                              RowParallelLinear)
+                                               LinearMethodBase,
+                                               QKVParallelLinear,
+                                               RowParallelLinear)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
@@ -80,21 +80,20 @@ class PhiAttention(nn.Module):
                           tensor_model_parallel_world_size)
 
         # pylint: disable=C0103
-        if linear_method is not None and not linear_method.quant_config.merge_weight(
-        ):
+        if linear_method is not None and not linear_method.quant_config.merge_weight():
             self.merge_weight = False
-            self.q_proj = ColumnParallelLinear(self.hidden_size,
-                                               self.hidden_size,
-                                               bias=True,
-                                               linear_method=linear_method)
-            self.k_proj = ColumnParallelLinear(self.hidden_size,
-                                               self.hidden_size,
-                                               bias=True,
-                                               linear_method=linear_method)
-            self.v_proj = ColumnParallelLinear(self.hidden_size,
-                                               self.hidden_size,
-                                               bias=True,
-                                               linear_method=linear_method)
+            self.q_proj = ColumnParallelLinear(
+                self.hidden_size, self.hidden_size,
+                bias=True,
+                linear_method=linear_method)
+            self.k_proj = ColumnParallelLinear(
+                self.hidden_size, self.hidden_size,
+                bias=True,
+                linear_method=linear_method)
+            self.v_proj = ColumnParallelLinear(
+                self.hidden_size, self.hidden_size,
+                bias=True,
+                linear_method=linear_method)
         else:
             self.merge_weight = True
             self.qkv_proj = QKVParallelLinear(
@@ -120,8 +119,7 @@ class PhiAttention(nn.Module):
         # https://huggingface.co/microsoft/phi-1_5/blob/d212a789620c380ff32ca1d1ee9943a777360987/modeling_phi.py#L518
         rope_theta = 10000
         max_position_embeddings = getattr(config, "n_positions", 2048)
-        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
-        ) is None else linear_method.quant_config.rope_style()
+        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style() is None else linear_method.quant_config.rope_style()
         self.rotary_emb = get_rope(
             self.head_size,
             rotary_dim=rotary_dim,
@@ -287,7 +285,6 @@ class PhiForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        head = self.lm_head  # pylint: disable=unused-variable
         next_tokens = self.sampler(self.lm_head(hidden_states),
                                    sampling_metadata)
         return next_tokens
@@ -303,14 +300,12 @@ class PhiForCausalLM(nn.Module):
             ("qkv_proj", "k_proj", "k"),
             ("qkv_proj", "v_proj", "v")
         ]
-        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
-        ):
+        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight():
             stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
 
         for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision,
-                self.config):
+                model_name_or_path, cache_dir, load_format, revision, self.config):
             if "rotary_emb.inv_freq" in name:
                 continue
 

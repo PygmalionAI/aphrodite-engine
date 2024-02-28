@@ -3,43 +3,43 @@ from typing import Optional
 import gguf
 from transformers import AutoConfig, PretrainedConfig
 from transformers.models.auto.configuration_auto import CONFIG_MAPPING
-from aphrodite.transformers_utils.configs import YiConfig, QWenConfig
+
+from aphrodite.transformers_utils.configs import *
 
 _CONFIG_REGISTRY = {
+    "baichuan": BaiChuanConfig,
+    "chatglm": ChatGLMConfig,
+    "mpt": MPTConfig,
     "qwen": QWenConfig,
-    "yi": YiConfig,
+    "RefinedWeb": RWConfig,  # For tiiuae/falcon-40b(-instruct)
+    "RefinedWebModel": RWConfig,  # For tiiuae/falcon-7b(-instruct)
 }
-
 
 def extract_gguf_config(checkpoint):
     result = gguf.GGUFReader(checkpoint)
-    architecture = result.fields["general.architecture"]
-    architecture = str(bytes(architecture.parts[architecture.data[0]]),
-                       encoding="utf-8")
+    architecture = result.fields['general.architecture']
+    architecture = str(bytes(architecture.parts[architecture.data[0]]), encoding = 'utf-8')
     # Only support llama so far
     if architecture != "llama":
         raise RuntimeError(f"Unsupported architecture {architecture}")
 
     # write config
-    vocab_size = len(result.fields["tokenizer.ggml.token_type"].data)
-    context_length = int(result.fields["llama.context_length"].parts[-1])
-    n_layer = int(result.fields["llama.block_count"].parts[-1])
-    n_head = int(result.fields["llama.attention.head_count"].parts[-1])
-    n_local_heads = int(
-        result.fields["llama.attention.head_count_kv"].parts[-1])
-    intermediate_size = int(
-        result.fields["llama.feed_forward_length"].parts[-1])
-    norm_eps = float(
-        result.fields["llama.attention.layer_norm_rms_epsilon"].parts[-1])
-    dim = int(result.fields["llama.embedding_length"].parts[-1])
+    vocab_size = len(result.fields['tokenizer.ggml.token_type'].data)
+    context_length = int(result.fields['llama.context_length'].parts[-1])
+    n_layer = int(result.fields['llama.block_count'].parts[-1])
+    n_head = int(result.fields['llama.attention.head_count'].parts[-1])
+    n_local_heads = int(result.fields['llama.attention.head_count_kv'].parts[-1])
+    intermediate_size = int(result.fields['llama.feed_forward_length'].parts[-1])
+    norm_eps = float(result.fields['llama.attention.layer_norm_rms_epsilon'].parts[-1])
+    dim = int(result.fields['llama.embedding_length'].parts[-1])
     arch = "MixtralForCausalLM"
-    if "llama.expert_count" in result.fields:
+    if 'llama.expert_count' in result.fields:
         arch = "MixtralForCausalLM"
         name = "mixtral"
     else:
         arch = "LlamaForCausalLM"
         name = "llama"
-    model_config = {
+    model_config= {
         "architectures": [arch],
         "bos_token_id": 1,
         "eos_token_id": 2,
@@ -55,14 +55,11 @@ def extract_gguf_config(checkpoint):
         "torch_dtype": "float16",
         "vocab_size": vocab_size
     }
-    if "llama.rope.freq_base" in result.fields:
-        model_config["rope_theta"] = float(
-            result.fields["llama.rope.freq_base"].parts[-1])
-    if "llama.expert_count" in result.fields:
-        model_config["num_local_experts"] = int(
-            result.fields["llama.expert_count"].parts[-1])
-        model_config["num_experts_per_tok"] = int(
-            result.fields["llama.expert_used_count"].parts[-1])
+    if 'llama.rope.freq_base' in result.fields:
+        model_config['rope_theta'] = float(result.fields['llama.rope.freq_base'].parts[-1])
+    if 'llama.expert_count' in result.fields:
+        model_config['num_local_experts'] = int(result.fields['llama.expert_count'].parts[-1])
+        model_config['num_experts_per_tok'] = int(result.fields['llama.expert_used_count'].parts[-1])
     if name in _CONFIG_REGISTRY:
         config_class = _CONFIG_REGISTRY[name]
     else:
@@ -73,12 +70,16 @@ def extract_gguf_config(checkpoint):
 
 def get_config(model: str,
                trust_remote_code: bool,
-               revision: Optional[str] = None) -> PretrainedConfig:
+               revision: Optional[str] = None,
+               code_revision: Optional[str] = None) -> PretrainedConfig:
     if model.endswith("gguf"):
         return extract_gguf_config(model)
     try:
         config = AutoConfig.from_pretrained(
-            model, trust_remote_code=trust_remote_code, revision=revision)
+            model,
+            trust_remote_code=trust_remote_code,
+            revision=revision,
+            code_revision=code_revision)
     except ValueError as e:
         if (not trust_remote_code and
                 "requires you to execute the configuration file" in str(e)):
@@ -92,5 +93,7 @@ def get_config(model: str,
             raise e
     if config.model_type in _CONFIG_REGISTRY:
         config_class = _CONFIG_REGISTRY[config.model_type]
-        config = config_class.from_pretrained(model, revision=revision)
+        config = config_class.from_pretrained(model,
+                                              revision=revision,
+                                              code_revision=code_revision)
     return config
