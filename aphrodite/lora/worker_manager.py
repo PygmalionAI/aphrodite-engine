@@ -4,8 +4,8 @@ from typing import Any, Dict, List, Optional, Set, Type
 
 import torch
 
-from aphrodite.lora.models import (LoRAModel,
-                                   LoRAModelManager, LRUCacheLoRAModelManager,
+from aphrodite.lora.models import (LoRAModel, LoRAModelManager,
+                                   LRUCacheLoRAModelManager,
                                    create_lora_manager)
 from aphrodite.lora.request import LoRARequest
 from aphrodite.lora.layers import LoRAMapping

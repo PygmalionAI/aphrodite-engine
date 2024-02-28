@@ -88,7 +88,6 @@ class ModelRunner:
         vocab_size = self.model.config.vocab_size
 
         if self.lora_config:
-            if self.lora_config:
             assert hasattr(
                 self.model, "supported_lora_modules"
             ) and self.model.supported_lora_modules, "Model does not support LoRA"
