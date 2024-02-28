@@ -279,7 +279,7 @@ class AphroditeEngine:
             is_driver_worker=True,
         )
 
-        self._run_workers("init_model")
+        self._run_workers("init_model", cupy_port=get_open_port())
         self._run_workers(
             "load_model",
             max_concurrent_workers=self.parallel_config.
