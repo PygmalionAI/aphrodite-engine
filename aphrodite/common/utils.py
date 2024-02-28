@@ -3,15 +3,16 @@ import os
 import socket
 import subprocess
 import uuid
+from collections.abc import Iterable
 from platform import uname
-
-import psutil
-import torch
-import asyncio
 from functools import partial
 from typing import (Any, Awaitable, Callable, Hashable, Optional, TypeVar,
                     List, Tuple, Union)
 from collections import OrderedDict
+
+import psutil
+import torch
+import asyncio
 from packaging.version import parse, Version
 
 from aphrodite.common.logger import init_logger
@@ -164,7 +165,7 @@ def get_open_port() -> int:
         return s.getsockname()[1]
 
 
-def set_cuda_visible_devices(device_ids: List[int]) -> None:
+def set_cuda_visible_devices(device_ids: Iterable[int]) -> None:
     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, device_ids))
 
 

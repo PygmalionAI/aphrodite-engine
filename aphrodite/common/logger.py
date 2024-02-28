@@ -8,10 +8,18 @@ import sys
 import os
 
 import colorlog
+import multiprocessing as mp
 
 # pylint: disable=line-too-long
 _FORMAT = "%(log_color)s%(levelname)s %(asctime)s %(filename)s:%(lineno)d] %(message)s"
 _DATE_FORMAT = "%m-%d %H:%M:%S"
+
+
+class ProcessLogger(logging.LoggerAdapter):
+
+    def process(self, msg, kwargs):
+        msg = f"[{self.extra['process_name']} pid {self.extra['pid']}] {msg}"
+        return msg, kwargs
 
 
 class ColoredFormatter(colorlog.ColoredFormatter):
@@ -76,4 +84,10 @@ def init_logger(name: str):
     logger.setLevel(os.getenv("LOG_LEVEL", "DEBUG"))
     logger.addHandler(_default_handler)
     logger.propagate = False
+    if mp.parent_process() is not None:
+        logger = ProcessLogger(
+            logger, {
+                "process_name": mp.current_process().name,
+                "pid": mp.current_process().pid
+            })
     return logger

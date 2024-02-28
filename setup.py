@@ -3,7 +3,7 @@ import io
 import os
 import re
 import subprocess
-from typing import List, Set
+from typing import List, Set, Optional
 import warnings
 from pathlib import Path
 
@@ -383,6 +383,8 @@ def get_requirements() -> List[str]:
             requirements = f.read().strip().split("\n")
     return requirements
 
+def get_ray_requirements() -> Optional[List[str]]:
+    return ["ray >= 2.9"]
 
 setuptools.setup(
     name="aphrodite-engine",
@@ -411,6 +413,7 @@ setuptools.setup(
                                                "tests")),
     python_requires=">=3.8",
     install_requires=get_requirements(),
+    extras_requires=get_ray_requirements(),
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
     package_data={

@@ -20,7 +20,7 @@ class EngineArgs:
     kv_cache_dtype: str = 'auto'
     seed: int = 0
     max_model_len: Optional[int] = None
-    worker_use_ray: bool = False
+    worker_use_ray: Optional[bool] = False
     pipeline_parallel_size: int = 1
     tensor_parallel_size: int = 1
     max_parallel_loading_workers: Optional[int] = None
@@ -140,8 +140,10 @@ class EngineArgs:
         # Parallel arguments
         parser.add_argument('--worker-use-ray',
                             action='store_true',
+                            default=EngineArgs.worker_use_ray,
                             help='use Ray for distributed serving, will be '
-                            'automatically set when using more than 1 GPU')
+                            'automatically set when ray is installed and '
+                            'using more than 1 GPU')
         parser.add_argument('--pipeline-parallel-size',
                             '-pp',
                             type=int,
