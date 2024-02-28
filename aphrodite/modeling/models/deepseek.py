@@ -34,10 +34,10 @@ from aphrodite.modeling.layers.attention import PagedAttention
 from aphrodite.modeling.layers.triton_kernel.fused_moe import fused_moe
 from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                               MergedColumnParallelLinear,
-                                               ReplicatedLinear,
-                                               QKVParallelLinear,
-                                               RowParallelLinear)
+                                              MergedColumnParallelLinear,
+                                              ReplicatedLinear,
+                                              QKVParallelLinear,
+                                              RowParallelLinear)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (

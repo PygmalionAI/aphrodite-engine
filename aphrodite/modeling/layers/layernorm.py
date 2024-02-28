@@ -31,6 +31,7 @@ class LayerNorm(nn.LayerNorm):
         else:
             return x, residual
 
+
 class RMSNorm(nn.Module):
     """Root mean square normalization.
 

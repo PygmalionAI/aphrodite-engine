@@ -257,22 +257,20 @@ class OlmoModel(nn.Module):
         self.config = config
 
         self.transformer = nn.ModuleDict(
-            dict(
-                wte=VocabParallelEmbedding(
-                    config.embedding_size or config.vocab_size,
-                    config.d_model,
-                    linear_method=linear_method,
-                ),
-                ln_f=nn.LayerNorm(config.d_model,
-                                  elementwise_affine=False,
-                                  bias=False),
-                ff_out=ParallelLMHead(
-                    config.embedding_size or config.vocab_size,
-                    config.d_model,
-                    bias=config.include_bias,
-                    linear_method=linear_method,
-                )
-            ))
+            dict(wte=VocabParallelEmbedding(
+                config.embedding_size or config.vocab_size,
+                config.d_model,
+                linear_method=linear_method,
+            ),
+                 ln_f=nn.LayerNorm(config.d_model,
+                                   elementwise_affine=False,
+                                   bias=False),
+                 ff_out=ParallelLMHead(
+                     config.embedding_size or config.vocab_size,
+                     config.d_model,
+                     bias=config.include_bias,
+                     linear_method=linear_method,
+                 )))
 
         blocks = [
             OlmoBlock(config, linear_method) for i in range(config.n_layers)
@@ -346,8 +344,8 @@ class OLMoForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(self.model.transformer.ff_out(hidden_states),
-                                   sampling_metadata)
+        next_tokens = self.sampler(
+            self.model.transformer.ff_out(hidden_states), sampling_metadata)
         return next_tokens
 
     def load_weights(
