@@ -64,6 +64,7 @@ __launch_bounds__(TPB) __global__ void moeSoftmax(
 
   for (int ii = threadIdx.x; ii < num_cols; ii += TPB)
   {
+    const int idx = thread_row_offset + ii;
     threadData = max(static_cast<float>(input[idx]), threadData);
   }
 
@@ -143,7 +144,7 @@ __launch_bounds__(TPB) __global__ void moeTopK(
     const cub_kvp result_kvp = BlockReduce(tmpStorage).Reduce(thread_kvp, arg_max);
     if (threadIdx.x == 0)
     {
-      const int expert = result_kvp.result;
+      const int expert = result_kvp.key;
       // ignore experts the node isn't responsible for with expert parallelism
       const bool node_uses_expert = expert >= start_expert && expert < end_expert;
       const bool should_process_row = row_is_active && node_uses_expert;
@@ -151,7 +152,7 @@ __launch_bounds__(TPB) __global__ void moeTopK(
       const int idx = k * block_row + k_idx;
       output[idx] = result_kvp.value;
       indices[idx] = should_process_row ? (expert - start_expert) : num_experts;
-      assert[indices[idx] >= 0];
+      assert(indices[idx] >= 0);
       source_rows[idx] = k_idx * num_rows + block_row;
     }
     __syncthreads();
@@ -159,7 +160,7 @@ __launch_bounds__(TPB) __global__ void moeTopK(
 }
 
 // Top-K
-template <int VPT, int NUM_EXPERTS, int WARPS_PER_CTA int BYTES_PER_LDG>
+template <int VPT, int NUM_EXPERTS, int WARPS_PER_CTA, int BYTES_PER_LDG>
 __launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__ void topkGatingSoftmax(
   const float* input, const bool* finished, float* output, const int num_rows,
   int* indices, int* source_rows, const int k, const int start_expert, const int end_expert)
