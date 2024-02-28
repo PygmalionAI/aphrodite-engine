@@ -67,6 +67,8 @@ class ChatCompletionRequest(BaseModel):
     stop: Optional[Union[str, List[str]]] = Field(default_factory=list)
     include_stop_str_in_output: Optional[bool] = False
     stream: Optional[bool] = False
+    logprobs: Optional[bool] = False
+    top_logprobs: Optional[int] = None
     presence_penalty: Optional[float] = 0.0
     frequency_penalty: Optional[float] = 0.0
     repetition_penalty: Optional[float] = 1.0
@@ -95,9 +97,13 @@ class ChatCompletionRequest(BaseModel):
     length_penalty: Optional[float] = 1.0
 
     def to_sampling_params(self) -> SamplingParams:
+        if self.logprobs and not self.top_logprobs:
+            raise ValueError("Top logprobs must be set when logprobs is.")
         return SamplingParams(
             n=self.n,
             max_tokens=self.max_tokens,
+            logprobs=self.top_logprobs if self.logprobs else None,
+            prompt_logprobs=self.top_logprobs if self.echo else None,
             temperature=self.temperature,
             top_p=self.top_p,
             tfs=self.tfs,
@@ -118,8 +124,6 @@ class ChatCompletionRequest(BaseModel):
             smoothing_factor=self.smoothing_factor,
             ignore_eos=self.ignore_eos,
             use_beam_search=self.use_beam_search,
-            logprobs=self.logprobs,
-            prompt_logprobs=self.prompt_logprobs,
             stop_token_ids=self.stop_token_ids,
             custom_token_bans=self.custom_token_bans,
             skip_special_tokens=self.skip_special_tokens,
@@ -258,6 +262,7 @@ class ChatMessage(BaseModel):
 class ChatCompletionResponseChoice(BaseModel):
     index: int
     message: ChatMessage
+    logprobs: Optional[LogProbs] = None
     finish_reason: Optional[Literal["stop", "length"]] = None
 
 
@@ -278,6 +283,7 @@ class DeltaMessage(BaseModel):
 class ChatCompletionResponseStreamChoice(BaseModel):
     index: int
     delta: DeltaMessage
+    logprobs: Optional[LogProbs] = None
     finish_reason: Optional[Literal["stop", "length"]] = None
 
 
@@ -288,6 +294,7 @@ class ChatCompletionStreamResponse(BaseModel):
     model: str
     choices: List[ChatCompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = Field(default=None)
+    logprobs: Optional[LogProbs] = None
 
 
 class Prompt(BaseModel):

@@ -1,7 +1,7 @@
 import time
 import codecs
 from fastapi import Request
-from typing import AsyncGenerator, AsyncIterator, Union
+from typing import AsyncGenerator, AsyncIterator, Optional, List, Union
 
 from aphrodite.common.logger import init_logger
 from aphrodite.common.utils import random_uuid
@@ -12,7 +12,7 @@ from aphrodite.endpoints.openai.protocol import (
     ChatCompletionStreamResponse, ChatMessage, DeltaMessage, ErrorResponse,
     UsageInfo)
 from aphrodite.common.outputs import RequestOutput
-from aphrodite.endpoints.openai.serving_engine import OpenAIServing
+from aphrodite.endpoints.openai.serving_engine import OpenAIServing, LoRA
 
 logger = init_logger(__name__)
 
@@ -23,8 +23,11 @@ class OpenAIServingChat(OpenAIServing):
                  engine: AsyncAphrodite,
                  served_model: str,
                  response_role: str,
+                 lora_modules: Optional[List[LoRA]] = None,
                  chat_template=None):
-        super().__init__(engine=engine, served_model=served_model)
+        super().__init__(engine=engine,
+                         served_model=served_model,
+                         lora_modules=lora_modules)
         self.response_role = response_role
         self._load_chat_template(chat_template)
 
@@ -37,18 +40,12 @@ class OpenAIServingChat(OpenAIServing):
         See  https://platform.openai.com/docs/api-reference/chat/create
         for the API specification. This API mimics the OpenAI ChatCompletion API.
 
-        NOTE: Currently we do not support the following features:
+        NOTE: Currently we do not support the following feature:
             - function_call (Users should implement this by themselves)
-            - logit_bias
         """
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
             return error_check_ret
-
-        if request.logit_bias is not None and len(request.logit_bias) > 0:
-            # TODO: Add logit bias back
-            return self.create_error_response(
-                "logit_bias is not currently supported")
 
         try:
             prompt = self.tokenizer.apply_chat_template(
@@ -65,11 +62,13 @@ class OpenAIServingChat(OpenAIServing):
             token_ids = self._validate_prompt_and_tokenize(request,
                                                            prompt=prompt)
             sampling_params = request.to_sampling_params()
+            lora_request = self._maybe_get_lora(request)
         except ValueError as e:
             return self.create_error_response(str(e))
 
         result_generator = self.engine.generate(prompt, sampling_params,
-                                                request_id, token_ids)
+                                                request_id, token_ids,
+                                                lora_request)
         # Streaming response
         if request.stream:
             return self.chat_completion_stream_generator(
@@ -97,7 +96,10 @@ class OpenAIServingChat(OpenAIServing):
         role = self.get_chat_request_role(request)
         for i in range(request.n):
             choice_data = ChatCompletionResponseStreamChoice(
-                index=i, delta=DeltaMessage(role=role), finish_reason=None)
+                index=i,
+                delta=DeltaMessage(role=role),
+                logprobs=None,
+                finish_reason=None)
             chunk = ChatCompletionStreamResponse(id=request_id,
                                                  object=chunk_object_type,
                                                  created=created_time,
@@ -114,6 +116,7 @@ class OpenAIServingChat(OpenAIServing):
                         "content") and request.messages[-1].get(
                             "role") == role:
                 last_msg_content = request.messages[-1]["content"]
+
             if last_msg_content:
                 for i in range(request.n):
                     choice_data = ChatCompletionResponseStreamChoice(
@@ -125,6 +128,7 @@ class OpenAIServingChat(OpenAIServing):
                         object=chunk_object_type,
                         created=created_time,
                         choices=[choice_data],
+                        logprobs=None,
                         model=model_name)
                     data = chunk.model_dump_json(exclude_unset=True)
                     yield f"data: {data}\n\n"
@@ -141,15 +145,29 @@ class OpenAIServingChat(OpenAIServing):
                 if finish_reason_sent[i]:
                     continue
 
+                delta_token_ids = output.token_ids[previous_num_tokens[i]:]
+                top_logprobs = output.logprobs[
+                    previous_num_tokens[i]:] if output.logprobs else None
+
+                if request.logprobs:
+                    logprobs = self._create_logprobs(
+                        token_ids=delta_token_ids,
+                        top_logprobs=top_logprobs,
+                        num_output_top_logprobs=request.logprobs,
+                        initial_text_offset=len(previous_texts[i]),
+                    )
+                else:
+                    logprobs = None
+
                 delta_text = output.text[len(previous_texts[i]):]
                 previous_texts[i] = output.text
                 previous_num_tokens[i] = len(output.token_ids)
-
                 if output.finish_reason is None:
                     # Send token-by-token response for each request.n
                     choice_data = ChatCompletionResponseStreamChoice(
                         index=i,
                         delta=DeltaMessage(content=delta_text),
+                        logprobs=logprobs,
                         finish_reason=None)
                     chunk = ChatCompletionStreamResponse(
                         id=request_id,
@@ -170,6 +188,7 @@ class OpenAIServingChat(OpenAIServing):
                     choice_data = ChatCompletionResponseStreamChoice(
                         index=i,
                         delta=DeltaMessage(content=delta_text),
+                        logprobs=logprobs,
                         finish_reason=output.finish_reason)
                     chunk = ChatCompletionStreamResponse(
                         id=request_id,
@@ -204,11 +223,25 @@ class OpenAIServingChat(OpenAIServing):
         assert final_res is not None
 
         choices = []
+
         role = self.get_chat_request_role(request)
         for output in final_res.outputs:
+            token_ids = output.token_ids
+            top_logprobs = output.logprobs
+
+            if request.logprobs:
+                logprobs = self._create_logprobs(
+                    token_ids=token_ids,
+                    top_logprobs=top_logprobs,
+                    num_output_top_logprobs=request.logprobs,
+                )
+            else:
+                logprobs = None
+
             choice_data = ChatCompletionResponseChoice(
                 index=output.index,
                 message=ChatMessage(role=role, content=output.text),
+                logprobs=logprobs,
                 finish_reason=output.finish_reason,
             )
             choices.append(choice_data)

@@ -10,28 +10,25 @@ from prometheus_client import make_asgi_app
 import fastapi
 import uvicorn
 from http import HTTPStatus
-from fastapi import Depends, Request, HTTPException, status
+from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, Response
-from fastapi.security import APIKeyHeader
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
-from aphrodite.endpoints.openai.protocol import CompletionRequest, ChatCompletionRequest, ErrorResponse
+from aphrodite.endpoints.openai.protocol import (
+    CompletionRequest, ChatCompletionRequest, ErrorResponse, Prompt)
 from aphrodite.common.logger import init_logger
 from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
 from aphrodite.endpoints.openai.serving_completions import OpenAIServingCompletion
-from aphrodite.endpoints.openai.protocol import Prompt
+from aphrodite.endpoints.openai.serving_engine import LoRA
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
 openai_serving_chat: OpenAIServingChat = None
 openai_serving_completion: OpenAIServingCompletion = None
 logger = init_logger(__name__)
-
-API_KEY_NAME = "Authorization"
-api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=True)
 
 
 @asynccontextmanager
@@ -51,13 +48,20 @@ async def lifespan(app: fastapi.FastAPI):
 app = fastapi.FastAPI(lifespan=lifespan)
 
 
+class LoRAParserAction(argparse.Action):
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        lora_list = []
+        for item in values:
+            name, path = item.split('=')
+            lora_list.append(LoRA(name, path))
+        setattr(namespace, self.dest, lora_list)
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Aphrodite OpenAI-Compatible RESTful API server.")
-    parser.add_argument("--host",
-                        type=str,
-                        default="localhost",
-                        help="host name")
+    parser.add_argument("--host", type=str, default=None, help="host name")
     parser.add_argument("--port", type=int, default=2242, help="port number")
     parser.add_argument("--allow-credentials",
                         action="store_true",
@@ -87,6 +91,15 @@ def parse_args():
                         help="The model name used in the API. If not "
                         "specified, the model name will be the same as "
                         "the huggingface name.")
+    parser.add_argument(
+        "--lora-modules",
+        type=str,
+        default=None,
+        nargs='+',
+        action=LoRAParserAction,
+        help=
+        "LoRA module configurations in the format name=path. Multiple modules can be specified."
+    )
     parser.add_argument("--chat-template",
                         type=str,
                         default=None,
@@ -127,16 +140,9 @@ def parse_args():
     return parser.parse_args()
 
 
+# Add prometheus asgi middleware to route /metrics requests
 metrics_app = make_asgi_app()
 app.mount("/metrics", metrics_app)
-
-
-async def get_api_key(api_key_header: str = Depends(api_key_header)):
-    api_key = os.environ.get("APHRODITE_API_KEY") or args.api_keys
-    if api_key is not None and api_key_header != "Bearer " + api_key:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail="Invalid API Key")
-    return api_key_header
 
 
 @app.exception_handler(RequestValidationError)
@@ -152,21 +158,20 @@ async def health() -> Response:
 
 
 @app.get("/v1/models")
-async def show_available_models(api_key: str = Depends(get_api_key)):
+async def show_available_models():
     models = await openai_serving_chat.show_available_models()
     return JSONResponse(content=models.model_dump())
 
 
 @app.post("/v1/tokenize")
-async def tokenize(prompt: Prompt, api_key: str = Depends(get_api_key)):
+async def tokenize(prompt: Prompt):
     tokenized = await openai_serving_chat.tokenize(prompt)
     return JSONResponse(content=tokenized)
 
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,
-                                 raw_request: Request,
-                                 api_key: str = Depends(get_api_key)):
+                                 raw_request: Request):
     generator = await openai_serving_chat.create_chat_completion(
         request, raw_request)
     if isinstance(generator, ErrorResponse):
@@ -180,9 +185,7 @@ async def create_chat_completion(request: ChatCompletionRequest,
 
 
 @app.post("/v1/completions")
-async def create_completion(request: CompletionRequest,
-                            raw_request: Request,
-                            api_key: str = Depends(get_api_key)):
+async def create_completion(request: CompletionRequest, raw_request: Request):
     generator = await openai_serving_completion.create_completion(
         request, raw_request)
     if isinstance(generator, ErrorResponse):
@@ -205,6 +208,17 @@ if __name__ == "__main__":
         allow_methods=args.allowed_methods,
         allow_headers=args.allowed_headers,
     )
+
+    if token := os.environ.get("APHRODITE_API_KEY") or args.api_keys:
+
+        @app.middleware("http")
+        async def authentication(request: Request, call_next):
+            if not request.url.path.startswith("/v1"):
+                return await call_next(request)
+            if request.headers.get("Authorization") != "Bearer " + token:
+                return JSONResponse(content={"error": "Unauthorized"},
+                                    status_code=401)
+            return await call_next(request)
 
     for middleware in args.middleware:
         module_path, object_name = middleware.rsplit(".", 1)
@@ -229,8 +243,10 @@ if __name__ == "__main__":
     engine = AsyncAphrodite.from_engine_args(engine_args)
     openai_serving_chat = OpenAIServingChat(engine, served_model,
                                             args.response_role,
+                                            args.lora_modules,
                                             args.chat_template)
-    openai_serving_completion = OpenAIServingCompletion(engine, served_model)
+    openai_serving_completion = OpenAIServingCompletion(
+        engine, served_model, args.lora_modules)
 
     app.root_path = args.root_path
     uvicorn.run(app,
