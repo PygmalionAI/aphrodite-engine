@@ -14,8 +14,7 @@ from aphrodite.modeling.megatron import cupy_utils
 from aphrodite.modeling.megatron.communication_op import (broadcast_tensor_dict
                                                           )
 from aphrodite.modeling.megatron.parallel_state import (
-    with_cupy_nccl_for_all_reduce
-)
+    with_cupy_nccl_for_all_reduce)
 from aphrodite.modeling.megatron import custom_all_reduce
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (SamplerOutput, SequenceData,
@@ -829,6 +828,7 @@ class CUDAGraphRunner:
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
+
 @contextlib.contextmanager
 def _maybe_cupy_nccl():
     if cupy_utils.is_initialized() and not custom_all_reduce.is_initialized():
@@ -836,6 +836,7 @@ def _maybe_cupy_nccl():
             yield
     else:
         yield
+
 
 def _pad_to_max(x: List[int], max_len: int, pad: int) -> List[int]:
     assert len(x) <= max_len

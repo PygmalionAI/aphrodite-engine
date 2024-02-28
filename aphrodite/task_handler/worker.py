@@ -267,7 +267,7 @@ def init_distributed_environment(
             rank=rank,
             init_method=distributed_init_method,
         )
-    
+
     if cupy_utils.is_initialized():
         cupy_world_size = cupy_utils.get_world_size()
         if cupy_world_size != parallel_config.world_size:
