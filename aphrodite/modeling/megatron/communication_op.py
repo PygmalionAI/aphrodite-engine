@@ -4,10 +4,12 @@ from typing import Any, Dict, List, Optional, Union
 from torch.distributed import ProcessGroup
 import torch
 
+from aphrodite.modeling.megatron import cupy_utils
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_rank,
     get_tensor_model_parallel_world_size,
     get_tensor_model_parallel_group,
+    is_cupy_nccl_enabled_for_all_reduce,
 )
 from aphrodite.modeling.megatron.custom_all_reduce import custom_all_reduce
 
@@ -29,8 +31,12 @@ def tensor_model_parallel_all_reduce(input_: torch.Tensor) -> torch.Tensor:
     out = custom_all_reduce(input_)
     if out is not None:
         return out
-    torch.distributed.all_reduce(input_,
-                                 group=get_tensor_model_parallel_group())
+    if is_cupy_nccl_enabled_for_all_reduce():
+        # TODO: support multiple parallel groups.
+        cupy_utils.all_reduce(input_)
+    else:
+        torch.distributed.all_reduce(input_,
+                                     group=get_tensor_model_parallel_group())
     return input_
 
 

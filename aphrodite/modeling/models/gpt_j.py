@@ -166,8 +166,7 @@ class GPTJBlock(nn.Module):
         linear_method: Optional[LinearMethodBase] = None,
     ):
         super().__init__()
-        inner_dim = (4 * config.n_embd
-                     if config.n_inner is None else config.n_inner)
+        inner_dim = 4 * config.n_embd if config.n_inner is None else config.n_inner
         self.ln_1 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
         self.attn = GPTJAttention(config, linear_method)
         self.mlp = GPTJMLP(inner_dim, config, linear_method)
@@ -202,11 +201,9 @@ class GPTJModel(nn.Module):
         super().__init__()
         self.config = config
         self.embed_dim = config.n_embd
-        self.wte = VocabParallelEmbedding(
-            config.vocab_size,
-            self.embed_dim,
-            linear_method=linear_method,
-        )
+        self.wte = VocabParallelEmbedding(config.vocab_size,
+                                          self.embed_dim,
+                                          linear_method=linear_method)
         self.h = nn.ModuleList(
             [GPTJBlock(config, linear_method) for _ in range(config.n_layer)])
         self.ln_f = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
@@ -243,12 +240,10 @@ class GPTJForCausalLM(nn.Module):
         self.linear_method = linear_method
         assert not config.tie_word_embeddings
         self.transformer = GPTJModel(config, linear_method)
-        self.lm_head = ParallelLMHead(
-            config.vocab_size,
-            config.n_embd,
-            bias=True,
-            linear_method=linear_method,
-        )
+        self.lm_head = ParallelLMHead(config.vocab_size,
+                                      config.n_embd,
+                                      bias=True,
+                                      linear_method=linear_method)
         self.sampler = Sampler(config.vocab_size)
 
     def forward(
