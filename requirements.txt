@@ -21,3 +21,4 @@ pynvml == 11.5.0
 gguf # for gguf
 scipy # for quip
 rich
+cupy-cuda12x == 12.3.0 # install cupy-cuda11x for CUDA 11.8

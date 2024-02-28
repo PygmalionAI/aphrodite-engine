@@ -5,6 +5,8 @@ https://github.com/skypilot-org/skypilot/blob/master/sky/sky_logging.py
 
 import logging
 import sys
+import os
+
 import colorlog
 
 # pylint: disable=line-too-long
@@ -71,7 +73,7 @@ _setup_logger()
 
 def init_logger(name: str):
     logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(os.getenv("LOG_LEVEL", "DEBUG"))
     logger.addHandler(_default_handler)
     logger.propagate = False
     return logger

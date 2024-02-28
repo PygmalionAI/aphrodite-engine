@@ -1,7 +1,4 @@
 # coding=utf-8
-# Adapted from
-# https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/models/llama/modeling_llama.py
-# Copyright 2023 The vLLM team.
 # Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
 #
 # This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
@@ -20,12 +17,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Inference-only LLaMA model compatible with HuggingFace weights."""
-from typing import Any, Dict, List, Optional, Tuple
+"""Inference-only BaiChuan model compatible with HuggingFace weights."""
+import math
+from typing import List, Optional, Tuple
 
 import torch
 from torch import nn
-from transformers import LlamaConfig
 
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import SiluAndMul
@@ -39,19 +36,44 @@ from aphrodite.modeling.layers.linear import (LinearMethodBase,
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding, ParallelLMHead, DEFAULT_VOCAB_PADDING_SIZE)
+    VocabParallelEmbedding, ParallelLMHead)
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_world_size)
+    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (default_weight_loader,
                                               hf_model_weights_iterator)
 from aphrodite.common.sequence import SamplerOutput
-from aphrodite.common.config import LoRAConfig
+from aphrodite.transformers_utils.configs.baichuan import BaiChuanConfig
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 
-class LlamaMLP(nn.Module):
+def _get_alibi_slopes(total_num_heads: int) -> torch.Tensor:
+    closest_power_of_2 = 2**math.floor(math.log2(total_num_heads))
+    base = torch.tensor(
+        2**(-(2**-(math.log2(closest_power_of_2) - 3))),
+        dtype=torch.float32,
+    )
+    powers = torch.arange(1, 1 + closest_power_of_2, dtype=torch.int32)
+    slopes = torch.pow(base, powers)
+
+    if closest_power_of_2 != total_num_heads:
+        extra_base = torch.tensor(
+            2**(-(2**-(math.log2(2 * closest_power_of_2) - 3))),
+            dtype=torch.float32,
+        )
+        num_remaining_heads = min(closest_power_of_2,
+                                  total_num_heads - closest_power_of_2)
+        extra_powers = torch.arange(start=1,
+                                    end=1 + 2 * num_remaining_heads,
+                                    step=2,
+                                    dtype=torch.int32)
+        slopes = torch.cat(
+            [slopes, torch.pow(extra_base, extra_powers)], dim=0)
+    return slopes
+
+
+class BaiChuanMLP(nn.Module):
 
     def __init__(
         self,
@@ -59,7 +81,7 @@ class LlamaMLP(nn.Module):
         intermediate_size: int,
         hidden_act: str,
         linear_method: Optional[LinearMethodBase] = None,
-    ) -> None:
+    ):
         super().__init__()
         if linear_method is not None and not linear_method.quant_config.merge_weight(
         ):
@@ -99,90 +121,72 @@ class LlamaMLP(nn.Module):
         return x
 
 
-class LlamaAttention(nn.Module):
+class BaiChuanAttention(nn.Module):
+    """Multi-headed attention from 'Attention Is All You Need' paper"""
 
     def __init__(
         self,
         hidden_size: int,
         num_heads: int,
-        num_kv_heads: int,
+        position_embedding: str,
         rope_theta: float = 10000,
-        rope_scaling: Optional[Dict[str, Any]] = None,
         max_position_embeddings: int = 8192,
         linear_method: Optional[LinearMethodBase] = None,
-        bias: bool = False,
-        sliding_window: Optional[int] = None,
-    ) -> None:
+    ):
         super().__init__()
         self.hidden_size = hidden_size
-        tp_size = get_tensor_model_parallel_world_size()
+        tensor_model_parallel_world_size = get_tensor_model_parallel_world_size(
+        )
         self.total_num_heads = num_heads
-        assert self.total_num_heads % tp_size == 0
-        self.num_heads = self.total_num_heads // tp_size
-        self.total_num_kv_heads = num_kv_heads
-        if self.total_num_kv_heads >= tp_size:
-            # Number of KV heads is greater than TP size, so we partition
-            # the KV heads across multiple tensor parallel GPUs.
-            assert self.total_num_kv_heads % tp_size == 0
-        else:
-            # Number of KV heads is less than TP size, so we replicate
-            # the KV heads across multiple tensor parallel GPUs.
-            assert tp_size % self.total_num_kv_heads == 0
-        self.num_kv_heads = max(1, self.total_num_kv_heads // tp_size)
+        assert self.total_num_heads % tensor_model_parallel_world_size == 0
+        self.num_heads = (self.total_num_heads //
+                          tensor_model_parallel_world_size)
         self.head_dim = hidden_size // self.total_num_heads
-        self.q_size = self.num_heads * self.head_dim
-        self.kv_size = self.num_kv_heads * self.head_dim
-        self.scaling = self.head_dim**-0.5
+        self.postion_embedding = position_embedding
         self.rope_theta = rope_theta
         self.max_position_embeddings = max_position_embeddings
 
-        if linear_method is not None and not linear_method.quant_config.merge_weight(
-        ):
-            self.merge_weight = False
-            self.q_proj = ColumnParallelLinear(hidden_size,
-                                               self.q_size,
-                                               bias=bias,
-                                               linear_method=linear_method)
-            self.k_proj = ColumnParallelLinear(hidden_size,
-                                               self.kv_size,
-                                               bias=bias,
-                                               linear_method=linear_method)
-            self.v_proj = ColumnParallelLinear(hidden_size,
-                                               self.kv_size,
-                                               bias=bias,
-                                               linear_method=linear_method)
-        else:
-            self.merge_weight = True
-            self.qkv_proj = QKVParallelLinear(
-                hidden_size,
-                self.head_dim,
-                self.total_num_heads,
-                self.total_num_kv_heads,
-                bias=bias,
-                linear_method=linear_method,
-            )
+        # pylint: disable=invalid-name
+        self.W_pack = QKVParallelLinear(
+            hidden_size,
+            self.head_dim,
+            self.total_num_heads,
+            self.total_num_heads,
+            bias=False,
+            linear_method=linear_method,
+        )
         self.o_proj = RowParallelLinear(
             self.total_num_heads * self.head_dim,
             hidden_size,
-            bias=bias,
+            bias=False,
             linear_method=linear_method,
         )
+        # Create the alibi slopes and slice them.
+        if self.postion_embedding == "ALIBI":
+            tp_rank = get_tensor_model_parallel_rank()
+            head_start = tp_rank * self.num_heads
+            head_end = (tp_rank + 1) * self.num_heads
+            alibi_slopes = _get_alibi_slopes(self.total_num_heads)
+            alibi_slopes = alibi_slopes[head_start:head_end].tolist()
 
-        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
-        ) is None else linear_method.quant_config.rope_style()
-        self.rotary_emb = get_rope(
-            self.head_dim,
-            rotary_dim=self.head_dim,
-            max_position=max_position_embeddings,
-            base=rope_theta,
-            rope_scaling=rope_scaling,
-            is_neox_style=is_neox_style,
-        )
-        self.attn = PagedAttention(self.num_heads,
-                                   self.head_dim,
-                                   self.scaling,
-                                   num_kv_heads=self.num_kv_heads,
-                                   sliding_window=sliding_window)
+            scaling = self.head_dim**-0.5
+            self.attn = PagedAttention(self.num_heads,
+                                       self.head_dim,
+                                       scaling,
+                                       alibi_slopes=alibi_slopes)
+        else:
+            is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
+            ) is None else linear_method.quant_config.rope_style()
+            self.rotary_emb = get_rope(
+                self.head_dim,
+                rotary_dim=self.head_dim,
+                max_position=self.max_position_embeddings,
+                base=self.rope_theta,
+                is_neox_style=is_neox_style,
+            )
+            self.scaling = self.head_dim**-0.5
+            self.attn = PagedAttention(self.num_heads, self.head_dim,
+                                       self.scaling)
 
     def forward(
         self,
@@ -191,48 +195,36 @@ class LlamaAttention(nn.Module):
         kv_cache: KVCache,
         input_metadata: InputMetadata,
     ) -> torch.Tensor:
-        if self.merge_weight:
-            qkv, _ = self.qkv_proj(hidden_states)
-            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size],
-                                dim=-1)
-        else:
-            q, _ = self.q_proj(hidden_states)
-            k, _ = self.k_proj(hidden_states)
-            v, _ = self.v_proj(hidden_states)
-        q, k = self.rotary_emb(positions, q, k)
+        qkv, _ = self.W_pack(hidden_states)
+        q, k, v = qkv.chunk(chunks=3, dim=-1)
+        if self.postion_embedding != "ALIBI":
+            q, k = self.rotary_emb(positions, q, k)
         k_cache, v_cache = kv_cache
         attn_output = self.attn(q, k, v, k_cache, v_cache, input_metadata)
         output, _ = self.o_proj(attn_output)
         return output
 
 
-class LlamaDecoderLayer(nn.Module):
+class BaiChuanDecoderLayer(nn.Module):
 
-    def __init__(
-        self,
-        config: LlamaConfig,
-        linear_method: Optional[LinearMethodBase] = None,
-    ) -> None:
+    def __init__(self,
+                 config: BaiChuanConfig,
+                 position_embedding: str,
+                 linear_method: Optional[LinearMethodBase] = None):
         super().__init__()
         self.hidden_size = config.hidden_size
         rope_theta = getattr(config, "rope_theta", 10000)
-        rope_scaling = getattr(config, "rope_scaling", None)
         max_position_embeddings = getattr(config, "max_position_embeddings",
                                           8192)
-        sliding_window = getattr(config, "sliding_window", None)
-        self.self_attn = LlamaAttention(
+        self.self_attn = BaiChuanAttention(
             hidden_size=self.hidden_size,
             num_heads=config.num_attention_heads,
-            num_kv_heads=getattr(config, "num_key_value_heads",
-                                 config.num_attention_heads),
+            position_embedding=position_embedding,
             rope_theta=rope_theta,
-            rope_scaling=rope_scaling,
             max_position_embeddings=max_position_embeddings,
             linear_method=linear_method,
-            bias=getattr(config, "bias", False),
-            sliding_window=sliding_window,
         )
-        self.mlp = LlamaMLP(
+        self.mlp = BaiChuanMLP(
             hidden_size=self.hidden_size,
             intermediate_size=config.intermediate_size,
             hidden_act=config.hidden_act,
@@ -272,29 +264,22 @@ class LlamaDecoderLayer(nn.Module):
         return hidden_states, residual
 
 
-class LlamaModel(nn.Module):
+class BaiChuanModel(nn.Module):
 
-    def __init__(
-        self,
-        config: LlamaConfig,
-        linear_method: Optional[LinearMethodBase] = None,
-        lora_config: Optional[LoRAConfig] = None,
-    ) -> None:
+    def __init__(self,
+                 config: BaiChuanConfig,
+                 position_embedding: str,
+                 linear_method: Optional[LinearMethodBase] = None):
         super().__init__()
         self.config = config
         self.padding_idx = config.pad_token_id
-        lora_vocab = (lora_config.lora_extra_vocab_size *
-                      (lora_config.max_loras or 1)) if lora_config else 0
-        self.vocab_size = config.vocab_size + lora_vocab
-        self.org_vocab_size = config.vocab_size
-        self.embed_tokens = VocabParallelEmbedding(
-            self.vocab_size,
-            config.hidden_size,
-            linear_method=linear_method,
-            org_num_embeddings=config.vocab_size,
-        )
+        self.vocab_size = config.vocab_size
+
+        self.embed_tokens = VocabParallelEmbedding(config.vocab_size,
+                                                   config.hidden_size,
+                                                   linear_method=linear_method)
         self.layers = nn.ModuleList([
-            LlamaDecoderLayer(config, linear_method)
+            BaiChuanDecoderLayer(config, position_embedding, linear_method)
             for _ in range(config.num_hidden_layers)
         ])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -321,58 +306,20 @@ class LlamaModel(nn.Module):
         return hidden_states
 
 
-class LlamaForCausalLM(nn.Module):
-    packed_modules_mapping = {
-        "qkv_proj": [
-            "q_proj",
-            "k_proj",
-            "v_proj",
-        ],
-        "gate_up_proj": [
-            "gate_proj",
-            "up_proj",
-        ],
-    }
+class BaiChuanBaseForCausalLM(nn.Module):
 
-    # LoRA specific attributes
-    supported_lora_modules = [
-        "qkv_proj",
-        "o_proj",
-        "gate_up_proj",
-        "down_proj",
-        "embed_tokens",
-        "lm_head",
-    ]
-    embedding_modules = {
-        "embed_tokens": "input_embeddings",
-        "lm_head": "output_embeddings",
-    }
-    embedding_padding_modules = ["lm_head"]
-
-    def __init__(
-        self,
-        config: LlamaConfig,
-        linear_method: Optional[LinearMethodBase] = None,
-        lora_config: Optional[LoRAConfig] = None,
-    ) -> None:
+    def __init__(self,
+                 config,
+                 position_embedding: str,
+                 linear_method: Optional[LinearMethodBase] = None):
         super().__init__()
         self.config = config
         self.linear_method = linear_method
-        self.model = LlamaModel(config, linear_method, lora_config=lora_config)
-        self.unpadded_vocab_size = config.vocab_size
-        if lora_config:
-            self.unpadded_vocab_size += lora_config.lora_extra_vocab_size
-        self.lm_head = ParallelLMHead(
-            self.unpadded_vocab_size,
-            config.hidden_size,
-            org_num_embeddings=config.vocab_size,
-            linear_method=linear_method,
-            padding_size=DEFAULT_VOCAB_PADDING_SIZE
-            # We need bigger padding if using lora for kernel
-            # compatibility
-            if not lora_config else lora_config.lora_vocab_padding_size,
-        )
-        self.sampler = Sampler(self.unpadded_vocab_size, config.vocab_size)
+        self.model = BaiChuanModel(config, position_embedding, linear_method)
+        self.lm_head = ParallelLMHead(config.vocab_size,
+                                      config.hidden_size,
+                                      linear_method=linear_method)
+        self.sampler = Sampler(config.vocab_size)
 
     def forward(
         self,
@@ -401,9 +348,6 @@ class LlamaForCausalLM(nn.Module):
                      revision: Optional[str] = None):
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
-            ("qkv_proj", "q_proj", "q"),
-            ("qkv_proj", "k_proj", "k"),
-            ("qkv_proj", "v_proj", "v"),
             ("gate_up_proj", "gate_proj", 0),
             ("gate_up_proj", "up_proj", 1),
         ]
@@ -416,11 +360,16 @@ class LlamaForCausalLM(nn.Module):
                 self.config):
             if "rotary_emb.inv_freq" in name:
                 continue
-            if ("rotary_emb.cos_cached" in name
-                    or "rotary_emb.sin_cached" in name):
-                # Models trained using ColossalAI may include these tensors in
-                # the checkpoint. Skip them.
-                continue
+            if name == "lm_head.weight":
+                # Unlike Baichuan, Baichuan2 normalizes the head weights. Refer to:
+                # https://huggingface.co/baichuan-inc/Baichuan2-7B-Chat/blob/84603cde5ebffb6084e476cfaeceaf0b8b91fe54/modeling_baichuan.py#L508
+                # Distinguish between Baichuan and Baichuan2 by checking the
+                # vocab size.
+                is_baichuan2 = self.config.vocab_size == 125696
+                if is_baichuan2:
+                    loaded_weight = torch.nn.functional.normalize(
+                        loaded_weight)
+
             for (param_name, weight_name, shard_id) in stacked_params_mapping:
                 if weight_name not in name:
                     continue
@@ -440,3 +389,24 @@ class LlamaForCausalLM(nn.Module):
                 weight_loader = getattr(param, "weight_loader",
                                         default_weight_loader)
                 weight_loader(param, loaded_weight)
+
+
+class BaichuanForCausalLM(BaiChuanBaseForCausalLM):
+    """Baichuan 13B and Baichuan2 7B/13B."""
+
+    def __init__(self,
+                 config,
+                 linear_method: Optional[LinearMethodBase] = None):
+        if config.hidden_size == 4096:  # baichuan2 7b
+            super().__init__(config, "ROPE", linear_method)
+        else:  # baichuan 13b, baichuan2 13b
+            super().__init__(config, "ALIBI", linear_method)
+
+
+class BaiChuanForCausalLM(BaiChuanBaseForCausalLM):
+    """Baichuan 7B."""
+
+    def __init__(self,
+                 config,
+                 linear_method: Optional[LinearMethodBase] = None):
+        super().__init__(config, "ROPE", linear_method)

@@ -21,19 +21,22 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Inference-only Yi model compatible with HuggingFace weights."""
-from typing import Any, Dict, List, Optional, Tuple
+"""Inference-only Mixtral model."""
+from typing import List, Optional, Tuple
+
+import numpy as np
 
 import torch
+import torch.nn.functional as F
+
 from torch import nn
-from aphrodite.transformers_utils.configs.yi import YiConfig
+from transformers import MixtralConfig
 
 from aphrodite.modeling.metadata import InputMetadata
-from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.modeling.layers.attention import PagedAttention
 from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              MergedColumnParallelLinear,
+                                              ReplicatedLinear,
                                               QKVParallelLinear,
                                               RowParallelLinear,
                                               ColumnParallelLinear)
@@ -41,8 +44,10 @@ from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding, ParallelLMHead)
+from aphrodite.modeling.megatron.communication_op import (
+    tensor_model_parallel_all_reduce)
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_world_size)
+    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (default_weight_loader,
                                               hf_model_weights_iterator)
@@ -51,66 +56,122 @@ from aphrodite.common.sequence import SamplerOutput
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 
-class YiMLP(nn.Module):
+class MixtralMLP(nn.Module):
 
     def __init__(
         self,
+        num_experts: int,
         hidden_size: int,
         intermediate_size: int,
-        hidden_act: str,
         linear_method: Optional[LinearMethodBase] = None,
     ) -> None:
         super().__init__()
-        if linear_method is not None and not linear_method.quant_config.merge_weight(
-        ):
-            self.merge_weight = False
-            self.gate_proj = ColumnParallelLinear(hidden_size,
-                                                  intermediate_size,
-                                                  bias=False,
-                                                  linear_method=linear_method)
-            self.up_proj = ColumnParallelLinear(hidden_size,
-                                                intermediate_size,
-                                                bias=False,
-                                                linear_method=linear_method)
-        else:
-            self.merge_weight = True
-            self.gate_up_proj = MergedColumnParallelLinear(
-                hidden_size, [intermediate_size] * 2,
-                bias=False,
-                linear_method=linear_method)
-        self.down_proj = RowParallelLinear(intermediate_size,
-                                           hidden_size,
-                                           bias=False,
-                                           linear_method=linear_method)
-        if hidden_act != "silu":
-            raise ValueError(f"Unsupported activation: {hidden_act}. "
-                             "Only silu is supported for now.")
-        self.act_fn = SiluAndMul()
+        self.num_experts = num_experts
+        self.ffn_dim = intermediate_size
+        self.hidden_dim = hidden_size
 
-    def forward(self, x):
-        if self.merge_weight:
-            gate_up, _ = self.gate_up_proj(x)
-        else:
-            up, _ = self.up_proj(x)
-            gate, _ = self.gate_proj(x)
-            gate_up = torch.cat([gate, up], dim=-1)
-        x = self.act_fn(gate_up)
-        x, _ = self.down_proj(x)
-        return x
+        self.w1 = ReplicatedLinear(self.hidden_dim,
+                                   self.ffn_dim,
+                                   bias=False,
+                                   linear_method=linear_method)
+        self.w2 = ReplicatedLinear(self.ffn_dim,
+                                   self.hidden_dim,
+                                   bias=False,
+                                   linear_method=linear_method)
+        self.w3 = ReplicatedLinear(self.hidden_dim,
+                                   self.ffn_dim,
+                                   bias=False,
+                                   linear_method=linear_method)
+
+        # TODO: Use Aphrodite's SiluAndMul
+        self.act_fn = nn.SiLU()
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        w1_out, _ = self.w1(hidden_states)
+        w1_out = self.act_fn(w1_out)
+        w3_out, _ = self.w3(hidden_states)
+        current_hidden_states = w1_out * w3_out
+        current_hidden_states, _ = self.w2(current_hidden_states)
+        return current_hidden_states
 
 
-class YiAttention(nn.Module):
+class MixtralMoE(nn.Module):
 
     def __init__(
         self,
-        hidden_size: int,
-        num_heads: int,
-        num_kv_heads: int,
-        rope_theta: float = 10000,
-        rope_scaling: Optional[Dict[str, Any]] = None,
-        max_position_embeddings: int = 8192,
+        config: MixtralConfig,
         linear_method: Optional[LinearMethodBase] = None,
-    ) -> None:
+    ):
+        super().__init__()
+        self.config = config
+        self.rank = get_tensor_model_parallel_rank()
+        self.tp_size = get_tensor_model_parallel_world_size()
+        self.num_total_experts = config.num_local_experts
+        self.top_k = config.num_experts_per_tok
+        if self.tp_size > self.num_total_experts:
+            raise ValueError(
+                f"Tensor parallel size {self.tp_size} is greater than "
+                f"the number of experts {self.num_total_experts}.")
+        # Split experts equally between ranks
+        self.expert_indicies = np.array_split(range(
+            self.num_total_experts), self.tp_size)[self.rank].tolist()
+        if not self.expert_indicies:
+            raise ValueError(
+                f"Rank {self.rank} has no experts assigned to it.")
+
+        self.experts = nn.ModuleList([
+            MixtralMLP(self.num_total_experts,
+                       config.hidden_size,
+                       config.intermediate_size,
+                       linear_method=linear_method)
+            if idx in self.expert_indicies else None
+            for idx in range(self.num_total_experts)
+        ])
+        self.gate = ReplicatedLinear(config.hidden_size,
+                                     self.num_total_experts,
+                                     bias=False,
+                                     linear_method=None)
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        batch_size, sequence_length, hidden_dim = hidden_states.shape
+        hidden_states = hidden_states.view(-1, hidden_dim)
+        # router_logits: (batch * sequence_length, n_experts)
+        router_logits, _ = self.gate(hidden_states)
+
+        routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
+        routing_weights, selected_experts = torch.topk(routing_weights,
+                                                       self.top_k,
+                                                       dim=-1)
+        routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
+
+        final_hidden_states = None
+        for expert_idx in self.expert_indicies:
+            expert_layer = self.experts[expert_idx]
+            expert_mask = (selected_experts == expert_idx)
+            expert_weights = (routing_weights * expert_mask).sum(dim=-1,
+                                                                 keepdim=True)
+
+            current_hidden_states = expert_layer(hidden_states).mul_(
+                expert_weights)
+            if final_hidden_states is None:
+                final_hidden_states = current_hidden_states
+            else:
+                final_hidden_states.add_(current_hidden_states)
+
+        return tensor_model_parallel_all_reduce(final_hidden_states).view(
+            batch_size, sequence_length, hidden_dim)
+
+
+class MixtralAttention(nn.Module):
+
+    def __init__(self,
+                 hidden_size: int,
+                 num_heads: int,
+                 num_kv_heads: int,
+                 max_position: int = 4096 * 32,
+                 rope_theta: float = 10000,
+                 linear_method: Optional[LinearMethodBase] = None,
+                 sliding_window: Optional[int] = None) -> None:
         super().__init__()
         self.hidden_size = hidden_size
         tp_size = get_tensor_model_parallel_world_size()
@@ -132,7 +193,7 @@ class YiAttention(nn.Module):
         self.kv_size = self.num_kv_heads * self.head_dim
         self.scaling = self.head_dim**-0.5
         self.rope_theta = rope_theta
-        self.max_position_embeddings = max_position_embeddings
+        self.sliding_window = sliding_window
 
         if linear_method is not None and not linear_method.quant_config.merge_weight(
         ):
@@ -165,20 +226,20 @@ class YiAttention(nn.Module):
             bias=False,
             linear_method=linear_method,
         )
-        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
-        ) is None else linear_method.quant_config.rope_style()
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.head_dim,
-            max_position=max_position_embeddings,
-            base=self.rope_theta,
-            rope_scaling=rope_scaling,
-            is_neox_style=is_neox_style,
+            max_position=max_position,
+            base=int(self.rope_theta),
+            is_neox_style=True,
         )
-        self.attn = PagedAttention(self.num_heads,
-                                   self.head_dim,
-                                   self.scaling,
-                                   num_kv_heads=self.num_kv_heads)
+        self.attn = PagedAttention(
+            self.num_heads,
+            self.head_dim,
+            self.scaling,
+            num_kv_heads=self.num_kv_heads,
+            sliding_window=self.sliding_window,
+        )
 
     def forward(
         self,
@@ -202,36 +263,31 @@ class YiAttention(nn.Module):
         return output
 
 
-class YiDecoderLayer(nn.Module):
+class MixtralDecoderLayer(nn.Module):
 
     def __init__(
         self,
-        config: YiConfig,
+        config: MixtralConfig,
         linear_method: Optional[LinearMethodBase] = None,
     ) -> None:
         super().__init__()
         self.hidden_size = config.hidden_size
+        # Requires transformers > 4.32.0
         rope_theta = getattr(config, "rope_theta", 10000)
-        rope_scaling = getattr(config, "rope_scaling", None)
-        max_position_embeddings = getattr(config, "max_position_embeddings",
-                                          8192)
-        self.self_attn = YiAttention(
+        self.self_attn = MixtralAttention(
             hidden_size=self.hidden_size,
             num_heads=config.num_attention_heads,
+            max_position=config.max_position_embeddings,
             num_kv_heads=config.num_key_value_heads,
             rope_theta=rope_theta,
-            rope_scaling=rope_scaling,
-            max_position_embeddings=max_position_embeddings,
-            linear_method=linear_method,
-        )
-        self.mlp = YiMLP(
-            hidden_size=self.hidden_size,
-            intermediate_size=config.intermediate_size,
-            hidden_act=config.hidden_act,
-            linear_method=linear_method,
-        )
-        self.ln1 = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.ln2 = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+            sliding_window=config.sliding_window,
+            linear_method=linear_method)
+        self.block_sparse_moe = MixtralMoE(config=config,
+                                           linear_method=linear_method)
+        self.input_layernorm = RMSNorm(config.hidden_size,
+                                       eps=config.rms_norm_eps)
+        self.post_attention_layernorm = RMSNorm(config.hidden_size,
+                                                eps=config.rms_norm_eps)
 
     def forward(
         self,
@@ -240,13 +296,14 @@ class YiDecoderLayer(nn.Module):
         kv_cache: KVCache,
         input_metadata: InputMetadata,
         residual: Optional[torch.Tensor],
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor:
         # Self Attention
         if residual is None:
             residual = hidden_states
-            hidden_states = self.ln1(hidden_states)
+            hidden_states = self.input_layernorm(hidden_states)
         else:
-            hidden_states, residual = self.ln1(hidden_states, residual)
+            hidden_states, residual = self.input_layernorm(
+                hidden_states, residual)
         hidden_states = self.self_attn(
             positions=positions,
             hidden_states=hidden_states,
@@ -255,27 +312,30 @@ class YiDecoderLayer(nn.Module):
         )
 
         # Fully Connected
-        hidden_states, residual = self.ln2(hidden_states, residual)
-        hidden_states = self.mlp(hidden_states)
+        hidden_states, residual = self.post_attention_layernorm(
+            hidden_states, residual)
+        hidden_states = self.block_sparse_moe(hidden_states)
         return hidden_states, residual
 
 
-class YiModel(nn.Module):
+class MixtralModel(nn.Module):
 
     def __init__(
         self,
-        config: YiConfig,
+        config: MixtralConfig,
         linear_method: Optional[LinearMethodBase] = None,
     ) -> None:
         super().__init__()
-        self.config = config
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
-        self.embed_tokens = VocabParallelEmbedding(config.vocab_size,
-                                                   config.hidden_size,
-                                                   linear_method=linear_method)
+
+        self.embed_tokens = VocabParallelEmbedding(
+            config.vocab_size,
+            config.hidden_size,
+            linear_method=linear_method,
+        )
         self.layers = nn.ModuleList([
-            YiDecoderLayer(config, linear_method)
+            MixtralDecoderLayer(config, linear_method=linear_method)
             for _ in range(config.num_hidden_layers)
         ])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -291,31 +351,29 @@ class YiModel(nn.Module):
         residual = None
         for i in range(len(self.layers)):
             layer = self.layers[i]
-            hidden_states, residual = layer(
-                positions,
-                hidden_states,
-                kv_caches[i],
-                input_metadata,
-                residual,
-            )
+            hidden_states, residual = layer(positions, hidden_states,
+                                            kv_caches[i], input_metadata,
+                                            residual)
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
 
 
-class YiForCausalLM(nn.Module):
+class MixtralForCausalLM(nn.Module):
 
     def __init__(
         self,
-        config: YiConfig,
+        config: MixtralConfig,
         linear_method: Optional[LinearMethodBase] = None,
     ) -> None:
         super().__init__()
         self.config = config
         self.linear_method = linear_method
-        self.model = YiModel(config, linear_method)
-        self.lm_head = ParallelLMHead(config.vocab_size,
-                                      config.hidden_size,
-                                      linear_method=linear_method)
+        self.model = MixtralModel(config, linear_method)
+        self.lm_head = ParallelLMHead(
+            config.vocab_size,
+            config.hidden_size,
+            linear_method=linear_method,
+        )
         self.sampler = Sampler(config.vocab_size)
 
     def forward(
@@ -331,7 +389,7 @@ class YiForCausalLM(nn.Module):
 
     def sample(
         self,
-        hidden_states: torch.Tensor,
+        hidden_states: Optional[torch.Tensor],
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
         next_tokens = self.sampler(self.lm_head(hidden_states),
@@ -348,16 +406,19 @@ class YiForCausalLM(nn.Module):
             ("qkv_proj", "q_proj", "q"),
             ("qkv_proj", "k_proj", "k"),
             ("qkv_proj", "v_proj", "v"),
-            ("gate_up_proj", "gate_proj", 0),
-            ("gate_up_proj", "up_proj", 1),
         ]
         if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
         ):
             stacked_params_mapping = []
+
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision,
-                self.config):
+                model_name_or_path,
+                cache_dir,
+                load_format,
+                revision,
+                self.config,
+                fall_back_to_pt=False):
             if "rotary_emb.inv_freq" in name:
                 continue
             for (param_name, weight_name, shard_id) in stacked_params_mapping:
@@ -374,6 +435,10 @@ class YiForCausalLM(nn.Module):
             else:
                 # Skip loading extra bias for GPTQ models.
                 if name.endswith(".bias") and name not in params_dict:
+                    continue
+                # Skip experts that are not assigned to this worker.
+                if ("block_sparse_moe.experts." in name
+                        and name not in params_dict):
                     continue
                 param = params_dict[name]
                 weight_loader = getattr(param, "weight_loader",

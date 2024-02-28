@@ -1,3 +1,4 @@
+import contextlib
 import time
 from typing import Dict, List, Optional, Tuple, Set, Union
 
@@ -9,8 +10,11 @@ from aphrodite.common.config import (DeviceConfig, ModelConfig, LoRAConfig,
                                      ParallelConfig, SchedulerConfig)
 from aphrodite.common.logger import init_logger
 from aphrodite.modeling import get_model, InputMetadata, SamplingMetadata
+from aphrodite.modeling.megatron import cupy_utils
 from aphrodite.modeling.megatron.communication_op import (broadcast_tensor_dict
                                                           )
+from aphrodite.modeling.megatron.parallel_state import (
+    with_cupy_nccl_for_all_reduce)
 from aphrodite.modeling.megatron import custom_all_reduce
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (SamplerOutput, SequenceData,
@@ -84,11 +88,20 @@ class ModelRunner:
         vocab_size = self.model.config.vocab_size
 
         if self.lora_config:
+            assert hasattr(
+                self.model, "supported_lora_modules"
+            ) and self.model.supported_lora_modules, "Model does not support LoRA"
+            assert hasattr(
+                self.model,
+                "embedding_modules"), "Model does not have embedding_modules"
+            assert hasattr(self.model, "embedding_padding_modules"
+                           ), "Model does not have embedding_padding_modules"
             self.lora_manager = LRUCacheWorkerLoRAManager(
                 self.scheduler_config.max_num_seqs,
                 self.scheduler_config.max_num_batched_tokens +
                 self.scheduler_config.max_paddings, vocab_size,
-                self.lora_config, self.device)
+                self.lora_config, self.device, self.model.embedding_modules,
+                self.model.embedding_padding_modules)
             self.model = self.lora_manager.create_lora_manager(self.model)
 
     def set_block_size(self, block_size: int) -> None:
@@ -652,6 +665,9 @@ class ModelRunner:
 
     @torch.inference_mode()
     def capture_model(self, kv_caches: List[KVCache]) -> None:
+        # NOTE: This is a hack to ensure that the NCCL backend is never
+        # deleted before the CUDA graph
+        self.cupy_nccl_backend = cupy_utils.get_nccl_backend()
         assert not self.model_config.enforce_eager
         logger.info("Capturing the model for CUDA graphs. This may lead to "
                     "unexpected consequences if the model is not static. To "
@@ -681,6 +697,12 @@ class ModelRunner:
 
         # NOTE: Capturing the largest batch size first may help reduce the
         # memory usage of CUDA graph.
+        # NOTE: There are 3 backends for all-reduce: custom all-reduce
+        # kernel, CuPy NCCL, and PyTorch NCCL. When using CUDA graph, we use
+        # either custom all-reduce kernel or CuPy NCCL. When not using CUDA
+        # graph, we use either custom all-reduce kernel or PyTorch NCCL.
+        # We always prioritize using custom all-reduce kernel but fall back
+        # to PyTorch or CuPy NCCL if it is disabled or not supported.
         with custom_all_reduce.capture():
             for batch_size in reversed(batch_size_capture_list):
                 if batch_size > self.scheduler_config.max_num_seqs:
@@ -722,6 +744,14 @@ class ModelRunner:
         # This usually takes < 10 seconds.
         logger.info(f"Graph capturing finished in {elapsed_time:.0f} secs.")
 
+    def __del__(self) -> None:
+        # Delete the CUDA graphs before deleting the CuPy NCCL communicator.
+        # NOTE: This is necessary because otherwise deadlocks can
+        # happen.
+        # FIXME: This is a bit hacky. Find a more robust solution.
+        self.graph_runners.clear()
+        self.cupy_nccl_backend = None
+
 
 class CUDAGraphRunner:
 
@@ -743,23 +773,27 @@ class CUDAGraphRunner:
         # Run the model once without capturing the graph.
         # This is to make sure that the captured graph does not include the
         # kernel launches for initial benchmarking (e.g., Triton autotune).
-        self.model(
-            input_ids,
-            positions,
-            kv_caches,
-            input_metadata,
-        )
-        torch.cuda.synchronize()
-
-        # Capture the graph.
-        self.graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(self.graph, pool=memory_pool):
-            hidden_states = self.model(
+        with _maybe_cupy_nccl():
+            self.model(
                 input_ids,
                 positions,
                 kv_caches,
                 input_metadata,
             )
+        torch.cuda.synchronize()
+
+        # Capture the graph.
+        # NOTE: Python 3.8 does not support multi-line with statements.
+        # https://stackoverflow.com/questions/31039022/python-multi-line-with-statement
+        self.graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(self.graph, pool=memory_pool):
+            with _maybe_cupy_nccl():
+                hidden_states = self.model(
+                    input_ids,
+                    positions,
+                    kv_caches,
+                    input_metadata,
+                )
         torch.cuda.synchronize()
 
         # Save the input and output buffers.
@@ -802,6 +836,15 @@ class CUDAGraphRunner:
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
+
+
+@contextlib.contextmanager
+def _maybe_cupy_nccl():
+    if cupy_utils.is_initialized() and not custom_all_reduce.is_initialized():
+        with with_cupy_nccl_for_all_reduce():
+            yield
+    else:
+        yield
 
 
 def _pad_to_max(x: List[int], max_len: int, pad: int) -> List[int]:

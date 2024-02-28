@@ -4,7 +4,6 @@ from typing import Optional, Type
 
 import torch
 import torch.nn as nn
-from transformers import PretrainedConfig
 
 from aphrodite.common.config import DeviceConfig, ModelConfig, LoRAConfig
 from aphrodite.modeling.models import ModelRegistry
@@ -21,8 +20,13 @@ def _set_default_torch_dtype(dtype: torch.dtype):
     torch.set_default_dtype(old_dtype)
 
 
-def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
-    architectures = getattr(config, "architectures", [])
+def _get_model_architecture(model_config: ModelConfig) -> Type[nn.Module]:
+    architectures = getattr(model_config.hf_config, "architectures", [])
+    # Special handling for quantized Mixtral.
+    # FIXME: This is a temporary hack.
+    if (model_config.quantization is not None
+            and "MixtralForCausalLM" in architectures):
+        architectures = ["QuantMixtralForCausalLM"]
     for arch in architectures:
         model_cls = ModelRegistry.load_model_cls(arch)
         if model_cls is not None:
@@ -35,7 +39,7 @@ def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
 def get_model(model_config: ModelConfig,
               device_config: DeviceConfig,
               lora_config: Optional[LoRAConfig] = None) -> nn.Module:
-    model_class = _get_model_architecture(model_config.hf_config)
+    model_class = _get_model_architecture(model_config)
 
     # Get the (maybe quantized) linear method.
     linear_method = None
@@ -61,7 +65,7 @@ def get_model(model_config: ModelConfig,
         # Create a model instance.
         # The weights will be initialized as empty tensors.
         with torch.device(device_config.device):
-            if getattr(model_class, "supports_lora", False):
+            if hasattr(model_class, "supported_lora_modules"):
                 model = model_class(model_config.hf_config, linear_method,
                                     lora_config)
             elif lora_config:
