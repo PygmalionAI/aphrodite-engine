@@ -222,7 +222,7 @@ __launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__ void topkGatingSoftmax(
   // this should support all powers of 2 up to 16
   // NOTE: the original TensorRT-LLM implementation uses CUTLASS aligned arrays here
   // we define our own aligned array and use it here to avoid using CUTLASS
-  using AlignedArray = AlignedArray<float, ELTS_PER_LDG>;
+  using AccessType = AlignedArray<float, ELTS_PER_LDG>;
 
   // finally, we put in the data from global memory
   float row_chunk[VPT];
