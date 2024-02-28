@@ -76,6 +76,7 @@ class ModelConfig:
         quantization: Optional[str] = None,
         enforce_eager: bool = False,
         max_context_len_to_capture: Optional[int] = None,
+        max_log_probs: int = 5,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -89,6 +90,7 @@ class ModelConfig:
         self.quantization = quantization
         self.enforce_eager = enforce_eager
         self.max_context_len_to_capture = max_context_len_to_capture
+        self.max_log_probs = max_log_probs
 
         if os.environ.get("APHRODITE_USE_MODELSCOPE",
                           "False").lower() == "true":

@@ -30,6 +30,7 @@ class EngineArgs:
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: int = 256
     max_paddings: int = 256
+    max_log_probs: int = 5
     disable_log_stats: bool = False
     revision: Optional[str] = None
     tokenizer_revision: Optional[str] = None
@@ -195,6 +196,11 @@ class EngineArgs:
                             type=int,
                             default=EngineArgs.max_paddings,
                             help='maximum number of paddings in a batch')
+        parser.add_argument('--max-log-probs',
+                            type=int,
+                            default=EngineArgs.max_log_probs,
+                            help='maximum number of log probabilities to '
+                            'return.')
         parser.add_argument('--disable-log-stats',
                             action='store_true',
                             help='disable logging statistics')
@@ -286,7 +292,8 @@ class EngineArgs:
                                    self.dtype, self.seed, self.revision,
                                    self.tokenizer_revision, self.max_model_len,
                                    self.quantization, self.enforce_eager,
-                                   self.max_context_len_to_capture)
+                                   self.max_context_len_to_capture,
+                                   self.max_log_probs)
         cache_config = CacheConfig(self.block_size,
                                    self.gpu_memory_utilization,
                                    self.swap_space, self.kv_cache_dtype,
