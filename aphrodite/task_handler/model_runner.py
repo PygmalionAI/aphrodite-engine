@@ -1,3 +1,4 @@
+import contextlib
 import time
 from typing import Dict, List, Optional, Tuple, Set, Union
 
@@ -9,9 +10,9 @@ from aphrodite.common.config import (DeviceConfig, ModelConfig, LoRAConfig,
                                      ParallelConfig, SchedulerConfig)
 from aphrodite.common.logger import init_logger
 from aphrodite.modeling import get_model, InputMetadata, SamplingMetadata
+from aphrodite.modeling.megatron import cupy_utils
 from aphrodite.modeling.megatron.communication_op import (broadcast_tensor_dict
                                                           )
-from aphrodite.modeling.megatron.cupy_utils import get_nccl_backend
 from aphrodite.modeling.megatron.parallel_state import (
     with_cupy_nccl_for_all_reduce
 )
@@ -658,7 +659,7 @@ class ModelRunner:
     def capture_model(self, kv_caches: List[KVCache]) -> None:
         # NOTE: This is a hack to ensure that the NCCL backend is never
         # deleted before the CUDA graph
-        self.cupy_nccl_backend = get_nccl_backend()
+        self.cupy_nccl_backend = cupy_utils.get_nccl_backend()
         assert not self.model_config.enforce_eager
         logger.info("Capturing the model for CUDA graphs. This may lead to "
                     "unexpected consequences if the model is not static. To "
@@ -764,7 +765,7 @@ class CUDAGraphRunner:
         # Run the model once without capturing the graph.
         # This is to make sure that the captured graph does not include the
         # kernel launches for initial benchmarking (e.g., Triton autotune).
-        with with_cupy_nccl_for_all_reduce():
+        with _maybe_cupy_nccl():
             self.model(
                 input_ids,
                 positions,
@@ -778,7 +779,7 @@ class CUDAGraphRunner:
         # https://stackoverflow.com/questions/31039022/python-multi-line-with-statement
         self.graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(self.graph, pool=memory_pool):
-            with with_cupy_nccl_for_all_reduce():
+            with _maybe_cupy_nccl():
                 hidden_states = self.model(
                     input_ids,
                     positions,
@@ -828,6 +829,13 @@ class CUDAGraphRunner:
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
+@contextlib.contextmanager
+def _maybe_cupy_nccl():
+    if cupy_utils.is_initialized() and not custom_all_reduce.is_initialized():
+        with with_cupy_nccl_for_all_reduce():
+            yield
+    else:
+        yield
 
 def _pad_to_max(x: List[int], max_len: int, pad: int) -> List[int]:
     assert len(x) <= max_len

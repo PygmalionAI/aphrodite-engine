@@ -20,6 +20,7 @@ from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 from aphrodite.task_handler.cache_engine import CacheEngine
 from aphrodite.task_handler.model_runner import ModelRunner
 from aphrodite.lora.request import LoRARequest
+from aphrodite.common.utils import is_hip
 
 
 class Worker:
@@ -274,7 +275,8 @@ def init_distributed_environment(
                 "cupy.distributed is already initialized but the cupy world "
                 "size does not match parallel_config.world_size "
                 f"({cupy_world_size} vs. {parallel_config.world_size}).")
-    elif parallel_config.world_size > 1 and cupy_port is not None:
+    elif (parallel_config.world_size > 1 and cupy_port is not None
+          and not is_hip()):
         # NOTE: We don't initialize CuPy process group when world size
         # is 1.
         # TODO: Support multi-node connection.

@@ -64,6 +64,8 @@ def is_capturing() -> bool:
 def get_handle() -> Optional["CustomAllreduce"]:
     return _CA_HANDLE
 
+def is_initialized() -> bool:
+    return _CA_HANDLE is not None
 
 @contextmanager
 def capture():
