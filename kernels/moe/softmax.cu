@@ -248,7 +248,7 @@ __launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__ void topkGatingSoftmax(
 #pragma unroll
   for (int mask = THREADS_PER_ROW / 2; mask > 0; mask /= 2)
   {
-    thread_max = max(thread_max, APHRODITE_SHFL_XOR_SYNC(0xFFFFFFFF, thread_max, mask, THREADS_PER_ROW));
+    thread_max = max(thread_max, __shfl_xor_sync(0xFFFFFFFF, thread_max, mask, THREADS_PER_ROW));
   }
 
   // from this point, thread max in all the threads have the max within the row.
@@ -267,7 +267,7 @@ __launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__ void topkGatingSoftmax(
 #pragma unroll
   for (int mask = THREADS_PER_ROW / 2; mask > 0; mask /= 2)
   {
-    row_sum += APHRODITE_SHFL_XOR_SYNC(0xFFFFFFFF, row_sum, mask, THREADS_PER_ROW);
+    row_sum += __shfl_xor_sync(0xFFFFFFFF, row_sum, mask, THREADS_PER_ROW);
   }
 
   // from this point, all threads have the max and the sum for their rows in the
@@ -317,8 +317,8 @@ __launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__ void topkGatingSoftmax(
 #pragma unroll
   for (int mask = THREADS_PER_ROW / 2; mask > 0; mask /= 2)
   {
-    float other_max = APHRODITE_SHFL_XOR_SYNC(0xFFFFFFFF, max_val, mask, THREADS_PER_ROW);
-    int other_expert = APHRODITE_SHFL_XOR_SYNC(0xFFFFFFFF, expert, mask, THREADS_PER_ROW);
+    float other_max = __shfl_xor_sync(0xFFFFFFFF, max_val, mask, THREADS_PER_ROW);
+    int other_expert = __shfl_xor_sync(0xFFFFFFFF, expert, mask, THREADS_PER_ROW);
 
     // we want lower indices to "win" in every thread so we break ties this way
     if (other_max > max_val || (other_max == max_val && other_expert < expert))
