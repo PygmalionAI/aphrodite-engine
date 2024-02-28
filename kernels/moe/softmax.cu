@@ -42,143 +42,145 @@ class alignas(Alignment) AlignedArray {
 // in the softmax kernel when we extend this module to support expert-choice routing.
 
 template <int TPB>
-__launch_bounds__(TPB) __global__ void moeSoftmax(
-  const float* input, const bool* finished, float* output, const int num_cols)
+__launch_bounds__(TPB) __global__
+    void moeSoftmax(const float* input, const bool* finished, float* output, const int num_cols)
 {
-  using BlockReduce = cub::BlockReduce<float, TPB>;
-  __shared__ typename BlockReduce::TempStorage tmpStorage;
+    using BlockReduce = cub::BlockReduce<float, TPB>;
+    __shared__ typename BlockReduce::TempStorage tmpStorage;
 
-  __shared__ float normalizing_factor;
-  __shared__ float float_max;
+    __shared__ float normalizing_factor;
+    __shared__ float float_max;
 
-  const int thread_row_offset = blockIdx.x * num_cols;
+    const int thread_row_offset = blockIdx.x * num_cols;
 
-  cub::Sum sum;
-  float threadData(-FLT_MAX);
+    cub::Sum sum;
+    float threadData(-FLT_MAX);
 
-  // Don't touch finished rows
-  if ((finished != nullptr) && finished[blockIdx.x])
-  {
-    return;
-  }
+    // Don't touch finished rows.
+    if ((finished != nullptr) && finished[blockIdx.x])
+    {
+        return;
+    }
 
-  for (int ii = threadIdx.x; ii < num_cols; ii += TPB)
-  {
-    const int idx = thread_row_offset + ii;
-    threadData = max(static_cast<float>(input[idx]), threadData);
-  }
+    for (int ii = threadIdx.x; ii < num_cols; ii += TPB)
+    {
+        const int idx = thread_row_offset + ii;
+        threadData = max(static_cast<float>(input[idx]), threadData);
+    }
 
-  const float maxElem = BlockReduce(tmpStorage).Reduce(threadData, cub::Max());
-  if (threadIdx.x == 0)
-  {
-    float_max = maxElem;
-  }
-  __syncthreads();
+    const float maxElem = BlockReduce(tmpStorage).Reduce(threadData, cub::Max());
+    if (threadIdx.x == 0)
+    {
+        float_max = maxElem;
+    }
+    __syncthreads();
 
-  threadData = 0;
+    threadData = 0;
 
-  for (int ii = threadIdx.x; ii < num_cols; ii += TPB)
-  {
-    const int idx = thread_row_offset + ii;
-    threadData += exp((static_cast<float>(input[idx]) - float_max));
-  }
+    for (int ii = threadIdx.x; ii < num_cols; ii += TPB)
+    {
+        const int idx = thread_row_offset + ii;
+        threadData += exp((static_cast<float>(input[idx]) - float_max));
+    }
 
-  const auto Z = BlockReduce(tmpStorage).Reduce(threadData, sum);
+    const auto Z = BlockReduce(tmpStorage).Reduce(threadData, sum);
 
-  if (threadIdx.x == 0)
-  {
-    normalizing_factor = 1.f / Z;
-  }
-  __syncthreads();
+    if (threadIdx.x == 0)
+    {
+        normalizing_factor = 1.f / Z;
+    }
+    __syncthreads();
 
-  for (int ii = threadIdx.x; ii < num_cols; ii += TPB)
-  {
-    const int idx = thread_row_offset + ii;
-    const float val = exp((static_cast<float>(input[idx]) - float_max)) * normalizing_factor;
-    output[idx] = val;
-  }
+    for (int ii = threadIdx.x; ii < num_cols; ii += TPB)
+    {
+        const int idx = thread_row_offset + ii;
+        const float val = exp((static_cast<float>(input[idx]) - float_max)) * normalizing_factor;
+        output[idx] = val;
+    }
 }
 
 template <int TPB>
-__launch_bounds__(TPB) __global__ void moeTopK(
-  const float* inputs_after_softmax, const bool* finished, float* output,
-  int* indices, int* source_rows, const int num_experts, const int k,
-  const int start_expert, const int end_expert)
+__launch_bounds__(TPB) __global__ void moeTopK(const float* inputs_after_softmax, const bool* finished, float* output,
+    int* indices, int* source_rows, const int num_experts, const int k, const int start_expert, const int end_expert)
 {
-  using cub_kvp = cub::KeyValuePair<int, float>;
-  using BlockReduce = cub::BlockReduce<cub_kvp, TPB>;
-  __shared__ typename BlockReduce::TempStorage tmpStorage;
 
-  cub_kvp thread_kvp;
-  cub::ArgMax arg_max;
+    using cub_kvp = cub::KeyValuePair<int, float>;
+    using BlockReduce = cub::BlockReduce<cub_kvp, TPB>;
+    __shared__ typename BlockReduce::TempStorage tmpStorage;
 
-  const int num_rows = gridDim.x;
-  const int block_row = blockIdx.x;
+    cub_kvp thread_kvp;
+    cub::ArgMax arg_max;
 
-  const bool row_is_active = finished ? !finished[block_row] : true;
-  // TODO: check if we can use block_row instead of blockIdx.x here
-  const int thread_read_offset = blockIdx.x * num_experts;
-  for (int k_idx = 0; k_idx < k; ++k_idx)
-  {
-    thread_kvp.key = 0;
-    thread_kvp.value = -1.f;
+    const int num_rows = gridDim.x;
+    const int block_row = blockIdx.x;
 
-    cub_kvp inp_kvp;
-    for (int expert = threadIdx.x; expert < num_experts; expert += TPB)
+    const bool row_is_active = finished ? !finished[block_row] : true;
+    const int thread_read_offset = blockIdx.x * num_experts;
+    for (int k_idx = 0; k_idx < k; ++k_idx)
     {
-      const int idx = thread_read_offset + expert;
-      inp_kvp.key = expert;
-      inp_kvp.value = inputs_after_softmax[idx];
+        thread_kvp.key = 0;
+        thread_kvp.value = -1.f; // This is OK because inputs are probabilities
 
-      for (int prior_k = 0; prior_k < k_idx; ++prior_k)
-      {
-        const int prior_winning_expert = indices[k * block_row + prior_k];
-        if (prior_winning_expert == expert)
+        cub_kvp inp_kvp;
+        for (int expert = threadIdx.x; expert < num_experts; expert += TPB)
         {
-          inp_kvp = thread_kvp;
+            const int idx = thread_read_offset + expert;
+            inp_kvp.key = expert;
+            inp_kvp.value = inputs_after_softmax[idx];
+
+            for (int prior_k = 0; prior_k < k_idx; ++prior_k)
+            {
+                const int prior_winning_expert = indices[k * block_row + prior_k];
+
+                if (prior_winning_expert == expert)
+                {
+                    inp_kvp = thread_kvp;
+                }
+            }
+
+            thread_kvp = arg_max(inp_kvp, thread_kvp);
         }
-      }
-      thread_kvp = arg_max(inp_kvp, thread_kvp);
-    }
 
-    const cub_kvp result_kvp = BlockReduce(tmpStorage).Reduce(thread_kvp, arg_max);
-    if (threadIdx.x == 0)
-    {
-      const int expert = result_kvp.key;
-      // ignore experts the node isn't responsible for with expert parallelism
-      const bool node_uses_expert = expert >= start_expert && expert < end_expert;
-      const bool should_process_row = row_is_active && node_uses_expert;
+        const cub_kvp result_kvp = BlockReduce(tmpStorage).Reduce(thread_kvp, arg_max);
+        if (threadIdx.x == 0)
+        {
+            // Ignore experts the node isn't responsible for with expert parallelism
+            const int expert = result_kvp.key;
+            const bool node_uses_expert = expert >= start_expert && expert < end_expert;
+            const bool should_process_row = row_is_active && node_uses_expert;
 
-      const int idx = k * block_row + k_idx;
-      output[idx] = result_kvp.value;
-      indices[idx] = should_process_row ? (expert - start_expert) : num_experts;
-      assert(indices[idx] >= 0);
-      source_rows[idx] = k_idx * num_rows + block_row;
+            const int idx = k * block_row + k_idx;
+            output[idx] = result_kvp.value;
+            indices[idx] = should_process_row ? (expert - start_expert) : num_experts;
+            assert(indices[idx] >= 0);
+            source_rows[idx] = k_idx * num_rows + block_row;
+        }
+        __syncthreads();
     }
-    __syncthreads();
-  }
 }
 
 // Top-K
 template <int VPT, int NUM_EXPERTS, int WARPS_PER_CTA, int BYTES_PER_LDG>
-__launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__ void topkGatingSoftmax(
-  const float* input, const bool* finished, float* output, const int num_rows,
-  int* indices, int* source_rows, const int k, const int start_expert, const int end_expert)
+__launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__
+    void topkGatingSoftmax(const float* input, const bool* finished, float* output, const int num_rows, int* indices,
+        int* source_rows, const int k, const int start_expert, const int end_expert)
 {
-  static_assert(VPT == (VPT & -VPT), "VPT must be a power of 2");
-  static_assert(NUM_EXPERTS == (NUM_EXPERTS && -NUM_EXPERTS), "NUM_EXPERTS must be a power of 2");
-  static_assert(BYTES_PER_LDG == (BYTES_PER_LDG && -BYTES_PER_LDG), "BYTES_PER_LDG must be a power of 2");
-  static_assert(BYTES_PER_LDG <= 16, "BYTES_PER_LDG must be leq 16");
+    // We begin by enforcing compile time assertions and setting up compile time constants.
+    static_assert(VPT == (VPT & -VPT), "VPT must be power of 2");
+    static_assert(NUM_EXPERTS == (NUM_EXPERTS & -NUM_EXPERTS), "NUM_EXPERTS must be power of 2");
+    static_assert(BYTES_PER_LDG == (BYTES_PER_LDG & -BYTES_PER_LDG), "BYTES_PER_LDG must be power of 2");
+    static_assert(BYTES_PER_LDG <= 16, "BYTES_PER_LDG must be leq 16");
 
-  static constexpr int ELTS_PER_LDG = BYTES_PER_LDG / sizeof(float);
-  static constexpr int ELTS_PER_ROW = NUM_EXPERTS;
-  static constexpr int THREADS_PER_ROW = ELTS_PER_ROW / VPT;
-  static constexpr int LDG_PER_THREAD = VPT / ELTS_PER_LDG;
+    // Number of bytes each thread pulls in per load
+    static constexpr int ELTS_PER_LDG = BYTES_PER_LDG / sizeof(float);
+    static constexpr int ELTS_PER_ROW = NUM_EXPERTS;
+    static constexpr int THREADS_PER_ROW = ELTS_PER_ROW / VPT;
+    static constexpr int LDG_PER_THREAD = VPT / ELTS_PER_LDG;
 
   // more compile-time assertions based on the previous section
   static_assert(VPT % ELTS_PER_LDG == 0, "The elements per thread must be a multiple of the elements per ldg");
   static_assert(WARP_SIZE % THREADS_PER_ROW == 0, "The threads per row must cleanly divide the threads per warp");
-  static_assert(THREADS_PER_ROW == (THREADS_PER_ROW & -THREADS_PER_ROW), "THREADS_PER_ROW must be a power of 2");
+  static_assert(THREADS_PER_ROW == (THREADS_PER_ROW & -THREADS_PER_ROW), "THREADS_PER_ROW must be power of 2");
   static_assert(THREADS_PER_ROW <= WARP_SIZE, "THREADS_PER_ROW can be at most warp size");
 
   static constexpr int ELTS_PER_WARP = WARP_SIZE * VPT;
