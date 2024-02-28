@@ -362,4 +362,127 @@ __launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__ void topkGatingSoftmax(
 }
 }
 
+namespace detail
+{
+// constructs some constants needed to partition the work across threads at compile time
+template <int EXPERTS, int BYTES_PER_LDG>
+struct TopkConstants
+{
+  static constexpr int ELTS_PER_LDG = BYTES_PER_LDG / sizeof(float);
+  static_assert(EXPERTS / (ELTS_PER_LDG * WARP_SIZE) == 0 || EXPERTS % (ELTS_PER_LDG * WARP_SIZE) == 0, "");
+  static constexpr int VECs_PER_THREAD = std::max(1, EXPERTS / (ELTS_PER_LDG * WARP_SIZE));
+  static constexpr int VPT = VECs_PER_THREAD * ELTS_PER_LDG;
+  static constexpr int THREADS_PER_ROW = EXPERTS / VPT;
+  static constexpr int ROWS_PER_WARP = WARP_SIZE / THREADS_PER_ROW;
+};
+} // namespace detail
+
+template <int EXPERTS, int WARPS_PER_TB>
+void topkGatingSoftmaxLauncherHelper(
+  const float* input, const bool* finished, float* output, int* indices, int* source_row,
+  const int num_rows, const int k, const int start_expert, const int end_expert,
+  cudaStream_t stream)
+{
+  static constexpr std::size_t MAX_BYTES_PER_LDG = 16;
+
+  static constexpr int BYTES_PER_LDG = std::min(MAX_BYTES_PER_LDG, sizeof(float) * EXPERTS);
+  using Constants = detail::TopkConstants<EXPERTS, BYTES_PER_LDG>;
+  static constexpr int VPT = Constants::VPT;
+  static constexpr int ROWS_PER_WARP = Constants::ROWS_PER_WARP;
+  const int num_warps = (num_rows + ROWS_PER_WARP - 1) / ROWS_PER_WARP;
+  const int num_blocks = (num_warps + WARPS_PER_TB - 1) / WARPS_PER_TB;
+
+  dim3 block_dim(WARP_SIZE, WARPS_PER_TB);
+  topkGatingSoftmax<VPT, EXPERTS, WARPS_PER_TB, BYTES_PER_LDG><<<num_blocks, block_dim, 0, stream>>>(
+    input, finished, output, num_rows, indices, source_row, k, start_expert, end_expert);
+}
+
+#define LAUNCH_SOFTMAX(NUM_EXPERTS, WARPS_PER_TB)             \
+  topkGatingSoftmaxLauncherHelper<NUM_EXPERTS, WARPS_PER_TB>( \
+    gating_output, nullptr, topk_weights, topk_indices,       \
+    token_expert_indices, num_tokens, topk, 0, num_experts,   \
+    stream);
+
+void topkGatingSoftmaxKernelLauncher(
+  const float* gating_output,
+  float* topk_weights,
+  int* topk_indices,
+  int* token_expert_indices,
+  float* softmax_workspace,
+  const int num_tokens,
+  const int num_experts,
+  const int topk,
+  cudaStream_t stream) {
+  static constexpr int WARPS_PER_TB = 4;
+  switch (num_experts) {
+    case 1:
+      LAUNCH_SOFTMAX(1, WARPS_PER_TB);
+      break;
+    case 2:
+      LAUNCH_SOFTMAX(2, WARPS_PER_TB);
+      break;
+    case 4:
+      LAUNCH_SOFTMAX(4, WARPS_PER_TB);
+      break;
+    case 8:
+      LAUNCH_SOFTMAX(8, WARPS_PER_TB);
+      break;
+    case 16:
+      LAUNCH_SOFTMAX(16, WARPS_PER_TB);
+      break;
+    case 32:
+      LAUNCH_SOFTMAX(32, WARPS_PER_TB);
+      break;
+    case 64:
+      LAUNCH_SOFTMAX(64, WARPS_PER_TB);
+      break;
+    case 128:
+      LAUNCH_SOFTMAX(128, WARPS_PER_TB);
+      break;
+    case 256:
+      LAUNCH_SOFTMAX(256, WARPS_PER_TB);
+      break;
+    default: {
+      TORCH_CHECK(softmax_workspace != nullptr,
+            "softmax_workspace must be provided for num_experts that aren't a power of 2.");
+      static constexpr int TPB = 256;
+      moeSoftmax<TPB><<<num_tokens, TPB, 0, stream>>>(
+        gating_output, nullptr, softmax_workspace, num_experts);
+      moeTopK<TPB><<<num_tokens, TPB, 0, stream>>>(
+        softmax_workspace, nullptr, topk_weights, topk_indices, token_expert_indices,
+        num_experts, topk, 0, num_experts);
+    }
+  }
+}
+
+} // namespace moe
+} // namespace aphrodite
+
+void topk_softmax(
+  torch::Tensor& topk_weights,
+  torch::Tensor& topk_indices,
+  torch::Tensor& token_expert_indices,
+  torch::Tensor& gating_output)
+{
+  const int num_experts = gating_output.size(-1);
+  const int num_tokens = gating_output.numel() / num_experts;
+  const int topk = topk_weights.size(-1);
+
+  const bool is_pow_2 = (num_experts != 0) && ((num_experts & (num_experts - 1)) == 0);
+  const bool needs_workspace = !is_pow_2 || num_experts > 256;
+  const int64_t workspace_size = needs_workspace ? num_tokens * num_experts : 0;
+
+  const at::cuda::OptionalCUDAGuard device_guard(device_of(gating_output));
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  torch::Tensor softmax_workspace = torch::empty({workspace_size}, gating_output.options());
+  aphrodite::moe::topkGatingSoftmaxKernelLauncher(
+    gating_output.data_ptr<float>(),
+    topk_weights.data_ptr<float>(),
+    topk_indices.data_ptr<int>(),
+    token_expert_indices.data_ptr<int>(),
+    softmax_workspace.data_ptr<float>(),
+    num_tokens,
+    num_experts,
+    topk,
+    stream);
 }
