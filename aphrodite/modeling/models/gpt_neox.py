@@ -196,11 +196,9 @@ class GPTNeoXModel(nn.Module):
         super().__init__()
         self.config = config
 
-        self.embed_in = VocabParallelEmbedding(
-            config.vocab_size,
-            config.hidden_size,
-            linear_method=linear_method,
-        )
+        self.embed_in = VocabParallelEmbedding(config.vocab_size,
+                                               config.hidden_size,
+                                               linear_method=linear_method)
         self.layers = nn.ModuleList([
             GPTNeoXLayer(config, linear_method)
             for _ in range(config.num_hidden_layers)
@@ -239,11 +237,9 @@ class GPTNeoXForCausalLM(nn.Module):
         self.config = config
         self.linear_method = linear_method
         self.gpt_neox = GPTNeoXModel(config, linear_method)
-        self.embed_out = ParallelLMHead(
-            config.vocab_size,
-            config.hidden_size,
-            linear_method=linear_method,
-        )
+        self.embed_out = ParallelLMHead(config.vocab_size,
+                                        config.hidden_size,
+                                        linear_method=linear_method)
         self.sampler = Sampler(config.vocab_size)
 
     def forward(
