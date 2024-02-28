@@ -4,6 +4,7 @@ from typing import Optional
 
 import torch
 
+
 def _raise_import_error(e):
     if torch.cuda.get_device_capability() < (8, 0):
         raise ImportError(
