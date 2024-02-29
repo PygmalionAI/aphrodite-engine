@@ -15,15 +15,15 @@ RANDOM_SEEDS = list(range(5))
 
 
 @pytest.fixture
-def vllm_model(vllm_runner):
-    vllm_model = vllm_runner(MODEL, dtype="half")
-    yield vllm_model
-    del vllm_model
+def aphrodite_model(aphrodite_runner):
+    aphrodite_model = aphrodite_runner(MODEL, dtype="half")
+    yield aphrodite_model
+    del aphrodite_model
 
 
 @pytest.mark.parametrize("seed", RANDOM_SEEDS)
 def test_random_sample_with_seed(
-    vllm_model,
+    aphrodite_model,
     example_prompts,
     seed: int,
 ) -> None:
@@ -45,7 +45,7 @@ def test_random_sample_with_seed(
     sampling_params_seed_2 = copy.deepcopy(sampling_params)
     sampling_params_seed_2.seed = 200
 
-    llm = vllm_model.model
+    llm = aphrodite_model.model
 
     for prompt in example_prompts:
         for params in (
