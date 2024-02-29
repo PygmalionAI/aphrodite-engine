@@ -101,6 +101,7 @@ class SamplingTensors:
     dynatemp_ranges: torch.Tensor
     dynatemp_exps: torch.Tensor
     smoothing_factors: torch.Tensor
+    smoothing_curve: torch.Tensor
     prompt_tokens: torch.Tensor
     output_tokens: torch.Tensor
 
@@ -132,6 +133,7 @@ class SamplingTensors:
         dynatemp_ranges: List[float] = []
         dynatemp_exps: List[float] = []
         smoothing_factors: List[float] = []
+        smoothing_curves: List[float] = []
         index = 0  # temporary, needed for building miro_indices
         do_temperatures = False
         do_penalties = False
@@ -166,6 +168,7 @@ class SamplingTensors:
             dynatemp_range = sampling_params.dynatemp_range
             dynatemp_exp = sampling_params.dynatemp_exponent
             smoothing_factor = sampling_params.smoothing_factor
+            smoothing_curve = sampling_params.smoothing_curve
 
             if do_temperatures is False and temperature > _SAMPLING_EPS:
                 do_temperatures = True
@@ -189,7 +192,8 @@ class SamplingTensors:
                 do_epsilon_cutoffs = True
             if do_typical_ps is False and typical_p < 1.0 - _SAMPLING_EPS:
                 do_typical_ps = True
-            if do_quadratic is False and smoothing_factor > _SAMPLING_EPS:
+            if do_quadratic is False and (smoothing_factor > _SAMPLING_EPS
+                                          or smoothing_curve > _SAMPLING_EPS):
                 do_quadratic = True
             if do_mirostat is False and sampling_params.mirostat_mode == 2:
                 do_mirostat = True
@@ -215,6 +219,7 @@ class SamplingTensors:
                 dynatemp_ranges += [dynatemp_range] * (prompt_len - 1)
                 dynatemp_exps += [dynatemp_exp] * (prompt_len - 1)
                 smoothing_factors += [smoothing_factor] * (prompt_len - 1)
+                smoothing_curves += [smoothing_curve] * (prompt_len - 1)
                 prompt_tokens.extend([] for _ in range(prompt_len - 1))
                 output_tokens.extend([] for _ in range(prompt_len - 1))
             for seq_id in seq_ids:
@@ -236,6 +241,7 @@ class SamplingTensors:
             dynatemp_ranges += [dynatemp_range] * len(seq_ids)
             dynatemp_exps += [dynatemp_exp] * len(seq_ids)
             smoothing_factors += [smoothing_factor] * len(seq_ids)
+            smoothing_curves += [smoothing_curve] * len(seq_ids)
             if sampling_params.mirostat_mode == 2:
                 miro_indices += [(index + i) for i in range(len(seq_ids))]
                 miro_seqids += seq_ids
@@ -253,8 +259,8 @@ class SamplingTensors:
             frequency_penalties, repetition_penalties, tfss, eta_cutoffs,
             epsilon_cutoffs, typical_ps, dynatemp_ranges, dynatemp_exps,
             miro_taus, miro_etas, miro_mus, miro_indices, miro_seqids,
-            smoothing_factors, prompt_tokens, output_tokens, vocab_size,
-            device, dtype)
+            smoothing_factors, smoothing_curves, prompt_tokens, output_tokens,
+            vocab_size, device, dtype)
         return (sampling_tensors, do_temperatures, do_penalties, do_topks,
                 do_topps, do_topas, do_minps, do_tfss, do_eta_cutoffs,
                 do_epsilon_cutoffs, do_typical_ps, do_quadratic, do_mirostat)
@@ -271,6 +277,7 @@ class SamplingTensors:
                    miro_etas: List[float], miro_mus: List[float],
                    miro_indices: List[int], miro_seqids: List[int],
                    smoothing_factors: List[float],
+                   smoothing_curves: List[float],
                    prompt_tokens: List[List[int]],
                    output_tokens: List[List[int]], vocab_size: int,
                    device: torch.device,
@@ -349,6 +356,10 @@ class SamplingTensors:
                                            device="cpu",
                                            dtype=dtype,
                                            pin_memory=pin_memory)
+        smoothing_curves_t = torch.tensor(smoothing_curves,
+                                            device="cpu",
+                                            dtype=dtype,
+                                            pin_memory=pin_memory)
         miro_taus_t = torch.tensor(miro_taus,
                                    device="cpu",
                                    dtype=dtype,
@@ -396,6 +407,8 @@ class SamplingTensors:
             dynatemp_exps=dynatemp_exps_t.to(device=device, non_blocking=True),
             smoothing_factors=smoothing_factors_t.to(device=device,
                                                      non_blocking=True),
+            smoothing_curve=smoothing_curves_t.to(device=device,
+                                                    non_blocking=True),
             miro_taus=miro_taus_t.to(device=device, non_blocking=True),
             miro_etas=miro_etas_t.to(device=device, non_blocking=True),
             miro_mus=miro_mus_t.to(device=device, non_blocking=True),

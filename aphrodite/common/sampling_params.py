@@ -83,6 +83,7 @@ class SamplingParams:
             in a minimum temp of 0.3 and max of 0.5.
         dynatemp_exponent: Exponent for dynatemp sampling. Range [0, inf).
         smoothing_factor: Smoothing factor for Quadratic Sampling.
+        smoothing_curve: Smoothing curve for Quadratic (Cubic) Sampling.
         use_beam_search: Whether to use beam search instead of sampling.
         length_penalty: Float that penalizes sequences based on their length.
             Used in beam search.
@@ -141,6 +142,7 @@ class SamplingParams:
         dynatemp_range: float = 0,
         dynatemp_exponent: float = 1,
         smoothing_factor: float = 0.0,
+        smoothing_curve: float = 1.0,
         use_beam_search: bool = False,
         length_penalty: float = 1.0,
         early_stopping: Union[bool, str] = False,
@@ -176,6 +178,7 @@ class SamplingParams:
         self.dynatemp_range = dynatemp_range
         self.dynatemp_exponent = dynatemp_exponent
         self.smoothing_factor = smoothing_factor
+        self.smoothing_curve = smoothing_curve
         self.use_beam_search = use_beam_search
         self.length_penalty = length_penalty
         self.early_stopping = early_stopping
@@ -257,6 +260,9 @@ class SamplingParams:
         if not self.smoothing_factor >= 0:
             raise ValueError(f"smoothing_factor must be non negative, got "
                              f"{self.smoothing_factor}.")
+        if not self.smoothing_factor >= 0:
+            raise ValueError(f"smoothing_curve must be non negative, got "
+                             f"{self.smoothing_curve}.")
         if self.mirostat_mode:
             if not self.mirostat_mode == 2:
                 raise ValueError(
