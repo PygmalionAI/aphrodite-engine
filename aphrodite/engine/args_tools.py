@@ -30,7 +30,7 @@ class EngineArgs:
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: int = 256
     max_paddings: int = 256
-    max_log_probs: int = 5
+    max_log_probs: int = 10
     disable_log_stats: bool = False
     revision: Optional[str] = None
     tokenizer_revision: Optional[str] = None

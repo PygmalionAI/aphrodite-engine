@@ -76,7 +76,7 @@ class ModelConfig:
         quantization: Optional[str] = None,
         enforce_eager: bool = False,
         max_context_len_to_capture: Optional[int] = None,
-        max_log_probs: int = 5,
+        max_log_probs: int = 10,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
