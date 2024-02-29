@@ -11,7 +11,8 @@ _SAMPLING_EPS = 1e-5
 class SamplingType(IntEnum):
     GREEDY = 0
     RANDOM = 1
-    BEAM = 2
+    RANDOM_SEED = 2
+    BEAM = 3
 
 
 LogitsProcessorFunc = Callable[[torch.Tensor, List[List[int]]], None]
@@ -83,6 +84,7 @@ class SamplingParams:
             in a minimum temp of 0.3 and max of 0.5.
         dynatemp_exponent: Exponent for dynatemp sampling. Range [0, inf).
         smoothing_factor: Smoothing factor for Quadratic Sampling.
+        seed: Random seed to use for the generation.
         use_beam_search: Whether to use beam search instead of sampling.
         length_penalty: Float that penalizes sequences based on their length.
             Used in beam search.
@@ -141,6 +143,7 @@ class SamplingParams:
         dynatemp_range: float = 0,
         dynatemp_exponent: float = 1,
         smoothing_factor: float = 0.0,
+        seed: Optional[int] = None,
         use_beam_search: bool = False,
         length_penalty: float = 1.0,
         early_stopping: Union[bool, str] = False,
@@ -176,6 +179,7 @@ class SamplingParams:
         self.dynatemp_range = dynatemp_range
         self.dynatemp_exponent = dynatemp_exponent
         self.smoothing_factor = smoothing_factor
+        self.seed = seed
         self.use_beam_search = use_beam_search
         self.length_penalty = length_penalty
         self.early_stopping = early_stopping
@@ -318,6 +322,8 @@ class SamplingParams:
             return SamplingType.BEAM
         if self.temperature < _SAMPLING_EPS:
             return SamplingType.GREEDY
+        if self.seed is not None:
+            return SamplingType.RANDOM_SEED
         return SamplingType.RANDOM
 
     def __repr__(self) -> str:
@@ -341,6 +347,7 @@ class SamplingParams:
                 f"dynatemp_range={self.dynatemp_range}, "
                 f"dynatemp_exponent={self.dynatemp_exponent}, "
                 f"smoothing_factor={self.smoothing_factor}, "
+                f"seed={self.seed}, "
                 f"use_beam_search={self.use_beam_search}, "
                 f"length_penalty={self.length_penalty}, "
                 f"early_stopping={self.early_stopping}, "
