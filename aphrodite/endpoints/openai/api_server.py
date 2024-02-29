@@ -343,6 +343,7 @@ async def create_chat_completion(
             smoothing_factor=request.smoothing_factor,
             stop=request.stop,
             stop_token_ids=request.stop_token_ids,
+            seed=request.seed,
             include_stop_str_in_output=request.include_stop_str_in_output,
             max_tokens=request.max_tokens,
             best_of=request.best_of,
@@ -624,6 +625,7 @@ async def create_completion(
             smoothing_factor=request.smoothing_factor,
             stop=request.stop,
             stop_token_ids=request.stop_token_ids,
+            seed=request.seed,
             include_stop_str_in_output=request.include_stop_str_in_output,
             max_tokens=request.max_tokens
             if not echo_without_generation else 1,
