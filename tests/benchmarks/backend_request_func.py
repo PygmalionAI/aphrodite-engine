@@ -76,6 +76,7 @@ async def async_request_tgi(
             pbar.update(1)
         return output
 
+
 async def async_request_aphrodite(
     request_func_input: RequestFuncInput,
     pbar: Optional[tqdm] = None,
@@ -124,6 +125,7 @@ async def async_request_aphrodite(
         if pbar:
             pbar.update(1)
         return output
+
 
 async def async_request_vllm(
     request_func_input: RequestFuncInput,

@@ -237,6 +237,7 @@ class SequenceGroupState:
     # torch.Generator used in seeded sampling
     generator: Optional = None
 
+
 class SequenceGroup:
     """A group of sequences that are generated from the same prompt.
 

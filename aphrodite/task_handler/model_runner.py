@@ -436,7 +436,7 @@ class ModelRunner:
                         range(categorized_sample_indices_start_idx,
                               categorized_sample_indices_start_idx + num_seqs))
                 categorized_sample_indices_start_idx += num_seqs
-            
+
             if sampling_params.seed is not None:
                 generators.append(seq_group_metadata.state.generator)
 
