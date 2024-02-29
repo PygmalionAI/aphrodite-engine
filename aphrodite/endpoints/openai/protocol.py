@@ -87,7 +87,6 @@ class ChatCompletionRequest(BaseModel):
     smoothing_factor: Optional[float] = 0.0
     ignore_eos: Optional[bool] = False
     use_beam_search: Optional[bool] = False
-    logprobs: Optional[int] = None
     prompt_logprobs: Optional[int] = None
     stop_token_ids: Optional[List[int]] = Field(default_factory=list)
     custom_token_bans: Optional[List[int]] = Field(default_factory=list)
@@ -132,6 +131,7 @@ class ChatCompletionRequest(BaseModel):
             stop=self.stop,
             best_of=self.best_of,
             include_stop_str_in_output=self.include_stop_str_in_output,
+            seed=self.seed,
         )
 
 
@@ -214,6 +214,7 @@ class CompletionRequest(BaseModel):
             stop=self.stop,
             best_of=self.best_of,
             include_stop_str_in_output=self.include_stop_str_in_output,
+            seed=self.seed,
         )
 
 

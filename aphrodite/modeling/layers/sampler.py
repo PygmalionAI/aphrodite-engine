@@ -10,7 +10,7 @@ from aphrodite.modeling.sampling_metadata import (SamplingMetadata,
 from aphrodite.modeling.megatron.communication_op import (
     tensor_model_parallel_gather)
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
-from aphrodite.common.sequence import (PromptLogprobs, SampleLogprobs,
+from aphrodite.common.sequence import (Logprob, PromptLogprobs, SampleLogprobs,
                                        SamplerOutput, SequenceData,
                                        SequenceGroupOutput, SequenceOutput)
 
@@ -701,7 +701,10 @@ def _get_logprobs(
                     prompt_logprobs_dict.update(
                         zip(top_token_ids[sample_idx, :num_logprobs].tolist(),
                             top_logprobs[sample_idx, :num_logprobs].tolist()))
-                group_prompt_logprobs.append(prompt_logprobs_dict)
+                group_prompt_logprobs.append({
+                    token_id: Logprob(logprob)
+                    for token_id, logprob in prompt_logprobs_dict.items()
+                })
                 sample_idx += 1
                 query_result_idx += 1
             result_prompt_logprobs.append(group_prompt_logprobs)
@@ -726,7 +729,10 @@ def _get_logprobs(
                                       parent_id, :num_logprobs].tolist(),
                         top_logprobs[sample_idx +
                                      parent_id, :num_logprobs].tolist()))
-            group_sample_logprobs.append(sample_logprobs_dict)
+            group_sample_logprobs.append({
+                token_id: Logprob(logprob)
+                for token_id, logprob in sample_logprobs_dict.items()
+            })
         result_sample_logprobs.append(group_sample_logprobs)
         sample_idx += len(seq_ids)
 
