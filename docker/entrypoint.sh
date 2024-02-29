@@ -1,29 +1,30 @@
-#!/bin/bash
+#!/bin/bash -e
 
-set -xe
-
-cd /app/aphrodite-engine
 echo 'Starting Aphrodite Engine API server...'
-CMD="python3 -m aphrodite.endpoints.openai.api_server \
-             --host 0.0.0.0 \
-             --port 7860 \
-             --model $MODEL_NAME \
-             --tensor-parallel-size $NUM_GPUS \
-             --dtype $DATATYPE \
-             --max-model-len $CONTEXT_LENGTH \
-             --gmu $GPU_MEMORY_UTILIZATION"
 
-if [ -n "$QUANTIZATION" ]; then
-    CMD="$CMD --quantization $QUANTIZATION --dtype half"
+CMD="python3 -m aphrodite.endpoints.${ENDPOINT:-openai}.api_server
+             --host 0.0.0.0
+             --port 5000
+             --download-dir ${HF_HOME:?}/hub
+             ${MODEL_NAME:+--model $MODEL_NAME}
+             ${REVISION:+--revision $REVISION}
+             ${DATATYPE:+--dtype $DATATYPE}
+             ${KVCACHE:+--kv-cache-dtype $KVCACHE}
+             ${CONTEXT_LENGTH:+--max-model-len $CONTEXT_LENGTH}
+             ${NUM_GPUS:+--tensor-parallel-size $NUM_GPUS}
+             ${GPU_MEMORY_UTILIZATION:+--gpu-memory-utilization $GPU_MEMORY_UTILIZATION}
+             ${QUANTIZATION:+--quantization $QUANTIZATION}
+             ${ENFORCE_EAGER:+--enforce-eager}
+             ${CMD_ADDITIONAL_ARGUMENTS}"
+
+# Only the 'openai' endpoint currently supports api-keys and ssl
+if [ "${ENDPOINT:-openai}" = "openai" ]; then
+  CMD+=" ${API_KEY:+--api-keys "$API_KEY"} ${SSL_KEYFILE:+--ssl-keyfile server.key} ${SSL_CERTFILE:+--ssl-certfile server.crt}"
 fi
-if [ -n "$API_KEY" ]; then
-    CMD="$CMD --api-keys $API_KEY"
-fi
-if [ -n "$ENFORCE_EAGER" ]; then
-    CMD="$CMD --enforce-eager"
-fi
-if [ -n "$KVCACHE" ]; then
-    CMD="$CMD --kv-cache-dtype $KVCACHE"
-fi
+
+# set umask to ensure group read / write at runtime
+umask 002
+
+set -x
 
 exec $CMD
