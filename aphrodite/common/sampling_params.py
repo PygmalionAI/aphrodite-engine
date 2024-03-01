@@ -15,6 +15,17 @@ class SamplingType(IntEnum):
     BEAM = 3
 
 
+# We also accept KoboldAI's sampler IDs and convert to strings
+_sampler_map = {
+    0: "topk",
+    1: "topa",
+    2: "topp",
+    3: "tfs",
+    4: "typ",
+    5: "temp",
+    6: "pens",
+}
+
 LogitsProcessorFunc = Callable[[torch.Tensor, List[List[int]]], None]
 """LogitsProcessorFunc takes a logits tensor and corresponding lists of
 previously generated output tokens, and modifies the logits tensor."""
@@ -83,6 +94,10 @@ class SamplingParams:
             setting `temperature=0.4` and `dynatemp_range=0.1` will result
             in a minimum temp of 0.3 and max of 0.5.
         dynatemp_exponent: Exponent for dynatemp sampling. Range [0, inf).
+        sampler_order: List of lists specifying the order in which samplers are applied.
+            All samplers in a sublist are applied in parallel, and the results are combined.
+            Combinator is hardcoded to be "and" for now.
+            Samplers are specified as strings, see "sampler.py" for sampler codes.
         smoothing_factor: Smoothing factor for Quadratic Sampling.
         seed: Random seed to use for the generation.
         use_beam_search: Whether to use beam search instead of sampling.
@@ -142,6 +157,7 @@ class SamplingParams:
         mirostat_eta: float = 0,
         dynatemp_range: float = 0,
         dynatemp_exponent: float = 1,
+        sampler_order: List[List[str]] = None,
         smoothing_factor: float = 0.0,
         seed: Optional[int] = None,
         use_beam_search: bool = False,
@@ -178,6 +194,7 @@ class SamplingParams:
         self.mirostat_eta = mirostat_eta
         self.dynatemp_range = dynatemp_range
         self.dynatemp_exponent = dynatemp_exponent
+        self.sampler_order = sampler_order
         self.smoothing_factor = smoothing_factor
         self.seed = seed
         self.use_beam_search = use_beam_search
@@ -199,6 +216,20 @@ class SamplingParams:
         self.spaces_between_special_tokens = spaces_between_special_tokens
         self.logits_processors = logits_processors or []
         self.include_stop_str_in_output = include_stop_str_in_output
+        if not self.sampler_order:
+            self.sampler_order = [
+                "pens", "temp", "miro", "typ", "quad", "tfs", "minp", "eta",
+                "topa", "topp", "eps", "topk"
+            ]
+        self.sampler_order = [[s] if
+                              (isinstance(s, str) or isinstance(s, int)) else s
+                              for s in self.sampler_order]
+        self.sampler_order = [[
+            _sampler_map[s] if isinstance(s, int) else s for s in sub
+        ] for sub in self.sampler_order]
+        self.verify()
+
+    def verify(self) -> None:
 
         self._verify_args()
         if self.use_beam_search:
@@ -281,6 +312,11 @@ class SamplingParams:
         if self.prompt_logprobs is not None and self.prompt_logprobs < 0:
             raise ValueError("prompt_logprobs must be non-negative, got "
                              f"{self.prompt_logprobs}.")
+        for subgroup in self.sampler_order:
+            if len(subgroup) > 1:
+                if any([s in ["temp", "pens", "miro"] for s in subgroup]):
+                    raise ValueError("temp, pens and miro must be alone"
+                                     f"in their own subgroup, got {subgroup}")
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:
@@ -346,6 +382,7 @@ class SamplingParams:
                 f"mirostat_eta={self.mirostat_eta}, "
                 f"dynatemp_range={self.dynatemp_range}, "
                 f"dynatemp_exponent={self.dynatemp_exponent}, "
+                f"sampler_order={self.sampler_order}, "
                 f"smoothing_factor={self.smoothing_factor}, "
                 f"seed={self.seed}, "
                 f"use_beam_search={self.use_beam_search}, "

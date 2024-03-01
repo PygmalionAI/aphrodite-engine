@@ -320,6 +320,18 @@ async def create_chat_completion(
     # compatibility
     if request.top_k == 0:
         request.top_k = -1
+    if request.temperature_last:
+        for i, item in enumerate(request.sampler_order):
+            if isinstance(item, str) and item == "temp":
+                request.sampler_order.pop(i)
+                break
+            elif isinstance(item, list):
+                for j, subitem in enumerate(item):
+                    if isinstance(subitem, str) and subitem == "temp":
+                        request.sampler_order[i].pop(j)
+                        break
+        request.sampler_order.append("temp")
+
     try:
         sampling_params = SamplingParams(
             n=request.n,
@@ -340,6 +352,7 @@ async def create_chat_completion(
             mirostat_eta=request.mirostat_eta,
             dynatemp_range=request.dynatemp_range,
             dynatemp_exponent=request.dynatemp_exponent,
+            sampler_order=request.sampler_order,
             smoothing_factor=request.smoothing_factor,
             stop=request.stop,
             stop_token_ids=request.stop_token_ids,
@@ -622,6 +635,7 @@ async def create_completion(
             mirostat_eta=request.mirostat_eta,
             dynatemp_range=request.dynatemp_range,
             dynatemp_exponent=request.dynatemp_exponent,
+            sampler_order=request.sampler_order,
             smoothing_factor=request.smoothing_factor,
             stop=request.stop,
             stop_token_ids=request.stop_token_ids,

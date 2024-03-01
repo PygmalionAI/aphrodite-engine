@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 
 import torch
 
@@ -103,6 +103,8 @@ class SamplingTensors:
     miro_seqids: List[int]  # state writeback done CPU side
     dynatemp_ranges: torch.Tensor
     dynatemp_exps: torch.Tensor
+    sampler_orders: List[
+        Any]  # logically, a List[Tuple[List[List[str]], int]] except that Tuple is actually a List too
     smoothing_factors: torch.Tensor
     prompt_tokens: torch.Tensor
     output_tokens: torch.Tensor
@@ -134,20 +136,21 @@ class SamplingTensors:
         miro_seqids: List[int] = []
         dynatemp_ranges: List[float] = []
         dynatemp_exps: List[float] = []
+        sampler_orders: List[Any] = []
         smoothing_factors: List[float] = []
         index = 0  # temporary, needed for building miro_indices
-        do_temperatures = False
-        do_penalties = False
-        do_topks = False
-        do_topps = False
-        do_topas = False
-        do_minps = False
-        do_tfss = False
-        do_eta_cutoffs = False
-        do_epsilon_cutoffs = False
-        do_typical_ps = False
-        do_quadratic = False
-        do_mirostat = False
+        #do_temperatures = False
+        #do_penalties = False
+        #do_topks = False
+        #do_topps = False
+        #do_topas = False
+        #do_minps = False
+        #do_tfss = False
+        #do_eta_cutoffs = False
+        #do_epsilon_cutoffs = False
+        #do_typical_ps = False
+        #do_mirostat = False
+
         for i, seq_group in enumerate(sampling_metadata.seq_groups):
             seq_ids, sampling_params = seq_group
             temperature = sampling_params.temperature
@@ -168,34 +171,33 @@ class SamplingTensors:
             miro_eta = sampling_params.mirostat_eta
             dynatemp_range = sampling_params.dynatemp_range
             dynatemp_exp = sampling_params.dynatemp_exponent
+            sampler_order = sampling_params.sampler_order
             smoothing_factor = sampling_params.smoothing_factor
 
-            if do_temperatures is False and temperature > _SAMPLING_EPS:
-                do_temperatures = True
-            if not do_penalties and (abs(p) >= _SAMPLING_EPS
-                                     or abs(f) >= _SAMPLING_EPS
-                                     or abs(r - 1.0) >= _SAMPLING_EPS):
-                do_penalties = True
-            if do_topks is False and top_k != vocab_size:
-                do_topks = True
-            if do_topps is False and top_p < 1.0 - _SAMPLING_EPS:
-                do_topps = True
-            if do_topas is False and top_a > 0.0:
-                do_topas = True
-            if do_minps is False and min_p > _SAMPLING_EPS:
-                do_minps = True
-            if do_tfss is False and tfs < 1.0 - _SAMPLING_EPS:
-                do_tfss = True
-            if do_eta_cutoffs is False and eta_cutoff > _SAMPLING_EPS:
-                do_eta_cutoffs = True
-            if do_epsilon_cutoffs is False and epsilon_cutoff > _SAMPLING_EPS:
-                do_epsilon_cutoffs = True
-            if do_typical_ps is False and typical_p < 1.0 - _SAMPLING_EPS:
-                do_typical_ps = True
-            if do_quadratic is False and smoothing_factor > _SAMPLING_EPS:
-                do_quadratic = True
-            if do_mirostat is False and sampling_params.mirostat_mode == 2:
-                do_mirostat = True
+            # if do_temperatures is False and temperature > _SAMPLING_EPS:
+            #     do_temperatures = True
+            # if not do_penalties and (abs(p) >= _SAMPLING_EPS
+            #                          or abs(f) >= _SAMPLING_EPS
+            #                          or abs(r - 1.0) >= _SAMPLING_EPS):
+            #     do_penalties = True
+            # if do_topks is False and top_k != vocab_size:
+            #     do_topks = True
+            # if do_topps is False and top_p < 1.0 - _SAMPLING_EPS:
+            #     do_topps = True
+            # if do_topas is False and top_a > 0.0:
+            #     do_topas = True
+            # if do_minps is False and min_p > _SAMPLING_EPS:
+            #     do_minps = True
+            # if do_tfss is False and tfs < 1.0 - _SAMPLING_EPS:
+            #     do_tfss = True
+            # if do_eta_cutoffs is False and eta_cutoff > _SAMPLING_EPS:
+            #     do_eta_cutoffs = True
+            # if do_epsilon_cutoffs is False and epsilon_cutoff > _SAMPLING_EPS:
+            #     do_epsilon_cutoffs = True
+            # if do_typical_ps is False and typical_p < 1.0 - _SAMPLING_EPS:
+            #     do_typical_ps = True
+            # if do_mirostat is False and sampling_params.mirostat_mode == 2:
+            #     do_mirostat = True
 
             if (i < sampling_metadata.num_prompts
                     and sampling_params.prompt_logprobs is not None):
@@ -220,6 +222,10 @@ class SamplingTensors:
                 smoothing_factors += [smoothing_factor] * (prompt_len - 1)
                 prompt_tokens.extend([] for _ in range(prompt_len - 1))
                 output_tokens.extend([] for _ in range(prompt_len - 1))
+                if not sampler_orders or sampler_orders[-1][0] != sampler_order:
+                    sampler_orders.append([sampler_order, prompt_len - 1])
+                else:
+                    sampler_orders[-1][1] += prompt_len - 1
             for seq_id in seq_ids:
                 seq_data = sampling_metadata.seq_data[seq_id]
                 prompt_tokens.append(seq_data.prompt_token_ids)
@@ -239,6 +245,10 @@ class SamplingTensors:
             dynatemp_ranges += [dynatemp_range] * len(seq_ids)
             dynatemp_exps += [dynatemp_exp] * len(seq_ids)
             smoothing_factors += [smoothing_factor] * len(seq_ids)
+            if not sampler_orders or sampler_orders[-1][0] != sampler_order:
+                sampler_orders.append([sampler_order, len(seq_ids)])
+            else:
+                sampler_orders[-1][1] += len(seq_ids)
             if sampling_params.mirostat_mode == 2:
                 miro_indices += [(index + i) for i in range(len(seq_ids))]
                 miro_seqids += seq_ids
@@ -256,11 +266,12 @@ class SamplingTensors:
             frequency_penalties, repetition_penalties, tfss, eta_cutoffs,
             epsilon_cutoffs, typical_ps, dynatemp_ranges, dynatemp_exps,
             miro_taus, miro_etas, miro_mus, miro_indices, miro_seqids,
-            smoothing_factors, prompt_tokens, output_tokens, vocab_size,
-            device, dtype)
-        return (sampling_tensors, do_temperatures, do_penalties, do_topks,
-                do_topps, do_topas, do_minps, do_tfss, do_eta_cutoffs,
-                do_epsilon_cutoffs, do_typical_ps, do_quadratic, do_mirostat)
+            sampler_orders, smoothing_factors, prompt_tokens, output_tokens,
+            vocab_size, device, dtype)
+        #return (sampling_tensors, do_temperatures, do_penalties, do_topks,
+        #        do_topps, do_topas, do_minps, do_tfss, do_eta_cutoffs,
+        #        do_epsilon_cutoffs, do_typical_ps, do_mirostat)
+        return sampling_tensors
 
     @classmethod
     def from_lists(cls, temperatures: List[float], top_ps: List[float],
@@ -273,6 +284,7 @@ class SamplingTensors:
                    dynatemp_exps: List[float], miro_taus: List[float],
                    miro_etas: List[float], miro_mus: List[float],
                    miro_indices: List[int], miro_seqids: List[int],
+                   sampler_orders: List[List[Any]],
                    smoothing_factors: List[float],
                    prompt_tokens: List[List[int]],
                    output_tokens: List[List[int]], vocab_size: int,
@@ -404,6 +416,7 @@ class SamplingTensors:
             miro_mus=miro_mus_t.to(device=device, non_blocking=True),
             miro_indices=miro_indices_t.to(device=device, non_blocking=True),
             miro_seqids=miro_seqids,
+            sampler_orders=sampler_orders,
             typical_ps=typical_ps_t.to(device=device, non_blocking=True),
             prompt_tokens=prompt_tensor.to(device=device, non_blocking=True),
             output_tokens=output_tensor.to(device=device, non_blocking=True),

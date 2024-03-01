@@ -105,6 +105,9 @@ def prepare_engine_payload(
         kai_payload.top_p = 1.0
         kai_payload.top_k = -1
 
+    if kai_payload.mirostat == 2:
+        kai_payload.sampler_order = ["pens", "temp", "miro"]
+
     sampling_params = SamplingParams(
         n=kai_payload.n,
         best_of=kai_payload.n,
@@ -129,7 +132,7 @@ def prepare_engine_payload(
         custom_token_bans=badwordsids
         if kai_payload.use_default_badwordsids else [],
         max_tokens=kai_payload.max_length,
-    )
+        sampler_order=kai_payload.sampler_order)
 
     max_input_tokens = max(
         1, kai_payload.max_context_length - kai_payload.max_length)
