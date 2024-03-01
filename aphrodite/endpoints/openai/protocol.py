@@ -3,7 +3,7 @@
 import time
 from typing import Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from aphrodite.common.utils import random_uuid
 from aphrodite.common.sampling_params import SamplingParams
@@ -95,6 +95,9 @@ class ChatCompletionRequest(BaseModel):
     add_generation_prompt: Optional[bool] = True
     echo: Optional[bool] = False
     length_penalty: Optional[float] = 1.0
+    guided_json: Optional[Union[str, dict, BaseModel]] = None
+    guided_regex: Optional[str] = None
+    guided_choice: Optional[List[str]] = None
 
     def to_sampling_params(self) -> SamplingParams:
         if self.logprobs and not self.top_logprobs:
@@ -133,6 +136,20 @@ class ChatCompletionRequest(BaseModel):
             include_stop_str_in_output=self.include_stop_str_in_output,
             seed=self.seed,
         )
+    
+    @model_validator(mode="before")
+    @classmethod
+    def check_guided_decoding_count(cls, data):
+        guide_count = sum([
+            "guided_json" in data and data["guided_json"] is not None,
+            "guided_regex" in data and data["guided_regex"] is not None,
+            "guided_choice" in data and data["guided_choice"] is not None
+        ])
+        if guide_count > 1:
+            raise ValueError(
+                "You can only use one kind of guided decoding "
+                "('guided_json', 'guided_regex' or 'guided_choice').")
+        return data
 
 
 class CompletionRequest(BaseModel):
@@ -179,6 +196,9 @@ class CompletionRequest(BaseModel):
     spaces_between_special_tokens: Optional[bool] = True
     grammar: Optional[str] = None
     length_penalty: Optional[float] = 1.0
+    guided_json: Optional[Union[str, dict, BaseModel]] = None
+    guided_regex: Optional[str] = None
+    guided_choice: Optional[List[str]] = None
 
     def to_sampling_params(self) -> SamplingParams:
         echo_without_generation = self.echo and self.max_tokens == 0
@@ -216,6 +236,20 @@ class CompletionRequest(BaseModel):
             include_stop_str_in_output=self.include_stop_str_in_output,
             seed=self.seed,
         )
+    
+    @model_validator(mode="before")
+    @classmethod
+    def check_guided_decoding_count(cls, data):
+        guide_count = sum([
+            "guided_json" in data and data["guided_json"] is not None,
+            "guided_regex" in data and data["guided_regex"] is not None,
+            "guided_choice" in data and data["guided_choice"] is not None
+        ])
+        if guide_count > 1:
+            raise ValueError(
+                "You can only use one kind of guided decoding "
+                "('guided_json', 'guided_regex' or 'guided_choice').")
+        return data
 
 
 class LogProbs(BaseModel):
