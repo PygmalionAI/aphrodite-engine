@@ -265,6 +265,7 @@ class CompletionRequest(BaseModel):
             best_of=self.best_of,
             include_stop_str_in_output=self.include_stop_str_in_output,
             seed=self.seed,
+            logits_processors=logits_processors,
         )
     
     @model_validator(mode="before")
