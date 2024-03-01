@@ -9,7 +9,7 @@ from typing import Union, Tuple
 from pydantic import BaseModel
 
 from aphrodite.endpoints.openai.protocol import CompletionRequest, ChatCompletionRequest
-from aphrodite.modeling.guided_logits_processors import JSONLogitsProcessor, RegexLogitsProcessor
+from aphrodite.modeling.outlines_logits_processors import JSONLogitsProcessor, RegexLogitsProcessor
 
 
 class GuidedDecodingMode(Enum):
