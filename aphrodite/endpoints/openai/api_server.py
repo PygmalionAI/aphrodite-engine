@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import os
 import importlib
 import inspect
+from typing import List
 
 from prometheus_client import make_asgi_app
 import fastapi
@@ -164,9 +165,16 @@ async def show_available_models():
 
 
 @app.post("/v1/tokenize")
+@app.post("/v1/token/encode")
 async def tokenize(prompt: Prompt):
     tokenized = await openai_serving_chat.tokenize(prompt)
     return JSONResponse(content=tokenized)
+
+@app.post("/v1/detokenize")
+@app.post("/v1/token/decode")
+async def detokenize(token_ids: List[int]):
+    detokenized = await openai_serving_chat.detokenize(token_ids)
+    return JSONResponse(content=detokenized)
 
 
 @app.post("/v1/chat/completions")

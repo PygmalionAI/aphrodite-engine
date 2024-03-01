@@ -89,6 +89,12 @@ class OpenAIServing:
         tokenized_prompt = self.tokenizer.tokenize(prompt.prompt)
         token_ids = self.tokenizer.convert_tokens_to_ids(tokenized_prompt)
         return {"value": len(tokenized_prompt), "ids": token_ids}
+    
+    async def detokenize(self, token_ids: List[int]):
+        """Detokenize a given list of token IDs."""
+        tokens = self.tokenizer.convert_ids_to_tokens(token_ids)
+        detokenized_text = self.tokenizer.convert_tokens_to_string(tokens)
+        return {"value": detokenized_text}
 
     def _create_logprobs(
         self,
