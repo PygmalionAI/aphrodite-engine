@@ -486,7 +486,7 @@ if __name__ == "__main__":
                 f"Invalid middleware {middleware}. Must be a function or a class."
             )
 
-    logger.info(f"args: {args}")
+    logger.debug(f"args: {args}")
 
     if args.served_model_name is not None:
         served_model = args.served_model_name
