@@ -52,26 +52,26 @@ class KAIGenerationInputSchema(BaseModel):
     dynatemp_range: Optional[NonNegativeFloat] = 0.0
     dynatemp_exponent: Optional[NonNegativeFloat] = 1.0
     smoothing_factor: Optional[NonNegativeFloat] = 0.0
-    # use_memory: Optional[bool]
-    # use_story: Optional[bool]
-    # use_authors_note: Optional[bool]
-    # use_world_info: Optional[bool]
-    # use_userscripts: Optional[bool]
-    # soft_prompt: Optional[str]
-    # disable_output_formatting: Optional[bool]
-    # frmtrmblln: Optional[bool]
-    # frmtrmspch: Optional[bool]
-    # singleline: Optional[bool]
+    use_memory: Optional[bool]
+    use_story: Optional[bool]
+    use_authors_note: Optional[bool]
+    use_world_info: Optional[bool]
+    use_userscripts: Optional[bool]
+    soft_prompt: Optional[str]
+    disable_output_formatting: Optional[bool]
+    frmtrmblln: Optional[bool]
+    frmtrmspch: Optional[bool]
+    singleline: Optional[bool]
     use_default_badwordsids: Optional[bool]
     mirostat: Optional[int] = 0
     mirostat_tau: Optional[float] = 0.0
     mirostat_eta: Optional[float] = 0.0
-    # disable_input_formatting: Optional[bool]
-    # frmtadsnsp: Optional[bool]
-    # quiet: Optional[bool]
-    # pylint: disable=unexpected-keyword-arg
-    # sampler_order: Optional[conlist(int)]
-    # sampler_seed: Optional[conint(ge=0, le=2**64 - 1)]
-    # sampler_full_determinism: Optional[bool]
+    disable_input_formatting: Optional[bool]
+    frmtadsnsp: Optional[bool]
+    quiet: Optional[bool]
+    pylint: disable=unexpected-keyword-arg
+    sampler_order: Optional[conlist(int)]
+    sampler_seed: Optional[conint(ge=0, le=2**64 - 1)]
+    sampler_full_determinism: Optional[bool]
     stop_sequence: Optional[List[str]]
     include_stop_str_in_output: Optional[bool] = False
