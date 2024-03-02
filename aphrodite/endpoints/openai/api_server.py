@@ -465,11 +465,7 @@ if __name__ == "__main__":
 
             if not request.url.path.startswith("/v1"):
                 return await call_next(request)
-
-            auth_header = request.headers.get("Authorization")
-            api_key_header = request.headers.get("x-api-key")
-
-            if auth_header != "Bearer " + token and api_key_header != token:
+            if request.headers.get("Authorization") != "Bearer " + token:
                 return JSONResponse(content={"error": "Unauthorized"},
                                     status_code=401)
             return await call_next(request)
