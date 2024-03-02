@@ -26,7 +26,7 @@ from aphrodite.common.sampling_params import SamplingParams, _SAMPLING_EPS
 from aphrodite.common.utils import random_uuid
 from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
 from aphrodite.endpoints.openai.serving_completions import OpenAIServingCompletion
-from aphrodite.endpoints.openai.protocol import KAIGenerationInputSchema
+from aphrodite.endpoints.kobold.protocol import KAIGenerationInputSchema
 from aphrodite.endpoints.openai.serving_engine import LoRA
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 
