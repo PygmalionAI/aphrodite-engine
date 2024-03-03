@@ -202,14 +202,14 @@ class CompletionRequest(BaseModel):
     mirostat_mode: Optional[int] = 0
     mirostat_tau: Optional[float] = 0.0
     mirostat_eta: Optional[float] = 0.0
-    dynatemp_min: Optional[float] = Field(
-        0.0,
-        validation_alias=AliasChoices("dynatemp_min", "dynatemp_low"),
-        description="Aliases: dynatemp_low")
-    dynatemp_max: Optional[float] = Field(
-        0.0,
-        validation_alias=AliasChoices("dynatemp_max", "dynatemp_high"),
-        description="Aliases: dynatemp_high")
+    dynatemp_min: Optional[float] = Field(0.0,
+                                          validation_alias=AliasChoices(
+                                              "dynatemp_min", "dynatemp_low"),
+                                          description="Aliases: dynatemp_low")
+    dynatemp_max: Optional[float] = Field(0.0,
+                                          validation_alias=AliasChoices(
+                                              "dynatemp_max", "dynatemp_high"),
+                                          description="Aliases: dynatemp_high")
     dynatemp_exponent: Optional[float] = 1.0
     smoothing_factor: Optional[float] = 0.0
     ignore_eos: Optional[bool] = False
