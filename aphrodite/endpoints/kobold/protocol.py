@@ -30,7 +30,7 @@ class SamplingParams(BaseModel):
     custom_token_bans: Optional[List[int]] = Field(None,
                                                    alias="custom_token_bans")
 
-    @root_validator
+    @root_validator(pre=False, skip_on_failure=True)
     def validate_best_of(cls, values):  # pylint: disable=no-self-argument
         best_of = values.get("best_of")
         n = values.get("n")
@@ -79,13 +79,13 @@ class KAIGenerationInputSchema(BaseModel):
     frmtadsnsp: Optional[bool]
     quiet: Optional[bool]
     # pylint: disable=unexpected-keyword-arg
-    sampler_order: Optional[conlist(int, min_items=6)]
+    sampler_order: Optional[conlist(int, min_length=6)]
     sampler_seed: Optional[conint(ge=0, le=2**64 - 1)]
     sampler_full_determinism: Optional[bool]
     stop_sequence: Optional[List[str]]
     include_stop_str_in_output: Optional[bool] = False
 
-    @root_validator
+    @root_validator(pre=False, skip_on_failure=True)
     def check_context(cls, values):  # pylint: disable=no-self-argument
         assert values.get("max_length") <= values.get(
             "max_context_length"
