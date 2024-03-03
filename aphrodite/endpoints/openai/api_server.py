@@ -279,13 +279,19 @@ def prepare_engine_payload(
         kai_payload.n = 1
         kai_payload.top_p = 1.0
         kai_payload.top_k = -1
+    
+    if kai_payload.dynatemp_range and kai_payload.temperature is not None:
+        dynatemp_min = kai_payload.temperature - kai_payload.dynatemp_range
+        dynatemp_max = kai_payload.temperature + kai_payload.dynatemp_range
+
 
     sampling_params = SamplingParams(
         n=kai_payload.n,
         best_of=kai_payload.n,
         repetition_penalty=kai_payload.rep_pen,
         temperature=kai_payload.temperature,
-        dynatemp_range=kai_payload.dynatemp_range,
+        dynatemp_min=dynatemp_min,
+        dynatemp_max=dynatemp_max,
         dynatemp_exponent=kai_payload.dynatemp_exponent,
         smoothing_factor=kai_payload.smoothing_factor,
         tfs=kai_payload.tfs,
@@ -304,6 +310,7 @@ def prepare_engine_payload(
         custom_token_bans=badwordsids
         if kai_payload.use_default_badwordsids else [],
         max_tokens=kai_payload.max_length,
+        seed=kai_payload.sampler_seed,
     )
 
     max_input_tokens = max(

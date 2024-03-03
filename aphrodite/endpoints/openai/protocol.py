@@ -419,8 +419,8 @@ class KAIGenerationInputSchema(BaseModel):
     max_context_length: int
     max_length: int
     rep_pen: Optional[float] = 1.0
-    rep_pen_range: Optional[int]
-    rep_pen_slope: Optional[float]
+    rep_pen_range: Optional[int] = None
+    rep_pen_slope: Optional[float] = None
     top_k: Optional[int] = 0
     top_a: Optional[float] = 0.0
     top_p: Optional[float] = 1.0
