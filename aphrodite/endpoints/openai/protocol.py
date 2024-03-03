@@ -83,7 +83,8 @@ class ChatCompletionRequest(BaseModel):
     mirostat_mode: Optional[int] = 0
     mirostat_tau: Optional[float] = 0.0
     mirostat_eta: Optional[float] = 0.0
-    dynatemp_range: Optional[float] = 0.0
+    dynatemp_min: Optional[float] = 0.0
+    dynatemp_max: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
     smoothing_factor: Optional[float] = 0.0
     ignore_eos: Optional[bool] = False
@@ -138,7 +139,8 @@ class ChatCompletionRequest(BaseModel):
             mirostat_mode=self.mirostat_mode,
             mirostat_tau=self.mirostat_tau,
             mirostat_eta=self.mirostat_eta,
-            dynatemp_range=self.dynatemp_range,
+            dynatemp_min=self.dynatemp_min,
+            dynatemp_max=self.dynatemp_max,
             dynatemp_exponent=self.dynatemp_exponent,
             smoothing_factor=self.smoothing_factor,
             ignore_eos=self.ignore_eos,
@@ -200,7 +202,8 @@ class CompletionRequest(BaseModel):
     mirostat_mode: Optional[int] = 0
     mirostat_tau: Optional[float] = 0.0
     mirostat_eta: Optional[float] = 0.0
-    dynatemp_range: Optional[float] = 0.0
+    dynatemp_min: Optional[float] = 0.0
+    dynatemp_max: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
     smoothing_factor: Optional[float] = 0.0
     ignore_eos: Optional[bool] = False
@@ -250,7 +253,8 @@ class CompletionRequest(BaseModel):
             mirostat_mode=self.mirostat_mode,
             mirostat_tau=self.mirostat_tau,
             mirostat_eta=self.mirostat_eta,
-            dynatemp_range=self.dynatemp_range,
+            dynatemp_min=self.dynatemp_min,
+            dynatemp_max=self.dynatemp_max,
             dynatemp_exponent=self.dynatemp_exponent,
             smoothing_factor=self.smoothing_factor,
             ignore_eos=self.ignore_eos,

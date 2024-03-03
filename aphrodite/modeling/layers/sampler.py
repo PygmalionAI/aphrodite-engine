@@ -402,12 +402,13 @@ def _apply_typical_sampling(
 def _apply_temperature(
     logits: torch.Tensor,
     temperatures: torch.Tensor,
-    dynatemp_range: torch.Tensor,
+    dynatemp_mins: torch.Tensor,
+    dynatemp_maxs: torch.Tensor,
     dynatemp_exps: torch.Tensor,
 ) -> torch.Tensor:
-    dynatemp_mask = dynatemp_range > 0
-    dynatemp_mins = (temperatures - dynatemp_range)[dynatemp_mask]
-    dynatemp_maxs = (temperatures + dynatemp_range)[dynatemp_mask]
+    dynatemp_mask = torch.logical_or(dynatemp_mins > 0, dynatemp_maxs > 0)
+    dynatemp_mins = dynatemp_mins[dynatemp_mask]
+    dynatemp_maxs = dynatemp_maxs[dynatemp_mask]
     dynatemp_exps = dynatemp_exps[dynatemp_mask]
     dynatemp_mins = dynatemp_mins.clamp_(min=0)
 
