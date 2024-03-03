@@ -223,7 +223,11 @@ if __name__ == "__main__":
         async def authentication(request: Request, call_next):
             if not request.url.path.startswith("/v1"):
                 return await call_next(request)
-            if request.headers.get("Authorization") != "Bearer " + token:
+
+            auth_header = request.headers.get("Authorization")
+            api_key_header = request.headers.get("x-api-key")
+
+            if auth_header != "Bearer " + token and api_key_header != token:
                 return JSONResponse(content={"error": "Unauthorized"},
                                     status_code=401)
             return await call_next(request)
