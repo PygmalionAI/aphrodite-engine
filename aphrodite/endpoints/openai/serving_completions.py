@@ -302,10 +302,8 @@ class OpenAIServingCompletion(OpenAIServing):
         except ValueError as e:
             # TODO: Use an aphrodite-specific Validation Error
             data = self.create_streaming_error_response(str(e))
-            print("yield", f"data: {data}\n\n")
             yield f"data: {data}\n\n"
 
-        print("yield", "data: [DONE]\n\n")
         yield "data: [DONE]\n\n"
 
     def request_output_to_completion_response(
