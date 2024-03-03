@@ -5,7 +5,7 @@ from typing import AsyncGenerator, AsyncIterator, Callable, List, Optional, Dict
 from aphrodite.common.logger import init_logger
 from aphrodite.common.utils import random_uuid
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
-from .protocol import (
+from aphrodite.endpoints.openai.protocol import (
     CompletionRequest,
     CompletionResponse,
     CompletionResponseChoice,
@@ -272,7 +272,7 @@ class OpenAIServingCompletion(OpenAIServing):
                                 logprobs=logprobs,
                                 finish_reason=finish_reason,
                             )
-                        ]).model_dump_json(exclude_unset=True)
+                        ]).model_dump_json()
                     yield f"data: {response_json}\n\n"
 
                     if output.finish_reason is not None:  # return final usage
@@ -298,7 +298,7 @@ class OpenAIServingCompletion(OpenAIServing):
                                 )
                             ],
                             usage=final_usage,
-                        ).model_dump_json(exclude_unset=True)
+                        ).model_dump_json()
                         yield f"data: {response_json}\n\n"
         except ValueError as e:
             # TODO: Use an aphrodite-specific Validation Error
