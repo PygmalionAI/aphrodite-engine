@@ -87,6 +87,7 @@ def _get_guide_and_mode(
     else:
         return None, None
 
+
 @lru_cache(maxsize=32)
 def _get_cached_logits_processor(guide: str, tokenizer,
                                  mode: GuidedDecodingMode):

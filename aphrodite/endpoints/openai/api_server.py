@@ -19,8 +19,9 @@ from fastapi.responses import JSONResponse, StreamingResponse, Response, HTMLRes
 import aphrodite
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
-from aphrodite.endpoints.openai.protocol import (
-    CompletionRequest, ChatCompletionRequest, ErrorResponse, Prompt)
+from aphrodite.endpoints.openai.protocol import (CompletionRequest,
+                                                 ChatCompletionRequest,
+                                                 ErrorResponse, Prompt)
 from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams, _SAMPLING_EPS
@@ -103,13 +104,13 @@ def parse_args():
     parser.add_argument(
         "--launch-kobold-api",
         action="store_true",
-        help="Launch the Kobold API server in addition to the OpenAI API server.")
-    parser.add_argument(
-        "--max-length",
-        type=int,
-        default=256,
-        help="The maximum length of the generated response. "
-        "For use with Kobold Horde.")
+        help=
+        "Launch the Kobold API server in addition to the OpenAI API server.")
+    parser.add_argument("--max-length",
+                        type=int,
+                        default=256,
+                        help="The maximum length of the generated response. "
+                        "For use with Kobold Horde.")
     parser.add_argument("--served-model-name",
                         type=str,
                         default=None,
@@ -190,21 +191,21 @@ async def show_available_models(x_api_key: Optional[str] = Header(None)):
 
 @app.post("/v1/tokenize")
 @app.post("/v1/token/encode")
-async def tokenize(
-    request: Request,
-    prompt: Prompt,
-    x_api_key: Optional[str] = Header(None)):
+async def tokenize(request: Request,
+                   prompt: Prompt,
+                   x_api_key: Optional[str] = Header(None)):
     tokenized = await openai_serving_chat.tokenize(prompt)
     return JSONResponse(content=tokenized)
 
+
 @app.post("/v1/detokenize")
 @app.post("/v1/token/decode")
-async def detokenize(
-    request: Request,
-    token_ids: List[int],
-    x_api_key: Optional[str] = Header(None)):
+async def detokenize(request: Request,
+                     token_ids: List[int],
+                     x_api_key: Optional[str] = Header(None)):
     detokenized = await openai_serving_chat.detokenize(token_ids)
     return JSONResponse(content=detokenized)
+
 
 @app.get("/version", description="Fetch the Aphrodite Engine version.")
 async def show_version(x_api_key: Optional[str] = Header(None)):
@@ -243,9 +244,12 @@ async def create_completion(request: CompletionRequest,
     else:
         return JSONResponse(content=generator.model_dump())
 
+
 # ============ KoboldAI API ============ #
 
+
 def _set_badwords(tokenizer, hf_config):  # pylint: disable=redefined-outer-name
+    # pylint: disable=global-variable-undefined
     global badwordsids
     if hf_config.bad_words_ids is not None:
         badwordsids = hf_config.bad_words_ids
@@ -258,6 +262,7 @@ def _set_badwords(tokenizer, hf_config):  # pylint: disable=redefined-outer-name
     if tokenizer.pad_token_id in badwordsids:
         badwordsids.remove(tokenizer.pad_token_id)
     badwordsids.append(tokenizer.eos_token_id)
+
 
 def prepare_engine_payload(
         kai_payload: KAIGenerationInputSchema
@@ -279,11 +284,10 @@ def prepare_engine_payload(
         kai_payload.n = 1
         kai_payload.top_p = 1.0
         kai_payload.top_k = -1
-    
+
     if kai_payload.dynatemp_range and kai_payload.temperature is not None:
         dynatemp_min = kai_payload.temperature - kai_payload.dynatemp_range
         dynatemp_max = kai_payload.temperature + kai_payload.dynatemp_range
-
 
     sampling_params = SamplingParams(
         n=kai_payload.n,
@@ -319,6 +323,7 @@ def prepare_engine_payload(
 
     return sampling_params, input_tokens
 
+
 @kai_api.post("/generate")
 async def generate(kai_payload: KAIGenerationInputSchema) -> JSONResponse:
     sampling_params, input_tokens = prepare_engine_payload(kai_payload)
@@ -341,9 +346,10 @@ async def generate(kai_payload: KAIGenerationInputSchema) -> JSONResponse:
             "text": output.text
         } for output in final_res.outputs]})
 
+
 @extra_api.post("/generate/stream")
 async def generate_stream(
-    kai_payload: KAIGenerationInputSchema) -> StreamingResponse:
+        kai_payload: KAIGenerationInputSchema) -> StreamingResponse:
 
     sampling_params, input_tokens = prepare_engine_payload(kai_payload)
     results_generator = engine.generate(None, sampling_params,
@@ -363,6 +369,7 @@ async def generate_stream(
                                  "Connection": "keep-alive",
                              },
                              media_type="text/event-stream")
+
 
 @extra_api.post("/generate/check")
 @extra_api.get("/generate/check")
@@ -389,22 +396,27 @@ async def abort_generation(request: Request):
 
     return JSONResponse({})
 
+
 @extra_api.post("/tokencount")
 async def count_tokens(request: Request):
     """Tokenize string and return token count"""
 
     request_dict = await request.json()
-    tokenizer_result = await openai_serving_chat.tokenize(request_dict["prompt"])
+    tokenizer_result = await openai_serving_chat.tokenize(
+        request_dict["prompt"])
     return JSONResponse({"value": len(tokenizer_result)})
+
 
 @kai_api.get("/info/version")
 async def get_version():
     """Impersonate KAI"""
     return JSONResponse({"result": "1.2.4"})
 
+
 @kai_api.get("/model")
 async def get_model():
     return JSONResponse({"result": f"aphrodite/{served_model}"})
+
 
 @kai_api.get("/config/soft_prompts_list")
 async def get_available_softprompts():
@@ -423,16 +435,19 @@ async def set_current_softprompt():
     """Stub for compatibility"""
     return JSONResponse({})
 
+
 @kai_api.get("/config/max_length")
 async def get_max_length() -> JSONResponse:
     max_length = args.max_length
     return JSONResponse({"value": max_length})
+
 
 @kai_api.get("/config/max_context_length")
 @extra_api.get("/true_max_context_length")
 async def get_max_context_length() -> JSONResponse:
     max_context_length = engine_args.max_model_len
     return JSONResponse({"value": max_context_length})
+
 
 @extra_api.get("/preloadstory")
 async def get_preloaded_story() -> JSONResponse:
@@ -444,6 +459,7 @@ async def get_preloaded_story() -> JSONResponse:
 async def get_extra_version():
     """Impersonate KoboldCpp"""
     return JSONResponse({"result": "KoboldCpp", "version": "1.55.1"})
+
 
 @app.get("/")
 async def get_kobold_lite_ui():
@@ -460,6 +476,8 @@ async def get_kobold_lite_ui():
         else:
             logger.error("Kobold Lite UI not found at " + klitepath)
     return HTMLResponse(content=kobold_lite_ui)
+
+
 # ============ KoboldAI API ============ #
 
 if __name__ == "__main__":
@@ -470,7 +488,9 @@ if __name__ == "__main__":
                        "Keep in mind that the Kobold API routes are NOT "
                        "protected via the API key.")
         app.include_router(kai_api, prefix="/api/v1")
-        app.include_router(kai_api, prefix="/api/latest", include_in_schema=False)
+        app.include_router(kai_api,
+                           prefix="/api/latest",
+                           include_in_schema=False)
         app.include_router(extra_api, prefix="/api/extra")
 
     app.add_middleware(
@@ -486,7 +506,9 @@ if __name__ == "__main__":
         @app.middleware("http")
         async def authentication(request: Request, call_next):
             excluded_paths = ["/api"]
-            if any(request.url.path.startswith(path) for path in excluded_paths):
+            if any(
+                    request.url.path.startswith(path)
+                    for path in excluded_paths):
                 return await call_next(request)
             if not request.url.path.startswith("/v1"):
                 return await call_next(request)
@@ -527,9 +549,11 @@ if __name__ == "__main__":
     openai_serving_completion = OpenAIServingCompletion(
         engine, served_model, args.lora_modules)
     engine_model_config = asyncio.run(engine.get_model_config())
-    tokenizer = get_tokenizer(engine_args.tokenizer,
-                              tokenizer_mode=engine_args.tokenizer_mode,
-                              trust_remote_code=engine_args.trust_remote_code,)
+    tokenizer = get_tokenizer(
+        engine_args.tokenizer,
+        tokenizer_mode=engine_args.tokenizer_mode,
+        trust_remote_code=engine_args.trust_remote_code,
+    )
 
     if 'launch_kobold_api' in args:
         _set_badwords(tokenizer, engine_model_config.hf_config)

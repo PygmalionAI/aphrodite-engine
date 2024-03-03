@@ -198,7 +198,6 @@ class OpenAIServingCompletion(OpenAIServing):
 
         return response
 
-
     async def completion_stream_generator(
         self,
         request: CompletionRequest,

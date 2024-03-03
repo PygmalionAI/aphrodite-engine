@@ -11,8 +11,7 @@ from aphrodite.endpoints.openai.protocol import (CompletionRequest,
                                                  ChatCompletionRequest,
                                                  ErrorResponse, LogProbs,
                                                  ModelCard, ModelList,
-                                                 ModelPermission,
-                                                 Prompt)
+                                                 ModelPermission, Prompt)
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.sequence import Logprob
 
@@ -89,7 +88,7 @@ class OpenAIServing:
         tokenized_prompt = self.tokenizer.tokenize(prompt.prompt)
         token_ids = self.tokenizer.convert_tokens_to_ids(tokenized_prompt)
         return {"value": len(tokenized_prompt), "ids": token_ids}
-    
+
     async def detokenize(self, token_ids: List[int]):
         """Detokenize a given list of token IDs."""
         tokens = self.tokenizer.convert_ids_to_tokens(token_ids)
@@ -139,7 +138,7 @@ class OpenAIServing:
         return ErrorResponse(message=message,
                              type=err_type,
                              code=status_code.value)
-    
+
     def create_streaming_error_response(
             self,
             message: str,

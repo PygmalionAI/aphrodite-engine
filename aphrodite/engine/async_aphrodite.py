@@ -109,7 +109,7 @@ class RequestTracker:
             if verbose:
                 logger.info(f"Finished request {request_id}.")
             self.abort_request(request_id)
-    
+
     def process_exception(self,
                           request_id: str,
                           exception: Exception,
@@ -342,7 +342,7 @@ class AsyncAphrodite:
     def is_running(self) -> bool:
         return (self.background_loop is not None
                 and not self.background_loop.done())
-    
+
     def get_tokenizer(self):
         return self.engine.tokenizer.tokenizer
 

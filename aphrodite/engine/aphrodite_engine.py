@@ -897,7 +897,7 @@ class AphroditeEngine:
             time_per_output_tokens=time_per_output_tokens,
             time_e2e_requests=time_e2e_requests,
         )
-    
+
     def _decode_logprobs(self, seq: Sequence, prms: SamplingParams,
                          logprobs: Dict[int, Logprob],
                          all_input_ids: List[int]) -> None:
@@ -906,6 +906,7 @@ class AphroditeEngine:
         for token_id, sample_logprob in logprobs.items():
             if (sample_logprob.decoded_token is None and token_id != -1):
                 all_input_ids_with_logprob = all_input_ids[:-1] + [token_id]
+                # pylint: disable=unused-variable
                 _, new_text, prefix_offset, read_offset = detokenize_incrementally(
                     self.get_tokenizer_for_seq(seq),
                     all_input_ids=all_input_ids_with_logprob,

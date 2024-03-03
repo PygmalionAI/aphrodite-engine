@@ -204,6 +204,7 @@ def _get_custom_token_bans(
 
 #     return logits
 
+
 def _apply_logits_processors(
     logits: torch.Tensor,
     sampling_metadata: SamplingMetadata,

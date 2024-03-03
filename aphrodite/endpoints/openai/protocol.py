@@ -104,7 +104,7 @@ class ChatCompletionRequest(BaseModel):
     def to_sampling_params(self) -> SamplingParams:
         if self.logprobs and not self.top_logprobs:
             raise ValueError("Top logprobs must be set when logprobs is.")
-        
+
         logits_processors = None
         if self.logit_bias:
 
@@ -118,7 +118,7 @@ class ChatCompletionRequest(BaseModel):
                 return logits
 
             logits_processors = [logit_bias_logits_processor]
-                    
+
         return SamplingParams(
             n=self.n,
             max_tokens=self.max_tokens,
@@ -155,7 +155,7 @@ class ChatCompletionRequest(BaseModel):
             seed=self.seed,
             logits_processors=logits_processors,
         )
-    
+
     @model_validator(mode="before")
     @classmethod
     def check_guided_decoding_count(cls, data):
@@ -271,7 +271,7 @@ class CompletionRequest(BaseModel):
             seed=self.seed,
             logits_processors=logits_processors,
         )
-    
+
     @model_validator(mode="before")
     @classmethod
     def check_guided_decoding_count(cls, data):
@@ -375,6 +375,7 @@ class Prompt(BaseModel):
 
 # ========== KoboldAI ========== #
 
+
 class KoboldSamplingParams(BaseModel):
     n: int = Field(1, alias="n")
     best_of: Optional[int] = Field(None, alias="best_of")
@@ -410,7 +411,8 @@ class KoboldSamplingParams(BaseModel):
         if best_of is not None and (best_of <= 0 or best_of > n):
             raise ValueError(
                 "best_of must be a positive integer less than or equal to n")
-        return values    
+        return values
+
 
 class KAIGenerationInputSchema(BaseModel):
     genkey: Optional[str] = None
