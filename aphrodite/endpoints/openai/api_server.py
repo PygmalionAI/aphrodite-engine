@@ -284,8 +284,7 @@ def prepare_engine_payload(
         kai_payload.n = 1
         kai_payload.top_p = 1.0
         kai_payload.top_k = -1
-
-    if kai_payload.dynatemp_range and kai_payload.temperature is not None:
+    if kai_payload.dynatemp_range is not None:
         dynatemp_min = kai_payload.temperature - kai_payload.dynatemp_range
         dynatemp_max = kai_payload.temperature + kai_payload.dynatemp_range
 
@@ -294,8 +293,8 @@ def prepare_engine_payload(
         best_of=kai_payload.n,
         repetition_penalty=kai_payload.rep_pen,
         temperature=kai_payload.temperature,
-        dynatemp_min=dynatemp_min,
-        dynatemp_max=dynatemp_max,
+        dynatemp_min=dynatemp_min if kai_payload.dynatemp_range > 0 else 0.0,
+        dynatemp_max=dynatemp_max if kai_payload.dynatemp_range > 0 else 0.0,
         dynatemp_exponent=kai_payload.dynatemp_exponent,
         smoothing_factor=kai_payload.smoothing_factor,
         tfs=kai_payload.tfs,
