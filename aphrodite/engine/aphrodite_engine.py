@@ -5,6 +5,7 @@ import time
 from typing import (TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple,
                     Union)
 
+import aphrodite
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig, LoRAConfig, DeviceConfig)
@@ -75,7 +76,7 @@ class AphroditeEngine:
         log_stats: bool,
     ) -> None:
         logger.info(
-            "Initializing the Aphrodite Engine with the following config:\n"
+            f"Initializing the Aphrodite Engine (v{aphrodite.__version__}) with the following config:\n"
             f"Model = {model_config.model!r}\n"
             f"Tokenizer = {model_config.tokenizer!r}\n"
             f"tokenizer_mode = {model_config.tokenizer_mode}\n"

@@ -5,17 +5,18 @@ from contextlib import asynccontextmanager
 import os
 import importlib
 import inspect
-from typing import List, Tuple, AsyncGenerator
+from typing import List, Tuple, AsyncGenerator, Optional
 
 from prometheus_client import make_asgi_app
 import fastapi
 import uvicorn
 from http import HTTPStatus
-from fastapi import Request, APIRouter
+from fastapi import Request, APIRouter, Header
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, Response, HTMLResponse
 
+import aphrodite
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.endpoints.openai.protocol import (
@@ -55,7 +56,11 @@ async def lifespan(app: fastapi.FastAPI):
     yield
 
 
-app = fastapi.FastAPI(lifespan=lifespan)
+app = fastapi.FastAPI(title="Aphrodite Engine",
+                      summary="Serving language models at scale",
+                      description=("A RESTful API server compatible with "
+                                   "OpenAI and KoboldAI clients. "),
+                      lifespan=lifespan)
 
 
 class LoRAParserAction(argparse.Action):
@@ -178,27 +183,39 @@ async def health() -> Response:
 
 
 @app.get("/v1/models")
-async def show_available_models():
+async def show_available_models(x_api_key: Optional[str] = Header(None)):
     models = await openai_serving_chat.show_available_models()
     return JSONResponse(content=models.model_dump())
 
 
 @app.post("/v1/tokenize")
 @app.post("/v1/token/encode")
-async def tokenize(prompt: Prompt):
+async def tokenize(
+    request: Request,
+    prompt: Prompt,
+    x_api_key: Optional[str] = Header(None)):
     tokenized = await openai_serving_chat.tokenize(prompt)
     return JSONResponse(content=tokenized)
 
 @app.post("/v1/detokenize")
 @app.post("/v1/token/decode")
-async def detokenize(token_ids: List[int]):
+async def detokenize(
+    request: Request,
+    token_ids: List[int],
+    x_api_key: Optional[str] = Header(None)):
     detokenized = await openai_serving_chat.detokenize(token_ids)
     return JSONResponse(content=detokenized)
+
+@app.get("/version", description="Fetch the Aphrodite Engine version.")
+async def show_version(x_api_key: Optional[str] = Header(None)):
+    ver = {"version": aphrodite.__version__}
+    return JSONResponse(content=ver)
 
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,
-                                 raw_request: Request):
+                                 raw_request: Request,
+                                 x_api_key: Optional[str] = Header(None)):
     generator = await openai_serving_chat.create_chat_completion(
         request, raw_request)
     if isinstance(generator, ErrorResponse):
@@ -212,7 +229,9 @@ async def create_chat_completion(request: ChatCompletionRequest,
 
 
 @app.post("/v1/completions")
-async def create_completion(request: CompletionRequest, raw_request: Request):
+async def create_completion(request: CompletionRequest,
+                            raw_request: Request,
+                            x_api_key: Optional[str] = Header(None)):
     generator = await openai_serving_completion.create_completion(
         request, raw_request)
     if isinstance(generator, ErrorResponse):
