@@ -93,7 +93,8 @@ class Sampler(nn.Module):
 
         if do_temperatures:
             logits = _apply_temperature(logits, sampling_tensors.temperatures,
-                                        sampling_tensors.dynatemp_ranges,
+                                        sampling_tensors.dynatemp_mins,
+                                        sampling_tensors.dynatemp_maxs,
                                         sampling_tensors.dynatemp_exps)
 
         if do_topks or do_topps or do_topas or do_minps:
