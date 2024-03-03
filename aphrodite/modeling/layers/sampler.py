@@ -10,7 +10,7 @@ from aphrodite.modeling.sampling_metadata import (SamplingMetadata,
 from aphrodite.modeling.megatron.communication_op import (
     tensor_model_parallel_gather)
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
-from aphrodite.common.sequence import (PromptLogprobs, SampleLogprobs,
+from aphrodite.common.sequence import (Logprob, PromptLogprobs, SampleLogprobs,
                                        SamplerOutput, SequenceData,
                                        SequenceGroupOutput, SequenceOutput)
 
@@ -93,7 +93,8 @@ class Sampler(nn.Module):
 
         if do_temperatures:
             logits = _apply_temperature(logits, sampling_tensors.temperatures,
-                                        sampling_tensors.dynatemp_ranges,
+                                        sampling_tensors.dynatemp_mins,
+                                        sampling_tensors.dynatemp_maxs,
                                         sampling_tensors.dynatemp_exps)
 
         if do_topks or do_topps or do_topas or do_minps:
@@ -178,29 +179,53 @@ def _get_custom_token_bans(
     return banned_tokens
 
 
+# def _apply_logits_processors(
+#     logits: torch.Tensor,
+#     metadata: SamplingMetadata,
+# ) -> torch.Tensor:
+#     seq_offset = 0
+#     for i, (seq_ids, sampling_params) in enumerate(metadata.seq_groups):
+#         seq_size = len(seq_ids)
+#         output_tokens = []
+#         if (i < metadata.num_prompts
+#                 and sampling_params.prompt_logprobs is not None):
+#             prompt_seqs = metadata.prompt_lens[i] - 1
+#             seq_size += prompt_seqs
+#             output_tokens.extend([[]] * prompt_seqs)
+#         seq_end = seq_offset + seq_size
+
+#         if sampling_params.logits_processors:
+#             output_tokens.extend(metadata.seq_data[sid].output_token_ids
+#                                  for sid in seq_ids)
+#             for proc in sampling_params.logits_processors:
+#                 proc(logits[seq_offset:seq_end], output_tokens)
+
+#         seq_offset = seq_end
+
+#     return logits
+
+
 def _apply_logits_processors(
     logits: torch.Tensor,
-    metadata: SamplingMetadata,
+    sampling_metadata: SamplingMetadata,
 ) -> torch.Tensor:
-    seq_offset = 0
-    for i, (seq_ids, sampling_params) in enumerate(metadata.seq_groups):
-        seq_size = len(seq_ids)
-        output_tokens = []
-        if (i < metadata.num_prompts
-                and sampling_params.prompt_logprobs is not None):
-            prompt_seqs = metadata.prompt_lens[i] - 1
-            seq_size += prompt_seqs
-            output_tokens.extend([[]] * prompt_seqs)
-        seq_end = seq_offset + seq_size
-
-        if sampling_params.logits_processors:
-            output_tokens.extend(metadata.seq_data[sid].output_token_ids
-                                 for sid in seq_ids)
-            for proc in sampling_params.logits_processors:
-                proc(logits[seq_offset:seq_end], output_tokens)
-
-        seq_offset = seq_end
-
+    logits_row_idx = 0
+    found_logits_processors = False
+    for seq_ids, sampling_params in sampling_metadata.seq_groups:
+        logits_processors = sampling_params.logits_processors
+        if logits_processors:
+            found_logits_processors = True
+            for seq_id in seq_ids:
+                logits_row = logits[logits_row_idx]
+                token_ids = sampling_metadata.seq_data[seq_id].output_token_ids
+                for logits_processor in logits_processors:
+                    logits_row = logits_processor(token_ids, logits_row)
+                logits[logits_row_idx] = logits_row
+                logits_row_idx += 1
+        else:
+            logits_row_idx += len(seq_ids)
+    if found_logits_processors:
+        assert logits_row_idx == logits.shape[0]
     return logits
 
 
@@ -379,12 +404,13 @@ def _apply_typical_sampling(
 def _apply_temperature(
     logits: torch.Tensor,
     temperatures: torch.Tensor,
-    dynatemp_range: torch.Tensor,
+    dynatemp_mins: torch.Tensor,
+    dynatemp_maxs: torch.Tensor,
     dynatemp_exps: torch.Tensor,
 ) -> torch.Tensor:
-    dynatemp_mask = dynatemp_range > 0
-    dynatemp_mins = (temperatures - dynatemp_range)[dynatemp_mask]
-    dynatemp_maxs = (temperatures + dynatemp_range)[dynatemp_mask]
+    dynatemp_mask = torch.logical_or(dynatemp_mins > 0, dynatemp_maxs > 0)
+    dynatemp_mins = dynatemp_mins[dynatemp_mask]
+    dynatemp_maxs = dynatemp_maxs[dynatemp_mask]
     dynatemp_exps = dynatemp_exps[dynatemp_mask]
     dynatemp_mins = dynatemp_mins.clamp_(min=0)
 
@@ -701,7 +727,10 @@ def _get_logprobs(
                     prompt_logprobs_dict.update(
                         zip(top_token_ids[sample_idx, :num_logprobs].tolist(),
                             top_logprobs[sample_idx, :num_logprobs].tolist()))
-                group_prompt_logprobs.append(prompt_logprobs_dict)
+                group_prompt_logprobs.append({
+                    token_id: Logprob(logprob)
+                    for token_id, logprob in prompt_logprobs_dict.items()
+                })
                 sample_idx += 1
                 query_result_idx += 1
             result_prompt_logprobs.append(group_prompt_logprobs)
@@ -726,7 +755,10 @@ def _get_logprobs(
                                       parent_id, :num_logprobs].tolist(),
                         top_logprobs[sample_idx +
                                      parent_id, :num_logprobs].tolist()))
-            group_sample_logprobs.append(sample_logprobs_dict)
+            group_sample_logprobs.append({
+                token_id: Logprob(logprob)
+                for token_id, logprob in sample_logprobs_dict.items()
+            })
         result_sample_logprobs.append(group_sample_logprobs)
         sample_idx += len(seq_ids)
 

@@ -51,6 +51,8 @@ confidence=
 # no Warning level messages displayed, use"--disable=all --enable=classes
 # --disable=W"
 disable=abstract-method,
+        consider-using-with,
+        consider-using-in,
         apply-builtin,
         arguments-differ,
         attribute-defined-outside-init,
@@ -92,6 +94,8 @@ disable=abstract-method,
         invalid-str-codec,
         invalid-name,
         locally-disabled,
+        broad-except,
+        redefined-outer-name,
         logging-fstring-interpolation,
         logging-not-lazy,
         unsubscriptable-object,

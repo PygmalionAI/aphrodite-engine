@@ -1,5 +1,5 @@
 from typing import List, Optional, Union
-from pydantic import BaseModel, Field, root_validator, conint, confloat, conlist, NonNegativeFloat, NonNegativeInt, PositiveInt
+from pydantic import BaseModel, Field, root_validator, NonNegativeFloat, NonNegativeInt, PositiveInt
 
 
 class SamplingParams(BaseModel):
@@ -30,7 +30,7 @@ class SamplingParams(BaseModel):
     custom_token_bans: Optional[List[int]] = Field(None,
                                                    alias="custom_token_bans")
 
-    @root_validator
+    @root_validator(pre=False, skip_on_failure=True)
     def validate_best_of(cls, values):  # pylint: disable=no-self-argument
         best_of = values.get("best_of")
         n = values.get("n")
@@ -41,51 +41,51 @@ class SamplingParams(BaseModel):
 
 
 class KAIGenerationInputSchema(BaseModel):
-    genkey: Optional[str]
+    genkey: Optional[str] = None
     prompt: str
-    n: Optional[conint(ge=1, le=5)] = 1
+    n: Optional[int] = 1
     max_context_length: PositiveInt
     max_length: PositiveInt
-    rep_pen: Optional[confloat(ge=1)] = 1.0
+    rep_pen: Optional[float] = 1.0
     rep_pen_range: Optional[NonNegativeInt]
     rep_pen_slope: Optional[NonNegativeFloat]
-    top_k: Optional[NonNegativeInt] = 0.0
+    top_k: Optional[NonNegativeInt] = 0
     top_a: Optional[NonNegativeFloat] = 0.0
-    top_p: Optional[confloat(ge=0, le=1)] = 1.0
-    min_p: Optional[confloat(ge=0, le=1)] = 0.0
-    tfs: Optional[confloat(ge=0, le=1)] = 1.0
-    eps_cutoff: Optional[confloat(ge=0, le=1000)] = 0.0
+    top_p: Optional[float] = 1.0
+    min_p: Optional[float] = 0.0
+    tfs: Optional[float] = 1.0
+    eps_cutoff: Optional[float] = 0.0
     eta_cutoff: Optional[NonNegativeFloat] = 0.0
-    typical: Optional[confloat(ge=0, le=1)] = 1.0
+    typical: Optional[float] = 1.0
     temperature: Optional[NonNegativeFloat] = 1.0
     dynatemp_range: Optional[NonNegativeFloat] = 0.0
     dynatemp_exponent: Optional[NonNegativeFloat] = 1.0
     smoothing_factor: Optional[NonNegativeFloat] = 0.0
-    use_memory: Optional[bool]
-    use_story: Optional[bool]
-    use_authors_note: Optional[bool]
-    use_world_info: Optional[bool]
-    use_userscripts: Optional[bool]
-    soft_prompt: Optional[str]
-    disable_output_formatting: Optional[bool]
-    frmtrmblln: Optional[bool]
-    frmtrmspch: Optional[bool]
-    singleline: Optional[bool]
-    use_default_badwordsids: Optional[bool]
+    use_memory: Optional[bool] = None
+    use_story: Optional[bool] = None
+    use_authors_note: Optional[bool] = None
+    use_world_info: Optional[bool] = None
+    use_userscripts: Optional[bool] = None
+    soft_prompt: Optional[str] = None
+    disable_output_formatting: Optional[bool] = None
+    frmtrmblln: Optional[bool] = None
+    frmtrmspch: Optional[bool] = None
+    singleline: Optional[bool] = None
+    use_default_badwordsids: Optional[bool] = None
     mirostat: Optional[int] = 0
     mirostat_tau: Optional[float] = 0.0
     mirostat_eta: Optional[float] = 0.0
-    disable_input_formatting: Optional[bool]
-    frmtadsnsp: Optional[bool]
-    quiet: Optional[bool]
+    disable_input_formatting: Optional[bool] = None
+    frmtadsnsp: Optional[bool] = None
+    quiet: Optional[bool] = None
     # pylint: disable=unexpected-keyword-arg
-    sampler_order: Optional[conlist(int, min_items=6)]
-    sampler_seed: Optional[conint(ge=0, le=2**64 - 1)]
-    sampler_full_determinism: Optional[bool]
-    stop_sequence: Optional[List[str]]
+    sampler_order: Optional[Union[List, str]] = Field(default_factory=list)
+    sampler_seed: Optional[int] = None
+    sampler_full_determinism: Optional[bool] = None
+    stop_sequence: Optional[List[str]] = None
     include_stop_str_in_output: Optional[bool] = False
 
-    @root_validator
+    @root_validator(pre=False, skip_on_failure=True)
     def check_context(cls, values):  # pylint: disable=no-self-argument
         assert values.get("max_length") <= values.get(
             "max_context_length"
