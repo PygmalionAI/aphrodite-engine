@@ -297,6 +297,7 @@ def prepare_engine_payload(
         dynatemp_max=dynatemp_max if kai_payload.dynatemp_range > 0 else 0.0,
         dynatemp_exponent=kai_payload.dynatemp_exponent,
         smoothing_factor=kai_payload.smoothing_factor,
+        smoothing_curve=kai_payload.smoothing_curve,
         tfs=kai_payload.tfs,
         top_p=kai_payload.top_p,
         top_k=kai_payload.top_k,

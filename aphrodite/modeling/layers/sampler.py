@@ -114,7 +114,8 @@ class Sampler(nn.Module):
                                              sampling_tensors.typical_ps)
         if do_quadratic:
             logits = _apply_quadratic_sampling(
-                logits, sampling_tensors.smoothing_factors)
+                logits, sampling_tensors.smoothing_factors,
+                sampling_tensors.smoothing_curves)
 
         banned_tokens = _get_custom_token_bans(sampling_metadata)
         assert len(banned_tokens) == logits.shape[0]
@@ -434,17 +435,45 @@ def _apply_temperature(
 def _apply_quadratic_sampling(
     logits: torch.Tensor,
     smoothing_factors: torch.Tensor,
+    smoothing_curves: torch.Tensor,
 ) -> torch.Tensor:
-    """Applies a quadratic transformation to the logits based on the
-    provided smoothing factor. The transformation is centered around
-    the maximum logit value in the batch.
+    """
+    Applies a quadratic transformation to the logits based on the
+    provided smoothing factors and curves. The transformation is
+    centered around the maximum logit value in the batch.
+
+    The transformation involves a quadratic and cubic term, with the
+    cubic term controlled by the smoothing curve. The quadratic term is
+    scaled by the smoothing factor, and the cubic term is scaled by the
+    product of the smoothing factor and the smoothing curve.
+
+    params:
+        logits (torch.Tensor): The logits to be transformed.
+        smoothing_factors (torch.Tensor): The factors to scale the quadratic
+            term in the transformation.
+        smoothing_curves (torch.Tensor): The factors to scale the cubic term
+            in the transformation.
+
+    returns:
+        torch.Tensor: The transformed logits.
 
     Credits: @kalomaze
     """
     max_logits = logits.max(dim=-1, keepdim=True).values
-    transformed_logits = -(smoothing_factors.unsqueeze_(dim=1) *
-                           (logits - max_logits).pow(2)) + max_logits
-    return transformed_logits
+    diff = logits - max_logits
+    smoothing_factors.unsqueeze_(dim=1)
+    smoothing_curves.unsqueeze_(dim=1)
+
+    k = (3 - smoothing_curves) / 2
+    s = (smoothing_curves - 1) / 2
+
+    mask = smoothing_factors > 0
+    mask = mask.flatten()
+    transformed_logits = torch.where(
+        logits != float('-inf'), -(k * smoothing_factors * diff**2) +
+        (s * smoothing_factors * diff**3) + max_logits, logits)
+    logits[mask, :] = transformed_logits[mask, :]
+    return logits
 
 
 def _greedy_sample(

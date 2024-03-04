@@ -83,6 +83,7 @@ class SamplingParams:
             Range [0, inf).
         dynatemp_exponent: Exponent for dynatemp sampling. Range [0, inf).
         smoothing_factor: Smoothing factor for Quadratic Sampling.
+        smoothing_curve: Smoothing curve for Quadratic (Cubic) Sampling.
         seed: Random seed to use for the generation.
         use_beam_search: Whether to use beam search instead of sampling.
         length_penalty: Float that penalizes sequences based on their length.
@@ -143,6 +144,7 @@ class SamplingParams:
         dynatemp_max: float = 0,
         dynatemp_exponent: float = 1,
         smoothing_factor: float = 0.0,
+        smoothing_curve: float = 1.0,
         seed: Optional[int] = None,
         use_beam_search: bool = False,
         length_penalty: float = 1.0,
@@ -180,6 +182,7 @@ class SamplingParams:
         self.dynatemp_max = dynatemp_max
         self.dynatemp_exponent = dynatemp_exponent
         self.smoothing_factor = smoothing_factor
+        self.smoothing_curve = smoothing_curve
         self.seed = seed
         self.use_beam_search = use_beam_search
         self.length_penalty = length_penalty
@@ -265,6 +268,9 @@ class SamplingParams:
         if not self.smoothing_factor >= 0:
             raise ValueError(f"smoothing_factor must be non negative, got "
                              f"{self.smoothing_factor}.")
+        if not self.smoothing_curve >= 1.0:
+            raise ValueError(f"smoothing_curve must larger than 1, got "
+                             f"{self.smoothing_curve}.")
         if self.mirostat_mode:
             if not self.mirostat_mode == 2:
                 raise ValueError(
@@ -352,6 +358,7 @@ class SamplingParams:
                 f"dynatemp_max={self.dynatemp_max}, "
                 f"dynatemp_exponent={self.dynatemp_exponent}, "
                 f"smoothing_factor={self.smoothing_factor}, "
+                f"smoothing_curve={self.smoothing_curve}, "
                 f"seed={self.seed}, "
                 f"use_beam_search={self.use_beam_search}, "
                 f"length_penalty={self.length_penalty}, "
