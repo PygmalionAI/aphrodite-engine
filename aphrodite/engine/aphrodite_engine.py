@@ -5,6 +5,7 @@ import time
 from typing import (TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple,
                     Union)
 
+import aphrodite
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig, LoRAConfig, DeviceConfig)
@@ -17,7 +18,7 @@ from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (SamplerOutput, Sequence, SequenceGroup,
                                        SequenceGroupOutput, SequenceOutput,
-                                       SequenceStatus)
+                                       SequenceStatus, Logprob)
 from aphrodite.transformers_utils.tokenizer import (detokenize_incrementally,
                                                     TokenizerGroup)
 from aphrodite.common.utils import (Counter, set_cuda_visible_devices, get_ip,
@@ -75,7 +76,7 @@ class AphroditeEngine:
         log_stats: bool,
     ) -> None:
         logger.info(
-            "Initializing the Aphrodite Engine with the following config:\n"
+            f"Initializing the Aphrodite Engine (v{aphrodite.__version__}) with the following config:\n"
             f"Model = {model_config.model!r}\n"
             f"Tokenizer = {model_config.tokenizer!r}\n"
             f"tokenizer_mode = {model_config.tokenizer_mode}\n"
@@ -279,7 +280,7 @@ class AphroditeEngine:
             is_driver_worker=True,
         )
 
-        self._run_workers("init_model")
+        self._run_workers("init_model", cupy_port=get_open_port())
         self._run_workers(
             "load_model",
             max_concurrent_workers=self.parallel_config.
@@ -442,6 +443,13 @@ class AphroditeEngine:
         if lora_request is not None and not self.lora_config:
             raise ValueError(f"Got lora_request {lora_request} but LoRA is "
                              "not enabled!")
+        max_log_probs = self.get_model_config().max_log_probs
+        if (sampling_params.logprobs
+                and sampling_params.logprobs > max_log_probs) or (
+                    sampling_params.prompt_logprobs
+                    and sampling_params.prompt_logprobs > max_log_probs):
+            raise ValueError(f"Cannot request more than "
+                             f"{max_log_probs} logprobs.")
         if arrival_time is None:
             arrival_time = time.monotonic()
         prompt_token_ids = self.encode_request(
@@ -876,26 +884,50 @@ class AphroditeEngine:
             time_to_first_tokens = time_last_iters if prompt_run else []
             time_per_output_tokens = [] if prompt_run else time_last_iters
 
-            return Stats(
-                now=now,
-                num_running=num_running,
-                num_swapped=num_swapped,
-                num_waiting=num_waiting,
-                gpu_cache_usage=gpu_cache_usage,
-                cpu_cache_usage=cpu_cache_usage,
-                num_prompt_tokens=num_prompt_tokens,
-                num_generation_tokens=num_generation_tokens,
-                time_to_first_tokens=time_to_first_tokens,
-                time_per_output_tokens=time_per_output_tokens,
-                time_e2e_requests=time_e2e_requests,
-            )
+        return Stats(
+            now=now,
+            num_running=num_running,
+            num_swapped=num_swapped,
+            num_waiting=num_waiting,
+            gpu_cache_usage=gpu_cache_usage,
+            cpu_cache_usage=cpu_cache_usage,
+            num_prompt_tokens=num_prompt_tokens,
+            num_generation_tokens=num_generation_tokens,
+            time_to_first_tokens=time_to_first_tokens,
+            time_per_output_tokens=time_per_output_tokens,
+            time_e2e_requests=time_e2e_requests,
+        )
+
+    def _decode_logprobs(self, seq: Sequence, prms: SamplingParams,
+                         logprobs: Dict[int, Logprob],
+                         all_input_ids: List[int]) -> None:
+        if not logprobs:
+            return
+        for token_id, sample_logprob in logprobs.items():
+            if (sample_logprob.decoded_token is None and token_id != -1):
+                all_input_ids_with_logprob = all_input_ids[:-1] + [token_id]
+                # pylint: disable=unused-variable
+                _, new_text, prefix_offset, read_offset = detokenize_incrementally(
+                    self.get_tokenizer_for_seq(seq),
+                    all_input_ids=all_input_ids_with_logprob,
+                    prev_tokens=seq.tokens,
+                    prefix_offset=seq.prefix_offset,
+                    read_offset=seq.read_offset,
+                    skip_special_tokens=prms.skip_special_tokens,
+                    spaces_between_special_tokens=prms.
+                    spaces_between_special_tokens,
+                )
+                sample_logprob.decoded_token = new_text
 
     def _decode_sequence(self, seq: Sequence, prms: SamplingParams) -> None:
         """Decodes the new token for a sequence."""
+        all_input_ids = seq.get_token_ids()
+        self._decode_logprobs(seq, prms, seq.output_logprobs[-1],
+                              all_input_ids)
         (new_tokens, new_output_text, prefix_offset,
          read_offset) = detokenize_incrementally(
              self.get_tokenizer_for_seq(seq),
-             all_input_ids=seq.get_token_ids(),
+             all_input_ids=all_input_ids,
              prev_tokens=seq.tokens,
              prefix_offset=seq.prefix_offset,
              read_offset=seq.read_offset,

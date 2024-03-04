@@ -1,56 +1,83 @@
-# Adapted from
-# https://github.com/lm-sys/FastChat/blob/168ccc29d3f7edc50823016105c024fe2282732a/fastchat/serve/openai_api_server.py
-
 import argparse
 import asyncio
-import codecs
 import json
-import time
-from http import HTTPStatus
-from typing import AsyncGenerator, Dict, List, Optional, Tuple, Union
+from contextlib import asynccontextmanager
+import os
+import importlib
+import inspect
+from typing import List, Tuple, AsyncGenerator, Optional
 
 from prometheus_client import make_asgi_app
 import fastapi
 import uvicorn
-from fastapi import Request, Response, Header, HTTPException, Depends
+from http import HTTPStatus
+from fastapi import Request, APIRouter, Header
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse, StreamingResponse, Response, HTMLResponse
 
+import aphrodite
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
-from aphrodite.endpoints.openai.protocol import (
-    CompletionRequest, CompletionResponse, CompletionResponseChoice,
-    CompletionResponseStreamChoice, CompletionStreamResponse,
-    ChatCompletionRequest, ChatCompletionResponse,
-    ChatCompletionResponseChoice, ChatCompletionResponseStreamChoice,
-    ChatCompletionStreamResponse, ChatMessage, DeltaMessage, ErrorResponse,
-    LogProbs, ModelCard, ModelList, ModelPermission, UsageInfo)
+from aphrodite.endpoints.openai.protocol import (CompletionRequest,
+                                                 ChatCompletionRequest,
+                                                 ErrorResponse, Prompt)
 from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
-from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.transformers_utils.tokenizer import get_tokenizer
+from aphrodite.common.sampling_params import SamplingParams, _SAMPLING_EPS
 from aphrodite.common.utils import random_uuid
-from aphrodite.common.logits_processor import BiasLogitsProcessor
-from aphrodite.common.grammar import GrammarLogitsProcessor
+from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
+from aphrodite.endpoints.openai.serving_completions import OpenAIServingCompletion
+from aphrodite.endpoints.openai.protocol import KAIGenerationInputSchema
+from aphrodite.endpoints.openai.serving_engine import LoRA
+from aphrodite.transformers_utils.tokenizer import get_tokenizer
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
+openai_serving_chat: OpenAIServingChat = None
+openai_serving_completion: OpenAIServingCompletion = None
 logger = init_logger(__name__)
-served_model = None
-app = fastapi.FastAPI()
-engine = None
-response_role = None
+kai_api = APIRouter()
+extra_api = APIRouter()
+kobold_lite_ui = ""
+gen_cache: dict = {}
+
+
+@asynccontextmanager
+async def lifespan(app: fastapi.FastAPI):
+
+    async def _force_log():
+        while True:
+            await asyncio.sleep(10)
+            await engine.do_log_stats()
+
+    if not engine_args.disable_log_stats:
+        asyncio.create_task(_force_log())
+
+    yield
+
+
+app = fastapi.FastAPI(title="Aphrodite Engine",
+                      summary="Serving language models at scale",
+                      description=("A RESTful API server compatible with "
+                                   "OpenAI and KoboldAI clients. "),
+                      lifespan=lifespan)
+
+
+class LoRAParserAction(argparse.Action):
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        lora_list = []
+        for item in values:
+            name, path = item.split('=')
+            lora_list.append(LoRA(name, path))
+        setattr(namespace, self.dest, lora_list)
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Aphrodite OpenAI-Compatible RESTful API server.")
-    parser.add_argument("--host",
-                        type=str,
-                        default="localhost",
-                        help="host name")
+    parser.add_argument("--host", type=str, default=None, help="host name")
     parser.add_argument("--port", type=int, default=2242, help="port number")
     parser.add_argument("--allow-credentials",
                         action="store_true",
@@ -67,34 +94,73 @@ def parse_args():
                         type=json.loads,
                         default=["*"],
                         help="allowed headers")
+    parser.add_argument(
+        "--api-keys",
+        type=str,
+        default=None,
+        help=
+        "If provided, the server will require this key to be presented in the header."
+    )
+    parser.add_argument(
+        "--launch-kobold-api",
+        action="store_true",
+        help=
+        "Launch the Kobold API server in addition to the OpenAI API server.")
+    parser.add_argument("--max-length",
+                        type=int,
+                        default=256,
+                        help="The maximum length of the generated response. "
+                        "For use with Kobold Horde.")
     parser.add_argument("--served-model-name",
                         type=str,
                         default=None,
                         help="The model name used in the API. If not "
                         "specified, the model name will be the same as "
                         "the huggingface name.")
-    parser.add_argument("--api-keys",
-                        nargs="*",
-                        help="Authorization API Keys for the server.")
+    parser.add_argument(
+        "--lora-modules",
+        type=str,
+        default=None,
+        nargs='+',
+        action=LoRAParserAction,
+        help=
+        "LoRA module configurations in the format name=path. Multiple modules can be specified."
+    )
     parser.add_argument("--chat-template",
                         type=str,
                         default=None,
                         help="The file path to the chat template, "
                         "or the template in single-line form "
-                        "for the specified model.")
+                        "for the specified model")
     parser.add_argument("--response-role",
                         type=str,
                         default="assistant",
                         help="The role name to return if "
-                        "`request.add_generation_prompt=True.")
+                        "`request.add_generation_prompt=true`.")
     parser.add_argument("--ssl-keyfile",
                         type=str,
                         default=None,
-                        help="SSL key file path.")
+                        help="The file path to the SSL key file")
     parser.add_argument("--ssl-certfile",
                         type=str,
                         default=None,
-                        help="SSL cert file path.")
+                        help="The file path to the SSL cert file")
+    parser.add_argument(
+        "--root-path",
+        type=str,
+        default=None,
+        help="FastAPI root_path when app is behind a path based routing proxy")
+    parser.add_argument(
+        "--middleware",
+        type=str,
+        action="append",
+        default=[],
+        help="Additional ASGI middleware to apply to the app. "
+        "We accept multiple --middleware arguments. "
+        "The value should be an import path. "
+        "If a function is provided, Aphrodite will add it to the server using @app.middleware('http'). "
+        "If a class is provided, Aphrodite will add it to the server using app.add_middleware(). "
+    )
 
     parser = AsyncEngineArgs.add_cli_args(parser)
     return parser.parse_args()
@@ -102,737 +168,331 @@ def parse_args():
 
 # Add prometheus asgi middleware to route /metrics requests
 metrics_app = make_asgi_app()
-app.mount("/metrics/", metrics_app)
-
-
-def _verify_api_key(x_api_key: str = Header(None),
-                    authorization: str = Header(None)):
-    if not EXPECTED_API_KEYS:  # If no keys are provided
-        return "NoKey"  # Return a default value
-    if x_api_key and x_api_key in EXPECTED_API_KEYS:
-        return x_api_key
-    elif authorization:
-        scheme, _, token = authorization.partition(" ")
-        if scheme.lower() == "bearer" and token in EXPECTED_API_KEYS:
-            return token
-    raise HTTPException(
-        status_code=401,
-        detail="Invalid API Key",
-    )
-
-
-def create_error_response(status_code: HTTPStatus,
-                          message: str) -> JSONResponse:
-    return JSONResponse(ErrorResponse(message=message,
-                                      type="invalid_request_error").dict(),
-                        status_code=status_code.value)
-
-
-def load_chat_template(args, tokenizer):  # pylint: disable=redefined-outer-name
-    if args.chat_template is not None:
-        try:
-            with open(args.chat_template, "r") as f:
-                chat_template = f.read()
-        except OSError:
-            # If opening a file fails, set chat template to be args to
-            # ensure we decode so our escape are interpreted correctly
-            chat_template = codecs.decode(args.chat_template, "unicode_escape")
-
-        tokenizer.chat_template = chat_template
-        logger.info(
-            f"Using supplied chat template:\n{tokenizer.chat_template}")
-    elif tokenizer.chat_template is not None:
-        logger.info(f"Using default chat template:\n{tokenizer.chat_template}")
-    else:
-        logger.warning("No chat template provided. Chat API will not work.")
+app.mount("/metrics", metrics_app)
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request, exc):  # pylint: disable=unused-argument
-    return create_error_response(HTTPStatus.BAD_REQUEST, str(exc))
-
-
-async def check_model(request) -> Optional[JSONResponse]:
-    if request.model == served_model:
-        return
-    ret = create_error_response(
-        HTTPStatus.NOT_FOUND,
-        f"The model `{request.model}` does not exist.",
-    )
-    return ret
-
-
-async def check_length(
-    request: Union[ChatCompletionRequest, CompletionRequest],
-    prompt: Optional[str] = None,
-    prompt_ids: Optional[List[int]] = None
-) -> Tuple[List[int], Optional[JSONResponse]]:
-    assert (not (prompt is None and prompt_ids is None)
-            and not (prompt is not None and prompt_ids is not None)
-            ), "Either prompt or prompt_ids should be provided."
-    input_ids = prompt_ids if prompt_ids is not None else tokenizer(
-        prompt).input_ids
-    token_num = len(input_ids)
-
-    if request.max_tokens is None:
-        request.max_tokens = max_model_len - token_num
-    if token_num + request.max_tokens > max_model_len:
-        return input_ids, create_error_response(
-            HTTPStatus.BAD_REQUEST,
-            f"This model's maximum context length is {max_model_len} tokens. "
-            f"However, you requested {request.max_tokens + token_num} tokens "
-            f"({token_num} in the messages, "
-            f"{request.max_tokens} in the completion). "
-            f"Please reduce the length of the messages or completion.",
-        )
-    else:
-        return input_ids, None
+async def validation_exception_handler(_, exc):
+    err = openai_serving_chat.create_error_response(message=str(exc))
+    return JSONResponse(err.model_dump(), status_code=HTTPStatus.BAD_REQUEST)
 
 
 @app.get("/health")
 async def health() -> Response:
-    """Health check route for K8s"""
+    """Health check."""
     return Response(status_code=200)
 
 
-class Prompt(BaseModel):
-    prompt: str
+@app.get("/v1/models")
+async def show_available_models(x_api_key: Optional[str] = Header(None)):
+    models = await openai_serving_chat.show_available_models()
+    return JSONResponse(content=models.model_dump())
 
 
 @app.post("/v1/tokenize")
-async def tokenize_text(
-    prompt: Prompt,
-    # pylint: disable=unused-argument
-    api_key: str = Depends(_verify_api_key)):
-    """Tokenize prompt using the tokenizer.
-    Returns:
-        value: The number of tokens in the prompt.
-        ids: The token IDs of the prompt.
-    """
-    try:
-        tokenized_prompt = tokenizer.tokenize(prompt.prompt)
-        token_ids = tokenizer.convert_tokens_to_ids(tokenized_prompt)
-        return {"value": len(tokenized_prompt), "ids": token_ids}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+@app.post("/v1/token/encode")
+async def tokenize(request: Request,
+                   prompt: Prompt,
+                   x_api_key: Optional[str] = Header(None)):
+    tokenized = await openai_serving_chat.tokenize(prompt)
+    return JSONResponse(content=tokenized)
 
 
-@app.get("/v1/models")
-async def show_available_models(
-        # pylint: disable=unused-argument
-        api_key: str = Depends(_verify_api_key)):
-    """Show available models. Right now we only have one model."""
-    model_cards = [
-        ModelCard(id=served_model,
-                  root=served_model,
-                  permission=[ModelPermission()])
-    ]
-    return ModelList(data=model_cards)
+@app.post("/v1/detokenize")
+@app.post("/v1/token/decode")
+async def detokenize(request: Request,
+                     token_ids: List[int],
+                     x_api_key: Optional[str] = Header(None)):
+    detokenized = await openai_serving_chat.detokenize(token_ids)
+    return JSONResponse(content=detokenized)
 
 
-def create_logprobs(
-    token_ids: List[int],
-    top_logprobs: Optional[List[Optional[Dict[int, float]]]] = None,
-    num_output_top_logprobs: Optional[int] = None,
-    initial_text_offset: int = 0,
-) -> LogProbs:
-    """Create OpenAI-style logprobs."""
-    logprobs = LogProbs()
-    last_token_len = 0
-    if num_output_top_logprobs:
-        logprobs.top_logprobs = []
-    for i, token_id in enumerate(token_ids):
-        step_top_logprobs = top_logprobs[i]
-        if step_top_logprobs is not None:
-            token_logprob = step_top_logprobs[token_id]
-        else:
-            token_logprob = None
-        token = tokenizer.convert_ids_to_tokens(token_id)
-        logprobs.tokens.append(token)
-        logprobs.token_logprobs.append(token_logprob)
-        if len(logprobs.text_offset) == 0:
-            logprobs.text_offset.append(initial_text_offset)
-        else:
-            logprobs.text_offset.append(logprobs.text_offset[-1] +
-                                        last_token_len)
-        last_token_len = len(token)
-
-        if num_output_top_logprobs:
-            logprobs.top_logprobs.append({
-                tokenizer.convert_ids_to_tokens(i): p
-                for i, p in step_top_logprobs.items()
-            } if step_top_logprobs else None)
-
-    logprobs.top_logprobs = [{
-        k: v if v > -1000 else -1000
-        for k, v in top_logprob.items()
-    } for top_logprob in logprobs.top_logprobs if top_logprob is not None]
-
-    return logprobs
+@app.get("/version", description="Fetch the Aphrodite Engine version.")
+async def show_version(x_api_key: Optional[str] = Header(None)):
+    ver = {"version": aphrodite.__version__}
+    return JSONResponse(content=ver)
 
 
 @app.post("/v1/chat/completions")
-async def create_chat_completion(
-    request: ChatCompletionRequest,
-    raw_request: Request,
-    # pylint: disable=unused-argument
-    api_key: str = Depends(_verify_api_key)):
-    """Completion API similar to OpenAI's API.
-
-    See  https://platform.openai.com/docs/api-reference/chat/create
-    for the API specification. This API mimics the OpenAI ChatCompletion API.
-
-    NOTE: Currently we do not support the following features:
-        - function_call (Users should implement this by themselves)
-    """
-
-    error_check_ret = await check_model(request)
-    if error_check_ret is not None:
-        return error_check_ret
-
-    try:
-        prompt = tokenizer.apply_chat_template(
-            conversation=request.messages,
-            tokenize=False,
-            add_generation_prompt=request.add_generation_prompt)
-    except Exception as e:  # pylint: disable=broad-except
-        logger.error(f"Error in applying chat template from request: {str(e)}")
-        return create_error_response(HTTPStatus.BAD_REQUEST, str(e))
-
-    token_ids, error_check_ret = await check_length(request, prompt=prompt)
-    if error_check_ret is not None:
-        return error_check_ret
-
-    if not request.logit_bias:
-        logit_processors = []
-    else:
-        biases = dict(
-            map(lambda bias: (int(bias[0]), bias[1]),
-                request.logit_bias.items()))
-        logit_processors = [BiasLogitsProcessor(biases)]
-
-    model_name = request.model
-    request_id = f"cmpl-{random_uuid()}"
-    created_time = int(time.monotonic())
-    chunk_object_type = "chat.completion.chunk"
-
-    # We disable top_k at -1, add this conversion for
-    # compatibility
-    if request.top_k == 0:
-        request.top_k = -1
-    try:
-        sampling_params = SamplingParams(
-            n=request.n,
-            presence_penalty=request.presence_penalty,
-            frequency_penalty=request.frequency_penalty,
-            repetition_penalty=request.repetition_penalty,
-            temperature=request.temperature,
-            top_p=request.top_p,
-            top_k=request.top_k,
-            top_a=request.top_a,
-            min_p=request.min_p,
-            tfs=request.tfs,
-            eta_cutoff=request.eta_cutoff,
-            epsilon_cutoff=request.epsilon_cutoff,
-            typical_p=request.typical_p,
-            mirostat_mode=request.mirostat_mode,
-            mirostat_tau=request.mirostat_tau,
-            mirostat_eta=request.mirostat_eta,
-            dynatemp_range=request.dynatemp_range,
-            dynatemp_exponent=request.dynatemp_exponent,
-            smoothing_factor=request.smoothing_factor,
-            stop=request.stop,
-            stop_token_ids=request.stop_token_ids,
-            include_stop_str_in_output=request.include_stop_str_in_output,
-            max_tokens=request.max_tokens,
-            best_of=request.best_of,
-            ignore_eos=request.ignore_eos,
-            use_beam_search=request.use_beam_search,
-            skip_special_tokens=request.skip_special_tokens,
-            spaces_between_special_tokens=request.
-            spaces_between_special_tokens,  # pylint: disable=line-too-long
-            custom_token_bans=request.custom_token_bans,
-            logprobs=request.logprobs,
-            prompt_logprobs=request.prompt_logprobs,
-            logits_processors=logit_processors,
-        )
-    except ValueError as e:
-        return create_error_response(HTTPStatus.BAD_REQUEST, str(e))
-
-    result_generator = engine.generate(prompt, sampling_params, request_id,
-                                       token_ids)
-
-    def get_role() -> str:
-        if request.add_generation_prompt:
-            return response_role
-        else:
-            return request.messages[-1]["role"]
-
-    async def completion_stream_generator() -> AsyncGenerator[str, None]:
-        # Send first response for each request.n (index) with the role
-        role = get_role()
-        for i in range(request.n):
-            choice_data = ChatCompletionResponseStreamChoice(
-                index=i, delta=DeltaMessage(role=role), finish_reason=None)
-            chunk = ChatCompletionStreamResponse(id=request_id,
-                                                 object=chunk_object_type,
-                                                 created=created_time,
-                                                 choices=[choice_data],
-                                                 model=model_name)
-            data = chunk.json(exclude_unset=True, ensure_ascii=False)
-            yield f"data: {data}\n\n"
-
-        # Send response to echo the input portion of the last message
-        if request.echo:
-            last_msg_content = ""
-            if request.messages and isinstance(
-                    request.messages, list) and request.messages[-1].get(
-                        "content") and request.messages[-1].get(
-                            "role") == role:
-                last_msg_content = request.messages[-1]["content"]
-            if last_msg_content:
-                for i in range(request.n):
-                    choice_data = ChatCompletionResponseStreamChoice(
-                        index=i,
-                        delta=DeltaMessage(content=last_msg_content),
-                        finish_reason=None)
-                    chunk = ChatCompletionStreamResponse(
-                        id=request_id,
-                        object=chunk_object_type,
-                        created=created_time,
-                        choices=[choice_data],
-                        model=model_name)
-                    data = chunk.json(exclude_unset=True, ensure_ascii=False)
-                    yield f"data: {data}\n\n"
-
-        # Send response for each token for each request.n (index)
-        previous_texts = [""] * request.n
-        previous_num_tokens = [0] * request.n
-        finish_reason_sent = [False] * request.n
-        async for res in result_generator:
-            res: RequestOutput
-            for output in res.outputs:
-                i = output.index
-
-                if finish_reason_sent[i]:
-                    continue
-
-                if output.finish_reason is None:
-                    # Send token-by-token response for each request.n
-                    delta_text = output.text[len(previous_texts[i]):]
-                    previous_texts[i] = output.text
-                    previous_num_tokens[i] = len(output.token_ids)
-                    choice_data = ChatCompletionResponseStreamChoice(
-                        index=i,
-                        delta=DeltaMessage(content=delta_text),
-                        finish_reason=None)
-                    chunk = ChatCompletionStreamResponse(
-                        id=request_id,
-                        object=chunk_object_type,
-                        created=created_time,
-                        choices=[choice_data],
-                        model=model_name)
-                    data = chunk.json(exclude_unset=True, ensure_ascii=False)
-                    yield f"data: {data}\n\n"
-                else:
-                    # Send the finish response for each request.n only once
-                    prompt_tokens = len(res.prompt_token_ids)
-                    final_usage = UsageInfo(
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=previous_num_tokens[i],
-                        total_tokens=prompt_tokens + previous_num_tokens[i],
-                    )
-                    choice_data = ChatCompletionResponseStreamChoice(
-                        index=i, delta=[], finish_reason=output.finish_reason)
-                    chunk = ChatCompletionStreamResponse(
-                        id=request_id,
-                        object=chunk_object_type,
-                        created=created_time,
-                        choices=[choice_data],
-                        model=model_name)
-                    if final_usage is not None:
-                        chunk.usage = final_usage
-                    data = chunk.json(exclude_unset=True,
-                                      exclude_none=True,
-                                      ensure_ascii=False)
-                    yield f"data: {data}\n\n"
-                    finish_reason_sent[i] = True
-        # Send the final done message after all response.n are finished
-        yield "data: [DONE]\n\n"
-
-    async def completion_full_generator():
-        final_res: RequestOutput = None
-        async for res in result_generator:
-            if await raw_request.is_disconnected():
-                # Abort the request if the client disconnects.
-                await engine.abort(request_id)
-                return create_error_response(HTTPStatus.BAD_REQUEST,
-                                             "Client disconnected")
-            final_res = res
-        assert final_res is not None
-
-        choices = []
-        role = get_role()
-        for output in final_res.outputs:
-            choice_data = ChatCompletionResponseChoice(
-                index=output.index,
-                message=ChatMessage(role=role, content=output.text),
-                finish_reason=output.finish_reason,
-            )
-            choices.append(choice_data)
-
-        if request.echo:
-            last_msg_content = ""
-            if request.messages and isinstance(
-                    request.messages, list) and request.messages[-1].get(
-                        "content") and request.messages[-1].get(
-                            "role") == role:
-                last_msg_content = request.messages[-1]["content"]
-
-            for choice in choices:
-                full_message = last_msg_content + choice.message.content
-                choice.message.content = full_message
-
-        num_prompt_tokens = len(final_res.prompt_token_ids)
-        num_generated_tokens = sum(
-            len(output.token_ids) for output in final_res.outputs)
-        usage = UsageInfo(
-            prompt_tokens=num_prompt_tokens,
-            completion_tokens=num_generated_tokens,
-            total_tokens=num_prompt_tokens + num_generated_tokens,
-        )
-        response = ChatCompletionResponse(
-            id=request_id,
-            created=created_time,
-            model=model_name,
-            choices=choices,
-            usage=usage,
-        )
-
-        return response
-
-    # Streaming response
+async def create_chat_completion(request: ChatCompletionRequest,
+                                 raw_request: Request,
+                                 x_api_key: Optional[str] = Header(None)):
+    generator = await openai_serving_chat.create_chat_completion(
+        request, raw_request)
+    if isinstance(generator, ErrorResponse):
+        return JSONResponse(content=generator.model_dump(),
+                            status_code=generator.code)
     if request.stream:
-        return StreamingResponse(completion_stream_generator(),
+        return StreamingResponse(content=generator,
                                  media_type="text/event-stream")
     else:
-        return await completion_full_generator()
+        return JSONResponse(content=generator.model_dump())
 
 
 @app.post("/v1/completions")
-async def create_completion(
-    request: CompletionRequest,
-    raw_request: Request,
-    # pylint: disable=unused-argument
-    api_key: str = Depends(_verify_api_key)):
-    """Completion API similar to OpenAI's API.
-
-    See https://platform.openai.com/docs/api-reference/completions/create
-    for the API specification. This API mimics the OpenAI Completion API.
-
-    NOTE: Currently we do not support the following features:
-        - echo (since the Aphrodite engine does not currently support
-          getting the logprobs of prompt tokens)
-        - suffix (the language models we currently support do not support
-          suffix)
-    """
-
-    error_check_ret = await check_model(request)
-    if error_check_ret is not None:
-        return error_check_ret
-
-    if not request.logit_bias:
-        logit_processors = []
-    else:
-        biases = dict(
-            map(lambda bias: (int(bias[0]), bias[1]),
-                request.logit_bias.items()))
-        logit_processors = [BiasLogitsProcessor(biases)]
-
-    if request.grammar:
-        grammar_logits_processor = GrammarLogitsProcessor(
-            tokenizer=tokenizer, grammar=request.grammar)
-        logit_processors = [grammar_logits_processor]
-    else:
-        logit_processors = []
-
-    # OpenAI API supports echoing the prompt when max_tokens is 0.
-    echo_without_generation = request.echo and request.max_tokens == 0
-
-    if request.suffix is not None:
-        # The language models we currently support do not support suffix.
-        return create_error_response(HTTPStatus.BAD_REQUEST,
-                                     "suffix is not currently supported")
-
-    model_name = request.model
-    request_id = f"cmpl-{random_uuid()}"
-
-    use_token_ids = False
-    if isinstance(request.prompt, list):
-        if len(request.prompt) == 0:
-            return create_error_response(HTTPStatus.BAD_REQUEST,
-                                         "please provide at least one prompt")
-        first_element = request.prompt[0]
-        if isinstance(first_element, int):
-            use_token_ids = True
-            prompt = request.prompt
-        elif isinstance(first_element, (str, list)):
-            # TODO: handles multiple prompt case in list[list[int]]
-            if len(request.prompt) > 1:
-                return create_error_response(
-                    HTTPStatus.BAD_REQUEST,
-                    "multiple prompts in a batch is not currently supported")
-            use_token_ids = not isinstance(first_element, str)
-            prompt = request.prompt[0]
-    else:
-        prompt = request.prompt
-
-    if use_token_ids:
-        _, error_check_ret = await check_length(request, prompt_ids=prompt)
-    else:
-        token_ids, error_check_ret = await check_length(request, prompt=prompt)
-    if error_check_ret is not None:
-        return error_check_ret
-
-    created_time = int(time.monotonic())
-
-    # We disable top_k at -1, add this conversion for
-    # compatibility
-    if request.top_k == 0:
-        request.top_k = -1
-
-    try:
-        sampling_params = SamplingParams(
-            n=request.n,
-            presence_penalty=request.presence_penalty,
-            frequency_penalty=request.frequency_penalty,
-            repetition_penalty=request.repetition_penalty,
-            temperature=request.temperature,
-            top_p=request.top_p,
-            top_k=request.top_k,
-            top_a=request.top_a,
-            min_p=request.min_p,
-            tfs=request.tfs,
-            eta_cutoff=request.eta_cutoff,
-            epsilon_cutoff=request.epsilon_cutoff,
-            typical_p=request.typical_p,
-            mirostat_mode=request.mirostat_mode,
-            mirostat_tau=request.mirostat_tau,
-            mirostat_eta=request.mirostat_eta,
-            dynatemp_range=request.dynatemp_range,
-            dynatemp_exponent=request.dynatemp_exponent,
-            smoothing_factor=request.smoothing_factor,
-            stop=request.stop,
-            stop_token_ids=request.stop_token_ids,
-            include_stop_str_in_output=request.include_stop_str_in_output,
-            max_tokens=request.max_tokens
-            if not echo_without_generation else 1,
-            best_of=request.best_of,
-            ignore_eos=request.ignore_eos,
-            use_beam_search=request.use_beam_search,
-            skip_special_tokens=request.skip_special_tokens,
-            spaces_between_special_tokens=request.
-            spaces_between_special_tokens,  # pylint: disable=line-too-long
-            custom_token_bans=request.custom_token_bans,
-            logprobs=request.logprobs,
-            prompt_logprobs=request.prompt_logprobs if request.echo else None,
-            logits_processors=logit_processors,
-        )
-    except ValueError as e:
-        return create_error_response(HTTPStatus.BAD_REQUEST, str(e))
-
-    if use_token_ids:
-        result_generator = engine.generate(None,
-                                           sampling_params,
-                                           request_id,
-                                           prompt_token_ids=prompt)
-    else:
-        result_generator = engine.generate(prompt, sampling_params, request_id,
-                                           token_ids)
-
-    # Similar to the OpenAI API, when n != best_of, we do not stream the
-    # results. In addition, we do not stream the results when use beam search.
-    stream = (request.stream
-              and (request.best_of is None or request.n == request.best_of)
-              and not request.use_beam_search)
-
-    def create_stream_response_json(
-        index: int,
-        text: str,
-        logprobs: Optional[LogProbs] = None,
-        finish_reason: Optional[str] = None,
-        usage: Optional[UsageInfo] = None,
-    ) -> str:
-        choice_data = CompletionResponseStreamChoice(
-            index=index,
-            text=text,
-            logprobs=logprobs,
-            finish_reason=finish_reason,
-        )
-        response = CompletionStreamResponse(
-            id=request_id,
-            created=created_time,
-            model=model_name,
-            choices=[choice_data],
-        )
-        if usage is not None:
-            response.usage = usage
-        response_json = response.json(exclude_unset=True, ensure_ascii=False)
-
-        return response_json
-
-    async def completion_stream_generator() -> AsyncGenerator[str, None]:
-        previous_texts = [""] * request.n
-        previous_num_tokens = [0] * request.n
-        has_echoed = [False] * request.n
-        async for res in result_generator:
-            res: RequestOutput
-            for output in res.outputs:
-                i = output.index
-                delta_text = output.text[len(previous_texts[i]):]
-                token_ids = output.token_ids[previous_num_tokens[i]:]
-                if request.logprobs is not None:
-                    top_logprobs = output.logprobs[previous_num_tokens[i]:]
-                else:
-                    top_logprobs = None
-                offsets = len(previous_texts[i])
-                if request.echo and not has_echoed[i]:
-                    if not echo_without_generation:
-                        delta_text = res.prompt + delta_text
-                        token_ids = res.prompt_token_ids + token_ids
-                        if top_logprobs:
-                            top_logprobs = res.prompt_logprobs + top_logprobs
-                    else:  # only just return the prompt
-                        delta_text = res.prompt
-                        token_ids = res.prompt_token_ids
-                        if top_logprobs:
-                            top_logprobs = res.prompt_logprobs
-                    has_echoed[i] = True
-                if request.logprobs is not None:
-                    logprobs = create_logprobs(
-                        token_ids=token_ids,
-                        top_logprobs=top_logprobs,
-                        num_output_top_logprobs=request.logprobs,
-                        initial_text_offset=offsets,
-                    )
-                else:
-                    logprobs = None
-                previous_texts[i] = output.text
-                previous_num_tokens[i] = len(output.token_ids)
-                finish_reason = output.finish_reason
-                response_json = create_stream_response_json(
-                    index=i,
-                    text=delta_text,
-                    logprobs=logprobs,
-                    finish_reason=finish_reason,
-                )
-                yield f"data: {response_json}\n\n"
-                if output.finish_reason is not None:
-                    logprobs = (LogProbs()
-                                if request.logprobs is not None else None)
-                    prompt_tokens = len(res.prompt_token_ids)
-                    completion_tokens = len(output.token_ids)
-                    final_usage = UsageInfo(
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
-                        total_tokens=prompt_tokens + completion_tokens,
-                    )
-                    response_json = create_stream_response_json(
-                        index=i,
-                        text="",
-                        logprobs=logprobs,
-                        finish_reason=output.finish_reason,
-                        usage=final_usage,
-                    )
-                    yield f"data: {response_json}\n\n"
-        yield "data: [DONE]\n\n"
-
-    # Streaming response
-    if stream:
-        return StreamingResponse(completion_stream_generator(),
-                                 media_type="text/event-stream")
-
-    # Non-streaming response
-    final_res: RequestOutput = None
-    async for res in result_generator:
-        if await raw_request.is_disconnected():
-            # Abort the request if the client disconnects.
-            await engine.abort(request_id)
-            return create_error_response(HTTPStatus.BAD_REQUEST,
-                                         "Client disconnected")
-        final_res = res
-    assert final_res is not None
-    choices = []
-    prompt_token_ids = final_res.prompt_token_ids
-    prompt_logprobs = final_res.prompt_logprobs
-    prompt_text = final_res.prompt
-    for output in final_res.outputs:
-        if request.logprobs is not None:
-            if not echo_without_generation:
-                token_ids = output.token_ids
-                top_logprobs = output.logprobs
-                if request.echo:
-                    token_ids = prompt_token_ids + token_ids
-                    top_logprobs = prompt_logprobs + top_logprobs
-            else:
-                token_ids = prompt_token_ids
-                top_logprobs = prompt_logprobs
-            logprobs = create_logprobs(
-                token_ids=token_ids,
-                top_logprobs=top_logprobs,
-                num_output_top_logprobs=request.logprobs,
-            )
-        else:
-            logprobs = None
-        if not echo_without_generation:
-            output_text = output.text
-            if request.echo:
-                output_text = prompt_text + output_text
-        else:
-            output_text = prompt_text
-        choice_data = CompletionResponseChoice(
-            index=output.index,
-            text=output_text,
-            logprobs=logprobs,
-            finish_reason=output.finish_reason,
-        )
-        choices.append(choice_data)
-
-    num_prompt_tokens = len(final_res.prompt_token_ids)
-    num_generated_tokens = sum(
-        len(output.token_ids) for output in final_res.outputs)
-    usage = UsageInfo(
-        prompt_tokens=num_prompt_tokens,
-        completion_tokens=num_generated_tokens,
-        total_tokens=num_prompt_tokens + num_generated_tokens,
-    )
-    response = CompletionResponse(
-        id=request_id,
-        created=created_time,
-        model=model_name,
-        choices=choices,
-        usage=usage,
-    )
-
+async def create_completion(request: CompletionRequest,
+                            raw_request: Request,
+                            x_api_key: Optional[str] = Header(None)):
+    generator = await openai_serving_completion.create_completion(
+        request, raw_request)
+    if isinstance(generator, ErrorResponse):
+        return JSONResponse(content=generator.model_dump(),
+                            status_code=generator.code)
     if request.stream:
-        # When user requests streaming but we don't stream, we still need to
-        # return a streaming response with a single event.
-        response_json = response.json(ensure_ascii=False)
-
-        async def fake_stream_generator() -> AsyncGenerator[str, None]:
-            yield f"data: {response_json}\n\n"
-            yield "data: [DONE]\n\n"
-
-        return StreamingResponse(fake_stream_generator(),
+        return StreamingResponse(content=generator,
                                  media_type="text/event-stream")
+    else:
+        return JSONResponse(content=generator.model_dump())
 
-    return response
 
+# ============ KoboldAI API ============ #
+
+
+def _set_badwords(tokenizer, hf_config):  # pylint: disable=redefined-outer-name
+    # pylint: disable=global-variable-undefined
+    global badwordsids
+    if hf_config.bad_words_ids is not None:
+        badwordsids = hf_config.bad_words_ids
+        return
+
+    badwordsids = [
+        v for k, v in tokenizer.get_vocab().items()
+        if any(c in str(k) for c in "[]")
+    ]
+    if tokenizer.pad_token_id in badwordsids:
+        badwordsids.remove(tokenizer.pad_token_id)
+    badwordsids.append(tokenizer.eos_token_id)
+
+
+def prepare_engine_payload(
+        kai_payload: KAIGenerationInputSchema
+) -> Tuple[SamplingParams, List[int]]:
+    """Create SamplingParams and truncated input tokens for AsyncEngine"""
+
+    if not kai_payload.genkey:
+        kai_payload.genkey = f"kai-{random_uuid()}"
+
+    # if kai_payload.max_context_length > engine_args.max_model_len:
+    #     raise ValueError(
+    #         f"max_context_length ({kai_payload.max_context_length}) "
+    #         "must be less than or equal to "
+    #         f"max_model_len ({engine_args.max_model_len})")
+
+    kai_payload.top_k = kai_payload.top_k if kai_payload.top_k != 0.0 else -1
+    kai_payload.tfs = max(_SAMPLING_EPS, kai_payload.tfs)
+    if kai_payload.temperature < _SAMPLING_EPS:
+        kai_payload.n = 1
+        kai_payload.top_p = 1.0
+        kai_payload.top_k = -1
+    if kai_payload.dynatemp_range is not None:
+        dynatemp_min = kai_payload.temperature - kai_payload.dynatemp_range
+        dynatemp_max = kai_payload.temperature + kai_payload.dynatemp_range
+
+    sampling_params = SamplingParams(
+        n=kai_payload.n,
+        best_of=kai_payload.n,
+        repetition_penalty=kai_payload.rep_pen,
+        temperature=kai_payload.temperature,
+        dynatemp_min=dynatemp_min if kai_payload.dynatemp_range > 0 else 0.0,
+        dynatemp_max=dynatemp_max if kai_payload.dynatemp_range > 0 else 0.0,
+        dynatemp_exponent=kai_payload.dynatemp_exponent,
+        smoothing_factor=kai_payload.smoothing_factor,
+        smoothing_curve=kai_payload.smoothing_curve,
+        tfs=kai_payload.tfs,
+        top_p=kai_payload.top_p,
+        top_k=kai_payload.top_k,
+        top_a=kai_payload.top_a,
+        min_p=kai_payload.min_p,
+        typical_p=kai_payload.typical,
+        eta_cutoff=kai_payload.eta_cutoff,
+        epsilon_cutoff=kai_payload.eps_cutoff,
+        mirostat_mode=kai_payload.mirostat,
+        mirostat_tau=kai_payload.mirostat_tau,
+        mirostat_eta=kai_payload.mirostat_eta,
+        stop=kai_payload.stop_sequence,
+        include_stop_str_in_output=kai_payload.include_stop_str_in_output,
+        custom_token_bans=badwordsids
+        if kai_payload.use_default_badwordsids else [],
+        max_tokens=kai_payload.max_length,
+        seed=kai_payload.sampler_seed,
+    )
+
+    max_input_tokens = max(
+        1, kai_payload.max_context_length - kai_payload.max_length)
+    input_tokens = tokenizer(kai_payload.prompt).input_ids[-max_input_tokens:]
+
+    return sampling_params, input_tokens
+
+
+@kai_api.post("/generate")
+async def generate(kai_payload: KAIGenerationInputSchema) -> JSONResponse:
+    sampling_params, input_tokens = prepare_engine_payload(kai_payload)
+    result_generator = engine.generate(None, sampling_params,
+                                       kai_payload.genkey, input_tokens)
+
+    final_res: RequestOutput = None
+    previous_output = ""
+    async for res in result_generator:
+        final_res = res
+        new_chunk = res.outputs[0].text[len(previous_output):]
+        previous_output += new_chunk
+        gen_cache[kai_payload.genkey] = previous_output
+
+    assert final_res is not None
+    del gen_cache[kai_payload.genkey]
+
+    return JSONResponse(
+        {"results": [{
+            "text": output.text
+        } for output in final_res.outputs]})
+
+
+@extra_api.post("/generate/stream")
+async def generate_stream(
+        kai_payload: KAIGenerationInputSchema) -> StreamingResponse:
+
+    sampling_params, input_tokens = prepare_engine_payload(kai_payload)
+    results_generator = engine.generate(None, sampling_params,
+                                        kai_payload.genkey, input_tokens)
+
+    async def stream_kobold() -> AsyncGenerator[bytes, None]:
+        previous_output = ""
+        async for res in results_generator:
+            new_chunk = res.outputs[0].text[len(previous_output):]
+            previous_output += new_chunk
+            yield b"event: message\n"
+            yield f"data: {json.dumps({'token': new_chunk})}\n\n".encode()
+
+    return StreamingResponse(stream_kobold(),
+                             headers={
+                                 "Cache-Control": "no-cache",
+                                 "Connection": "keep-alive",
+                             },
+                             media_type="text/event-stream")
+
+
+@extra_api.post("/generate/check")
+@extra_api.get("/generate/check")
+async def check_generation(request: Request):
+    text = ""
+    try:
+        request_dict = await request.json()
+        if "genkey" in request_dict and request_dict["genkey"] in gen_cache:
+            text = gen_cache[request_dict["genkey"]]
+    except json.JSONDecodeError:
+        pass
+
+    return JSONResponse({"results": [{"text": text}]})
+
+
+@extra_api.post("/abort")
+async def abort_generation(request: Request):
+    try:
+        request_dict = await request.json()
+        if "genkey" in request_dict:
+            await engine.abort(request_dict["genkey"])
+    except json.JSONDecodeError:
+        pass
+
+    return JSONResponse({})
+
+
+@extra_api.post("/tokencount")
+async def count_tokens(request: Request):
+    """Tokenize string and return token count"""
+
+    request_dict = await request.json()
+    tokenizer_result = await openai_serving_chat.tokenize(
+        request_dict["prompt"])
+    return JSONResponse({"value": len(tokenizer_result)})
+
+
+@kai_api.get("/info/version")
+async def get_version():
+    """Impersonate KAI"""
+    return JSONResponse({"result": "1.2.4"})
+
+
+@kai_api.get("/model")
+async def get_model():
+    return JSONResponse({"result": f"aphrodite/{served_model}"})
+
+
+@kai_api.get("/config/soft_prompts_list")
+async def get_available_softprompts():
+    """Stub for compatibility"""
+    return JSONResponse({"values": []})
+
+
+@kai_api.get("/config/soft_prompt")
+async def get_current_softprompt():
+    """Stub for compatibility"""
+    return JSONResponse({"value": ""})
+
+
+@kai_api.put("/config/soft_prompt")
+async def set_current_softprompt():
+    """Stub for compatibility"""
+    return JSONResponse({})
+
+
+@kai_api.get("/config/max_length")
+async def get_max_length() -> JSONResponse:
+    max_length = args.max_length
+    return JSONResponse({"value": max_length})
+
+
+@kai_api.get("/config/max_context_length")
+@extra_api.get("/true_max_context_length")
+async def get_max_context_length() -> JSONResponse:
+    max_context_length = engine_args.max_model_len
+    return JSONResponse({"value": max_context_length})
+
+
+@extra_api.get("/preloadstory")
+async def get_preloaded_story() -> JSONResponse:
+    """Stub for compatibility"""
+    return JSONResponse({})
+
+
+@extra_api.get("/version")
+async def get_extra_version():
+    """Impersonate KoboldCpp"""
+    return JSONResponse({"result": "KoboldCpp", "version": "1.55.1"})
+
+
+@app.get("/")
+async def get_kobold_lite_ui():
+    """Serves a cached copy of the Kobold Lite UI, loading it from disk
+    on demand if needed."""
+    global kobold_lite_ui
+    if kobold_lite_ui == "":
+        scriptpath = os.path.dirname(os.path.abspath(__file__))
+        klitepath = os.path.join(scriptpath, "../kobold/klite.embd")
+        klitepath = os.path.normpath(klitepath)  # Normalize the path
+        if os.path.exists(klitepath):
+            with open(klitepath, "r") as f:
+                kobold_lite_ui = f.read()
+        else:
+            logger.error("Kobold Lite UI not found at " + klitepath)
+    return HTMLResponse(content=kobold_lite_ui)
+
+
+# ============ KoboldAI API ============ #
 
 if __name__ == "__main__":
     args = parse_args()
-    global EXPECTED_API_KEYS  # pylint: disable=global-at-module-level
-    EXPECTED_API_KEYS = args.api_keys
+
+    if 'launch_kobold_api' in args:
+        logger.warning("Launching Kobold API server in addition to OpenAI. "
+                       "Keep in mind that the Kobold API routes are NOT "
+                       "protected via the API key.")
+        app.include_router(kai_api, prefix="/api/v1")
+        app.include_router(kai_api,
+                           prefix="/api/latest",
+                           include_in_schema=False)
+        app.include_router(extra_api, prefix="/api/extra")
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=args.allowed_origins,
@@ -841,6 +501,38 @@ if __name__ == "__main__":
         allow_headers=args.allowed_headers,
     )
 
+    if token := os.environ.get("APHRODITE_API_KEY") or args.api_keys:
+
+        @app.middleware("http")
+        async def authentication(request: Request, call_next):
+            excluded_paths = ["/api"]
+            if any(
+                    request.url.path.startswith(path)
+                    for path in excluded_paths):
+                return await call_next(request)
+            if not request.url.path.startswith("/v1"):
+                return await call_next(request)
+
+            auth_header = request.headers.get("Authorization")
+            api_key_header = request.headers.get("x-api-key")
+
+            if auth_header != "Bearer " + token and api_key_header != token:
+                return JSONResponse(content={"error": "Unauthorized"},
+                                    status_code=401)
+            return await call_next(request)
+
+    for middleware in args.middleware:
+        module_path, object_name = middleware.rsplit(".", 1)
+        imported = getattr(importlib.import_module(module_path), object_name)
+        if inspect.isclass(imported):
+            app.add_middleware(imported)
+        elif inspect.iscoroutinefunction(imported):
+            app.middleware("http")(imported)
+        else:
+            raise ValueError(
+                f"Invalid middleware {middleware}. Must be a function or a class."
+            )
+
     logger.debug(f"args: {args}")
 
     if args.served_model_name is not None:
@@ -848,21 +540,25 @@ if __name__ == "__main__":
     else:
         served_model = args.model
 
-    response_role = args.response_role
-
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = AsyncAphrodite.from_engine_args(engine_args)
+    openai_serving_chat = OpenAIServingChat(engine, served_model,
+                                            args.response_role,
+                                            args.lora_modules,
+                                            args.chat_template)
+    openai_serving_completion = OpenAIServingCompletion(
+        engine, served_model, args.lora_modules)
     engine_model_config = asyncio.run(engine.get_model_config())
-    max_model_len = engine_model_config.max_model_len
-
-    # A separate tokenizer to map token IDs to strings.
     tokenizer = get_tokenizer(
-        engine_model_config.tokenizer,
-        tokenizer_mode=engine_model_config.tokenizer_mode,
-        trust_remote_code=engine_model_config.trust_remote_code)
+        engine_args.tokenizer,
+        tokenizer_mode=engine_args.tokenizer_mode,
+        trust_remote_code=engine_args.trust_remote_code,
+    )
 
-    load_chat_template(args, tokenizer)
+    if 'launch_kobold_api' in args:
+        _set_badwords(tokenizer, engine_model_config.hf_config)
 
+    app.root_path = args.root_path
     uvicorn.run(app,
                 host=args.host,
                 port=args.port,

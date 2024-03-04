@@ -10,7 +10,7 @@ from aphrodite.modeling.sampling_metadata import (SamplingMetadata,
 from aphrodite.modeling.megatron.communication_op import (
     tensor_model_parallel_gather)
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
-from aphrodite.common.sequence import (PromptLogprobs, SampleLogprobs,
+from aphrodite.common.sequence import (Logprob, PromptLogprobs, SampleLogprobs,
                                        SamplerOutput, SequenceData,
                                        SequenceGroupOutput, SequenceOutput)
 
@@ -93,7 +93,8 @@ class Sampler(nn.Module):
 
         if do_temperatures:
             logits = _apply_temperature(logits, sampling_tensors.temperatures,
-                                        sampling_tensors.dynatemp_ranges,
+                                        sampling_tensors.dynatemp_mins,
+                                        sampling_tensors.dynatemp_maxs,
                                         sampling_tensors.dynatemp_exps)
 
         if do_topks or do_topps or do_topas or do_minps:
@@ -113,7 +114,8 @@ class Sampler(nn.Module):
                                              sampling_tensors.typical_ps)
         if do_quadratic:
             logits = _apply_quadratic_sampling(
-                logits, sampling_tensors.smoothing_factors)
+                logits, sampling_tensors.smoothing_factors,
+                sampling_tensors.smoothing_curves)
 
         banned_tokens = _get_custom_token_bans(sampling_metadata)
         assert len(banned_tokens) == logits.shape[0]
@@ -178,29 +180,53 @@ def _get_custom_token_bans(
     return banned_tokens
 
 
+# def _apply_logits_processors(
+#     logits: torch.Tensor,
+#     metadata: SamplingMetadata,
+# ) -> torch.Tensor:
+#     seq_offset = 0
+#     for i, (seq_ids, sampling_params) in enumerate(metadata.seq_groups):
+#         seq_size = len(seq_ids)
+#         output_tokens = []
+#         if (i < metadata.num_prompts
+#                 and sampling_params.prompt_logprobs is not None):
+#             prompt_seqs = metadata.prompt_lens[i] - 1
+#             seq_size += prompt_seqs
+#             output_tokens.extend([[]] * prompt_seqs)
+#         seq_end = seq_offset + seq_size
+
+#         if sampling_params.logits_processors:
+#             output_tokens.extend(metadata.seq_data[sid].output_token_ids
+#                                  for sid in seq_ids)
+#             for proc in sampling_params.logits_processors:
+#                 proc(logits[seq_offset:seq_end], output_tokens)
+
+#         seq_offset = seq_end
+
+#     return logits
+
+
 def _apply_logits_processors(
     logits: torch.Tensor,
-    metadata: SamplingMetadata,
+    sampling_metadata: SamplingMetadata,
 ) -> torch.Tensor:
-    seq_offset = 0
-    for i, (seq_ids, sampling_params) in enumerate(metadata.seq_groups):
-        seq_size = len(seq_ids)
-        output_tokens = []
-        if (i < metadata.num_prompts
-                and sampling_params.prompt_logprobs is not None):
-            prompt_seqs = metadata.prompt_lens[i] - 1
-            seq_size += prompt_seqs
-            output_tokens.extend([[]] * prompt_seqs)
-        seq_end = seq_offset + seq_size
-
-        if sampling_params.logits_processors:
-            output_tokens.extend(metadata.seq_data[sid].output_token_ids
-                                 for sid in seq_ids)
-            for proc in sampling_params.logits_processors:
-                proc(logits[seq_offset:seq_end], output_tokens)
-
-        seq_offset = seq_end
-
+    logits_row_idx = 0
+    found_logits_processors = False
+    for seq_ids, sampling_params in sampling_metadata.seq_groups:
+        logits_processors = sampling_params.logits_processors
+        if logits_processors:
+            found_logits_processors = True
+            for seq_id in seq_ids:
+                logits_row = logits[logits_row_idx]
+                token_ids = sampling_metadata.seq_data[seq_id].output_token_ids
+                for logits_processor in logits_processors:
+                    logits_row = logits_processor(token_ids, logits_row)
+                logits[logits_row_idx] = logits_row
+                logits_row_idx += 1
+        else:
+            logits_row_idx += len(seq_ids)
+    if found_logits_processors:
+        assert logits_row_idx == logits.shape[0]
     return logits
 
 
@@ -379,12 +405,13 @@ def _apply_typical_sampling(
 def _apply_temperature(
     logits: torch.Tensor,
     temperatures: torch.Tensor,
-    dynatemp_range: torch.Tensor,
+    dynatemp_mins: torch.Tensor,
+    dynatemp_maxs: torch.Tensor,
     dynatemp_exps: torch.Tensor,
 ) -> torch.Tensor:
-    dynatemp_mask = dynatemp_range > 0
-    dynatemp_mins = (temperatures - dynatemp_range)[dynatemp_mask]
-    dynatemp_maxs = (temperatures + dynatemp_range)[dynatemp_mask]
+    dynatemp_mask = torch.logical_or(dynatemp_mins > 0, dynatemp_maxs > 0)
+    dynatemp_mins = dynatemp_mins[dynatemp_mask]
+    dynatemp_maxs = dynatemp_maxs[dynatemp_mask]
     dynatemp_exps = dynatemp_exps[dynatemp_mask]
     dynatemp_mins = dynatemp_mins.clamp_(min=0)
 
@@ -408,17 +435,45 @@ def _apply_temperature(
 def _apply_quadratic_sampling(
     logits: torch.Tensor,
     smoothing_factors: torch.Tensor,
+    smoothing_curves: torch.Tensor,
 ) -> torch.Tensor:
-    """Applies a quadratic transformation to the logits based on the
-    provided smoothing factor. The transformation is centered around
-    the maximum logit value in the batch.
+    """
+    Applies a quadratic transformation to the logits based on the
+    provided smoothing factors and curves. The transformation is
+    centered around the maximum logit value in the batch.
+
+    The transformation involves a quadratic and cubic term, with the
+    cubic term controlled by the smoothing curve. The quadratic term is
+    scaled by the smoothing factor, and the cubic term is scaled by the
+    product of the smoothing factor and the smoothing curve.
+
+    params:
+        logits (torch.Tensor): The logits to be transformed.
+        smoothing_factors (torch.Tensor): The factors to scale the quadratic
+            term in the transformation.
+        smoothing_curves (torch.Tensor): The factors to scale the cubic term
+            in the transformation.
+
+    returns:
+        torch.Tensor: The transformed logits.
 
     Credits: @kalomaze
     """
     max_logits = logits.max(dim=-1, keepdim=True).values
-    transformed_logits = -(smoothing_factors.unsqueeze_(dim=1) *
-                           (logits - max_logits).pow(2)) + max_logits
-    return transformed_logits
+    diff = logits - max_logits
+    smoothing_factors.unsqueeze_(dim=1)
+    smoothing_curves.unsqueeze_(dim=1)
+
+    k = (3 - smoothing_curves) / 2
+    s = (smoothing_curves - 1) / 2
+
+    mask = smoothing_factors > 0
+    mask = mask.flatten()
+    transformed_logits = torch.where(
+        logits != float('-inf'), -(k * smoothing_factors * diff**2) +
+        (s * smoothing_factors * diff**3) + max_logits, logits)
+    logits[mask, :] = transformed_logits[mask, :]
+    return logits
 
 
 def _greedy_sample(
@@ -528,7 +583,9 @@ def _beam_search_sample(
 def _multinomial(
     probs: torch.Tensor,
     num_samples: int,
-):
+    seq_groups: Optional[List[Tuple[List[int], SamplingParams]]] = None,
+    generators: Optional[List[torch.Generator]] = None,
+) -> torch.Tensor:
     if num_samples > 1:
         # This is equivalent to torch.repeat_interleaved (which also
         # forces a GPU<->CPU sync).
@@ -538,7 +595,15 @@ def _multinomial(
         probs = probs[:, None, :].expand(probs.shape[0], num_samples,
                                          probs.shape[1]).contiguous().view(
                                              -1, probs.shape[1])
-    q = torch.empty_like(probs).exponential_(1)
+    q = torch.empty_like(probs)
+    if seq_groups is None:
+        q.exponential_()
+    else:
+        sample_idx = 0
+        for (seq_ids, _), generator in zip(seq_groups, generators):
+            next_sample_idx = sample_idx + len(seq_ids) * num_samples
+            q[sample_idx:next_sample_idx].exponential_(generator=generator)
+            sample_idx = next_sample_idx
     return probs.div_(q).argmax(dim=1).view(-1, num_samples)
 
 
@@ -556,6 +621,7 @@ def _sample(
 
     sample_results_dict: Dict[int, Tuple[List[int], List[int]]] = {}
     sample_metadata = {}
+    multinomial_samples = {}
 
     # Counterintuitively, having two loops here is actually faster.
     # The first loop can run without waiting on GPU<->CPU sync.
@@ -569,14 +635,18 @@ def _sample(
                                           is_prompts, sample_indices)
         if sampling_type == SamplingType.GREEDY:
             greedy_samples = torch.argmax(logprobs[sample_indices], dim=-1)
-        elif sampling_type == SamplingType.RANDOM:
+        elif sampling_type in (SamplingType.RANDOM, SamplingType.RANDOM_SEED):
             max_best_of = 1
             for seq_group, is_prompt in zip(seq_groups, is_prompts):
                 if is_prompt:
                     _, sampling_params = seq_group
                     max_best_of = max(max_best_of, sampling_params.best_of)
-            multinomial_samples = _multinomial(probs[sample_indices],
-                                               max_best_of)
+            seeded_args = {} if sampling_type == SamplingType.RANDOM else {
+                "seq_groups": seq_groups,
+                "generators": sampling_metadata.generators,
+            }
+            multinomial_samples[sampling_type] = _multinomial(
+                probs[sample_indices], max_best_of, **seeded_args)
         elif sampling_type == SamplingType.BEAM:
             beam_search_logprobs = logprobs[sample_indices]
         else:
@@ -588,9 +658,9 @@ def _sample(
         seq_group_ids, seq_groups, is_prompts, sample_indices = metadata
         if sampling_type == SamplingType.GREEDY:
             sample_results = _greedy_sample(seq_groups, greedy_samples)
-        elif sampling_type == SamplingType.RANDOM:
+        elif sampling_type in (SamplingType.RANDOM, SamplingType.RANDOM_SEED):
             sample_results = _random_sample(seq_groups, is_prompts,
-                                            multinomial_samples)
+                                            multinomial_samples[sampling_type])
         elif sampling_type == SamplingType.BEAM:
             sample_results = _beam_search_sample(seq_groups, is_prompts,
                                                  sampling_metadata.seq_data,
@@ -686,7 +756,10 @@ def _get_logprobs(
                     prompt_logprobs_dict.update(
                         zip(top_token_ids[sample_idx, :num_logprobs].tolist(),
                             top_logprobs[sample_idx, :num_logprobs].tolist()))
-                group_prompt_logprobs.append(prompt_logprobs_dict)
+                group_prompt_logprobs.append({
+                    token_id: Logprob(logprob)
+                    for token_id, logprob in prompt_logprobs_dict.items()
+                })
                 sample_idx += 1
                 query_result_idx += 1
             result_prompt_logprobs.append(group_prompt_logprobs)
@@ -711,7 +784,10 @@ def _get_logprobs(
                                       parent_id, :num_logprobs].tolist(),
                         top_logprobs[sample_idx +
                                      parent_id, :num_logprobs].tolist()))
-            group_sample_logprobs.append(sample_logprobs_dict)
+            group_sample_logprobs.append({
+                token_id: Logprob(logprob)
+                for token_id, logprob in sample_logprobs_dict.items()
+            })
         result_sample_logprobs.append(group_sample_logprobs)
         sample_idx += len(seq_ids)
 

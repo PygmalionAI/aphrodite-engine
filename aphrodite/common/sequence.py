@@ -1,6 +1,7 @@
 """Sequence and its related classes."""
 import copy
 import enum
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Union
 
 from aphrodite.common.block import LogicalTokenBlock
@@ -8,8 +9,16 @@ from aphrodite.common.prefix import Prefix
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.lora.request import LoRARequest
 
-PromptLogprobs = List[Optional[Dict[int, float]]]
-SampleLogprobs = List[Dict[int, float]]
+
+@dataclass
+class Logprob:
+    """Infos for supporting OpenAI compatible logprobs."""
+    logprob: float
+    decoded_token: Optional[str] = None
+
+
+PromptLogprobs = List[Optional[Dict[int, Logprob]]]
+SampleLogprobs = List[Dict[int, Logprob]]
 
 
 class SequenceStatus(enum.Enum):
@@ -169,12 +178,12 @@ class Sequence:
     def append_token_id(
         self,
         token_id: int,
-        logprobs: Dict[int, float],
+        logprobs: Dict[int, Logprob],
     ) -> None:
         assert token_id in logprobs
         self._append_tokens_to_blocks([token_id])
         self.output_logprobs.append(logprobs)
-        self.data.append_token_id(token_id, logprobs[token_id])
+        self.data.append_token_id(token_id, logprobs[token_id].logprob)
 
     def get_len(self) -> int:
         return self.data.get_len()
@@ -230,6 +239,13 @@ class Sequence:
                 f"num_blocks={len(self.logical_token_blocks)})")
 
 
+@dataclass
+class SequenceGroupState:
+    """Mutable state tied to a specific seq group"""
+    # torch.Generator used in seeded sampling
+    generator: Optional = None
+
+
 class SequenceGroup:
     """A group of sequences that are generated from the same prompt.
 
@@ -259,6 +275,7 @@ class SequenceGroup:
         self.lora_request = lora_request
         self.prefix: Optional[Prefix] = prefix
         self.prompt_logprobs: Optional[PromptLogprobs] = None
+        self.state = SequenceGroupState()
 
     @property
     def prompt(self) -> str:
@@ -362,6 +379,7 @@ class SequenceGroupMetadata:
         sampling_params: The sampling parameters used to generate the outputs.
         block_tables: The block tables. (Seq id -> list of physical block
             numbers)
+        state: Internal state tied to this sequence group.
         lora_request: LoRA request.
         prefix: The prefix of the prompt of the sequence group.
         persistent_data: The persistent data of the sequence group.
@@ -377,6 +395,7 @@ class SequenceGroupMetadata:
         persistent_data: Dict[int, dict],
         lora_request: Optional[LoRARequest] = None,
         prefix: Optional[Prefix] = None,
+        state: Optional[SequenceGroupState] = None,
     ) -> None:
         self.request_id = request_id
         self.is_prompt = is_prompt
@@ -386,6 +405,7 @@ class SequenceGroupMetadata:
         self.persistent_data = persistent_data
         self.lora_request = lora_request
         self.prefix = prefix
+        self.state = SequenceGroupState() if state is None else state
 
     @property
     def lora_int_id(self) -> int:
@@ -408,7 +428,7 @@ class SequenceOutput:
         self,
         parent_seq_id: int,
         output_token: int,
-        logprobs: Dict[int, float],
+        logprobs: Dict[int, Logprob],
         persistent_data: dict,
     ) -> None:
         self.parent_seq_id = parent_seq_id
@@ -425,10 +445,10 @@ class SequenceOutput:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SequenceOutput):
             raise NotImplementedError()
-        return (self.parent_seq_id == other.parent_seq_id
-                and self.output_token == other.output_token
-                and self.logprobs == other.logprobs
-                and self.persistent_data == other.persistent_data)
+        equal = (self.parent_seq_id == other.parent_seq_id
+                 and self.output_token == other.output_token)
+        log_probs_equal = other.logprobs == self.logprobs
+        return equal and log_probs_equal
 
 
 class SequenceGroupOutput:

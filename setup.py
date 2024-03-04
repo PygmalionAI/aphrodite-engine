@@ -315,7 +315,17 @@ if _is_cuda():
     aphrodite_extension_sources.append("kernels/quantization/quip/origin_order.cu")
     aphrodite_extension_sources.append("kernels/quantization/marlin/marlin_cuda_kernel.cu")
     aphrodite_extension_sources.append("kernels/all_reduce/custom_all_reduce.cu")
-
+    
+    ext_modules.append(
+        CUDAExtension(
+            name="aphrodite._moe_C",
+            sources=glob("kernels/moe/*.cu") + glob("kernels/moe/*.cpp"),
+            extra_compile_args={
+                "cxx": CXX_FLAGS,
+                "nvcc": NVCC_FLAGS,
+            },
+        ))
+    
 aphrodite_extension = CUDAExtension(
     name="aphrodite._C",
     sources=aphrodite_extension_sources,
