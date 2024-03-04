@@ -114,8 +114,7 @@ class Sampler(nn.Module):
                                              sampling_tensors.typical_ps)
         if do_quadratic:
             logits = _apply_quadratic_sampling(
-                logits,
-                sampling_tensors.smoothing_factors,
+                logits, sampling_tensors.smoothing_factors,
                 sampling_tensors.smoothing_curves)
 
         banned_tokens = _get_custom_token_bans(sampling_metadata)
@@ -455,10 +454,8 @@ def _apply_quadratic_sampling(
     mask = smoothing_factors > 0
     mask = mask.flatten()
     transformed_logits = torch.where(
-        logits != float('-inf'),
-        -(k * smoothing_factors * diff**2) + (
-            s * smoothing_factors * diff**3) +
-            max_logits, logits)
+        logits != float('-inf'), -(k * smoothing_factors * diff**2) +
+        (s * smoothing_factors * diff**3) + max_logits, logits)
     logits[mask, :] = transformed_logits[mask, :]
     return logits
 

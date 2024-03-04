@@ -369,9 +369,9 @@ class SamplingTensors:
                                            dtype=dtype,
                                            pin_memory=pin_memory)
         smoothing_curves_t = torch.tensor(smoothing_curves,
-                                            device="cpu",
-                                            dtype=dtype,
-                                            pin_memory=pin_memory)
+                                          device="cpu",
+                                          dtype=dtype,
+                                          pin_memory=pin_memory)
         miro_taus_t = torch.tensor(miro_taus,
                                    device="cpu",
                                    dtype=dtype,
@@ -420,7 +420,7 @@ class SamplingTensors:
             smoothing_factors=smoothing_factors_t.to(device=device,
                                                      non_blocking=True),
             smoothing_curves=smoothing_curves_t.to(device=device,
-                                                    non_blocking=True),
+                                                   non_blocking=True),
             miro_taus=miro_taus_t.to(device=device, non_blocking=True),
             miro_etas=miro_etas_t.to(device=device, non_blocking=True),
             miro_mus=miro_mus_t.to(device=device, non_blocking=True),
