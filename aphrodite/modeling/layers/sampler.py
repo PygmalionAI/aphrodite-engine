@@ -446,6 +446,8 @@ def _apply_quadratic_sampling(
     """
     max_logits = logits.max(dim=-1, keepdim=True).values
     diff = logits - max_logits
+    smoothing_factors.unsqueeze_(dim=1)
+    smoothing_curves.unsqueeze_(dim=1)
 
     k = (3 - smoothing_curves) / 2
     s = (smoothing_curves - 1) / 2
