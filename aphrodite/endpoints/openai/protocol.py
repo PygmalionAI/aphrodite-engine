@@ -87,6 +87,7 @@ class ChatCompletionRequest(BaseModel):
     dynatemp_max: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
     smoothing_factor: Optional[float] = 0.0
+    smoothing_curve: Optional[float] = 1.0
     ignore_eos: Optional[bool] = False
     use_beam_search: Optional[bool] = False
     prompt_logprobs: Optional[int] = None
@@ -143,6 +144,7 @@ class ChatCompletionRequest(BaseModel):
             dynatemp_max=self.dynatemp_max,
             dynatemp_exponent=self.dynatemp_exponent,
             smoothing_factor=self.smoothing_factor,
+            smoothing_curve=self.smoothing_curve,
             ignore_eos=self.ignore_eos,
             use_beam_search=self.use_beam_search,
             stop_token_ids=self.stop_token_ids,
@@ -212,6 +214,7 @@ class CompletionRequest(BaseModel):
                                           description="Aliases: dynatemp_high")
     dynatemp_exponent: Optional[float] = 1.0
     smoothing_factor: Optional[float] = 0.0
+    smoothing_curve: Optional[float] = 1.0
     ignore_eos: Optional[bool] = False
     use_beam_search: Optional[bool] = False
     logprobs: Optional[int] = None
@@ -263,6 +266,7 @@ class CompletionRequest(BaseModel):
             dynatemp_max=self.dynatemp_max,
             dynatemp_exponent=self.dynatemp_exponent,
             smoothing_factor=self.smoothing_factor,
+            smoothing_curve=self.smoothing_curve,
             ignore_eos=self.ignore_eos,
             use_beam_search=self.use_beam_search,
             logprobs=self.logprobs,
@@ -391,6 +395,7 @@ class KoboldSamplingParams(BaseModel):
     dynatemp_range: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
     smoothing_factor: Optional[float] = 0.0
+    smoothing_curve: Optional[float] = 1.0
     top_p: float = Field(1.0, alias="top_p")
     top_k: float = Field(-1, alias="top_k")
     min_p: float = Field(0.0, alias="min_p")
@@ -441,6 +446,7 @@ class KAIGenerationInputSchema(BaseModel):
     dynatemp_range: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
     smoothing_factor: Optional[float] = 0.0
+    smoothing_curve: Optional[float] = 1.0
     use_memory: Optional[bool] = None
     use_story: Optional[bool] = None
     use_authors_note: Optional[bool] = None
