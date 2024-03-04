@@ -453,6 +453,7 @@ def _apply_quadratic_sampling(
     s = (smoothing_curves - 1) / 2
 
     mask = smoothing_factors > 0
+    mask = mask.flatten()
     transformed_logits = torch.where(
         logits != float('-inf'),
         -(k * smoothing_factors * diff**2) + (
