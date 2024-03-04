@@ -11,7 +11,8 @@ _SAMPLING_EPS = 1e-5
 class SamplingType(IntEnum):
     GREEDY = 0
     RANDOM = 1
-    BEAM = 2
+    RANDOM_SEED = 2
+    BEAM = 3
 
 
 LogitsProcessorFunc = Callable[[torch.Tensor, List[List[int]]], None]
@@ -76,14 +77,14 @@ class SamplingParams:
             Range [0, inf).
         mirostat_eta: Rate at which mirostat updates its internal surprisal
             value. Range [0, inf).
-        dynatemp_range: The range to use for dynamic temperature.  When used,
-            the actual temperature is allowed to be automatically adjusted
-            dynamically between DynaTemp ± DynaTempRange. For example,
-            setting `temperature=0.4` and `dynatemp_range=0.1` will result
-            in a minimum temp of 0.3 and max of 0.5.
+        dynatemp_min: Minimum temperature for dynatemp sampling.
+            Range [0, inf).
+        dynatemp_max: Maximum temperature for dynatemp sampling.
+            Range [0, inf).
         dynatemp_exponent: Exponent for dynatemp sampling. Range [0, inf).
         smoothing_factor: Smoothing factor for Quadratic Sampling.
         smoothing_curve: Smoothing curve for Quadratic (Cubic) Sampling.
+        seed: Random seed to use for the generation.
         use_beam_search: Whether to use beam search instead of sampling.
         length_penalty: Float that penalizes sequences based on their length.
             Used in beam search.
@@ -139,10 +140,12 @@ class SamplingParams:
         mirostat_mode: int = 0,
         mirostat_tau: float = 0,
         mirostat_eta: float = 0,
-        dynatemp_range: float = 0,
+        dynatemp_min: float = 0,
+        dynatemp_max: float = 0,
         dynatemp_exponent: float = 1,
         smoothing_factor: float = 0.0,
         smoothing_curve: float = 1.0,
+        seed: Optional[int] = None,
         use_beam_search: bool = False,
         length_penalty: float = 1.0,
         early_stopping: Union[bool, str] = False,
@@ -175,10 +178,12 @@ class SamplingParams:
         self.mirostat_mode = mirostat_mode
         self.mirostat_tau = mirostat_tau
         self.mirostat_eta = mirostat_eta
-        self.dynatemp_range = dynatemp_range
+        self.dynatemp_min = dynatemp_min
+        self.dynatemp_max = dynatemp_max
         self.dynatemp_exponent = dynatemp_exponent
         self.smoothing_factor = smoothing_factor
         self.smoothing_curve = smoothing_curve
+        self.seed = seed
         self.use_beam_search = use_beam_search
         self.length_penalty = length_penalty
         self.early_stopping = early_stopping
@@ -251,9 +256,12 @@ class SamplingParams:
         if not 0.0 <= self.typical_p <= 1.0:
             raise ValueError(
                 f"typical_p must be in (0, 1], got {self.typical_p}.")
-        if not self.dynatemp_range >= 0:
-            raise ValueError("dynatemp_range must be non negative, got "
-                             f"{self.dynatemp_range}.")
+        if not self.dynatemp_min >= 0:
+            raise ValueError(
+                f"dynatemp_min must be non negative, got {self.dynatemp_min}.")
+        if not self.dynatemp_max >= 0:
+            raise ValueError(
+                f"dynatemp_max must be non negative, got {self.dynatemp_max}.")
         if not self.dynatemp_exponent >= 0:
             raise ValueError(f"dynatemp_exponent must be non negative, got "
                              f"{self.dynatemp_exponent}.")
@@ -324,6 +332,8 @@ class SamplingParams:
             return SamplingType.BEAM
         if self.temperature < _SAMPLING_EPS:
             return SamplingType.GREEDY
+        if self.seed is not None:
+            return SamplingType.RANDOM_SEED
         return SamplingType.RANDOM
 
     def __repr__(self) -> str:
@@ -344,9 +354,11 @@ class SamplingParams:
                 f"mirostat_mode={self.mirostat_mode}, "
                 f"mirostat_tau={self.mirostat_tau}, "
                 f"mirostat_eta={self.mirostat_eta}, "
-                f"dynatemp_range={self.dynatemp_range}, "
+                f"dynatemp_min={self.dynatemp_min}, "
+                f"dynatemp_max={self.dynatemp_max}, "
                 f"dynatemp_exponent={self.dynatemp_exponent}, "
                 f"smoothing_factor={self.smoothing_factor}, "
+                f"seed={self.seed}, "
                 f"use_beam_search={self.use_beam_search}, "
                 f"length_penalty={self.length_penalty}, "
                 f"early_stopping={self.early_stopping}, "
