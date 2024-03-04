@@ -358,6 +358,7 @@ class SamplingParams:
                 f"dynatemp_max={self.dynatemp_max}, "
                 f"dynatemp_exponent={self.dynatemp_exponent}, "
                 f"smoothing_factor={self.smoothing_factor}, "
+                f"smoothing_curve={self.smoothing_curve}, "
                 f"seed={self.seed}, "
                 f"use_beam_search={self.use_beam_search}, "
                 f"length_penalty={self.length_penalty}, "
