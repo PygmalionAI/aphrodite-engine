@@ -199,7 +199,7 @@ class SamplingTensors:
             if do_typical_ps is False and typical_p < 1.0 - _SAMPLING_EPS:
                 do_typical_ps = True
             if do_quadratic is False and (smoothing_factor > _SAMPLING_EPS
-                                          or smoothing_curve > _SAMPLING_EPS):
+                                          or smoothing_curve > 1.0):
                 do_quadratic = True
             if do_mirostat is False and sampling_params.mirostat_mode == 2:
                 do_mirostat = True
