@@ -437,9 +437,25 @@ def _apply_quadratic_sampling(
     smoothing_factors: torch.Tensor,
     smoothing_curves: torch.Tensor,
 ) -> torch.Tensor:
-    """Applies a quadratic transformation to the logits based on the
-    provided smoothing factor. The transformation is centered around
-    the maximum logit value in the batch.
+    """
+    Applies a quadratic transformation to the logits based on the
+    provided smoothing factors and curves. The transformation is
+    centered around the maximum logit value in the batch.
+
+    The transformation involves a quadratic and cubic term, with the
+    cubic term controlled by the smoothing curve. The quadratic term is
+    scaled by the smoothing factor, and the cubic term is scaled by the
+    product of the smoothing factor and the smoothing curve.
+
+    params:
+        logits (torch.Tensor): The logits to be transformed.
+        smoothing_factors (torch.Tensor): The factors to scale the quadratic
+            term in the transformation.
+        smoothing_curves (torch.Tensor): The factors to scale the cubic term
+            in the transformation.
+
+    returns:
+        torch.Tensor: The transformed logits.
 
     Credits: @kalomaze
     """
