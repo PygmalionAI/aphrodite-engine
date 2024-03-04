@@ -105,7 +105,7 @@ class SamplingTensors:
     dynatemp_maxs: torch.Tensor
     dynatemp_exps: torch.Tensor
     smoothing_factors: torch.Tensor
-    smoothing_curve: torch.Tensor
+    smoothing_curves: torch.Tensor
     prompt_tokens: torch.Tensor
     output_tokens: torch.Tensor
 
@@ -268,7 +268,7 @@ class SamplingTensors:
             epsilon_cutoffs, typical_ps, dynatemp_mins, dynatemp_maxs,
             dynatemp_exps, miro_taus, miro_etas, miro_mus, miro_indices,
             miro_seqids, smoothing_factors, smoothing_curves, prompt_tokens,
-            output_tokens, ocab_size, device, dtype)
+            output_tokens, vocab_size, device, dtype)
         return (sampling_tensors, do_temperatures, do_penalties, do_topks,
                 do_topps, do_topas, do_minps, do_tfss, do_eta_cutoffs,
                 do_epsilon_cutoffs, do_typical_ps, do_quadratic, do_mirostat)
@@ -419,7 +419,7 @@ class SamplingTensors:
             dynatemp_exps=dynatemp_exps_t.to(device=device, non_blocking=True),
             smoothing_factors=smoothing_factors_t.to(device=device,
                                                      non_blocking=True),
-            smoothing_curve=smoothing_curves_t.to(device=device,
+            smoothing_curves=smoothing_curves_t.to(device=device,
                                                     non_blocking=True),
             miro_taus=miro_taus_t.to(device=device, non_blocking=True),
             miro_etas=miro_etas_t.to(device=device, non_blocking=True),
