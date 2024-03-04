@@ -58,7 +58,7 @@ class PagedAttention(nn.Module):
         if self.head_size not in _SUPPORTED_HEAD_SIZES:
             raise ValueError(f"head_size ({self.head_size}) is not supported. "
                              f"Supported head sizes: {_SUPPORTED_HEAD_SIZES}.")
-        
+
         self.use_ref_attention = self.check_use_ref_attention()
 
     def check_use_ref_attention(self) -> bool:
