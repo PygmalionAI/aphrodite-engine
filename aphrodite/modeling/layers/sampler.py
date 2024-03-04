@@ -452,12 +452,14 @@ def _apply_quadratic_sampling(
     k = (3 - smoothing_curves) / 2
     s = (smoothing_curves - 1) / 2
 
+    mask = smoothing_factors > 0
     transformed_logits = torch.where(
         logits != float('-inf'),
         -(k * smoothing_factors * diff**2) + (
             s * smoothing_factors * diff**3) +
             max_logits, logits)
-    return transformed_logits
+    logits[mask, :] = transformed_logits[mask, :]
+    return logits
 
 
 def _greedy_sample(
