@@ -14,7 +14,6 @@ from aphrodite.common.sequence import (Logprob, PromptLogprobs, SampleLogprobs,
                                        SamplerOutput, SequenceData,
                                        SequenceGroupOutput, SequenceOutput)
 
-SAMPLING_EPS = 1e-6
 
 class Sampler(nn.Module):
     """Samples the next tokens from the model's outputs.
@@ -115,7 +114,9 @@ class Sampler(nn.Module):
                                              sampling_tensors.typical_ps)
         if do_quadratic:
             logits = _apply_quadratic_sampling(
-                logits, sampling_tensors.smoothing_factors)
+                logits,
+                sampling_tensors.smoothing_factors,
+                sampling_tensors.smoothing_curves)
 
         banned_tokens = _get_custom_token_bans(sampling_metadata)
         assert len(banned_tokens) == logits.shape[0]
@@ -446,14 +447,14 @@ def _apply_quadratic_sampling(
     max_logits = logits.max(dim=-1, keepdim=True).values
     diff = logits - max_logits
 
-    smoothing_curve = smoothing_curves + SAMPLING_EPS
-    k = (3 - smoothing_curve) / 2
-    s = (smoothing_curve - 1) / 2
+    k = (3 - smoothing_curves) / 2
+    s = (smoothing_curves - 1) / 2
 
-    quadratic_term = -(k * smoothing_factors * diff**2)
-    cubic_term = s * smoothing_factors * diff**3
-
-    transformed_logits = quadratic_term + cubic_term + max_logits
+    transformed_logits = torch.where(
+        logits != float('-inf'),
+        -(k * smoothing_factors * diff**2) + (
+            s * smoothing_factors * diff**3) +
+            max_logits, logits)
     return transformed_logits
 
 
