@@ -1,5 +1,5 @@
 from typing import List, Optional, Union
-from pydantic import BaseModel, Field, root_validator, NonNegativeFloat, NonNegativeInt, PositiveInt
+from pydantic import BaseModel, Field, root_validator
 
 
 class SamplingParams(BaseModel):
@@ -11,6 +11,7 @@ class SamplingParams(BaseModel):
     dynatemp_range: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
     smoothing_factor: Optional[float] = 0.0
+    smoothing_curve: Optional[float] = 1.0
     top_p: float = Field(1.0, alias="top_p")
     top_k: float = Field(-1, alias="top_k")
     min_p: float = Field(0.0, alias="min_p")
@@ -44,23 +45,24 @@ class KAIGenerationInputSchema(BaseModel):
     genkey: Optional[str] = None
     prompt: str
     n: Optional[int] = 1
-    max_context_length: PositiveInt
-    max_length: PositiveInt
+    max_context_length: int
+    max_length: int
     rep_pen: Optional[float] = 1.0
-    rep_pen_range: Optional[NonNegativeInt]
-    rep_pen_slope: Optional[NonNegativeFloat]
-    top_k: Optional[NonNegativeInt] = 0
-    top_a: Optional[NonNegativeFloat] = 0.0
+    rep_pen_range: Optional[int] = None
+    rep_pen_slope: Optional[float] = None
+    top_k: Optional[int] = 0
+    top_a: Optional[float] = 0.0
     top_p: Optional[float] = 1.0
     min_p: Optional[float] = 0.0
     tfs: Optional[float] = 1.0
     eps_cutoff: Optional[float] = 0.0
-    eta_cutoff: Optional[NonNegativeFloat] = 0.0
+    eta_cutoff: Optional[float] = 0.0
     typical: Optional[float] = 1.0
-    temperature: Optional[NonNegativeFloat] = 1.0
-    dynatemp_range: Optional[NonNegativeFloat] = 0.0
-    dynatemp_exponent: Optional[NonNegativeFloat] = 1.0
-    smoothing_factor: Optional[NonNegativeFloat] = 0.0
+    temperature: Optional[float] = 1.0
+    dynatemp_range: Optional[float] = 0.0
+    dynatemp_exponent: Optional[float] = 1.0
+    smoothing_factor: Optional[float] = 0.0
+    smoothing_curve: Optional[float] = 1.0
     use_memory: Optional[bool] = None
     use_story: Optional[bool] = None
     use_authors_note: Optional[bool] = None
