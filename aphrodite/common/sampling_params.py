@@ -1,4 +1,5 @@
 """Sampling parameters for text generation."""
+import copy
 from enum import IntEnum
 from functools import cached_property
 from typing import Callable, List, Optional, Union
@@ -355,6 +356,20 @@ class SamplingParams:
         if self.temperature < _SAMPLING_EPS:
             return SamplingType.GREEDY
         return SamplingType.RANDOM
+    
+    def clone(self) -> "SamplingParams":
+        """Deep copy excluding LogitsProcessors objects.
+        
+        LogitsProcessor objects are excluded because they
+        may contain an arbitrary, nontrivial amount of
+        data.
+        """
+
+        logit_processor_refs = None if self.logits_processors is None else {
+            id(lp): lp
+            for lp in self.logits_processors
+        }
+        return copy.deepcopy(self, memo=logit_processor_refs)
 
     def __repr__(self) -> str:
         return (f"SamplingParams(n={self.n}, "
