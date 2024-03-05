@@ -56,7 +56,7 @@ class UsageInfo(BaseModel):
 
 class ChatCompletionRequest(BaseModel):
     model: str
-    messages: Union[str, List[Dict[str, str]]]
+    messages: List[Dict[str, str]]
     temperature: Optional[float] = 0.7
     top_p: Optional[float] = 1.0
     tfs: Optional[float] = 1.0
