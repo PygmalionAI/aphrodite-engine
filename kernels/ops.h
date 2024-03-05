@@ -85,12 +85,14 @@ torch::Tensor awq_dequantize(
     int thx,
     int thy);
 
-void marlin_gemm(
-  const torch::Tensor& input,
-  const torch::Tensor& weights,
-        torch::Tensor& output,
-  const torch::Tensor& scales,
-        torch::Tensor& workspace);
+torch::Tensor marlin_gemm(
+    torch::Tensor& a, 
+    torch::Tensor& b_q_weight,
+    torch::Tensor& b_scales, 
+    torch::Tensor& workspace,
+    int64_t size_m, 
+    int64_t size_n, 
+    int64_t size_k);
 
 at::Tensor e8p_mm_origorder(
     const at::Tensor& A,

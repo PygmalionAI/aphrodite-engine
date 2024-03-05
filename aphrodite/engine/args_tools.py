@@ -208,7 +208,8 @@ class EngineArgs:
             '--quantization',
             '-q',
             type=str,
-            choices=['awq', 'gguf', 'gptq', 'quip', 'squeezellm', None],
+            choices=['awq', 'gguf', 'gptq', 'quip',
+                     'squeezellm', 'marlin', None],
             default=EngineArgs.quantization,
             help='Method used to quantize the weights. If '
             'None, we first check the `quantization_config` '

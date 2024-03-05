@@ -6,6 +6,7 @@ from aphrodite.modeling.layers.quantization.gguf import GGUFConfig
 from aphrodite.modeling.layers.quantization.gptq import GPTQConfig
 from aphrodite.modeling.layers.quantization.quip import QuipConfig
 from aphrodite.modeling.layers.quantization.squeezellm import SqueezeLLMConfig
+from aphrodite.modeling.layers.quantization.marlin import MarlinConfig
 
 _QUANTIZATION_CONFIG_REGISTRY = {
     "awq": AWQConfig,
@@ -13,6 +14,7 @@ _QUANTIZATION_CONFIG_REGISTRY = {
     "gptq": GPTQConfig,
     "quip": QuipConfig,
     "squeezellm": SqueezeLLMConfig,
+    "marlin": MarlinConfig,
 }
 
 
