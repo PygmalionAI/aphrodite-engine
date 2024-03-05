@@ -207,11 +207,11 @@ if __name__ == "__main__":
                         type=str,
                         default="EleutherAI/pythia-70m-deduped")
     parser.add_argument("--tokenizer", type=str, default=None)
-    parser.add_argument("--quantization",
-                        "-q",
-                        choices=["awq", "gguf", "gptq",
-                                 "squeezellm", "marlin", None],
-                        default=None)
+    parser.add_argument(
+        "--quantization",
+        "-q",
+        choices=["awq", "gguf", "gptq", "squeezellm", "marlin", None],
+        default=None)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.88)
     parser.add_argument("--tensor-parallel-size", "-tp", type=int, default=1)
     parser.add_argument("--n",
