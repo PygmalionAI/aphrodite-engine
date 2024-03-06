@@ -483,7 +483,7 @@ async def get_kobold_lite_ui():
 if __name__ == "__main__":
     args = parse_args()
 
-    if '--launch-kobold-api' in args:
+    if args.launch_kobold_api:
         logger.warning("Launching Kobold API server in addition to OpenAI. "
                        "Keep in mind that the Kobold API routes are NOT "
                        "protected via the API key.")
@@ -555,7 +555,7 @@ if __name__ == "__main__":
         trust_remote_code=engine_args.trust_remote_code,
     )
 
-    if 'launch_kobold_api' in args:
+    if args.launch_kobold_api:
         _set_badwords(tokenizer, engine_model_config.hf_config)
 
     app.root_path = args.root_path
