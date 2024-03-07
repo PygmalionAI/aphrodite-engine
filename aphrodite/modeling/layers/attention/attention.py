@@ -1,4 +1,5 @@
 """Attention layer."""
+import importlib
 from typing import List, Optional
 
 import torch
@@ -31,8 +32,11 @@ class Attention(nn.Module):
         sliding_window: Optional[int] = None,
     ) -> None:
         super().__init__()
-        if (not is_hip() and torch.cuda.get_device_capability()[0] >= 8 and
-                torch.get_default_dtype() in (torch.float16, torch.bfloat16)):
+        flash_attn_spec = importlib.util.find_spec("flash_attn")
+        flash_attn_found = flash_attn_spec is not None
+        if (flash_attn_found and not is_hip() and
+            torch.cuda.get_device_capability()[0] >= 8 and
+            torch.get_default_dtype() in (torch.float16, torch.bfloat16)):
             # Ampere or later NVIDIA GPUs.
             # NOTE: FlashAttention does not support FP32.
             logger.info("Using Flash Attention backend.")
