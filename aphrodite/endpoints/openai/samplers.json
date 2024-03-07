@@ -18,7 +18,7 @@
             "pretty_name": "Max Context Length",
             "type": "integer",
             "minimum": 128,
-            "maximum": 1000000,
+            "maximum": 999936,
             "step": 128,
             "default": 4096,
             "description": "The model's maximum context size."
