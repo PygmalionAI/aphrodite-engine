@@ -251,7 +251,7 @@ class BlockSpaceManager:
         seq: Sequence,
     ) -> PhysicalTokenBlock:
         block_hash: Optional[int] = None
-        if (self._is_last_block_full(seq)):
+        if self._is_last_block_full(seq):
             block_hash = seq.hash_of_block(len(seq.logical_token_blocks) - 1)
         num_hashed_tokens = seq.num_hashed_tokens_of_block(
             len(seq.logical_token_blocks) - 1)

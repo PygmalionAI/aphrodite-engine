@@ -719,7 +719,8 @@ class ModelRunner:
         # to PyTorch or CuPy NCCL if it is disabled or not supported.
         # Initialize a new progress bar
         progress = Progress()
-        task = progress.add_task("[cyan]Capturing graph...", total=len(batch_size_capture_list))
+        task = progress.add_task("[cyan]Capturing graph...",
+                                 total=len(batch_size_capture_list))
 
         with progress:
             with custom_all_reduce.capture():

@@ -565,13 +565,12 @@ class AsyncAphrodite:
         arrival_time = time.monotonic()
 
         try:
-            stream = await self.add_request(
-                request_id,
-                prompt,
-                sampling_params,
-                prompt_token_ids=prompt_token_ids,
-                arrival_time=arrival_time,
-                lora_request=lora_request)
+            stream = await self.add_request(request_id,
+                                            prompt,
+                                            sampling_params,
+                                            prompt_token_ids=prompt_token_ids,
+                                            arrival_time=arrival_time,
+                                            lora_request=lora_request)
 
             async for request_output in stream:
                 yield request_output

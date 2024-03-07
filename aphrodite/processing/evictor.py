@@ -115,6 +115,7 @@ class LRUEvictor(Evictor):
         return block
 
     @property
+    # pylint: disable=invalid-overridden-method
     def num_blocks(self) -> int:
         return len(self.free_table)
 
@@ -148,6 +149,7 @@ class RandomEvictor(Evictor):
         return block
 
     @property
+    # pylint: disable=invalid-overridden-method
     def num_blocks(self) -> int:
         return len(self.free_table)
 

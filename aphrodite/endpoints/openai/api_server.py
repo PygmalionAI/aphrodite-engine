@@ -213,6 +213,7 @@ async def show_version(x_api_key: Optional[str] = Header(None)):
     ver = {"version": aphrodite.__version__}
     return JSONResponse(content=ver)
 
+
 @app.get("/v1/samplers")
 async def show_samplers(x_api_key: Optional[str] = Header(None)):
     """Get the available samplers."""
@@ -227,6 +228,7 @@ async def show_samplers(x_api_key: Optional[str] = Header(None)):
         else:
             logger.error("Sampler JSON not found at " + samplerpath)
     return sampler_json
+
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,
