@@ -1034,10 +1034,10 @@ class AphroditeEngine:
     def _check_if_any_actor_is_dead(self):
         if not self.parallel_config.worker_use_ray:
             return
-        
+
         if not self.workers:
             return
-        
+
         dead_actors = []
         for actor in self.workers:
             actor_state = ray.state.actors(actor._ray_actor_id.hex())

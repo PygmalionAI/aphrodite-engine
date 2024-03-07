@@ -19,7 +19,6 @@ ENGINE_ITERATION_TIMEOUT_S = int(
     os.environ.get("APHRODITE_ENGINE_ITERATION_TIMEOUT_S", 60))
 
 
-
 class AsyncEngineDeadError(RuntimeError):
     pass
 
@@ -179,7 +178,6 @@ class RequestTracker:
             self._request_streams[stream.request_id] = stream
             new_requests.append(new_request)
 
-
         return new_requests, finished_requests
 
     async def wait_for_new_requests(self):
@@ -295,7 +293,7 @@ class _AsyncAphrodite(AphroditeEngine):
 
         all_outputs = await asyncio.gather(*coros)
         return all_outputs
-    
+
     async def check_health_async(self):
         """Raises an error if engine is unhealthy."""
         self._check_if_any_actor_is_dead()
