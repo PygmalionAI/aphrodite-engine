@@ -31,7 +31,7 @@ from transformers import Qwen2Config
 
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import SiluAndMul
-from aphrodite.modeling.layers.attention import PagedAttention
+from aphrodite.modeling.layers.attention import Attention
 from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               ColumnParallelLinear,
@@ -172,7 +172,7 @@ class Qwen2Attention(nn.Module):
             max_position=max_position,
             base=self.rope_theta,
         )
-        self.attn = PagedAttention(self.num_heads,
+        self.attn = Attention(self.num_heads,
                                    self.head_dim,
                                    self.scaling,
                                    num_kv_heads=self.num_kv_heads,

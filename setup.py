@@ -3,6 +3,7 @@ import io
 import os
 import re
 import subprocess
+import sys
 from typing import List, Set
 import warnings
 from pathlib import Path
@@ -15,6 +16,8 @@ from torch.utils.cpp_extension import (
     BuildExtension, CUDAExtension, CUDA_HOME, ROCM_HOME)
 
 ROOT_DIR = os.path.dirname(__file__)
+# Temp directory to store third-part packages
+THIRDPARTY_SUBDIR = "aphrodite/thirdparty_files"
 
 MAIN_CUDA_VERSION = "12.1"
 
@@ -295,6 +298,44 @@ if _is_cuda():
                     "nvcc": NVCC_FLAGS,
                 },
             ))
+    
+    # Download the FlashAttention package.
+    # Adapted from https://github.com/ray-project/ray/blob/f92928c9cfcbbf80c3a8534ca4911de1b44069c0/python/setup.py#L518-L530
+    flash_attn_version = "2.5.6"
+    install_dir = os.path.join(ROOT_DIR, THIRDPARTY_SUBDIR)
+    try:
+        subprocess.run(
+            f"{sys.executable} -m ensurepip",
+            shell=True,
+            check=True,
+        )
+        subprocess.run(
+            f"{sys.executable} -m pip install -q --target={install_dir} einops flash-attn=={flash_attn_version} --no-dependencies",
+            shell=True,
+            check=True,
+            env=dict(os.environ, CC="gcc"),
+        )
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+    # Copy the FlashAttention package into the Aphrodite package after build.
+    class build_ext(BuildExtension):
+
+        def run(self):
+            super().run()
+            target_dir = os.path.join(self.build_lib, THIRDPARTY_SUBDIR)
+            if not os.path.exists(target_dir):
+                os.makedirs(target_dir)
+            self.copy_tree(install_dir, target_dir)
+
+    class BinaryDistribution(setuptools.Distribution):
+
+        def has_ext_modules(self):
+            return True
+
+else:
+    build_ext = BuildExtension
+    BinaryDistribution = setuptools.Distribution
 
 aphrodite_extension_sources = [
     "kernels/cache_kernels.cu",
@@ -424,7 +465,8 @@ setuptools.setup(
     python_requires=">=3.8",
     install_requires=get_requirements(),
     ext_modules=ext_modules,
-    cmdclass={"build_ext": BuildExtension},
+    cmdclass={"build_ext": build_ext},
+    distclass=BinaryDistribution,
     package_data={
         "aphrodite": [
             "endpoints/kobold/klite.embd",

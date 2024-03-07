@@ -71,9 +71,27 @@ def _setup_logger():
 _setup_logger()
 
 
-def init_logger(name: str):
+class DeduplicatingHandler(logging.StreamHandler):
+    """Logging handler that only logs unique messages."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.logged_messages = set()
+
+    def emit(self, record):
+        if record.msg not in self.logged_messages:
+            super().emit(record)
+            self.logged_messages.add(record.msg)
+
+
+def init_logger(name: str, deduplicate: bool = False):
     logger = logging.getLogger(name)
     logger.setLevel(os.getenv("LOG_LEVEL", "DEBUG"))
-    logger.addHandler(_default_handler)
+    if deduplicate:
+        dedup_handler = DeduplicatingHandler(sys.stdout)
+        dedup_handler.setFormatter(_default_handler.formatter)
+        logger.addHandler(dedup_handler)
+    else:
+        logger.addHandler(_default_handler)
     logger.propagate = False
     return logger

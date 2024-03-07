@@ -26,7 +26,7 @@ from transformers import GPT2Config
 
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import get_act_fn
-from aphrodite.modeling.layers.attention import PagedAttention
+from aphrodite.modeling.layers.attention import Attention
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               LinearMethodBase,
                                               QKVParallelLinear,
@@ -74,7 +74,7 @@ class GPT2Attention(nn.Module):
             bias=True,
             linear_method=linear_method,
         )
-        self.attn = PagedAttention(self.num_heads,
+        self.attn = Attention(self.num_heads,
                                    self.head_dim,
                                    scale=self.scale)
 
