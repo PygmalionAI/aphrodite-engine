@@ -89,12 +89,11 @@ class AphroditeEngine:
             f"Disable Custom All-Reduce = "
             f"{parallel_config.disable_custom_all_reduce}\n"
             f"Quantization Format = {model_config.quantization}\n"
-            f"Sampler Seed = {model_config.seed}\n"
             f"Context Length = {model_config.max_model_len}\n"
             f"Enforce Eager Mode = {model_config.enforce_eager}\n"
             f"KV Cache Data Type = {cache_config.cache_dtype}\n"
             f"Device = {device_config.device}\n"
-            f"Seed = {model_config.seed}")
+            f"Sampler Seed = {model_config.seed}")
         # TODO: Print more configs in debug mode.
 
         self.model_config = model_config
