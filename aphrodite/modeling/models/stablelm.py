@@ -153,14 +153,12 @@ class StablelmAttention(nn.Module):
                                         bias=False,
                                         linear_method=linear_method)
         self.rotary_ndims = int(self.head_dim * self.config.rope_pct)
-        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
-        ) is None else linear_method.quant_config.rope_style()
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.rotary_ndims,
             max_position=self.config.max_position_embeddings,
             base=self.config.rope_theta,
-            is_neox_style=is_neox_style,
+            is_neox_style=True,
         )
         self.attn = PagedAttention(self.num_heads,
                                    self.head_dim,

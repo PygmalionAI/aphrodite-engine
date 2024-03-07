@@ -68,9 +68,5 @@ class QuantizationConfig(ABC):
         """whether fuse qkv and up/gate."""
         raise NotImplementedError
 
-    @abstractmethod
-    def rope_style(self) -> Optional[bool]:
-        raise NotImplementedError
-
     def quant_vocab(self) -> Optional[bool]:
         return False

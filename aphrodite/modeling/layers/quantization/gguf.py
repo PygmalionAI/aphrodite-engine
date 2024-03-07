@@ -61,8 +61,6 @@ class GGUFConfig(QuantizationConfig):
     def merge_weight(self) -> bool:
         return False
 
-    def rope_style(self) -> Optional[bool]:
-        return False
 
     def quant_vocab(self) -> Optional[bool]:
         return True

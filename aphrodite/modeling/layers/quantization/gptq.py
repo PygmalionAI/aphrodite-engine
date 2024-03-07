@@ -72,9 +72,6 @@ class GPTQConfig(QuantizationConfig):
     def merge_weight(self) -> bool:
         return True
 
-    def rope_style(self) -> Optional[bool]:
-        return None
-
 
 class ExllamaState(Enum):
 

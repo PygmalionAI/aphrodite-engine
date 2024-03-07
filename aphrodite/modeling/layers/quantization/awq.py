@@ -69,9 +69,6 @@ class AWQConfig(QuantizationConfig):
     def merge_weight(self) -> bool:
         return True
 
-    def rope_style(self) -> Optional[bool]:
-        return None
-
 
 class AWQLinearMethod(LinearMethodBase):
     """Linear method for AWQ.

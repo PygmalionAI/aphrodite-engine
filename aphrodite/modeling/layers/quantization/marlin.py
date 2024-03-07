@@ -77,8 +77,6 @@ class MarlinConfig(QuantizationConfig):
     def merge_weight(self) -> bool:
         return False
 
-    def rope_style(self) -> Optional[bool]:
-        return None
 
 
 class MarlinLinearMethod(LinearMethodBase):
