@@ -393,7 +393,6 @@ class AphroditeEngine:
         prompt_token_ids: Optional[List[int]] = None,
         arrival_time: Optional[float] = None,
         lora_request: Optional[LoRARequest] = None,
-        prefix_pos: Optional[int] = None,
     ) -> None:
         """Add a request to the engine's request pool.
 
@@ -410,11 +409,6 @@ class AphroditeEngine:
                 use the tokenizer to convert the prompts to token IDs.
             arrival_time: The arrival time of the request. If None, we use
                 the current monotonic time.
-            prefix_pos: If not None, we use the given position as the prefix
-                position for each prompt. We will cache the prefix's KV
-                cache and reuse it for the next request with the same prefix.
-                This is an experimental feature, and may be replaced with
-                automatic prefix caching in the future.
 
         Details:
             - Set arrival_time to the current time if it is None.
@@ -464,14 +458,9 @@ class AphroditeEngine:
         seq = Sequence(seq_id, prompt, prompt_token_ids, block_size,
                        lora_request)
 
-        # Check whether the input specifies prefix
-        prefix = self.scheduler.prefix_pool.add_or_get_prefix(
-            prompt_token_ids[:prefix_pos], lora_request.lora_int_id
-            if lora_request else 0) if prefix_pos is not None else None
-
         # Create the sequence group.
         seq_group = SequenceGroup(request_id, [seq], sampling_params,
-                                  arrival_time, lora_request, prefix)
+                                  arrival_time, lora_request)
 
         # Add the sequence group to the scheduler.
         self.scheduler.add_seq_group(seq_group)
@@ -733,6 +722,11 @@ class AphroditeEngine:
             scheduler_outputs: SchedulerOutputs) -> List[RequestOutput]:
         # Update the scheduled sequence groups with the model outputs.
         scheduled_seq_groups = scheduler_outputs.scheduled_seq_groups
+        # If prefix caching is enabled, mark all blocks in the sequence groups
+        # as completed so that future requests don't attempt to recompute them
+        if self.cache_config.context_shift:
+            for seq_group in scheduled_seq_groups:
+                self.scheduler.mark_blocks_as_computed(seq_group)
         for seq_group, outputs in zip(scheduled_seq_groups, output):
             self._process_sequence_group_outputs(seq_group, outputs)
 
@@ -747,12 +741,6 @@ class AphroditeEngine:
         for seq_group in scheduler_outputs.ignored_seq_groups:
             request_output = RequestOutput.from_seq_group(seq_group)
             request_outputs.append(request_output)
-
-        # Update prefix state, now all the uncomputed prefixes are computed.
-        for seq_group in scheduled_seq_groups:
-            if (seq_group.prefix is not None and seq_group.prefix.allocated
-                    and not seq_group.prefix.computed):
-                seq_group.prefix.computed = True
 
         # Log stats.
         if self.log_stats:
@@ -868,18 +856,24 @@ class AphroditeEngine:
 
             # Number of Tokens.
             if prompt_run:
-                num_prompt_tokens = scheduler_outputs.num_batched_tokens
+                num_prompt_tokens = sum(
+                    len(seq_group.prompt_token_ids)
+                    for seq_group in scheduler_outputs.scheduled_seq_groups)
+                num_generation_tokens = sum(
+                    seq_group.num_seqs()
+                    for seq_group in scheduler_outputs.scheduled_seq_groups)
             else:
                 num_generation_tokens = scheduler_outputs.num_batched_tokens
 
             # Latency Timings.
             time_last_iters = []
             for seq_group in scheduler_outputs.scheduled_seq_groups:
-                # Time since last token. (n.b. updates seq_group.last_token_time)
+                # Time since last token. (n.b. updates seq_group.metrics.last_token_time)
                 time_last_iters.append(seq_group.get_last_latency(now))
                 # Time since arrival for all finished requests.
                 if seq_group.is_finished():
-                    time_e2e_requests.append(now - seq_group.arrival_time)
+                    time_e2e_requests.append(now -
+                                             seq_group.metrics.arrival_time)
 
             time_to_first_tokens = time_last_iters if prompt_run else []
             time_per_output_tokens = [] if prompt_run else time_last_iters
