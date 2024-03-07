@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Tuple, Set, Union
 import numpy as np
 import torch
 import torch.nn as nn
+from rich.progress import Progress
 
 from aphrodite.common.config import (DeviceConfig, ModelConfig, LoRAConfig,
                                      ParallelConfig, SchedulerConfig)
@@ -716,42 +717,48 @@ class ModelRunner:
         # graph, we use either custom all-reduce kernel or PyTorch NCCL.
         # We always prioritize using custom all-reduce kernel but fall back
         # to PyTorch or CuPy NCCL if it is disabled or not supported.
-        with custom_all_reduce.capture():
-            for batch_size in reversed(batch_size_capture_list):
-                if batch_size > self.scheduler_config.max_num_seqs:
-                    continue
-                # Create dummy input_metadata.
-                input_metadata = InputMetadata(
-                    is_prompt=False,
-                    slot_mapping=slot_mapping[:batch_size],
-                    prompt_lens=None,
-                    max_seq_len=None,
-                    start_loc=None,
-                    max_context_len=self.max_context_len_to_capture,
-                    context_lens=context_lens[:batch_size],
-                    block_tables=block_tables[:batch_size],
-                    use_cuda_graph=True,
-                    kv_cache_dtype=self.kv_cache_dtype,
-                )
+        # Initialize a new progress bar
+        progress = Progress()
+        task = progress.add_task("[cyan]Capturing graph...", total=len(batch_size_capture_list))
 
-                if self.lora_config:
-                    lora_mapping = LoRAMapping(
-                        [0] * batch_size,
-                        [0] * batch_size,
+        with progress:
+            with custom_all_reduce.capture():
+                for batch_size in reversed(batch_size_capture_list):
+                    if batch_size > self.scheduler_config.max_num_seqs:
+                        continue
+                    # Create dummy input_metadata.
+                    input_metadata = InputMetadata(
+                        is_prompt=False,
+                        slot_mapping=slot_mapping[:batch_size],
+                        prompt_lens=None,
+                        max_seq_len=None,
+                        start_loc=None,
+                        max_context_len=self.max_context_len_to_capture,
+                        context_lens=context_lens[:batch_size],
+                        block_tables=block_tables[:batch_size],
+                        use_cuda_graph=True,
+                        kv_cache_dtype=self.kv_cache_dtype,
                     )
-                    self.set_active_loras(set(), lora_mapping)
 
-                graph_runner = CUDAGraphRunner(self.model)
-                graph_runner.capture(
-                    input_tokens[:batch_size],
-                    input_positions[:batch_size],
-                    kv_caches,
-                    input_metadata,
-                    memory_pool=self.graph_memory_pool,
-                )
-                self.graph_memory_pool = graph_runner.graph.pool()
-                self.graph_runners[batch_size] = graph_runner
+                    if self.lora_config:
+                        lora_mapping = LoRAMapping(
+                            [0] * batch_size,
+                            [0] * batch_size,
+                        )
+                        self.set_active_loras(set(), lora_mapping)
 
+                    graph_runner = CUDAGraphRunner(self.model)
+                    graph_runner.capture(
+                        input_tokens[:batch_size],
+                        input_positions[:batch_size],
+                        kv_caches,
+                        input_metadata,
+                        memory_pool=self.graph_memory_pool,
+                    )
+                    self.graph_memory_pool = graph_runner.graph.pool()
+                    self.graph_runners[batch_size] = graph_runner
+                    # Update the progress bar
+                    progress.update(task, advance=1)
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
         # This usually takes < 10 seconds.

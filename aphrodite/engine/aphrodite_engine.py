@@ -334,12 +334,17 @@ class AphroditeEngine:
         # FIXME: Change to debug log.
         logger.info(f"# GPU blocks: {num_gpu_blocks}, "
                     f"# CPU blocks: {num_cpu_blocks}")
+        
+        logger.info(f"Expected concurrency: {num_gpu_blocks * self.cache_config.block_size / self.scheduler_config.max_model_len:.2f}x")
+        
 
         if num_gpu_blocks <= 0:
             raise ValueError("No available memory for the cache blocks. "
                              "Try increasing `gpu_memory_utilization` when "
                              "initializing the engine.")
         max_seq_len = self.cache_config.block_size * num_gpu_blocks
+        logger.info(f"Maximum sequence length allowed in the cache: "
+                    f"{max_seq_len}")
         if self.model_config.max_model_len > max_seq_len:
             raise ValueError(
                 f"The model's max seq len ({self.model_config.max_model_len}) "
