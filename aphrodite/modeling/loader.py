@@ -9,6 +9,9 @@ from aphrodite.common.config import DeviceConfig, ModelConfig, LoRAConfig
 from aphrodite.modeling.models import ModelRegistry
 from aphrodite.modeling.hf_downloader import (get_quant_config,
                                               initialize_dummy_weights)
+from aphrodite.common.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 @contextlib.contextmanager
@@ -55,10 +58,9 @@ def get_model(model_config: ModelConfig,
                 f"Current capability: {capability}.")
         supported_dtypes = quant_config.get_supported_act_dtypes()
         if model_config.dtype not in supported_dtypes:
-            raise ValueError(
-                f"{model_config.dtype} is not supported for quantization "
-                f"method {model_config.quantization}. Supported dtypes: "
-                f"{supported_dtypes}")
+            # set the dtype to float16 for quantized models
+            model_config.dtype = torch.float16
+            logger.warning("Model is quantized. Forcing float16 datatype.")
         linear_method = quant_config.get_linear_method()
 
     with _set_default_torch_dtype(model_config.dtype):
