@@ -67,6 +67,7 @@ def run_aphrodite(
     dtype: str,
     kv_cache_dtype: str,
     disable_custom_all_reduce: bool,
+    context_shift: bool,
 ) -> float:
     llm = LLM(
         model=model,
@@ -76,7 +77,9 @@ def run_aphrodite(
         seed=seed,
         trust_remote_code=trust_remote_code,
         dtype=dtype,
+        kv_cache_dtype=kv_cache_dtype,
         disable_custom_all_reduce=disable_custom_all_reduce,
+        context_shift=context_shift,
     )
 
     # Add the requests to the engine.
@@ -177,7 +180,7 @@ def main(args: argparse.Namespace):  # pylint: disable=redefined-outer-name
             requests, args.model, args.tokenizer, args.quantization,
             args.tensor_parallel_size, args.seed, args.n, args.use_beam_search,
             args.trust_remote_code, args.dtype, args.kv_cache_dtype,
-            args.disable_custom_all_reduce)
+            args.disable_custom_all_reduce, args.context_shift)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -249,6 +252,10 @@ if __name__ == "__main__":
         "--disable-custom-all-reduce",
         action="store_true",
         help="disable custom all reduce for the Aphrodite backend")
+    parser.add_argument(
+        "--context-shift",
+        action="store_true",
+        help="enable context shifting for the Aphrodite backend")
     args = parser.parse_args()
 
     if args.backend == "aphrodite":

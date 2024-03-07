@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Tuple, Set, Union
 import numpy as np
 import torch
 import torch.nn as nn
+from rich.progress import Progress
 
 from aphrodite.common.config import (DeviceConfig, ModelConfig, LoRAConfig,
                                      ParallelConfig, SchedulerConfig)
@@ -139,33 +140,37 @@ class ModelRunner:
             prompt_tokens = seq_data.get_token_ids()
             prompt_len = len(prompt_tokens)
             prompt_lens.append(prompt_len)
-            prefix_len = 0
-            prefix = seq_group_metadata.prefix
-            if prefix is not None and prefix.computed:
-                prefix_len = prefix.get_length()
-                prompt_tokens = prompt_tokens[prefix_len:]
-                prefix_block_tables.append(prefix.get_block_numbers())
+            computed_len = 0
+
+            # NOTE: This only works for oooooooxxx style attention.
+            computed_block_nums = seq_group_metadata.computed_block_nums
+            if computed_block_nums is not None and len(
+                    computed_block_nums) > 0 and self.sliding_window is None:
+                # Prefix is not supported with sliding_window
+                computed_len = len(computed_block_nums) * self.block_size
+                prompt_tokens = prompt_tokens[computed_len:]
+                prefix_block_tables.append(computed_block_nums)
             else:
                 prefix_block_tables.append([])
             # actual prompt lens
-            context_lens.append(prefix_len)
-            subquery_lens.append(prompt_len - prefix_len)
+            context_lens.append(computed_len)
+            subquery_lens.append(prompt_len - computed_len)
 
             input_tokens.append(prompt_tokens)
             # NOTE: Here we assume that the first token in the prompt
             # is always the first token in the sequence.
             input_positions.append(
-                list(range(prefix_len, prefix_len + len(prompt_tokens))))
+                list(range(computed_len, computed_len + len(prompt_tokens))))
 
             lora_id = seq_group_metadata.lora_int_id
 
             if lora_id > 0:
                 lora_requests.add(seq_group_metadata.lora_request)
 
-            lora_index_mapping.append([lora_id] * (prompt_len - prefix_len))
+            lora_index_mapping.append([lora_id] * (prompt_len - computed_len))
             lora_prompt_mapping.extend(
                 [lora_id] *
-                (prompt_len - prefix_len
+                (prompt_len - computed_len
                  if seq_group_metadata.sampling_params.prompt_logprobs else 1))
 
             if seq_group_metadata.block_tables is None:
@@ -184,11 +189,11 @@ class ModelRunner:
             # mapping will be [-1, -1, 2, 3, 4, 5, 6, 7, 0, 1].
             start_idx = 0
             if self.sliding_window is not None:
-                assert prefix_len == 0, (
+                assert computed_len == 0, (
                     "Prefix caching is currently not supported with "
                     "sliding window attention")
                 start_idx = max(0, prompt_len - self.sliding_window)
-            for i in range(prefix_len, prompt_len):
+            for i in range(computed_len, prompt_len):
                 if i < start_idx:
                     slot_mapping[-1].append(_PAD_SLOT_ID)
                     continue
@@ -712,42 +717,49 @@ class ModelRunner:
         # graph, we use either custom all-reduce kernel or PyTorch NCCL.
         # We always prioritize using custom all-reduce kernel but fall back
         # to PyTorch or CuPy NCCL if it is disabled or not supported.
-        with custom_all_reduce.capture():
-            for batch_size in reversed(batch_size_capture_list):
-                if batch_size > self.scheduler_config.max_num_seqs:
-                    continue
-                # Create dummy input_metadata.
-                input_metadata = InputMetadata(
-                    is_prompt=False,
-                    slot_mapping=slot_mapping[:batch_size],
-                    prompt_lens=None,
-                    max_seq_len=None,
-                    start_loc=None,
-                    max_context_len=self.max_context_len_to_capture,
-                    context_lens=context_lens[:batch_size],
-                    block_tables=block_tables[:batch_size],
-                    use_cuda_graph=True,
-                    kv_cache_dtype=self.kv_cache_dtype,
-                )
+        # Initialize a new progress bar
+        progress = Progress()
+        task = progress.add_task("[cyan]Capturing graph...",
+                                 total=len(batch_size_capture_list))
 
-                if self.lora_config:
-                    lora_mapping = LoRAMapping(
-                        [0] * batch_size,
-                        [0] * batch_size,
+        with progress:
+            with custom_all_reduce.capture():
+                for batch_size in reversed(batch_size_capture_list):
+                    if batch_size > self.scheduler_config.max_num_seqs:
+                        continue
+                    # Create dummy input_metadata.
+                    input_metadata = InputMetadata(
+                        is_prompt=False,
+                        slot_mapping=slot_mapping[:batch_size],
+                        prompt_lens=None,
+                        max_seq_len=None,
+                        start_loc=None,
+                        max_context_len=self.max_context_len_to_capture,
+                        context_lens=context_lens[:batch_size],
+                        block_tables=block_tables[:batch_size],
+                        use_cuda_graph=True,
+                        kv_cache_dtype=self.kv_cache_dtype,
                     )
-                    self.set_active_loras(set(), lora_mapping)
 
-                graph_runner = CUDAGraphRunner(self.model)
-                graph_runner.capture(
-                    input_tokens[:batch_size],
-                    input_positions[:batch_size],
-                    kv_caches,
-                    input_metadata,
-                    memory_pool=self.graph_memory_pool,
-                )
-                self.graph_memory_pool = graph_runner.graph.pool()
-                self.graph_runners[batch_size] = graph_runner
+                    if self.lora_config:
+                        lora_mapping = LoRAMapping(
+                            [0] * batch_size,
+                            [0] * batch_size,
+                        )
+                        self.set_active_loras(set(), lora_mapping)
 
+                    graph_runner = CUDAGraphRunner(self.model)
+                    graph_runner.capture(
+                        input_tokens[:batch_size],
+                        input_positions[:batch_size],
+                        kv_caches,
+                        input_metadata,
+                        memory_pool=self.graph_memory_pool,
+                    )
+                    self.graph_memory_pool = graph_runner.graph.pool()
+                    self.graph_runners[batch_size] = graph_runner
+                    # Update the progress bar
+                    progress.update(task, advance=1)
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
         # This usually takes < 10 seconds.

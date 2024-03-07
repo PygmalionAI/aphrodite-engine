@@ -53,6 +53,7 @@ confidence=
 disable=abstract-method,
         consider-using-with,
         consider-using-in,
+        invalid-overriden-method,
         apply-builtin,
         unnecessary-comprehension,
         arguments-differ,
