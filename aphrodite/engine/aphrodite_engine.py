@@ -78,12 +78,7 @@ class AphroditeEngine:
         logger.info(
             f"Initializing the Aphrodite Engine (v{aphrodite.__version__}) with the following config:\n"
             f"Model = {model_config.model!r}\n"
-            f"Tokenizer = {model_config.tokenizer!r}\n"
-            f"tokenizer_mode = {model_config.tokenizer_mode}\n"
-            f"revision = {model_config.revision}\n"
-            f"trust_remote_code = {model_config.trust_remote_code}\n"
             f"DataType = {model_config.dtype}\n"
-            f"Download Directory = {model_config.download_dir!r}\n"
             f"Model Load Format = {model_config.load_format}\n"
             f"Number of GPUs = {parallel_config.tensor_parallel_size}\n"
             f"Disable Custom All-Reduce = "
@@ -92,8 +87,7 @@ class AphroditeEngine:
             f"Context Length = {model_config.max_model_len}\n"
             f"Enforce Eager Mode = {model_config.enforce_eager}\n"
             f"KV Cache Data Type = {cache_config.cache_dtype}\n"
-            f"Device = {device_config.device}\n"
-            f"Sampler Seed = {model_config.seed}")
+            f"Device = {device_config.device}")
         # TODO: Print more configs in debug mode.
 
         self.model_config = model_config
