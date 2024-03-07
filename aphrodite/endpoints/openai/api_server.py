@@ -40,6 +40,7 @@ logger = init_logger(__name__)
 kai_api = APIRouter()
 extra_api = APIRouter()
 kobold_lite_ui = ""
+sampler_json = ""
 gen_cache: dict = {}
 
 
@@ -212,6 +213,20 @@ async def show_version(x_api_key: Optional[str] = Header(None)):
     ver = {"version": aphrodite.__version__}
     return JSONResponse(content=ver)
 
+@app.get("/v1/samplers")
+async def show_samplers(x_api_key: Optional[str] = Header(None)):
+    """Get the available samplers."""
+    global sampler_json
+    if not sampler_json:
+        jsonpath = os.path.dirname(os.path.abspath(__file__))
+        samplerpath = os.path.join(jsonpath, "./samplers.json")
+        samplerpath = os.path.normpath(samplerpath)  # Normalize the path
+        if os.path.exists(samplerpath):
+            with open(samplerpath, "r") as f:
+                sampler_json = json.load(f)
+        else:
+            logger.error("Sampler JSON not found at " + samplerpath)
+    return sampler_json
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,
