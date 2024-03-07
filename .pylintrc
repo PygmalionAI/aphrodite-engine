@@ -167,6 +167,7 @@ disable=abstract-method,
         useless-return,
         using-cmp-argument,
         wrong-import-order,
+        wrong-import-position,
         xrange-builtin,
         zip-builtin-not-iterating,
 

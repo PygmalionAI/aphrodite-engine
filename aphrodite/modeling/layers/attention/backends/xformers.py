@@ -178,6 +178,8 @@ class XFormersBackend:
             )
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
+
+
 def _make_alibi_bias(
     alibi_slopes: torch.Tensor,
     num_kv_heads: int,

@@ -87,9 +87,9 @@ class GPTBigCodeAttention(nn.Module):
             linear_method=linear_method,
         )
         self.attn = Attention(self.num_heads,
-                                   self.head_dim,
-                                   scale=self.scale,
-                                   num_kv_heads=self.num_kv_heads)
+                              self.head_dim,
+                              scale=self.scale,
+                              num_kv_heads=self.num_kv_heads)
 
     def forward(
         self,

@@ -109,7 +109,7 @@ class PagedAttentionImpl:
                 input_metadata.kv_cache_dtype,
             )
         return output
-    
+
     @staticmethod
     def forward_prefix(
         query: torch.Tensor,

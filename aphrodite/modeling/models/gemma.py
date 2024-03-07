@@ -159,9 +159,9 @@ class GemmaAttention(nn.Module):
             is_neox_style=True,
         )
         self.attn = Attention(self.num_heads,
-                                   self.head_dim,
-                                   self.scaling,
-                                   num_kv_heads=self.num_kv_heads)
+                              self.head_dim,
+                              self.scaling,
+                              num_kv_heads=self.num_kv_heads)
 
     def forward(
         self,

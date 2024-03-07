@@ -134,9 +134,9 @@ class InternLM2Attention(nn.Module):
             rope_scaling=rope_scaling,
         )
         self.attn = Attention(self.num_heads,
-                                   self.head_dim,
-                                   self.scaling,
-                                   num_kv_heads=self.num_kv_heads)
+                              self.head_dim,
+                              self.scaling,
+                              num_kv_heads=self.num_kv_heads)
 
     def forward(
         self,

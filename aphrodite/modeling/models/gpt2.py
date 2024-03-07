@@ -74,9 +74,7 @@ class GPT2Attention(nn.Module):
             bias=True,
             linear_method=linear_method,
         )
-        self.attn = Attention(self.num_heads,
-                                   self.head_dim,
-                                   scale=self.scale)
+        self.attn = Attention(self.num_heads, self.head_dim, scale=self.scale)
 
     def forward(
         self,

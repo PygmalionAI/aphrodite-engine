@@ -171,9 +171,9 @@ class BaiChuanAttention(nn.Module):
 
             scaling = self.head_dim**-0.5
             self.attn = Attention(self.num_heads,
-                                       self.head_dim,
-                                       scaling,
-                                       alibi_slopes=alibi_slopes)
+                                  self.head_dim,
+                                  scaling,
+                                  alibi_slopes=alibi_slopes)
         else:
             is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
             ) is None else linear_method.quant_config.rope_style()
@@ -185,8 +185,7 @@ class BaiChuanAttention(nn.Module):
                 is_neox_style=is_neox_style,
             )
             self.scaling = self.head_dim**-0.5
-            self.attn = Attention(self.num_heads, self.head_dim,
-                                       self.scaling)
+            self.attn = Attention(self.num_heads, self.head_dim, self.scaling)
 
     def forward(
         self,

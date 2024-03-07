@@ -163,9 +163,9 @@ class StablelmAttention(nn.Module):
             is_neox_style=is_neox_style,
         )
         self.attn = Attention(self.num_heads,
-                                   self.head_dim,
-                                   self.scaling,
-                                   num_kv_heads=self.num_key_value_heads)
+                              self.head_dim,
+                              self.scaling,
+                              num_kv_heads=self.num_key_value_heads)
 
     def forward(
         self,

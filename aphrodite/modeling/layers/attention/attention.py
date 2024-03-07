@@ -35,7 +35,7 @@ class Attention(nn.Module):
                 torch.get_default_dtype() in (torch.float16, torch.bfloat16)):
             # Ampere or later NVIDIA GPUs.
             # NOTE: FlashAttention does not support FP32.
-            logger.info("Using FlashAttention backend.")
+            logger.info("Using Flash Attention backend.")
             from aphrodite.modeling.layers.attention.backends.flash_attn import FlashAttentionBackend
             self.backend = FlashAttentionBackend(num_heads, head_size, scale,
                                                  num_kv_heads, alibi_slopes,

@@ -173,10 +173,10 @@ class Qwen2Attention(nn.Module):
             base=self.rope_theta,
         )
         self.attn = Attention(self.num_heads,
-                                   self.head_dim,
-                                   self.scaling,
-                                   num_kv_heads=self.num_kv_heads,
-                                   sliding_window=self.sliding_window)
+                              self.head_dim,
+                              self.scaling,
+                              num_kv_heads=self.num_kv_heads,
+                              sliding_window=self.sliding_window)
 
     def forward(
         self,
