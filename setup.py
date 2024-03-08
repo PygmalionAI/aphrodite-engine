@@ -315,6 +315,8 @@ if _is_cuda():
     aphrodite_extension_sources.append("kernels/quantization/quip/origin_order.cu")
     aphrodite_extension_sources.append("kernels/quantization/marlin/marlin_cuda_kernel.cu")
     aphrodite_extension_sources.append("kernels/all_reduce/custom_all_reduce.cu")
+    aphrodite_extension_sources.append("kernels/quantization/aqlm/aqlm_cuda_entry.cpp")
+    aphrodite_extension_sources.append("kernels/quantization/aqlm/aqlm_cuda_kernel.cu")
     
     ext_modules.append(
         CUDAExtension(
