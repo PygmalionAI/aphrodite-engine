@@ -38,8 +38,10 @@ def _get_lora_device(base_layer: nn.Module) -> torch.device:
         try:
             linear_weights = base_layer.linear_weights
             if isinstance(linear_weights, dict):
-                tensor_values = [v for v in linear_weights.values(
-                ) if isinstance(v, torch.Tensor)]
+                tensor_values = [
+                    v for v in linear_weights.values()
+                    if isinstance(v, torch.Tensor)
+                ]
                 if tensor_values:
                     device = tensor_values[0].device
         except AttributeError:
