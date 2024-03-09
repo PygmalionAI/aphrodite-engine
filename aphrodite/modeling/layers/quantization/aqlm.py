@@ -58,9 +58,8 @@ class AQLMConfig(QuantizationConfig):
     @classmethod
     def get_supported_act_dtypes(cls) -> List[torch.dtype]:
         return [torch.half]
-    
+
     @classmethod
-    # Need to figure it out
     def get_min_capability(cls) -> int:
         return 70
 
@@ -112,7 +111,6 @@ class AQLMLinearMethod(LinearMethodBase):
 
         if params_dtype != torch.half:
             raise ValueError("Only half is currently supported by aqlm")
-        
         if input_size_per_partition % self.quant_config.in_group_size != 0:
             raise ValueError(
                 "The input size is not aligned with the quantized "
