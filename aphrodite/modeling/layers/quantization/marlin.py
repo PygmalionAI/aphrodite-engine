@@ -98,13 +98,13 @@ class MarlinLinearMethod(LinearMethodBase):
         input_size: int,
         output_size: int,
         params_dtype: torch.dtype,
-) -> Dict[str, Any]:
+    ) -> Dict[str, Any]:
         del output_size  # Unused.
 
         if params_dtype != torch.float16:
             raise ValueError(
                 f"The params dtype must be float16, but got {params_dtype}")
-        
+
         output_size_per_partition = sum(output_partition_sizes)
         # Validate output_size_per_partition
         if output_size_per_partition % self.quant_config.min_n_threads != 0:

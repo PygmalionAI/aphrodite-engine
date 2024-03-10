@@ -9,8 +9,8 @@ from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from aphrodite.modeling.megatron.communication_op import (
     tensor_model_parallel_all_reduce, tensor_model_parallel_all_gather)
-from aphrodite.modeling.megatron.utils import (
-    divide, split_tensor_along_last_dim)
+from aphrodite.modeling.megatron.utils import (divide,
+                                               split_tensor_along_last_dim)
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.common.logger import init_logger
 
@@ -78,7 +78,7 @@ class UnquantizedLinearMethod(LinearMethodBase):
                 return F.linear(x, weight) + bias
             return F.linear(x, weight)
         return F.linear(x, weight, bias)
-    
+
     def apply_embedding(self, weights: Dict[str, torch.Tensor],
                         x: torch.Tensor) -> torch.Tensor:
         weight = weights["weight"]
@@ -214,7 +214,8 @@ class ColumnParallelLinear(torch.nn.Module):
         param_data = param.data
         if output_dim is not None:
             if loaded_weight.shape[output_dim] % tp_size != 0:
-                raise ValueError("Size is not aligned with the quantized weight shape")
+                raise ValueError(
+                    "Size is not aligned with the quantized weight shape")
             shard_size = loaded_weight.shape[output_dim] // tp_size
             start_idx = tp_rank * shard_size
             loaded_weight = loaded_weight.narrow(output_dim, start_idx,
@@ -586,7 +587,8 @@ class RowParallelLinear(torch.nn.Module):
         param_data = param.data
         if input_dim is not None:
             if loaded_weight.shape[input_dim] % tp_size != 0:
-                raise ValueError("Size is not aligned with the quantized weight shape")
+                raise ValueError(
+                    "Size is not aligned with the quantized weight shape")
 
             shard_size = loaded_weight.shape[input_dim] // tp_size
             start_idx = tp_rank * shard_size
