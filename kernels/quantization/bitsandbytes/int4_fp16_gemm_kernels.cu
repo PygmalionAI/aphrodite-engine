@@ -23,7 +23,7 @@ void autoquant_convert_s4_k_m8(
   int m,
   int k,
   int group_size){
-#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 750
+#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 800
       auto st_ = _quant_scales.scalar_type();
       const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
       if(st_ == at::ScalarType::Half){
@@ -55,7 +55,7 @@ torch::Tensor autoquant_s4_f16_gemm(
     torch::Tensor _kernel,
     torch::Tensor _scales_zeros)
 {
-#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 750
+#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 800
     int num_in_feats = _in_feats.size(0);
     int num_in_channels = _in_feats.size(1);
     const at::cuda::OptionalCUDAGuard device_guard(device_of(_in_feats));
