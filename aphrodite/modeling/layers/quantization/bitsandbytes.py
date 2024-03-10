@@ -55,8 +55,8 @@ class BitsandBytesConfig(QuantizationConfig):
         return [torch.half, torch.bfloat16]
 
     def get_min_capability(self) -> int:
-        # The BitsandBytes kernel only supports Ampere or newer GPUs.
-        return 80
+        # The BitsandBytes kernel only supports Turing or newer GPUs.
+        return 75
 
     def merge_weight(self) -> bool:
         return True
