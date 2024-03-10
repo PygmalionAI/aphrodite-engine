@@ -12,6 +12,7 @@ dependencies:
   - cuda-nvcc=12.1
   - cuda-libraries-dev=12.1
   - cxx-compiler
+  - gxx=11.3
   - pip
   - git=2.35.1
   - ninja
