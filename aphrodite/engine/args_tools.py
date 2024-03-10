@@ -212,7 +212,7 @@ class EngineArgs:
                             '-q',
                             type=str,
                             choices=[
-                                'aqlm', 'awq', 'gguf', 'gptq', 'quip',
+                                'aqlm', 'awq', 'bnb', 'gguf', 'gptq', 'quip',
                                 'squeezellm', 'marlin', None
                             ],
                             default=EngineArgs.quantization,
