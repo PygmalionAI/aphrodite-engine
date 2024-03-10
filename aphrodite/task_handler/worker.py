@@ -42,6 +42,7 @@ class Worker:
         distributed_init_method: str,
         lora_config: Optional[LoRAConfig] = None,
         kv_cache_dtype: Optional[str] = "auto",
+        kv_quant_params_path: Optional[str] = None,
         is_driver_worker: bool = False,
     ) -> None:
         self.model_config = model_config
@@ -62,6 +63,7 @@ class Worker:
                                         device_config,
                                         lora_config=self.lora_config,
                                         kv_cache_dtype=kv_cache_dtype,
+                                        kv_quant_params_path=kv_quant_params_path,
                                         is_driver_worker=is_driver_worker)
         # Uninitialized cache engine. Will be initialized by
         # self.init_cache_engine().

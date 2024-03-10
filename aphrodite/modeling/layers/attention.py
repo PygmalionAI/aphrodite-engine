@@ -101,6 +101,7 @@ class PagedAttention(nn.Module):
         key_cache: Optional[torch.Tensor],
         value_cache: Optional[torch.Tensor],
         input_metadata: InputMetadata,
+        kv_quant_param: List[float] = None,
     ) -> torch.Tensor:
         """PagedAttention forward pass.
 
@@ -121,6 +122,9 @@ class PagedAttention(nn.Module):
         query = query.view(-1, self.num_heads, self.head_size)
         key = key.view(-1, self.num_kv_heads, self.head_size)
         value = value.view(-1, self.num_kv_heads, self.head_size)
+        # FIXME: Remove this when all models support int8 kv cache
+        kv_quant_param = [1.0, 0.0, 1.0, 0.0
+                          ] if kv_quant_param is None else kv_quant_param
 
         # Reshape the keys and values and store them in the cache.
         # If key_cache and value_cache are not provided, the new key and value
@@ -134,6 +138,7 @@ class PagedAttention(nn.Module):
                 value_cache,
                 input_metadata.slot_mapping.flatten(),
                 input_metadata.kv_cache_dtype,
+                *kv_quant_param,
             )
 
         if input_metadata.is_prompt:
@@ -230,6 +235,7 @@ class PagedAttention(nn.Module):
                 self.num_kv_heads,
                 self.scale,
                 self.alibi_slopes,
+                kv_quant_param,
             )
 
         # Reshape the output tensor.
@@ -278,6 +284,7 @@ def _paged_attention(
     num_kv_heads: int,
     scale: float,
     alibi_slopes: Optional[torch.Tensor],
+    kv_quant_param: List[float],
 ) -> torch.Tensor:
     output = torch.empty_like(query)
 
@@ -310,6 +317,7 @@ def _paged_attention(
             input_metadata.max_context_len,
             alibi_slopes,
             input_metadata.kv_cache_dtype,
+            *kv_quant_param,
         )
     else:
         # Run PagedAttention V2.
@@ -341,5 +349,6 @@ def _paged_attention(
             input_metadata.max_context_len,
             alibi_slopes,
             input_metadata.kv_cache_dtype,
+            *kv_quant_param,
         )
     return output
