@@ -162,8 +162,8 @@ class ModelConfig:
 
     def _verify_quantization(self) -> None:
         supported_quantization = [
-            "aqlm", "awq", "bnb", "gguf", "gptq",
-            "quip", "squeezellm", "marlin"
+            "aqlm", "awq", "bnb", "gguf", "gptq", "quip", "squeezellm",
+            "marlin"
         ]
         rocm_not_supported_quantization = ["aqlm", "awq", "bnb", "quip"]
         if self.quantization is not None:
@@ -205,9 +205,7 @@ class ModelConfig:
                     "from_float": True
                 }
             elif self.quantization == "awq":
-                logger.warning(
-                    "AWQ model is being loaded in 4bit bnb format."
-                )
+                logger.warning("AWQ model is being loaded in 4bit bnb format.")
                 self.quantization = "bnb"
                 self.hf_config.quantization_config = {
                     "zero_point": True,
@@ -216,16 +214,14 @@ class ModelConfig:
                     "version": "gemm"
                 }
             elif self.quantization != "bnb":
-                raise ValueError(
-                    "4bit quantization is not supported in "
-                    f"{self.quantization}.")
+                raise ValueError("4bit quantization is not supported in "
+                                 f"{self.quantization}.")
         if self.load_in_8bit:
             if self.quantization is None:
                 self.quantization = "bnb"
             elif self.quantization != "bnb":
-                raise ValueError(
-                    "8bit quantization is not supported in "
-                    f"{self.quantization}.")
+                raise ValueError("8bit quantization is not supported in "
+                                 f"{self.quantization}.")
             self.hf_config.quantization_config = {
                 "bits": 8,
                 "quant_mode": "llm_int8",
@@ -239,9 +235,8 @@ class ModelConfig:
             if self.quantization is None:
                 self.quantization = "bnb"
             elif self.quantization != "bnb":
-                raise ValueError(
-                    "Smooth quantization is not supported in "
-                    f"{self.quantization}.")
+                raise ValueError("Smooth quantization is not supported in "
+                                 f"{self.quantization}.")
             self.hf_config.quantization_config = {
                 "bits": 8,
                 "quant_mode": "smoothquant",

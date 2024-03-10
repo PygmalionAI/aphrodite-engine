@@ -1,15 +1,14 @@
-
 import torch
 from torch.nn.parameter import Parameter
 from typing import List, Dict, Any, Optional, TypeVar, NamedTuple
 
 from aphrodite._C import ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                               set_weight_attrs)
+                                              set_weight_attrs)
 from aphrodite.modeling.layers.quantization.base_config import QuantizationConfig
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
-                                               QKVParallelLinear,
-                                               RowParallelLinear)
+                                              QKVParallelLinear,
+                                              RowParallelLinear)
 
 
 class BitsandBytesConfig(QuantizationConfig):
@@ -58,7 +57,7 @@ class BitsandBytesConfig(QuantizationConfig):
     def get_min_capability(self) -> int:
         # The BitsandBytes kernel only supports Turing or newer GPUs.
         return 75
-    
+
     def merge_weight(self) -> bool:
         return True
 

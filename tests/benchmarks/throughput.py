@@ -216,8 +216,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--quantization",
         "-q",
-        choices=["awq", "gguf", "bnb", "gptq",
-                 "squeezellm", "marlin", None],
+        choices=["awq", "gguf", "bnb", "gptq", "squeezellm", "marlin", None],
         default=None)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.88)
     parser.add_argument("--tensor-parallel-size", "-tp", type=int, default=1)
@@ -260,10 +259,9 @@ if __name__ == "__main__":
         "--context-shift",
         action="store_true",
         help="enable context shifting for the Aphrodite backend")
-    parser.add_argument(
-        "--enforce-eager",
-        action="store_true",
-        help="enforce eager mode for the Aphrodite backend")
+    parser.add_argument("--enforce-eager",
+                        action="store_true",
+                        help="enforce eager mode for the Aphrodite backend")
     args = parser.parse_args()
 
     if args.backend == "aphrodite":
