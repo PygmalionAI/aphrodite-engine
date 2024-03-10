@@ -194,6 +194,11 @@ class ModelConfig:
                     f"method specified in the `quantization` argument "
                     f"({self.quantization}).")
         if self.load_in_4bit:
+            # the kernels seem to not work with 4bit weight_only
+            if torch.cuda.get_device_capability(0)[0] < 8:
+                raise ValueError(
+                    "load_in_4bit quantization is not supported on GPUs with "
+                    "compute capability less than 8.0.")
             if self.quantization is None:
                 self.quantization = "bnb"
                 self.hf_config.quantization_config = {
