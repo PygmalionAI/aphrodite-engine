@@ -23,7 +23,6 @@ namespace autoquant {
 
 __device__ void atomic_assign_u4(uint32_t* address, uint32_t index, uint32_t value)
 {
-#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 800
     uint32_t old = *address;
     uint32_t assumed;
     do {
@@ -31,20 +30,16 @@ __device__ void atomic_assign_u4(uint32_t* address, uint32_t index, uint32_t val
         uint32_t tmp = (assumed & ~(0xfu << (index * 4u))) | (value << (index * 4u));
         old          = atomicCAS(address, assumed, tmp);
     } while (assumed != old);
-#endif
 }
 
 __device__ uint32_t read_u4(const uint32_t* address, uint32_t index)
 {
-#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 800
     return (*address >> (index * 4u)) & 0xfu;
-#endif
 }
 
 template<int... Ds>
 __global__ void permute_u4(uint* dst, const uint* src, Array<int, sizeof...(Ds)> dims)
 {
-#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 800
     constexpr int N = sizeof...(Ds);
 
     size_t count = 1;
@@ -77,63 +72,50 @@ __global__ void permute_u4(uint* dst, const uint* src, Array<int, sizeof...(Ds)>
 
         atomic_assign_u4(dst + index / 8, index % 8, data);
     }
-#endif
 }
 
 void reformat_s4_k8_m(uint32_t* dst, const uint32_t* src, int m, int k, cudaStream_t st)
 {
-#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 800
     // permutation for [k/8, m] layout
     Array<int, 10> shape{k / 32, 2, 2, m / 32, 2, 2, 8, 2, 2, 2};
     //        |warp|  lane  | 2x2 |  a0-7  |
     permute_u4<0, 3, 6, 8, 9, 1, 4, 7, 2, 5><<<512, 512, 0, st>>>(dst, src, shape);
-#endif
 }
 
 void reformat_s4_k_m8(uint32_t* dst, const uint32_t* src, int m, int k, cudaStream_t st)
 {
-#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 800
     // permutation for [k, m/8] layout
     Array<int, 10> shape{k / 32, 2, 2, 4, 2, m / 32, 2, 2, 2, 4};
     //        |warp|  lane  | 2x2 |  a0-7  |
     permute_u4<0, 5, 9, 8, 3, 1, 6, 4, 2, 7><<<512, 512, 0, st>>>(dst, src, shape);
-#endif
 }
 
 __global__ void dequantize_s4_offset_64(uint4* dst, const uint32_t* src, size_t count)
 {
-#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 800
     for (int i = threadIdx.x + blockDim.x * blockIdx.x; i < count; i += blockDim.x * gridDim.x) {
         dst[i] = dequantize_s4_to_fp16x2_v2(src[i]);
     }
-#endif
 }
 
 __global__ void dequantize_s4_offset_64_bf16(uint4* dst, const uint32_t* src, size_t count)
 {
-#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 800
     for (int i = threadIdx.x + blockDim.x * blockIdx.x; i < count; i += blockDim.x * gridDim.x) {
         dst[i] = dequantize_s4_to_bf16x2_v2(src[i]);
     }
-#endif
 }
 
 __global__ void merge_Q(half2* Q, const half* scales, const half* zeros, int count)
 {
-#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 800
     for (int i = threadIdx.x + blockDim.x * blockIdx.x; i < count; i += blockDim.x * gridDim.x) {
         Q[i] = __halves2half2(zeros[i], scales[i]);
     }
-#endif
 }
 
 __global__ void merge_Q(__nv_bfloat162* Q, const __nv_bfloat16* scales, const __nv_bfloat16* zeros, int count)
 {
-#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 800
     for (int i = threadIdx.x + blockDim.x * blockIdx.x; i < count; i += blockDim.x * gridDim.x) {
         Q[i] = 	halves2bfloat162(zeros[i], scales[i]);
     }
-#endif
 }
 
 void convert_s4_k_m8(uint32_t*       A_dst,
@@ -147,11 +129,9 @@ void convert_s4_k_m8(uint32_t*       A_dst,
                      int             group_size,
                      cudaStream_t    st)
 {
-#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 800
     dequantize_s4_offset_64<<<256, 256, 0, st>>>((uint4*)workspace, qzeros, k / group_size * m / 8);
     merge_Q<<<256, 256, 0, st>>>(Q_dst, scales, workspace, k / group_size * m);
     reformat_s4_k_m8(A_dst, A_src, m, k, st);
-#endif
 }
 void convert_s4_k_m8(uint32_t*            A_dst,
                      __nv_bfloat162*      Q_dst,
@@ -164,48 +144,38 @@ void convert_s4_k_m8(uint32_t*            A_dst,
                      int                  group_size,
                      cudaStream_t         st)
 {
-#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 800
     dequantize_s4_offset_64_bf16<<<256, 256, 0, st>>>((uint4*)workspace, qzeros, k / group_size * m / 8);
     merge_Q<<<256, 256, 0, st>>>(Q_dst, scales, workspace, k / group_size * m);
     reformat_s4_k_m8(A_dst, A_src, m, k, st);
-#endif
 }
 
 void transpose_qk_s4_k_m8_hf(uint32_t* dst, const uint32_t* src, int m, int k, int size_per_head, cudaStream_t st)
 {
-#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 800
     Array<int, 7> shape{k, m / size_per_head, 2, size_per_head / 2 / 8, 2, 2, 2};
     //      dequant   transpose    quant
     // 0123456 -> 0123564 -> 0135642 -> 0135264
     permute_u4<0, 1, 3, 5, 2, 6, 4><<<512, 512, 0, st>>>(dst, src, shape);
-#endif
 }
 
 // [2, k, m/8] -> [k, m/8, 2]
 void fuse_w1_w3_s4_k_m8(uint32_t* dst, const uint32_t* src, int m, int k, cudaStream_t st)
 {
-#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 800
     Array<int, 6> shape{2, k, m / 8, 2, 2, 2};
     //     dequant   transpose   quant
     // 012345 -> 012453 -> 124530 -> 124053
     permute_u4<1, 2, 4, 0, 5, 3><<<512, 512, 0, st>>>(dst, src, shape);
-#endif
 }
 
 __global__ void dequantize_s4_kernel(uint4* dst, const uint* src, size_t count)
 {
-#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 800
     for (int i = threadIdx.x + blockDim.x * blockIdx.x; i < count; i += blockDim.x * gridDim.x) {
         dst[i] = dequantize_s4_to_fp16x2(src[i]);
     }
-#endif
 }
 
 void dequantize_s4(uint4* dst, const uint32_t* src, size_t count, cudaStream_t st)
 {
-#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 800
     dequantize_s4_kernel<<<512, 512>>>(dst, src, count);
-#endif
 }
 
 }  // namespace autoquant
