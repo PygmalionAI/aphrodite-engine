@@ -227,14 +227,17 @@ class EngineArgs:
                             'type of the weights.')
         parser.add_argument('--load-in-4bit',
                             action='store_true',
-                            help='Load the FP16 model in 4-bit format.')
+                            help='Load the FP16 model in 4-bit format. Also '
+                            'works with AWQ models. Throughput at 2.5x of '
+                            'FP16.')
         parser.add_argument('--load-in-8bit',
                             action='store_true',
-                            help='Load the FP16 model in 8-bit format.')
+                            help='Load the FP16 model in 8-bit format. '
+                            'Throughput at 0.3x of FP16.')
         parser.add_argument('--load-in-smooth',
                             action='store_true',
                             help='Load the FP16 model in smoothquant '
-                            '8bit format.')
+                            '8bit format. Throughput at 0.7x of FP16. ')
         parser.add_argument('--enforce-eager',
                             action='store_true',
                             help='Always use eager-mode PyTorch. If False, '

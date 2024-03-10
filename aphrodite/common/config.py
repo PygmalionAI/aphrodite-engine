@@ -52,7 +52,11 @@ class ModelConfig:
             output). If None, will be derived from the model.
         quantization: Quantization method that was used to quantize the model
             weights. If None, we assume the model weights are not quantized.
-        load_in_4bit: Whether to load the model in bitsandbytes 4bit format.
+        load_in_4bit: Whether to load the FP16 model in bitsandbytes 4bit
+            format. Works with AWQ models as well as FP16.
+        load_in_8bit: Whether to load the FP16 model in 8bit format. Slower
+            than load_in_smooth in terms of throughput.
+        load_in_smooth: Whether to load the FP16 model in smoothquant format.
         enforce_eager: Whether to enforce eager execution. If True, we will
             disable CUDA graph and always execute the model in eager mode.
             If False, we will use CUDA graph and eager execution in hybrid.
@@ -192,18 +196,29 @@ class ModelConfig:
         if self.load_in_4bit:
             if self.quantization is None:
                 self.quantization = "bnb"
+                self.hf_config.quantization_config = {
+                    "bits": 4,
+                    "quant_mode": "weight_only",
+                    "quant_method": "bnb",
+                    "group_size": 128,
+                    "zero_point": True,
+                    "from_float": True
+                }
+            elif self.quantization == "awq":
+                logger.warning(
+                    "AWQ model is being loaded in 4bit bnb format."
+                )
+                self.quantization = "bnb"
+                self.hf_config.quantization_config = {
+                    "zero_point": True,
+                    "q_group_size": 128,
+                    "w_bit": 4,
+                    "version": "gemm"
+                }
             elif self.quantization != "bnb":
                 raise ValueError(
                     "4bit quantization is not supported in "
                     f"{self.quantization}.")
-            self.hf_config.quantization_config = {
-                "bits": 4,
-                "quant_mode": "weight_only",
-                "quant_method": "bnb",
-                "group_size": 128,
-                "zero_point": True,
-                "from_float": True
-            }
         if self.load_in_8bit:
             if self.quantization is None:
                 self.quantization = "bnb"
