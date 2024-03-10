@@ -138,12 +138,13 @@ class EngineArgs:
             help='Data type for kv cache storage. If "auto", will use model '
             'data type. Note FP8 is not supported when cuda version is '
             'lower than 11.8.')
-        parser.add_argument('--kv-quant-params-path',
-                            type=str,
-                            default=EngineArgs.kv_quant_params_path,
-                            help='Path to scales and zero points of KV cache '
-                            'quantization. Only applicable when kv-cache-dtype '
-                            'is int8.')
+        parser.add_argument(
+            '--kv-quant-params-path',
+            type=str,
+            default=EngineArgs.kv_quant_params_path,
+            help='Path to scales and zero points of KV cache '
+            'quantization. Only applicable when kv-cache-dtype '
+            'is int8.')
         parser.add_argument('--max-model-len',
                             type=int,
                             default=EngineArgs.max_model_len,

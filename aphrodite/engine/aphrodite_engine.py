@@ -149,8 +149,7 @@ class AphroditeEngine:
             distributed_init_method=distributed_init_method,
             lora_config=self.lora_config,
             kv_cache_dtype=self.cache_config.cache_dtype,
-            kv_quant_params_path=(
-                        self.cache_config.cache_quant_params_path),
+            kv_quant_params_path=(self.cache_config.cache_quant_params_path),
             is_driver_worker=True,
         )
         self._run_workers("init_model")
@@ -259,8 +258,8 @@ class AphroditeEngine:
                     distributed_init_method,
                     lora_config=self.lora_config,
                     kv_cache_dtype=self.cache_config.cache_dtype,
-                    kv_quant_params_path=(
-                        self.cache_config.cache_quant_params_path),
+                    kv_quant_params_path=
+                    (self.cache_config.cache_quant_params_path),
                 ))
 
         driver_rank = 0
@@ -275,8 +274,7 @@ class AphroditeEngine:
             distributed_init_method,
             lora_config=self.lora_config,
             kv_cache_dtype=self.cache_config.cache_dtype,
-            kv_quant_params_path=(
-                        self.cache_config.cache_quant_params_path),
+            kv_quant_params_path=(self.cache_config.cache_quant_params_path),
             is_driver_worker=True,
         )
 

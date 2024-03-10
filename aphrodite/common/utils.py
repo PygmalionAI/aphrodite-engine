@@ -253,7 +253,7 @@ def create_kv_caches_with_random(
                                 device=device)
         if cache_dtype == 'fp8_e5m2':
             _generate_random_fp8_e5m2(key_cache, -scale, scale)
-        elif cache_dtype ==  'int8':
+        elif cache_dtype == 'int8':
             torch.randint(-128, 127, key_cache.size(), out=key_cache)
         elif torch_dtype in [torch.half, torch.bfloat16, torch.float]:
             key_cache.uniform_(-scale, scale)
