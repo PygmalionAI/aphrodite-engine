@@ -97,6 +97,7 @@ struct OutputOps {
 template<typename T_BC, typename T_Q>
 void Impl<T_BC, T_Q>::Generate(std::vector<Kernels>& kernels)
 {
+#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 750
     // smem size (KB):
     // sm75: 64
     // sm80: 163
@@ -127,6 +128,7 @@ void Impl<T_BC, T_Q>::Generate(std::vector<Kernels>& kernels)
     k.emplace_back(new GemmKernel<Shape<64, 16, 256>, Shape<32, 16, 32>, 3, GS, Op, T_BC, T_Q>{});
     k.emplace_back(new GemmKernel<Shape<64, 8, 256>, Shape<32, 8, 32>, 3, GS, Op, T_BC, T_Q>{});
     kernels.push_back(std::move(k));
+#endif
 }
 
 template<typename T_BC, typename T_Q>
@@ -143,6 +145,7 @@ void Impl<T_BC, T_Q>::Measure(T_BC*                 C,
                               cudaStream_t          st,
                               std::vector<Kernels>& _kernels)
 {
+#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 750
     int gid = -1;
     for (size_t i = 0; i < group_sizes_.size(); ++i) {
         if (group_sizes_[i] == group_size) {
@@ -195,6 +198,7 @@ void Impl<T_BC, T_Q>::Measure(T_BC*                 C,
         tmp.push_back(metrics[indices[i]]);
     }
     metrics.swap(tmp);
+#endif
 }
 
 static bool Compare(const Metric& a, const Metric& b)
@@ -245,6 +249,7 @@ void Impl<T_BC, T_Q>::Run(T_BC*                 C,
                           cudaStream_t          st,
                           std::vector<Kernels>& kernels)
 {
+#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 750
     for (size_t i = 0; i < group_sizes_.size(); ++i) {
         if (group_sizes_[i] == group_size) {
             if (algo_id < 0) {
@@ -259,6 +264,7 @@ void Impl<T_BC, T_Q>::Run(T_BC*                 C,
         }
     }
     throw std::runtime_error("unsupported group size");
+#endif
 }
 
 template<typename T_BC, typename T_Q>
@@ -302,7 +308,9 @@ void GemmS4F16<T_BC, T_Q>::Measure(T_BC*                C,
                                    std::vector<Metric>& metrics,
                                    cudaStream_t         st)
 {
+#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 750
     impl_->Measure(C, A, B, Q, m, n, k, group_size, type, metrics, st, impl_->kernels_);
+#endif
 }
 
 template<typename T_BC, typename T_Q>
@@ -318,7 +326,9 @@ void GemmS4F16<T_BC, T_Q>::Run(T_BC*        C,
                                int          algo_id,
                                cudaStream_t st)
 {
+#if defined __CUDA_ARCH__ && __CUDA_ARCH__ >= 750
     impl_->Run(C, A, B, Q, m, n, k, group_size, type, algo_id, st, impl_->kernels_);
+#endif
 }
 
 template class GemmS4F16<half, half2>;
