@@ -1,11 +1,8 @@
 from typing import Optional, Sequence
 
 import torch
-import torch.nn.functional as F
 from torch.nn.parameter import Parameter
 
-from aphrodite.modeling.megatron.communication_op import (
-    tensor_model_parallel_gather)
 from aphrodite.modeling.layers.linear import UnquantizedLinearMethod
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_rank,
