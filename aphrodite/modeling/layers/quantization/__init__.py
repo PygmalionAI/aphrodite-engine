@@ -3,6 +3,7 @@ from typing import Type
 from aphrodite.modeling.layers.quantization.base_config import QuantizationConfig
 from aphrodite.modeling.layers.quantization.aqlm import AQLMConfig
 from aphrodite.modeling.layers.quantization.awq import AWQConfig
+from aphrodite.modeling.layers.quantization.bitsandbytes import BitsandBytesConfig
 from aphrodite.modeling.layers.quantization.gguf import GGUFConfig
 from aphrodite.modeling.layers.quantization.gptq import GPTQConfig
 from aphrodite.modeling.layers.quantization.quip import QuipConfig
@@ -12,6 +13,7 @@ from aphrodite.modeling.layers.quantization.marlin import MarlinConfig
 _QUANTIZATION_CONFIG_REGISTRY = {
     "aqlm": AQLMConfig,
     "awq": AWQConfig,
+    "bnb": BitsandBytesConfig,
     "gguf": GGUFConfig,
     "gptq": GPTQConfig,
     "quip": QuipConfig,

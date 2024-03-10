@@ -52,6 +52,11 @@ class ModelConfig:
             output). If None, will be derived from the model.
         quantization: Quantization method that was used to quantize the model
             weights. If None, we assume the model weights are not quantized.
+        load_in_4bit: Whether to load the FP16 model in bitsandbytes 4bit
+            format. Works with AWQ models as well as FP16.
+        load_in_8bit: Whether to load the FP16 model in 8bit format. Slower
+            than load_in_smooth in terms of throughput.
+        load_in_smooth: Whether to load the FP16 model in smoothquant format.
         enforce_eager: Whether to enforce eager execution. If True, we will
             disable CUDA graph and always execute the model in eager mode.
             If False, we will use CUDA graph and eager execution in hybrid.
@@ -74,6 +79,9 @@ class ModelConfig:
         tokenizer_revision: Optional[str] = None,
         max_model_len: Optional[int] = None,
         quantization: Optional[str] = None,
+        load_in_4bit: bool = False,
+        load_in_8bit: bool = False,
+        load_in_smooth: bool = False,
         enforce_eager: bool = False,
         max_context_len_to_capture: Optional[int] = None,
         max_log_probs: int = 10,
@@ -88,6 +96,9 @@ class ModelConfig:
         self.revision = revision
         self.tokenizer_revision = tokenizer_revision
         self.quantization = quantization
+        self.load_in_4bit = load_in_4bit
+        self.load_in_8bit = load_in_8bit
+        self.load_in_smooth = load_in_smooth
         self.enforce_eager = enforce_eager
         self.max_context_len_to_capture = max_context_len_to_capture
         self.max_log_probs = max_log_probs
@@ -151,9 +162,10 @@ class ModelConfig:
 
     def _verify_quantization(self) -> None:
         supported_quantization = [
-            "aqlm", "awq", "gguf", "gptq", "quip", "squeezellm", "marlin"
+            "aqlm", "awq", "bnb", "gguf", "gptq", "quip", "squeezellm",
+            "marlin"
         ]
-        rocm_not_supported_quantization = ["aqlm", "awq", "quip"]
+        rocm_not_supported_quantization = ["aqlm", "awq", "bnb", "quip"]
         if self.quantization is not None:
             self.quantization = self.quantization.lower()
 
@@ -181,6 +193,59 @@ class ModelConfig:
                     f"({hf_quant_method}) does not match the quantization "
                     f"method specified in the `quantization` argument "
                     f"({self.quantization}).")
+        if self.load_in_4bit:
+            if self.quantization is None:
+                self.quantization = "bnb"
+                self.hf_config.quantization_config = {
+                    "bits": 4,
+                    "quant_mode": "weight_only",
+                    "quant_method": "bnb",
+                    "group_size": 128,
+                    "zero_point": True,
+                    "from_float": True
+                }
+            elif self.quantization == "awq":
+                logger.warning("AWQ model is being loaded in 4bit bnb format.")
+                self.quantization = "bnb"
+                self.hf_config.quantization_config = {
+                    "zero_point": True,
+                    "q_group_size": 128,
+                    "w_bit": 4,
+                    "version": "gemm"
+                }
+            elif self.quantization != "bnb":
+                raise ValueError("4bit quantization is not supported in "
+                                 f"{self.quantization}.")
+        if self.load_in_8bit:
+            if self.quantization is None:
+                self.quantization = "bnb"
+            elif self.quantization != "bnb":
+                raise ValueError("8bit quantization is not supported in "
+                                 f"{self.quantization}.")
+            self.hf_config.quantization_config = {
+                "bits": 8,
+                "quant_mode": "llm_int8",
+                "quant_method": "bnb",
+                "group_size": 128,
+                "zero_point": True,
+                "from_float": True
+            }
+            self.enforce_eager = True
+        if self.load_in_smooth:
+            if self.quantization is None:
+                self.quantization = "bnb"
+            elif self.quantization != "bnb":
+                raise ValueError("Smooth quantization is not supported in "
+                                 f"{self.quantization}.")
+            self.hf_config.quantization_config = {
+                "bits": 8,
+                "quant_mode": "smoothquant",
+                "quant_method": "bnb",
+                "group_size": 128,
+                "zero_point": True,
+                "from_float": True
+            }
+            self.enforce_eager = True
 
         if self.quantization is not None:
             if self.quantization not in supported_quantization:
