@@ -126,6 +126,15 @@ void gptq_shuffle(
   torch::Tensor q_perm,
   int bit);
 
+torch::Tensor aqlm_gemm(
+  const torch::Tensor& input,
+  const torch::Tensor& codes,
+  const torch::Tensor& codebooks,
+  const torch::Tensor& scales,
+  const torch::Tensor& codebook_partition_sizes,
+  const std::optional<torch::Tensor>& bias
+);
+
 torch::Tensor ggml_dequantize(
     torch::Tensor X,
     int8_t type,

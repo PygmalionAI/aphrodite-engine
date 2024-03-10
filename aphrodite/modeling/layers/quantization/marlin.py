@@ -94,7 +94,7 @@ class MarlinLinearMethod(LinearMethodBase):
     def create_weights(
         self,
         input_size_per_partition: int,
-        output_size_per_partition: int,
+        output_partition_sizes: List[int],
         input_size: int,
         output_size: int,
         params_dtype: torch.dtype,
@@ -105,6 +105,7 @@ class MarlinLinearMethod(LinearMethodBase):
             raise ValueError(
                 f"The params dtype must be float16, but got {params_dtype}")
 
+        output_size_per_partition = sum(output_partition_sizes)
         # Validate output_size_per_partition
         if output_size_per_partition % self.quant_config.min_n_threads != 0:
             raise ValueError(

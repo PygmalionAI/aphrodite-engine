@@ -80,7 +80,7 @@ class VocabParallelEmbedding(torch.nn.Module):
             linear_method = UnquantizedLinearMethod()
         self.linear_method = linear_method
         self.linear_weights = self.linear_method.create_weights(
-            self.embedding_dim, self.num_embeddings_per_partition,
+            self.embedding_dim, [self.num_embeddings_per_partition],
             self.embedding_dim, self.num_embeddings_padded, params_dtype)
         for name, weight in self.linear_weights.items():
             if isinstance(weight, torch.nn.parameter.Parameter):
@@ -116,7 +116,6 @@ class VocabParallelEmbedding(torch.nn.Module):
         output_parallel = self.linear_method.apply_embedding(
             self.linear_weights, masked_input)
         # output_parallel = F.embedding(masked_input, self.weight)
-        # Mask the output embedding.
         if self.tp_size > 1:
             output_parallel[input_mask, :] = 0.0
         # Reduce across all the model parallel GPUs.
@@ -126,11 +125,9 @@ class VocabParallelEmbedding(torch.nn.Module):
 
 class ParallelLMHead(VocabParallelEmbedding):
     """Parallelized LM head.
-
     Output logits weight matrices used in the Sampler. The weight and bias
     tensors are padded to make sure they are divisible by the number of
     model parallel GPUs.
-
     Args:
         num_embeddings: vocabulary size.
         embedding_dim: size of hidden state.
