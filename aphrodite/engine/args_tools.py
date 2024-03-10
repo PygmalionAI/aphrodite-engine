@@ -37,6 +37,8 @@ class EngineArgs:
     tokenizer_revision: Optional[str] = None
     quantization: Optional[str] = None
     load_in_4bit: bool = False
+    load_in_8bit: bool = False
+    load_in_smooth: bool = False
     enforce_eager: bool = False
     max_context_len_to_capture: int = 8192
     disable_custom_all_reduce: bool = False
@@ -225,7 +227,14 @@ class EngineArgs:
                             'type of the weights.')
         parser.add_argument('--load-in-4bit',
                             action='store_true',
-                            help='Load the model in 4-bit format.')
+                            help='Load the FP16 model in 4-bit format.')
+        parser.add_argument('--load-in-8bit',
+                            action='store_true',
+                            help='Load the FP16 model in 8-bit format.')
+        parser.add_argument('--load-in-smooth',
+                            action='store_true',
+                            help='Load the FP16 model in smoothquant '
+                            '8bit format.')
         parser.add_argument('--enforce-eager',
                             action='store_true',
                             help='Always use eager-mode PyTorch. If False, '
@@ -300,8 +309,8 @@ class EngineArgs:
             self.trust_remote_code, self.download_dir, self.load_format,
             self.dtype, self.seed, self.revision, self.tokenizer_revision,
             self.max_model_len, self.quantization, self.load_in_4bit,
-            self.enforce_eager, self.max_context_len_to_capture,
-            self.max_log_probs)
+            self.load_in_8bit, self.load_in_smooth, self.enforce_eager,
+            self.max_context_len_to_capture, self.max_log_probs)
         cache_config = CacheConfig(self.block_size,
                                    self.gpu_memory_utilization,
                                    self.swap_space, self.kv_cache_dtype,

@@ -76,6 +76,8 @@ class ModelConfig:
         max_model_len: Optional[int] = None,
         quantization: Optional[str] = None,
         load_in_4bit: bool = False,
+        load_in_8bit: bool = False,
+        load_in_smooth: bool = False,
         enforce_eager: bool = False,
         max_context_len_to_capture: Optional[int] = None,
         max_log_probs: int = 10,
@@ -91,6 +93,8 @@ class ModelConfig:
         self.tokenizer_revision = tokenizer_revision
         self.quantization = quantization
         self.load_in_4bit = load_in_4bit
+        self.load_in_8bit = load_in_8bit
+        self.load_in_smooth = load_in_smooth
         self.enforce_eager = enforce_eager
         self.max_context_len_to_capture = max_context_len_to_capture
         self.max_log_probs = max_log_probs
@@ -200,6 +204,38 @@ class ModelConfig:
                 "zero_point": True,
                 "from_float": True
             }
+        if self.load_in_8bit:
+            if self.quantization is None:
+                self.quantization = "bnb"
+            elif self.quantization != "bnb":
+                raise ValueError(
+                    "8bit quantization is not supported in "
+                    f"{self.quantization}.")
+            self.hf_config.quantization_config = {
+                "bits": 8,
+                "quant_mode": "llm_int8",
+                "quant_method": "bnb",
+                "group_size": 128,
+                "zero_point": True,
+                "from_float": True
+            }
+            self.enforce_eager = True
+        if self.load_in_smooth:
+            if self.quantization is None:
+                self.quantization = "bnb"
+            elif self.quantization != "bnb":
+                raise ValueError(
+                    "Smooth quantization is not supported in "
+                    f"{self.quantization}.")
+            self.hf_config.quantization_config = {
+                "bits": 8,
+                "quant_mode": "smoothquant",
+                "quant_method": "bnb",
+                "group_size": 128,
+                "zero_point": True,
+                "from_float": True
+            }
+            self.enforce_eager = True
 
         if self.quantization is not None:
             if self.quantization not in supported_quantization:
