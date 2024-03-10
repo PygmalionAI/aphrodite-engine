@@ -52,6 +52,7 @@ class ModelConfig:
             output). If None, will be derived from the model.
         quantization: Quantization method that was used to quantize the model
             weights. If None, we assume the model weights are not quantized.
+        load_in_4bit: Whether to load the model in bitsandbytes 4bit format.
         enforce_eager: Whether to enforce eager execution. If True, we will
             disable CUDA graph and always execute the model in eager mode.
             If False, we will use CUDA graph and eager execution in hybrid.
@@ -74,6 +75,7 @@ class ModelConfig:
         tokenizer_revision: Optional[str] = None,
         max_model_len: Optional[int] = None,
         quantization: Optional[str] = None,
+        load_in_4bit: bool = False,
         enforce_eager: bool = False,
         max_context_len_to_capture: Optional[int] = None,
         max_log_probs: int = 10,
@@ -88,6 +90,7 @@ class ModelConfig:
         self.revision = revision
         self.tokenizer_revision = tokenizer_revision
         self.quantization = quantization
+        self.load_in_4bit = load_in_4bit
         self.enforce_eager = enforce_eager
         self.max_context_len_to_capture = max_context_len_to_capture
         self.max_log_probs = max_log_probs
@@ -182,6 +185,21 @@ class ModelConfig:
                     f"({hf_quant_method}) does not match the quantization "
                     f"method specified in the `quantization` argument "
                     f"({self.quantization}).")
+        if self.load_in_4bit:
+            if self.quantization is None:
+                self.quantization = "bnb"
+            elif self.quantization != "bnb":
+                raise ValueError(
+                    "4bit quantization is not supported in "
+                    f"{self.quantization}.")
+            self.hf_config.quantization_config = {
+                "bits": 4,
+                "quant_mode": "weight_only",
+                "quant_method": "bnb",
+                "group_size": 128,
+                "zero_point": True,
+                "from_float": True
+            }
 
         if self.quantization is not None:
             if self.quantization not in supported_quantization:
