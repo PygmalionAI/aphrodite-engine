@@ -95,7 +95,7 @@ class VocabParallelEmbedding(torch.nn.Module):
             assert loaded_weight.shape[output_dim] == self.org_vocab_size
             loaded_weight = loaded_weight.narrow(
                 output_dim, self.vocab_start_index,
-                min(self.vocab_end_index, self.org_vocab_size))
+                min(self.vocab_end_index - self.vocab_start_index, self.org_vocab_size - self.vocab_start_index))
         if isinstance(param, torch.nn.parameter.UninitializedParameter):
             vocab_shape = list(loaded_weight.shape)
             if output_dim is not None:
