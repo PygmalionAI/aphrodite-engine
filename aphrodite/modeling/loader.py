@@ -99,14 +99,12 @@ def get_model(model_config: ModelConfig,
                 model = model.cuda()
             gc.collect()
             torch.cuda.empty_cache()
-            logger.info(
-                "Memory allocated for converted model: {} GiB".format(
-                    round(
-                        torch.cuda.memory_allocated(torch.cuda.current_device()) /
-                        (1024 * 1024 * 1024), 2)))
-            logger.info(
-                "Memory reserved for converted model: {} GiB".format(
-                    round(
-                        torch.cuda.memory_reserved(torch.cuda.current_device()) /
-                        (1024 * 1024 * 1024), 2)))
+            logger.info("Memory allocated for converted model: {} GiB".format(
+                round(
+                    torch.cuda.memory_allocated(torch.cuda.current_device()) /
+                    (1024 * 1024 * 1024), 2)))
+            logger.info("Memory reserved for converted model: {} GiB".format(
+                round(
+                    torch.cuda.memory_reserved(torch.cuda.current_device()) /
+                    (1024 * 1024 * 1024), 2)))
     return model.eval()
