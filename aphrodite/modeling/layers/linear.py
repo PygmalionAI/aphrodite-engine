@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
+from loguru import logger
 
 import torch
 import torch.nn.functional as F
@@ -12,9 +13,6 @@ from aphrodite.modeling.megatron.communication_op import (
 from aphrodite.modeling.megatron.utils import (divide,
                                                split_tensor_along_last_dim)
 from aphrodite.modeling.utils import set_weight_attrs
-from aphrodite.common.logger import init_logger
-
-logger = init_logger(__name__)
 
 
 def adjust_marlin_shard(param, shard_size, shard_offset):

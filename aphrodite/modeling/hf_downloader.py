@@ -6,6 +6,7 @@ import json
 import os
 from collections import defaultdict
 from typing import Any, Iterator, List, Optional, Tuple
+from loguru import logger
 
 import gguf
 from huggingface_hub import snapshot_download, HfFileSystem
@@ -14,14 +15,11 @@ from safetensors.torch import load_file, save_file, safe_open
 import torch
 from transformers import PretrainedConfig
 from tqdm.auto import tqdm
-from rich.progress import Progress
 
 from aphrodite.common.config import ModelConfig
-from aphrodite.common.logger import init_logger
+from aphrodite.common.logger import get_loading_progress_bar
 from aphrodite.modeling.layers.quantization import (get_quantization_config,
                                                     QuantizationConfig)
-
-logger = init_logger(__name__)
 
 
 class Disabledtqdm(tqdm):  # pylint: disable=inconsistent-mro
@@ -263,7 +261,7 @@ def convert_gguf_to_state_dict(checkpoint, config):
                     mapping[fk] = (fv, v[1])
 
     state_dict = {}
-    with Progress() as progress:
+    with get_loading_progress_bar() as progress:
         task = progress.add_task("[cyan]Converting GGUF tensors to PyTorch...",
                                  total=len(result.tensors))
         for ts in result.tensors:

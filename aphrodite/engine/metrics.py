@@ -1,12 +1,10 @@
-from aphrodite.common.logger import init_logger
-from prometheus_client import Counter, Gauge, Histogram, disable_created_metrics
-
 import time
 import numpy as np
 from typing import Dict, List
 from dataclasses import dataclass
 
-logger = init_logger(__name__)
+from prometheus_client import Counter, Gauge, Histogram, disable_created_metrics
+from loguru import logger
 
 disable_created_metrics()
 

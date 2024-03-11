@@ -4,6 +4,7 @@ import os
 import time
 from typing import (TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple,
                     Union)
+from loguru import logger
 
 import aphrodite
 from aphrodite.lora.request import LoRARequest
@@ -13,7 +14,7 @@ from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.metrics import StatLogger, Stats
 from aphrodite.engine.ray_tools import RayWorkerAphrodite, initialize_cluster, ray
-from aphrodite.common.logger import init_logger
+from aphrodite.common.logger import setup_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (SamplerOutput, Sequence, SequenceGroup,
@@ -29,8 +30,6 @@ if ray:
 
 if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
-
-logger = init_logger(__name__)
 
 _LOCAL_LOGGING_INTERVAL_SEC = 5
 
@@ -1051,3 +1050,6 @@ class AphroditeEngine:
         if dead_actors:
             raise RuntimeError("At least one Worker is dead. "
                                f"Dead workers: {dead_actors}")
+
+
+setup_logger()

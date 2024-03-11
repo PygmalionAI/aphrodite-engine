@@ -1,10 +1,8 @@
 from typing import Optional, List, Tuple, TYPE_CHECKING
+from loguru import logger
 
 from aphrodite.common.config import ParallelConfig
-from aphrodite.common.logger import init_logger
 from aphrodite.common.utils import is_hip, set_cuda_visible_devices, get_ip
-
-logger = init_logger(__name__)
 
 try:
     import ray

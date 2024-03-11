@@ -2,8 +2,8 @@ import time
 import codecs
 from fastapi import Request
 from typing import AsyncGenerator, AsyncIterator, Optional, List, Union
+from loguru import logger
 
-from aphrodite.common.logger import init_logger
 from aphrodite.common.utils import random_uuid
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.endpoints.openai.protocol import (
@@ -14,8 +14,6 @@ from aphrodite.endpoints.openai.protocol import (
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.endpoints.openai.serving_engine import OpenAIServing, LoRA
 from aphrodite.modeling.outlines_decoding import get_guided_decoding_logits_processor
-
-logger = init_logger(__name__)
 
 
 class OpenAIServingChat(OpenAIServing):
@@ -316,13 +314,9 @@ class OpenAIServingChat(OpenAIServing):
                 self.tokenizer.chat_template = codecs.decode(
                     chat_template, "unicode_escape")
 
-            logger.info(
-                f"Using supplied chat template:\n{self.tokenizer.chat_template}"
-            )
+            logger.info("Using the supplied chat template.")
         elif self.tokenizer.chat_template is not None:
-            logger.info(
-                f"Using default chat template:\n{self.tokenizer.chat_template}"
-            )
+            logger.info("Using the default chat template")
         else:
             logger.warning(
                 "No chat template provided. Chat API will not work.")

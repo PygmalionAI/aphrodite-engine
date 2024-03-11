@@ -2,7 +2,7 @@ import asyncio
 import time
 from fastapi import Request
 from typing import AsyncGenerator, AsyncIterator, Callable, List, Optional, Dict, Tuple
-from aphrodite.common.logger import init_logger
+
 from aphrodite.common.utils import random_uuid
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.endpoints.openai.protocol import (
@@ -17,8 +17,6 @@ from aphrodite.endpoints.openai.protocol import (
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.endpoints.openai.serving_engine import OpenAIServing, LoRA
 from aphrodite.modeling.outlines_decoding import get_guided_decoding_logits_processor
-
-logger = init_logger(__name__)
 
 TypeTokenIDs = List[int]
 TypeTopLogProbs = List[Optional[Dict[int, float]]]

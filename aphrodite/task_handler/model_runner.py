@@ -5,11 +5,11 @@ from typing import Dict, List, Optional, Tuple, Set, Union
 import numpy as np
 import torch
 import torch.nn as nn
-from rich.progress import Progress
+from loguru import logger
 
 from aphrodite.common.config import (DeviceConfig, ModelConfig, LoRAConfig,
                                      ParallelConfig, SchedulerConfig)
-from aphrodite.common.logger import init_logger
+from aphrodite.common.logger import get_loading_progress_bar
 from aphrodite.modeling import get_model, InputMetadata, SamplingMetadata
 from aphrodite.modeling.megatron import cupy_utils
 from aphrodite.modeling.megatron.communication_op import (broadcast_tensor_dict
@@ -24,9 +24,7 @@ from aphrodite.modeling.sampling_metadata import PersistentMetadata
 from aphrodite.lora.worker_manager import LRUCacheWorkerLoRAManager
 from aphrodite.lora.layers import LoRAMapping
 from aphrodite.lora.request import LoRARequest
-from aphrodite.common.utils import in_wsl
-
-logger = init_logger(__name__)
+from aphrodite.common.utils import in_wsl, measure_cuda_memory
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 _PAD_SLOT_ID = -1
@@ -108,8 +106,12 @@ class ModelRunner:
         return kv_quant_params
 
     def load_model(self) -> None:
-        self.model = get_model(self.model_config, self.device_config,
-                               self.lora_config)
+        with measure_cuda_memory() as m:
+            self.model = get_model(self.model_config, self.device_config,
+                                   self.lora_config)
+        self.model_memory_usage = m.consumed_memory
+        logger.info("Model loaded. Memory usage: "
+                    f"{self.model_memory_usage / float(2**30):.2f} GiB")
 
         vocab_size = self.model.config.vocab_size
 
@@ -747,7 +749,7 @@ class ModelRunner:
         # We always prioritize using custom all-reduce kernel but fall back
         # to PyTorch or CuPy NCCL if it is disabled or not supported.
         # Initialize a new progress bar
-        progress = Progress()
+        progress = get_loading_progress_bar()
         task = progress.add_task("[cyan]Capturing graph...",
                                  total=len(batch_size_capture_list))
 

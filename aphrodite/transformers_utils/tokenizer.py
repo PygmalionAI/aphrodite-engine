@@ -6,13 +6,11 @@ import gguf
 from transformers import (AutoTokenizer, PreTrainedTokenizer,
                           PreTrainedTokenizerFast, LlamaTokenizer)
 from transformers.convert_slow_tokenizer import import_protobuf
+from loguru import logger
 
-from aphrodite.common.logger import init_logger
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.utils import make_async, LRUCache
 from aphrodite.transformers_utils.tokenizers import BaichuanTokenizer
-
-logger = init_logger(__name__)
 
 
 def convert_gguf_to_tokenizer(checkpoint):

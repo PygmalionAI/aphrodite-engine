@@ -1,10 +1,10 @@
 from contextlib import contextmanager
 from typing import Optional
+from loguru import logger
 
 import torch
 import torch.distributed as dist
 
-from aphrodite.common.logger import init_logger
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_world_size, get_tensor_model_parallel_rank)
 
@@ -15,8 +15,6 @@ except ImportError:
     # For AMD GPUs
     custom_ar = None
     pynvml = None
-
-logger = init_logger(__name__)
 
 _CA_HANDLE = None
 _IS_CAPTURING = False
@@ -41,7 +39,7 @@ def init_custom_ar() -> None:
     if not _can_p2p(rank, world_size):
         logger.warning(
             "Custom allreduce is disabled because your platform lacks GPU P2P"
-            " capability. To slience this warning, specify"
+            " capability. To slience this warning, specify "
             "disable_custom_all_reduce=True explicitly.")
         return
     _CA_HANDLE = CustomAllreduce(rank, world_size)
