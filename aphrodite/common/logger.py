@@ -6,6 +6,7 @@ https://github.com/theroyallab/tabbyAPI/blob/4cc0b59bdc94e6342b6d1d7acadbadc63c7
 import logging
 from loguru import logger
 from rich.console import Console
+from rich.markup import escape
 from rich.progress import (
     Progress,
     TextColumn,
@@ -38,7 +39,7 @@ def get_loading_progress_bar():
     )
 
 
-def _log_formatter(record: dict) -> str:
+def _log_formatter(record: dict):
     """Log message formatter."""
 
     color_map = {
@@ -59,7 +60,10 @@ def _log_formatter(record: dict) -> str:
     message = unwrap(record.get("message"), "")
 
     # Replace once loguru allows for turning off str.format
-    message = message.replace("{{", "{{").replace("}}", "}}").replace("<", "<")
+    message = message.replace("{{", "{{").replace("}}", "}}")
+    # Manually escape < and > characters
+    message = message.replace("<", "\\<").replace(">", "\\>")
+    message = escape(message)
     lines = message.splitlines()
 
     fmt = ""

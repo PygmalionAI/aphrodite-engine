@@ -358,12 +358,15 @@ class OLMoForCausalLM(nn.Module):
         params_dict = dict(self.named_parameters(remove_duplicate=False))
         for name, loaded_weight in hf_model_weights_iterator(
                 model_name_or_path, cache_dir, load_format, revision):
-            if "wte.weight" in name and self.config.weight_tying:
+            if "wte" in name and self.config.weight_tying:
                 # Copy word embedding to lm_head
-                lm_head_param = params_dict["model.transformer.ff_out.weight"]
-                weight_loader = getattr(lm_head_param, "weight_loader",
-                                        default_weight_loader)
-                weight_loader(lm_head_param, loaded_weight)
+                head_name = name.replace("model.transformer.wte",
+                                         "model.transformer.ff_out")
+                if head_name in params_dict:
+                    lm_head_param = params_dict[head_name]
+                    weight_loader = getattr(lm_head_param, "weight_loader",
+                                            default_weight_loader)
+                    weight_loader(lm_head_param, loaded_weight)
             # attention
             if ".att" in name:
                 name = name.replace(".att", ".attn.att")
