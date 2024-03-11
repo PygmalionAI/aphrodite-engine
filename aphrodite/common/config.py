@@ -160,8 +160,8 @@ class ModelConfig:
 
     def _verify_quantization(self) -> None:
         supported_quantization = [
-            "aqlm", "awq", "bnb", "gguf", "gptq", "quip", "squeezellm",
-            "marlin"
+            "aqlm", "awq", "bnb", "exl2", "gguf",
+            "gptq", "quip", "squeezellm", "marlin"
         ]
         rocm_not_supported_quantization = ["aqlm", "awq", "bnb", "quip"]
         if self.quantization is not None:

@@ -65,7 +65,7 @@ class GGUFConfig(QuantizationConfig):
         return False
 
     def quant_vocab(self) -> Optional[bool]:
-        return True
+        return (True, True)
 
 
 class GGUFLinearMethod(LinearMethodBase):

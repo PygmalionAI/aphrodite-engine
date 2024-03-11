@@ -223,8 +223,8 @@ class EngineArgs:
                             '-q',
                             type=str,
                             choices=[
-                                'aqlm', 'awq', 'bnb', 'gguf', 'gptq', 'quip',
-                                'squeezellm', 'marlin', None
+                                'aqlm', 'awq', 'bnb', 'exl2', 'gguf', 'gptq',
+                                'quip', 'squeezellm', 'marlin', None
                             ],
                             default=EngineArgs.quantization,
                             help='Method used to quantize the weights. If '
