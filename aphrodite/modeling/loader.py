@@ -3,6 +3,7 @@ import contextlib
 import gc
 from contextlib import nullcontext
 from typing import Optional, Type
+from loguru import logger
 
 import torch
 import torch.nn as nn
@@ -13,9 +14,6 @@ from aphrodite.modeling.hf_downloader import (get_quant_config,
                                               initialize_dummy_weights)
 from aphrodite.modeling.layers.quantization.bitsandbytes import (
     BNBLinearMethod, replace_quant_params)
-from aphrodite.common.logger import init_logger
-
-logger = init_logger(__name__)
 
 
 @contextlib.contextmanager
@@ -101,8 +99,14 @@ def get_model(model_config: ModelConfig,
                 model = model.cuda()
             gc.collect()
             torch.cuda.empty_cache()
-            print("Memory allocated:",
-                  torch.cuda.memory_allocated(torch.cuda.current_device()))
-            print("Memory reserved:",
-                  torch.cuda.memory_reserved(torch.cuda.current_device()))
+            logger.info(
+                "Memory allocated for converted model: %s MB",
+                round(
+                    torch.cuda.memory_allocated(torch.cuda.current_device()) /
+                    (1024 * 1024), 2))
+            logger.info(
+                "Memory reserved for converted model: %s MB",
+                round(
+                    torch.cuda.memory_reserved(torch.cuda.current_device()) /
+                    (1024 * 1024), 2))
     return model.eval()

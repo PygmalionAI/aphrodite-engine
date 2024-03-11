@@ -2,16 +2,14 @@ from typing import Optional, Union, ClassVar
 from dataclasses import dataclass
 import os
 from packaging.version import Version
+from loguru import logger
 
 import torch
 from transformers import PretrainedConfig
 
-from aphrodite.common.logger import init_logger
 from aphrodite.transformers_utils.config import get_config
 from aphrodite.common.utils import (get_cpu_memory, is_hip,
                                     get_nvcc_cuda_version)
-
-logger = init_logger(__name__)
 
 _GB = 1 << 30
 

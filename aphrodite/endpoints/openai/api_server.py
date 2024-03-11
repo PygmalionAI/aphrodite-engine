@@ -15,6 +15,7 @@ from fastapi import Request, APIRouter, Header
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, Response, HTMLResponse
+from loguru import logger
 
 import aphrodite
 from aphrodite.engine.args_tools import AsyncEngineArgs
@@ -22,7 +23,7 @@ from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.endpoints.openai.protocol import (CompletionRequest,
                                                  ChatCompletionRequest,
                                                  ErrorResponse, Prompt)
-from aphrodite.common.logger import init_logger
+from aphrodite.common.logger import UVICORN_LOG_CONFIG
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams, _SAMPLING_EPS
 from aphrodite.common.utils import random_uuid
@@ -36,7 +37,6 @@ TIMEOUT_KEEP_ALIVE = 5  # seconds
 
 openai_serving_chat: OpenAIServingChat = None
 openai_serving_completion: OpenAIServingCompletion = None
-logger = init_logger(__name__)
 kai_api = APIRouter()
 extra_api = APIRouter()
 kobold_lite_ui = ""
@@ -582,4 +582,5 @@ if __name__ == "__main__":
                 log_level="info",
                 timeout_keep_alive=TIMEOUT_KEEP_ALIVE,
                 ssl_keyfile=args.ssl_keyfile,
-                ssl_certfile=args.ssl_certfile)
+                ssl_certfile=args.ssl_certfile,
+                log_config=UVICORN_LOG_CONFIG)
