@@ -34,7 +34,7 @@ class Exl2Config(QuantizationConfig):
     """
 
     def __repr__(self) -> str:
-        return f"Exl2Config()"
+        return "Exl2Config()"
 
     @classmethod
     def get_name(cls) -> str:
