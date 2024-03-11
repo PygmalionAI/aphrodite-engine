@@ -111,7 +111,7 @@ class ModelRunner:
                                    self.lora_config)
         self.model_memory_usage = m.consumed_memory
         logger.info("Model loaded. Memory usage: "
-                    f"{self.model_memory_usage / float(2**30):.4f} GiB")
+                    f"{self.model_memory_usage / float(2**30):.2f} GiB")
 
         vocab_size = self.model.config.vocab_size
 
