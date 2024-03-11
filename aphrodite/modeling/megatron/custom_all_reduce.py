@@ -39,7 +39,7 @@ def init_custom_ar() -> None:
     if not _can_p2p(rank, world_size):
         logger.warning(
             "Custom allreduce is disabled because your platform lacks GPU P2P"
-            " capability. To slience this warning, specify"
+            " capability. To slience this warning, specify "
             "disable_custom_all_reduce=True explicitly.")
         return
     _CA_HANDLE = CustomAllreduce(rank, world_size)
