@@ -70,6 +70,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   ops.def("ggml_mul_mat_vec", &ggml_mul_mat_vec, "ggml_mul_mat_vec");
   ops.def("ggml_mul_mat_vec_a8", &ggml_mul_mat_vec_a8, "ggml_mul_mat_vec_a8");
   ops.def("ggml_mul_mat_a8", &ggml_mul_mat_a8, "ggml_mul_mat_a8");
+  ops.def("exl2_make_q_matrix",&make_q_matrix, "preprocess for exl2");
+  ops.def("exl2_gemm", &exl2_gemm, "exl2 gemm");
   
   ops.def("moe_align_block_size",
           &moe_align_block_size,
