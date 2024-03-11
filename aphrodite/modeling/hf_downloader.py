@@ -88,7 +88,7 @@ def get_quant_config(model_config: ModelConfig) -> QuantizationConfig:
     quant_cls = get_quantization_config(model_config.quantization)
     # Read the quantization config from the HF model config, if available.
     # if the quantization if "gguf", we skip and return quant_cls()
-    if model_config.quantization == "gguf":
+    if model_config.quantization in ["exl2", "gguf"]:
         return quant_cls()
     hf_quant_config = getattr(model_config.hf_config, "quantization_config",
                               None)

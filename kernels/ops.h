@@ -187,6 +187,21 @@ torch::Tensor ggml_mul_mat_a8(
     int64_t row
 );
 
+uintptr_t make_q_matrix(
+    torch::Tensor q_weight,
+    torch::Tensor q_perm,
+    torch::Tensor q_invperm,
+    torch::Tensor q_scale,
+    torch::Tensor q_scale_max,
+    torch::Tensor q_groups,
+    torch::Tensor q_group_map
+);
+
+torch::Tensor exl2_gemm(
+    torch::Tensor a,
+    uintptr_t b
+);
+
 void moe_align_block_size(
   torch::Tensor topk_ids,
   int num_experts,
