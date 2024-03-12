@@ -559,6 +559,16 @@ if __name__ == "__main__":
 
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = AsyncAphrodite.from_engine_args(engine_args)
+    tokenizer = get_tokenizer(
+        engine_args.tokenizer,
+        tokenizer_mode=engine_args.tokenizer_mode,
+        trust_remote_code=engine_args.trust_remote_code,
+    )
+
+    chat_template = args.chat_template
+    if chat_template is None and tokenizer.chat_template is not None:
+        chat_template = tokenizer.chat_template
+
     openai_serving_chat = OpenAIServingChat(engine, served_model,
                                             args.response_role,
                                             args.lora_modules,
@@ -566,11 +576,6 @@ if __name__ == "__main__":
     openai_serving_completion = OpenAIServingCompletion(
         engine, served_model, args.lora_modules)
     engine_model_config = asyncio.run(engine.get_model_config())
-    tokenizer = get_tokenizer(
-        engine_args.tokenizer,
-        tokenizer_mode=engine_args.tokenizer_mode,
-        trust_remote_code=engine_args.trust_remote_code,
-    )
 
     if args.launch_kobold_api:
         _set_badwords(tokenizer, engine_model_config.hf_config)

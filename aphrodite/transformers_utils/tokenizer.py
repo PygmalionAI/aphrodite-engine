@@ -57,6 +57,9 @@ def convert_gguf_to_tokenizer(checkpoint):
     if 'tokenizer.ggml.add_eos_token' in result.fields:
         tokenizer_args["add_eos_token"] = bool(
             result.fields['tokenizer.ggml.add_eos_token'].parts[-1])
+    if 'tokenizer.chat_template' in result.fields:
+        tokenizer_args["chat_template"] = str(
+            bytes(result.fields['tokenizer.chat_template'].parts[-1]))
     tokenizer = LlamaTokenizer(**tokenizer_args)
     os.unlink(temp_file_filename)
     return tokenizer
