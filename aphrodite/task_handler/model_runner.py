@@ -112,9 +112,9 @@ class ModelRunner:
         self.model_memory_usage = m.consumed_memory
         tp = get_tensor_model_parallel_world_size()
         logger.info(
-            "Model loaded. Memory usage: "
+            "Model weights loaded. Memory usage: "
             f"{self.model_memory_usage / float(2**30):.2f} GiB x {tp} = "
-            f"{self.model_memory_usage * tp / float(2**30):.2f} GiB in total")
+            f"{self.model_memory_usage * tp / float(2**30):.2f} GiB")
 
         vocab_size = self.model.config.vocab_size
 
