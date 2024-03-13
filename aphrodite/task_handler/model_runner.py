@@ -15,7 +15,7 @@ from aphrodite.modeling.megatron import cupy_utils
 from aphrodite.modeling.megatron.communication_op import (broadcast_tensor_dict
                                                           )
 from aphrodite.modeling.megatron.parallel_state import (
-    with_cupy_nccl_for_all_reduce)
+    get_tensor_model_parallel_world_size, with_cupy_nccl_for_all_reduce)
 from aphrodite.modeling.megatron import custom_all_reduce
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (SamplerOutput, SequenceData,
@@ -110,8 +110,11 @@ class ModelRunner:
             self.model = get_model(self.model_config, self.device_config,
                                    self.lora_config)
         self.model_memory_usage = m.consumed_memory
-        logger.info("Model loaded. Memory usage: "
-                    f"{self.model_memory_usage / float(2**30):.2f} GiB")
+        tp = get_tensor_model_parallel_world_size()
+        logger.info(
+            "Model weights loaded. Memory usage: "
+            f"{self.model_memory_usage / float(2**30):.2f} GiB x {tp} = "
+            f"{self.model_memory_usage * tp / float(2**30):.2f} GiB")
 
         vocab_size = self.model.config.vocab_size
 
