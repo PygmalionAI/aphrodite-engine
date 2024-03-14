@@ -1,0 +1,22 @@
+name: 📚 Wiki
+description: Report an issue related to https://github.com/PygmalionAI/aphrodite-engine/wiki
+title: "[Wiki]: "
+labels: ["wiki"]
+
+body:
+- type: textarea
+  attributes:
+    label: 📚 The wiki issue
+    description: >
+      A clear and concise description of what content in https://github.com/PygmalionAI/aphrodite-engine/wiki is an issue.
+  validations:
+    required: true
+- type: textarea
+  attributes:
+    label: Suggest a potential alternative/fix
+    description: >
+      Tell us how we could improve the wiki in this regard.
+- type: markdown
+  attributes:
+    value: >
+      Thanks for contributing 🎉~
