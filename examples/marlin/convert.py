@@ -1,4 +1,6 @@
-import torch, argparse, copy
+import torch
+import argparse
+import copy
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from auto_gptq.nn_modules.qlinear.qlinear_exllama import QuantLinear
 from marlin import Layer as MarlinLayer
@@ -9,26 +11,45 @@ parser.add_argument("--model-id", type=str)
 parser.add_argument("--save-path", type=str)
 parser.add_argument("--do-generation", action="store_true")
 
+
 def _validate_compatibility(model):
     if not hasattr(model.config, "quantization_config"):
-        raise ValueError("Must be a quantized model to convert to Marlin Format")
+        raise ValueError(
+            "Must be a quantized model to convert to Marlin Format")
     quantization_config = model.config.quantization_config
     if quantization_config.quant_method != "gptq":
-        raise ValueError(f"Only GPTQ models can be converted to Marlin format. You passed a model with quant_method={quantization_config.quant_method}")
+        raise ValueError(
+            f"Only GPTQ models can be converted to Marlin format. You passed a model with quant_method={quantization_config.quant_method}"
+        )
     if quantization_config.bits != 4:
-        raise ValueError(f"Only 4 bit quantized models can be converted to Marlin format. You passed a model with bits={quantization_config.bits}")
+        raise ValueError(
+            f"Only 4 bit quantized models can be converted to Marlin format. You passed a model with bits={quantization_config.bits}"
+        )
     if quantization_config.group_size != 128:
-        raise ValueError(f"Only group size 128 models can be converted to Marlin format. You passed a model with group_size={quantization_config.group_size}")
+        raise ValueError(
+            f"Only group size 128 models can be converted to Marlin format. You passed a model with group_size={quantization_config.group_size}"
+        )
     if not quantization_config.sym:
-        raise ValueError(f"Only models with symmetric quantization can be converted to Marlin Format. You passed a model with sym={quantization_config.sym}")
+        raise ValueError(
+            f"Only models with symmetric quantization can be converted to Marlin Format. You passed a model with sym={quantization_config.sym}"
+        )
     if quantization_config.desc_act:
-        raise ValueError(f"Models with act order quantization cannot be converted to Marlin Format. You passed a model with desc_act={quantization_config.desc_act}")
+        raise ValueError(
+            f"Models with act order quantization cannot be converted to Marlin Format. You passed a model with desc_act={quantization_config.desc_act}"
+        )
+
 
 @torch.no_grad()
 def unpack_4bit_to_32bit_signed(qweight, qzeros):
     # Unpack 4-bit values and interpret them as signed integers
-    unpacked_weights = torch.zeros((qweight.shape[0]*8, qweight.shape[1]), dtype=torch.int8, device=qweight.device, requires_grad=False)
-    unpacked_zeros = torch.zeros((qzeros.shape[0], qzeros.shape[1]*8), dtype=torch.int8, device=qzeros.device, requires_grad=False)
+    unpacked_weights = torch.zeros((qweight.shape[0] * 8, qweight.shape[1]),
+                                   dtype=torch.int8,
+                                   device=qweight.device,
+                                   requires_grad=False)
+    unpacked_zeros = torch.zeros((qzeros.shape[0], qzeros.shape[1] * 8),
+                                 dtype=torch.int8,
+                                 device=qzeros.device,
+                                 requires_grad=False)
 
     for row in range(unpacked_weights.shape[0]):
         i = row % 8
@@ -40,16 +61,19 @@ def unpack_4bit_to_32bit_signed(qweight, qzeros):
 
     return unpacked_weights, unpacked_zeros + 1
 
+
 @torch.no_grad()
 def dequantize_weight(layer):
     qweight, qzeros, scales = layer.qweight, layer.qzeros, layer.scales
-    unpacked_qweight, unpacked_qzeros = unpack_4bit_to_32bit_signed(qweight, qzeros)
+    unpacked_qweight, unpacked_qzeros = unpack_4bit_to_32bit_signed(
+        qweight, qzeros)
     group_size = unpacked_qweight.shape[0] // scales.shape[0]
     scales = scales.repeat_interleave(group_size, dim=0)
     unpacked_qzeros = unpacked_qzeros.repeat_interleave(group_size, dim=0)
     unpacked_qweight = (unpacked_qweight - unpacked_qzeros) * scales
 
     return unpacked_qweight.T
+
 
 @torch.no_grad()
 def convert_model(model, verbose=True):
@@ -77,7 +101,8 @@ def convert_model(model, verbose=True):
             infeatures=linear_module.in_features,
             outfeatures=linear_module.out_features,
             groupsize=model.config.quantization_config.group_size)
-        new_module.pack(linear_module, scales=copy.deepcopy(module.scales.data.t()))
+        new_module.pack(linear_module,
+                        scales=copy.deepcopy(module.scales.data.t()))
 
         # Save to parent.
         parent_module = model.get_submodule(parent_name)
@@ -89,6 +114,7 @@ def convert_model(model, verbose=True):
         gc.collect()
 
     return model
+
 
 @torch.no_grad()
 def dequantize_model(model, verbose=True):
@@ -112,7 +138,8 @@ def dequantize_model(model, verbose=True):
             bias=False,
             dtype=torch.float16)
         new_module.weight.data.copy_(dequantized_weight_cpu)
-        new_module.scales = torch.nn.Parameter(copy.deepcopy(module.scales.data))
+        new_module.scales = torch.nn.Parameter(
+            copy.deepcopy(module.scales.data))
 
         # Save to parent.
         parent_module = model.get_submodule(parent_name)
@@ -123,6 +150,7 @@ def dequantize_model(model, verbose=True):
         torch.cuda.empty_cache()
 
     return model
+
 
 if __name__ == "__main__":
     args = parser.parse_args()

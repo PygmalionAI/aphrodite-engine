@@ -4,7 +4,6 @@ from loguru import logger
 
 import torch.nn as nn
 
-from aphrodite.common.logger import setup_logger
 from aphrodite.common.utils import is_hip
 
 # Architecture -> (module, class).

@@ -11,21 +11,21 @@ from packaging.version import parse, Version
 import setuptools
 import torch
 import torch.utils.cpp_extension as torch_cpp_ext
-from torch.utils.cpp_extension import (
-    BuildExtension, CUDAExtension, CUDA_HOME, ROCM_HOME)
+from torch.utils.cpp_extension import (BuildExtension, CUDAExtension,
+                                       CUDA_HOME, ROCM_HOME)
 
 ROOT_DIR = os.path.dirname(__file__)
 
 MAIN_CUDA_VERSION = "12.1"
 
 # Supported NVIDIA GPU architectures.
-NVIDIA_SUPPORTED_ARCHS = {
-    "6.1", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"
-}
+NVIDIA_SUPPORTED_ARCHS = {"6.1", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"}
 ROCM_SUPPORTED_ARCHS = {"gfx90a", "gfx942", "gfx1100"}
+
 
 def _is_hip() -> bool:
     return torch.version.hip is not None
+
 
 def _is_cuda() -> bool:
     return torch.version.cuda is not None
@@ -35,7 +35,6 @@ def _is_cuda() -> bool:
 CXX_FLAGS = ["-g", "-O2", "-std=c++17"]
 # TODO: Should we use -O3?
 NVCC_FLAGS = ["-O2", "-std=c++17"]
-
 
 if _is_hip():
     if ROCM_HOME is None:
@@ -74,9 +73,11 @@ def get_hipcc_rocm_version():
         print("Could not find HIP version in the output")
         return None
 
+
 def glob(pattern: str):
     root = Path(__name__).parent
     return [str(p) for p in root.glob(pattern)]
+
 
 def get_nvcc_cuda_version(cuda_dir: str) -> Version:
     """Get the CUDA version from nvcc.
@@ -89,6 +90,7 @@ def get_nvcc_cuda_version(cuda_dir: str) -> Version:
     release_idx = output.index("release") + 1
     nvcc_cuda_version = parse(output[release_idx].split(",")[0])
     return nvcc_cuda_version
+
 
 def get_pytorch_rocm_arch() -> Set[str]:
     env_arch_list = os.environ.get("PYTORCH_ROCM_ARCH", None)
@@ -123,6 +125,7 @@ def get_pytorch_rocm_arch() -> Set[str]:
             f"{ROCM_SUPPORTED_ARCHS}.",
             stacklevel=2)
     return arch_list
+
 
 def get_torch_arch_list() -> Set[str]:
     # TORCH_CUDA_ARCH_LIST can have one or more architectures,
@@ -242,7 +245,7 @@ if _is_cuda():
         nvcc_threads = int(os.getenv("NVCC_THREADS", 8))
         num_threads = min(os.cpu_count(), nvcc_threads)
         NVCC_FLAGS += ["--threads", str(num_threads)]
-    
+
     if nvcc_cuda_version >= Version("11.8"):
         NVCC_FLAGS += ["-DENABLE_FP8_E5M2"]
 
@@ -258,7 +261,8 @@ if _is_cuda():
         with contextlib.suppress(ValueError):
             torch_cpp_ext.COMMON_NVCC_FLAGS.remove(flag)
 
-    install_punica = bool(int(os.getenv("APHRODITE_INSTALL_PUNICA_KERNELS", "1")))
+    install_punica = bool(
+        int(os.getenv("APHRODITE_INSTALL_PUNICA_KERNELS", "1")))
     device_count = torch.cuda.device_count()
     for i in range(device_count):
         major, minor = torch.cuda.get_device_capability(i)
@@ -276,8 +280,9 @@ if _is_cuda():
                     "nvcc": NVCC_FLAGS_PUNICA,
                 },
             ))
-    
-    install_hadamard = bool(int(os.getenv("APHRODITE_INSTALL_HADAMARD_KERNELS", "1")))
+
+    install_hadamard = bool(
+        int(os.getenv("APHRODITE_INSTALL_HADAMARD_KERNELS", "1")))
     device_count = torch.cuda.device_count()
     for i in range(device_count):
         major, minor = torch.cuda.get_device_capability(i)
@@ -288,8 +293,10 @@ if _is_cuda():
         ext_modules.append(
             CUDAExtension(
                 name="aphrodite._hadamard_C",
-                sources=["kernels/hadamard/fast_hadamard_transform.cpp",
-                         "kernels/hadamard/fast_hadamard_transform_cuda.cu"],
+                sources=[
+                    "kernels/hadamard/fast_hadamard_transform.cpp",
+                    "kernels/hadamard/fast_hadamard_transform_cuda.cu"
+                ],
                 extra_compile_args={
                     "cxx": CXX_FLAGS,
                     "nvcc": NVCC_FLAGS,
@@ -313,17 +320,25 @@ aphrodite_extension_sources = [
 ]
 
 if _is_cuda():
-    aphrodite_extension_sources.append("kernels/quantization/awq/gemm_kernels.cu")
-    aphrodite_extension_sources.append("kernels/quantization/quip/origin_order.cu")
-    aphrodite_extension_sources.append("kernels/quantization/marlin/marlin_cuda_kernel.cu")
-    aphrodite_extension_sources.append("kernels/all_reduce/custom_all_reduce.cu")
-    aphrodite_extension_sources.append("kernels/quantization/aqlm/aqlm_cuda_entry.cpp")
-    aphrodite_extension_sources.append("kernels/quantization/aqlm/aqlm_cuda_kernel.cu")
+    aphrodite_extension_sources.append(
+        "kernels/quantization/awq/gemm_kernels.cu")
+    aphrodite_extension_sources.append(
+        "kernels/quantization/quip/origin_order.cu")
+    aphrodite_extension_sources.append(
+        "kernels/quantization/marlin/marlin_cuda_kernel.cu")
+    aphrodite_extension_sources.append(
+        "kernels/all_reduce/custom_all_reduce.cu")
+    aphrodite_extension_sources.append(
+        "kernels/quantization/aqlm/aqlm_cuda_entry.cpp")
+    aphrodite_extension_sources.append(
+        "kernels/quantization/aqlm/aqlm_cuda_kernel.cu")
     aphrodite_extension_sources.append(
         "kernels/quantization/bitsandbytes/int4_fp16_gemm_kernels.cu")
-    aphrodite_extension_sources.append("kernels/quantization/bitsandbytes/format.cu")
-    aphrodite_extension_sources.append("kernels/quantization/bitsandbytes/gemm_s4_f16.cu")
-    
+    aphrodite_extension_sources.append(
+        "kernels/quantization/bitsandbytes/format.cu")
+    aphrodite_extension_sources.append(
+        "kernels/quantization/bitsandbytes/gemm_s4_f16.cu")
+
     ext_modules.append(
         CUDAExtension(
             name="aphrodite._moe_C",
@@ -333,7 +348,7 @@ if _is_cuda():
                 "nvcc": NVCC_FLAGS,
             },
         ))
-    
+
 aphrodite_extension = CUDAExtension(
     name="aphrodite._C",
     sources=aphrodite_extension_sources,
@@ -341,12 +356,17 @@ aphrodite_extension = CUDAExtension(
         "cxx": CXX_FLAGS,
         "nvcc": NVCC_FLAGS,
     },
-    libraries=["cuda", "conda/envs/aphrodite-runtime/lib",
-               "conda/envs/aphrodite-runtime/lib/stubs"] if _is_cuda() else [],
-    library_dirs=["conda/envs/aphrodite-runtime/lib",
-                  "conda/envs/aphrodite-runtime/lib/stubs"] if _is_cuda() else [],
+    libraries=[
+        "cuda", "conda/envs/aphrodite-runtime/lib",
+        "conda/envs/aphrodite-runtime/lib/stubs"
+    ] if _is_cuda() else [],
+    library_dirs=[
+        "conda/envs/aphrodite-runtime/lib",
+        "conda/envs/aphrodite-runtime/lib/stubs"
+    ] if _is_cuda() else [],
 )
 ext_modules.append(aphrodite_extension)
+
 
 def get_path(*filepath) -> str:
     return os.path.join(ROOT_DIR, *filepath)
@@ -367,7 +387,7 @@ def find_version(filepath: str) -> str:
 
 def get_aphrodite_version() -> str:
     version = find_version(get_path("aphrodite", "__init__.py"))
-    
+
     if _is_hip():
         # get the HIP version
 
@@ -436,8 +456,7 @@ setuptools.setup(
     package_data={
         "aphrodite": [
             "endpoints/kobold/klite.embd",
-            "modeling/layers/quantization/hadamard.safetensors",
-            "py.typed"
+            "modeling/layers/quantization/hadamard.safetensors", "py.typed"
         ]
     },
     include_package_data=True,
