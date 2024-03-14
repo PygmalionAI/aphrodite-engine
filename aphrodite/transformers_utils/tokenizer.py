@@ -2,6 +2,7 @@ import os
 import tempfile
 from typing import List, Optional, Tuple, Union
 
+import gguf
 from transformers import (AutoTokenizer, PreTrainedTokenizer,
                           PreTrainedTokenizerFast, LlamaTokenizer)
 from transformers.convert_slow_tokenizer import import_protobuf
@@ -10,10 +11,58 @@ from aphrodite.common.logger import init_logger
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.utils import make_async, LRUCache
 from aphrodite.transformers_utils.tokenizers import BaichuanTokenizer
-from aphrodite.modeling.layers.quantization.gguf_utils import (
-    convert_gguf_to_tokenizer)
 
 logger = init_logger(__name__)
+
+
+def convert_gguf_to_tokenizer(checkpoint):
+    result = gguf.GGUFReader(checkpoint)
+    # write vocab
+    sentencepiece_model_pb2 = import_protobuf()
+    vocab = sentencepiece_model_pb2.ModelProto()
+    vocab_size = len(result.fields['tokenizer.ggml.token_type'].data)
+    vocab.trainer_spec.model_type = 2  # BPE
+    vocab.trainer_spec.vocab_size = vocab_size
+    vocab.trainer_spec.byte_fallback = True
+    vocab.normalizer_spec.remove_extra_whitespaces = False
+    tokens = result.fields['tokenizer.ggml.tokens']
+    scores = result.fields['tokenizer.ggml.scores']
+    types = result.fields['tokenizer.ggml.token_type']
+    for i in range(vocab_size):
+        new_token = vocab.SentencePiece()
+        new_token.piece = str(bytes(tokens.parts[tokens.data[i]]),
+                              encoding='utf-8')
+        new_token.score = scores.parts[scores.data[i]]
+        # llama.cpp tokentype is the same with sentencepiece token type
+        new_token.type = int(types.parts[types.data[i]])
+        vocab.pieces.append(new_token)
+    with tempfile.NamedTemporaryFile(mode='wb', delete=False) as temp_file:
+        temp_file.write(vocab.SerializeToString())
+        temp_file_filename = temp_file.name
+    tokenizer_args = {"vocab_file": temp_file_filename}
+
+    if 'tokenizer.ggml.bos_token_id' in result.fields:
+        tokenizer_args["bos_token"] = vocab.pieces[int(
+            result.fields['tokenizer.ggml.bos_token_id'].parts[-1])].piece
+    if 'tokenizer.ggml.eos_token_id' in result.fields:
+        tokenizer_args["eos_token"] = vocab.pieces[int(
+            result.fields['tokenizer.ggml.eos_token_id'].parts[-1])].piece
+    if 'tokenizer.ggml.padding_token_id' in result.fields:
+        tokenizer_args["pad_token"] = vocab.pieces[int(
+            result.fields['tokenizer.ggml.padding_token_id'].parts[-1])].piece
+    if 'tokenizer.ggml.unknown_token_id' in result.fields:
+        tokenizer_args["unk_token"] = vocab.pieces[int(
+            result.fields['tokenizer.ggml.unknown_token_id'].parts[-1])].piece
+    if 'tokenizer.ggml.add_bos_token' in result.fields:
+        tokenizer_args["add_bos_token"] = bool(
+            result.fields['tokenizer.ggml.add_bos_token'].parts[-1])
+    if 'tokenizer.ggml.add_eos_token' in result.fields:
+        tokenizer_args["add_eos_token"] = bool(
+            result.fields['tokenizer.ggml.add_eos_token'].parts[-1])
+    tokenizer = LlamaTokenizer(**tokenizer_args)
+    os.unlink(temp_file_filename)
+    return tokenizer
+
 
 def get_tokenizer(
     tokenizer_name: str,

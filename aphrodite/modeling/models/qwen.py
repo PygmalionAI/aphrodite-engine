@@ -116,13 +116,15 @@ class QWenAttention(nn.Module):
         )
         self.scaling = self.head_dim**-0.5
 
+        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
+        ) is None else linear_method.quant_config.rope_style()
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.head_dim,
             max_position=max_position_embeddings,
             base=rope_theta,
             rope_scaling=rope_scaling,
-            is_neox_style=True,
+            is_neox_style=is_neox_style,
         )
         self.attn = PagedAttention(self.num_heads, self.head_dim, self.scaling)
 
