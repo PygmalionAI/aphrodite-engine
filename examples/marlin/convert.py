@@ -19,24 +19,26 @@ def _validate_compatibility(model):
     quantization_config = model.config.quantization_config
     if quantization_config.quant_method != "gptq":
         raise ValueError(
-            f"Only GPTQ models can be converted to Marlin format. You passed a model with quant_method={quantization_config.quant_method}"
-        )
+            "Only GPTQ models can be converted to Marlin format. You passed a "
+            f"model with quant_method={quantization_config.quant_method}")
     if quantization_config.bits != 4:
         raise ValueError(
-            f"Only 4 bit quantized models can be converted to Marlin format. You passed a model with bits={quantization_config.bits}"
-        )
+            "Only 4 bit quantized models can be converted to Marlin format. "
+            f"You passed a model with bits={quantization_config.bits}")
     if quantization_config.group_size != 128:
         raise ValueError(
-            f"Only group size 128 models can be converted to Marlin format. You passed a model with group_size={quantization_config.group_size}"
-        )
+            "Only group size 128 models can be converted to Marlin format. You "
+            f"passed a model with group_size={quantization_config.group_size}")
     if not quantization_config.sym:
         raise ValueError(
-            f"Only models with symmetric quantization can be converted to Marlin Format. You passed a model with sym={quantization_config.sym}"
-        )
+            "Only models with symmetric quantization can be converted to "
+            "Marlin Format. You passed a model with sym="
+            f"{quantization_config.sym}")
     if quantization_config.desc_act:
         raise ValueError(
-            f"Models with act order quantization cannot be converted to Marlin Format. You passed a model with desc_act={quantization_config.desc_act}"
-        )
+            "Models with act order quantization cannot be converted to "
+            "Marlin Format. You passed a model with desc_act="
+            f"{quantization_config.desc_act}")
 
 
 @torch.no_grad()

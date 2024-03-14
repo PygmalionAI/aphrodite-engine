@@ -22,9 +22,9 @@ def fused_moe_kernel(
     K,
     EM,
     num_valid_tokens,
-    # The stride variables represent how much to increase the ptr by when moving by 1
-    # element in a particular dimension. E.g. `stride_am` is how much to increase `a_ptr`
-    # by to get the element one row down (A has M rows).
+    # The stride variables represent how much to increase the ptr by when moving
+    # by 1 element in a particular dimension. E.g. `stride_am` is how much to
+    # increase `a_ptr` by to get the element one row down (A has M rows).
     stride_am,
     stride_ak,
     stride_be,
@@ -249,7 +249,8 @@ def fused_moe(
     - hidden_states (torch.Tensor): The input tensor to the MoE layer.
     - w1 (torch.Tensor): The first set of expert weights.
     - w2 (torch.Tensor): The second set of expert weights.
-    - gating_output (torch.Tensor): The output of the gating operation (before softmax).
+    - gating_output (torch.Tensor): The output of the gating operation (before
+        softmax).
     - topk (int): The number of top-k experts to select.
     - renormalize (bool): If True, renormalize the top-k weights to sum to 1.
     - inplace (bool): If True, perform the operation in-place. Defaults to

@@ -77,17 +77,16 @@ def run(command):
                          shell=shell)
     raw_output, raw_err = p.communicate()
     rc = p.returncode
-    if get_platform() == 'win32':
-        enc = 'oem'
-    else:
-        enc = locale.getpreferredencoding()
+    enc = 'oem' if get_platform() == 'win32' else locale.getpreferredencoding()
     output = raw_output.decode(enc)
     err = raw_err.decode(enc)
     return rc, output.strip(), err.strip()
 
 
 def run_and_read_all(run_lambda, command):
-    """Run command using run_lambda; reads and returns entire output if rc is 0."""
+    """
+    Run command using run_lambda; reads and returns entire output if rc is 0.
+    """
     rc, out, _ = run_lambda(command)
     if rc != 0:
         return None
@@ -95,7 +94,9 @@ def run_and_read_all(run_lambda, command):
 
 
 def run_and_parse_first_match(run_lambda, command, regex):
-    """Run command using run_lambda, returns the first regex match if it exists."""
+    """
+    Run command using run_lambda, returns the first regex match if it exists.
+    """
     rc, out, _ = run_lambda(command)
     if rc != 0:
         return None
@@ -106,7 +107,9 @@ def run_and_parse_first_match(run_lambda, command, regex):
 
 
 def run_and_return_first_line(run_lambda, command):
-    """Run command using run_lambda and returns first line if output is not empty."""
+    """
+    Run command using run_lambda and returns first line if output is not empty.
+    """
     rc, out, _ = run_lambda(command)
     if rc != 0:
         return None
@@ -179,7 +182,9 @@ def get_running_cuda_version(run_lambda):
 
 
 def get_cudnn_version(run_lambda):
-    """Return a list of libcudnn.so; it's hard to tell which one is being used."""
+    """
+    Return a list of libcudnn.so; it's hard to tell which one is being used.
+    """
     if get_platform() == 'win32':
         system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
         cuda_path = os.environ.get('CUDA_PATH', "%CUDA_PATH%")
@@ -248,7 +253,8 @@ def get_aphrodite_version():
 
 
 def summarize_aphrodite_build_flags():
-    # This could be a static method if the flags are constant, or dynamic if you need to check environment variables, etc.
+    # This could be a static method if the flags are constant, or dynamic if
+    # you need to check environment variables, etc.
     return 'CUDA Archs: {}; ROCm: {}'.format(
         os.environ.get('TORCH_CUDA_ARCH_LIST', 'Not Set'),
         'Enabled' if os.environ.get('ROCM_HOME') else 'Disabled',
@@ -261,16 +267,12 @@ def get_cpu_info(run_lambda):
         rc, out, err = run_lambda('lscpu')
     elif get_platform() == 'win32':
         rc, out, err = run_lambda(
-            'wmic cpu get Name,Manufacturer,Family,Architecture,ProcessorType,DeviceID, \
-        CurrentClockSpeed,MaxClockSpeed,L2CacheSize,L2CacheSpeed,Revision /VALUE'
-        )
+            'wmic cpu get Name,Manufacturer,Family,Architecture,ProcessorType, \
+                DeviceID,CurrentClockSpeed,MaxClockSpeed,L2CacheSize, \
+                    L2CacheSpeed,Revision /VALUE')
     elif get_platform() == 'darwin':
         rc, out, err = run_lambda("sysctl -n machdep.cpu.brand_string")
-    cpu_info = 'None'
-    if rc == 0:
-        cpu_info = out
-    else:
-        cpu_info = err
+    cpu_info = out if rc == 0 else err
     return cpu_info
 
 
@@ -354,7 +356,10 @@ def get_libc_version():
 
 
 def get_pip_packages(run_lambda, patterns=None):
-    """Return `pip list` output. Note: will also find conda-installed pytorch and numpy packages."""
+    """
+    Return `pip list` output. Note: will also find conda-installed pytorch and
+    numpy packages.
+    """
     if patterns is None:
         patterns = DEFAULT_PIP_PATTERNS
 
@@ -405,7 +410,9 @@ def get_env_info():
         cuda_version_str = torch.version.cuda
         if not hasattr(torch.version,
                        'hip') or torch.version.hip is None:  # cuda version
-            hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'
+            hip_compiled_version = 'N/A'
+            hip_runtime_version = 'N/A'
+            miopen_runtime_version = 'N/A'
         else:  # HIP version
 
             def get_version_or_na(cfg, prefix):
@@ -418,8 +425,13 @@ def get_env_info():
             cuda_version_str = 'N/A'
             hip_compiled_version = torch.version.hip
     else:
-        version_str = debug_mode_str = cuda_available_str = cuda_version_str = 'N/A'
-        hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'
+        version_str = 'N/A'
+        debug_mode_str = 'N/A'
+        cuda_available_str = 'N/A'
+        cuda_version_str = 'N/A'
+        hip_compiled_version = 'N/A'
+        hip_runtime_version = 'N/A'
+        miopen_runtime_version = 'N/A'
 
     sys_version = sys.version.replace("\n", " ")
 
@@ -502,14 +514,14 @@ Aphrodite Build Flags:
 def pretty_str(envinfo):
 
     def replace_nones(dct, replacement='Could not collect '):
-        for key in dct.keys():
+        for key in dct:
             if dct[key] is not None:
                 continue
             dct[key] = replacement
         return dct
 
     def replace_bools(dct, true='Yes', false='No'):
-        for key in dct.keys():
+        for key in dct:
             if dct[key] is True:
                 dct[key] = true
             elif dct[key] is False:
@@ -567,7 +579,8 @@ def pretty_str(envinfo):
         mutable_dict['conda_packages'])
 
     # Tag conda and pip packages with a prefix
-    # If they were previously None, they'll show up as ie '[conda] Could not collect'
+    # If they were previously None, they'll show up as ie '[conda] Could not
+    # collect'
     if mutable_dict['pip_packages']:
         mutable_dict['pip_packages'] = prepend(
             mutable_dict['pip_packages'], '[{}] '.format(envinfo.pip_version))
@@ -599,8 +612,10 @@ def main():
             ctime = os.path.getctime(latest)
             creation_time = datetime.datetime.fromtimestamp(ctime).strftime(
                 '%Y-%m-%d %H:%M:%S')
-            msg = "\n*** Detected a minidump at {} created on {}, ".format(latest, creation_time) + \
-                  "if this is related to your bug please include it when you file a report ***"
+            msg = "\n*** Detected a minidump at {} created on {}, ".format( \
+                latest, creation_time) + \
+                  "if this is related to your bug please include it when you " \
+                    "file a report ***"
             print(msg, file=sys.stderr)
 
 

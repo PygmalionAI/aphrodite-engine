@@ -6,7 +6,8 @@ import gguf
 from sentencepiece import sentencepiece_model_pb2
 from safetensors.torch import save_file as safe_save_file
 from transformers.modeling_utils import shard_checkpoint
-from transformers.utils import WEIGHTS_NAME, WEIGHTS_INDEX_NAME, SAFE_WEIGHTS_NAME, SAFE_WEIGHTS_INDEX_NAME
+from transformers.utils import (WEIGHTS_NAME, WEIGHTS_INDEX_NAME,
+                                SAFE_WEIGHTS_NAME, SAFE_WEIGHTS_INDEX_NAME)
 
 
 def convert_to_state_dict(checkpoint, save_dir, max_shard_size,
@@ -69,9 +70,8 @@ def convert_to_state_dict(checkpoint, save_dir, max_shard_size,
         tokenizer_config["chat_template"] = str(bytes(
             result.fields['tokenizer.chat_template'].parts[-1]),
                                                 encoding="utf-8")
-    json.dump(tokenizer_config,
-              open(os.path.join(save_dir, "tokenizer_config.json"), 'w'),
-              indent=2)
+    with open(os.path.join(save_dir, "tokenizer_config.json"), 'w') as f:
+        json.dump(tokenizer_config, f, indent=2)
 
     # write config
     context_length = int(result.fields['llama.context_length'].parts[-1])
@@ -116,9 +116,8 @@ def convert_to_state_dict(checkpoint, save_dir, max_shard_size,
             result.fields['llama.expert_count'].parts[-1])
         model_config['num_experts_per_tok'] = int(
             result.fields['llama.expert_used_count'].parts[-1])
-    json.dump(model_config,
-              open(os.path.join(save_dir, "config.json"), 'w'),
-              indent=2)
+    with open(os.path.join(save_dir, "config.json"), 'w') as f:
+        json.dump(model_config, f, indent=2)
 
     # write tensor
     tensor_mapping = {
@@ -191,7 +190,10 @@ def convert_to_state_dict(checkpoint, save_dir, max_shard_size,
             else:
                 torch.save(shard, os.path.join(save_dir, shard_file))
         if index is not None:
-            save_index_file = SAFE_WEIGHTS_INDEX_NAME if safe_serialization else WEIGHTS_INDEX_NAME
+            if safe_serialization:
+                save_index_file = SAFE_WEIGHTS_INDEX_NAME
+            else:
+                save_index_file = WEIGHTS_INDEX_NAME
             save_index_file = os.path.join(save_dir, save_index_file)
             # Save the index as well
             with open(save_index_file, "w", encoding="utf-8") as f:

@@ -3,7 +3,7 @@ from aphrodite import LLM, SamplingParams
 # Sample prompts.
 prompts = [
     "<|system|>Enter chat mode.<|user|>Hello!<|model|>",
-    "<|system|>Enter RP mode.<|model|>Hello!<|user|>What are you doing?<|model|>",
+    "<|system|>Enter RP mode.<|model|>Hello!<|user|>What are you doing?",
     "<|system|>Enter chat mode.<|user|>What is the meaning of life?<|model|>",
     "<|system|>Enter QA mode.<|user|>What is a man?<|model|>A miserable",
 ]
