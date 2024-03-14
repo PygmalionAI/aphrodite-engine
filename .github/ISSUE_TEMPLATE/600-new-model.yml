@@ -1,5 +1,5 @@
-name: 🤗 Support request for a new model from Hugging Face
-description: Submit a proposal/request for a new model from Hugging Face
+name: 🤗 Support request for a new model architecture from Hugging Face
+description: Submit a proposal/request for a new architecture from Hugging Face
 title: "[New Model]: "
 labels: ["new model"]
 
