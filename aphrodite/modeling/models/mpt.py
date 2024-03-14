@@ -295,12 +295,14 @@ class MPTForCausalLM(nn.Module):
             # Skip loading extra bias for GPTQ models.
             if name.endswith(".bias") and name not in params_dict:
                 continue
-            if "wte.weight" in name:
+            if "wte" in name:
                 # Copy word embedding to lm_head
-                lm_head_param = params_dict["lm_head.weight"]
-                weight_loader = getattr(lm_head_param, "weight_loader",
-                                        default_weight_loader)
-                weight_loader(lm_head_param, loaded_weight)
+                head_name = name.replace("transformer.wte", "lm_head")
+                if head_name in params_dict:
+                    lm_head_param = params_dict[head_name]
+                    weight_loader = getattr(lm_head_param, "weight_loader",
+                                            default_weight_loader)
+                    weight_loader(lm_head_param, loaded_weight)
             param = params_dict[name]
             weight_loader = getattr(param, "weight_loader",
                                     default_weight_loader)

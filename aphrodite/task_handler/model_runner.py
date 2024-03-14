@@ -5,17 +5,17 @@ from typing import Dict, List, Optional, Tuple, Set, Union
 import numpy as np
 import torch
 import torch.nn as nn
-from rich.progress import Progress
+from loguru import logger
 
 from aphrodite.common.config import (DeviceConfig, ModelConfig, LoRAConfig,
                                      ParallelConfig, SchedulerConfig)
-from aphrodite.common.logger import init_logger
+from aphrodite.common.logger import get_loading_progress_bar
 from aphrodite.modeling import get_model, InputMetadata, SamplingMetadata
 from aphrodite.modeling.megatron import cupy_utils
 from aphrodite.modeling.megatron.communication_op import (broadcast_tensor_dict
                                                           )
 from aphrodite.modeling.megatron.parallel_state import (
-    with_cupy_nccl_for_all_reduce)
+    get_tensor_model_parallel_world_size, with_cupy_nccl_for_all_reduce)
 from aphrodite.modeling.megatron import custom_all_reduce
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (SamplerOutput, SequenceData,
@@ -24,9 +24,7 @@ from aphrodite.modeling.sampling_metadata import PersistentMetadata
 from aphrodite.lora.worker_manager import LRUCacheWorkerLoRAManager
 from aphrodite.lora.layers import LoRAMapping
 from aphrodite.lora.request import LoRARequest
-from aphrodite.common.utils import in_wsl
-
-logger = init_logger(__name__)
+from aphrodite.common.utils import in_wsl, measure_cuda_memory
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 _PAD_SLOT_ID = -1
@@ -46,6 +44,7 @@ class ModelRunner:
         device_config: DeviceConfig,
         lora_config: Optional[LoRAConfig],
         kv_cache_dtype: Optional[str] = "auto",
+        kv_quant_params_path: Optional[str] = None,
         is_driver_worker: bool = False,
     ):
         self.model_config = model_config
@@ -81,10 +80,41 @@ class ModelRunner:
         # cache in_wsl result
         self.in_wsl = in_wsl()
         self.kv_cache_dtype = kv_cache_dtype
+        self.kv_quant_params = self.load_kv_quant_params(
+            model_config,
+            kv_quant_params_path) if self.kv_cache_dtype == "int8" else None
+
+    def load_kv_quant_params(self, model_config: ModelConfig,
+                             kv_quant_params_path: str) -> List[List[float]]:
+        if model_config is None:
+            return None
+        # Remove it when all models support kv cache int8.
+        architectures = model_config.hf_config.architectures
+        for arch in architectures:
+            if arch not in ["LlamaForCausalLM", "LLaMAForCausalLM"]:
+                raise ValueError(
+                    f"KV CACHE INT8 is not supported for model architectures {arch} for now. "
+                    f"Supported architectures: LlamaForCausalLM and LLaMAForCausalLM."
+                )
+        num_layers = model_config.hf_config.num_hidden_layers
+        kv_quant_params = []
+        for i in range(num_layers):
+            if kv_quant_params_path is not None:
+                path = kv_quant_params_path + f"/layers.{i}.past_kv_scale.0.weight"
+                kv_quant_param = list(np.fromfile(path, dtype=np.float32))
+            kv_quant_params.append(kv_quant_param)
+        return kv_quant_params
 
     def load_model(self) -> None:
-        self.model = get_model(self.model_config, self.device_config,
-                               self.lora_config)
+        with measure_cuda_memory() as m:
+            self.model = get_model(self.model_config, self.device_config,
+                                   self.lora_config)
+        self.model_memory_usage = m.consumed_memory
+        tp = get_tensor_model_parallel_world_size()
+        logger.info(
+            "Model weights loaded. Memory usage: "
+            f"{self.model_memory_usage / float(2**30):.2f} GiB x {tp} = "
+            f"{self.model_memory_usage * tp / float(2**30):.2f} GiB")
 
         vocab_size = self.model.config.vocab_size
 
@@ -255,6 +285,7 @@ class ModelRunner:
             block_tables=block_tables,
             use_cuda_graph=False,
             kv_cache_dtype=self.kv_cache_dtype,
+            kv_quant_params=self.kv_quant_params,
         )
         return (input_tokens, input_positions, input_metadata, prompt_lens,
                 subquery_lens, lora_index_mapping, lora_prompt_mapping,
@@ -383,6 +414,7 @@ class ModelRunner:
             block_tables=block_tables,
             use_cuda_graph=use_captured_graph,
             kv_cache_dtype=self.kv_cache_dtype,
+            kv_quant_params=self.kv_quant_params,
         )
         return (input_tokens, input_positions, input_metadata,
                 lora_index_mapping, lora_prompt_mapping, lora_requests)
@@ -525,6 +557,7 @@ class ModelRunner:
                 "block_tables": input_metadata.block_tables,
                 "use_cuda_graph": input_metadata.use_cuda_graph,
                 "kv_cache_dtype": input_metadata.kv_cache_dtype,
+                "kv_quant_params": input_metadata.kv_quant_params,
                 "selected_token_indices":
                 sampling_metadata.selected_token_indices,
                 "lora_requests": lora_requests,
@@ -548,6 +581,7 @@ class ModelRunner:
                 block_tables=metadata_dict["block_tables"],
                 use_cuda_graph=metadata_dict["use_cuda_graph"],
                 kv_cache_dtype=metadata_dict["kv_cache_dtype"],
+                kv_quant_params=metadata_dict["kv_quant_params"],
             )
             sampling_metadata = SamplingMetadata(
                 seq_groups=None,
@@ -718,7 +752,7 @@ class ModelRunner:
         # We always prioritize using custom all-reduce kernel but fall back
         # to PyTorch or CuPy NCCL if it is disabled or not supported.
         # Initialize a new progress bar
-        progress = Progress()
+        progress = get_loading_progress_bar()
         task = progress.add_task("[cyan]Capturing graph...",
                                  total=len(batch_size_capture_list))
 
@@ -739,6 +773,7 @@ class ModelRunner:
                         block_tables=block_tables[:batch_size],
                         use_cuda_graph=True,
                         kv_cache_dtype=self.kv_cache_dtype,
+                        kv_quant_params=self.kv_quant_params,
                     )
 
                     if self.lora_config:

@@ -14,10 +14,10 @@ import fastapi
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from loguru import logger
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
-from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams, _SAMPLING_EPS
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
@@ -26,7 +26,6 @@ from aphrodite.endpoints.kobold.protocol import KAIGenerationInputSchema
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
-logger = init_logger(__name__)
 served_model: str = "Read Only"
 engine: AsyncAphrodite = None
 gen_cache: dict = {}

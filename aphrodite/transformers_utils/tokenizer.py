@@ -6,13 +6,11 @@ import gguf
 from transformers import (AutoTokenizer, PreTrainedTokenizer,
                           PreTrainedTokenizerFast, LlamaTokenizer)
 from transformers.convert_slow_tokenizer import import_protobuf
+from loguru import logger
 
-from aphrodite.common.logger import init_logger
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.utils import make_async, LRUCache
 from aphrodite.transformers_utils.tokenizers import BaichuanTokenizer
-
-logger = init_logger(__name__)
 
 
 def convert_gguf_to_tokenizer(checkpoint):
@@ -59,6 +57,9 @@ def convert_gguf_to_tokenizer(checkpoint):
     if 'tokenizer.ggml.add_eos_token' in result.fields:
         tokenizer_args["add_eos_token"] = bool(
             result.fields['tokenizer.ggml.add_eos_token'].parts[-1])
+    if 'tokenizer.chat_template' in result.fields:
+        tokenizer_args["chat_template"] = str(
+            bytes(result.fields['tokenizer.chat_template'].parts[-1]))
     tokenizer = LlamaTokenizer(**tokenizer_args)
     os.unlink(temp_file_filename)
     return tokenizer

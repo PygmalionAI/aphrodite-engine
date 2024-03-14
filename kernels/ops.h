@@ -14,7 +14,11 @@ void paged_attention_v1(
   int block_size,
   int max_context_len,
   const c10::optional<torch::Tensor>& alibi_slopes,
-  const std::string& kv_cache_dtype);
+  const std::string& kv_cache_dtype,
+  float k_scale = 1.0f,
+  float k_zp = 0.0f,
+  float v_scale = 1.0f,
+  float v_zp = 0.0f);
 
 void paged_attention_v2(
   torch::Tensor& out,
@@ -31,7 +35,11 @@ void paged_attention_v2(
   int block_size,
   int max_context_len,
   const c10::optional<torch::Tensor>& alibi_slopes,
-  const std::string& kv_cache_dtype);
+  const std::string& kv_cache_dtype,
+  float k_scale = 1.0f,
+  float k_zp = 0.0f,
+  float v_scale = 1.0f,
+  float v_zp = 0.0f);
 
 void rms_norm(
   torch::Tensor& out,
@@ -84,6 +92,22 @@ torch::Tensor awq_dequantize(
     int split_k_iters,
     int thx,
     int thy);
+  
+torch::Tensor autoquant_s4_f16_gemm(
+  torch::Tensor _in_feats,
+  torch::Tensor _kernel,
+  torch::Tensor _scales_zeros);
+
+void autoquant_convert_s4_k_m8(
+  torch::Tensor _weight_dest,
+  torch::Tensor _quant_scales_zeros_dest,
+  torch::Tensor _workspace,
+  torch::Tensor _quant_weight_src,
+  torch::Tensor _quant_scales,
+  torch::Tensor _quant_zeros,
+  int m,
+  int k,
+  int group_size);
 
 torch::Tensor marlin_gemm(
     torch::Tensor& a, 
@@ -126,6 +150,15 @@ void gptq_shuffle(
   torch::Tensor q_perm,
   int bit);
 
+torch::Tensor aqlm_gemm(
+  const torch::Tensor& input,
+  const torch::Tensor& codes,
+  const torch::Tensor& codebooks,
+  const torch::Tensor& scales,
+  const torch::Tensor& codebook_partition_sizes,
+  const std::optional<torch::Tensor>& bias
+);
+
 torch::Tensor ggml_dequantize(
     torch::Tensor X,
     int8_t type,
@@ -152,6 +185,21 @@ torch::Tensor ggml_mul_mat_a8(
     torch::Tensor X,  // input
     int8_t type,
     int64_t row
+);
+
+uintptr_t make_q_matrix(
+    torch::Tensor q_weight,
+    torch::Tensor q_perm,
+    torch::Tensor q_invperm,
+    torch::Tensor q_scale,
+    torch::Tensor q_scale_max,
+    torch::Tensor q_groups,
+    torch::Tensor q_group_map
+);
+
+torch::Tensor exl2_gemm(
+    torch::Tensor a,
+    uintptr_t b
 );
 
 void moe_align_block_size(

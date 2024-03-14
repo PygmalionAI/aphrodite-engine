@@ -2,16 +2,14 @@ from collections import deque
 import enum
 import time
 from typing import Deque, Dict, Iterable, List, Optional, Tuple, Union, Set
+from loguru import logger
 
 from aphrodite.common.config import CacheConfig, LoRAConfig, SchedulerConfig
 from aphrodite.processing.block_manager import AllocStatus, BlockSpaceManager
 from aphrodite.processing.policy import PolicyFactory
 from aphrodite.lora.request import LoRARequest
-from aphrodite.common.logger import init_logger
 from aphrodite.common.sequence import (Sequence, SequenceData, SequenceGroup,
                                        SequenceGroupMetadata, SequenceStatus)
-
-logger = init_logger(__name__)
 
 
 class PreemptionMode(enum.Enum):

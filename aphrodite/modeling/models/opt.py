@@ -356,14 +356,19 @@ class OPTForCausalLM(nn.Module):
         for name, loaded_weight in hf_model_weights_iterator(
                 model_name_or_path, cache_dir, load_format, revision,
                 self.config):
-            if "lm_head.weight" in name:
+            if "lm_head" in name and name not in params_dict:
                 continue
-            if "embed_tokens.weight" in name:
+            if "embed_tokens" in name:
                 # Copy word embedding to lm_head
-                lm_head_param = params_dict["lm_head.weight"]
-                weight_loader = getattr(lm_head_param, "weight_loader",
-                                        default_weight_loader)
-                weight_loader(lm_head_param, loaded_weight)
+                if name.startswith("decoder."):
+                    name = "model." + name
+                head_name = name.replace("model.decoder.embed_tokens",
+                                         "lm_head")
+                if head_name in params_dict:
+                    lm_head_param = params_dict[head_name]
+                    weight_loader = getattr(lm_head_param, "weight_loader",
+                                            default_weight_loader)
+                    weight_loader(lm_head_param, loaded_weight)
             if name.startswith("decoder."):
                 name = "model." + name
 

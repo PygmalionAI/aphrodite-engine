@@ -65,7 +65,7 @@ class GGUFConfig(QuantizationConfig):
         return False
 
     def quant_vocab(self) -> Optional[bool]:
-        return True
+        return (True, True)
 
 
 class GGUFLinearMethod(LinearMethodBase):
@@ -77,10 +77,14 @@ class GGUFLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: GGUFConfig):
         self.quant_config = quant_config
 
-    def create_weights(self, input_size_per_partition: int,
-                       output_size_per_partition: int, input_size: int,
-                       output_size: int,
-                       params_dtype: torch.dtype) -> Dict[str, Any]:
+    def create_weights(
+        self,
+        input_size_per_partition: int,
+        output_partition_sizes: List[int],
+        input_size: int,
+        output_size: int,
+        params_dtype: torch.dtype,
+    ) -> Dict[str, Any]:
         # The type of weight is unknown until load state dict
         weight = torch.nn.parameter.UninitializedParameter(requires_grad=False)
         # No need for pack_factor because we don't fuse qkv layers anyway.

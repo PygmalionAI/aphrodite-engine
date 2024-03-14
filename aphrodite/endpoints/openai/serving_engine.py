@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Dict, List, Optional, Union
 
-from aphrodite.common.logger import init_logger
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.endpoints.openai.protocol import (CompletionRequest,
@@ -14,8 +13,6 @@ from aphrodite.endpoints.openai.protocol import (CompletionRequest,
                                                  ModelPermission, Prompt)
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.sequence import Logprob
-
-logger = init_logger(__name__)
 
 
 @dataclass

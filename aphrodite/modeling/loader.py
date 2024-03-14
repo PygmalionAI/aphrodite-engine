@@ -1,6 +1,9 @@
 """Utilities for selecting and loading models."""
 import contextlib
+import gc
+from contextlib import nullcontext
 from typing import Optional, Type
+from loguru import logger
 
 import torch
 import torch.nn as nn
@@ -9,9 +12,8 @@ from aphrodite.common.config import DeviceConfig, ModelConfig, LoRAConfig
 from aphrodite.modeling.models import ModelRegistry
 from aphrodite.modeling.hf_downloader import (get_quant_config,
                                               initialize_dummy_weights)
-from aphrodite.common.logger import init_logger
-
-logger = init_logger(__name__)
+from aphrodite.modeling.layers.quantization.bitsandbytes import (
+    BNBLinearMethod, replace_quant_params)
 
 
 @contextlib.contextmanager
@@ -66,7 +68,9 @@ def get_model(model_config: ModelConfig,
     with _set_default_torch_dtype(model_config.dtype):
         # Create a model instance.
         # The weights will be initialized as empty tensors.
-        with torch.device(device_config.device):
+        with torch.device(device_config.device) if not \
+            (isinstance(linear_method, BNBLinearMethod) and
+             linear_method.quant_config.from_float) else nullcontext():
             if hasattr(model_class, "supported_lora_modules"):
                 model = model_class(model_config.hf_config, linear_method,
                                     lora_config)
@@ -86,4 +90,21 @@ def get_model(model_config: ModelConfig,
             # Load the weights from the cached or downloaded files.
             model.load_weights(model_config.model, model_config.download_dir,
                                model_config.load_format, model_config.revision)
+        if isinstance(linear_method, BNBLinearMethod):
+            replace_quant_params(model,
+                                 quant_config=linear_method.quant_config,
+                                 modules_to_not_convert="lm_head")
+            torch.cuda.synchronize()
+            if linear_method.quant_config.from_float:
+                model = model.cuda()
+            gc.collect()
+            torch.cuda.empty_cache()
+            logger.info("Memory allocated for converted model: {} GiB".format(
+                round(
+                    torch.cuda.memory_allocated(torch.cuda.current_device()) /
+                    (1024 * 1024 * 1024), 2)))
+            logger.info("Memory reserved for converted model: {} GiB".format(
+                round(
+                    torch.cuda.memory_reserved(torch.cuda.current_device()) /
+                    (1024 * 1024 * 1024), 2)))
     return model.eval()

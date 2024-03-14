@@ -4,17 +4,16 @@ import time
 from functools import partial
 from typing import (Any, Dict, Iterable, List, Optional, Set, Tuple, Type,
                     Union, AsyncIterator, Callable)
+from loguru import logger
 
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.config import ModelConfig
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.engine.ray_tools import initialize_cluster, ray
-from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 
-logger = init_logger(__name__)
 ENGINE_ITERATION_TIMEOUT_S = int(
     os.environ.get("APHRODITE_ENGINE_ITERATION_TIMEOUT_S", 60))
 

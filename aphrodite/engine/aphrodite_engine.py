@@ -4,6 +4,7 @@ import os
 import time
 from typing import (TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple,
                     Union)
+from loguru import logger
 
 import aphrodite
 from aphrodite.lora.request import LoRARequest
@@ -13,7 +14,7 @@ from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.metrics import StatLogger, Stats
 from aphrodite.engine.ray_tools import RayWorkerAphrodite, initialize_cluster, ray
-from aphrodite.common.logger import init_logger
+from aphrodite.common.logger import setup_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (SamplerOutput, Sequence, SequenceGroup,
@@ -29,8 +30,6 @@ if ray:
 
 if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
-
-logger = init_logger(__name__)
 
 _LOCAL_LOGGING_INTERVAL_SEC = 5
 
@@ -87,6 +86,7 @@ class AphroditeEngine:
             f"Context Length = {model_config.max_model_len}\n"
             f"Enforce Eager Mode = {model_config.enforce_eager}\n"
             f"KV Cache Data Type = {cache_config.cache_dtype}\n"
+            f"KV Cache Params Path = {cache_config.cache_quant_params_path}\n"
             f"Device = {device_config.device}")
         # TODO: Print more configs in debug mode.
 
@@ -148,6 +148,7 @@ class AphroditeEngine:
             distributed_init_method=distributed_init_method,
             lora_config=self.lora_config,
             kv_cache_dtype=self.cache_config.cache_dtype,
+            kv_quant_params_path=(self.cache_config.cache_quant_params_path),
             is_driver_worker=True,
         )
         self._run_workers("init_model")
@@ -256,6 +257,8 @@ class AphroditeEngine:
                     distributed_init_method,
                     lora_config=self.lora_config,
                     kv_cache_dtype=self.cache_config.cache_dtype,
+                    kv_quant_params_path=
+                    (self.cache_config.cache_quant_params_path),
                 ))
 
         driver_rank = 0
@@ -270,6 +273,7 @@ class AphroditeEngine:
             distributed_init_method,
             lora_config=self.lora_config,
             kv_cache_dtype=self.cache_config.cache_dtype,
+            kv_quant_params_path=(self.cache_config.cache_quant_params_path),
             is_driver_worker=True,
         )
 
@@ -1046,3 +1050,6 @@ class AphroditeEngine:
         if dead_actors:
             raise RuntimeError("At least one Worker is dead. "
                                f"Dead workers: {dead_actors}")
+
+
+setup_logger()

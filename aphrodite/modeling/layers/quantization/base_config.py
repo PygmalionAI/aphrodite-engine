@@ -73,4 +73,4 @@ class QuantizationConfig(ABC):
         raise NotImplementedError
 
     def quant_vocab(self) -> Optional[bool]:
-        return False
+        return (False, False)

@@ -305,6 +305,8 @@ aphrodite_extension_sources = [
     "kernels/quantization/squeezellm/quant_cuda_kernel.cu",
     "kernels/quantization/gguf/gguf_kernel.cu",
     "kernels/quantization/gptq/q_gemm.cu",
+    "kernels/quantization/exl2/q_matrix.cu",
+    "kernels/quantization/exl2/q_gemm_exl2.cu",
     "kernels/cuda_utils_kernels.cu",
     "kernels/moe/align_block_size_kernel.cu",
     "kernels/pybind.cpp",
@@ -315,6 +317,12 @@ if _is_cuda():
     aphrodite_extension_sources.append("kernels/quantization/quip/origin_order.cu")
     aphrodite_extension_sources.append("kernels/quantization/marlin/marlin_cuda_kernel.cu")
     aphrodite_extension_sources.append("kernels/all_reduce/custom_all_reduce.cu")
+    aphrodite_extension_sources.append("kernels/quantization/aqlm/aqlm_cuda_entry.cpp")
+    aphrodite_extension_sources.append("kernels/quantization/aqlm/aqlm_cuda_kernel.cu")
+    aphrodite_extension_sources.append(
+        "kernels/quantization/bitsandbytes/int4_fp16_gemm_kernels.cu")
+    aphrodite_extension_sources.append("kernels/quantization/bitsandbytes/format.cu")
+    aphrodite_extension_sources.append("kernels/quantization/bitsandbytes/gemm_s4_f16.cu")
     
     ext_modules.append(
         CUDAExtension(

@@ -1,79 +1,116 @@
 """
-Logging utility. Adapted from
-https://github.com/skypilot-org/skypilot/blob/master/sky/sky_logging.py
+Internal logging utility. Adapted from
+https://github.com/theroyallab/tabbyAPI/blob/4cc0b59bdc94e6342b6d1d7acadbadc63c740ed9/common/logger.py
 """
 
 import logging
-import sys
-import os
+from loguru import logger
+from rich.console import Console
+from rich.markup import escape
+from rich.progress import (
+    Progress,
+    TextColumn,
+    BarColumn,
+    TimeRemainingColumn,
+    TaskProgressColumn,
+    MofNCompleteColumn,
+)
 
-import colorlog
-
-# pylint: disable=line-too-long
-_FORMAT = "%(log_color)s%(levelname)s %(asctime)s %(filename)s:%(lineno)d] %(message)s"
-_DATE_FORMAT = "%m-%d %H:%M:%S"
-
-
-class ColoredFormatter(colorlog.ColoredFormatter):
-    """Adds logging prefix to newlines to align multi-line messages."""
-
-    def __init__(self,
-                 fmt,
-                 datefmt=None,
-                 log_colors=None,
-                 reset=True,
-                 style="%"):
-        super().__init__(fmt,
-                         datefmt=datefmt,
-                         log_colors=log_colors,
-                         reset=reset,
-                         style=style)
-
-    def format(self, record):
-        msg = super().format(record)
-        if record.message != "":
-            parts = msg.split(record.message)
-            msg = msg.replace("\n", "\r\n" + parts[0])
-        return msg
+RICH_CONSOLE = Console()
 
 
-_root_logger = logging.getLogger("aphrodite")
-_default_handler = None
+def unwrap(wrapped, default=None):
+    """Unwrap function for Optionals."""
+    if wrapped is None:
+        return default
+    return wrapped
 
 
-def _setup_logger():
-    _root_logger.setLevel(logging.DEBUG)
-    global _default_handler
-    if _default_handler is None:
-        _default_handler = logging.StreamHandler(sys.stdout)
-        _default_handler.flush = sys.stdout.flush  # type: ignore
-        _default_handler.setLevel(logging.INFO)
-        _root_logger.addHandler(_default_handler)
-    fmt = ColoredFormatter(_FORMAT,
-                           datefmt=_DATE_FORMAT,
-                           log_colors={
-                               "DEBUG": "cyan",
-                               "INFO": "green",
-                               "WARNING": "yellow",
-                               "ERROR": "red",
-                               "CRITICAL": "red,bg_white",
-                           },
-                           reset=True)
-    _default_handler.setFormatter(fmt)
-    # Setting this will avoid the message
-    # being propagated to the parent logger.
-    _root_logger.propagate = False
+def get_loading_progress_bar():
+    """Gets a pre-made progress bar for loading tasks."""
+
+    return Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        MofNCompleteColumn(),
+        TimeRemainingColumn(),
+        console=RICH_CONSOLE,
+    )
 
 
-# The logger is initialized when the module is imported.
-# This is thread-safe as the module is only imported once,
-# guaranteed by the Python GIL.
-_setup_logger()
+def _log_formatter(record: dict):
+    """Log message formatter."""
+
+    color_map = {
+        "TRACE": "dim blue",
+        "DEBUG": "cyan",
+        "INFO": "green",
+        "SUCCESS": "bold green",
+        "WARNING": "yellow",
+        "ERROR": "red",
+        "CRITICAL": "bold white on red",
+    }
+    level = record.get("level")
+    level_color = color_map.get(level.name, "cyan")
+    colored_level = f"[{level_color}]{level.name}[/{level_color}]:"
+
+    separator = " " * (9 - len(level.name))
+
+    message = unwrap(record.get("message"), "")
+
+    # Replace once loguru allows for turning off str.format
+    message = message.replace("{{", "{{").replace("}}", "}}")
+    # Manually escape < and > characters
+    message = message.replace("<", "\\<").replace(">", "\\>")
+    message = escape(message)
+    lines = message.splitlines()
+
+    fmt = ""
+    if len(lines) > 1:
+        fmt = "\n".join(
+            [f"{colored_level}{separator}{line}" for line in lines])
+    else:
+        fmt = f"{colored_level}{separator}{message}"
+
+    return fmt
 
 
-def init_logger(name: str):
-    logger = logging.getLogger(name)
-    logger.setLevel(os.getenv("LOG_LEVEL", "DEBUG"))
-    logger.addHandler(_default_handler)
-    logger.propagate = False
-    return logger
+# Uvicorn log handler
+# Uvicorn log portions inspired from https://github.com/encode/uvicorn/discussions/2027#discussioncomment-6432362
+class UvicornLoggingHandler(logging.Handler):
+
+    def emit(self, record: logging.LogRecord) -> None:
+        logger.opt(exception=record.exc_info).log(record.levelname,
+                                                  self.format(record).rstrip())
+
+
+# Uvicorn config for logging. Passed into run when creating all loggers in server
+UVICORN_LOG_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "uvicorn": {
+            "class":
+            f"{UvicornLoggingHandler.__module__}.{UvicornLoggingHandler.__qualname__}",  # noqa
+        },
+    },
+    "root": {
+        "handlers": ["uvicorn"],
+        "propagate": False,
+        "level": "INFO"
+    },
+}
+
+
+def setup_logger():
+    """Bootstrap the logger."""
+
+    logger.remove()
+
+    logger.add(
+        RICH_CONSOLE.print,
+        level="INFO",
+        format=_log_formatter,
+        colorize=True,
+    )
