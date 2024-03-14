@@ -160,8 +160,7 @@ class WorkerLoRAManager(AbstractWorkerLoRAManager):
             raise ValueError(
                 f"LoRA added vocab size {lora.extra_vocab_size} is "
                 "greater than lora_extra_vocab_size "
-                f"{self.lora_config.lora_extra_vocab_size}."
-            )
+                f"{self.lora_config.lora_extra_vocab_size}.")
         return lora
 
     def add_dummy_lora(self, lora_request: LoRARequest, rank: int) -> bool:

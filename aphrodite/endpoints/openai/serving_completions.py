@@ -1,9 +1,8 @@
 import asyncio
 import time
 from fastapi import Request
-from typing import (
-    AsyncGenerator, AsyncIterator, Callable,
-    List, Optional, Dict, Tuple)
+from typing import (AsyncGenerator, AsyncIterator, Callable, List, Optional,
+                    Dict, Tuple)
 
 from aphrodite.common.utils import random_uuid
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
@@ -47,8 +46,7 @@ def parse_prompt_format(prompt) -> Tuple[bool, list]:
         else:
             raise ValueError(
                 "prompt must be a string, array of strings, array of tokens, "
-                "or array of token arrays"
-            )
+                "or array of token arrays")
     return prompt_is_tokens, prompts
 
 
@@ -234,11 +232,8 @@ class OpenAIServingCompletion(OpenAIServing):
                         delta_token_ids = res.prompt_token_ids
                         top_logprobs = res.prompt_logprobs
                         has_echoed[i] = True
-                    elif (
-                        request.echo and 
-                        request.max_tokens > 0 and 
-                        not has_echoed[i]
-                    ):
+                    elif (request.echo and request.max_tokens > 0
+                          and not has_echoed[i]):
                         # echo the prompt and first token
                         delta_text = res.prompt + output.text
                         delta_token_ids = (res.prompt_token_ids +

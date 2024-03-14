@@ -166,8 +166,7 @@ class GGUFReader:
         if version not in READER_SUPPORTED_VERSIONS:
             raise ValueError(
                 f'Sorry, file appears to be version {version} which we cannot '
-                'handle'
-            )
+                'handle')
         self.fields: OrderedDict[str, ReaderField] = OrderedDict()
         self.tensors: list[ReaderTensor] = []
         offs += self._push_field(
@@ -219,10 +218,8 @@ class GGUFReader:
 
     def _push_field(self, field: ReaderField, skip_sum: bool = False) -> int:
         if field.name in self.fields:
-            raise KeyError(
-                f'Duplicate {field.name} already in list at offset '
-                f'{field.offset}'
-            )
+            raise KeyError(f'Duplicate {field.name} already in list at offset '
+                           f'{field.offset}')
         self.fields[field.name] = field
         return 0 if skip_sum else sum(int(part.nbytes) for part in field.parts)
 
@@ -328,8 +325,8 @@ class GGUFReader:
         tensors = []
         for field in fields:
             # pylint: disable=unused-variable
-            (_name_len, name_data, _n_dims, dims,
-             raw_dtype, offset_tensor) = field.parts
+            (_name_len, name_data, _n_dims, dims, raw_dtype,
+             offset_tensor) = field.parts
             ggml_type = GGMLQuantizationType(raw_dtype[0])
             n_elems = np.prod(dims)
             block_size, type_size = GGML_QUANT_SIZES[ggml_type]

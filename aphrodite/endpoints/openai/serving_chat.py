@@ -148,7 +148,7 @@ class OpenAIServingChat(OpenAIServing):
 
                         if last_msg_content:
                             for i in range(request.n):
-                                choice_data = ChatCompletionResponseStreamChoice( # noqa
+                                choice_data = ChatCompletionResponseStreamChoice(  # noqa
                                     index=i,
                                     delta=DeltaMessage(
                                         content=last_msg_content),

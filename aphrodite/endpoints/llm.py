@@ -149,9 +149,10 @@ class LLM:
             # Convert a single prompt to a list.
             prompts = [prompts]
         if prompts is not None and prompt_token_ids is not None and len(
-            prompts) != len(prompt_token_ids):
-            raise ValueError("The lengths of prompts and prompt_token_ids must "
-                             "be the same.")
+                prompts) != len(prompt_token_ids):
+            raise ValueError(
+                "The lengths of prompts and prompt_token_ids must "
+                "be the same.")
         if sampling_params is None:
             # Use default sampling params.
             sampling_params = SamplingParams()

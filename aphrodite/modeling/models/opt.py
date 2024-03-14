@@ -41,8 +41,7 @@ from aphrodite.modeling.layers.vocab_parallel_embedding import (
     ParallelLMHead,
 )
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_world_size,
-)
+    get_tensor_model_parallel_world_size, )
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (
     default_weight_loader,
@@ -54,6 +53,7 @@ KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 
 class OPTLearnedPositionalEmbedding(nn.Embedding):
+
     def __init__(self, num_embeddings: int, embedding_dim: int):
         # OPT is set up so that if padding_idx is specified then offset the
         # embedding ids by 2 and adjust num_embeddings appropriately. Other
@@ -66,6 +66,7 @@ class OPTLearnedPositionalEmbedding(nn.Embedding):
 
 
 class OPTAttention(nn.Module):
+
     def __init__(
         self,
         embed_dim: int,
@@ -76,28 +77,28 @@ class OPTAttention(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
         tensor_model_parallel_world_size = (
-            get_tensor_model_parallel_world_size()
-        )
+            get_tensor_model_parallel_world_size())
         total_num_heads = num_heads
         assert num_heads % tensor_model_parallel_world_size == 0
         self.num_heads = total_num_heads // tensor_model_parallel_world_size
         self.head_dim = embed_dim // total_num_heads
         self.scaling = self.head_dim**-0.5
 
-        if (
-            linear_method is not None
-            and not linear_method.quant_config.merge_weight()
-        ):
+        if (linear_method is not None
+                and not linear_method.quant_config.merge_weight()):
             self.merge_weight = False
-            self.q_proj = ColumnParallelLinear(
-                embed_dim, embed_dim, bias=bias, linear_method=linear_method
-            )
-            self.k_proj = ColumnParallelLinear(
-                embed_dim, embed_dim, bias=bias, linear_method=linear_method
-            )
-            self.v_proj = ColumnParallelLinear(
-                embed_dim, embed_dim, bias=bias, linear_method=linear_method
-            )
+            self.q_proj = ColumnParallelLinear(embed_dim,
+                                               embed_dim,
+                                               bias=bias,
+                                               linear_method=linear_method)
+            self.k_proj = ColumnParallelLinear(embed_dim,
+                                               embed_dim,
+                                               bias=bias,
+                                               linear_method=linear_method)
+            self.v_proj = ColumnParallelLinear(embed_dim,
+                                               embed_dim,
+                                               bias=bias,
+                                               linear_method=linear_method)
         else:
             self.merge_weight = True
             self.qkv_proj = QKVParallelLinear(
@@ -113,9 +114,9 @@ class OPTAttention(nn.Module):
             bias=bias,
             linear_method=linear_method,
         )
-        self.attn = PagedAttention(
-            self.num_heads, self.head_dim, scale=self.scaling
-        )
+        self.attn = PagedAttention(self.num_heads,
+                                   self.head_dim,
+                                   scale=self.scaling)
 
     def forward(
         self,
@@ -131,12 +132,14 @@ class OPTAttention(nn.Module):
             k, _ = self.k_proj(hidden_states)
             v, _ = self.v_proj(hidden_states)
         key_cache, value_cache = kv_cache
-        attn_output = self.attn(q, k, v, key_cache, value_cache, input_metadata)
+        attn_output = self.attn(q, k, v, key_cache, value_cache,
+                                input_metadata)
         output, _ = self.out_proj(attn_output)
         return output
 
 
 class OPTDecoderLayer(nn.Module):
+
     def __init__(
         self,
         config: OPTConfig,
@@ -164,9 +167,8 @@ class OPTDecoderLayer(nn.Module):
             linear_method=linear_method,
         )
         quant_config = getattr(linear_method, "quant_config", None)
-        self.activation_fn = get_act_fn(
-            config.activation_function, quant_config, config.ffn_dim
-        )
+        self.activation_fn = get_act_fn(config.activation_function,
+                                        quant_config, config.ffn_dim)
         self.fc2 = RowParallelLinear(
             config.ffn_dim,
             self.embed_dim,
@@ -215,6 +217,7 @@ class OPTDecoderLayer(nn.Module):
 
 
 class OPTDecoder(nn.Module):
+
     def __init__(
         self,
         config: OPTConfig,
@@ -233,8 +236,7 @@ class OPTDecoder(nn.Module):
         )
         # Positional embeddings are replicated (not sharded).
         self.embed_positions = OPTLearnedPositionalEmbedding(
-            config.max_position_embeddings, config.hidden_size
-        )
+            config.max_position_embeddings, config.hidden_size)
 
         # Project out & in will be replicated if they exist.
         if config.word_embed_proj_dim != config.hidden_size:
@@ -269,12 +271,10 @@ class OPTDecoder(nn.Module):
         else:
             self.final_layer_norm = None
 
-        self.layers = nn.ModuleList(
-            [
-                OPTDecoderLayer(config, linear_method)
-                for _ in range(config.num_hidden_layers)
-            ]
-        )
+        self.layers = nn.ModuleList([
+            OPTDecoderLayer(config, linear_method)
+            for _ in range(config.num_hidden_layers)
+        ])
 
     def forward(
         self,
@@ -301,6 +301,7 @@ class OPTDecoder(nn.Module):
 
 
 class OPTModel(nn.Module):
+
     def __init__(
         self,
         config: OPTConfig,
@@ -320,6 +321,7 @@ class OPTModel(nn.Module):
 
 
 class OPTForCausalLM(nn.Module):
+
     def __init__(
         self,
         config,
@@ -329,9 +331,9 @@ class OPTForCausalLM(nn.Module):
         self.config = config
         self.linear_method = linear_method
         self.model = OPTModel(config, linear_method)
-        self.lm_head = ParallelLMHead(
-            config.vocab_size, config.hidden_size, linear_method=linear_method
-        )
+        self.lm_head = ParallelLMHead(config.vocab_size,
+                                      config.hidden_size,
+                                      linear_method=linear_method)
         self.sampler = Sampler(config.vocab_size)
 
     def forward(
@@ -341,9 +343,8 @@ class OPTForCausalLM(nn.Module):
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
     ) -> torch.Tensor:
-        hidden_states = self.model(
-            input_ids, positions, kv_caches, input_metadata
-        )
+        hidden_states = self.model(input_ids, positions, kv_caches,
+                                   input_metadata)
         return hidden_states
 
     def sample(
@@ -351,9 +352,8 @@ class OPTForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(
-            self.lm_head(hidden_states), sampling_metadata
-        )
+        next_tokens = self.sampler(self.lm_head(hidden_states),
+                                   sampling_metadata)
         return next_tokens
 
     def load_weights(
@@ -369,29 +369,25 @@ class OPTForCausalLM(nn.Module):
             ("qkv_proj", "k_proj", "k"),
             ("qkv_proj", "v_proj", "v"),
         ]
-        if (
-            self.linear_method is not None
-            and not self.linear_method.quant_config.merge_weight()
-        ):
+        if (self.linear_method is not None
+                and not self.linear_method.quant_config.merge_weight()):
             stacked_params_mapping = []
         params_dict = dict(self.named_parameters(remove_duplicate=False))
         for name, loaded_weight in hf_model_weights_iterator(
-            model_name_or_path, cache_dir, load_format, revision, self.config
-        ):
+                model_name_or_path, cache_dir, load_format, revision,
+                self.config):
             if "lm_head" in name and name not in params_dict:
                 continue
             if "embed_tokens" in name:
                 # Copy word embedding to lm_head
                 if name.startswith("decoder."):
                     name = "model." + name
-                head_name = name.replace(
-                    "model.decoder.embed_tokens", "lm_head"
-                )
+                head_name = name.replace("model.decoder.embed_tokens",
+                                         "lm_head")
                 if head_name in params_dict:
                     lm_head_param = params_dict[head_name]
-                    weight_loader = getattr(
-                        lm_head_param, "weight_loader", default_weight_loader
-                    )
+                    weight_loader = getattr(lm_head_param, "weight_loader",
+                                            default_weight_loader)
                     weight_loader(lm_head_param, loaded_weight)
             if name.startswith("decoder."):
                 name = "model." + name
@@ -412,7 +408,6 @@ class OPTForCausalLM(nn.Module):
                 if name.endswith(".bias") and name not in params_dict:
                     continue
                 param = params_dict[name]
-                weight_loader = getattr(
-                    param, "weight_loader", default_weight_loader
-                )
+                weight_loader = getattr(param, "weight_loader",
+                                        default_weight_loader)
                 weight_loader(param, loaded_weight)

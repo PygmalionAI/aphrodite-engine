@@ -40,8 +40,7 @@ from aphrodite.modeling.layers.vocab_parallel_embedding import (
     ParallelLMHead,
 )
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_world_size,
-)
+    get_tensor_model_parallel_world_size, )
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (
     default_weight_loader,
@@ -53,6 +52,7 @@ KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 
 class GemmaMLP(nn.Module):
+
     def __init__(
         self,
         hidden_size: int,
@@ -60,10 +60,8 @@ class GemmaMLP(nn.Module):
         linear_method: Optional[LinearMethodBase] = None,
     ) -> None:
         super().__init__()
-        if (
-            linear_method is not None
-            and not linear_method.quant_config.merge_weight()
-        ):
+        if (linear_method is not None
+                and not linear_method.quant_config.merge_weight()):
             self.merge_weight = False
             self.gate_proj = ColumnParallelLinear(
                 hidden_size,
@@ -106,6 +104,7 @@ class GemmaMLP(nn.Module):
 
 
 class GemmaAttention(nn.Module):
+
     def __init__(
         self,
         hidden_size: int,
@@ -138,10 +137,8 @@ class GemmaAttention(nn.Module):
         self.scaling = self.head_dim**-0.5
         self.rope_theta = rope_theta
 
-        if (
-            linear_method is not None
-            and not linear_method.quant_config.merge_weight()
-        ):
+        if (linear_method is not None
+                and not linear_method.quant_config.merge_weight()):
             self.merge_weight = False
             self.q_proj = ColumnParallelLinear(
                 hidden_size,
@@ -200,9 +197,8 @@ class GemmaAttention(nn.Module):
     ) -> torch.Tensor:
         if self.merge_weight:
             qkv, _ = self.qkv_proj(hidden_states)
-            q, k, v = qkv.split(
-                [self.q_size, self.kv_size, self.kv_size], dim=-1
-            )
+            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size],
+                                dim=-1)
         else:
             q, _ = self.q_proj(hidden_states)
             k, _ = self.k_proj(hidden_states)
@@ -215,6 +211,7 @@ class GemmaAttention(nn.Module):
 
 
 class GemmaDecoderLayer(nn.Module):
+
     def __init__(
         self,
         config: GemmaConfig,
@@ -236,12 +233,10 @@ class GemmaDecoderLayer(nn.Module):
             intermediate_size=config.intermediate_size,
             linear_method=linear_method,
         )
-        self.input_layernorm = RMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps
-        )
-        self.post_attention_layernorm = RMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps
-        )
+        self.input_layernorm = RMSNorm(config.hidden_size,
+                                       eps=config.rms_norm_eps)
+        self.post_attention_layernorm = RMSNorm(config.hidden_size,
+                                                eps=config.rms_norm_eps)
 
     def forward(
         self,
@@ -257,8 +252,7 @@ class GemmaDecoderLayer(nn.Module):
             hidden_states = self.input_layernorm(hidden_states)
         else:
             hidden_states, residual = self.input_layernorm(
-                hidden_states, residual
-            )
+                hidden_states, residual)
         hidden_states = self.self_attn(
             positions=positions,
             hidden_states=hidden_states,
@@ -268,13 +262,13 @@ class GemmaDecoderLayer(nn.Module):
 
         # Fully Connected
         hidden_states, residual = self.post_attention_layernorm(
-            hidden_states, residual
-        )
+            hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
 
 
 class GemmaModel(nn.Module):
+
     def __init__(
         self,
         config: GemmaConfig,
@@ -283,15 +277,13 @@ class GemmaModel(nn.Module):
         super().__init__()
         self.config = config
 
-        self.embed_tokens = VocabParallelEmbedding(
-            config.vocab_size, config.hidden_size, linear_method=linear_method
-        )
-        self.layers = nn.ModuleList(
-            [
-                GemmaDecoderLayer(config, linear_method)
-                for _ in range(config.num_hidden_layers)
-            ]
-        )
+        self.embed_tokens = VocabParallelEmbedding(config.vocab_size,
+                                                   config.hidden_size,
+                                                   linear_method=linear_method)
+        self.layers = nn.ModuleList([
+            GemmaDecoderLayer(config, linear_method)
+            for _ in range(config.num_hidden_layers)
+        ])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
@@ -320,6 +312,7 @@ class GemmaModel(nn.Module):
 
 
 class GemmaForCausalLM(nn.Module):
+
     def __init__(
         self,
         config: GemmaConfig,
@@ -329,9 +322,9 @@ class GemmaForCausalLM(nn.Module):
         self.config = config
         self.linear_method = linear_method
         self.model = GemmaModel(config, linear_method)
-        self.lm_head = ParallelLMHead(
-            config.vocab_size, config.hidden_size, linear_method=linear_method
-        )
+        self.lm_head = ParallelLMHead(config.vocab_size,
+                                      config.hidden_size,
+                                      linear_method=linear_method)
         self.sampler = Sampler(config.vocab_size)
 
     @torch.no_grad()
@@ -342,9 +335,8 @@ class GemmaForCausalLM(nn.Module):
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
     ) -> torch.Tensor:
-        hidden_states = self.model(
-            input_ids, positions, kv_caches, input_metadata
-        )
+        hidden_states = self.model(input_ids, positions, kv_caches,
+                                   input_metadata)
         return hidden_states
 
     def sample(
@@ -352,9 +344,8 @@ class GemmaForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(
-            self.lm_head(hidden_states), sampling_metadata
-        )
+        next_tokens = self.sampler(self.lm_head(hidden_states),
+                                   sampling_metadata)
         return next_tokens
 
     def load_weights(
@@ -372,16 +363,14 @@ class GemmaForCausalLM(nn.Module):
             ("gate_up_proj", "gate_proj", 0),
             ("gate_up_proj", "up_proj", 1),
         ]
-        if (
-            self.linear_method is not None
-            and not self.linear_method.quant_config.merge_weight()
-        ):
+        if (self.linear_method is not None
+                and not self.linear_method.quant_config.merge_weight()):
             stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         loaded_params = set()
         for name, loaded_weight in hf_model_weights_iterator(
-            model_name_or_path, cache_dir, load_format, revision, self.config
-        ):
+                model_name_or_path, cache_dir, load_format, revision,
+                self.config):
             if "rotary_emb.inv_freq" in name:
                 continue
             if "embed_tokens" in name:
@@ -390,9 +379,8 @@ class GemmaForCausalLM(nn.Module):
                 if head_name in params_dict:
                     loaded_params.add(head_name)
                     lm_head_param = params_dict[head_name]
-                    weight_loader = getattr(
-                        lm_head_param, "weight_loader", default_weight_loader
-                    )
+                    weight_loader = getattr(lm_head_param, "weight_loader",
+                                            default_weight_loader)
                     weight_loader(lm_head_param, loaded_weight)
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
@@ -414,14 +402,12 @@ class GemmaForCausalLM(nn.Module):
                 if "norm.weight" in name:
                     loaded_weight += 1.0
                 param = params_dict[name]
-                weight_loader = getattr(
-                    param, "weight_loader", default_weight_loader
-                )
+                weight_loader = getattr(param, "weight_loader",
+                                        default_weight_loader)
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
         unloaded_params = params_dict.keys() - loaded_params
         if unloaded_params:
             raise RuntimeError(
                 "Some weights are not initialized from checkpoints: "
-                f"{unloaded_params}"
-            )
+                f"{unloaded_params}")

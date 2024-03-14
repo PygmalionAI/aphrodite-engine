@@ -13,8 +13,8 @@ from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
 from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.metrics import StatLogger, Stats
-from aphrodite.engine.ray_tools import (
-    RayWorkerAphrodite, initialize_cluster, ray)
+from aphrodite.engine.ray_tools import (RayWorkerAphrodite, initialize_cluster,
+                                        ray)
 from aphrodite.common.logger import setup_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams

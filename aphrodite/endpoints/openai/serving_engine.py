@@ -49,7 +49,7 @@ class OpenAIServing:
             event_loop = None
 
         if event_loop is not None and event_loop.is_running(
-        ):  # If the current is instanced by Ray Serve, there is already 
+        ):  # If the current is instanced by Ray Serve, there is already
             # a running event loop
             event_loop.create_task(self._post_init())
         else:  # When using single Aphrodite without engine_use_ray

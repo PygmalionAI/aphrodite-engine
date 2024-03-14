@@ -846,8 +846,7 @@ class SamplerWithLoRA(BaseLayerWithLoRA):
         if 32000 < self.base_layer.vocab_size > 33024:
             raise ValueError(
                 "When using LoRA, vocab size must be 32000 >= vocab_size "
-                "<= 33024"
-            )
+                "<= 33024")
         self.lora_a_stacked = torch.zeros(
             (
                 max_loras,

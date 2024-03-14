@@ -40,8 +40,7 @@ from aphrodite.modeling.layers.vocab_parallel_embedding import (
     ParallelLMHead,
 )
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_world_size,
-)
+    get_tensor_model_parallel_world_size, )
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (
     default_weight_loader,
@@ -53,6 +52,7 @@ KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 
 class GPTJAttention(nn.Module):
+
     def __init__(
         self,
         config: GPTJConfig,
@@ -63,10 +63,8 @@ class GPTJAttention(nn.Module):
         self.hidden_size = config.hidden_size
         self.head_size = self.hidden_size // self.total_num_heads
 
-        if (
-            linear_method is not None
-            and not linear_method.quant_config.merge_weight()
-        ):
+        if (linear_method is not None
+                and not linear_method.quant_config.merge_weight()):
             self.merge_weight = False
             self.q_proj = ColumnParallelLinear(
                 config.hidden_size,
@@ -110,9 +108,8 @@ class GPTJAttention(nn.Module):
         assert getattr(config, "rotary", True)
         assert config.rotary_dim % 2 == 0
         rope_theta = getattr(config, "rope_theta", 10000)
-        max_position_embeddings = getattr(
-            config, "max_position_embeddings", 8192
-        )
+        max_position_embeddings = getattr(config, "max_position_embeddings",
+                                          8192)
         self.rotary_emb = get_rope(
             self.head_size,
             rotary_dim=config.rotary_dim,
@@ -144,6 +141,7 @@ class GPTJAttention(nn.Module):
 
 
 class GPTJMLP(nn.Module):
+
     def __init__(
         self,
         intermediate_size: int,
@@ -163,9 +161,8 @@ class GPTJMLP(nn.Module):
             linear_method=linear_method,
         )
         quant_config = getattr(linear_method, "quant_config", None)
-        self.act = get_act_fn(
-            config.activation_function, quant_config, intermediate_size
-        )
+        self.act = get_act_fn(config.activation_function, quant_config,
+                              intermediate_size)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         hidden_states, _ = self.fc_in(hidden_states)
@@ -175,15 +172,15 @@ class GPTJMLP(nn.Module):
 
 
 class GPTJBlock(nn.Module):
+
     def __init__(
         self,
         config: GPTJConfig,
         linear_method: Optional[LinearMethodBase] = None,
     ):
         super().__init__()
-        inner_dim = (
-            4 * config.n_embd if config.n_inner is None else config.n_inner
-        )
+        inner_dim = (4 * config.n_embd
+                     if config.n_inner is None else config.n_inner)
         self.ln_1 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
         self.attn = GPTJAttention(config, linear_method)
         self.mlp = GPTJMLP(inner_dim, config, linear_method)
@@ -209,6 +206,7 @@ class GPTJBlock(nn.Module):
 
 
 class GPTJModel(nn.Module):
+
     def __init__(
         self,
         config: GPTJConfig,
@@ -217,12 +215,11 @@ class GPTJModel(nn.Module):
         super().__init__()
         self.config = config
         self.embed_dim = config.n_embd
-        self.wte = VocabParallelEmbedding(
-            config.vocab_size, self.embed_dim, linear_method=linear_method
-        )
+        self.wte = VocabParallelEmbedding(config.vocab_size,
+                                          self.embed_dim,
+                                          linear_method=linear_method)
         self.h = nn.ModuleList(
-            [GPTJBlock(config, linear_method) for _ in range(config.n_layer)]
-        )
+            [GPTJBlock(config, linear_method) for _ in range(config.n_layer)])
         self.ln_f = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
 
     def forward(
@@ -246,6 +243,7 @@ class GPTJModel(nn.Module):
 
 
 class GPTJForCausalLM(nn.Module):
+
     def __init__(
         self,
         config: GPTJConfig,
@@ -271,9 +269,8 @@ class GPTJForCausalLM(nn.Module):
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
     ) -> torch.Tensor:
-        hidden_states = self.transformer(
-            input_ids, positions, kv_caches, input_metadata
-        )
+        hidden_states = self.transformer(input_ids, positions, kv_caches,
+                                         input_metadata)
         return hidden_states
 
     def sample(
@@ -281,9 +278,8 @@ class GPTJForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(
-            self.lm_head(hidden_states), sampling_metadata, self.lm_head.bias
-        )
+        next_tokens = self.sampler(self.lm_head(hidden_states),
+                                   sampling_metadata, self.lm_head.bias)
         return next_tokens
 
     def load_weights(
@@ -301,15 +297,13 @@ class GPTJForCausalLM(nn.Module):
             ("gate_up_proj", "gate_proj", 0),
             ("gate_up_proj", "up_proj", 1),
         ]
-        if (
-            self.linear_method is not None
-            and not self.linear_method.quant_config.merge_weight()
-        ):
+        if (self.linear_method is not None
+                and not self.linear_method.quant_config.merge_weight()):
             stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
-            model_name_or_path, cache_dir, load_format, revision, self.config
-        ):
+                model_name_or_path, cache_dir, load_format, revision,
+                self.config):
             if "attn.bias" in name or "attn.masked_bias" in name:
                 continue
             for param_name, weight_name, shard_id in stacked_params_mapping:
@@ -328,7 +322,6 @@ class GPTJForCausalLM(nn.Module):
                 if name.endswith(".bias") and name not in params_dict:
                     continue
                 param = params_dict[name]
-                weight_loader = getattr(
-                    param, "weight_loader", default_weight_loader
-                )
+                weight_loader = getattr(param, "weight_loader",
+                                        default_weight_loader)
                 weight_loader(param, loaded_weight)

@@ -28,8 +28,8 @@ global_thread_pool = None  # used for generating logits processor fsm
 
 
 async def get_guided_decoding_logits_processor(
-    request: Union[CompletionRequest, ChatCompletionRequest], tokenizer
-) -> Union[JSONLogitsProcessor, RegexLogitsProcessor]:
+        request: Union[CompletionRequest, ChatCompletionRequest],
+        tokenizer) -> Union[JSONLogitsProcessor, RegexLogitsProcessor]:
     """
     Given an OpenAI-compatible request, check for guided decoding parameters
     and get the necessary logits processor for the given guide.
@@ -43,13 +43,12 @@ async def get_guided_decoding_logits_processor(
 
     if global_thread_pool is None:
         global_thread_pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=2
-        )
+            max_workers=2)
     loop = asyncio.get_running_loop()
 
-    result = await loop.run_in_executor(
-        global_thread_pool, _get_cached_logits_processor, guide, tokenizer, mode
-    )
+    result = await loop.run_in_executor(global_thread_pool,
+                                        _get_cached_logits_processor, guide,
+                                        tokenizer, mode)
 
     logits_processor = copy(result)
     # reset logits processor's internal state
@@ -95,9 +94,8 @@ def _get_guide_and_mode(
 
 
 @lru_cache(maxsize=32)
-def _get_cached_logits_processor(
-    guide: str, tokenizer, mode: GuidedDecodingMode
-):
+def _get_cached_logits_processor(guide: str, tokenizer,
+                                 mode: GuidedDecodingMode):
     if mode == GuidedDecodingMode.JSON:
         return JSONLogitsProcessor(guide, tokenizer)
     elif mode == GuidedDecodingMode.REGEX or mode == GuidedDecodingMode.CHOICE:

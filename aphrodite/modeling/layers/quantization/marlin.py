@@ -25,7 +25,7 @@ class MarlinConfig(QuantizationConfig):
             raise ValueError(
                 "Currently, only group size 128 and -1 (channelwise) is "
                 f"supported for Marlin, but got group_size of {self.group_size}"
-                )
+            )
 
         # 4 Bits packed into 32 bit datatype.
         self.pack_factor = 32 // 4
@@ -114,29 +114,25 @@ class MarlinLinearMethod(LinearMethodBase):
             raise ValueError(
                 "Weight output_size_per_partition = "
                 f"{output_size_per_partition} is not divisible by "
-                f"min_n_threads = {self.quant_config.min_n_threads}."
-            )
+                f"min_n_threads = {self.quant_config.min_n_threads}.")
         if output_size_per_partition % self.quant_config.pack_factor != 0:
             raise ValueError(
                 f"Weight output_size_per_partition = "
                 f"{output_size_per_partition} is not divisible by pack_factor "
-                f"= {self.quant_config.pack_factor}."
-            )
+                f"= {self.quant_config.pack_factor}.")
 
         # Validate input_size_per_partition
         if input_size_per_partition % self.quant_config.min_k_threads != 0:
             raise ValueError(
                 f"Weight input_size_per_partition = {input_size_per_partition}"
                 " is not divisible by min_k_threads = "
-                f"{self.quant_config.min_k_threads}."
-            )
-        if (self.quant_config.group_size != -1 and 
-            input_size_per_partition % self.quant_config.group_size != 0):
+                f"{self.quant_config.min_k_threads}.")
+        if (self.quant_config.group_size != -1 and
+                input_size_per_partition % self.quant_config.group_size != 0):
             raise ValueError(
                 f"Weight input_size_per_partition = {input_size_per_partition} "
                 "is not divisible by group_size = "
-                f"{self.quant_config.group_size}."
-            )
+                f"{self.quant_config.group_size}.")
 
         # Check that we have at least 4 tiles horizontally in the shard
         num_tiles_per_perm = self.quant_config.perm_len // (
@@ -168,10 +164,9 @@ class MarlinLinearMethod(LinearMethodBase):
         )
 
         # Determine if channelwise or not
-        input_groups = (
-            1 if self.quant_config.group_size == -1 
-            else input_size_per_partition // self.quant_config.group_size
-        )
+        input_groups = (1 if self.quant_config.group_size == -1 else
+                        input_size_per_partition //
+                        self.quant_config.group_size)
 
         scales = Parameter(
             torch.empty(

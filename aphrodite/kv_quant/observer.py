@@ -115,8 +115,7 @@ class KVCacheObserver(GlobalAvailMixin):
         elif x.size(2) != self.num_head or x.size(3) != self.head_dim:
             raise RuntimeError(
                 'Unexpected dimensions for x, expected (bs, num_head, '
-                'seqlen, head_dim) or (bs, seqlen, num_head, head_dim)'
-            )
+                'seqlen, head_dim) or (bs, seqlen, num_head, head_dim)')
 
         cur_max = x.flatten(0, 1).max(0)[0].cpu()
         cur_min = x.flatten(0, 1).min(0)[0].cpu()

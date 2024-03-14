@@ -161,7 +161,7 @@ class StatLogger:
     def _log_prometheus_interval(self, prompt_throughput: float,
                                  generation_throughput: float) -> None:
         # Logs metrics to prometheus that are computed every logging_interval.
-        # Support legacy gauge metrics that make throughput calculations on 
+        # Support legacy gauge metrics that make throughput calculations on
         # the Aphrodite side.
         # Moving forward, we should use counters like counter_prompt_tokens,
         # counter_generation_tokens
