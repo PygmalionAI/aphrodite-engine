@@ -86,7 +86,8 @@ class Worker:
             # This env var set by Ray causes exceptions with graph building.
             os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
 
-            # Patch for torch.cuda.is_available() unexpected error in WSL; always call torch.cuda.device_count() before initialising device
+            # Patch for torch.cuda.is_available() unexpected error in WSL;
+            # always call torch.cuda.device_count() before initialising device
             if in_wsl():
                 torch.cuda.device_count()
             self.device = torch.device(f"cuda:{self.local_rank}")

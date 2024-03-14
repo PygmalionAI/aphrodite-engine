@@ -8,8 +8,14 @@ from re import escape as regex_escape
 from typing import Union, Tuple
 from pydantic import BaseModel
 
-from aphrodite.endpoints.openai.protocol import CompletionRequest, ChatCompletionRequest
-from aphrodite.modeling.outlines_logits_processors import JSONLogitsProcessor, RegexLogitsProcessor
+from aphrodite.endpoints.openai.protocol import (
+    CompletionRequest,
+    ChatCompletionRequest,
+)
+from aphrodite.modeling.outlines_logits_processors import (
+    JSONLogitsProcessor,
+    RegexLogitsProcessor,
+)
 
 
 class GuidedDecodingMode(Enum):
@@ -22,8 +28,8 @@ global_thread_pool = None  # used for generating logits processor fsm
 
 
 async def get_guided_decoding_logits_processor(
-        request: Union[CompletionRequest, ChatCompletionRequest],
-        tokenizer) -> Union[JSONLogitsProcessor, RegexLogitsProcessor]:
+    request: Union[CompletionRequest, ChatCompletionRequest], tokenizer
+) -> Union[JSONLogitsProcessor, RegexLogitsProcessor]:
     """
     Given an OpenAI-compatible request, check for guided decoding parameters
     and get the necessary logits processor for the given guide.
@@ -37,12 +43,13 @@ async def get_guided_decoding_logits_processor(
 
     if global_thread_pool is None:
         global_thread_pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=2)
+            max_workers=2
+        )
     loop = asyncio.get_running_loop()
 
-    result = await loop.run_in_executor(global_thread_pool,
-                                        _get_cached_logits_processor, guide,
-                                        tokenizer, mode)
+    result = await loop.run_in_executor(
+        global_thread_pool, _get_cached_logits_processor, guide, tokenizer, mode
+    )
 
     logits_processor = copy(result)
     # reset logits processor's internal state
@@ -51,9 +58,8 @@ async def get_guided_decoding_logits_processor(
 
 
 def _get_guide_and_mode(
-    request: Union[CompletionRequest, ChatCompletionRequest]
+    request: Union[CompletionRequest, ChatCompletionRequest],
 ) -> Tuple[str, GuidedDecodingMode]:
-
     if request.guided_json:
         if not isinstance(request.guided_json, (str, dict, BaseModel)):
             raise TypeError("JSON schema must be str, dict, or BaseModel")
@@ -89,8 +95,9 @@ def _get_guide_and_mode(
 
 
 @lru_cache(maxsize=32)
-def _get_cached_logits_processor(guide: str, tokenizer,
-                                 mode: GuidedDecodingMode):
+def _get_cached_logits_processor(
+    guide: str, tokenizer, mode: GuidedDecodingMode
+):
     if mode == GuidedDecodingMode.JSON:
         return JSONLogitsProcessor(guide, tokenizer)
     elif mode == GuidedDecodingMode.REGEX or mode == GuidedDecodingMode.CHOICE:

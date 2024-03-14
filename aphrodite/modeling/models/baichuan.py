@@ -18,6 +18,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only BaiChuan model compatible with HuggingFace weights."""
+
 import math
 from typing import List, Optional, Tuple
 
@@ -28,20 +29,28 @@ from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.modeling.layers.attention import PagedAttention
 from aphrodite.modeling.layers.layernorm import RMSNorm
-from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              MergedColumnParallelLinear,
-                                              QKVParallelLinear,
-                                              RowParallelLinear,
-                                              ColumnParallelLinear)
+from aphrodite.modeling.layers.linear import (
+    LinearMethodBase,
+    MergedColumnParallelLinear,
+    QKVParallelLinear,
+    RowParallelLinear,
+    ColumnParallelLinear,
+)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding, ParallelLMHead)
+    VocabParallelEmbedding,
+    ParallelLMHead,
+)
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
+    get_tensor_model_parallel_rank,
+    get_tensor_model_parallel_world_size,
+)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.modeling.hf_downloader import (default_weight_loader,
-                                              hf_model_weights_iterator)
+from aphrodite.modeling.hf_downloader import (
+    default_weight_loader,
+    hf_model_weights_iterator,
+)
 from aphrodite.common.sequence import SamplerOutput
 from aphrodite.transformers_utils.configs.baichuan import BaiChuanConfig
 
@@ -49,9 +58,9 @@ KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 
 def _get_alibi_slopes(total_num_heads: int) -> torch.Tensor:
-    closest_power_of_2 = 2**math.floor(math.log2(total_num_heads))
+    closest_power_of_2 = 2 ** math.floor(math.log2(total_num_heads))
     base = torch.tensor(
-        2**(-(2**-(math.log2(closest_power_of_2) - 3))),
+        2 ** (-(2 ** -(math.log2(closest_power_of_2) - 3))),
         dtype=torch.float32,
     )
     powers = torch.arange(1, 1 + closest_power_of_2, dtype=torch.int32)
@@ -59,22 +68,20 @@ def _get_alibi_slopes(total_num_heads: int) -> torch.Tensor:
 
     if closest_power_of_2 != total_num_heads:
         extra_base = torch.tensor(
-            2**(-(2**-(math.log2(2 * closest_power_of_2) - 3))),
+            2 ** (-(2 ** -(math.log2(2 * closest_power_of_2) - 3))),
             dtype=torch.float32,
         )
-        num_remaining_heads = min(closest_power_of_2,
-                                  total_num_heads - closest_power_of_2)
-        extra_powers = torch.arange(start=1,
-                                    end=1 + 2 * num_remaining_heads,
-                                    step=2,
-                                    dtype=torch.int32)
-        slopes = torch.cat(
-            [slopes, torch.pow(extra_base, extra_powers)], dim=0)
+        num_remaining_heads = min(
+            closest_power_of_2, total_num_heads - closest_power_of_2
+        )
+        extra_powers = torch.arange(
+            start=1, end=1 + 2 * num_remaining_heads, step=2, dtype=torch.int32
+        )
+        slopes = torch.cat([slopes, torch.pow(extra_base, extra_powers)], dim=0)
     return slopes
 
 
 class BaiChuanMLP(nn.Module):
-
     def __init__(
         self,
         hidden_size: int,
@@ -83,30 +90,42 @@ class BaiChuanMLP(nn.Module):
         linear_method: Optional[LinearMethodBase] = None,
     ):
         super().__init__()
-        if linear_method is not None and not linear_method.quant_config.merge_weight(
+        if (
+            linear_method is not None
+            and not linear_method.quant_config.merge_weight()
         ):
             self.merge_weight = False
-            self.gate_proj = ColumnParallelLinear(hidden_size,
-                                                  intermediate_size,
-                                                  bias=False,
-                                                  linear_method=linear_method)
-            self.up_proj = ColumnParallelLinear(hidden_size,
-                                                intermediate_size,
-                                                bias=False,
-                                                linear_method=linear_method)
+            self.gate_proj = ColumnParallelLinear(
+                hidden_size,
+                intermediate_size,
+                bias=False,
+                linear_method=linear_method,
+            )
+            self.up_proj = ColumnParallelLinear(
+                hidden_size,
+                intermediate_size,
+                bias=False,
+                linear_method=linear_method,
+            )
         else:
             self.merge_weight = True
             self.gate_up_proj = MergedColumnParallelLinear(
-                hidden_size, [intermediate_size] * 2,
+                hidden_size,
+                [intermediate_size] * 2,
                 bias=False,
-                linear_method=linear_method)
-        self.down_proj = RowParallelLinear(intermediate_size,
-                                           hidden_size,
-                                           bias=False,
-                                           linear_method=linear_method)
+                linear_method=linear_method,
+            )
+        self.down_proj = RowParallelLinear(
+            intermediate_size,
+            hidden_size,
+            bias=False,
+            linear_method=linear_method,
+        )
         if hidden_act != "silu":
-            raise ValueError(f"Unsupported activation: {hidden_act}. "
-                             "Only silu is supported for now.")
+            raise ValueError(
+                f"Unsupported activation: {hidden_act}. "
+                "Only silu is supported for now."
+            )
         self.act_fn = SiluAndMul()
 
     def forward(self, x):
@@ -135,12 +154,14 @@ class BaiChuanAttention(nn.Module):
     ):
         super().__init__()
         self.hidden_size = hidden_size
-        tensor_model_parallel_world_size = get_tensor_model_parallel_world_size(
+        tensor_model_parallel_world_size = (
+            get_tensor_model_parallel_world_size()
         )
         self.total_num_heads = num_heads
         assert self.total_num_heads % tensor_model_parallel_world_size == 0
-        self.num_heads = (self.total_num_heads //
-                          tensor_model_parallel_world_size)
+        self.num_heads = (
+            self.total_num_heads // tensor_model_parallel_world_size
+        )
         self.head_dim = hidden_size // self.total_num_heads
         self.postion_embedding = position_embedding
         self.rope_theta = rope_theta
@@ -170,13 +191,19 @@ class BaiChuanAttention(nn.Module):
             alibi_slopes = alibi_slopes[head_start:head_end].tolist()
 
             scaling = self.head_dim**-0.5
-            self.attn = PagedAttention(self.num_heads,
-                                       self.head_dim,
-                                       scaling,
-                                       alibi_slopes=alibi_slopes)
+            self.attn = PagedAttention(
+                self.num_heads,
+                self.head_dim,
+                scaling,
+                alibi_slopes=alibi_slopes,
+            )
         else:
-            is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
-            ) is None else linear_method.quant_config.rope_style()
+            is_neox_style = (
+                True
+                if linear_method is None
+                or linear_method.quant_config.rope_style() is None
+                else linear_method.quant_config.rope_style()
+            )
             self.rotary_emb = get_rope(
                 self.head_dim,
                 rotary_dim=self.head_dim,
@@ -185,8 +212,9 @@ class BaiChuanAttention(nn.Module):
                 is_neox_style=is_neox_style,
             )
             self.scaling = self.head_dim**-0.5
-            self.attn = PagedAttention(self.num_heads, self.head_dim,
-                                       self.scaling)
+            self.attn = PagedAttention(
+                self.num_heads, self.head_dim, self.scaling
+            )
 
     def forward(
         self,
@@ -206,16 +234,18 @@ class BaiChuanAttention(nn.Module):
 
 
 class BaiChuanDecoderLayer(nn.Module):
-
-    def __init__(self,
-                 config: BaiChuanConfig,
-                 position_embedding: str,
-                 linear_method: Optional[LinearMethodBase] = None):
+    def __init__(
+        self,
+        config: BaiChuanConfig,
+        position_embedding: str,
+        linear_method: Optional[LinearMethodBase] = None,
+    ):
         super().__init__()
         self.hidden_size = config.hidden_size
         rope_theta = getattr(config, "rope_theta", 10000)
-        max_position_embeddings = getattr(config, "max_position_embeddings",
-                                          8192)
+        max_position_embeddings = getattr(
+            config, "max_position_embeddings", 8192
+        )
         self.self_attn = BaiChuanAttention(
             hidden_size=self.hidden_size,
             num_heads=config.num_attention_heads,
@@ -230,10 +260,12 @@ class BaiChuanDecoderLayer(nn.Module):
             hidden_act=config.hidden_act,
             linear_method=linear_method,
         )
-        self.input_layernorm = RMSNorm(config.hidden_size,
-                                       eps=config.rms_norm_eps)
-        self.post_attention_layernorm = RMSNorm(config.hidden_size,
-                                                eps=config.rms_norm_eps)
+        self.input_layernorm = RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps
+        )
+        self.post_attention_layernorm = RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps
+        )
 
     def forward(
         self,
@@ -249,7 +281,8 @@ class BaiChuanDecoderLayer(nn.Module):
             hidden_states = self.input_layernorm(hidden_states)
         else:
             hidden_states, residual = self.input_layernorm(
-                hidden_states, residual)
+                hidden_states, residual
+            )
         hidden_states = self.self_attn(
             positions=positions,
             hidden_states=hidden_states,
@@ -259,29 +292,33 @@ class BaiChuanDecoderLayer(nn.Module):
 
         # Fully Connected
         hidden_states, residual = self.post_attention_layernorm(
-            hidden_states, residual)
+            hidden_states, residual
+        )
         hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
 
 
 class BaiChuanModel(nn.Module):
-
-    def __init__(self,
-                 config: BaiChuanConfig,
-                 position_embedding: str,
-                 linear_method: Optional[LinearMethodBase] = None):
+    def __init__(
+        self,
+        config: BaiChuanConfig,
+        position_embedding: str,
+        linear_method: Optional[LinearMethodBase] = None,
+    ):
         super().__init__()
         self.config = config
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
-        self.embed_tokens = VocabParallelEmbedding(config.vocab_size,
-                                                   config.hidden_size,
-                                                   linear_method=linear_method)
-        self.layers = nn.ModuleList([
-            BaiChuanDecoderLayer(config, position_embedding, linear_method)
-            for _ in range(config.num_hidden_layers)
-        ])
+        self.embed_tokens = VocabParallelEmbedding(
+            config.vocab_size, config.hidden_size, linear_method=linear_method
+        )
+        self.layers = nn.ModuleList(
+            [
+                BaiChuanDecoderLayer(config, position_embedding, linear_method)
+                for _ in range(config.num_hidden_layers)
+            ]
+        )
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
@@ -307,18 +344,19 @@ class BaiChuanModel(nn.Module):
 
 
 class BaiChuanBaseForCausalLM(nn.Module):
-
-    def __init__(self,
-                 config,
-                 position_embedding: str,
-                 linear_method: Optional[LinearMethodBase] = None):
+    def __init__(
+        self,
+        config,
+        position_embedding: str,
+        linear_method: Optional[LinearMethodBase] = None,
+    ):
         super().__init__()
         self.config = config
         self.linear_method = linear_method
         self.model = BaiChuanModel(config, position_embedding, linear_method)
-        self.lm_head = ParallelLMHead(config.vocab_size,
-                                      config.hidden_size,
-                                      linear_method=linear_method)
+        self.lm_head = ParallelLMHead(
+            config.vocab_size, config.hidden_size, linear_method=linear_method
+        )
         self.sampler = Sampler(config.vocab_size)
 
     def forward(
@@ -328,8 +366,9 @@ class BaiChuanBaseForCausalLM(nn.Module):
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
     ) -> torch.Tensor:
-        hidden_states = self.model(input_ids, positions, kv_caches,
-                                   input_metadata)
+        hidden_states = self.model(
+            input_ids, positions, kv_caches, input_metadata
+        )
         return hidden_states
 
     def sample(
@@ -337,40 +376,44 @@ class BaiChuanBaseForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(self.lm_head(hidden_states),
-                                   sampling_metadata)
+        next_tokens = self.sampler(
+            self.lm_head(hidden_states), sampling_metadata
+        )
         return next_tokens
 
-    def load_weights(self,
-                     model_name_or_path: str,
-                     cache_dir: Optional[str] = None,
-                     load_format: str = "auto",
-                     revision: Optional[str] = None):
+    def load_weights(
+        self,
+        model_name_or_path: str,
+        cache_dir: Optional[str] = None,
+        load_format: str = "auto",
+        revision: Optional[str] = None,
+    ):
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
             ("gate_up_proj", "gate_proj", 0),
             ("gate_up_proj", "up_proj", 1),
         ]
-        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
+        if (
+            self.linear_method is not None
+            and not self.linear_method.quant_config.merge_weight()
         ):
             stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision,
-                self.config):
+            model_name_or_path, cache_dir, load_format, revision, self.config
+        ):
             if "rotary_emb.inv_freq" in name:
                 continue
             if name == "lm_head.weight":
-                # Unlike Baichuan, Baichuan2 normalizes the head weights. Refer to:
+                # Unlike Baichuan, Baichuan2 normalizes the head weights. Ref.:
                 # https://huggingface.co/baichuan-inc/Baichuan2-7B-Chat/blob/84603cde5ebffb6084e476cfaeceaf0b8b91fe54/modeling_baichuan.py#L508
                 # Distinguish between Baichuan and Baichuan2 by checking the
                 # vocab size.
                 is_baichuan2 = self.config.vocab_size == 125696
                 if is_baichuan2:
-                    loaded_weight = torch.nn.functional.normalize(
-                        loaded_weight)
+                    loaded_weight = torch.nn.functional.normalize(loaded_weight)
 
-            for (param_name, weight_name, shard_id) in stacked_params_mapping:
+            for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)
@@ -386,17 +429,18 @@ class BaiChuanBaseForCausalLM(nn.Module):
                 if name.endswith(".bias") and name not in params_dict:
                     continue
                 param = params_dict[name]
-                weight_loader = getattr(param, "weight_loader",
-                                        default_weight_loader)
+                weight_loader = getattr(
+                    param, "weight_loader", default_weight_loader
+                )
                 weight_loader(param, loaded_weight)
 
 
 class BaichuanForCausalLM(BaiChuanBaseForCausalLM):
     """Baichuan 13B and Baichuan2 7B/13B."""
 
-    def __init__(self,
-                 config,
-                 linear_method: Optional[LinearMethodBase] = None):
+    def __init__(
+        self, config, linear_method: Optional[LinearMethodBase] = None
+    ):
         if config.hidden_size == 4096:  # baichuan2 7b
             super().__init__(config, "ROPE", linear_method)
         else:  # baichuan 13b, baichuan2 13b
@@ -406,7 +450,7 @@ class BaichuanForCausalLM(BaiChuanBaseForCausalLM):
 class BaiChuanForCausalLM(BaiChuanBaseForCausalLM):
     """Baichuan 7B."""
 
-    def __init__(self,
-                 config,
-                 linear_method: Optional[LinearMethodBase] = None):
+    def __init__(
+        self, config, linear_method: Optional[LinearMethodBase] = None
+    ):
         super().__init__(config, "ROPE", linear_method)

@@ -89,7 +89,8 @@ class QuipLinearMethod(LinearMethodBase):
         params_dtype: torch.dtype,
     ) -> Dict[str, Any]:
         output_size_per_partition = sum(output_partition_sizes)
-        if input_size != input_size_per_partition or output_size != output_size_per_partition:
+        if (input_size != input_size_per_partition or 
+            output_size != output_size_per_partition):
             raise ValueError(
                 "Currently Quip doesn't support tensor parallel yet")
 

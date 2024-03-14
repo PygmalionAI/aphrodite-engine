@@ -9,27 +9,33 @@ from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.modeling.layers.attention import PagedAttention
 from aphrodite.modeling.layers.layernorm import RMSNorm
-from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              ColumnParallelLinear,
-                                              MergedColumnParallelLinear,
-                                              QKVParallelLinear,
-                                              RowParallelLinear)
+from aphrodite.modeling.layers.linear import (
+    LinearMethodBase,
+    ColumnParallelLinear,
+    MergedColumnParallelLinear,
+    QKVParallelLinear,
+    RowParallelLinear,
+)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding, ParallelLMHead)
+    VocabParallelEmbedding,
+    ParallelLMHead,
+)
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_world_size)
+    get_tensor_model_parallel_world_size,
+)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.modeling.hf_downloader import (default_weight_loader,
-                                              hf_model_weights_iterator)
+from aphrodite.modeling.hf_downloader import (
+    default_weight_loader,
+    hf_model_weights_iterator,
+)
 from aphrodite.common.sequence import SamplerOutput
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 
 class InternLM2MLP(nn.Module):
-
     def __init__(
         self,
         hidden_size: int,
@@ -38,30 +44,42 @@ class InternLM2MLP(nn.Module):
         linear_method: Optional[LinearMethodBase] = None,
     ) -> None:
         super().__init__()
-        if linear_method is not None and not linear_method.quant_config.merge_weight(
+        if (
+            linear_method is not None
+            and not linear_method.quant_config.merge_weight()
         ):
             self.merge_weight = False
-            self.w1 = ColumnParallelLinear(hidden_size,
-                                           intermediate_size,
-                                           bias=False,
-                                           linear_method=linear_method)
-            self.w3 = ColumnParallelLinear(hidden_size,
-                                           intermediate_size,
-                                           bias=False,
-                                           linear_method=linear_method)
+            self.w1 = ColumnParallelLinear(
+                hidden_size,
+                intermediate_size,
+                bias=False,
+                linear_method=linear_method,
+            )
+            self.w3 = ColumnParallelLinear(
+                hidden_size,
+                intermediate_size,
+                bias=False,
+                linear_method=linear_method,
+            )
         else:
             self.merge_weight = True
             self.gate_up_proj = MergedColumnParallelLinear(
-                hidden_size, [intermediate_size] * 2,
+                hidden_size,
+                [intermediate_size] * 2,
                 bias=False,
-                linear_method=linear_method)
-        self.w2 = RowParallelLinear(intermediate_size,
-                                    hidden_size,
-                                    bias=False,
-                                    linear_method=linear_method)
+                linear_method=linear_method,
+            )
+        self.w2 = RowParallelLinear(
+            intermediate_size,
+            hidden_size,
+            bias=False,
+            linear_method=linear_method,
+        )
         if hidden_act != "silu":
-            raise ValueError(f"Unsupported activation: {hidden_act}. "
-                             "Only silu is supported for now.")
+            raise ValueError(
+                f"Unsupported activation: {hidden_act}. "
+                "Only silu is supported for now."
+            )
         self.act_fn = SiluAndMul()
 
     def forward(self, x):
@@ -77,7 +95,6 @@ class InternLM2MLP(nn.Module):
 
 
 class InternLM2Attention(nn.Module):
-
     def __init__(
         self,
         hidden_size: int,
@@ -133,10 +150,12 @@ class InternLM2Attention(nn.Module):
             base=rope_theta,
             rope_scaling=rope_scaling,
         )
-        self.attn = PagedAttention(self.num_heads,
-                                   self.head_dim,
-                                   self.scaling,
-                                   num_kv_heads=self.num_kv_heads)
+        self.attn = PagedAttention(
+            self.num_heads,
+            self.head_dim,
+            self.scaling,
+            num_kv_heads=self.num_kv_heads,
+        )
 
     def forward(
         self,
@@ -155,7 +174,6 @@ class InternLM2Attention(nn.Module):
 
 
 class InternLMDecoderLayer(nn.Module):
-
     def __init__(
         self,
         config: PretrainedConfig,
@@ -165,8 +183,9 @@ class InternLMDecoderLayer(nn.Module):
         self.hidden_size = config.hidden_size
         rope_theta = getattr(config, "rope_theta", 10000)
         rope_scaling = getattr(config, "rope_scaling", None)
-        max_position_embeddings = getattr(config, "max_position_embeddings",
-                                          8192)
+        max_position_embeddings = getattr(
+            config, "max_position_embeddings", 8192
+        )
         self.attention = InternLM2Attention(
             hidden_size=self.hidden_size,
             num_heads=config.num_attention_heads,
@@ -182,8 +201,9 @@ class InternLMDecoderLayer(nn.Module):
             hidden_act=config.hidden_act,
             linear_method=linear_method,
         )
-        self.attention_norm = RMSNorm(config.hidden_size,
-                                      eps=config.rms_norm_eps)
+        self.attention_norm = RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps
+        )
         self.ffn_norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
@@ -200,7 +220,8 @@ class InternLMDecoderLayer(nn.Module):
             hidden_states = self.attention_norm(hidden_states)
         else:
             hidden_states, residual = self.attention_norm(
-                hidden_states, residual)
+                hidden_states, residual
+            )
         hidden_states = self.attention(
             positions=positions,
             hidden_states=hidden_states,
@@ -215,7 +236,6 @@ class InternLMDecoderLayer(nn.Module):
 
 
 class InternLM2Model(nn.Module):
-
     def __init__(
         self,
         config: PretrainedConfig,
@@ -230,10 +250,12 @@ class InternLM2Model(nn.Module):
             config.hidden_size,
             linear_method=linear_method,
         )
-        self.layers = nn.ModuleList([
-            InternLMDecoderLayer(config, linear_method)
-            for _ in range(config.num_hidden_layers)
-        ])
+        self.layers = nn.ModuleList(
+            [
+                InternLMDecoderLayer(config, linear_method)
+                for _ in range(config.num_hidden_layers)
+            ]
+        )
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
@@ -259,7 +281,6 @@ class InternLM2Model(nn.Module):
 
 
 class InternLM2ForCausalLM(nn.Module):
-
     def __init__(
         self,
         config: PretrainedConfig,
@@ -283,8 +304,9 @@ class InternLM2ForCausalLM(nn.Module):
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
     ) -> torch.Tensor:
-        hidden_states = self.model(input_ids, positions, kv_caches,
-                                   input_metadata)
+        hidden_states = self.model(
+            input_ids, positions, kv_caches, input_metadata
+        )
         return hidden_states
 
     def sample(
@@ -292,29 +314,35 @@ class InternLM2ForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(self.output(hidden_states),
-                                   sampling_metadata)
+        next_tokens = self.sampler(
+            self.output(hidden_states), sampling_metadata
+        )
         return next_tokens
 
-    def load_weights(self,
-                     model_name_or_path: str,
-                     cache_dir: Optional[str] = None,
-                     load_format: str = "auto",
-                     revision: Optional[str] = None):
+    def load_weights(
+        self,
+        model_name_or_path: str,
+        cache_dir: Optional[str] = None,
+        load_format: str = "auto",
+        revision: Optional[str] = None,
+    ):
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
             ("gate_up_proj", "w1", 0),
             ("gate_up_proj", "w3", 1),
         ]
-        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
+        if (
+            self.linear_method is not None
+            and not self.linear_method.quant_config.merge_weight()
         ):
             stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision):
+            model_name_or_path, cache_dir, load_format, revision
+        ):
             if "rotary_emb.inv_freq" in name:
                 continue
-            for (param_name, weight_name, shard_id) in stacked_params_mapping:
+            for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)
@@ -332,21 +360,25 @@ class InternLM2ForCausalLM(nn.Module):
                 param = params_dict[name]
                 if "wqkv" in name:
                     config = self.config
-                    kv_groups = config.num_attention_heads // config.num_key_value_heads
+                    kv_groups = (
+                        config.num_attention_heads // config.num_key_value_heads
+                    )
                     head_dim = config.hidden_size // config.num_attention_heads
-                    loaded_weight = loaded_weight.view(-1, 2 + kv_groups,
-                                                       head_dim,
-                                                       loaded_weight.shape[-1])
-                    wq, wk, wv = torch.split(loaded_weight, [kv_groups, 1, 1],
-                                             dim=1)
+                    loaded_weight = loaded_weight.view(
+                        -1, 2 + kv_groups, head_dim, loaded_weight.shape[-1]
+                    )
+                    wq, wk, wv = torch.split(
+                        loaded_weight, [kv_groups, 1, 1], dim=1
+                    )
                     wq = wq.reshape(-1, wq.shape[-1])
                     wk = wk.reshape(-1, wk.shape[-1])
                     wv = wv.reshape(-1, wv.shape[-1])
                     weight_loader = param.weight_loader
-                    weight_loader(param, wq, 'q')
-                    weight_loader(param, wk, 'k')
-                    weight_loader(param, wv, 'v')
+                    weight_loader(param, wq, "q")
+                    weight_loader(param, wk, "k")
+                    weight_loader(param, wv, "v")
                 else:
-                    weight_loader = getattr(param, "weight_loader",
-                                            default_weight_loader)
+                    weight_loader = getattr(
+                        param, "weight_loader", default_weight_loader
+                    )
                     weight_loader(param, loaded_weight)

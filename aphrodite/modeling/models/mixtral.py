@@ -22,6 +22,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only Mixtral model."""
+
 from typing import List, Optional, Tuple
 
 import torch
@@ -33,23 +34,33 @@ from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.attention import PagedAttention
 from aphrodite.modeling.layers.triton_kernel.fused_moe import fused_moe
 from aphrodite.modeling.layers.layernorm import RMSNorm
-from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              QKVParallelLinear,
-                                              ReplicatedLinear,
-                                              RowParallelLinear,
-                                              ColumnParallelLinear)
+from aphrodite.modeling.layers.linear import (
+    LinearMethodBase,
+    QKVParallelLinear,
+    ReplicatedLinear,
+    RowParallelLinear,
+    ColumnParallelLinear,
+)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding, ParallelLMHead, DEFAULT_VOCAB_PADDING_SIZE)
+    VocabParallelEmbedding,
+    ParallelLMHead,
+    DEFAULT_VOCAB_PADDING_SIZE,
+)
 from aphrodite.modeling.megatron.communication_op import (
-    tensor_model_parallel_all_reduce)
+    tensor_model_parallel_all_reduce,
+)
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
+    get_tensor_model_parallel_rank,
+    get_tensor_model_parallel_world_size,
+)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.utils import set_weight_attrs
-from aphrodite.modeling.hf_downloader import (default_weight_loader,
-                                              hf_model_weights_iterator)
+from aphrodite.modeling.hf_downloader import (
+    default_weight_loader,
+    hf_model_weights_iterator,
+)
 from aphrodite.common.sequence import SamplerOutput
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
@@ -84,34 +95,53 @@ class MixtralMoE(nn.Module):
             params_dtype = torch.get_default_dtype()
         self.params_dtype = params_dtype
 
-        self.gate = ReplicatedLinear(self.hidden_size,
-                                     self.num_total_experts,
-                                     bias=False,
-                                     params_dtype=self.params_dtype,
-                                     linear_method=None)
+        self.gate = ReplicatedLinear(
+            self.hidden_size,
+            self.num_total_experts,
+            bias=False,
+            params_dtype=self.params_dtype,
+            linear_method=None,
+        )
 
         self.ws = nn.Parameter(
-            torch.empty(self.num_total_experts,
-                        2 * self.intermediate_size,
-                        self.hidden_size,
-                        device="cuda",
-                        dtype=self.params_dtype))
+            torch.empty(
+                self.num_total_experts,
+                2 * self.intermediate_size,
+                self.hidden_size,
+                device="cuda",
+                dtype=self.params_dtype,
+            )
+        )
         self.w2s = nn.Parameter(
-            torch.empty(self.num_total_experts,
-                        self.hidden_size,
-                        self.intermediate_size,
-                        device="cuda",
-                        dtype=self.params_dtype))
+            torch.empty(
+                self.num_total_experts,
+                self.hidden_size,
+                self.intermediate_size,
+                device="cuda",
+                dtype=self.params_dtype,
+            )
+        )
 
-        set_weight_attrs(self.ws, {
-            "weight_loader": self.weight_loader,
-        })
-        set_weight_attrs(self.w2s, {
-            "weight_loader": self.weight_loader,
-        })
+        set_weight_attrs(
+            self.ws,
+            {
+                "weight_loader": self.weight_loader,
+            },
+        )
+        set_weight_attrs(
+            self.w2s,
+            {
+                "weight_loader": self.weight_loader,
+            },
+        )
 
-    def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor,
-                      weight_name: str, expert_id: int):
+    def weight_loader(
+        self,
+        param: nn.Parameter,
+        loaded_weight: torch.Tensor,
+        weight_name: str,
+        expert_id: int,
+    ):
         tp_rank = get_tensor_model_parallel_rank()
         param_data = param.data
         shard_size = self.intermediate_size
@@ -119,8 +149,9 @@ class MixtralMoE(nn.Module):
         if weight_name.endswith("w1.weight"):
             param_data[expert_id, 0:shard_size, :] = loaded_weight[shard, :]
         if weight_name.endswith("w3.weight"):
-            param_data[expert_id,
-                       shard_size:2 * shard_size, :] = loaded_weight[shard, :]
+            param_data[expert_id, shard_size : 2 * shard_size, :] = (
+                loaded_weight[shard, :]
+            )
         if weight_name.endswith("w2.weight"):
             param_data[expert_id, :, :] = loaded_weight[:, shard]
 
@@ -129,32 +160,37 @@ class MixtralMoE(nn.Module):
         hidden_states = hidden_states.view(-1, self.hidden_size)
         # router_logits: (batch * sequence_length, n_experts)
         router_logits, _ = self.gate(hidden_states)
-        final_hidden_states = fused_moe(hidden_states,
-                                        self.ws,
-                                        self.w2s,
-                                        router_logits,
-                                        self.top_k,
-                                        renormalize=True,
-                                        inplace=True)
+        final_hidden_states = fused_moe(
+            hidden_states,
+            self.ws,
+            self.w2s,
+            router_logits,
+            self.top_k,
+            renormalize=True,
+            inplace=True,
+        )
 
         if self.tp_size > 1:
             final_hidden_states = tensor_model_parallel_all_reduce(
-                final_hidden_states)
+                final_hidden_states
+            )
 
-        return final_hidden_states.view(batch_size, sequence_length,
-                                        hidden_size)
+        return final_hidden_states.view(
+            batch_size, sequence_length, hidden_size
+        )
 
 
 class MixtralAttention(nn.Module):
-
-    def __init__(self,
-                 hidden_size: int,
-                 num_heads: int,
-                 num_kv_heads: int,
-                 max_position: int = 4096 * 32,
-                 rope_theta: float = 10000,
-                 linear_method: Optional[LinearMethodBase] = None,
-                 sliding_window: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        hidden_size: int,
+        num_heads: int,
+        num_kv_heads: int,
+        max_position: int = 4096 * 32,
+        rope_theta: float = 10000,
+        linear_method: Optional[LinearMethodBase] = None,
+        sliding_window: Optional[int] = None,
+    ) -> None:
         super().__init__()
         self.hidden_size = hidden_size
         tp_size = get_tensor_model_parallel_world_size()
@@ -178,21 +214,29 @@ class MixtralAttention(nn.Module):
         self.rope_theta = rope_theta
         self.sliding_window = sliding_window
 
-        if linear_method is not None and not linear_method.quant_config.merge_weight(
+        if (
+            linear_method is not None
+            and not linear_method.quant_config.merge_weight()
         ):
             self.merge_weight = False
-            self.q_proj = ColumnParallelLinear(hidden_size,
-                                               self.q_size,
-                                               bias=False,
-                                               linear_method=linear_method)
-            self.k_proj = ColumnParallelLinear(hidden_size,
-                                               self.kv_size,
-                                               bias=False,
-                                               linear_method=linear_method)
-            self.v_proj = ColumnParallelLinear(hidden_size,
-                                               self.kv_size,
-                                               bias=False,
-                                               linear_method=linear_method)
+            self.q_proj = ColumnParallelLinear(
+                hidden_size,
+                self.q_size,
+                bias=False,
+                linear_method=linear_method,
+            )
+            self.k_proj = ColumnParallelLinear(
+                hidden_size,
+                self.kv_size,
+                bias=False,
+                linear_method=linear_method,
+            )
+            self.v_proj = ColumnParallelLinear(
+                hidden_size,
+                self.kv_size,
+                bias=False,
+                linear_method=linear_method,
+            )
         else:
             self.merge_weight = True
             self.qkv_proj = QKVParallelLinear(
@@ -209,8 +253,12 @@ class MixtralAttention(nn.Module):
             bias=False,
             linear_method=linear_method,
         )
-        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
-        ) is None else linear_method.quant_config.rope_style()
+        is_neox_style = (
+            True
+            if linear_method is None
+            or linear_method.quant_config.rope_style() is None
+            else linear_method.quant_config.rope_style()
+        )
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.head_dim,
@@ -235,8 +283,9 @@ class MixtralAttention(nn.Module):
     ) -> torch.Tensor:
         if self.merge_weight:
             qkv, _ = self.qkv_proj(hidden_states)
-            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size],
-                                dim=-1)
+            q, k, v = qkv.split(
+                [self.q_size, self.kv_size, self.kv_size], dim=-1
+            )
         else:
             q, _ = self.q_proj(hidden_states)
             k, _ = self.k_proj(hidden_states)
@@ -249,7 +298,6 @@ class MixtralAttention(nn.Module):
 
 
 class MixtralDecoderLayer(nn.Module):
-
     def __init__(
         self,
         config: MixtralConfig,
@@ -266,16 +314,20 @@ class MixtralDecoderLayer(nn.Module):
             num_kv_heads=config.num_key_value_heads,
             rope_theta=rope_theta,
             sliding_window=config.sliding_window,
-            linear_method=linear_method)
+            linear_method=linear_method,
+        )
         self.block_sparse_moe = MixtralMoE(
             num_experts=config.num_local_experts,
             top_k=config.num_experts_per_tok,
             hidden_size=config.hidden_size,
-            intermediate_size=config.intermediate_size)
-        self.input_layernorm = RMSNorm(config.hidden_size,
-                                       eps=config.rms_norm_eps)
-        self.post_attention_layernorm = RMSNorm(config.hidden_size,
-                                                eps=config.rms_norm_eps)
+            intermediate_size=config.intermediate_size,
+        )
+        self.input_layernorm = RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps
+        )
+        self.post_attention_layernorm = RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps
+        )
 
     def forward(
         self,
@@ -291,7 +343,8 @@ class MixtralDecoderLayer(nn.Module):
             hidden_states = self.input_layernorm(hidden_states)
         else:
             hidden_states, residual = self.input_layernorm(
-                hidden_states, residual)
+                hidden_states, residual
+            )
         hidden_states = self.self_attn(
             positions=positions,
             hidden_states=hidden_states,
@@ -301,13 +354,13 @@ class MixtralDecoderLayer(nn.Module):
 
         # Fully Connected
         hidden_states, residual = self.post_attention_layernorm(
-            hidden_states, residual)
+            hidden_states, residual
+        )
         hidden_states = self.block_sparse_moe(hidden_states)
         return hidden_states, residual
 
 
 class MixtralModel(nn.Module):
-
     def __init__(
         self,
         config: MixtralConfig,
@@ -316,8 +369,11 @@ class MixtralModel(nn.Module):
     ) -> None:
         super().__init__()
         self.padding_idx = config.pad_token_id
-        lora_vocab = (lora_config.lora_extra_vocab_size *
-                      (lora_config.max_loras or 1)) if lora_config else 0
+        lora_vocab = (
+            (lora_config.lora_extra_vocab_size * (lora_config.max_loras or 1))
+            if lora_config
+            else 0
+        )
         self.vocab_size = config.vocab_size + lora_vocab
         self.org_vocab_size = config.vocab_size
 
@@ -327,10 +383,12 @@ class MixtralModel(nn.Module):
             linear_method=linear_method,
             org_num_embeddings=config.vocab_size,
         )
-        self.layers = nn.ModuleList([
-            MixtralDecoderLayer(config, linear_method=linear_method)
-            for _ in range(config.num_hidden_layers)
-        ])
+        self.layers = nn.ModuleList(
+            [
+                MixtralDecoderLayer(config, linear_method=linear_method)
+                for _ in range(config.num_hidden_layers)
+            ]
+        )
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
@@ -344,9 +402,9 @@ class MixtralModel(nn.Module):
         residual = None
         for i in range(len(self.layers)):
             layer = self.layers[i]
-            hidden_states, residual = layer(positions, hidden_states,
-                                            kv_caches[i], input_metadata,
-                                            residual)
+            hidden_states, residual = layer(
+                positions, hidden_states, kv_caches[i], input_metadata, residual
+            )
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
 
@@ -382,9 +440,9 @@ class MixtralForCausalLM(nn.Module):
         super().__init__()
         self.config = config
         self.linear_method = linear_method
-        self.model = MixtralModel(config,
-                                  linear_method,
-                                  lora_config=lora_config)
+        self.model = MixtralModel(
+            config, linear_method, lora_config=lora_config
+        )
         self.unpadded_vocab_size = config.vocab_size
         if lora_config:
             self.unpadded_vocab_size += lora_config.lora_extra_vocab_size
@@ -396,7 +454,8 @@ class MixtralForCausalLM(nn.Module):
             padding_size=DEFAULT_VOCAB_PADDING_SIZE
             # We need bigger padding if using lora for kernel
             # compatibility
-            if not lora_config else lora_config.lora_vocab_padding_size,
+            if not lora_config
+            else lora_config.lora_vocab_padding_size,
         )
         self.sampler = Sampler(self.unpadded_vocab_size, config.vocab_size)
 
@@ -407,8 +466,9 @@ class MixtralForCausalLM(nn.Module):
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
     ) -> torch.Tensor:
-        hidden_states = self.model(input_ids, positions, kv_caches,
-                                   input_metadata)
+        hidden_states = self.model(
+            input_ids, positions, kv_caches, input_metadata
+        )
         return hidden_states
 
     def sample(
@@ -416,45 +476,54 @@ class MixtralForCausalLM(nn.Module):
         hidden_states: Optional[torch.Tensor],
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(self.lm_head(hidden_states),
-                                   sampling_metadata)
+        next_tokens = self.sampler(
+            self.lm_head(hidden_states), sampling_metadata
+        )
         return next_tokens
 
-    def load_weights(self,
-                     model_name_or_path: str,
-                     cache_dir: Optional[str] = None,
-                     load_format: str = "auto",
-                     revision: Optional[str] = None):
+    def load_weights(
+        self,
+        model_name_or_path: str,
+        cache_dir: Optional[str] = None,
+        load_format: str = "auto",
+        revision: Optional[str] = None,
+    ):
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
             ("qkv_proj", "q_proj", "q"),
             ("qkv_proj", "k_proj", "k"),
             ("qkv_proj", "v_proj", "v"),
         ]
-        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
+        if (
+            self.linear_method is not None
+            and not self.linear_method.quant_config.merge_weight()
         ):
             stacked_params_mapping = []
 
         expert_params_mapping = [
             # (param_name, weight_name, expert_id)
-            ("ws" if weight_name in ["w1", "w3"] else "w2s",
-             f"experts.{expert_id}.{weight_name}.weight", expert_id)
+            (
+                "ws" if weight_name in ["w1", "w3"] else "w2s",
+                f"experts.{expert_id}.{weight_name}.weight",
+                expert_id,
+            )
             for expert_id in range(self.config.num_local_experts)
             for weight_name in ["w1", "w2", "w3"]
         ]
 
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path,
-                cache_dir,
-                load_format,
-                revision,
-                self.config,
-                fall_back_to_pt=False):
+            model_name_or_path,
+            cache_dir,
+            load_format,
+            revision,
+            self.config,
+            fall_back_to_pt=False,
+        ):
             if "rotary_emb.inv_freq" in name:
                 continue
 
-            for (param_name, weight_name, shard_id) in stacked_params_mapping:
+            for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)
@@ -472,16 +541,16 @@ class MixtralForCausalLM(nn.Module):
                     name = name.replace(weight_name, param_name)
                     param = params_dict[name]
                     weight_loader = param.weight_loader
-                    weight_loader(param,
-                                  loaded_weight,
-                                  weight_name,
-                                  expert_id=expert_id)
+                    weight_loader(
+                        param, loaded_weight, weight_name, expert_id=expert_id
+                    )
                     break
                 else:
                     # Skip loading extra bias for GPTQ models.
                     if name.endswith(".bias") and name not in params_dict:
                         continue
                     param = params_dict[name]
-                    weight_loader = getattr(param, "weight_loader",
-                                            default_weight_loader)
+                    weight_loader = getattr(
+                        param, "weight_loader", default_weight_loader
+                    )
                     weight_loader(param, loaded_weight)

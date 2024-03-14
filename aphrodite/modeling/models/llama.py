@@ -21,6 +21,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only LLaMA model compatible with HuggingFace weights."""
+
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -31,20 +32,28 @@ from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.modeling.layers.attention import PagedAttention
 from aphrodite.modeling.layers.layernorm import RMSNorm
-from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              MergedColumnParallelLinear,
-                                              QKVParallelLinear,
-                                              RowParallelLinear,
-                                              ColumnParallelLinear)
+from aphrodite.modeling.layers.linear import (
+    LinearMethodBase,
+    MergedColumnParallelLinear,
+    QKVParallelLinear,
+    RowParallelLinear,
+    ColumnParallelLinear,
+)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding, ParallelLMHead, DEFAULT_VOCAB_PADDING_SIZE)
+    VocabParallelEmbedding,
+    ParallelLMHead,
+    DEFAULT_VOCAB_PADDING_SIZE,
+)
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_world_size)
+    get_tensor_model_parallel_world_size,
+)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.modeling.hf_downloader import (default_weight_loader,
-                                              hf_model_weights_iterator)
+from aphrodite.modeling.hf_downloader import (
+    default_weight_loader,
+    hf_model_weights_iterator,
+)
 from aphrodite.common.sequence import SamplerOutput
 from aphrodite.common.config import LoRAConfig
 
@@ -52,7 +61,6 @@ KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 
 class LlamaMLP(nn.Module):
-
     def __init__(
         self,
         hidden_size: int,
@@ -61,30 +69,42 @@ class LlamaMLP(nn.Module):
         linear_method: Optional[LinearMethodBase] = None,
     ) -> None:
         super().__init__()
-        if linear_method is not None and not linear_method.quant_config.merge_weight(
+        if (
+            linear_method is not None
+            and not linear_method.quant_config.merge_weight()
         ):
             self.merge_weight = False
-            self.gate_proj = ColumnParallelLinear(hidden_size,
-                                                  intermediate_size,
-                                                  bias=False,
-                                                  linear_method=linear_method)
-            self.up_proj = ColumnParallelLinear(hidden_size,
-                                                intermediate_size,
-                                                bias=False,
-                                                linear_method=linear_method)
+            self.gate_proj = ColumnParallelLinear(
+                hidden_size,
+                intermediate_size,
+                bias=False,
+                linear_method=linear_method,
+            )
+            self.up_proj = ColumnParallelLinear(
+                hidden_size,
+                intermediate_size,
+                bias=False,
+                linear_method=linear_method,
+            )
         else:
             self.merge_weight = True
             self.gate_up_proj = MergedColumnParallelLinear(
-                hidden_size, [intermediate_size] * 2,
+                hidden_size,
+                [intermediate_size] * 2,
                 bias=False,
-                linear_method=linear_method)
-        self.down_proj = RowParallelLinear(intermediate_size,
-                                           hidden_size,
-                                           bias=False,
-                                           linear_method=linear_method)
+                linear_method=linear_method,
+            )
+        self.down_proj = RowParallelLinear(
+            intermediate_size,
+            hidden_size,
+            bias=False,
+            linear_method=linear_method,
+        )
         if hidden_act != "silu":
-            raise ValueError(f"Unsupported activation: {hidden_act}. "
-                             "Only silu is supported for now.")
+            raise ValueError(
+                f"Unsupported activation: {hidden_act}. "
+                "Only silu is supported for now."
+            )
         self.act_fn = SiluAndMul()
 
     def forward(self, x):
@@ -100,7 +120,6 @@ class LlamaMLP(nn.Module):
 
 
 class LlamaAttention(nn.Module):
-
     def __init__(
         self,
         hidden_size: int,
@@ -136,21 +155,26 @@ class LlamaAttention(nn.Module):
         self.rope_theta = rope_theta
         self.max_position_embeddings = max_position_embeddings
 
-        if linear_method is not None and not linear_method.quant_config.merge_weight(
+        if (
+            linear_method is not None
+            and not linear_method.quant_config.merge_weight()
         ):
             self.merge_weight = False
-            self.q_proj = ColumnParallelLinear(hidden_size,
-                                               self.q_size,
-                                               bias=bias,
-                                               linear_method=linear_method)
-            self.k_proj = ColumnParallelLinear(hidden_size,
-                                               self.kv_size,
-                                               bias=bias,
-                                               linear_method=linear_method)
-            self.v_proj = ColumnParallelLinear(hidden_size,
-                                               self.kv_size,
-                                               bias=bias,
-                                               linear_method=linear_method)
+            self.q_proj = ColumnParallelLinear(
+                hidden_size, self.q_size, bias=bias, linear_method=linear_method
+            )
+            self.k_proj = ColumnParallelLinear(
+                hidden_size,
+                self.kv_size,
+                bias=bias,
+                linear_method=linear_method,
+            )
+            self.v_proj = ColumnParallelLinear(
+                hidden_size,
+                self.kv_size,
+                bias=bias,
+                linear_method=linear_method,
+            )
         else:
             self.merge_weight = True
             self.qkv_proj = QKVParallelLinear(
@@ -168,8 +192,12 @@ class LlamaAttention(nn.Module):
             linear_method=linear_method,
         )
 
-        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
-        ) is None else linear_method.quant_config.rope_style()
+        is_neox_style = (
+            True
+            if linear_method is None
+            or linear_method.quant_config.rope_style() is None
+            else linear_method.quant_config.rope_style()
+        )
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.head_dim,
@@ -178,11 +206,13 @@ class LlamaAttention(nn.Module):
             rope_scaling=rope_scaling,
             is_neox_style=is_neox_style,
         )
-        self.attn = PagedAttention(self.num_heads,
-                                   self.head_dim,
-                                   self.scaling,
-                                   num_kv_heads=self.num_kv_heads,
-                                   sliding_window=sliding_window)
+        self.attn = PagedAttention(
+            self.num_heads,
+            self.head_dim,
+            self.scaling,
+            num_kv_heads=self.num_kv_heads,
+            sliding_window=sliding_window,
+        )
 
     def forward(
         self,
@@ -194,22 +224,23 @@ class LlamaAttention(nn.Module):
     ) -> torch.Tensor:
         if self.merge_weight:
             qkv, _ = self.qkv_proj(hidden_states)
-            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size],
-                                dim=-1)
+            q, k, v = qkv.split(
+                [self.q_size, self.kv_size, self.kv_size], dim=-1
+            )
         else:
             q, _ = self.q_proj(hidden_states)
             k, _ = self.k_proj(hidden_states)
             v, _ = self.v_proj(hidden_states)
         q, k = self.rotary_emb(positions, q, k)
         k_cache, v_cache = kv_cache
-        attn_output = self.attn(q, k, v, k_cache, v_cache, input_metadata,
-                                kv_quant_param)
+        attn_output = self.attn(
+            q, k, v, k_cache, v_cache, input_metadata, kv_quant_param
+        )
         output, _ = self.o_proj(attn_output)
         return output
 
 
 class LlamaDecoderLayer(nn.Module):
-
     def __init__(
         self,
         config: LlamaConfig,
@@ -219,14 +250,16 @@ class LlamaDecoderLayer(nn.Module):
         self.hidden_size = config.hidden_size
         rope_theta = getattr(config, "rope_theta", 10000)
         rope_scaling = getattr(config, "rope_scaling", None)
-        max_position_embeddings = getattr(config, "max_position_embeddings",
-                                          8192)
+        max_position_embeddings = getattr(
+            config, "max_position_embeddings", 8192
+        )
         sliding_window = getattr(config, "sliding_window", None)
         self.self_attn = LlamaAttention(
             hidden_size=self.hidden_size,
             num_heads=config.num_attention_heads,
-            num_kv_heads=getattr(config, "num_key_value_heads",
-                                 config.num_attention_heads),
+            num_kv_heads=getattr(
+                config, "num_key_value_heads", config.num_attention_heads
+            ),
             rope_theta=rope_theta,
             rope_scaling=rope_scaling,
             max_position_embeddings=max_position_embeddings,
@@ -240,10 +273,12 @@ class LlamaDecoderLayer(nn.Module):
             hidden_act=config.hidden_act,
             linear_method=linear_method,
         )
-        self.input_layernorm = RMSNorm(config.hidden_size,
-                                       eps=config.rms_norm_eps)
-        self.post_attention_layernorm = RMSNorm(config.hidden_size,
-                                                eps=config.rms_norm_eps)
+        self.input_layernorm = RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps
+        )
+        self.post_attention_layernorm = RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps
+        )
 
     def forward(
         self,
@@ -260,7 +295,8 @@ class LlamaDecoderLayer(nn.Module):
             hidden_states = self.input_layernorm(hidden_states)
         else:
             hidden_states, residual = self.input_layernorm(
-                hidden_states, residual)
+                hidden_states, residual
+            )
         hidden_states = self.self_attn(
             positions=positions,
             hidden_states=hidden_states,
@@ -271,13 +307,13 @@ class LlamaDecoderLayer(nn.Module):
 
         # Fully Connected
         hidden_states, residual = self.post_attention_layernorm(
-            hidden_states, residual)
+            hidden_states, residual
+        )
         hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
 
 
 class LlamaModel(nn.Module):
-
     def __init__(
         self,
         config: LlamaConfig,
@@ -287,8 +323,11 @@ class LlamaModel(nn.Module):
         super().__init__()
         self.config = config
         self.padding_idx = config.pad_token_id
-        lora_vocab = (lora_config.lora_extra_vocab_size *
-                      (lora_config.max_loras or 1)) if lora_config else 0
+        lora_vocab = (
+            (lora_config.lora_extra_vocab_size * (lora_config.max_loras or 1))
+            if lora_config
+            else 0
+        )
         self.vocab_size = config.vocab_size + lora_vocab
         self.org_vocab_size = config.vocab_size
         self.embed_tokens = VocabParallelEmbedding(
@@ -297,10 +336,12 @@ class LlamaModel(nn.Module):
             linear_method=linear_method,
             org_num_embeddings=config.vocab_size,
         )
-        self.layers = nn.ModuleList([
-            LlamaDecoderLayer(config, linear_method)
-            for _ in range(config.num_hidden_layers)
-        ])
+        self.layers = nn.ModuleList(
+            [
+                LlamaDecoderLayer(config, linear_method)
+                for _ in range(config.num_hidden_layers)
+            ]
+        )
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
@@ -321,7 +362,8 @@ class LlamaModel(nn.Module):
                 input_metadata,
                 residual,
                 input_metadata.kv_quant_params[i]
-                if input_metadata.kv_quant_params is not None else None,
+                if input_metadata.kv_quant_params is not None
+                else None,
             )
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
@@ -376,7 +418,8 @@ class LlamaForCausalLM(nn.Module):
             padding_size=DEFAULT_VOCAB_PADDING_SIZE
             # We need bigger padding if using lora for kernel
             # compatibility
-            if not lora_config else lora_config.lora_vocab_padding_size,
+            if not lora_config
+            else lora_config.lora_vocab_padding_size,
         )
         self.sampler = Sampler(self.unpadded_vocab_size, config.vocab_size)
 
@@ -387,8 +430,9 @@ class LlamaForCausalLM(nn.Module):
         kv_caches: List[KVCache],
         input_metadata: InputMetadata,
     ) -> torch.Tensor:
-        hidden_states = self.model(input_ids, positions, kv_caches,
-                                   input_metadata)
+        hidden_states = self.model(
+            input_ids, positions, kv_caches, input_metadata
+        )
         return hidden_states
 
     def sample(
@@ -396,15 +440,18 @@ class LlamaForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(self.lm_head(hidden_states),
-                                   sampling_metadata)
+        next_tokens = self.sampler(
+            self.lm_head(hidden_states), sampling_metadata
+        )
         return next_tokens
 
-    def load_weights(self,
-                     model_name_or_path: str,
-                     cache_dir: Optional[str] = None,
-                     load_format: str = "auto",
-                     revision: Optional[str] = None):
+    def load_weights(
+        self,
+        model_name_or_path: str,
+        cache_dir: Optional[str] = None,
+        load_format: str = "auto",
+        revision: Optional[str] = None,
+    ):
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
             ("qkv_proj", "q_proj", "q"),
@@ -413,21 +460,25 @@ class LlamaForCausalLM(nn.Module):
             ("gate_up_proj", "gate_proj", 0),
             ("gate_up_proj", "up_proj", 1),
         ]
-        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
+        if (
+            self.linear_method is not None
+            and not self.linear_method.quant_config.merge_weight()
         ):
             stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision,
-                self.config):
+            model_name_or_path, cache_dir, load_format, revision, self.config
+        ):
             if "rotary_emb.inv_freq" in name:
                 continue
-            if ("rotary_emb.cos_cached" in name
-                    or "rotary_emb.sin_cached" in name):
+            if (
+                "rotary_emb.cos_cached" in name
+                or "rotary_emb.sin_cached" in name
+            ):
                 # Models trained using ColossalAI may include these tensors in
                 # the checkpoint. Skip them.
                 continue
-            for (param_name, weight_name, shard_id) in stacked_params_mapping:
+            for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)
@@ -443,6 +494,7 @@ class LlamaForCausalLM(nn.Module):
                 if name.endswith(".bias") and name not in params_dict:
                     continue
                 param = params_dict[name]
-                weight_loader = getattr(param, "weight_loader",
-                                        default_weight_loader)
+                weight_loader = getattr(
+                    param, "weight_loader", default_weight_loader
+                )
                 weight_loader(param, loaded_weight)

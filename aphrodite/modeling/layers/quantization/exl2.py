@@ -87,7 +87,8 @@ class Exl2LinearMethod(LinearMethodBase):
                        output_size: int,
                        params_dtype: torch.dtype) -> Dict[str, Any]:
         output_size_per_partition = sum(output_partition_sizes)
-        if input_size != input_size_per_partition or output_size != output_size_per_partition:
+        if (input_size != input_size_per_partition or 
+            output_size != output_size_per_partition):
             raise ValueError(
                 "Currently exl2 doesn't support tensor parallel yet")
         # The shape of weight is unknown until load state dict

@@ -212,7 +212,8 @@ def convert_gguf_to_state_dict(checkpoint, config):
 
     result = GGUFReader(checkpoint)
     # write tensor
-    kv_dim = config.hidden_size // config.num_attention_heads * config.num_key_value_heads
+    kv_dim = (config.hidden_size // config.num_attention_heads *
+              config.num_key_value_heads)
     tensor_mapping = {
         "token_embd": ("model.embed_tokens", config.vocab_size),
         "output": ("lm_head", config.vocab_size),

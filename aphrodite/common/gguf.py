@@ -157,14 +157,16 @@ class GGUFReader:
         offs += 4
         temp_version = self._get(offs, np.uint32)
         if temp_version[0] & 65535 == 0:
-            # If we get 0 here that means it's (probably) a GGUF file created for
-            # the opposite byte order of the machine this script is running on.
+            # If we get 0 here that means it's (probably) a GGUF file created
+            # for the opposite byte order of the machine this script is
+            # running on.
             self.byte_order = 'S'
             temp_version = temp_version.newbyteorder(self.byte_order)
         version = temp_version[0]
         if version not in READER_SUPPORTED_VERSIONS:
             raise ValueError(
-                f'Sorry, file appears to be version {version} which we cannot handle'
+                f'Sorry, file appears to be version {version} which we cannot '
+                'handle'
             )
         self.fields: OrderedDict[str, ReaderField] = OrderedDict()
         self.tensors: list[ReaderTensor] = []
@@ -218,7 +220,8 @@ class GGUFReader:
     def _push_field(self, field: ReaderField, skip_sum: bool = False) -> int:
         if field.name in self.fields:
             raise KeyError(
-                f'Duplicate {field.name} already in list at offset {field.offset}'
+                f'Duplicate {field.name} already in list at offset '
+                f'{field.offset}'
             )
         self.fields[field.name] = field
         return 0 if skip_sum else sum(int(part.nbytes) for part in field.parts)
@@ -257,8 +260,8 @@ class GGUFReader:
             aparts: list[npt.NDArray[Any]] = [raw_itype, alen]
             data_idxs: list[int] = []
             for idx in range(alen[0]):
-                curr_size, curr_parts, curr_idxs, curr_types = self._get_field_parts(
-                    offs, raw_itype[0])
+                curr_size, curr_parts, curr_idxs, curr_types = (
+                    self._get_field_parts(offs, raw_itype[0]))
                 if idx == 0:
                     types += curr_types
                 idxs_offs = len(aparts)
@@ -297,8 +300,8 @@ class GGUFReader:
             offs += int(raw_kv_type.nbytes)
             parts: list[npt.NDArray[Any]] = [kv_klen, kv_kdata, raw_kv_type]
             idxs_offs = len(parts)
-            field_size, field_parts, field_idxs, field_types = self._get_field_parts(
-                offs, raw_kv_type[0])
+            field_size, field_parts, field_idxs, field_types = (
+                self._get_field_parts(offs, raw_kv_type[0]))
             parts += field_parts
             self._push_field(ReaderField(
                 orig_offs,
@@ -325,7 +328,8 @@ class GGUFReader:
         tensors = []
         for field in fields:
             # pylint: disable=unused-variable
-            _name_len, name_data, _n_dims, dims, raw_dtype, offset_tensor = field.parts
+            (_name_len, name_data, _n_dims, dims,
+             raw_dtype, offset_tensor) = field.parts
             ggml_type = GGMLQuantizationType(raw_dtype[0])
             n_elems = np.prod(dims)
             block_size, type_size = GGML_QUANT_SIZES[ggml_type]

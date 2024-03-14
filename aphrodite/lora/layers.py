@@ -20,7 +20,8 @@ from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               RowParallelLinear,
                                               QKVParallelLinear,
                                               MergedColumnParallelLinear)
-from aphrodite.modeling.layers.vocab_parallel_embedding import VocabParallelEmbedding, ParallelLMHead
+from aphrodite.modeling.layers.vocab_parallel_embedding import (
+    VocabParallelEmbedding, ParallelLMHead)
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from aphrodite.modeling.megatron.utils import split_tensor_along_last_dim
@@ -107,7 +108,8 @@ def _apply_lora_packed_nslice(
         lora_b_stacked:    3 element tuple of (num_loras, output_dim, lora_rank)
         indices:           (batch_size)
         output:            (batch_size, q_slice_size + 2*kv_slice_size)
-        output_slices:     n-1 element tuple of (slice_size...), where n is number of slices
+        output_slices:     n-1 element tuple of (slice_size...), where n is
+                           number of slices
     """
     org_output = output
     x = x.view(-1, x.shape[-1])
@@ -843,7 +845,8 @@ class SamplerWithLoRA(BaseLayerWithLoRA):
         # Keep this in sync with csrc/punica/bgmv/bgmv_config.h
         if 32000 < self.base_layer.vocab_size > 33024:
             raise ValueError(
-                "When using LoRA, vocab size must be 32000 >= vocab_size <= 33024"
+                "When using LoRA, vocab size must be 32000 >= vocab_size "
+                "<= 33024"
             )
         self.lora_a_stacked = torch.zeros(
             (

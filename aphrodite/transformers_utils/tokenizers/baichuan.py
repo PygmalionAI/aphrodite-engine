@@ -50,7 +50,10 @@ class BaichuanTokenizer(PreTrainedTokenizer):
         clean_up_tokenization_spaces=False,
         **kwargs,
     ):
-        self.sp_model_kwargs = {} if sp_model_kwargs is None else sp_model_kwargs
+        if sp_model_kwargs is None:
+            self.sp_model_kwargs = {}
+        else:
+            self.sp_model_kwargs = sp_model_kwargs
         bos_token = (
             AddedToken(bos_token, lstrip=False, rstrip=False)
             if isinstance(bos_token, str)
@@ -105,7 +108,8 @@ class BaichuanTokenizer(PreTrainedTokenizer):
 
     def get_vocab(self):
         """Returns vocab as a dict"""
-        vocab = {self.convert_ids_to_tokens(i): i for i in range(self.vocab_size)}
+        vocab = {self.convert_ids_to_tokens(i): i for i in range(
+            self.vocab_size)}
         vocab.update(self.added_tokens_encoder)
         return vocab
 
@@ -128,7 +132,8 @@ class BaichuanTokenizer(PreTrainedTokenizer):
         out_string = ""
         prev_is_special = False
         for i, token in enumerate(tokens):
-            # make sure that special tokens are not decoded using sentencepiece model
+            # make sure that special tokens are not decoded using
+            # sentencepiece model
             if token in self.all_special_tokens:
                 if not prev_is_special and i != 0:
                     out_string += " "
@@ -155,7 +160,8 @@ class BaichuanTokenizer(PreTrainedTokenizer):
             `Tuple(str)`: Paths to the files saved.
         """
         if not os.path.isdir(save_directory):
-            logger.error(f"Vocabulary path ({save_directory}) should be a directory")
+            logger.error(f"Vocabulary path ({save_directory}) should be"
+                         " a directory")
             return
         out_vocab_file = os.path.join(
             save_directory,
@@ -192,19 +198,22 @@ class BaichuanTokenizer(PreTrainedTokenizer):
         already_has_special_tokens: bool = False,
     ) -> List[int]:
         """
-        Retrieve sequence ids from a token list that has no special tokens added. This method is called when adding
-        special tokens using the tokenizer `prepare_for_model` method.
+        Retrieve sequence ids from a token list that has no special tokens
+        added. This method is called when adding special tokens using the
+        tokenizer `prepare_for_model` method.
 
         Args:
             token_ids_0 (`List[int]`):
                 List of IDs.
             token_ids_1 (`List[int]`, *optional*):
                 Optional second list of IDs for sequence pairs.
-            already_has_special_tokens (`bool`, *optional*, defaults to `False`):
-                Whether or not the token list is already formatted with special tokens for the model.
+            already_has_special_tokens(`bool`, *optional*, defaults to `False`):
+                Whether or not the token list is already formatted with special
+                tokens for the model.
 
         Returns:
-            `List[int]`: A list of integers in the range [0, 1]: 1 for a special token, 0 for a sequence token.
+            `List[int]`: A list of integers in the range [0, 1]: 1 for a
+            special token, 0 for a sequence token.
         """
         if already_has_special_tokens:
             return super().get_special_tokens_mask(
@@ -231,7 +240,8 @@ class BaichuanTokenizer(PreTrainedTokenizer):
         self, token_ids_0: List[int], token_ids_1: Optional[List[int]] = None
     ) -> List[int]:
         """
-        Creates a mask from the two sequences passed to be used in a sequence-pair classification task. An ALBERT
+        Creates a mask from the two sequences passed to be used in a
+        sequence-pair classification task. An ALBERT
         sequence pair mask has the following format:
 
         ```
@@ -248,7 +258,8 @@ class BaichuanTokenizer(PreTrainedTokenizer):
                 Optional second list of IDs for sequence pairs.
 
         Returns:
-            `List[int]`: List of [token type IDs](../glossary#token-type-ids) according to the given sequence(s).
+            `List[int]`: List of [token type IDs](../glossary#token-type-ids)
+            according to the given sequence(s).
         """
         bos_token_id = [self.bos_token_id] if self.add_bos_token else []
         eos_token_id = [self.eos_token_id] if self.add_eos_token else []

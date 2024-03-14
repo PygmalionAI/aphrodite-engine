@@ -85,7 +85,8 @@ class UvicornLoggingHandler(logging.Handler):
                                                   self.format(record).rstrip())
 
 
-# Uvicorn config for logging. Passed into run when creating all loggers in server
+# Uvicorn config for logging. Passed into run when creating all loggers in
+#server
 UVICORN_LOG_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,

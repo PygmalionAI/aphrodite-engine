@@ -158,8 +158,9 @@ class WorkerLoRAManager(AbstractWorkerLoRAManager):
                 f"{self.lora_config.max_lora_rank}.")
         if lora.extra_vocab_size > self.lora_config.lora_extra_vocab_size:
             raise ValueError(
-                f"LoRA added vocab size {lora.extra_vocab_size} is greater than "
-                f"lora_extra_vocab_size {self.lora_config.lora_extra_vocab_size}."
+                f"LoRA added vocab size {lora.extra_vocab_size} is "
+                "greater than lora_extra_vocab_size "
+                f"{self.lora_config.lora_extra_vocab_size}."
             )
         return lora
 

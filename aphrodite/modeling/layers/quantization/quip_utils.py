@@ -4,11 +4,10 @@ from pathlib import Path
 import scipy
 import torch
 from safetensors.torch import load_file
+from contextlib import suppress
 
-try:
+with suppress(ImportError):
     import aphrodite._hadamard_C as hadamard_C
-except ImportError:
-    pass
 
 HADA_TENSORS = load_file(
     Path(__file__).resolve().parent / "hadamard.safetensors")

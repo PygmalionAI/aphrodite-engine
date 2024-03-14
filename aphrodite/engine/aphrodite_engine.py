@@ -13,7 +13,8 @@ from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
 from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.metrics import StatLogger, Stats
-from aphrodite.engine.ray_tools import RayWorkerAphrodite, initialize_cluster, ray
+from aphrodite.engine.ray_tools import (
+    RayWorkerAphrodite, initialize_cluster, ray)
 from aphrodite.common.logger import setup_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
@@ -75,7 +76,8 @@ class AphroditeEngine:
         log_stats: bool,
     ) -> None:
         logger.info(
-            f"Initializing the Aphrodite Engine (v{aphrodite.__version__}) with the following config:\n"
+            f"Initializing the Aphrodite Engine (v{aphrodite.__version__}) "
+            "with the following config:\n"
             f"Model = {model_config.model!r}\n"
             f"DataType = {model_config.dtype}\n"
             f"Model Load Format = {model_config.load_format}\n"
@@ -293,6 +295,7 @@ class AphroditeEngine:
                 self.scheduler_config)
 
     def _init_cache(self) -> None:
+        # ruff: noqa: E501
         """Profiles the memory usage and initializes the KV cache.
 
         The engine will first conduct a profiling of the existing memory usage.
