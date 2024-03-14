@@ -341,8 +341,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--tokenizer",
         type=str,
-        help=
-        "Name or path of the tokenizer, if not using the default model "
+        help="Name or path of the tokenizer, if not using the default model "
         "tokenizer.",
     )
     parser.add_argument(
