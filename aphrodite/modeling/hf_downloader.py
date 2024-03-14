@@ -8,7 +8,6 @@ from collections import defaultdict
 from typing import Any, Iterator, List, Optional, Tuple
 from loguru import logger
 
-import gguf
 from huggingface_hub import snapshot_download, HfFileSystem
 import numpy as np
 from safetensors.torch import load_file, save_file, safe_open
@@ -18,6 +17,7 @@ from tqdm.auto import tqdm
 
 from aphrodite.common.config import ModelConfig
 from aphrodite.common.logger import get_loading_progress_bar
+from aphrodite.common.gguf import GGUFReader
 from aphrodite.modeling.layers.quantization import (get_quantization_config,
                                                     QuantizationConfig)
 
@@ -210,7 +210,7 @@ def convert_gguf_to_state_dict(checkpoint, config):
         raise RuntimeError(
             f"Cannot find any model weights with `{checkpoint}`")
 
-    result = gguf.GGUFReader(checkpoint)
+    result = GGUFReader(checkpoint)
     # write tensor
     kv_dim = config.hidden_size // config.num_attention_heads * config.num_key_value_heads
     tensor_mapping = {
