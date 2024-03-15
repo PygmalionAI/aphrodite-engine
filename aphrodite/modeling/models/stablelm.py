@@ -180,7 +180,8 @@ class StablelmAttention(nn.Module):
             bias=False,
             linear_method=linear_method,
         )
-        self.rotary_ndims = int(self.head_dim * self.config.partial_rotary_factor)
+        self.rotary_ndims = int(self.head_dim *
+                                self.config.partial_rotary_factor)
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.rotary_ndims,
