@@ -13,7 +13,8 @@ from torch import nn
 from aphrodite.common.config import LoRAConfig
 from aphrodite.common.utils import LRUCache, in_wsl
 
-from aphrodite.lora.layers import BaseLayerWithLoRA, LoRAMapping, from_layer, from_layer_sampler
+from aphrodite.lora.layers import (BaseLayerWithLoRA, LoRAMapping, from_layer,
+                                   from_layer_sampler)
 from aphrodite.lora.lora import LoRALayerWeights, PackedLoRALayerWeights
 from aphrodite.lora.utils import parse_fine_tuned_lora_name, replace_submodule
 
@@ -283,7 +284,7 @@ class LoRAModelManager:
                                               dtype=torch.long,
                                               device="cuda")
         self.offsets = []
-        # 4 is the number of indicies tensors defined above
+        # 4 is the number of indices tensors defined above
         # base_indices, sampler_indices, sampler_indices_padded,
         # embeddings_indices
         self.indices_len = [None] * 4

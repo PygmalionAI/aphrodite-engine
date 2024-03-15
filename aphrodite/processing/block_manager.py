@@ -1,4 +1,5 @@
 """A block manager that manages token blocks."""
+
 import enum
 from itertools import count
 from os.path import commonprefix
@@ -18,12 +19,14 @@ class BlockAllocator:
     the reference count becomes zero, the block is added back to the free list.
     """
 
-    def __init__(self,
-                 device: Device,
-                 block_size: int,
-                 num_blocks: int,
-                 eviction_policy: EvictionPolicy = EvictionPolicy.LRU,
-                 enable_caching: bool = False) -> None:
+    def __init__(
+        self,
+        device: Device,
+        block_size: int,
+        num_blocks: int,
+        eviction_policy: EvictionPolicy = EvictionPolicy.LRU,
+        enable_caching: bool = False,
+    ) -> None:
         self.device = device
         self.block_size = block_size
         self.num_blocks = num_blocks
@@ -46,11 +49,13 @@ class BlockAllocator:
             block.block_hash = block_hash
             block.num_hashed_tokens = num_hashed_tokens
             return block
-        block = PhysicalTokenBlock(device=self.device,
-                                   block_number=self.current_num_blocks,
-                                   block_size=self.block_size,
-                                   block_hash=block_hash,
-                                   num_hashed_tokens=num_hashed_tokens)
+        block = PhysicalTokenBlock(
+            device=self.device,
+            block_number=self.current_num_blocks,
+            block_size=self.block_size,
+            block_hash=block_hash,
+            num_hashed_tokens=num_hashed_tokens,
+        )
         self.current_num_blocks += 1
         return block
 
@@ -95,13 +100,15 @@ class BlockAllocator:
                 del self.cached_blocks[block.block_hash]
 
     def get_num_free_blocks(self) -> int:
-        return self.num_blocks - self.current_num_blocks + self.evictor.num_blocks
+        return (self.num_blocks - self.current_num_blocks +
+                self.evictor.num_blocks)
 
     def contains_block(self, block_hash: int) -> bool:
         return block_hash in self.cached_blocks or block_hash in self.evictor
 
     def update_hash(self, block_hash: int, block: PhysicalTokenBlock):
-        # If caching is enabled, update the hash of block and the cached_blocks dictionary.
+        # If caching is enabled, update the hash of block and the cached_blocks
+        # dictionary.
         if self.enable_caching:
             assert not self.contains_block(block_hash)
             old_hash = block.block_hash
@@ -119,6 +126,7 @@ class AllocStatus(enum.Enum):
     3. Never: seq_group can never be allocated.
       The seq_group is too large to allocated in GPU.
     """
+
     OK = enum.auto()
     LATER = enum.auto()
     NEVER = enum.auto()
@@ -142,8 +150,10 @@ class BlockSpaceManager:
 
         self.block_sliding_window = None
         if sliding_window is not None:
-            assert sliding_window % block_size == 0, (sliding_window,
-                                                      block_size)
+            assert sliding_window % block_size == 0, (
+                sliding_window,
+                block_size,
+            )
             self.block_sliding_window = sliding_window // block_size
 
         self.watermark = watermark
@@ -152,14 +162,18 @@ class BlockSpaceManager:
         self.enable_caching = enable_caching
 
         self.watermark_blocks = int(watermark * num_gpu_blocks)
-        self.gpu_allocator = BlockAllocator(Device.GPU,
-                                            block_size,
-                                            num_gpu_blocks,
-                                            enable_caching=enable_caching)
-        self.cpu_allocator = BlockAllocator(Device.CPU,
-                                            block_size,
-                                            num_cpu_blocks,
-                                            enable_caching=enable_caching)
+        self.gpu_allocator = BlockAllocator(
+            Device.GPU,
+            block_size,
+            num_gpu_blocks,
+            enable_caching=enable_caching,
+        )
+        self.cpu_allocator = BlockAllocator(
+            Device.CPU,
+            block_size,
+            num_cpu_blocks,
+            enable_caching=enable_caching,
+        )
         # Mapping: seq_id -> BlockTable.
         self.block_tables: Dict[int, BlockTable] = {}
 
@@ -199,7 +213,8 @@ class BlockSpaceManager:
             else:
                 block = self.gpu_allocator.allocate(
                     seq.hash_of_block(logical_idx),
-                    seq.num_hashed_tokens_of_block(logical_idx))
+                    seq.num_hashed_tokens_of_block(logical_idx),
+                )
             block_table.append(block)
 
         # Assign the block table for each sequence.
@@ -218,10 +233,12 @@ class BlockSpaceManager:
         seq: Sequence,
         last_block: PhysicalTokenBlock,
     ) -> PhysicalTokenBlock:
-        # Compute a new hash for the block so that it can be shared by other Sequences
+        # Compute a new hash for the block so that it can be shared by other
+        # Sequences
         new_hash = seq.hash_of_block(len(seq.logical_token_blocks) - 1)
 
-        # if new_hash is already in the cached table, then free last_block and return the cached version
+        # if new_hash is already in the cached table, then free last_block and
+        # return the cached version
         if self.gpu_allocator.contains_block(new_hash):
             self.gpu_allocator.free(last_block)
             return self.gpu_allocator.allocate(new_hash)
@@ -289,7 +306,8 @@ class BlockSpaceManager:
         assert last_block.device == Device.GPU
         if last_block.ref_count == 1:
             # Not shared with other sequences. Appendable.
-            # If the last block is now complete, promote it to a full block so that it can be shared
+            # If the last block is now complete, promote it to a full block so
+            # that it can be shared
             new_block = self._maybe_promote_last_block(seq, last_block)
             block_table[-1] = new_block
             return None

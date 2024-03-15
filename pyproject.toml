@@ -7,3 +7,48 @@ requires = [
     "wheel",
 ]
 build-backend = "setuptools.build_meta"
+
+
+[tool.ruff]
+# Allow lines to be as long as 80.
+line-length = 80
+
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # pyupgrade
+    # "UP",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # isort
+    # "I",
+]
+ignore = [
+    # wildcard imports
+    "F405", "F403",
+    # lambda expression assignment
+    "E731",
+    # .strip() with multi-character strings
+    "B005",
+    # Loop control variable not used within loop body
+    "B007",
+]
+
+[tool.mypy]
+python_version = "3.8"
+
+ignore_missing_imports = true
+
+files = "aphrodite"
+# TODO: Include the code from Megatron and HuggingFace.
+exclude = "aphrodite/modeling/megatron/|aphrodite/modeling/models/|aphrodite/endpoints/kobold/klite.embd"
+
+
+[tool.codespell]
+ignore-words-list = "dout, te, indicies"
+skip = "./aphrodite/endpoints/kobold/klite.embd"

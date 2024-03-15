@@ -4,7 +4,6 @@ from loguru import logger
 
 import torch.nn as nn
 
-from aphrodite.common.logger import setup_logger
 from aphrodite.common.utils import is_hip
 
 # Architecture -> (module, class).
@@ -42,6 +41,7 @@ _MODELS = {
     "Qwen2ForCausalLM": ("qwen2", "Qwen2ForCausalLM"),
     "RWForCausalLM": ("falcon", "FalconForCausalLM"),
     "StableLMEpochForCausalLM": ("stablelm", "StablelmForCausalLM"),
+    "StableLmForCausalLM": ("stablelm", "StablelmForCausalLM"),
 }
 
 # Models not supported by ROCm.

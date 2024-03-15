@@ -3,7 +3,8 @@
 import time
 from typing import Dict, List, Literal, Optional, Union
 
-from pydantic import AliasChoices, BaseModel, Field, model_validator, root_validator
+from pydantic import (AliasChoices, BaseModel, Field, model_validator,
+                      root_validator)
 import torch
 
 from aphrodite.common.utils import random_uuid

@@ -83,7 +83,7 @@ GPU: NVIDIA A40, Mistral 7B. Baseline is the same model loaded with text-generat
 ### High Batch Size Performance
 
 > [!NOTE]  
-> The numbers below are the theoritical peak achieved by *only* requesting output tokens at very high batch sizes. At lower batch sizes with much larger prompts, the results will be vastly different.
+> The numbers below are the theoretical peak achieved by *only* requesting output tokens at very high batch sizes. At lower batch sizes with much larger prompts, the results will be vastly different.
 Throughput refers to output tokens per second.
 
 This table is outdated, will be replaced soon.

@@ -8,8 +8,14 @@ from re import escape as regex_escape
 from typing import Union, Tuple
 from pydantic import BaseModel
 
-from aphrodite.endpoints.openai.protocol import CompletionRequest, ChatCompletionRequest
-from aphrodite.modeling.outlines_logits_processors import JSONLogitsProcessor, RegexLogitsProcessor
+from aphrodite.endpoints.openai.protocol import (
+    CompletionRequest,
+    ChatCompletionRequest,
+)
+from aphrodite.modeling.outlines_logits_processors import (
+    JSONLogitsProcessor,
+    RegexLogitsProcessor,
+)
 
 
 class GuidedDecodingMode(Enum):
@@ -51,9 +57,8 @@ async def get_guided_decoding_logits_processor(
 
 
 def _get_guide_and_mode(
-    request: Union[CompletionRequest, ChatCompletionRequest]
+    request: Union[CompletionRequest, ChatCompletionRequest],
 ) -> Tuple[str, GuidedDecodingMode]:
-
     if request.guided_json:
         if not isinstance(request.guided_json, (str, dict, BaseModel)):
             raise TypeError("JSON schema must be str, dict, or BaseModel")

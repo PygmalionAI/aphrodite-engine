@@ -5,9 +5,9 @@ import time
 import sys
 import pytest
 import requests
-import ray  # using Ray for overall ease of process management, parallel requests, and debugging.
+import ray
 import openai  # use the official client for correctness check
-from huggingface_hub import snapshot_download  # downloading lora to test lora requests
+from huggingface_hub import snapshot_download
 
 # imports for guided decoding tests
 import json
@@ -17,8 +17,8 @@ import re
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 
 MAX_SERVER_START_WAIT_S = 600  # wait for server to start for 60 seconds
-MODEL_NAME = "HuggingFaceH4/zephyr-7b-beta"  # any model with a chat template should work here
-LORA_NAME = "typeof/zephyr-7b-beta-lora"  # technically this needs Mistral-7B-v0.1 as base, but we're not testing generation quality here
+MODEL_NAME = "HuggingFaceH4/zephyr-7b-beta"
+LORA_NAME = "typeof/zephyr-7b-beta-lora"
 
 TEST_SCHEMA = {
     "type": "object",
@@ -121,7 +121,7 @@ def server(zephyr_lora_files):
         "--model",
         MODEL_NAME,
         "--dtype",
-        "bfloat16",  # use half precision for speed and memory savings in CI environment
+        "bfloat16",  # use half precision for speed and memory savings in CI env
         "--max-model-len",
         "8192",
         "--enforce-eager",
@@ -337,7 +337,8 @@ async def test_batch_completions(server, client: openai.AsyncOpenAI,
         max_tokens=5,
         temperature=0.0,
         extra_body=dict(
-            # NOTE: this has to be true for n > 1 in Aphrodite, but not necessary for official client.
+            # NOTE: this has to be true for n > 1 in Aphrodite, but not
+            # necessary for official client.
             use_beam_search=True),
     )
     assert len(batch.choices) == 4
@@ -415,7 +416,8 @@ async def test_guided_json_completion(server, client: openai.AsyncOpenAI):
     completion = await client.completions.create(
         model=MODEL_NAME,
         prompt=
-        f"Give an example JSON for an employee profile that fits this schema: {TEST_SCHEMA}",
+        "Give an example JSON for an employee profile that fits this schema:"
+        f" {TEST_SCHEMA}",
         n=3,
         temperature=1.0,
         max_tokens=500,

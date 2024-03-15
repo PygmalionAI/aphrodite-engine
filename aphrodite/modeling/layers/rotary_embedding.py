@@ -32,14 +32,14 @@ from aphrodite._C import ops
 
 
 def _rotate_neox(x: torch.Tensor) -> torch.Tensor:
-    """PyTorch-native implemenation."""
+    """PyTorch-native implementation."""
     x1 = x[..., :x.shape[-1] // 2]
     x2 = x[..., x.shape[-1] // 2:]
     return torch.cat((-x2, x1), dim=-1)
 
 
 def _rotate_gptj(x: torch.Tensor) -> torch.Tensor:
-    """PyTorch-native implemenation."""
+    """PyTorch-native implementation."""
     x1 = x[..., ::2]
     x2 = x[..., 1::2]
     x = torch.stack((-x2, x1), dim=-1)

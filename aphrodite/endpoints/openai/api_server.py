@@ -14,7 +14,8 @@ from http import HTTPStatus
 from fastapi import Request, APIRouter, Header
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse, Response, HTMLResponse
+from fastapi.responses import (JSONResponse, StreamingResponse, Response,
+                               HTMLResponse)
 from loguru import logger
 
 import aphrodite
@@ -28,7 +29,8 @@ from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams, _SAMPLING_EPS
 from aphrodite.common.utils import random_uuid
 from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
-from aphrodite.endpoints.openai.serving_completions import OpenAIServingCompletion
+from aphrodite.endpoints.openai.serving_completions import (
+    OpenAIServingCompletion)
 from aphrodite.endpoints.openai.protocol import KAIGenerationInputSchema
 from aphrodite.endpoints.openai.serving_engine import LoRA
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
@@ -100,8 +102,8 @@ def parse_args():
         type=str,
         default=None,
         help=
-        "If provided, the server will require this key to be presented in the header."
-    )
+        "If provided, the server will require this key to be presented in the "
+        "header.")
     parser.add_argument(
         "--launch-kobold-api",
         action="store_true",
@@ -125,8 +127,8 @@ def parse_args():
         nargs='+',
         action=LoRAParserAction,
         help=
-        "LoRA module configurations in the format name=path. Multiple modules can be specified."
-    )
+        "LoRA module configurations in the format name=path. Multiple modules "
+        "can be specified.")
     parser.add_argument("--chat-template",
                         type=str,
                         default=None,
@@ -159,9 +161,10 @@ def parse_args():
         help="Additional ASGI middleware to apply to the app. "
         "We accept multiple --middleware arguments. "
         "The value should be an import path. "
-        "If a function is provided, Aphrodite will add it to the server using @app.middleware('http'). "
-        "If a class is provided, Aphrodite will add it to the server using app.add_middleware(). "
-    )
+        "If a function is provided, Aphrodite will add it to the server using "
+        "@app.middleware('http'). "
+        "If a class is provided, Aphrodite will add it to the server using "
+        "app.add_middleware(). ")
 
     parser = AsyncEngineArgs.add_cli_args(parser)
     return parser.parse_args()
@@ -546,9 +549,8 @@ if __name__ == "__main__":
         elif inspect.iscoroutinefunction(imported):
             app.middleware("http")(imported)
         else:
-            raise ValueError(
-                f"Invalid middleware {middleware}. Must be a function or a class."
-            )
+            raise ValueError(f"Invalid middleware {middleware}. Must be a "
+                             "function or a class.")
 
     logger.debug(f"args: {args}")
 

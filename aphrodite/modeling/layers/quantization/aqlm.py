@@ -9,7 +9,8 @@ from torch.nn.parameter import Parameter
 
 from aphrodite._C import ops
 from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
-from aphrodite.modeling.layers.quantization.base_config import QuantizationConfig
+from aphrodite.modeling.layers.quantization.base_config import (
+    QuantizationConfig)
 
 
 def get_int_dtype(nbits: int) -> torch.dtype:
@@ -126,9 +127,11 @@ class AQLMLinearMethod(LinearMethodBase):
 
         codes = Parameter(
             torch.empty(
-                # There could actually be two pack factors, one along input and one along output,
+                # There could actually be two pack factors, one along input
+                # and one along output,
                 # but we don't currently support out_group_size,
-                # and only the one along output needs to be marked with "packed_dim".
+                # and only the one along output needs to be marked with
+                # "packed_dim".
                 # in order for QKVLinear to work.
                 output_size_per_partition,
                 input_size_per_partition // self.quant_config.pack_factor,
