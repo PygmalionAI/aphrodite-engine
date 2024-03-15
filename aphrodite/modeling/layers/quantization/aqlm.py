@@ -48,8 +48,8 @@ def dequantize_weight(codes: torch.Tensor,
         num_in_groups*group_size]
     """
     num_out_groups, num_in_groups, num_codebooks = codes.shape[-3:]
-    (num_codebooks, codebook_size,
-     out_group_size, in_group_size) = codebooks.shape
+    (num_codebooks, codebook_size, out_group_size,
+     in_group_size) = codebooks.shape
     out_features = num_out_groups * out_group_size
     in_features = num_in_groups * in_group_size
     codebook_offsets = torch.arange(
@@ -60,7 +60,7 @@ def dequantize_weight(codes: torch.Tensor,
         codebooks.flatten(0, 1).flatten(-2, -1),
         mode="sum"
     )  # [prod(dims) * num_out_groups * num_in_groups, out_group_size *
-       # in_group_size]
+    # in_group_size]
 
     reconstructed_weight_groupwise = reconstructed_weight_flat.view(
         list(codes.shape[:-3]) +
@@ -310,7 +310,7 @@ class AQLMLinearMethod(LinearMethodBase):
         scales = weights["scales"]
         output_partition_sizes = getattr(codebooks, "output_partition_sizes",
                                          None)
-        
+
         use_gemv = math.prod(
             x.shape[:-1]) <= 32 or output_partition_sizes is None
 
