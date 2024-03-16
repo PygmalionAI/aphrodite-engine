@@ -15,7 +15,7 @@ from torch.utils.cpp_extension import CUDA_HOME
 
 ROOT_DIR = os.path.dirname(__file__)
 
-MAIN_CUDA_VERSION = "12.1"
+MAIN_CUDA_VERSION = "12.2"
 
 def is_sccache_available() -> bool:
     return which("sccache") is not None
@@ -235,7 +235,7 @@ def get_aphrodite_version() -> str:
             rocm_version_str = hipcc_version.replace(".", "")[:3]
             version += f"+rocm{rocm_version_str}"
     else:
-        cuda_version = str(get_nvcc_cuda_version)
+        cuda_version = str(get_nvcc_cuda_version())
         if cuda_version != MAIN_CUDA_VERSION:
             cuda_version_str = cuda_version.replace(".", "")[:3]
             version += f"+cu{cuda_version_str}"
