@@ -16,4 +16,3 @@ dependencies:
   - pip
   - git=2.35.1
   - ninja
-  - cmake=3.21

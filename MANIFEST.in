@@ -1,7 +1,5 @@
 include LICENSE
 include requirements.txt
 include aphrodite/endpoints/kobold/klite.embd
-include CMakeLists.txt
 
-recursive-include cmake *
 recursive-include kernels *
