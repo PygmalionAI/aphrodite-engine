@@ -5,12 +5,15 @@ from transformers.models.auto.configuration_auto import CONFIG_MAPPING
 
 from aphrodite.transformers_utils.configs import (BaiChuanConfig,
                                                   ChatGLMConfig, MPTConfig,
-                                                  QWenConfig, RWConfig)
+                                                  QWenConfig, RWConfig,
+                                                  CohereConfig)
 from aphrodite.common.gguf import GGUFReader
 
 _CONFIG_REGISTRY = {
     "baichuan": BaiChuanConfig,
     "chatglm": ChatGLMConfig,
+    "cohere": CohereConfig,
+    "command-r": CohereConfig,
     "mpt": MPTConfig,
     "qwen": QWenConfig,
     "RefinedWeb": RWConfig,  # For tiiuae/falcon-40b(-instruct)
@@ -25,7 +28,8 @@ def extract_gguf_config(checkpoint):
                        encoding='utf-8')
     # Only support llama so far
     if architecture != "llama":
-        raise RuntimeError(f"Unsupported architecture {architecture}")
+        raise RuntimeError(f"Unsupported architecture {architecture}, "
+                           "only llama is supported.")
 
     # write config
     vocab_size = len(result.fields['tokenizer.ggml.token_type'].data)
