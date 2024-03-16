@@ -267,6 +267,7 @@ class QuantSampler(nn.Module):
                                      prompt_logprobs, sample_logprobs,
                                      output_metadata)
 
+
 def _prune_hidden_states(
     hidden_states: torch.Tensor,
     sampling_metadata: SamplingMetadata,

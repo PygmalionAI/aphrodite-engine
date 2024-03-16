@@ -309,12 +309,13 @@ class InternLM2ForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight():
+        if (self.linear_method is not None
+                and not self.linear_method.quant_config.merge_weight()):
             next_tokens = self.quant_sampler(self.output(hidden_states),
-                                    sampling_metadata)
+                                             sampling_metadata)
         else:
             next_tokens = self.sampler(self.output.weight, hidden_states,
-                                   sampling_metadata)
+                                       sampling_metadata)
         return next_tokens
 
     def load_weights(

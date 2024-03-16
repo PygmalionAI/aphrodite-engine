@@ -10,7 +10,7 @@ from transformers import PretrainedConfig
 
 from aphrodite.common.config import LoRAConfig
 from aphrodite.lora.punica import add_lora, add_lora_slice, bgmv
-from aphrodite.modeling.layers.sampler import Sampler, QuantSampler
+from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.megatron.communication_op import (
     tensor_model_parallel_all_gather,
     tensor_model_parallel_all_reduce,
