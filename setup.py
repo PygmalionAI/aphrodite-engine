@@ -4,18 +4,15 @@ import re
 import subprocess
 import sys
 from typing import List, Set
-import warnings
-from pathlib import Path
+import sys
+from typing import List
 
 from packaging.version import parse, Version
-import setuptools
-import torch
-import torch.utils.cpp_extension as torch_cpp_ext
-from setuptools.command.build_ext import build_ext
 from setuptools import setup, find_packages, Extension
-from torch.utils.cpp_extension import (BuildExtension, CUDAExtension,
-                                       CUDA_HOME, ROCM_HOME)
+from setuptools.command.build_ext import build_ext
 from shutil import which
+import torch
+from torch.utils.cpp_extension import CUDA_HOME
 
 ROOT_DIR = os.path.dirname(__file__)
 
@@ -109,6 +106,7 @@ def get_nvcc_cuda_version() -> Version:
 
     Adapted from https://github.com/NVIDIA/apex/blob/8b7a1ff183741dd8f9b87e7bafd04cfde99cea28/setup.py
     """
+    nvcc_output = subprocess.check_output([CUDA_HOME + "/bin/nvcc", "-V"],
     nvcc_output = subprocess.check_output([CUDA_HOME + "/bin/nvcc", "-V"],
                                           universal_newlines=True)
     output = nvcc_output.split()
@@ -234,6 +232,7 @@ setup(
         "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",  # noqa: E501
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
+    packages=find_packages(exclude=("kernels", "examples",
     packages=find_packages(exclude=("kernels", "examples",
                                                "tests")),
     python_requires=">=3.8",
