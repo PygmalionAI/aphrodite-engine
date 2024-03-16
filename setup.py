@@ -15,7 +15,7 @@ from torch.utils.cpp_extension import CUDA_HOME
 
 ROOT_DIR = os.path.dirname(__file__)
 
-MAIN_CUDA_VERSION = "12.2"
+MAIN_CUDA_VERSION = "12.1"
 
 def is_sccache_available() -> bool:
     return which("sccache") is not None
