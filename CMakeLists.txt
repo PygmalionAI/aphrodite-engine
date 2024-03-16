@@ -151,7 +151,7 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     "kernels/quantization/awq/gemm_kernels.cu"
     "kernels/quantization/quip/origin_order.cu"
     "kernels/quantization/marlin/marlin_cuda_kernel.cu"
-    "kernels/custom_all_reduce.cu"
+    "kernels/all_reduce/custom_all_reduce.cu"
     "kernels/quantization/aqlm/aqlm_cuda_entry.cpp"
     "kernels/quantization/aqlm/aqlm_cuda_kernel.cu"
     "kernels/quantization/bitsandbytes/int4_fp16_gemm_kernels.cu"
