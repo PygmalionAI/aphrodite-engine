@@ -704,7 +704,8 @@ class ModelRunner:
         return output
 
     @torch.inference_mode()
-    def profile_run(self) -> None:
+    def profile_run(self) -> int:
+        """Returns the number of tokens stored in the KV cache during the profiling run."""
         # Enable top-k sampling to reflect the accurate memory usage.
         vocab_size = self.model_config.get_vocab_size()
         sampling_params = SamplingParams(top_p=0.99, top_k=vocab_size - 1)
@@ -736,9 +737,11 @@ class ModelRunner:
         # Profile memory usage with max_num_sequences sequences and the total
         # number of tokens equal to max_num_batched_tokens.
         seqs: List[SequenceGroupMetadata] = []
+        total_kvcache_used = 0
         for group_id in range(max_num_seqs):
             seq_len = max_num_batched_tokens // max_num_seqs + (
                 group_id < max_num_batched_tokens % max_num_seqs)
+            total_kvcache_used += seq_len
             seq_data = SequenceData([0] * seq_len)
             seq = SequenceGroupMetadata(
                 request_id=str(group_id),
@@ -757,7 +760,7 @@ class ModelRunner:
         kv_caches = [(None, None)] * num_layers
         self.execute_model(seqs, kv_caches)
         torch.cuda.synchronize()
-        return
+        return total_kvcache_used
 
     def remove_all_loras(self) -> bool:
         if not self.lora_manager:
