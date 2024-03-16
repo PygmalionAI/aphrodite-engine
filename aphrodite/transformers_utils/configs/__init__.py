@@ -1,6 +1,5 @@
 from aphrodite.transformers_utils.configs.baichuan import BaiChuanConfig
 from aphrodite.transformers_utils.configs.chatglm import ChatGLMConfig
-from aphrodite.transformers_utils.configs.cohere import CohereConfig
 from aphrodite.transformers_utils.configs.mpt import MPTConfig
 from aphrodite.transformers_utils.configs.olmo import OLMoConfig
 from aphrodite.transformers_utils.configs.qwen import QWenConfig
@@ -12,7 +11,6 @@ from aphrodite.transformers_utils.configs.falcon import RWConfig
 __all__ = [
     "BaiChuanConfig",
     "ChatGLMConfig",
-    "CohereConfig",
     "MPTConfig",
     "OLMoConfig",
     "QWenConfig",

@@ -363,7 +363,11 @@ class BaiChuanBaseForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(self.lm_head(hidden_states),
+        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight():
+            next_tokens = self.quant_sampler(self.lm_head(hidden_states),
+                                    sampling_metadata)
+        else:
+            next_tokens = self.sampler(self.lm_head.weight, hidden_states,
                                    sampling_metadata)
         return next_tokens
 

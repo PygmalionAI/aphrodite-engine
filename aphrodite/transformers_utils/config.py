@@ -5,15 +5,12 @@ from transformers.models.auto.configuration_auto import CONFIG_MAPPING
 
 from aphrodite.transformers_utils.configs import (BaiChuanConfig,
                                                   ChatGLMConfig, MPTConfig,
-                                                  QWenConfig, RWConfig,
-                                                  CohereConfig)
+                                                  QWenConfig, RWConfig)
 from aphrodite.common.gguf import GGUFReader
 
 _CONFIG_REGISTRY = {
     "baichuan": BaiChuanConfig,
     "chatglm": ChatGLMConfig,
-    "cohere": CohereConfig,
-    "command-r": CohereConfig,
     "mpt": MPTConfig,
     "qwen": QWenConfig,
     "RefinedWeb": RWConfig,  # For tiiuae/falcon-40b(-instruct)
