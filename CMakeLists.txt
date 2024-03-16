@@ -48,37 +48,30 @@ endif()
 # Update cmake's `CMAKE_PREFIX_PATH` with torch location.
 append_cmake_prefix_path("torch" "torch.utils.cmake_prefix_path")
 
-# Ensure the 'nvcc' command is in the PATH
-find_program(NVCC_EXECUTABLE nvcc)
-if (CUDA_FOUND AND NOT NVCC_EXECUTABLE)
-    message(FATAL_ERROR "nvcc not found")
-endif()
-
 #[==============================================================================[
-# Import torch cmake configuration.
-# Torch also imports CUDA (and partially HIP) languages with some customizations,
-# so there is no need to do this explicitly with check_language/enable_language,
-# etc.
+Import torch cmake configuration.
+Torch also imports CUDA (and partially HIP) languages with some customizations,
+so there is no need to do this explicitly with check_language/enable_language,
+etc.
 #]==============================================================================]
 find_package(Torch REQUIRED)
 
 #[==============================================================================[
-# Normally `torch.utils.cpp_extension.CUDAExtension` would add
-# `libtorch_python.so` for linking against an extension. Torch's cmake
-# configuration does not include this library (presumably since the cmake
-# config is used for standalone C++ binaries that link against torch).
-# The `libtorch_python.so` library defines some of the glue code between
-# torch/python via pybind and is required by Aphrodite extensions for this
-# reason. So, add it by manually with `find_library` using torch's
-# installed library path.
+Normally `torch.utils.cpp_extension.CUDAExtension` would add
+`libtorch_python.so` for linking against an extension. Torch's cmake
+configuration does not include this library (presumably since the cmake
+config is used for standalone C++ binaries that link against torch).
+The `libtorch_python.so` library defines some of the glue code between
+torch/python via pybind and is required by Aphrodite extensions for this
+reason. So, add it by manually using `append_torchlib_if_found` from
+torch's cmake setup.
 #]==============================================================================]
-find_library(torch_python_LIBRARY torch_python PATHS
-  "${TORCH_INSTALL_PREFIX}/lib")
+append_torchlib_if_found(torch_python)
 
-#[==============================================================================[
+#[====================================================================[
 # Set up GPU language and check the torch version and warn if it isn't
 # what is expected.
-#]==============================================================================]
+#]====================================================================]
 if (NOT HIP_FOUND AND CUDA_FOUND)
   set(APHRODITE_GPU_LANG "CUDA")
 
@@ -139,18 +132,18 @@ endif()
 # _C extension
 
 set(APHRODITE_EXT_SRC
-    "kernels/cache_kernels.cu"
-    "kernels/attention/attention_kernels.cu"
-    "kernels/pos_encoding_kernels.cu"
-    "kernels/activation_kernels.cu"
-    "kernels/layernorm_kernels.cu"
-    "kernels/quantization/squeezellm/quant_cuda_kernel.cu"
-    "kernels/quantization/gguf/gguf_kernel.cu"
-    "kernels/quantization/gptq/q_gemm.cu"
-    "kernels/quantization/exl2/q_matrix.cu"
-    "kernels/quantization/exl2/q_gemm_exl2.cu"
-    "kernels/cuda_utils_kernels.cu"
-    "kernels/moe/align_block_size_kernel.cu"
+    "kernels/cache_kernels.cu",
+    "kernels/attention/attention_kernels.cu",
+    "kernels/pos_encoding_kernels.cu",
+    "kernels/activation_kernels.cu",
+    "kernels/layernorm_kernels.cu",
+    "kernels/quantization/squeezellm/quant_cuda_kernel.cu",
+    "kernels/quantization/gguf/gguf_kernel.cu",
+    "kernels/quantization/gptq/q_gemm.cu",
+    "kernels/quantization/exl2/q_matrix.cu",
+    "kernels/quantization/exl2/q_gemm_exl2.cu",
+    "kernels/cuda_utils_kernels.cu",
+    "kernels/moe/align_block_size_kernel.cu",
     "kernels/pybind.cpp")
 
 if(APHRODITE_GPU_LANG STREQUAL "CUDA")
@@ -158,7 +151,7 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     "kernels/quantization/awq/gemm_kernels.cu"
     "kernels/quantization/quip/origin_order.cu"
     "kernels/quantization/marlin/marlin_cuda_kernel.cu"
-    "kernels/all_reduce/custom_all_reduce.cu"
+    "kernels/custom_all_reduce.cu"
     "kernels/quantization/aqlm/aqlm_cuda_entry.cpp"
     "kernels/quantization/aqlm/aqlm_cuda_kernel.cu"
     "kernels/quantization/bitsandbytes/int4_fp16_gemm_kernels.cu"
@@ -280,19 +273,18 @@ if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
   endforeach()
   message(STATUS "Hadamard target arches: ${APHRODITE_HADAMARD_GPU_ARCHES}")
 
-  if (APHRODITE_HADAMARD_GPU_ARCHES)
-    define_gpu_extension_target(
-      _hadamard_C
-      DESTINATION aphrodite
-      LANGUAGE ${APHRODITE_GPU_LANG}
-      SOURCES ${APHRODITE_HADAMARD_EXT_SRC}
-      COMPILE_FLAGS ${APHRODITE_HADAMARD_GPU_FLAGS}
-      ARCHITECTURES ${APHRODITE_HADAMARD_GPU_ARCHES}
-      WITH_SOABI)
-  else()
-    message(WARNING "Unable to create _hadamard_C target because none of the "
-      "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 7.0")
-  endif()
+if (APHRODITE_HADAMARD_GPU_ARCHES)
+  define_gpu_extension_target(
+    _hadamard_C
+    DESTINATION aphrodite
+    LANGUAGE ${APHRODITE_GPU_LANG}
+    SOURCES ${APHRODITE_HADAMARD_EXT_SRC}
+    COMPILE_FLAGS ${APHRODITE_HADAMARD_GPU_FLAGS}
+    ARCHITECTURES ${APHRODITE_HADAMARD_GPU_ARCHES}
+    WITH_SOABI)
+else()
+  message(WARNING "Unable to create _hadamard_C target because none of the "
+    "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 7.0")
 endif()
 
 #[=====================================================================[
@@ -329,7 +321,6 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     message(STATUS "Enabling punica extension.")
     add_dependencies(default _punica_C)
   endif()
-endif()
 
 if (APHRODITE_HADAMARD_GPU_ARCHES)
   message(STATUS "Enabling hadamard extension.")
