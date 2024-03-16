@@ -135,7 +135,7 @@ class Sampler(nn.Module):
         sample_results = _sample(probs, logprobs, sampling_metadata)
 
         if do_mirostat:
-            _mirostat_store_args(logits, sampling_tensors, sample_results, 
+            _mirostat_store_args(logits, sampling_tensors, sample_results,
                                  sampling_metadata, output_metadata)
 
         # Get the logprobs query results.
@@ -821,8 +821,8 @@ def _build_sampler_output(
         seq_outputs = [
             SequenceOutput(seq_ids[parent_id], token_id, logprobs,
                            output_metadata.get(seq_ids[parent_id], idx))
-            for idx, (token_id, parent_id, logprobs) in
-            enumerate(zip(*sample_result, group_sample_logprobs))
+            for idx, (token_id, parent_id, logprobs) in enumerate(
+                zip(*sample_result, group_sample_logprobs))
         ]
 
         sampler_output.append(
@@ -830,13 +830,11 @@ def _build_sampler_output(
     return sampler_output
 
 
-def _apply_mirostat_v2(
-        logits: torch.Tensor,
-        sampling_tensors: SamplingTensors
-) -> torch.Tensor:
+def _apply_mirostat_v2(logits: torch.Tensor,
+                       sampling_tensors: SamplingTensors) -> torch.Tensor:
     # Reduce our view to just the affected logits
     logit_view = logits[sampling_tensors.miro_indices]
-    
+
     # Calculate surprise value per token
     #  Converts from nats to bits for compatibility with ooba/kobold.
     logit_surprise = torch.log_softmax(logit_view, dim=-1) / -math.log(2)
@@ -858,13 +856,10 @@ def _apply_mirostat_v2(
     return logits
 
 
-def _mirostat_store_args(
-        logits: torch.Tensor,
-        args: SamplingTensors,
-        sample_results: List[Tuple[List[int], List[int]]],
-        sampling_metadata: SamplingMetadata,
-        output_metadata: OutputMetadata
-) -> None:
+def _mirostat_store_args(logits: torch.Tensor, args: SamplingTensors,
+                         sample_results: List[Tuple[List[int], List[int]]],
+                         sampling_metadata: SamplingMetadata,
+                         output_metadata: OutputMetadata) -> None:
     """Based on whichever token was finally sampled, we calculate the
     final surprisal values to update the mus.
     
@@ -878,28 +873,26 @@ def _mirostat_store_args(
         for idx, (token, parent) in enumerate(zip(toks, parents)):
             seqid_to_tokens.setdefault(sids[parent], []).append(token)
             seqid_to_indices.setdefault(sids[parent], []).append(idx)
-    
+
     seqids = args.miro_seqids
 
     picked_tokens = torch.tensor([seqid_to_tokens[x] for x in seqids],
                                  device=logits.device,
                                  dtype=torch.long)
-    
+
     # Clumsily, we recalculate token surprisals.
     logits_view = logits[args.miro_indices]
     picked_surprise = torch.gather(torch.log_softmax(logits_view, dim=-1),
                                    dim=-1,
                                    index=picked_tokens) / -math.log(2)
-    
+
     taus = args.miro_taus.unsqueeze(dim=-1)  # AKA target surprisals
     etas = args.miro_etas.unsqueeze(dim=-1)  # AKA accumulation rates
     mus = args.miro_mus.unsqueeze(dim=-1)  # AKA surprisal accumulators
     nu_mus = mus - (picked_surprise - taus) * etas
-
 
     # Record updated mu values for use in the next iteration
     # Note how each mu is split into multiple based on the number of samples.
     for seqid, seq_mus in zip(seqids, nu_mus):
         for sample_idx, mu in zip(seqid_to_indices[seqid], seq_mus):
             output_metadata.add(seqid, sample_idx, "miro_mu", mu)
-

@@ -29,12 +29,11 @@ class OutputMetadata():
     def __init__(self):
         self._metadata: Dict[int, Dict[int, dict]] = {}
 
-    def add(self, seq_id: int, sample_id:int, key, val) -> None:
-        (self._metadata.setdefault(seq_id, {})
-                       .setdefault(sample_id, {})
-                       [key]) = val
+    def add(self, seq_id: int, sample_id: int, key, val) -> None:
+        (self._metadata.setdefault(seq_id, {}).setdefault(sample_id,
+                                                          {})[key]) = val
 
-    def get(self, seq_id: int, sample_id:int) -> dict:
+    def get(self, seq_id: int, sample_id: int) -> dict:
         return self._metadata.get(seq_id, {}).get(sample_id, {})
 
 
