@@ -273,18 +273,19 @@ if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
   endforeach()
   message(STATUS "Hadamard target arches: ${APHRODITE_HADAMARD_GPU_ARCHES}")
 
-if (APHRODITE_HADAMARD_GPU_ARCHES)
-  define_gpu_extension_target(
-    _hadamard_C
-    DESTINATION aphrodite
-    LANGUAGE ${APHRODITE_GPU_LANG}
-    SOURCES ${APHRODITE_HADAMARD_EXT_SRC}
-    COMPILE_FLAGS ${APHRODITE_HADAMARD_GPU_FLAGS}
-    ARCHITECTURES ${APHRODITE_HADAMARD_GPU_ARCHES}
-    WITH_SOABI)
-else()
-  message(WARNING "Unable to create _hadamard_C target because none of the "
-    "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 7.0")
+  if (APHRODITE_HADAMARD_GPU_ARCHES)
+    define_gpu_extension_target(
+      _hadamard_C
+      DESTINATION aphrodite
+      LANGUAGE ${APHRODITE_GPU_LANG}
+      SOURCES ${APHRODITE_HADAMARD_EXT_SRC}
+      COMPILE_FLAGS ${APHRODITE_HADAMARD_GPU_FLAGS}
+      ARCHITECTURES ${APHRODITE_HADAMARD_GPU_ARCHES}
+      WITH_SOABI)
+  else()
+    message(WARNING "Unable to create _hadamard_C target because none of the "
+      "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 7.0")
+  endif()
 endif()
 
 #[=====================================================================[
@@ -321,6 +322,7 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     message(STATUS "Enabling punica extension.")
     add_dependencies(default _punica_C)
   endif()
+endif()
 
 if (APHRODITE_HADAMARD_GPU_ARCHES)
   message(STATUS "Enabling hadamard extension.")
