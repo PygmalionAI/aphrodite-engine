@@ -132,18 +132,18 @@ endif()
 # _C extension
 
 set(APHRODITE_EXT_SRC
-    "kernels/cache_kernels.cu",
-    "kernels/attention/attention_kernels.cu",
-    "kernels/pos_encoding_kernels.cu",
-    "kernels/activation_kernels.cu",
-    "kernels/layernorm_kernels.cu",
-    "kernels/quantization/squeezellm/quant_cuda_kernel.cu",
-    "kernels/quantization/gguf/gguf_kernel.cu",
-    "kernels/quantization/gptq/q_gemm.cu",
-    "kernels/quantization/exl2/q_matrix.cu",
-    "kernels/quantization/exl2/q_gemm_exl2.cu",
-    "kernels/cuda_utils_kernels.cu",
-    "kernels/moe/align_block_size_kernel.cu",
+    "kernels/cache_kernels.cu"
+    "kernels/attention/attention_kernels.cu"
+    "kernels/pos_encoding_kernels.cu"
+    "kernels/activation_kernels.cu"
+    "kernels/layernorm_kernels.cu"
+    "kernels/quantization/squeezellm/quant_cuda_kernel.cu"
+    "kernels/quantization/gguf/gguf_kernel.cu"
+    "kernels/quantization/gptq/q_gemm.cu"
+    "kernels/quantization/exl2/q_matrix.cu"
+    "kernels/quantization/exl2/q_gemm_exl2.cu"
+    "kernels/cuda_utils_kernels.cu"
+    "kernels/moe/align_block_size_kernel.cu"
     "kernels/pybind.cpp")
 
 if(APHRODITE_GPU_LANG STREQUAL "CUDA")
