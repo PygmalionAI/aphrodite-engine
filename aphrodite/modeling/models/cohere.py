@@ -38,7 +38,7 @@ from aphrodite.modeling.layers.linear import (
     RowParallelLinear,
 )
 from aphrodite.modeling.layers.rotary_embedding import get_rope
-from aphrodite.modeling.layers.sampler import Sampler, QuantSampler
+from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
 from aphrodite.modeling.megatron.parallel_state import (
@@ -287,7 +287,6 @@ class CohereForCausalLM(nn.Module):
         self.linear_method = linear_method
         self.model = CohereModel(config, linear_method)
         self.sampler = Sampler(config.vocab_size)
-        self.quant_sampler = QuantSampler(config.vocab_size)
 
     @torch.no_grad()
     def forward(
@@ -306,13 +305,9 @@ class CohereForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        if (self.linear_method is not None
-                and not self.linear_method.quant_config.merge_weight()):
-            next_tokens = self.quant_sampler(self.lm_head(hidden_states),
-                                             sampling_metadata)
-        else:
-            next_tokens = self.sampler(self.lm_head.weight, hidden_states,
-                                       sampling_metadata)
+        next_tokens = self.sampler(
+            self.model.embed_tokens.weight, hidden_states, sampling_metadata
+        )
         return next_tokens
 
     def load_weights(
