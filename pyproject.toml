@@ -1,9 +1,10 @@
 [build-system]
 requires = [
+    "cmake>=3.21",
     "ninja",
     "packaging",
     "setuptools",
-    "torch >= 2.1.2",
+    "torch >= 2.2.0",
     "wheel",
 ]
 build-backend = "setuptools.build_meta"
