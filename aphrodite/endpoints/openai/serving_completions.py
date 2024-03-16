@@ -1,7 +1,8 @@
 import asyncio
 import time
 from fastapi import Request
-from typing import AsyncGenerator, AsyncIterator, Callable, List, Optional, Dict, Tuple
+from typing import (AsyncGenerator, AsyncIterator, Callable, List, Optional,
+                    Dict, Tuple)
 
 from aphrodite.common.utils import random_uuid
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
@@ -16,7 +17,8 @@ from aphrodite.endpoints.openai.protocol import (
 )
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.endpoints.openai.serving_engine import OpenAIServing, LoRA
-from aphrodite.modeling.outlines_decoding import get_guided_decoding_logits_processor
+from aphrodite.modeling.outlines_decoding import (
+    get_guided_decoding_logits_processor)
 
 TypeTokenIDs = List[int]
 TypeTopLogProbs = List[Optional[Dict[int, float]]]
@@ -43,8 +45,8 @@ def parse_prompt_format(prompt) -> Tuple[bool, list]:
             prompts = prompt  # case 4: array of token arrays
         else:
             raise ValueError(
-                "prompt must be a string, array of strings, array of tokens, or array of token arrays"
-            )
+                "prompt must be a string, array of strings, array of tokens, "
+                "or array of token arrays")
     return prompt_is_tokens, prompts
 
 
@@ -153,7 +155,8 @@ class OpenAIServingCompletion(OpenAIServing):
             int, RequestOutput]] = merge_async_iterators(*generators)
 
         # Similar to the OpenAI API, when n != best_of, we do not stream the
-        # results. In addition, we do not stream the results when use beam search.
+        # results. In addition, we do not stream the results when use beam
+        # search.
         stream = (request.stream
                   and (request.best_of is None or request.n == request.best_of)
                   and not request.use_beam_search)
@@ -220,7 +223,8 @@ class OpenAIServingCompletion(OpenAIServing):
 
                 for output in res.outputs:
                     i = output.index + prompt_idx * request.n
-                    # TODO: optimize the performance by avoiding full text O(n^2) sending.
+                    # TODO: optimize the performance by avoiding full text
+                    # O(n^2) sending.
 
                     if request.echo and request.max_tokens == 0:
                         # only return the prompt
@@ -228,11 +232,12 @@ class OpenAIServingCompletion(OpenAIServing):
                         delta_token_ids = res.prompt_token_ids
                         top_logprobs = res.prompt_logprobs
                         has_echoed[i] = True
-                    elif request.echo and request.max_tokens > 0 and not has_echoed[
-                            i]:
+                    elif (request.echo and request.max_tokens > 0
+                          and not has_echoed[i]):
                         # echo the prompt and first token
                         delta_text = res.prompt + output.text
-                        delta_token_ids = res.prompt_token_ids + output.token_ids
+                        delta_token_ids = (res.prompt_token_ids +
+                                           output.token_ids)
                         top_logprobs = res.prompt_logprobs + (output.logprobs
                                                               or [])
                         has_echoed[i] = True
@@ -245,7 +250,8 @@ class OpenAIServingCompletion(OpenAIServing):
                             i]:] if output.logprobs else None
 
                     if request.logprobs is not None:
-                        assert top_logprobs is not None, "top_logprobs must be provided when logprobs is requested"
+                        assert top_logprobs is not None, "top_logprobs must " \
+                            "be provided when logprobs is requested"
                         logprobs = self._create_logprobs(
                             token_ids=delta_token_ids,
                             top_logprobs=top_logprobs,

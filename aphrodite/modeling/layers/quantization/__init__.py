@@ -1,5 +1,5 @@
 from typing import Type
-
+# ruff: noqa: E501
 from aphrodite.modeling.layers.quantization.base_config import QuantizationConfig
 from aphrodite.modeling.layers.quantization.aqlm import AQLMConfig
 from aphrodite.modeling.layers.quantization.awq import AWQConfig

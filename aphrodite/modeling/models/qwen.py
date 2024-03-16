@@ -4,6 +4,7 @@
 # Copyright (c) Alibaba Cloud.
 # LICENSE: https://huggingface.co/Qwen/Qwen-7B/blob/main/LICENSE
 """Inference-only QWen model compatible with HuggingFace weights."""
+
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -13,20 +14,26 @@ from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.modeling.layers.attention import PagedAttention
 from aphrodite.modeling.layers.layernorm import RMSNorm
-from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              MergedColumnParallelLinear,
-                                              QKVParallelLinear,
-                                              RowParallelLinear,
-                                              ColumnParallelLinear)
+from aphrodite.modeling.layers.linear import (
+    LinearMethodBase,
+    MergedColumnParallelLinear,
+    QKVParallelLinear,
+    RowParallelLinear,
+    ColumnParallelLinear,
+)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding, ParallelLMHead)
+    VocabParallelEmbedding,
+    ParallelLMHead,
+)
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_world_size)
+    get_tensor_model_parallel_world_size, )
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.modeling.hf_downloader import (default_weight_loader,
-                                              hf_model_weights_iterator)
+from aphrodite.modeling.hf_downloader import (
+    default_weight_loader,
+    hf_model_weights_iterator,
+)
 from aphrodite.common.sequence import SamplerOutput
 from aphrodite.transformers_utils.configs.qwen import QWenConfig
 
@@ -43,27 +50,35 @@ class QWenMLP(nn.Module):
         linear_method: Optional[LinearMethodBase] = None,
     ):
         super().__init__()
-        if linear_method is not None and not linear_method.quant_config.merge_weight(
-        ):
+        if (linear_method is not None
+                and not linear_method.quant_config.merge_weight()):
             self.merge_weight = False
-            self.w2 = ColumnParallelLinear(hidden_size,
-                                           intermediate_size,
-                                           bias=False,
-                                           linear_method=linear_method)
-            self.w1 = ColumnParallelLinear(hidden_size,
-                                           intermediate_size,
-                                           bias=False,
-                                           linear_method=linear_method)
+            self.w2 = ColumnParallelLinear(
+                hidden_size,
+                intermediate_size,
+                bias=False,
+                linear_method=linear_method,
+            )
+            self.w1 = ColumnParallelLinear(
+                hidden_size,
+                intermediate_size,
+                bias=False,
+                linear_method=linear_method,
+            )
         else:
             self.merge_weight = True
             self.gate_up_proj = MergedColumnParallelLinear(
-                hidden_size, [intermediate_size] * 2,
+                hidden_size,
+                [intermediate_size] * 2,
                 bias=False,
-                linear_method=linear_method)
-        self.c_proj = RowParallelLinear(intermediate_size,
-                                        hidden_size,
-                                        bias=False,
-                                        linear_method=linear_method)
+                linear_method=linear_method,
+            )
+        self.c_proj = RowParallelLinear(
+            intermediate_size,
+            hidden_size,
+            bias=False,
+            linear_method=linear_method,
+        )
         if hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {hidden_act}. "
                              "Only silu is supported for now.")
@@ -94,8 +109,8 @@ class QWenAttention(nn.Module):
     ):
         super().__init__()
         self.hidden_size = hidden_size
-        tensor_model_parallel_world_size = get_tensor_model_parallel_world_size(
-        )
+        tensor_model_parallel_world_size = (
+            get_tensor_model_parallel_world_size())
         self.total_num_heads = num_heads
         assert self.total_num_heads % tensor_model_parallel_world_size == 0
         self.num_heads = (self.total_num_heads //
@@ -116,8 +131,9 @@ class QWenAttention(nn.Module):
         )
         self.scaling = self.head_dim**-0.5
 
-        is_neox_style = True if linear_method is None or linear_method.quant_config.rope_style(
-        ) is None else linear_method.quant_config.rope_style()
+        is_neox_style = (True if linear_method is None
+                         or linear_method.quant_config.rope_style() is None
+                         else linear_method.quant_config.rope_style())
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.head_dim,
@@ -157,18 +173,22 @@ class QWenBlock(nn.Module):
 
         rope_theta = getattr(config, "rope_theta", 10000)
         rope_scaling = getattr(config, "rope_scaling", None)
-        self.attn = QWenAttention(config.hidden_size,
-                                  config.num_attention_heads,
-                                  config.max_position_embeddings,
-                                  rope_theta=rope_theta,
-                                  rope_scaling=rope_scaling,
-                                  linear_method=linear_method)
+        self.attn = QWenAttention(
+            config.hidden_size,
+            config.num_attention_heads,
+            config.max_position_embeddings,
+            rope_theta=rope_theta,
+            rope_scaling=rope_scaling,
+            linear_method=linear_method,
+        )
 
         self.ln_2 = RMSNorm(config.hidden_size, eps=config.layer_norm_epsilon)
 
-        self.mlp = QWenMLP(config.hidden_size,
-                           config.intermediate_size // 2,
-                           linear_method=linear_method)
+        self.mlp = QWenMLP(
+            config.hidden_size,
+            config.intermediate_size // 2,
+            linear_method=linear_method,
+        )
 
     def forward(
         self,
@@ -275,18 +295,20 @@ class QWenLMHeadModel(nn.Module):
                                    sampling_metadata)
         return next_tokens
 
-    def load_weights(self,
-                     model_name_or_path: str,
-                     cache_dir: Optional[str] = None,
-                     load_format: str = "auto",
-                     revision: Optional[str] = None):
+    def load_weights(
+        self,
+        model_name_or_path: str,
+        cache_dir: Optional[str] = None,
+        load_format: str = "auto",
+        revision: Optional[str] = None,
+    ):
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
             ("gate_up_proj", "w2", 0),
             ("gate_up_proj", "w1", 1),
         ]
-        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
-        ):
+        if (self.linear_method is not None
+                and not self.linear_method.quant_config.merge_weight()):
             stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in hf_model_weights_iterator(
@@ -294,7 +316,7 @@ class QWenLMHeadModel(nn.Module):
                 self.config):
             if "rotary_emb.inv_freq" in name:
                 continue
-            for (param_name, weight_name, shard_id) in stacked_params_mapping:
+            for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)

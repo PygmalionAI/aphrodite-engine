@@ -8,8 +8,13 @@ from aphrodite.common.config import CacheConfig, LoRAConfig, SchedulerConfig
 from aphrodite.processing.block_manager import AllocStatus, BlockSpaceManager
 from aphrodite.processing.policy import PolicyFactory
 from aphrodite.lora.request import LoRARequest
-from aphrodite.common.sequence import (Sequence, SequenceData, SequenceGroup,
-                                       SequenceGroupMetadata, SequenceStatus)
+from aphrodite.common.sequence import (
+    Sequence,
+    SequenceData,
+    SequenceGroup,
+    SequenceGroupMetadata,
+    SequenceStatus,
+)
 
 
 class PreemptionMode(enum.Enum):
@@ -21,6 +26,7 @@ class PreemptionMode(enum.Enum):
     recompute them when the sequences are resumed, treating the sequences as
     new prompts.
     """
+
     SWAP = enum.auto()
     RECOMPUTE = enum.auto()
 
@@ -59,8 +65,11 @@ class SchedulerOutputs:
     def _sort_by_lora_ids(self) -> bool:
         self.scheduled_seq_groups = sorted(
             self.scheduled_seq_groups,
-            key=lambda g: (g.lora_request.lora_int_id
-                           if g.lora_request else 0, g.request_id))
+            key=lambda g: (
+                g.lora_request.lora_int_id if g.lora_request else 0,
+                g.request_id,
+            ),
+        )
 
     @property
     def lora_requests(self) -> Set[LoRARequest]:
@@ -82,8 +91,10 @@ class Scheduler:
         # LoRAs. This should be improved in the future.
         self.lora_config = lora_config
 
-        self.prompt_limit = min(self.scheduler_config.max_model_len,
-                                self.scheduler_config.max_num_batched_tokens)
+        self.prompt_limit = min(
+            self.scheduler_config.max_model_len,
+            self.scheduler_config.max_num_batched_tokens,
+        )
 
         # Instantiate the scheduling policy.
         self.policy = PolicyFactory.get_policy(policy_name="fcfs")
@@ -93,7 +104,8 @@ class Scheduler:
             num_gpu_blocks=self.cache_config.num_gpu_blocks,
             num_cpu_blocks=self.cache_config.num_cpu_blocks,
             sliding_window=self.cache_config.sliding_window,
-            enable_caching=self.cache_config.context_shift)
+            enable_caching=self.cache_config.context_shift,
+        )
 
         # Sequence groups in the WAITING state.
         self.waiting: Deque[SequenceGroup] = deque()
@@ -169,9 +181,9 @@ class Scheduler:
             # requests in the generation phase.
             num_curr_seqs = sum(seq_group.get_max_num_running_seqs()
                                 for seq_group in self.running)
-            curr_loras = set(
+            curr_loras = (set(
                 seq_group.lora_int_id
-                for seq_group in self.running) if self.lora_enabled else None
+                for seq_group in self.running) if self.lora_enabled else None)
             seq_lens: List[int] = []
 
             # Optimization: We do not sort the waiting queue since the preempted
@@ -213,8 +225,8 @@ class Scheduler:
                 lora_int_id = 0
                 if self.lora_enabled:
                     lora_int_id = seq_group.lora_int_id
-                    if lora_int_id > 0 and lora_int_id not in curr_loras and len(
-                            curr_loras) >= self.lora_config.max_loras:
+                    if (lora_int_id > 0 and lora_int_id not in curr_loras
+                            and len(curr_loras) >= self.lora_config.max_loras):
                         # We don't have a space for another LoRA, so
                         # we ignore this request for now.
                         leftover_waiting_sequences.appendleft(seq_group)
@@ -297,9 +309,9 @@ class Scheduler:
         if not preempted:
             num_curr_seqs = sum(seq_group.get_max_num_running_seqs()
                                 for seq_group in self.running)
-            curr_loras = set(
+            curr_loras = (set(
                 seq_group.lora_int_id
-                for seq_group in self.running) if self.lora_enabled else None
+                for seq_group in self.running) if self.lora_enabled else None)
 
             leftover_swapped = deque()
 
@@ -308,8 +320,8 @@ class Scheduler:
                 lora_int_id = 0
                 if self.lora_enabled:
                     lora_int_id = seq_group.lora_int_id
-                    if lora_int_id > 0 and lora_int_id not in curr_loras and len(
-                            curr_loras) >= self.lora_config.max_loras:
+                    if (lora_int_id > 0 and lora_int_id not in curr_loras
+                            and len(curr_loras) >= self.lora_config.max_loras):
                         # We don't have a space for another LoRA, so
                         # we ignore this request for now.
                         leftover_swapped.appendleft(seq_group)

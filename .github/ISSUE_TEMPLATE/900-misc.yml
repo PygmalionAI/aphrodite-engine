@@ -1,0 +1,21 @@
+name: 🎲 Misc/random discussions that do not fit into the above categories.
+description: Submit a discussion as you like.
+title: "[Misc]: "
+labels: ["misc"]
+
+body:
+- type: markdown
+  attributes:
+    value: >
+        #### Before submitting an issue, please make sure the issue hasn't been already addressed by searching through [the existing and past issues](https://github.com/PygmalionAI/aphrodite-engine/issues?q=is%3Aissue+sort%3Acreated-desc+).
+- type: textarea
+  attributes:
+    label: Anything you want to discuss about Aphrodite.
+    description: >
+      Anything you want to discuss about Aphrodite.
+  validations:
+    required: true
+- type: markdown
+  attributes:
+    value: >
+      Thanks for contributing 🎉!

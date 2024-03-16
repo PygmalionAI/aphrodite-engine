@@ -18,6 +18,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only OPT model compatible with HuggingFace weights."""
+
 from typing import List, Optional, Tuple
 
 import torch
@@ -27,19 +28,25 @@ from transformers import OPTConfig
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.attention import PagedAttention
-from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
-                                              LinearMethodBase,
-                                              QKVParallelLinear,
-                                              ReplicatedLinear,
-                                              RowParallelLinear)
+from aphrodite.modeling.layers.linear import (
+    ColumnParallelLinear,
+    LinearMethodBase,
+    QKVParallelLinear,
+    ReplicatedLinear,
+    RowParallelLinear,
+)
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding, ParallelLMHead)
+    VocabParallelEmbedding,
+    ParallelLMHead,
+)
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_world_size)
+    get_tensor_model_parallel_world_size, )
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.modeling.hf_downloader import (default_weight_loader,
-                                              hf_model_weights_iterator)
+from aphrodite.modeling.hf_downloader import (
+    default_weight_loader,
+    hf_model_weights_iterator,
+)
 from aphrodite.common.sequence import SamplerOutput
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
@@ -77,8 +84,8 @@ class OPTAttention(nn.Module):
         self.head_dim = embed_dim // total_num_heads
         self.scaling = self.head_dim**-0.5
 
-        if linear_method is not None and not linear_method.quant_config.merge_weight(
-        ):
+        if (linear_method is not None
+                and not linear_method.quant_config.merge_weight()):
             self.merge_weight = False
             self.q_proj = ColumnParallelLinear(embed_dim,
                                                embed_dim,
@@ -151,7 +158,8 @@ class OPTDecoderLayer(nn.Module):
 
         self.self_attn_layer_norm = nn.LayerNorm(
             self.embed_dim,
-            elementwise_affine=config.layer_norm_elementwise_affine)
+            elementwise_affine=config.layer_norm_elementwise_affine,
+        )
         self.fc1 = ColumnParallelLinear(
             self.embed_dim,
             config.ffn_dim,
@@ -169,7 +177,8 @@ class OPTDecoderLayer(nn.Module):
         )
         self.final_layer_norm = nn.LayerNorm(
             self.embed_dim,
-            elementwise_affine=config.layer_norm_elementwise_affine)
+            elementwise_affine=config.layer_norm_elementwise_affine,
+        )
 
     def forward(
         self,
@@ -182,9 +191,11 @@ class OPTDecoderLayer(nn.Module):
         # 125m, 1.7B, ..., 175B applies layer norm BEFORE attention
         if self.do_layer_norm_before:
             hidden_states = self.self_attn_layer_norm(hidden_states)
-        hidden_states = self.self_attn(hidden_states=hidden_states,
-                                       kv_cache=kv_cache,
-                                       input_metadata=input_metadata)
+        hidden_states = self.self_attn(
+            hidden_states=hidden_states,
+            kv_cache=kv_cache,
+            input_metadata=input_metadata,
+        )
         hidden_states = residual + hidden_states
         # 350m applies layer norm AFTER attention
         if not self.do_layer_norm_before:
@@ -218,27 +229,33 @@ class OPTDecoder(nn.Module):
         self.max_target_positions = config.max_position_embeddings
         self.vocab_size = config.vocab_size
 
-        self.embed_tokens = VocabParallelEmbedding(config.vocab_size,
-                                                   config.word_embed_proj_dim,
-                                                   linear_method=linear_method)
+        self.embed_tokens = VocabParallelEmbedding(
+            config.vocab_size,
+            config.word_embed_proj_dim,
+            linear_method=linear_method,
+        )
         # Positional embeddings are replicated (not sharded).
         self.embed_positions = OPTLearnedPositionalEmbedding(
             config.max_position_embeddings, config.hidden_size)
 
         # Project out & in will be replicated if they exist.
         if config.word_embed_proj_dim != config.hidden_size:
-            self.project_out = ReplicatedLinear(config.hidden_size,
-                                                config.word_embed_proj_dim,
-                                                bias=False,
-                                                linear_method=linear_method)
+            self.project_out = ReplicatedLinear(
+                config.hidden_size,
+                config.word_embed_proj_dim,
+                bias=False,
+                linear_method=linear_method,
+            )
         else:
             self.project_out = None
 
         if config.word_embed_proj_dim != config.hidden_size:
-            self.project_in = ReplicatedLinear(config.word_embed_proj_dim,
-                                               config.hidden_size,
-                                               bias=False,
-                                               linear_method=linear_method)
+            self.project_in = ReplicatedLinear(
+                config.word_embed_proj_dim,
+                config.hidden_size,
+                bias=False,
+                linear_method=linear_method,
+            )
         else:
             self.project_in = None
 
@@ -249,7 +266,8 @@ class OPTDecoder(nn.Module):
         if config.do_layer_norm_before and not config._remove_final_layer_norm:
             self.final_layer_norm = nn.LayerNorm(
                 config.hidden_size,
-                elementwise_affine=config.layer_norm_elementwise_affine)
+                elementwise_affine=config.layer_norm_elementwise_affine,
+            )
         else:
             self.final_layer_norm = None
 
@@ -338,19 +356,21 @@ class OPTForCausalLM(nn.Module):
                                    sampling_metadata)
         return next_tokens
 
-    def load_weights(self,
-                     model_name_or_path: str,
-                     cache_dir: Optional[str] = None,
-                     load_format: str = "auto",
-                     revision: Optional[str] = None):
+    def load_weights(
+        self,
+        model_name_or_path: str,
+        cache_dir: Optional[str] = None,
+        load_format: str = "auto",
+        revision: Optional[str] = None,
+    ):
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
             ("qkv_proj", "q_proj", "q"),
             ("qkv_proj", "k_proj", "k"),
             ("qkv_proj", "v_proj", "v"),
         ]
-        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight(
-        ):
+        if (self.linear_method is not None
+                and not self.linear_method.quant_config.merge_weight()):
             stacked_params_mapping = []
         params_dict = dict(self.named_parameters(remove_duplicate=False))
         for name, loaded_weight in hf_model_weights_iterator(
@@ -372,7 +392,7 @@ class OPTForCausalLM(nn.Module):
             if name.startswith("decoder."):
                 name = "model." + name
 
-            for (param_name, weight_name, shard_id) in stacked_params_mapping:
+            for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)

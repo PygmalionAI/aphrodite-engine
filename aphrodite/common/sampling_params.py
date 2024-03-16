@@ -59,15 +59,15 @@ class SamplingParams:
             Exact cutoff is top_a*max_prob**2. Must be in [0,inf], 0 to disable.
         min_p: Float that controls the cutoff for min-p sampling.
             Exact cutoff is min_p*max_prob. Must be in [0,1], 0 to disable.
-        tfs: Float that controls the cummulative approximate curvature of the
+        tfs: Float that controls the cumulative approximate curvature of the
             distribution to retain for Tail Free Sampling.
             Must be in (0, 1]. Set to 1 to disable
-        eta_cutoff: Float that controls the cutoff treshold for Eta sampling
+        eta_cutoff: Float that controls the cutoff threshold for Eta sampling
             (a form of entropy adaptive truncation sampling)
-            treshold is computed as min(eta, sqrt(eta)*entropy(probs)).
+            threshold is computed as min(eta, sqrt(eta)*entropy(probs)).
             Specified in units of 1e-4. Set to 0 to disable
-        epsilon_cutoff: Float that controls the cutoff treshold for
-            Epsilon sampling (simple probability treshold truncation).
+        epsilon_cutoff: Float that controls the cutoff threshold for
+            Epsilon sampling (simple probability threshold truncation).
             Specified in units of 1e-4. Set to 0 to disable.
         typical_p: Float that controls the cumulative probability of tokens
             closest in surprise to the expected surprise to consider.
@@ -99,7 +99,7 @@ class SamplingParams:
             The returned output will not contain the stop strings.
         stop_token_ids: List of tokens that stop the generation when they are
             generated. The returned output will contain the stop tokens unless
-            the stop tokens are sepcial tokens.
+            the stop tokens are special tokens.
         include_stop_str_in_output: Whether to include the stop strings in
             output text. Defaults to False.
         ignore_eos: Whether to ignore the EOS token and continue generating

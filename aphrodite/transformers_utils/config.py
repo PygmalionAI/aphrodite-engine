@@ -1,12 +1,12 @@
 from typing import Optional
 
-import gguf
 from transformers import AutoConfig, PretrainedConfig
 from transformers.models.auto.configuration_auto import CONFIG_MAPPING
 
 from aphrodite.transformers_utils.configs import (BaiChuanConfig,
                                                   ChatGLMConfig, MPTConfig,
                                                   QWenConfig, RWConfig)
+from aphrodite.common.gguf import GGUFReader
 
 _CONFIG_REGISTRY = {
     "baichuan": BaiChuanConfig,
@@ -19,7 +19,7 @@ _CONFIG_REGISTRY = {
 
 
 def extract_gguf_config(checkpoint):
-    result = gguf.GGUFReader(checkpoint)
+    result = GGUFReader(checkpoint)
     architecture = result.fields['general.architecture']
     architecture = str(bytes(architecture.parts[architecture.data[0]]),
                        encoding='utf-8')

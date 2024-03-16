@@ -12,7 +12,8 @@ class OLMoConfig(PretrainedConfig):
         'num_hidden_layers': 'n_layers',
     }
 
-    # Note that the defaults for these attributes are equivalent to the base GPT2 model.
+    # Note that the defaults for these attributes are equivalent to the
+    # base GPT2 model.
     def __init__(
         self,
         d_model=768,

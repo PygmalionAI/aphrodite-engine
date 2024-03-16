@@ -2,7 +2,6 @@ import os
 import tempfile
 from typing import List, Optional, Tuple, Union
 
-import gguf
 from transformers import (AutoTokenizer, PreTrainedTokenizer,
                           PreTrainedTokenizerFast, LlamaTokenizer)
 from transformers.convert_slow_tokenizer import import_protobuf
@@ -10,11 +9,12 @@ from loguru import logger
 
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.utils import make_async, LRUCache
+from aphrodite.common.gguf import GGUFReader
 from aphrodite.transformers_utils.tokenizers import BaichuanTokenizer
 
 
 def convert_gguf_to_tokenizer(checkpoint):
-    result = gguf.GGUFReader(checkpoint)
+    result = GGUFReader(checkpoint)
     # write vocab
     sentencepiece_model_pb2 = import_protobuf()
     vocab = sentencepiece_model_pb2.ModelProto()

@@ -1,0 +1,26 @@
+name: 🐱 Support request for a new quantization method.
+description: Submit a proposal/request for a new quantization method.
+title: "[New Model]: "
+labels: ["new model"]
+
+body:
+- type: markdown
+  attributes:
+    value: >
+        #### Before submitting an issue, please make sure the issue hasn't been already addressed by searching through [the existing and past issues](https://github.com/PygmalionAI/aphrodite-engine/issues?q=is%3Aissue+sort%3Acreated-desc+).
+- type: textarea
+  attributes:
+    label: The quantization format
+    description: >
+      The paper that describes the quantization method, along with code (if available).
+  validations:
+    required: true
+- type: textarea
+  attributes:
+    label: What are its advantages over the existing quantization methods?
+    description: >
+      What does this quantization method bring to the table that the existing methods don't?
+- type: markdown
+  attributes:
+    value: >
+      Thanks for contributing 🎉~

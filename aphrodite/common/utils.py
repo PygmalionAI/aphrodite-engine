@@ -174,8 +174,8 @@ def get_nvcc_cuda_version() -> Optional[Version]:
         cuda_home = '/usr/local/cuda'
         if os.path.isfile(cuda_home + '/bin/nvcc'):
             logger.info(
-                f'CUDA_HOME is not found in the environment. Using {cuda_home} as CUDA_HOME.'
-            )
+                f'CUDA_HOME is not found in the environment. Using {cuda_home} '
+                'as CUDA_HOME.')
         else:
             logger.warning(
                 f'Not found nvcc in {cuda_home}. Skipping cuda version check!')
@@ -196,7 +196,7 @@ def _generate_random_fp8_e5m2(
     # NOTE: Due to NaN and Inf representation for fp8 data type,
     # we may get Inf or NaN if we directly use torch.randint
     # to generate random data for fp8 data.
-    # For example, s.11111.00 in fp8e5m2 format repesents Inf.
+    # For example, s.11111.00 in fp8e5m2 format represents Inf.
     #     | E4M3        | E5M2
     #-----|-------------|-------------------
     # Inf | N/A         | s.11111.00

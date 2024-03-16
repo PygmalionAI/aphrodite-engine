@@ -6,7 +6,8 @@ from torch.nn.parameter import Parameter
 from aphrodite._C import ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
-from aphrodite.modeling.layers.quantization.base_config import QuantizationConfig
+from aphrodite.modeling.layers.quantization.base_config import (
+    QuantizationConfig)
 
 
 class AWQConfig(QuantizationConfig):
@@ -49,8 +50,8 @@ class AWQConfig(QuantizationConfig):
     @staticmethod
     def get_config_filenames() -> List[str]:
         return [
-            "quant_config.json",  # E.g., casperhansen/vicuna-7b-v1.5-awq
-            "quantize_config.json",  # E.g., abhinavkulkarni/mosaicml-mpt-7b-instruct-w4-g128-awq  # pylint: disable=line-too-long
+            "quant_config.json",
+            "quantize_config.json",
         ]
 
     @classmethod

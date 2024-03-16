@@ -276,8 +276,8 @@ def _apply_alphabet_soup(
     probs_sum = probs_sort.cumsum(dim=-1).sub_(probs_sort)
     min_p_thresholds = probs_sort[:, 0] * m
     top_a_thresholds = torch.pow(probs_sort[:, 0], 2) * a
-    treshold = torch.maximum(min_p_thresholds, top_a_thresholds)
-    mask = (probs_sort < treshold.unsqueeze(1)
+    threshold = torch.maximum(min_p_thresholds, top_a_thresholds)
+    mask = (probs_sort < threshold.unsqueeze(1)
             )  # Cull logits below the top-a threshold
     mask.logical_or_(
         probs_sum >
@@ -887,6 +887,6 @@ def _mirostat(logits: torch.Tensor, sampling_tensors: SamplingTensors,
     mus = sampling_tensors.miro_mus
 
     logits[idx] = _apply_mirostat_v2(logits[idx], taus, etas,
-                                     mus)  # mus is an inout param, :vomit:
+                                     mus)  # mus is an i/o param, :vomit:
     _miro_store_args(seqids, mus, output_metadata)
     return logits

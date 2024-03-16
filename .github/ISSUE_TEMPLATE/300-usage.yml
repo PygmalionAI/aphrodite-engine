@@ -1,0 +1,37 @@
+name: 💻 Usage
+description: Raise an issue here if you don't know how to use Aphrodite.
+title: "[Usage]: "
+labels: ["usage"]
+
+body:
+- type: markdown
+  attributes:
+    value: >
+      #### Before submitting an issue, please make sure the issue hasn't been already addressed by searching through [the existing and past issues](https://github.com/PygmalionAI/aphrodite-engine/issues?q=is%3Aissue+sort%3Acreated-desc+).
+- type: textarea
+  attributes:
+    label: Your current environment
+    description: |
+      Please run the following and paste the output below.
+      ```sh
+      wget https://raw.githubusercontent.com/PygmalionAI/aphrodite-engine/main/env.py
+      # For security purposes, please check the contents of env.py before running it.
+      python env.py
+      ```
+    value: |
+      ```text
+      The output of `python env.py`
+      ```
+  validations:
+    required: true
+- type: textarea
+  attributes:
+    label: How would you like to use Aphrodite?
+    description: |
+      A detailed description of how you want to use Aphrodite.
+    value: |
+      I want to run this [specific model](put link here). I don't know how to integrate it with Aphrodite.
+- type: markdown
+  attributes:
+    value: >
+      Thanks for contributing 🎉~
