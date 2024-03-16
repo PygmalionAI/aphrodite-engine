@@ -305,9 +305,8 @@ class CohereForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(
-            self.model.embed_tokens.weight, hidden_states, sampling_metadata
-        )
+        next_tokens = self.sampler(self.model.embed_tokens.weight,
+                                   hidden_states, sampling_metadata)
         return next_tokens
 
     def load_weights(
