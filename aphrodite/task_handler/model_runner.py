@@ -705,7 +705,8 @@ class ModelRunner:
 
     @torch.inference_mode()
     def profile_run(self) -> int:
-        """Returns the number of tokens stored in the KV cache during the profiling run."""
+        """Returns the number of tokens stored in the KV cache
+        during the profiling run."""
         # Enable top-k sampling to reflect the accurate memory usage.
         vocab_size = self.model_config.get_vocab_size()
         sampling_params = SamplingParams(top_p=0.99, top_k=vocab_size - 1)
