@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 import torch
 
-from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.sampler import Sampler, QuantSampler
 from aphrodite.modeling.utils import set_random_seed
 from aphrodite.common.sequence import (SamplingParams, SequenceData,
                                        SequenceGroupMetadata)

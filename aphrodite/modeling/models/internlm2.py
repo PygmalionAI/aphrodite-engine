@@ -17,7 +17,7 @@ from aphrodite.modeling.layers.linear import (
     RowParallelLinear,
 )
 from aphrodite.modeling.layers.rotary_embedding import get_rope
-from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.sampler import Sampler, QuantSampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding,
     ParallelLMHead,
@@ -291,6 +291,7 @@ class InternLM2ForCausalLM(nn.Module):
             linear_method=linear_method,
         )
         self.sampler = Sampler(config.vocab_size)
+        self.quant_sampler = QuantSampler(config.vocab_size)
 
     def forward(
         self,
@@ -308,7 +309,11 @@ class InternLM2ForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(self.output(hidden_states),
+        if self.linear_method is not None and not self.linear_method.quant_config.merge_weight():
+            next_tokens = self.quant_sampler(self.output(hidden_states),
+                                    sampling_metadata)
+        else:
+            next_tokens = self.sampler(self.output.weight, hidden_states,
                                    sampling_metadata)
         return next_tokens
 

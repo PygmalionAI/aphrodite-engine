@@ -37,7 +37,7 @@ from aphrodite.modeling.layers.linear import (
     ColumnParallelLinear,
 )
 from aphrodite.modeling.layers.rotary_embedding import get_rope
-from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.sampler import Sampler, QuantSampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding,
     ParallelLMHead,
@@ -346,6 +346,7 @@ class BaiChuanBaseForCausalLM(nn.Module):
                                       config.hidden_size,
                                       linear_method=linear_method)
         self.sampler = Sampler(config.vocab_size)
+        self.quant_sampler = QuantSampler(config.vocab_size)
 
     def forward(
         self,

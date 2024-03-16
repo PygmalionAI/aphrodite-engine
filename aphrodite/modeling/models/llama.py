@@ -40,7 +40,7 @@ from aphrodite.modeling.layers.linear import (
     ColumnParallelLinear,
 )
 from aphrodite.modeling.layers.rotary_embedding import get_rope
-from aphrodite.modeling.layers.sampler import Sampler, QuantSampler
+from aphrodite.modeling.layers.sampler import Sampler, QuantSampler, QuantSampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding,
     ParallelLMHead,
