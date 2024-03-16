@@ -19,12 +19,23 @@ class PersistentMetadata:
         return self._metadata.get(seq_id, {})
 
 
-class OutputMetadata(PersistentMetadata):
+class OutputMetadata():
+    """Not symmetrical with PersistentMetadata because the process of
+    sampling can produce unique metadata per sample, per sequence.
+    
+    The appropriate conversion would be `output[seq][sample](dict)` to
+    `persist[new_seq_for_sample](dict)`"""
 
-    def add(self, seq_id: int, key, val) -> None:
-        if seq_id not in self._metadata:
-            self._metadata[seq_id] = {}
-        self._metadata[seq_id][key] = val
+    def __init__(self):
+        self._metadata: Dict[int, Dict[int, dict]] = {}
+
+    def add(self, seq_id: int, sample_id:int, key, val) -> None:
+        (self._metadata.setdefault(seq_id, {})
+                       .setdefault(sample_id, {})
+                       [key]) = val
+
+    def get(self, seq_id: int, sample_id:int) -> dict:
+        return self._metadata.get(seq_id, {}).get(sample_id, {})
 
 
 class SamplingMetadata:
