@@ -34,7 +34,7 @@ from aphrodite.modeling.layers.linear import (
     RowParallelLinear,
 )
 from aphrodite.modeling.layers.rotary_embedding import get_rope
-from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.sampler import Sampler, QuantSampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding,
     ParallelLMHead,
@@ -261,6 +261,7 @@ class GPTJForCausalLM(nn.Module):
             linear_method=linear_method,
         )
         self.sampler = Sampler(config.vocab_size)
+        self.quant_sampler = QuantSampler(config.vocab_size)
 
     def forward(
         self,
@@ -278,8 +279,14 @@ class GPTJForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(self.lm_head(hidden_states),
-                                   sampling_metadata, self.lm_head.bias)
+        if (self.linear_method is not None
+                and not self.linear_method.quant_config.merge_weight()):
+            next_tokens = self.quant_sampler(self.lm_head(hidden_states),
+                                             sampling_metadata,
+                                             self.lm_head.bias)
+        else:
+            next_tokens = self.sampler(self.lm_head.weight, hidden_states,
+                                       sampling_metadata, self.lm_head.bias)
         return next_tokens
 
     def load_weights(

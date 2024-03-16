@@ -25,7 +25,8 @@ def extract_gguf_config(checkpoint):
                        encoding='utf-8')
     # Only support llama so far
     if architecture != "llama":
-        raise RuntimeError(f"Unsupported architecture {architecture}")
+        raise RuntimeError(f"Unsupported architecture {architecture}, "
+                           "only llama is supported.")
 
     # write config
     vocab_size = len(result.fields['tokenizer.ggml.token_type'].data)
