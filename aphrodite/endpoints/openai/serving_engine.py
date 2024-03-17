@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Dict, List, Optional, Union
 
+from loguru import logger
+
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.endpoints.openai.protocol import (CompletionRequest,
@@ -165,6 +167,24 @@ class OpenAIServing:
             message=f"The model `{request.model}` does not exist.",
             err_type="NotFoundError",
             status_code=HTTPStatus.NOT_FOUND)
+
+    def add_lora(self, lora: LoRA):
+        if lora.name in [
+                existing_lora.lora_name for existing_lora in self.lora_requests
+        ]:
+            logger.error(f"LoRA with name {lora.name} already exists.")
+            return
+        self.lora_requests.append(
+            LoRARequest(
+                lora_name=lora.name,
+                lora_int_id=len(self.lora_requests) + 1,
+                lora_local_path=lora.local_path,
+            ))
+
+    def remove_lora(self, lora_name: str):
+        self.lora_requests = [
+            lora for lora in self.lora_requests if lora.lora_name != lora_name
+        ]
 
     def _maybe_get_lora(self, request) -> Optional[LoRARequest]:
         if request.model == self.served_model:
