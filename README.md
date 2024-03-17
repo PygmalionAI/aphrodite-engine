@@ -5,7 +5,7 @@ Breathing Life into Language
 
 ![aphrodite](https://raw.githubusercontent.com/PygmalionAI/aphrodite-engine/main/assets/aphrodite.png)
 
-Aphrodite is the official backend engine for PygmalionAI. It is designed to serve as the inference endpoint for the PygmalionAI website, and to allow serving the [Pygmalion](https://huggingface.co/PygmalionAI) models to a large number of users with blazing fast speeds (thanks to vLLM's Paged Attention). 
+Aphrodite is the official backend engine for PygmalionAI. It is designed to serve as the inference endpoint for the PygmalionAI website, and to allow serving the [Pygmalion](https://huggingface.co/PygmalionAI) models to a large number of users with blazing fast speeds (thanks to vLLM's Paged Attention).
 
 Aphrodite builds upon and integrates the exceptional work from [various projects](#acknowledgements).
 
@@ -41,12 +41,16 @@ You can play around with the engine in the demo here:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/AlpinDale/misc-scripts/blob/main/Aphrodite.ipynb)
 
 ### Docker
-Additionally, we provide a docker image for easy deployment. Here's a base command to get you started:
-```
-sudo docker run --gpus '"all"' --shm-size 10g -p 2242:2242 -e MODEL_NAME="mistralai/Mistral-7B-Instruct-v0.2" -e PORT=2242 -it alpindale/aphrodite-engine
+
+Additionally, we provide a Docker image for easy deployment. Here's a basic command to get you started:
+
+```sh
+sudo docker run -d -e MODEL_NAME="mistralai/Mistral-7B-Instruct-v0.2" -p 2242:7860 --gpus all --ipc host alpindale/aphrodite-engine
 ```
 
 This will pull the Aphrodite Engine image (~9GiB download), and launch the engine with the Mistral-7B model at port 2242. Check [here](/docker/.env) for the full list of env variables.
+
+See [here](/docker/docker-compose.yml) for the Compose file to use with Docker Compose.
 
 ## Requirements
 
