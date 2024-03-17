@@ -45,7 +45,7 @@ You can play around with the engine in the demo here:
 Additionally, we provide a Docker image for easy deployment. Here's a basic command to get you started:
 
 ```sh
-sudo docker run -e MODEL_NAME="mistralai/Mistral-7B-Instruct-v0.2" -p 2242:7860 --detach --gpus all --shm-size 10g alpindale/aphrodite-engine
+sudo docker run -d -e MODEL_NAME="mistralai/Mistral-7B-Instruct-v0.2" -p 2242:7860 --gpus all --ipc host alpindale/aphrodite-engine
 ```
 
 This will pull the Aphrodite Engine image (~9GiB download), and launch the engine with the Mistral-7B model at port 2242. Check [here](/docker/.env) for the full list of env variables.
