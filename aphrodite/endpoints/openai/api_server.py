@@ -241,8 +241,7 @@ async def show_samplers(x_api_key: Optional[str] = Header(None)):
 
 
 @app.post("/v1/lora/load")
-async def load_lora(lora: LoRA,
-                    x_api_key: Optional[str] = Header(None)):
+async def load_lora(lora: LoRA, x_api_key: Optional[str] = Header(None)):
     openai_serving_chat.add_lora(lora)
     openai_serving_completion.add_lora(lora)
     if engine_args.enable_lora is False:
@@ -251,12 +250,13 @@ async def load_lora(lora: LoRA,
                      "--enable-lora flag.")
     return JSONResponse(content={"result": "success"})
 
+
 @app.delete("/v1/lora/unload")
-async def unload_lora(lora_name: str,
-                      x_api_key: Optional[str] = Header(None)):
-        openai_serving_chat.remove_lora(lora_name)
-        openai_serving_completion.remove_lora(lora_name)
-        return JSONResponse(content={"result": "success"})
+async def unload_lora(lora_name: str, x_api_key: Optional[str] = Header(None)):
+    openai_serving_chat.remove_lora(lora_name)
+    openai_serving_completion.remove_lora(lora_name)
+    return JSONResponse(content={"result": "success"})
+
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,

@@ -165,15 +165,14 @@ class OpenAIServing:
             message=f"The model `{request.model}` does not exist.",
             err_type="NotFoundError",
             status_code=HTTPStatus.NOT_FOUND)
-    
+
     def add_lora(self, lora: LoRA):
         self.lora_requests.append(
             LoRARequest(
                 lora_name=lora.name,
                 lora_int_id=len(self.lora_requests) + 1,
                 lora_local_path=lora.local_path,
-            )
-        )
+            ))
 
     def remove_lora(self, lora_name: str):
         self.lora_requests = [
