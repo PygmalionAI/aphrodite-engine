@@ -105,6 +105,13 @@ def parse_args():
         "If provided, the server will require this key to be presented in the "
         "header.")
     parser.add_argument(
+        "--admin-key",
+        type=str,
+        default=None,
+        help=
+        "If provided, the server will require this key to be presented in the "
+        "header for admin operations.")
+    parser.add_argument(
         "--launch-kobold-api",
         action="store_true",
         help=
@@ -231,6 +238,24 @@ async def show_samplers(x_api_key: Optional[str] = Header(None)):
         else:
             logger.error("Sampler JSON not found at " + samplerpath)
     return sampler_json
+
+
+@app.post("/v1/lora/load")
+async def load_lora(lora: LoRA, x_api_key: Optional[str] = Header(None)):
+    openai_serving_chat.add_lora(lora)
+    openai_serving_completion.add_lora(lora)
+    if engine_args.enable_lora is False:
+        logger.error("LoRA is not enabled in the engine. "
+                     "Please start the server with the "
+                     "--enable-lora flag.")
+    return JSONResponse(content={"result": "success"})
+
+
+@app.delete("/v1/lora/unload")
+async def unload_lora(lora_name: str, x_api_key: Optional[str] = Header(None)):
+    openai_serving_chat.remove_lora(lora_name)
+    openai_serving_completion.remove_lora(lora_name)
+    return JSONResponse(content={"result": "success"})
 
 
 @app.post("/v1/chat/completions")
@@ -522,6 +547,11 @@ if __name__ == "__main__":
     )
 
     if token := os.environ.get("APHRODITE_API_KEY") or args.api_keys:
+        admin_key = os.environ.get("APHRODITE_ADMIN_KEY") or args.admin_key
+
+        if admin_key is None:
+            logger.warning("Admin key not provided. Admin operations will "
+                           "be disabled.")
 
         @app.middleware("http")
         async def authentication(request: Request, call_next):
@@ -535,6 +565,12 @@ if __name__ == "__main__":
 
             auth_header = request.headers.get("Authorization")
             api_key_header = request.headers.get("x-api-key")
+
+            if request.url.path.startswith("/v1/lora"):
+                if admin_key is not None and api_key_header == admin_key:
+                    return await call_next(request)
+                return JSONResponse(content={"error": "Unauthorized"},
+                                    status_code=401)
 
             if auth_header != "Bearer " + token and api_key_header != token:
                 return JSONResponse(content={"error": "Unauthorized"},
