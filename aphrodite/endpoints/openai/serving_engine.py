@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Dict, List, Optional, Union
 
+from loguru import logger
+
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.endpoints.openai.protocol import (CompletionRequest,
@@ -167,6 +169,10 @@ class OpenAIServing:
             status_code=HTTPStatus.NOT_FOUND)
 
     def add_lora(self, lora: LoRA):
+        if lora.name in [existing_lora.lora_name for existing_lora in
+                         self.lora_requests]:
+            logger.error(f"LoRA with name {lora.name} already exists.")
+            return
         self.lora_requests.append(
             LoRARequest(
                 lora_name=lora.name,

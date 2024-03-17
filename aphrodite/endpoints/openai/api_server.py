@@ -549,6 +549,10 @@ if __name__ == "__main__":
     if token := os.environ.get("APHRODITE_API_KEY") or args.api_keys:
         admin_key = os.environ.get("APHRODITE_ADMIN_KEY") or args.admin_key
 
+        if admin_key is None:
+            logger.warning("Admin key not provided. Admin operations will "
+                           "be disabled.")
+
         @app.middleware("http")
         async def authentication(request: Request, call_next):
             excluded_paths = ["/api"]
