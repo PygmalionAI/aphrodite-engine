@@ -1,11 +1,10 @@
 #!/bin/bash -e
 
-export NUMBA_CACHE_DIR="/tmp/numba_cache"
 echo 'Starting Aphrodite Engine API server...'
 
 CMD="python3 -m aphrodite.endpoints.openai.api_server
-             --host ${HOST:-0.0.0.0}
-             --port ${PORT:-7860}
+             --host 0.0.0.0
+             --port 7860
              --download-dir ${HF_HOME:?}/hub
              ${MODEL_NAME:+--model $MODEL_NAME}
              ${REVISION:+--revision $REVISION}
@@ -16,7 +15,7 @@ CMD="python3 -m aphrodite.endpoints.openai.api_server
              ${GPU_MEMORY_UTILIZATION:+--gpu-memory-utilization $GPU_MEMORY_UTILIZATION}
              ${QUANTIZATION:+--quantization $QUANTIZATION}
              ${ENFORCE_EAGER:+--enforce-eager}
-             ${KOBOLD:+--launch-kobold-api}
+             ${KOBOLD_API:+--launch-kobold-api}
              ${CMD_ADDITIONAL_ARGUMENTS}"
 
 # set umask to ensure group read / write at runtime
