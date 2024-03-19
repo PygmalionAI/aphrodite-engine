@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import time
 from typing import Dict, List, Optional, Tuple, Set, Union
 
@@ -689,12 +690,48 @@ class ModelRunner:
             model_executable = self.graph_runners[graph_batch_size]
         else:
             model_executable = self.model
-        hidden_states = model_executable(
-            input_ids=input_tokens,
-            positions=input_positions,
-            kv_caches=kv_caches,
-            input_metadata=input_metadata,
-        )
+
+        print("Input:")
+        print(input_tokens.shape, input_positions)
+        print(input_metadata)
+        if kv_caches[0][0] is not None:
+            total_len = input_tokens.shape[1]
+            max_chunk_size = 16
+
+            chunk_begin = 0
+            while chunk_begin < total_len:
+                chunk_end = min(chunk_begin + max_chunk_size, total_len)
+                chunk_len = chunk_end - chunk_begin
+                chunk_input_tokens = input_tokens[:, chunk_begin:chunk_end]
+                chunk_positions = input_positions[:, chunk_begin:chunk_end]
+                chunk_metadata = copy.deepcopy(input_metadata)
+                
+                chunk_metadata.slot_mapping = chunk_metadata.slot_mapping[:, chunk_begin:chunk_end]
+                chunk_metadata.context_lens[:] = chunk_begin
+                blocks_end = np.ceil(chunk_begin / 16)
+                block_tables = torch.arange(blocks_end, dtype=chunk_metadata.block_tables.dtype, device=chunk_metadata.block_tables.device)
+                block_tables = block_tables.expand(chunk_metadata.block_tables.shape[0], -1)
+                chunk_metadata.block_tables = block_tables
+
+                print("Chunk:")
+                print(chunk_input_tokens.shape, chunk_positions)
+                print(chunk_metadata)
+
+                hidden_states = model_executable(
+                    input_ids=chunk_input_tokens,
+                    positions=chunk_positions,
+                    kv_caches=kv_caches,
+                    input_metadata=chunk_metadata,
+                )
+                
+                chunk_begin += max_chunk_size
+        else:
+            hidden_states = model_executable(
+                input_ids=input_tokens,
+                positions=input_positions,
+                kv_caches=kv_caches,
+                input_metadata=input_metadata,
+            )
 
         # Sample the next token.
         output = self.model.sample(
