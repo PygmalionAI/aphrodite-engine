@@ -64,6 +64,7 @@ class ChatCompletionRequest(BaseModel):
     eta_cutoff: Optional[float] = 0.0
     epsilon_cutoff: Optional[float] = 0.0
     typical_p: Optional[float] = 1.0
+    typical_threshold: Optional[float] = 0.0
     n: Optional[int] = 1
     max_tokens: Optional[int] = None
     seed: Optional[int] = None
@@ -132,6 +133,7 @@ class ChatCompletionRequest(BaseModel):
             eta_cutoff=self.eta_cutoff,
             epsilon_cutoff=self.epsilon_cutoff,
             typical_p=self.typical_p,
+            typical_threshold=self.typical_threshold,
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
             repetition_penalty=self.repetition_penalty,
@@ -186,6 +188,7 @@ class CompletionRequest(BaseModel):
     eta_cutoff: Optional[float] = 0.0
     epsilon_cutoff: Optional[float] = 0.0
     typical_p: Optional[float] = 1.0
+    typical_threshold: Optional[float] = 0.0
     n: Optional[int] = 1
     stream: Optional[bool] = False
     logprobs: Optional[int] = None
@@ -254,6 +257,7 @@ class CompletionRequest(BaseModel):
             eta_cutoff=self.eta_cutoff,
             epsilon_cutoff=self.epsilon_cutoff,
             typical_p=self.typical_p,
+            typical_threshold=self.typical_threshold,
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
             repetition_penalty=self.repetition_penalty,
@@ -405,6 +409,7 @@ class KoboldSamplingParams(BaseModel):
     eta_cutoff: float = Field(0.0, alias="eta_cutoff")
     epsilon_cutoff: float = Field(0.0, alias="epsilon_cutoff")
     typical_p: float = Field(1.0, alias="typical_p")
+    typical_threshold: float = Field(0.0, alias="typical_threshold")
     use_beam_search: bool = Field(False, alias="use_beam_search")
     length_penalty: float = Field(1.0, alias="length_penalty")
     early_stopping: Union[bool, str] = Field(False, alias="early_stopping")
