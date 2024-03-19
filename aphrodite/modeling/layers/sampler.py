@@ -111,9 +111,9 @@ class Sampler(nn.Module):
             logits = _apply_epsilon_cutoff(logits,
                                            sampling_tensors.epsilon_cutoffs)
         if do_typical_ps:
-            logits = _apply_typical_sampling(
-                logits, sampling_tensors.typical_ps,
-                sampling_tensors.typical_thresholds)
+            logits = _apply_typical_sampling(logits,
+                                             sampling_tensors.typical_ps,
+                                             sampling_tensors.typical_p_sigmas)
         if do_quadratic:
             logits = _apply_quadratic_sampling(
                 logits, sampling_tensors.smoothing_factors,
@@ -509,10 +509,10 @@ def _apply_epsilon_cutoff(
 def _apply_typical_sampling(
     logits: torch.Tensor,
     typical_p: torch.Tensor,
-    typical_threshold: torch.Tensor,
+    typical_p_sigma: torch.Tensor,
 ) -> torch.Tensor:
     typ_p = typical_p.clone().detach().to(logits.device).to(logits.dtype)
-    typ_threshold = typical_threshold.clone().detach().to(logits.device).to(
+    typ_threshold = typical_p_sigma.clone().detach().to(logits.device).to(
         logits.dtype)
 
     shifted_logits = torch.log_softmax(logits, dim=-1)
@@ -529,7 +529,7 @@ def _apply_typical_sampling(
 
     # Invert the minimum deviation from the expected information content of the
     # probability distribution for the next token and scale it based on the
-    # provided typical_threshold parameter.
+    # provided typical_p_sigma parameter.
     max_threshold = surprisal_deviations.min().negative() * typ_threshold
 
     # Mask negative deviations and positive deviations above the max threshold
