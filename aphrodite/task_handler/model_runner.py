@@ -694,7 +694,7 @@ class ModelRunner:
         print("Input:")
         print(input_tokens.shape, input_positions)
         print(input_metadata)
-        if kv_caches[0][0] is not None:
+        if kv_caches[0][0] is not None and input_metadata.is_prompt:
             total_len = input_tokens.shape[1]
             max_chunk_size = 16
 
@@ -723,6 +723,8 @@ class ModelRunner:
                     kv_caches=kv_caches,
                     input_metadata=chunk_metadata,
                 )
+
+                print("Chunk finished")
                 
                 chunk_begin += max_chunk_size
         else:
