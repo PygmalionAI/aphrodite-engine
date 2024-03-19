@@ -96,6 +96,7 @@ class SamplingTensors:
     eta_cutoffs: torch.Tensor
     epsilon_cutoffs: torch.Tensor
     typical_ps: torch.Tensor
+    typical_thresholds: torch.Tensor
     miro_taus: torch.Tensor
     miro_etas: torch.Tensor
     miro_mus: torch.Tensor
@@ -129,6 +130,7 @@ class SamplingTensors:
         eta_cutoffs: List[float] = []
         epsilon_cutoffs: List[float] = []
         typical_ps: List[float] = []
+        typical_thresholds: List[float] = []
         miro_taus: List[float] = []
         miro_etas: List[float] = []
         miro_mus: List[float] = []
@@ -168,6 +170,7 @@ class SamplingTensors:
             eta_cutoff = sampling_params.eta_cutoff
             epsilon_cutoff = sampling_params.epsilon_cutoff
             typical_p = sampling_params.typical_p
+            typical_threshold = sampling_params.typical_threshold
             miro_tau = sampling_params.mirostat_tau
             miro_eta = sampling_params.mirostat_eta
             dynatemp_min = sampling_params.dynatemp_min
@@ -196,7 +199,8 @@ class SamplingTensors:
                 do_eta_cutoffs = True
             if do_epsilon_cutoffs is False and epsilon_cutoff > _SAMPLING_EPS:
                 do_epsilon_cutoffs = True
-            if do_typical_ps is False and typical_p < 1.0 - _SAMPLING_EPS:
+            if do_typical_ps is False and (typical_p < 1.0 - _SAMPLING_EPS
+                                           or typical_threshold > 0.0):
                 do_typical_ps = True
             if do_quadratic is False and (smoothing_factor > _SAMPLING_EPS
                                           or smoothing_curve > 1.0):
@@ -222,6 +226,7 @@ class SamplingTensors:
                 eta_cutoffs += [0] * (prompt_len - 1)
                 epsilon_cutoffs += [0] * (prompt_len - 1)
                 typical_ps += [1] * (prompt_len - 1)
+                typical_thresholds += [0] * (prompt_len - 1)
                 dynatemp_mins += [dynatemp_min] * (prompt_len - 1)
                 dynatemp_maxs += [dynatemp_max] * (prompt_len - 1)
                 dynatemp_exps += [dynatemp_exp] * (prompt_len - 1)
@@ -245,6 +250,7 @@ class SamplingTensors:
             eta_cutoffs += [eta_cutoff] * len(seq_ids)
             epsilon_cutoffs += [epsilon_cutoff] * len(seq_ids)
             typical_ps += [typical_p] * len(seq_ids)
+            typical_thresholds += [typical_threshold] * len(seq_ids)
             dynatemp_mins += [dynatemp_min] * len(seq_ids)
             dynatemp_maxs += [dynatemp_max] * len(seq_ids)
             dynatemp_exps += [dynatemp_exp] * len(seq_ids)
@@ -265,10 +271,10 @@ class SamplingTensors:
         sampling_tensors = SamplingTensors.from_lists(
             temperatures, top_ps, top_ks, top_as, min_ps, presence_penalties,
             frequency_penalties, repetition_penalties, tfss, eta_cutoffs,
-            epsilon_cutoffs, typical_ps, dynatemp_mins, dynatemp_maxs,
-            dynatemp_exps, miro_taus, miro_etas, miro_mus, miro_indices,
-            miro_seqids, smoothing_factors, smoothing_curves, prompt_tokens,
-            output_tokens, vocab_size, device, dtype)
+            epsilon_cutoffs, typical_ps, typical_thresholds, dynatemp_mins,
+            dynatemp_maxs, dynatemp_exps, smoothing_factors, smoothing_curves,
+            miro_taus, miro_etas, miro_mus, miro_indices, miro_seqids,
+            prompt_tokens, output_tokens, vocab_size, device, dtype)
         return (sampling_tensors, do_temperatures, do_penalties, do_topks,
                 do_topps, do_topas, do_minps, do_tfss, do_eta_cutoffs,
                 do_epsilon_cutoffs, do_typical_ps, do_quadratic, do_mirostat)
@@ -280,12 +286,13 @@ class SamplingTensors:
                    frequency_penalties: List[float],
                    repetition_penalties: List[float], tfss: List[float],
                    eta_cutoffs: List[float], epsilon_cutoffs: List[float],
-                   typical_ps: List[float], dynatemp_mins: List[float],
-                   dynatemp_maxs: List[float], dynatemp_exps: List[float],
-                   miro_taus: List[float], miro_etas: List[float],
-                   miro_mus: List[float], miro_indices: List[int],
-                   miro_seqids: List[int], smoothing_factors: List[float],
-                   smoothing_curves: List[float],
+                   typical_ps: List[float], typical_thresholds: List[float],
+                   dynatemp_mins: List[float], dynatemp_maxs: List[float],
+                   dynatemp_exps: List[float],
+                   smoothing_factors: List[float],
+                   smoothing_curves: List[float], miro_taus: List[float],
+                   miro_etas: List[float], miro_mus: List[float],
+                   miro_indices: List[int], miro_seqids: List[int],
                    prompt_tokens: List[List[int]],
                    output_tokens: List[List[int]], vocab_size: int,
                    device: torch.device,
@@ -352,6 +359,10 @@ class SamplingTensors:
                                     device="cpu",
                                     dtype=dtype,
                                     pin_memory=pin_memory)
+        typical_thresholds_t = torch.tensor(typical_thresholds,
+                                             device="cpu",
+                                             dtype=dtype,
+                                             pin_memory=pin_memory)
         dynatemp_mins_t = torch.tensor(dynatemp_mins,
                                        device="cpu",
                                        dtype=dtype,
@@ -414,6 +425,9 @@ class SamplingTensors:
             eta_cutoffs=eta_cutoffs_t.to(device=device, non_blocking=True),
             epsilon_cutoffs=epsilon_cutoffs_t.to(device=device,
                                                  non_blocking=True),
+            typical_ps=typical_ps_t.to(device=device, non_blocking=True),
+            typical_thresholds=typical_thresholds_t.to(device=device,
+                                                       non_blocking=True),
             dynatemp_mins=dynatemp_mins_t.to(device=device, non_blocking=True),
             dynatemp_maxs=dynatemp_maxs_t.to(device=device, non_blocking=True),
             dynatemp_exps=dynatemp_exps_t.to(device=device, non_blocking=True),
@@ -426,7 +440,6 @@ class SamplingTensors:
             miro_mus=miro_mus_t.to(device=device, non_blocking=True),
             miro_indices=miro_indices_t.to(device=device, non_blocking=True),
             miro_seqids=miro_seqids,
-            typical_ps=typical_ps_t.to(device=device, non_blocking=True),
             prompt_tokens=prompt_tensor.to(device=device, non_blocking=True),
             output_tokens=output_tensor.to(device=device, non_blocking=True),
         )

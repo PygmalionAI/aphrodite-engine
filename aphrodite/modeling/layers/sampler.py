@@ -508,24 +508,43 @@ def _apply_epsilon_cutoff(
 def _apply_typical_sampling(
     logits: torch.Tensor,
     typical_p: torch.Tensor,
+    typical_threshold: torch.Tensor,
 ) -> torch.Tensor:
     typ_p = torch.tensor(typical_p, dtype=logits.dtype, device=logits.device)
+    typ_threshold = torch.tensor(typical_threshold, dtype=logits.dtype,
+                                 device=logits.device)
+
     shifted_logits = torch.log_softmax(logits, dim=-1)
-    probs = shifted_logits.exp()
+    probs = torch.exp(shifted_logits)
 
     neg_entropy = (probs * shifted_logits).nansum(dim=-1, keepdim=True)
+    # NOTE: We don't take the absolute value of the surprisal deviations
+    # This deviates from the original implementation
+    surprisal_deviations = neg_entropy - shifted_logits
 
-    surprisal_deviations = (neg_entropy - shifted_logits).abs()
     _, indices = torch.sort(surprisal_deviations)
     reordered_probs = probs.gather(-1, indices)
     typ_mask_sorted = reordered_probs.cumsum(dim=-1) >= typ_p.unsqueeze(dim=1)
 
-    min_tokens_to_keep = 1
-    # Keep at least min_tokens_to_keep
-    typ_mask_sorted[..., :min_tokens_to_keep] = 0
+    # Invert the minimum deviation from the expected information content of the
+    # probability distribution for the next token and scale it based on the
+    # provided typical_threshold parameter.
+    max_threshold = surprisal_deviations.min().negative() * typ_threshold
 
+    # Mask negative deviations and positive deviations above the max threshold
+    surprisal_deviations[surprisal_deviations <= 0] = 1000
+    surprisal_deviations[surprisal_deviations > max_threshold] = 1000
+    positive_mask = surprisal_deviations == 1000
+
+    typ_mask_sorted[..., :1] = 0
     typ_mask = typ_mask_sorted.scatter(1, indices, typ_mask_sorted)
+    
+    # Merging the mask created above with the one from the standard Typical-p.
+    # Masked out tokens in the distribution are True
+    typ_mask = typ_mask.bitwise_and(positive_mask)
+    
     logits[typ_mask] = -float("inf")
+
     return logits
 
 

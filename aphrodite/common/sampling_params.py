@@ -72,6 +72,8 @@ class SamplingParams:
         typical_p: Float that controls the cumulative probability of tokens
             closest in surprise to the expected surprise to consider.
             Must be in (0, 1]. Set to 1 to disable.
+        typical_threshold: Used to scale the maximum threshold for positive
+            deviations in typical_p. Range in [0, inf). Set to 0 to disable.
         mirostat_mode: Can either be 0 (disabled) or 2 (Mirostat v2).
         mirostat_tau: Target "surprisal" that mirostat works towards.
             Range [0, inf).
@@ -137,6 +139,7 @@ class SamplingParams:
         eta_cutoff: float = 0.0,
         epsilon_cutoff: float = 0.0,
         typical_p: float = 1.0,
+        typical_threshold: float = 0.0,
         mirostat_mode: int = 0,
         mirostat_tau: float = 0,
         mirostat_eta: float = 0,
@@ -175,6 +178,7 @@ class SamplingParams:
         self.eta_cutoff = eta_cutoff
         self.epsilon_cutoff = epsilon_cutoff
         self.typical_p = typical_p
+        self.typical_threshold = typical_threshold
         self.mirostat_mode = mirostat_mode
         self.mirostat_tau = mirostat_tau
         self.mirostat_eta = mirostat_eta
@@ -219,6 +223,7 @@ class SamplingParams:
             "eta_cutoff": 0.0,
             "epsilon_cutoff": 0.0,
             "typical_p": 1.0,
+            "typical_threshold": 0.0,
             "mirostat_mode": 0,
             "mirostat_tau": 0,
             "mirostat_eta": 0,
@@ -295,6 +300,10 @@ class SamplingParams:
         if not 0.0 <= self.typical_p <= 1.0:
             raise ValueError(
                 f"typical_p must be in (0, 1], got {self.typical_p}.")
+        if not self.typical_threshold >= 0:
+            raise ValueError(
+                f"typical_threshold must be non negative, got "
+                f"{self.typical_threshold}.")
         if not self.dynatemp_min >= 0:
             raise ValueError(
                 f"dynatemp_min must be non negative, got {self.dynatemp_min}.")
