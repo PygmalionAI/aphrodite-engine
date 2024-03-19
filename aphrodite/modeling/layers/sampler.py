@@ -514,6 +514,7 @@ def _apply_typical_sampling(
     typ_p = typical_p.clone().detach().to(logits.device).to(logits.dtype)
     typ_threshold = typical_p_sigma.clone().detach().to(logits.device).to(
         logits.dtype)
+    THRESHOLD = 1000
 
     shifted_logits = torch.log_softmax(logits, dim=-1)
     probs = torch.exp(shifted_logits)
@@ -534,9 +535,9 @@ def _apply_typical_sampling(
 
     # Mask negative deviations and positive deviations above the max threshold
     max_threshold = max_threshold.unsqueeze(1)
-    surprisal_deviations[surprisal_deviations <= 0] = 1000
-    surprisal_deviations[surprisal_deviations > max_threshold] = 1000
-    positive_mask = surprisal_deviations == 1000
+    surprisal_deviations[surprisal_deviations <= 0] = THRESHOLD
+    surprisal_deviations[surprisal_deviations > max_threshold] = THRESHOLD
+    positive_mask = surprisal_deviations == THRESHOLD
 
     typ_mask_sorted[..., :1] = 0
     typ_mask = typ_mask_sorted.scatter(1, indices, typ_mask_sorted)
