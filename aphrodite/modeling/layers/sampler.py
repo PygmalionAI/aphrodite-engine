@@ -112,7 +112,8 @@ class Sampler(nn.Module):
                                            sampling_tensors.epsilon_cutoffs)
         if do_typical_ps:
             logits = _apply_typical_sampling(logits,
-                                             sampling_tensors.typical_ps)
+                                             sampling_tensors.typical_ps,
+                                             sampling_tensors.typical_thresholds)
         if do_quadratic:
             logits = _apply_quadratic_sampling(
                 logits, sampling_tensors.smoothing_factors,
