@@ -1,5 +1,4 @@
 import contextlib
-import copy
 import time
 from typing import Dict, List, Optional, Tuple, Set, Union
 
@@ -699,19 +698,39 @@ class ModelRunner:
             max_chunk_size = 16
 
             chunk_begin = 0
+            hidden_states_list = []
             while chunk_begin < total_len:
                 chunk_end = min(chunk_begin + max_chunk_size, total_len)
                 chunk_len = chunk_end - chunk_begin
                 chunk_input_tokens = input_tokens[:, chunk_begin:chunk_end]
                 chunk_positions = input_positions[:, chunk_begin:chunk_end]
-                chunk_metadata = copy.deepcopy(input_metadata)
-                
-                chunk_metadata.slot_mapping = chunk_metadata.slot_mapping[:, chunk_begin:chunk_end]
-                chunk_metadata.context_lens[:] = chunk_begin
-                blocks_end = np.ceil(chunk_begin / 16)
-                block_tables = torch.arange(blocks_end, dtype=chunk_metadata.block_tables.dtype, device=chunk_metadata.block_tables.device)
-                block_tables = block_tables.expand(chunk_metadata.block_tables.shape[0], -1)
-                chunk_metadata.block_tables = block_tables
+
+                blocks_end = np.ceil(chunk_begin / 16) # block size = 16
+                block_tables = torch.arange(blocks_end, dtype=input_metadata.block_tables.dtype, device=input_metadata.block_tables.device)
+                block_tables = block_tables.expand(input_metadata.block_tables.shape[0], -1)
+                chunk_metadata = InputMetadata(
+                    is_prompt=True,
+                    slot_mapping=input_metadata.
+                    slot_mapping[:, chunk_begin:chunk_end],
+                    prompt_lens=torch.tensor(
+                        [chunk_len],
+                        device=input_metadata.prompt_lens.device,
+                        dtype=input_metadata.prompt_lens.dtype),
+                    max_seq_len=chunk_end,
+                    start_loc=torch.tensor(
+                        [chunk_begin],
+                        device=input_metadata.start_loc.device,
+                        dtype=input_metadata.start_loc.dtype),
+                    max_context_len=None,
+                    context_lens=torch.tensor(
+                        [chunk_begin],
+                        device=input_metadata.context_lens.device,
+                        dtype=input_metadata.context_lens.dtype),
+                    block_tables=block_tables,
+                    use_cuda_graph=input_metadata.use_cuda_graph,
+                    kv_cache_dtype=input_metadata.kv_cache_dtype,
+                    kv_quant_params=input_metadata.kv_quant_params,
+                )
 
                 print("Chunk:")
                 print(chunk_input_tokens.shape, chunk_positions)
@@ -723,10 +742,12 @@ class ModelRunner:
                     kv_caches=kv_caches,
                     input_metadata=chunk_metadata,
                 )
+                hidden_states_list.append(hidden_states)
 
                 print("Chunk finished")
-                
+
                 chunk_begin += max_chunk_size
+            hidden_states = torch.concat(hidden_states_list, dim=-2)
         else:
             hidden_states = model_executable(
                 input_ids=input_tokens,
