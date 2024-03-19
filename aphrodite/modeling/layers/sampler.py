@@ -533,6 +533,7 @@ def _apply_typical_sampling(
     max_threshold = surprisal_deviations.min().negative() * typ_threshold
 
     # Mask negative deviations and positive deviations above the max threshold
+    max_threshold = max_threshold.unsqueeze(1)
     surprisal_deviations[surprisal_deviations <= 0] = 1000
     surprisal_deviations[surprisal_deviations > max_threshold] = 1000
     positive_mask = surprisal_deviations == 1000
