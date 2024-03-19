@@ -511,10 +511,9 @@ def _apply_typical_sampling(
     typical_p: torch.Tensor,
     typical_threshold: torch.Tensor,
 ) -> torch.Tensor:
-    typ_p = torch.tensor(typical_p, dtype=logits.dtype, device=logits.device)
-    typ_threshold = torch.tensor(typical_threshold,
-                                 dtype=logits.dtype,
-                                 device=logits.device)
+    typ_p = typical_p.clone().detach().to(logits.device).to(logits.dtype)
+    typ_threshold = typical_threshold.clone().detach().to(logits.device).to(
+        logits.dtype)
 
     shifted_logits = torch.log_softmax(logits, dim=-1)
     probs = torch.exp(shifted_logits)
