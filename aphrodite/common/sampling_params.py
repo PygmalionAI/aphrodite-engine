@@ -301,9 +301,8 @@ class SamplingParams:
             raise ValueError(
                 f"typical_p must be in (0, 1], got {self.typical_p}.")
         if not self.typical_threshold >= 0:
-            raise ValueError(
-                f"typical_threshold must be non negative, got "
-                f"{self.typical_threshold}.")
+            raise ValueError(f"typical_threshold must be non negative, got "
+                             f"{self.typical_threshold}.")
         if not self.dynatemp_min >= 0:
             raise ValueError(
                 f"dynatemp_min must be non negative, got {self.dynatemp_min}.")

@@ -288,8 +288,7 @@ class SamplingTensors:
                    eta_cutoffs: List[float], epsilon_cutoffs: List[float],
                    typical_ps: List[float], typical_thresholds: List[float],
                    dynatemp_mins: List[float], dynatemp_maxs: List[float],
-                   dynatemp_exps: List[float],
-                   smoothing_factors: List[float],
+                   dynatemp_exps: List[float], smoothing_factors: List[float],
                    smoothing_curves: List[float], miro_taus: List[float],
                    miro_etas: List[float], miro_mus: List[float],
                    miro_indices: List[int], miro_seqids: List[int],
@@ -360,9 +359,9 @@ class SamplingTensors:
                                     dtype=dtype,
                                     pin_memory=pin_memory)
         typical_thresholds_t = torch.tensor(typical_thresholds,
-                                             device="cpu",
-                                             dtype=dtype,
-                                             pin_memory=pin_memory)
+                                            device="cpu",
+                                            dtype=dtype,
+                                            pin_memory=pin_memory)
         dynatemp_mins_t = torch.tensor(dynatemp_mins,
                                        device="cpu",
                                        dtype=dtype,

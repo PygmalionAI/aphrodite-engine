@@ -511,7 +511,8 @@ def _apply_typical_sampling(
     typical_threshold: torch.Tensor,
 ) -> torch.Tensor:
     typ_p = torch.tensor(typical_p, dtype=logits.dtype, device=logits.device)
-    typ_threshold = torch.tensor(typical_threshold, dtype=logits.dtype,
+    typ_threshold = torch.tensor(typical_threshold,
+                                 dtype=logits.dtype,
                                  device=logits.device)
 
     shifted_logits = torch.log_softmax(logits, dim=-1)
@@ -538,11 +539,11 @@ def _apply_typical_sampling(
 
     typ_mask_sorted[..., :1] = 0
     typ_mask = typ_mask_sorted.scatter(1, indices, typ_mask_sorted)
-    
+
     # Merging the mask created above with the one from the standard Typical-p.
     # Masked out tokens in the distribution are True
     typ_mask = typ_mask.bitwise_and(positive_mask)
-    
+
     logits[typ_mask] = -float("inf")
 
     return logits
