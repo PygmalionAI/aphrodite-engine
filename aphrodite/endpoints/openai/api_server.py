@@ -179,7 +179,7 @@ def parse_args():
 
 # Add prometheus asgi middleware to route /metrics requests
 metrics_app = make_asgi_app()
-app.mount("/metrics", metrics_app)
+app.mount("/metrics/", metrics_app)
 
 
 @app.exception_handler(RequestValidationError)
