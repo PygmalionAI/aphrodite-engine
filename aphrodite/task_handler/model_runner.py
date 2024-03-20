@@ -698,7 +698,7 @@ class ModelRunner:
             max_chunk_size = 16
 
             chunk_begin = 0
-            hidden_states_list = []
+            hidden_states = None
             while chunk_begin < total_len:
                 chunk_end = min(chunk_begin + max_chunk_size, total_len)
                 chunk_len = chunk_end - chunk_begin
@@ -736,18 +736,22 @@ class ModelRunner:
                 print(chunk_input_tokens.shape, chunk_positions)
                 print(chunk_metadata)
 
-                hidden_states = model_executable(
+                chunk_hidden_states = model_executable(
                     input_ids=chunk_input_tokens,
                     positions=chunk_positions,
                     kv_caches=kv_caches,
                     input_metadata=chunk_metadata,
                 )
-                hidden_states_list.append(hidden_states)
+                if hidden_states is None:
+                    hidden_states = torch.empty(
+                        (input_tokens.shape[0], input_tokens.shape[1],
+                         chunk_hidden_states.shape[2]),
+                        dtype=chunk_hidden_states.dtype,
+                        device=chunk_hidden_states.device)
+                hidden_states[:, chunk_begin:chunk_end] = chunk_hidden_states
 
                 print("Chunk finished")
-
                 chunk_begin += max_chunk_size
-            hidden_states = torch.concat(hidden_states_list, dim=-2)
         else:
             hidden_states = model_executable(
                 input_ids=input_tokens,
