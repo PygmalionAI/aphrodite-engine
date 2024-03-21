@@ -209,6 +209,15 @@
             "default": 1,
             "description": "Control the cumulative probability of tokens closest in surprise to the expected surprise to consider."
           },
+          "typical_threshold": {
+            "pretty_name": "Typical Threshold",
+            "type": "float",
+            "minimum": 0,
+            "maximum": 10,
+            "step": 0.01,
+            "default": 0,
+            "description": "Scale the maximum threshold for positive deviations in typical_p."
+          },
           "eta_cutoff": {
             "pretty_name": "Eta Cutoff",
             "type": "float",
