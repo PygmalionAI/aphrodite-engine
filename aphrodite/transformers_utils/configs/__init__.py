@@ -7,6 +7,7 @@ from aphrodite.transformers_utils.configs.qwen import QWenConfig
 # tiiuae/falcon-7b(-instruct) models. Newer Falcon models will use the
 # `FalconConfig` class from the official HuggingFace transformers library.
 from aphrodite.transformers_utils.configs.falcon import RWConfig
+from aphrodite.transformers_utils.configs.grok import GrokConfig
 
 __all__ = [
     "BaiChuanConfig",
@@ -15,4 +16,5 @@ __all__ = [
     "OLMoConfig",
     "QWenConfig",
     "RWConfig",
+    "GrokConfig",
 ]
