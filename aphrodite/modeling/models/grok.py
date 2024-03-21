@@ -476,8 +476,7 @@ class GrokForCausalLM(nn.Module):
                 if name.endswith(".bias") and name not in params_dict:
                     continue
                 # Skip experts that are not assigned to this worker.
-                if ("moe." in name
-                        and name not in params_dict):
+                if ("moe." in name and name not in params_dict):
                     continue
                 param = params_dict[name]
                 weight_loader = getattr(param, "weight_loader",
