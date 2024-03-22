@@ -263,16 +263,14 @@ class LlamaDecoderLayer(nn.Module):
             hidden_act=config.hidden_act,
             linear_method=linear_method,
         )
-
-        # Some old Yi finetunes and quants have not been llama-fied
+        self.input_layernorm = RMSNorm(config.hidden_size,
+                                       eps=config.rms_norm_eps)
+        self.post_attention_layernorm = RMSNorm(config.hidden_size,
+                                                eps=config.rms_norm_eps)
         if config.model_type == "Yi":
-            self.ln1 = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-            self.ln2 = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        else:
-            self.input_layernorm = RMSNorm(config.hidden_size,
-                                           eps=config.rms_norm_eps)
-            self.post_attention_layernorm = RMSNorm(config.hidden_size,
-                                                    eps=config.rms_norm_eps)
+            # Some old Yi finetunes and quants have not been llama-fied
+            self.ln1 = self.input_layernorm
+            self.ln2 = self.post_attention_layernorm
 
     def forward(
         self,
@@ -286,16 +284,10 @@ class LlamaDecoderLayer(nn.Module):
         # Self Attention
         if residual is None:
             residual = hidden_states
-            if hasattr(self, "ln1"):
-                hidden_states = self.ln1(hidden_states)
-            else:
-                hidden_states = self.input_layernorm(hidden_states)
+            hidden_states = self.input_layernorm(hidden_states)
         else:
-            if hasattr(self, "ln1"):
-                hidden_states, residual = self.ln1(hidden_states, residual)
-            else:
-                hidden_states, residual = self.input_layernorm(
-                    hidden_states, residual)
+            hidden_states, residual = self.input_layernorm(
+                hidden_states, residual)
         hidden_states = self.self_attn(
             positions=positions,
             hidden_states=hidden_states,
@@ -305,11 +297,8 @@ class LlamaDecoderLayer(nn.Module):
         )
 
         # Fully Connected
-        if hasattr(self, "ln2"):
-            hidden_states, residual = self.ln2(hidden_states, residual)
-        else:
-            hidden_states, residual = self.post_attention_layernorm(
-                hidden_states, residual)
+        hidden_states, residual = self.post_attention_layernorm(
+            hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
 
