@@ -14,10 +14,10 @@ import fastapi
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from loguru import logger
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
-from aphrodite.common.logger import init_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams, _SAMPLING_EPS
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
@@ -26,7 +26,6 @@ from aphrodite.endpoints.kobold.protocol import KAIGenerationInputSchema
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
-logger = init_logger(__name__)
 served_model: str = "Read Only"
 engine: AsyncAphrodite = None
 gen_cache: dict = {}
@@ -105,14 +104,20 @@ def prepare_engine_payload(
         kai_payload.top_p = 1.0
         kai_payload.top_k = -1
 
+    if kai_payload.dynatemp_range is not None:
+        dynatemp_min = kai_payload.temperature - kai_payload.dynatemp_range
+        dynatemp_max = kai_payload.temperature + kai_payload.dynatemp_range
+
     sampling_params = SamplingParams(
         n=kai_payload.n,
         best_of=kai_payload.n,
         repetition_penalty=kai_payload.rep_pen,
         temperature=kai_payload.temperature,
-        dynatemp_range=kai_payload.dynatemp_range,
+        dynatemp_min=dynatemp_min if kai_payload.dynatemp_range > 0 else 0.0,
+        dynatemp_max=dynatemp_max if kai_payload.dynatemp_range > 0 else 0.0,
         dynatemp_exponent=kai_payload.dynatemp_exponent,
         smoothing_factor=kai_payload.smoothing_factor,
+        smoothing_curve=kai_payload.smoothing_curve,
         tfs=kai_payload.tfs,
         top_p=kai_payload.top_p,
         top_k=kai_payload.top_k,
@@ -129,6 +134,7 @@ def prepare_engine_payload(
         custom_token_bans=badwordsids
         if kai_payload.use_default_badwordsids else [],
         max_tokens=kai_payload.max_length,
+        seed=kai_payload.sampler_seed,
     )
 
     max_input_tokens = max(
@@ -334,6 +340,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     logger.debug(f"args: {args}")
+    logger.warning("The standalone Kobold API is deprecated and will not "
+                   "receive updates. Please use the OpenAI API with the "
+                   "--launch-kobold-api flag instead.")
 
     if args.served_model_name is not None:
         served_model = args.served_model_name

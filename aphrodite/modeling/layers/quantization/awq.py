@@ -6,7 +6,8 @@ from torch.nn.parameter import Parameter
 from aphrodite._C import ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
-from aphrodite.modeling.layers.quantization.base_config import QuantizationConfig
+from aphrodite.modeling.layers.quantization.base_config import (
+    QuantizationConfig)
 
 
 class AWQConfig(QuantizationConfig):
@@ -49,8 +50,8 @@ class AWQConfig(QuantizationConfig):
     @staticmethod
     def get_config_filenames() -> List[str]:
         return [
-            "quant_config.json",  # E.g., casperhansen/vicuna-7b-v1.5-awq
-            "quantize_config.json",  # E.g., abhinavkulkarni/mosaicml-mpt-7b-instruct-w4-g128-awq  # pylint: disable=line-too-long
+            "quant_config.json",
+            "quantize_config.json",
         ]
 
     @classmethod
@@ -83,15 +84,20 @@ class AWQLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: AWQConfig):
         self.quant_config = quant_config
 
-    def create_weights(self, input_size_per_partition: int,
-                       output_size_per_partition: int, input_size: int,
-                       output_size: int,
-                       params_dtype: torch.dtype) -> Dict[str, Any]:
+    def create_weights(
+        self,
+        input_size_per_partition: int,
+        output_partition_sizes: List[int],
+        input_size: int,
+        output_size: int,
+        params_dtype: torch.dtype,
+    ) -> Dict[str, Any]:
         if input_size_per_partition % self.quant_config.group_size != 0:
             raise ValueError(
                 "The input size is not aligned with the quantized "
                 "weight shape. This can be caused by too large "
                 "tensor parallel size.")
+        output_size_per_partition = sum(output_partition_sizes)
         if output_size_per_partition % self.quant_config.pack_factor != 0:
             raise ValueError(
                 "The output size is not aligned with the quantized "

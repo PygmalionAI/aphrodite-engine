@@ -1,15 +1,23 @@
 """Sequence and its related classes."""
 import copy
 import enum
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Union
 
 from aphrodite.common.block import LogicalTokenBlock
-from aphrodite.common.prefix import Prefix
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.lora.request import LoRARequest
 
-PromptLogprobs = List[Optional[Dict[int, float]]]
-SampleLogprobs = List[Dict[int, float]]
+
+@dataclass
+class Logprob:
+    """Infos for supporting OpenAI compatible logprobs."""
+    logprob: float
+    decoded_token: Optional[str] = None
+
+
+PromptLogprobs = List[Optional[Dict[int, Logprob]]]
+SampleLogprobs = List[Dict[int, Logprob]]
 
 
 class SequenceStatus(enum.Enum):
@@ -49,9 +57,27 @@ class SequenceStatus(enum.Enum):
         return finish_reason
 
 
+@dataclass
+class RequestMetrics:
+    """Metrics associated with a request.
+
+    Args:
+        arrival_time: The time when the request arrived.
+        first_scheduled_time: The time when the request was first scheduled.
+        first_token_time: The time when the first token was generated.
+        time_in_queue: The time the request spent in the queue.
+        finished_time: The time when the request was finished.
+    """
+    arrival_time: float
+    last_token_time: float
+    first_scheduled_time: Optional[float]
+    first_token_time: Optional[float]
+    time_in_queue: Optional[float]
+    finished_time: Optional[float] = None
+
+
 class SequenceData:
     """Data associated with a sequence.
-
 
     Args:
         prompt_token_ids: The token IDs of the prompt.
@@ -138,10 +164,22 @@ class Sequence:
         # Input + output tokens
         self.tokens: Optional[List[str]] = None
         self.persistent_data = {}
+        self.persistent_data = {}
 
     @property
     def lora_int_id(self) -> int:
         return self.lora_request.lora_int_id if self.lora_request else 0
+
+    def hash_of_block(self, logical_idx: int) -> int:
+        # Compute the number of tokens in the sequence
+        # TODO: The current hashing function is O(L^2). We should optimize
+        # this in the future.
+        num_tokens = self.num_hashed_tokens_of_block(logical_idx)
+        return hash(
+            (tuple(self.data.get_token_ids()[0:num_tokens]), self.lora_int_id))
+
+    def num_hashed_tokens_of_block(self, logical_idx: int):
+        return logical_idx * self.block_size + self.block_size
 
     def _append_logical_block(self) -> None:
         block = LogicalTokenBlock(
@@ -169,12 +207,12 @@ class Sequence:
     def append_token_id(
         self,
         token_id: int,
-        logprobs: Dict[int, float],
+        logprobs: Dict[int, Logprob],
     ) -> None:
         assert token_id in logprobs
         self._append_tokens_to_blocks([token_id])
         self.output_logprobs.append(logprobs)
-        self.data.append_token_id(token_id, logprobs[token_id])
+        self.data.append_token_id(token_id, logprobs[token_id].logprob)
 
     def get_len(self) -> int:
         return self.data.get_len()
@@ -230,6 +268,14 @@ class Sequence:
                 f"num_blocks={len(self.logical_token_blocks)})")
 
 
+@dataclass
+class SequenceGroupState:
+    """Mutable state tied to a specific sequence group"""
+
+    # torch.Generator used in seeded sampling
+    generator: Optional = None
+
+
 class SequenceGroup:
     """A group of sequences that are generated from the same prompt.
 
@@ -239,7 +285,6 @@ class SequenceGroup:
         sampling_params: The sampling parameters used to generate the outputs.
         arrival_time: The arrival time of the request.
         lora_request: LoRA request.
-        prefix: The prefix of the prompt of the sequence group.
     """
 
     def __init__(
@@ -249,16 +294,18 @@ class SequenceGroup:
         sampling_params: SamplingParams,
         arrival_time: float,
         lora_request: Optional[LoRARequest] = None,
-        prefix: Optional[Prefix] = None,
     ) -> None:
         self.request_id = request_id
         self.seqs_dict = {seq.seq_id: seq for seq in seqs}
         self.sampling_params = sampling_params
-        self.arrival_time = arrival_time
-        self.last_token_time = arrival_time
+        self.metrics = RequestMetrics(arrival_time=arrival_time,
+                                      last_token_time=arrival_time,
+                                      first_scheduled_time=None,
+                                      first_token_time=None,
+                                      time_in_queue=None)
         self.lora_request = lora_request
-        self.prefix: Optional[Prefix] = prefix
         self.prompt_logprobs: Optional[PromptLogprobs] = None
+        self.state = SequenceGroupState()
 
     @property
     def prompt(self) -> str:
@@ -278,9 +325,25 @@ class SequenceGroup:
 
     def get_last_latency(self, now: float) -> float:
         """Gets last token latency for Request level timings."""
-        latency = now - self.last_token_time
-        self.last_token_time = now
+        latency = now - self.metrics.last_token_time
+        self.metrics.last_token_time = now
         return latency
+
+    def maybe_set_first_token_time(self, time: float) -> None:
+        """Sets the first token time for Request level timings."""
+        if self.metrics.first_token_time is None:
+            self.metrics.first_token_time = time
+
+    def maybe_set_first_scheduled_time(self, time: float) -> None:
+        """Sets the first scheduled time and time in queue for Request level
+        timings."""
+        if self.metrics.first_scheduled_time is None:
+            self.metrics.first_scheduled_time = time
+            self.metrics.time_in_queue = time - self.metrics.arrival_time
+
+    def set_finished_time(self, time: Optional[float]) -> None:
+        """Sets the finished time for Request level timings."""
+        self.metrics.finished_time = time
 
     def get_max_num_running_seqs(self) -> int:
         """The maximum number of sequences running in parallel in the remaining
@@ -354,7 +417,6 @@ class SequenceGroup:
 class SequenceGroupMetadata:
     """Metadata for a sequence group. Used to create `InputMetadata`.
 
-
     Args:
         request_id: The ID of the request.
         is_prompt: Whether the request is at prompt stage.
@@ -362,8 +424,8 @@ class SequenceGroupMetadata:
         sampling_params: The sampling parameters used to generate the outputs.
         block_tables: The block tables. (Seq id -> list of physical block
             numbers)
+        state: Internal state tied to this sequence group.
         lora_request: LoRA request.
-        prefix: The prefix of the prompt of the sequence group.
         persistent_data: The persistent data of the sequence group.
     """
 
@@ -376,7 +438,8 @@ class SequenceGroupMetadata:
         block_tables: Dict[int, List[int]],
         persistent_data: Dict[int, dict],
         lora_request: Optional[LoRARequest] = None,
-        prefix: Optional[Prefix] = None,
+        computed_block_nums: Optional[List[int]] = None,
+        state: Optional[SequenceGroupState] = None,
     ) -> None:
         self.request_id = request_id
         self.is_prompt = is_prompt
@@ -385,7 +448,8 @@ class SequenceGroupMetadata:
         self.block_tables = block_tables
         self.persistent_data = persistent_data
         self.lora_request = lora_request
-        self.prefix = prefix
+        self.computed_block_nums = computed_block_nums
+        self.state = SequenceGroupState() if state is None else state
 
     @property
     def lora_int_id(self) -> int:
@@ -408,7 +472,7 @@ class SequenceOutput:
         self,
         parent_seq_id: int,
         output_token: int,
-        logprobs: Dict[int, float],
+        logprobs: Dict[int, Logprob],
         persistent_data: dict,
     ) -> None:
         self.parent_seq_id = parent_seq_id
@@ -425,10 +489,10 @@ class SequenceOutput:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SequenceOutput):
             raise NotImplementedError()
-        return (self.parent_seq_id == other.parent_seq_id
-                and self.output_token == other.output_token
-                and self.logprobs == other.logprobs
-                and self.persistent_data == other.persistent_data)
+        equal = (self.parent_seq_id == other.parent_seq_id
+                 and self.output_token == other.output_token)
+        log_probs_equal = other.logprobs == self.logprobs
+        return equal and log_probs_equal
 
 
 class SequenceGroupOutput:

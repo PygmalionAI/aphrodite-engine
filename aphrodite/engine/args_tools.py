@@ -18,6 +18,7 @@ class EngineArgs:
     load_format: str = 'auto'
     dtype: str = 'auto'
     kv_cache_dtype: str = 'auto'
+    kv_quant_params_path: str = None
     seed: int = 0
     max_model_len: Optional[int] = None
     worker_use_ray: bool = False
@@ -25,15 +26,20 @@ class EngineArgs:
     tensor_parallel_size: int = 1
     max_parallel_loading_workers: Optional[int] = None
     block_size: int = 16
+    context_shift: bool = False
     swap_space: int = 4  # GiB
     gpu_memory_utilization: float = 0.90
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: int = 256
     max_paddings: int = 256
+    max_log_probs: int = 10
     disable_log_stats: bool = False
     revision: Optional[str] = None
     tokenizer_revision: Optional[str] = None
     quantization: Optional[str] = None
+    load_in_4bit: bool = False
+    load_in_8bit: bool = False
+    load_in_smooth: bool = False
     enforce_eager: bool = False
     max_context_len_to_capture: int = 8192
     disable_custom_all_reduce: bool = False
@@ -127,11 +133,18 @@ class EngineArgs:
         parser.add_argument(
             '--kv-cache-dtype',
             type=str,
-            choices=['auto', 'fp8_e5m2'],
+            choices=['auto', 'fp8_e5m2', 'int8'],
             default=EngineArgs.kv_cache_dtype,
             help='Data type for kv cache storage. If "auto", will use model '
             'data type. Note FP8 is not supported when cuda version is '
             'lower than 11.8.')
+        parser.add_argument(
+            '--kv-quant-params-path',
+            type=str,
+            default=EngineArgs.kv_quant_params_path,
+            help='Path to scales and zero points of KV cache '
+            'quantization. Only applicable when kv-cache-dtype '
+            'is int8.')
         parser.add_argument('--max-model-len',
                             type=int,
                             default=EngineArgs.max_model_len,
@@ -165,7 +178,9 @@ class EngineArgs:
                             default=EngineArgs.block_size,
                             choices=[8, 16, 32],
                             help='token block size')
-        # TODO: Support fine-grained seeds (e.g., seed per request).
+        parser.add_argument('--context-shift',
+                            action='store_true',
+                            help='Enable context shifting.')
         parser.add_argument('--seed',
                             type=int,
                             default=EngineArgs.seed,
@@ -195,22 +210,42 @@ class EngineArgs:
                             type=int,
                             default=EngineArgs.max_paddings,
                             help='maximum number of paddings in a batch')
+        parser.add_argument('--max-log-probs',
+                            type=int,
+                            default=EngineArgs.max_log_probs,
+                            help='maximum number of log probabilities to '
+                            'return.')
         parser.add_argument('--disable-log-stats',
                             action='store_true',
                             help='disable logging statistics')
         # Quantization settings.
-        parser.add_argument(
-            '--quantization',
-            '-q',
-            type=str,
-            choices=['awq', 'gguf', 'gptq', 'quip', 'squeezellm', None],
-            default=EngineArgs.quantization,
-            help='Method used to quantize the weights. If '
-            'None, we first check the `quantization_config` '
-            'attribute in the model config file. If that is '
-            'None, we assume the model weights are not '
-            'quantized and use `dtype` to determine the data '
-            'type of the weights.')
+        parser.add_argument('--quantization',
+                            '-q',
+                            type=str,
+                            choices=[
+                                'aqlm', 'awq', 'bnb', 'exl2', 'gguf', 'gptq',
+                                'quip', 'squeezellm', 'marlin', None
+                            ],
+                            default=EngineArgs.quantization,
+                            help='Method used to quantize the weights. If '
+                            'None, we first check the `quantization_config` '
+                            'attribute in the model config file. If that is '
+                            'None, we assume the model weights are not '
+                            'quantized and use `dtype` to determine the data '
+                            'type of the weights.')
+        parser.add_argument('--load-in-4bit',
+                            action='store_true',
+                            help='Load the FP16 model in 4-bit format. Also '
+                            'works with AWQ models. Throughput at 2.5x of '
+                            'FP16.')
+        parser.add_argument('--load-in-8bit',
+                            action='store_true',
+                            help='Load the FP16 model in 8-bit format. '
+                            'Throughput at 0.3x of FP16.')
+        parser.add_argument('--load-in-smooth',
+                            action='store_true',
+                            help='Load the FP16 model in smoothquant '
+                            '8bit format. Throughput at 0.7x of FP16. ')
         parser.add_argument('--enforce-eager',
                             action='store_true',
                             help='Always use eager-mode PyTorch. If False, '
@@ -280,17 +315,19 @@ class EngineArgs:
     ) -> Tuple[ModelConfig, CacheConfig, ParallelConfig, SchedulerConfig,
                DeviceConfig, Optional[LoRAConfig]]:
         device_config = DeviceConfig(self.device)
-        model_config = ModelConfig(self.model, self.tokenizer,
-                                   self.tokenizer_mode, self.trust_remote_code,
-                                   self.download_dir, self.load_format,
-                                   self.dtype, self.seed, self.revision,
-                                   self.tokenizer_revision, self.max_model_len,
-                                   self.quantization, self.enforce_eager,
-                                   self.max_context_len_to_capture)
+        model_config = ModelConfig(
+            self.model, self.tokenizer, self.tokenizer_mode,
+            self.trust_remote_code, self.download_dir, self.load_format,
+            self.dtype, self.seed, self.revision, self.tokenizer_revision,
+            self.max_model_len, self.quantization, self.load_in_4bit,
+            self.load_in_8bit, self.load_in_smooth, self.enforce_eager,
+            self.max_context_len_to_capture, self.max_log_probs)
         cache_config = CacheConfig(self.block_size,
                                    self.gpu_memory_utilization,
                                    self.swap_space, self.kv_cache_dtype,
-                                   model_config.get_sliding_window())
+                                   self.kv_quant_params_path,
+                                   model_config.get_sliding_window(),
+                                   self.context_shift)
         parallel_config = ParallelConfig(self.pipeline_parallel_size,
                                          self.tensor_parallel_size,
                                          self.worker_use_ray,

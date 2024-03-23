@@ -83,12 +83,14 @@ class QuipLinearMethod(LinearMethodBase):
     def create_weights(
         self,
         input_size_per_partition: int,
-        output_size_per_partition: int,
+        output_partition_sizes: List[int],
         input_size: int,
         output_size: int,
         params_dtype: torch.dtype,
     ) -> Dict[str, Any]:
-        if input_size != input_size_per_partition or output_size != output_size_per_partition:
+        output_size_per_partition = sum(output_partition_sizes)
+        if (input_size != input_size_per_partition
+                or output_size != output_size_per_partition):
             raise ValueError(
                 "Currently Quip doesn't support tensor parallel yet")
 

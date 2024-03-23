@@ -1,6 +1,6 @@
 """
-This example shows how to use the multi-LoRA functionality for offline inference.
-Requires HuggingFace credentials for access to Llama2.
+This example shows how to use the multi-LoRA functionality for offline
+inference. Requires HuggingFace credentials for access to Llama2.
 """
 
 from typing import Optional, List, Tuple
@@ -21,45 +21,65 @@ def create_test_prompts(lora_path: str) -> List[Tuple[str, SamplingParams]]:
     first adapter have finished.
     """
     return [
-        ("A robot may not injure a human being",
-         SamplingParams(temperature=0.0,
-                        # logprobs=1,
-                        prompt_logprobs=1,
-                        max_tokens=128), None),
+        (
+            "A robot may not injure a human being",
+            SamplingParams(
+                temperature=0.0,
+                # logprobs=1,
+                prompt_logprobs=1,
+                max_tokens=128),
+            None),
         ("To be or not to be,",
          SamplingParams(temperature=0.8,
                         top_k=5,
                         presence_penalty=0.2,
                         max_tokens=128), None),
-        ("[user] Write a SQL query to answer the question based on the table schema.\n\n context: CREATE TABLE table_name_74 (icao VARCHAR, airport VARCHAR)\n\n question: Name the ICAO for lilongwe international airport [/user] [assistant]",
-         SamplingParams(temperature=0.0,
-                        # logprobs=1,
-                        prompt_logprobs=1,
-                        max_tokens=128,
-                        stop_token_ids=[32003]),
-         LoRARequest("l2-lora-test", 1, lora_path)),
-        ("[user] Write a SQL query to answer the question based on the table schema.\n\n context: CREATE TABLE table_name_11 (nationality VARCHAR, elector VARCHAR)\n\n question: When Anchero Pantaleone was the elector what is under nationality? [/user] [assistant]",
+        (
+            """[user] Write a SQL query to answer the question based on the
+            table schema.\n\n context: CREATE TABLE table_name_74
+            (icao VARCHAR, airport VARCHAR)\n\n
+            question: Name the ICAO for lilongwe
+            international airport [/user] [assistant]""",
+            SamplingParams(
+                temperature=0.0,
+                # logprobs=1,
+                prompt_logprobs=1,
+                max_tokens=128,
+                stop_token_ids=[32003]),
+            LoRARequest("l2-lora-test", 1, lora_path)),
+        ("""[user] Write a SQL query to answer the question based on the table
+         schema.\n\n context: CREATE TABLE table_name_11 (nationality VARCHAR,
+         elector VARCHAR)\n\n question: When Anchero Pantaleone was the elector
+         what is under nationality? [/user] [assistant]""",
          SamplingParams(n=3,
                         best_of=3,
                         temperature=0.8,
                         max_tokens=128,
                         stop_token_ids=[32003]),
          LoRARequest("l2-lora-test", 1, lora_path)),
-        ("[user] Write a SQL query to answer the question based on the table schema.\n\n context: CREATE TABLE table_name_74 (icao VARCHAR, airport VARCHAR)\n\n question: Name the ICAO for lilongwe international airport [/user] [assistant]",
-         SamplingParams(temperature=0.0,
-                        # logprobs=1,
-                        prompt_logprobs=1,
-                        max_tokens=128,
-                        stop_token_ids=[32003]),
-         LoRARequest("l2-lora-test2", 2, lora_path)),
-        ("[user] Write a SQL query to answer the question based on the table schema.\n\n context: CREATE TABLE table_name_11 (nationality VARCHAR, elector VARCHAR)\n\n question: When Anchero Pantaleone was the elector what is under nationality? [/user] [assistant]",
+        (
+            """[user] Write a SQL query to answer the question based on the
+            table schema.\n\n context: CREATE TABLE table_name_74 (icao
+            VARCHAR, airport VARCHAR)\n\n question: Name the ICAO for lilongwe
+            international airport [/user] [assistant]""",
+            SamplingParams(
+                temperature=0.0,
+                # logprobs=1,
+                prompt_logprobs=1,
+                max_tokens=128,
+                stop_token_ids=[32003]),
+            LoRARequest("l2-lora-test2", 2, lora_path)),
+        ("""[user] Write a SQL query to answer the question based on the table
+         schema.\n\n context: CREATE TABLE table_name_11 (nationality VARCHAR,
+         elector VARCHAR)\n\n question: When Anchero Pantaleone was the elector
+         what is under nationality? [/user] [assistant]""",
          SamplingParams(n=3,
                         best_of=3,
                         temperature=0.9,
                         max_tokens=128,
                         stop_token_ids=[32003]),
          LoRARequest("l2-lora-test", 1, lora_path)),
-    ] # type: ignore
+    ]  # type: ignore
 
 
 def process_requests(engine: AphroditeEngine,

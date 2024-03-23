@@ -8,7 +8,9 @@ import torch.distributed
 
 from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig, LoRAConfig, DeviceConfig)
+from aphrodite.common.utils import in_wsl
 from aphrodite.modeling import set_random_seed
+from aphrodite.modeling.megatron import cupy_utils
 from aphrodite.modeling.megatron.communication_op import (broadcast_tensor_dict
                                                           )
 from aphrodite.modeling.megatron.custom_all_reduce import init_custom_ar
@@ -18,6 +20,7 @@ from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 from aphrodite.task_handler.cache_engine import CacheEngine
 from aphrodite.task_handler.model_runner import ModelRunner
 from aphrodite.lora.request import LoRARequest
+from aphrodite.common.utils import is_hip
 
 
 class Worker:
@@ -39,6 +42,7 @@ class Worker:
         distributed_init_method: str,
         lora_config: Optional[LoRAConfig] = None,
         kv_cache_dtype: Optional[str] = "auto",
+        kv_quant_params_path: Optional[str] = None,
         is_driver_worker: bool = False,
     ) -> None:
         self.model_config = model_config
@@ -53,13 +57,15 @@ class Worker:
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
 
-        self.model_runner = ModelRunner(model_config,
-                                        parallel_config,
-                                        scheduler_config,
-                                        device_config,
-                                        lora_config=self.lora_config,
-                                        kv_cache_dtype=kv_cache_dtype,
-                                        is_driver_worker=is_driver_worker)
+        self.model_runner = ModelRunner(
+            model_config,
+            parallel_config,
+            scheduler_config,
+            device_config,
+            lora_config=self.lora_config,
+            kv_cache_dtype=kv_cache_dtype,
+            kv_quant_params_path=kv_quant_params_path,
+            is_driver_worker=is_driver_worker)
         # Uninitialized cache engine. Will be initialized by
         # self.init_cache_engine().
         self.cache_config = None
@@ -67,7 +73,7 @@ class Worker:
         self.cache_events = None
         self.gpu_cache = None
 
-    def init_model(self) -> None:
+    def init_model(self, cupy_port: Optional[int] = None) -> None:
         if self.device_config.device.type == "cuda":
             # torch.distributed.all_reduce does not free the input tensor until
             # the synchronization point. This causes the memory usage to grow
@@ -79,17 +85,24 @@ class Worker:
 
             # This env var set by Ray causes exceptions with graph building.
             os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
+
+            # Patch for torch.cuda.is_available() unexpected error in WSL;
+            # always call torch.cuda.device_count() before initialising device
+            if in_wsl():
+                torch.cuda.device_count()
             self.device = torch.device(f"cuda:{self.local_rank}")
             torch.cuda.set_device(self.device)
 
             _check_if_gpu_supports_dtype(self.model_config.dtype)
+            torch.cuda.empty_cache()
+            self.init_gpu_memory = torch.cuda.mem_get_info()[0]
         else:
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
 
         # Initialize the distributed environment.
         init_distributed_environment(self.parallel_config, self.rank,
-                                     self.distributed_init_method)
+                                     cupy_port, self.distributed_init_method)
         if not self.parallel_config.disable_custom_all_reduce:
             init_custom_ar()
         # Initialize the model.
@@ -126,7 +139,9 @@ class Worker:
         # profiled peak memory.
         torch.cuda.synchronize()
         free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
-        peak_memory = total_gpu_memory - free_gpu_memory
+        # NOTE: Here we assume that the other processes using the same
+        # GPU did not change their memory usage during the profiling.
+        peak_memory = self.init_gpu_memory - free_gpu_memory
 
         cache_block_size = CacheEngine.get_cache_block_size(
             block_size, cache_dtype, self.model_config, self.parallel_config)
@@ -234,6 +249,7 @@ class Worker:
 def init_distributed_environment(
     parallel_config: ParallelConfig,
     rank: int,
+    cupy_port: Optional[int],
     distributed_init_method: Optional[str] = None,
 ) -> None:
     """Initialize the distributed environment."""
@@ -256,8 +272,29 @@ def init_distributed_environment(
             init_method=distributed_init_method,
         )
 
+    if cupy_utils.is_initialized():
+        cupy_world_size = cupy_utils.get_world_size()
+        if cupy_world_size != parallel_config.world_size:
+            raise RuntimeError(
+                "cupy.distributed is already initialized but the cupy world "
+                "size does not match parallel_config.world_size "
+                f"({cupy_world_size} vs. {parallel_config.world_size}).")
+    elif (parallel_config.world_size > 1 and cupy_port is not None
+          and not is_hip()):
+        # NOTE: We don't initialize CuPy process group when world size
+        # is 1.
+        # TODO: Support multi-node connection.
+        cupy_utils.init_process_group(
+            world_size=parallel_config.world_size,
+            rank=rank,
+            host="localhost",
+            port=cupy_port,
+        )
+
     # A small all_reduce for warmup.
     torch.distributed.all_reduce(torch.zeros(1).cuda())
+    if cupy_utils.is_initialized():
+        cupy_utils.all_reduce(torch.zeros(1).cuda())
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
 

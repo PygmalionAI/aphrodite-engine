@@ -1,6 +1,7 @@
 """Multi-head attention."""
 from typing import List, Optional
 
+import importlib
 import torch
 import torch.nn as nn
 from xformers import ops as xops
@@ -58,6 +59,40 @@ class PagedAttention(nn.Module):
             raise ValueError(f"head_size ({self.head_size}) is not supported. "
                              f"Supported head sizes: {_SUPPORTED_HEAD_SIZES}.")
 
+        self.use_ref_attention = self.check_use_ref_attention()
+
+    def check_use_ref_attention(self) -> bool:
+        if not is_hip():
+            return False
+        # For ROCm, check whether flash attention is installed or not.
+        # if not, use_ref_attention needs to be True
+        return importlib.util.find_spec("flash_attn") is None
+
+    def ref_masked_attention(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+    ) -> torch.Tensor:
+        query = query.view(-1, self.num_heads, self.head_size)
+        key = key.view(-1, self.num_kv_heads, self.head_size)
+        value = value.view(-1, self.num_kv_heads, self.head_size)
+
+        seq_len, _, _ = query.shape
+        attn_mask = torch.triu(torch.ones(seq_len,
+                                          seq_len,
+                                          dtype=query.dtype,
+                                          device=query.device),
+                               diagonal=1)
+        attn_mask = attn_mask * torch.finfo(query.dtype).min
+
+        attn_weights = self.scale * torch.einsum("qhd,khd->hqk", query,
+                                                 key).float()
+        attn_weights = attn_weights + attn_mask.float()
+        attn_weights = torch.softmax(attn_weights, dim=-1).to(value.dtype)
+        out = torch.einsum("hqk,khd->qhd", attn_weights, value)
+        return out
+
     def forward(
         self,
         query: torch.Tensor,
@@ -66,6 +101,7 @@ class PagedAttention(nn.Module):
         key_cache: Optional[torch.Tensor],
         value_cache: Optional[torch.Tensor],
         input_metadata: InputMetadata,
+        kv_quant_param: List[float] = None,
     ) -> torch.Tensor:
         """PagedAttention forward pass.
 
@@ -86,6 +122,9 @@ class PagedAttention(nn.Module):
         query = query.view(-1, self.num_heads, self.head_size)
         key = key.view(-1, self.num_kv_heads, self.head_size)
         value = value.view(-1, self.num_kv_heads, self.head_size)
+        # FIXME: Remove this when all models support int8 kv cache
+        kv_quant_param = [1.0, 0.0, 1.0, 0.0
+                          ] if kv_quant_param is None else kv_quant_param
 
         # Reshape the keys and values and store them in the cache.
         # If key_cache and value_cache are not provided, the new key and value
@@ -99,6 +138,7 @@ class PagedAttention(nn.Module):
                 value_cache,
                 input_metadata.slot_mapping.flatten(),
                 input_metadata.kv_cache_dtype,
+                *kv_quant_param,
             )
 
         if input_metadata.is_prompt:
@@ -136,6 +176,14 @@ class PagedAttention(nn.Module):
                         input_metadata.attn_bias = _make_alibi_bias(
                             self.alibi_slopes, self.num_kv_heads, batch_size,
                             seq_len, query.dtype)
+
+                if self.use_ref_attention:
+                    output = self.ref_masked_attention(
+                        query,
+                        key,
+                        value,
+                    )
+                    return output.reshape(batch_size, seq_len, hidden_size)
 
                 # TODO: Too many view operations. Let's try to reduce
                 # them in the future for code readability.
@@ -187,6 +235,7 @@ class PagedAttention(nn.Module):
                 self.num_kv_heads,
                 self.scale,
                 self.alibi_slopes,
+                kv_quant_param,
             )
 
         # Reshape the output tensor.
@@ -235,6 +284,7 @@ def _paged_attention(
     num_kv_heads: int,
     scale: float,
     alibi_slopes: Optional[torch.Tensor],
+    kv_quant_param: List[float],
 ) -> torch.Tensor:
     output = torch.empty_like(query)
 
@@ -267,6 +317,7 @@ def _paged_attention(
             input_metadata.max_context_len,
             alibi_slopes,
             input_metadata.kv_cache_dtype,
+            *kv_quant_param,
         )
     else:
         # Run PagedAttention V2.
@@ -298,5 +349,6 @@ def _paged_attention(
             input_metadata.max_context_len,
             alibi_slopes,
             input_metadata.kv_cache_dtype,
+            *kv_quant_param,
         )
     return output

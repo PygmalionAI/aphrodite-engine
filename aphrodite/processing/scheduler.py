@@ -2,17 +2,19 @@ from collections import deque
 import enum
 import time
 from typing import Deque, Dict, Iterable, List, Optional, Tuple, Union, Set
+from loguru import logger
 
-from aphrodite.common.config import LoRAConfig, CacheConfig, SchedulerConfig
+from aphrodite.common.config import CacheConfig, LoRAConfig, SchedulerConfig
 from aphrodite.processing.block_manager import AllocStatus, BlockSpaceManager
 from aphrodite.processing.policy import PolicyFactory
 from aphrodite.lora.request import LoRARequest
-from aphrodite.common.logger import init_logger
-from aphrodite.common.sequence import (Sequence, SequenceData, SequenceGroup,
-                                       SequenceGroupMetadata, SequenceStatus)
-from aphrodite.common.prefix import PrefixPool
-
-logger = init_logger(__name__)
+from aphrodite.common.sequence import (
+    Sequence,
+    SequenceData,
+    SequenceGroup,
+    SequenceGroupMetadata,
+    SequenceStatus,
+)
 
 
 class PreemptionMode(enum.Enum):
@@ -24,6 +26,7 @@ class PreemptionMode(enum.Enum):
     recompute them when the sequences are resumed, treating the sequences as
     new prompts.
     """
+
     SWAP = enum.auto()
     RECOMPUTE = enum.auto()
 
@@ -62,8 +65,11 @@ class SchedulerOutputs:
     def _sort_by_lora_ids(self) -> bool:
         self.scheduled_seq_groups = sorted(
             self.scheduled_seq_groups,
-            key=lambda g: (g.lora_request.lora_int_id
-                           if g.lora_request else 0, g.request_id))
+            key=lambda g: (
+                g.lora_request.lora_int_id if g.lora_request else 0,
+                g.request_id,
+            ),
+        )
 
     @property
     def lora_requests(self) -> Set[LoRARequest]:
@@ -85,8 +91,10 @@ class Scheduler:
         # LoRAs. This should be improved in the future.
         self.lora_config = lora_config
 
-        self.prompt_limit = min(self.scheduler_config.max_model_len,
-                                self.scheduler_config.max_num_batched_tokens)
+        self.prompt_limit = min(
+            self.scheduler_config.max_model_len,
+            self.scheduler_config.max_num_batched_tokens,
+        )
 
         # Instantiate the scheduling policy.
         self.policy = PolicyFactory.get_policy(policy_name="fcfs")
@@ -95,10 +103,9 @@ class Scheduler:
             block_size=self.cache_config.block_size,
             num_gpu_blocks=self.cache_config.num_gpu_blocks,
             num_cpu_blocks=self.cache_config.num_cpu_blocks,
-            sliding_window=self.cache_config.sliding_window)
-
-        # Create the prefix pool to cache the prefixes.
-        self.prefix_pool = PrefixPool(self.cache_config.block_size)
+            sliding_window=self.cache_config.sliding_window,
+            enable_caching=self.cache_config.context_shift,
+        )
 
         # Sequence groups in the WAITING state.
         self.waiting: Deque[SequenceGroup] = deque()
@@ -158,7 +165,7 @@ class Scheduler:
         return len(self.waiting) + len(self.running) + len(self.swapped)
 
     def _schedule(self) -> SchedulerOutputs:
-        # Blocks that need to be swaped or copied before model execution.
+        # Blocks that need to be swapped or copied before model execution.
         blocks_to_swap_in: Dict[int, int] = {}
         blocks_to_swap_out: Dict[int, int] = {}
         blocks_to_copy: Dict[int, List[int]] = {}
@@ -174,9 +181,9 @@ class Scheduler:
             # requests in the generation phase.
             num_curr_seqs = sum(seq_group.get_max_num_running_seqs()
                                 for seq_group in self.running)
-            curr_loras = set(
+            curr_loras = (set(
                 seq_group.lora_int_id
-                for seq_group in self.running) if self.lora_enabled else None
+                for seq_group in self.running) if self.lora_enabled else None)
             seq_lens: List[int] = []
 
             # Optimization: We do not sort the waiting queue since the preempted
@@ -185,7 +192,6 @@ class Scheduler:
             leftover_waiting_sequences = deque()
             while self.waiting:
                 seq_group = self.waiting[0]
-
                 waiting_seqs = seq_group.get_seqs(
                     status=SequenceStatus.WAITING)
                 assert len(waiting_seqs) == 1, (
@@ -249,7 +255,6 @@ class Scheduler:
                 if lora_int_id > 0:
                     curr_loras.add(lora_int_id)
                 self.waiting.popleft()
-
                 self._allocate(seq_group)
                 self.running.append(seq_group)
                 num_curr_seqs += num_new_seqs
@@ -304,9 +309,9 @@ class Scheduler:
         if not preempted:
             num_curr_seqs = sum(seq_group.get_max_num_running_seqs()
                                 for seq_group in self.running)
-            curr_loras = set(
+            curr_loras = (set(
                 seq_group.lora_int_id
-                for seq_group in self.running) if self.lora_enabled else None
+                for seq_group in self.running) if self.lora_enabled else None)
 
             leftover_swapped = deque()
 
@@ -367,18 +372,23 @@ class Scheduler:
         # This function call changes the internal states of the scheduler
         # such as self.running, self.swapped, and self.waiting.
         scheduler_outputs = self._schedule()
+        now = time.time()
 
         # Create input data structures.
         seq_group_metadata_list: List[SequenceGroupMetadata] = []
         for seq_group in scheduler_outputs.scheduled_seq_groups:
+            seq_group.maybe_set_first_scheduled_time(now)
+
             seq_data: Dict[int, SequenceData] = {}
             block_tables: Dict[int, List[int]] = {}
             persistent_data: Dict[int, dict] = {}
+
             for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
                 seq_id = seq.seq_id
                 seq_data[seq_id] = seq.data
                 block_tables[seq_id] = self.block_manager.get_block_table(seq)
                 persistent_data[seq_id] = seq.persistent_data
+                self.block_manager.access_all_blocks_in_seq(seq, now)
 
             seq_group_metadata = SequenceGroupMetadata(
                 request_id=seq_group.request_id,
@@ -388,7 +398,9 @@ class Scheduler:
                 block_tables=block_tables,
                 lora_request=seq_group.lora_request,
                 persistent_data=persistent_data,
-                prefix=seq_group.prefix,
+                computed_block_nums=self.block_manager.
+                get_common_computed_block_ids(seq_group),
+                state=seq_group.state,
             )
             seq_group_metadata_list.append(seq_group_metadata)
         return seq_group_metadata_list, scheduler_outputs
@@ -497,3 +509,6 @@ class Scheduler:
         blocks_to_swap_out.update(mapping)
         for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
             seq.status = SequenceStatus.SWAPPED
+
+    def mark_blocks_as_computed(self, seq_group: SequenceGroup):
+        self.block_manager.mark_blocks_as_computed(seq_group)

@@ -23,6 +23,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     &silu_and_mul,
     "Activation function used in SwiGLU.");
   ops.def(
+    "gelu_and_mul",
+    &gelu_and_mul,
+    "Activation function used in GeGLU.");
+  ops.def(
     "gelu_new",
     &gelu_new,
     "GELU implementation used in GPT-2.");
@@ -50,8 +54,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 
 #ifndef USE_ROCM
   // Quantization ops
+  ops.def("aqlm_gemm", &aqlm_gemm, "Quantized GEMM for AQLM");
   ops.def("awq_gemm", &awq_gemm, "Quantized GEMM for AWQ");
   ops.def("awq_dequantize", &awq_dequantize, "Dequantization for AWQ");
+  ops.def("autoquant_convert_s4_k_m8", &autoquant_convert_s4_k_m8, "convert kernel.");
+  ops.def("autoquant_s4_f16_gemm", &autoquant_s4_f16_gemm, "weight int4 activation float16 gemm kernel.");
   ops.def("quip_decompress", &decompress_e8p_origorder, "decompress_packed_e8p");
   ops.def("quip_gemv", &e8p_mm_origorder, "e8p_mm_origorder");
   ops.def("marlin_gemm", &marlin_gemm, "Marlin Optimized Quantized GEMM for GPTQ");
@@ -63,6 +70,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   ops.def("ggml_mul_mat_vec", &ggml_mul_mat_vec, "ggml_mul_mat_vec");
   ops.def("ggml_mul_mat_vec_a8", &ggml_mul_mat_vec_a8, "ggml_mul_mat_vec_a8");
   ops.def("ggml_mul_mat_a8", &ggml_mul_mat_a8, "ggml_mul_mat_a8");
+  ops.def("exl2_make_q_matrix",&make_q_matrix, "preprocess for exl2");
+  ops.def("exl2_gemm", &exl2_gemm, "exl2 gemm");
   
   ops.def("moe_align_block_size",
           &moe_align_block_size,

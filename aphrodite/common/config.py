@@ -2,16 +2,14 @@ from typing import Optional, Union, ClassVar
 from dataclasses import dataclass
 import os
 from packaging.version import Version
+from loguru import logger
 
 import torch
 from transformers import PretrainedConfig
 
-from aphrodite.common.logger import init_logger
 from aphrodite.transformers_utils.config import get_config
 from aphrodite.common.utils import (get_cpu_memory, is_hip,
                                     get_nvcc_cuda_version)
-
-logger = init_logger(__name__)
 
 _GB = 1 << 30
 
@@ -52,6 +50,11 @@ class ModelConfig:
             output). If None, will be derived from the model.
         quantization: Quantization method that was used to quantize the model
             weights. If None, we assume the model weights are not quantized.
+        load_in_4bit: Whether to load the FP16 model in bitsandbytes 4bit
+            format. Works with AWQ models as well as FP16.
+        load_in_8bit: Whether to load the FP16 model in 8bit format. Slower
+            than load_in_smooth in terms of throughput.
+        load_in_smooth: Whether to load the FP16 model in smoothquant format.
         enforce_eager: Whether to enforce eager execution. If True, we will
             disable CUDA graph and always execute the model in eager mode.
             If False, we will use CUDA graph and eager execution in hybrid.
@@ -68,14 +71,18 @@ class ModelConfig:
         trust_remote_code: bool,
         download_dir: Optional[str],
         load_format: str,
-        dtype: Union[str, torch.dtype],
+        dtype: str,
         seed: int,
         revision: Optional[str] = None,
         tokenizer_revision: Optional[str] = None,
         max_model_len: Optional[int] = None,
         quantization: Optional[str] = None,
+        load_in_4bit: bool = False,
+        load_in_8bit: bool = False,
+        load_in_smooth: bool = False,
         enforce_eager: bool = False,
         max_context_len_to_capture: Optional[int] = None,
+        max_log_probs: int = 10,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -87,8 +94,12 @@ class ModelConfig:
         self.revision = revision
         self.tokenizer_revision = tokenizer_revision
         self.quantization = quantization
+        self.load_in_4bit = load_in_4bit
+        self.load_in_8bit = load_in_8bit
+        self.load_in_smooth = load_in_smooth
         self.enforce_eager = enforce_eager
         self.max_context_len_to_capture = max_context_len_to_capture
+        self.max_log_probs = max_log_probs
 
         if os.environ.get("APHRODITE_USE_MODELSCOPE",
                           "False").lower() == "true":
@@ -148,8 +159,11 @@ class ModelConfig:
         self.tokenizer_mode = tokenizer_mode
 
     def _verify_quantization(self) -> None:
-        supported_quantization = ["awq", "gguf", "gptq", "quip", "squeezellm"]
-        rocm_not_supported_quantization = ["awq", "quip"]
+        supported_quantization = [
+            "aqlm", "awq", "bnb", "exl2", "gguf", "gptq", "quip", "squeezellm",
+            "marlin"
+        ]
+        rocm_not_supported_quantization = ["aqlm", "awq", "bnb", "quip"]
         if self.quantization is not None:
             self.quantization = self.quantization.lower()
 
@@ -164,6 +178,11 @@ class ModelConfig:
         hf_quant_config = getattr(self.hf_config, "quantization_config", None)
         if hf_quant_config is not None:
             hf_quant_method = str(hf_quant_config["quant_method"]).lower()
+            # If the GPTQ model is serialized in marlin format, use marlin.
+            if (hf_quant_method == "gptq"
+                    and "is_marlin_format" in hf_quant_config
+                    and hf_quant_config["is_marlin_format"]):
+                hf_quant_method = "marlin"
             if self.quantization is None:
                 self.quantization = hf_quant_method
             elif self.quantization != hf_quant_method:
@@ -172,6 +191,64 @@ class ModelConfig:
                     f"({hf_quant_method}) does not match the quantization "
                     f"method specified in the `quantization` argument "
                     f"({self.quantization}).")
+        if self.load_in_4bit:
+            # the kernels seem to not work with 4bit weight_only
+            if torch.cuda.get_device_capability(0)[0] < 8:
+                raise ValueError(
+                    "load_in_4bit quantization is not supported on GPUs with "
+                    "compute capability less than 8.0.")
+            if self.quantization is None:
+                self.quantization = "bnb"
+                self.hf_config.quantization_config = {
+                    "bits": 4,
+                    "quant_mode": "weight_only",
+                    "quant_method": "bnb",
+                    "group_size": 128,
+                    "zero_point": True,
+                    "from_float": True
+                }
+            elif self.quantization == "awq":
+                logger.warning("AWQ model is being loaded in 4bit bnb format.")
+                self.quantization = "bnb"
+                self.hf_config.quantization_config = {
+                    "zero_point": True,
+                    "q_group_size": 128,
+                    "w_bit": 4,
+                    "version": "gemm"
+                }
+            elif self.quantization != "bnb":
+                raise ValueError("4bit quantization is not supported in "
+                                 f"{self.quantization}.")
+        if self.load_in_8bit:
+            if self.quantization is None:
+                self.quantization = "bnb"
+            elif self.quantization != "bnb":
+                raise ValueError("8bit quantization is not supported in "
+                                 f"{self.quantization}.")
+            self.hf_config.quantization_config = {
+                "bits": 8,
+                "quant_mode": "llm_int8",
+                "quant_method": "bnb",
+                "group_size": 128,
+                "zero_point": True,
+                "from_float": True
+            }
+            self.enforce_eager = True
+        if self.load_in_smooth:
+            if self.quantization is None:
+                self.quantization = "bnb"
+            elif self.quantization != "bnb":
+                raise ValueError("Smooth quantization is not supported in "
+                                 f"{self.quantization}.")
+            self.hf_config.quantization_config = {
+                "bits": 8,
+                "quant_mode": "smoothquant",
+                "quant_method": "bnb",
+                "group_size": 128,
+                "zero_point": True,
+                "from_float": True
+            }
+            self.enforce_eager = True
 
         if self.quantization is not None:
             if self.quantization not in supported_quantization:
@@ -183,9 +260,11 @@ class ModelConfig:
                 raise ValueError(
                     f"{self.quantization} quantization is currently not "
                     "supported in ROCm.")
-            logger.warning(f"{self.quantization} quantization is not fully "
-                           "optimized yet. The speed can be slower than "
-                           "non-quantized models.")
+            if self.quantization != "marlin":
+                logger.warning(
+                    f"{self.quantization} quantization is not fully "
+                    "optimized yet. The speed can be slower than "
+                    "non-quantized models.")
 
     def _verify_cuda_graph(self) -> None:
         if self.max_context_len_to_capture is None:
@@ -286,6 +365,8 @@ class CacheConfig:
             Aphrodite execution.
         swap_space: Size of the CPU swap space per GPU (in GiB).
         cache_dtype: Data Type for KV cache storage.
+        cache_quant_params_path: Path to the scales and zero points
+            of KV cache quantization when cache_dtype is int8.
     """
 
     def __init__(
@@ -294,13 +375,17 @@ class CacheConfig:
         gpu_memory_utilization: float,
         swap_space: int,
         cache_dtype: str,
+        cache_quant_params_path: Optional[str] = None,
         sliding_window: Optional[int] = None,
+        context_shift: bool = False,
     ) -> None:
         self.block_size = block_size
         self.gpu_memory_utilization = gpu_memory_utilization
         self.swap_space_bytes = swap_space * _GB
         self.cache_dtype = cache_dtype
         self.sliding_window = sliding_window
+        self.cache_quant_params_path = cache_quant_params_path
+        self.context_shift = context_shift
         self._verify_args()
         self._verify_cache_dtype()
 
@@ -315,7 +400,7 @@ class CacheConfig:
                 f"{self.gpu_memory_utilization}.")
 
     def _verify_cache_dtype(self) -> None:
-        if self.cache_dtype == "auto":
+        if self.cache_dtype in ["auto", "int8"]:
             pass
         elif self.cache_dtype == "fp8_e5m2":
             nvcc_cuda_version = get_nvcc_cuda_version()
@@ -493,9 +578,9 @@ class LoRAConfig:
             self.lora_dtype = model_config.dtype
         elif isinstance(self.lora_dtype, str):
             self.lora_dtype = getattr(torch, self.lora_dtype)
-        if model_config.quantization is not None:
-            raise ValueError(
-                "LoRA is not supported with quantized models yet.")
+        if (model_config.quantization is not None
+                and model_config.quantization == "gguf"):
+            raise ValueError("LoRA is not supported with GGUF quantization.")
 
     def verify_with_scheduler_config(self, scheduler_config: SchedulerConfig):
         if scheduler_config.max_num_batched_tokens > 65528:

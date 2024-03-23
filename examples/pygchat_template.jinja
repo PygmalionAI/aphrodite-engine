@@ -1,0 +1,13 @@
+{# Fetch character name. This gets a bit ugly, but so be it. #}
+{% set char_name = (messages|selectattr('role', 'equalto', 'assistant')|list|last|split(":"))[0]|trim - %}
+
+{% for message in messages %}
+{{ message['content']|trim -}}
+{% if not loop.last %}
+
+{% endif %}
+{% endfor %}
+{% if add_generation_prompt and messages[-1]['role'] != 'assistant' %}
+
+{{char_name}}: 
+{% endif %}

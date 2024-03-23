@@ -11,23 +11,21 @@ from packaging.version import parse, Version
 import setuptools
 import torch
 import torch.utils.cpp_extension as torch_cpp_ext
-from torch.utils.cpp_extension import (
-    BuildExtension, CUDAExtension, CUDA_HOME, ROCM_HOME)
+from torch.utils.cpp_extension import (BuildExtension, CUDAExtension,
+                                       CUDA_HOME, ROCM_HOME)
 
 ROOT_DIR = os.path.dirname(__file__)
 
 MAIN_CUDA_VERSION = "12.1"
 
 # Supported NVIDIA GPU architectures.
-NVIDIA_SUPPORTED_ARCHS = {
-    "6.1", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"
-}
-ROCM_SUPPORTED_ARCHS = {
-    "gfx90a", "gfx908", "gfx906", "gfx1030", "gfx1100"
-}
+NVIDIA_SUPPORTED_ARCHS = {"6.1", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"}
+ROCM_SUPPORTED_ARCHS = {"gfx90a", "gfx942", "gfx1100"}
+
 
 def _is_hip() -> bool:
     return torch.version.hip is not None
+
 
 def _is_cuda() -> bool:
     return torch.version.cuda is not None
@@ -37,7 +35,6 @@ def _is_cuda() -> bool:
 CXX_FLAGS = ["-g", "-O2", "-std=c++17"]
 # TODO: Should we use -O3?
 NVCC_FLAGS = ["-O2", "-std=c++17"]
-
 
 if _is_hip():
     if ROCM_HOME is None:
@@ -53,21 +50,6 @@ if _is_cuda() and CUDA_HOME is None:
 ABI = 1 if torch._C._GLIBCXX_USE_CXX11_ABI else 0
 CXX_FLAGS += [f"-D_GLIBCXX_USE_CXX11_ABI={ABI}"]
 NVCC_FLAGS += [f"-D_GLIBCXX_USE_CXX11_ABI={ABI}"]
-
-def get_amdgpu_offload_arch():
-    command = "/opt/rocm/llvm/bin/amdgpu-offload-arch"
-    try:
-        output = subprocess.check_output([command])
-        return output.decode('utf-8').strip()
-    except subprocess.CalledProcessError as e:
-        error_message = f"Error: {e}"
-        raise RuntimeError(error_message) from e
-    except FileNotFoundError as e:
-        # If the command is not found, print an error message
-        error_message = f"The command {command} was not found."
-        raise RuntimeError(error_message) from e
-
-    return None
 
 
 def get_hipcc_rocm_version():
@@ -91,9 +73,11 @@ def get_hipcc_rocm_version():
         print("Could not find HIP version in the output")
         return None
 
+
 def glob(pattern: str):
     root = Path(__name__).parent
     return [str(p) for p in root.glob(pattern)]
+
 
 def get_nvcc_cuda_version(cuda_dir: str) -> Version:
     """Get the CUDA version from nvcc.
@@ -106,6 +90,42 @@ def get_nvcc_cuda_version(cuda_dir: str) -> Version:
     release_idx = output.index("release") + 1
     nvcc_cuda_version = parse(output[release_idx].split(",")[0])
     return nvcc_cuda_version
+
+
+def get_pytorch_rocm_arch() -> Set[str]:
+    env_arch_list = os.environ.get("PYTORCH_ROCM_ARCH", None)
+
+    # If we don't have PYTORCH_ROCM_ARCH specified pull the list from
+    # rocm_agent_enumerator
+    if env_arch_list is None:
+        command = "rocm_agent_enumerator"
+        env_arch_list = subprocess.check_output([command]).decode('utf-8')\
+                        .strip().replace("\n", ";")
+        arch_source_str = "rocm_agent_enumerator"
+    else:
+        arch_source_str = "PYTORCH_ROCM_ARCH env variable"
+
+    # List are separated by ; or space.
+    pytorch_rocm_arch = set(env_arch_list.replace(" ", ";").split(";"))
+
+    # Filter out the invalid architectures and print a warning.
+    arch_list = pytorch_rocm_arch.intersection(ROCM_SUPPORTED_ARCHS)
+
+    # If none of the specified architectures are valid, raise an error.
+    if not arch_list:
+        raise RuntimeError(
+            f"None of the ROCM architectures in {arch_source_str} "
+            f"({env_arch_list}) is supported. "
+            f"Supported ROCM architectures are: {ROCM_SUPPORTED_ARCHS}.")
+    invalid_arch_list = pytorch_rocm_arch - ROCM_SUPPORTED_ARCHS
+    if invalid_arch_list:
+        warnings.warn(
+            f"Unsupported ROCM architectures ({invalid_arch_list}) are "
+            f"excluded from the {arch_source_str} output "
+            f"({env_arch_list}). Supported ROCM architectures are: "
+            f"{ROCM_SUPPORTED_ARCHS}.",
+            stacklevel=2)
+    return arch_list
 
 
 def get_torch_arch_list() -> Set[str]:
@@ -146,8 +166,12 @@ def get_torch_arch_list() -> Set[str]:
     return arch_list
 
 
-# First, check the TORCH_CUDA_ARCH_LIST environment variable.
-compute_capabilities = get_torch_arch_list()
+if _is_hip():
+    rocm_arches = get_pytorch_rocm_arch()
+    NVCC_FLAGS += ["--offload-arch=" + arch for arch in rocm_arches]
+else:
+    # First, check the TORCH_CUDA_ARCH_LIST environment variable.
+    compute_capabilities = get_torch_arch_list()
 if _is_cuda() and not compute_capabilities:
     # If TORCH_CUDA_ARCH_LIST is not defined or empty, target all available
     # GPUs on the current machine.
@@ -182,11 +206,11 @@ if _is_cuda():
             "CUDA 11.1 or higher is required for compute capability 8.6.")
     if nvcc_cuda_version < Version("11.8"):
         if any(cc.startswith("8.9") for cc in compute_capabilities):
-            # CUDA 11.8 is required to generate the code targeting compute capability 8.9.
-            # However, GPUs with compute capability 8.9 can also run the code generated by
-            # the previous versions of CUDA 11 and targeting compute capability 8.0.
-            # Therefore, if CUDA 11.8 is not available, we target compute capability 8.0
-            # instead of 8.9.
+            # CUDA 11.8 is required to generate the code targeting compute
+            # capability 8.9. However, GPUs with compute capability 8.9 can
+            # also run the code generated by the previous versions of CUDA 11
+            # and targeting compute capability 8.0. Therefore, if CUDA 11.8 is
+            # not available, we target compute capability 8.0 instead of 8.9.
             warnings.warn(
                 "CUDA 11.8 or higher is required for compute capability 8.9. "
                 "Targeting compute capability 8.0 instead.",
@@ -222,7 +246,7 @@ if _is_cuda():
         nvcc_threads = int(os.getenv("NVCC_THREADS", 8))
         num_threads = min(os.cpu_count(), nvcc_threads)
         NVCC_FLAGS += ["--threads", str(num_threads)]
-    
+
     if nvcc_cuda_version >= Version("11.8"):
         NVCC_FLAGS += ["-DENABLE_FP8_E5M2"]
 
@@ -238,7 +262,8 @@ if _is_cuda():
         with contextlib.suppress(ValueError):
             torch_cpp_ext.COMMON_NVCC_FLAGS.remove(flag)
 
-    install_punica = bool(int(os.getenv("APHRODITE_INSTALL_PUNICA_KERNELS", "1")))
+    install_punica = bool(
+        int(os.getenv("APHRODITE_INSTALL_PUNICA_KERNELS", "1")))
     device_count = torch.cuda.device_count()
     for i in range(device_count):
         major, minor = torch.cuda.get_device_capability(i)
@@ -256,8 +281,9 @@ if _is_cuda():
                     "nvcc": NVCC_FLAGS_PUNICA,
                 },
             ))
-    
-    install_hadamard = bool(int(os.getenv("APHRODITE_INSTALL_HADAMARD_KERNELS", "1")))
+
+    install_hadamard = bool(
+        int(os.getenv("APHRODITE_INSTALL_HADAMARD_KERNELS", "1")))
     device_count = torch.cuda.device_count()
     for i in range(device_count):
         major, minor = torch.cuda.get_device_capability(i)
@@ -268,21 +294,15 @@ if _is_cuda():
         ext_modules.append(
             CUDAExtension(
                 name="aphrodite._hadamard_C",
-                sources=["kernels/hadamard/fast_hadamard_transform.cpp",
-                         "kernels/hadamard/fast_hadamard_transform_cuda.cu"],
+                sources=[
+                    "kernels/hadamard/fast_hadamard_transform.cpp",
+                    "kernels/hadamard/fast_hadamard_transform_cuda.cu"
+                ],
                 extra_compile_args={
                     "cxx": CXX_FLAGS,
                     "nvcc": NVCC_FLAGS,
                 },
             ))
-
-elif _is_hip():
-    amd_arch = get_amdgpu_offload_arch()
-    if amd_arch not in ROCM_SUPPORTED_ARCHS:
-        raise RuntimeError(
-            f"Only the following arch is supported: {ROCM_SUPPORTED_ARCHS}"
-            f"amdgpu_arch_found: {amd_arch}")
-
 
 aphrodite_extension_sources = [
     "kernels/cache_kernels.cu",
@@ -293,16 +313,42 @@ aphrodite_extension_sources = [
     "kernels/quantization/squeezellm/quant_cuda_kernel.cu",
     "kernels/quantization/gguf/gguf_kernel.cu",
     "kernels/quantization/gptq/q_gemm.cu",
+    "kernels/quantization/exl2/q_matrix.cu",
+    "kernels/quantization/exl2/q_gemm_exl2.cu",
     "kernels/cuda_utils_kernels.cu",
     "kernels/moe/align_block_size_kernel.cu",
     "kernels/pybind.cpp",
 ]
 
 if _is_cuda():
-    aphrodite_extension_sources.append("kernels/quantization/awq/gemm_kernels.cu")
-    aphrodite_extension_sources.append("kernels/quantization/quip/origin_order.cu")
-    aphrodite_extension_sources.append("kernels/quantization/marlin/marlin_cuda_kernel.cu")
-    aphrodite_extension_sources.append("kernels/all_reduce/custom_all_reduce.cu")
+    aphrodite_extension_sources.append(
+        "kernels/quantization/awq/gemm_kernels.cu")
+    aphrodite_extension_sources.append(
+        "kernels/quantization/quip/origin_order.cu")
+    aphrodite_extension_sources.append(
+        "kernels/quantization/marlin/marlin_cuda_kernel.cu")
+    aphrodite_extension_sources.append(
+        "kernels/all_reduce/custom_all_reduce.cu")
+    aphrodite_extension_sources.append(
+        "kernels/quantization/aqlm/aqlm_cuda_entry.cpp")
+    aphrodite_extension_sources.append(
+        "kernels/quantization/aqlm/aqlm_cuda_kernel.cu")
+    aphrodite_extension_sources.append(
+        "kernels/quantization/bitsandbytes/int4_fp16_gemm_kernels.cu")
+    aphrodite_extension_sources.append(
+        "kernels/quantization/bitsandbytes/format.cu")
+    aphrodite_extension_sources.append(
+        "kernels/quantization/bitsandbytes/gemm_s4_f16.cu")
+
+    ext_modules.append(
+        CUDAExtension(
+            name="aphrodite._moe_C",
+            sources=glob("kernels/moe/*.cu") + glob("kernels/moe/*.cpp"),
+            extra_compile_args={
+                "cxx": CXX_FLAGS,
+                "nvcc": NVCC_FLAGS,
+            },
+        ))
 
 aphrodite_extension = CUDAExtension(
     name="aphrodite._C",
@@ -311,12 +357,17 @@ aphrodite_extension = CUDAExtension(
         "cxx": CXX_FLAGS,
         "nvcc": NVCC_FLAGS,
     },
-    libraries=["cuda", "conda/envs/aphrodite-runtime/lib",
-               "conda/envs/aphrodite-runtime/lib/stubs"] if _is_cuda() else [],
-    library_dirs=["conda/envs/aphrodite-runtime/lib",
-                  "conda/envs/aphrodite-runtime/lib/stubs"] if _is_cuda() else [],
+    libraries=[
+        "cuda", "conda/envs/aphrodite-runtime/lib",
+        "conda/envs/aphrodite-runtime/lib/stubs"
+    ] if _is_cuda() else [],
+    library_dirs=[
+        "conda/envs/aphrodite-runtime/lib",
+        "conda/envs/aphrodite-runtime/lib/stubs"
+    ] if _is_cuda() else [],
 )
 ext_modules.append(aphrodite_extension)
+
 
 def get_path(*filepath) -> str:
     return os.path.join(ROOT_DIR, *filepath)
@@ -336,8 +387,8 @@ def find_version(filepath: str) -> str:
 
 
 def get_aphrodite_version() -> str:
-    version = find_version(get_path("aphrodite-engine", "__init__.py"))
-    
+    version = find_version(get_path("aphrodite", "__init__.py"))
+
     if _is_hip():
         # get the HIP version
 
@@ -347,19 +398,11 @@ def get_aphrodite_version() -> str:
             version += f"+rocm{rocm_version_str}"
     else:
         cuda_version = str(nvcc_cuda_version)
-        # Split the version into numerical and suffix parts
-        version_parts = version.split('-')
-        version_num = version_parts[0]
-        version_suffix = version_parts[1] if len(version_parts) > 1 else ''
-        
         if cuda_version != MAIN_CUDA_VERSION:
             cuda_version_str = cuda_version.replace(".", "")[:3]
-            version_num += f"+cu{cuda_version_str}"
-        
-        # Reassemble the version string with the suffix, if any
-        version = version_num + ('-' + version_suffix if version_suffix else '')
-        
-        return version
+            version += f"+cu{cuda_version_str}"
+
+    return version
 
 
 def read_readme() -> str:
@@ -384,7 +427,7 @@ def get_requirements() -> List[str]:
 
 setuptools.setup(
     name="aphrodite-engine",
-    version=find_version(get_path("aphrodite", "__init__.py")),
+    version=get_aphrodite_version(),
     author="PygmalionAI",
     license="AGPL 3.0",
     description="The inference engine for PygmalionAI models",
@@ -402,7 +445,7 @@ setuptools.setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
-        "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+        "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",  # noqa: E501
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
     packages=setuptools.find_packages(exclude=("kernels", "examples",
@@ -414,8 +457,7 @@ setuptools.setup(
     package_data={
         "aphrodite": [
             "endpoints/kobold/klite.embd",
-            "modeling/layers/quantization/hadamard.safetensors",
-            "py.typed"
+            "modeling/layers/quantization/hadamard.safetensors", "py.typed"
         ]
     },
     include_package_data=True,

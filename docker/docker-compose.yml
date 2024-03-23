@@ -1,29 +1,29 @@
+version: "3.7"
+
 services:
   aphrodite-engine:
-    build:
-      context: .
-    restart: on-failure:5
-    environment:
-      - NUM_GPUS=${NUM_GPUS}
-      - MODEL_NAME=${MODEL_NAME}
-      - REVISION=${REVISION}
-      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
-      - QUANTIZATION=${QUANTIZATION}
-      - KVCACHE=${KVCACHE}
-      - API_KEY=${API_KEY}
-      - CONTEXT_LENGTH=${CONTEXT_LENGTH}
-      - GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION}
-      - ENFORCE_EAGER=${ENFORCE_EAGER}
-    volumes:
-      - ${HOME}/.cache:/root/.cache/
-    shm_size: 10g
-    ports:
-      - "7860:7860"
-      - "2242:2242"
+    #build:
+    #  context: .
+    container_name: aphrodite-engine
     deploy:
       resources:
         reservations:
           devices:
-          - driver: nvidia
-            count: all
-            capabilities: [gpu]
+            - capabilities: [gpu]
+              count: all
+              driver: nvidia
+    env_file: .env
+    hostname: aphrodite-engine
+    image: alpindale/aphrodite-engine
+    ipc: host
+    ports:
+      - "${PORT:-7860}:7860"
+    restart: on-failure:5
+    user: "${UID:-1000}:${GID:-0}"
+    volumes:
+      - ${HF_CACHE:-hf-cache}:/tmp
+      - ${SSL_CERTFILE:-/dev/null}:/app/aphrodite-engine/server.crt:ro
+      - ${SSL_KEYFILE:-/dev/null}:/app/aphrodite-engine/server.key:ro
+
+volumes:
+  hf-cache:

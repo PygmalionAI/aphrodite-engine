@@ -90,6 +90,7 @@ class RequestOutput:
             sorting_key = lambda seq: seq.get_beam_search_score(
                 seq_group.sampling_params.length_penalty)
         else:
+            # ruff: noqa: E731
             sorting_key = lambda seq: seq.get_cumulative_logprob()
         sorted_seqs = sorted(seqs, key=sorting_key, reverse=True)
         top_n_seqs = sorted_seqs[:n]

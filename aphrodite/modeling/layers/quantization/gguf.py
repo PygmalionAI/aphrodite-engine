@@ -10,22 +10,28 @@ from aphrodite.modeling.layers.quantization.base_config import (
     QuantizationConfig)
 
 GGML_QUANT_SIZES = {
-    0: (1, 4),
-    1: (1, 2),
-    2: (32, 2 + 16),
-    3: (32, 2 + 2 + 16),
-    6: (32, 2 + 4 + 16),
-    7: (32, 2 + 2 + 4 + 16),
-    8: (32, 2 + 32),
-    9: (32, 4 + 4 + 32),
-    10: (256, 2 + 2 + 256 // 16 + 256 // 4),
-    11: (256, 2 + 256 // 4 + 256 // 8 + 12),
-    12: (256, 2 + 2 + 256 // 2 + 12),
-    13: (256, 2 + 2 + 256 // 2 + 256 // 8 + 12),
-    14: (256, 2 + 256 // 2 + 256 // 4 + 256 // 16),
-    15: (256, 4 + 256 + 256 // 8),
-    16: (256, 2 + 256 // 4),
-    17: (256, 2 + 256 // 4 + 256 // 32),
+    0: (1, 4),  # F32
+    1: (1, 2),  # F16
+    2: (32, 2 + 16),  # Q4_0
+    3: (32, 2 + 2 + 16),  # Q4_1
+    6: (32, 2 + 4 + 16),  # Q5_0
+    7: (32, 2 + 2 + 4 + 16),  # Q5_1
+    8: (32, 2 + 32),  # Q8_0
+    9: (32, 4 + 4 + 32),  # Q8_1
+    10: (256, 2 + 2 + 256 // 16 + 256 // 4),  # Q2_K
+    11: (256, 2 + 256 // 4 + 256 // 8 + 12),  # Q3_K
+    12: (256, 2 + 2 + 256 // 2 + 12),  # Q4_K
+    13: (256, 2 + 2 + 256 // 2 + 256 // 8 + 12),  # Q5_K
+    14: (256, 2 + 256 // 2 + 256 // 4 + 256 // 16),  # Q6_K
+    15: (256, 4 + 256 + 256 // 8),  # Q8_K
+    16: (256, 2 + 256 // 4),  # IQ2_XXS
+    17: (256, 2 + 256 // 4 + 256 // 32),  # IQ2_XS
+    18: (256, 2 + 3 * 256 // 8),  # IQ3_XXS
+    19: (256, 2 + 256 // 8 + 256 // 16),  # IQ1_S
+    20: (32, 2 + 32 // 2),  # IQ4_NL
+    21: (256, 2 + 256 // 4 + 256 // 32 + 256 // 8 + 256 // 64),  # IQ3_S
+    22: (256, 2 + 256 // 4 + 256 // 32 + 256 // 32),  # IQ2_S
+    23: (256, 2 + 2 + 256 // 64 + 256 // 2),  # IQ4_XS
 }
 
 
@@ -65,7 +71,7 @@ class GGUFConfig(QuantizationConfig):
         return False
 
     def quant_vocab(self) -> Optional[bool]:
-        return True
+        return (True, True)
 
 
 class GGUFLinearMethod(LinearMethodBase):
@@ -77,10 +83,14 @@ class GGUFLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: GGUFConfig):
         self.quant_config = quant_config
 
-    def create_weights(self, input_size_per_partition: int,
-                       output_size_per_partition: int, input_size: int,
-                       output_size: int,
-                       params_dtype: torch.dtype) -> Dict[str, Any]:
+    def create_weights(
+        self,
+        input_size_per_partition: int,
+        output_partition_sizes: List[int],
+        input_size: int,
+        output_size: int,
+        params_dtype: torch.dtype,
+    ) -> Dict[str, Any]:
         # The type of weight is unknown until load state dict
         weight = torch.nn.parameter.UninitializedParameter(requires_grad=False)
         # No need for pack_factor because we don't fuse qkv layers anyway.
