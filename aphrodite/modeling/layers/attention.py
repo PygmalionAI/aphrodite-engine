@@ -226,17 +226,12 @@ class PagedAttention(nn.Module):
                 )
 
         else:
-            # Decoding run.
-            output = _paged_attention(
-                query,
-                key_cache,
-                value_cache,
-                input_metadata,
-                self.num_kv_heads,
-                self.scale,
-                self.alibi_slopes,
-                kv_quant_param,
-            )
+            # Decoding run
+            output = paged_attention(
+                query, key_cache, value_cache, input_metadata.block_tables,
+                input_metadata.context_lens, input_metadata.max_context_len,
+                self.num_kv_heads, self.scale, self.alibi_slopes,
+                kv_quant_param, None, input_metadata.kv_cache_dtype)
 
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
@@ -276,23 +271,26 @@ def _make_alibi_bias(
     return attn_bias
 
 
-def _paged_attention(
+def paged_attention(
     query: torch.Tensor,
     key_cache: torch.Tensor,
     value_cache: torch.Tensor,
-    input_metadata: InputMetadata,
+    block_tables: torch.Tensor,
+    context_lens: torch.Tensor,
+    max_context_len: int,
     num_kv_heads: int,
     scale: float,
     alibi_slopes: Optional[torch.Tensor],
+    custom_bias: Optional[torch.Tensor],
+    kv_cache_dtype: torch.dtype,
     kv_quant_param: List[float],
 ) -> torch.Tensor:
     output = torch.empty_like(query)
 
     block_size = value_cache.shape[3]
     num_seqs, num_heads, head_size = query.shape
-    max_num_partitions = (
-        (input_metadata.max_context_len + _PARTITION_SIZE - 1) //
-        _PARTITION_SIZE)
+    max_num_partitions = ((max_context_len + _PARTITION_SIZE - 1) //
+                          _PARTITION_SIZE)
     # NOTE: We use a simple heuristic to decide whether to use
     # PagedAttention V1 or V2. If the number of partitions is 1, we use
     # V1 to avoid the overhead of reduction. Also, if the number of
@@ -300,8 +298,8 @@ def _paged_attention(
     # to parallelize.
     # TODO: Tune this heuristic.
     # For context len > 8192, use V2 kernel to avoid shared memory shortage.
-    use_v1 = input_metadata.max_context_len <= 8192 and (
-        max_num_partitions == 1 or num_seqs * num_heads > 512)
+    use_v1 = max_context_len <= 8192 and (max_num_partitions == 1
+                                          or num_seqs * num_heads > 512)
     if use_v1:
         # Run PagedAttention V1.
         ops.paged_attention_v1(
@@ -311,12 +309,13 @@ def _paged_attention(
             value_cache,
             num_kv_heads,
             scale,
-            input_metadata.block_tables,
-            input_metadata.context_lens,
+            block_tables,
+            context_lens,
             block_size,
-            input_metadata.max_context_len,
+            max_context_len,
             alibi_slopes,
-            input_metadata.kv_cache_dtype,
+            custom_bias,
+            kv_cache_dtype,
             *kv_quant_param,
         )
     else:
@@ -343,12 +342,13 @@ def _paged_attention(
             value_cache,
             num_kv_heads,
             scale,
-            input_metadata.block_tables,
-            input_metadata.context_lens,
+            block_tables,
+            context_lens,
             block_size,
-            input_metadata.max_context_len,
+            max_context_len,
             alibi_slopes,
-            input_metadata.kv_cache_dtype,
+            custom_bias,
+            kv_cache_dtype,
             *kv_quant_param,
         )
     return output
