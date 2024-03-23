@@ -23,6 +23,7 @@
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <stdio.h>
 
 #include "attention_dtypes.h"
 #include "attention_utils.cuh"
@@ -110,6 +111,7 @@ __device__ void paged_attention_kernel(
   const int* __restrict__ context_lens,   // [num_seqs]
   const int max_num_blocks_per_seq,
   const float* __restrict__ alibi_slopes, // [num_heads]
+  const float* __restrict__ custom_bias,  // [num_seqs, num_heads, 1, max_seq_len]
   const int q_stride,
   const int kv_block_stride,
   const int kv_head_stride,
@@ -154,6 +156,10 @@ __device__ void paged_attention_kernel(
   const int num_queries_per_kv = num_heads / num_kv_heads;
   const int kv_head_idx = head_idx / num_queries_per_kv;
   const float alibi_slope = alibi_slopes == nullptr ? 0.f : alibi_slopes[head_idx];
+  const float* custom_bias_vec = custom_bias == nullptr
+                                     ? nullptr
+                                     : custom_bias + seq_idx * num_kv_heads * num_context_blocks * BLOCK_SIZE +
+                                           kv_head_idx * num_context_blocks * BLOCK_SIZE;
 
   // A vector type to store a part of a key or a query.
   // The vector size is configured in such a way that the threads in a thread group
@@ -246,8 +252,10 @@ __device__ void paged_attention_kernel(
       // Compute dot product.
       // This includes a reduction across the threads in the same thread group.
       float qk = scale * Qk_dot<scalar_t, THREAD_GROUP_SIZE>::dot(q_vecs[thread_group_offset], k_vecs);
-      // Add the ALiBi bias if slopes are given.
-      qk += (alibi_slope != 0) ? alibi_slope * (token_idx - context_len + 1) : 0;
+      // Add the custom or ALiBi bias if given.
+      qk += (custom_bias_vec != nullptr) ? custom_bias_vec[token_idx]
+            : (alibi_slope != 0)         ? alibi_slope * (token_idx - context_len + 1)
+                                         : 0;
 
       if (thread_group_offset == 0) {
         // Store the partial reductions to shared memory.
@@ -458,6 +466,7 @@ __global__ void paged_attention_v1_kernel(
   const int* __restrict__ context_lens,   // [num_seqs]
   const int max_num_blocks_per_seq,
   const float* __restrict__ alibi_slopes, // [num_heads]
+  const float* __restrict__ custom_bias,  // [num_seqs, num_heads, 1, seq_len]
   const int q_stride,
   const int kv_block_stride,
   const int kv_head_stride,
@@ -468,7 +477,7 @@ __global__ void paged_attention_v1_kernel(
   paged_attention_kernel<scalar_t, cache_t, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS, KV_CACHE_DTYPE>(
     /* exp_sums */ nullptr, /* max_logits */ nullptr,
     out, q, k_cache, v_cache, num_kv_heads, scale, block_tables, context_lens,
-    max_num_blocks_per_seq, alibi_slopes, q_stride, kv_block_stride, kv_head_stride, k_scale, k_zp, v_scale, v_zp);
+    max_num_blocks_per_seq, alibi_slopes, custom_bias, q_stride, kv_block_stride, kv_head_stride, k_scale, k_zp, v_scale, v_zp);
 }
 
 // Grid: (num_heads, num_seqs, max_num_partitions).
@@ -493,6 +502,7 @@ __global__ void paged_attention_v2_kernel(
   const int* __restrict__ context_lens,   // [num_seqs]
   const int max_num_blocks_per_seq,
   const float* __restrict__ alibi_slopes, // [num_heads]
+  const float* __restrict__ custom_bias,  // [num_seqs, num_heads, 1, seq_len]
   const int q_stride,
   const int kv_block_stride,
   const int kv_head_stride,
@@ -502,7 +512,7 @@ __global__ void paged_attention_v2_kernel(
   const float v_zp) {
   paged_attention_kernel<scalar_t, cache_t, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS, KV_CACHE_DTYPE, PARTITION_SIZE>(
     exp_sums, max_logits, tmp_out, q, k_cache, v_cache, num_kv_heads, scale,
-    block_tables, context_lens, max_num_blocks_per_seq, alibi_slopes,
+    block_tables, context_lens, max_num_blocks_per_seq, alibi_slopes, custom_bias,
     q_stride, kv_block_stride, kv_head_stride, k_scale, k_zp, v_scale, v_zp);
 }
 
@@ -623,6 +633,7 @@ __global__ void paged_attention_v2_reduce_kernel(
     context_lens_ptr,                                                                               \
     max_num_blocks_per_seq,                                                                         \
     alibi_slopes_ptr,                                                                               \
+    custom_bias_ptr,                                                                                \
     q_stride,                                                                                       \
     kv_block_stride,                                                                                \
     kv_head_stride,                                                                                 \
@@ -649,6 +660,7 @@ void paged_attention_v1_launcher(
   torch::Tensor& context_lens,
   int max_context_len,
   const c10::optional<torch::Tensor>& alibi_slopes,
+  const c10::optional<torch::Tensor>& custom_bias,
   const float k_scale,
   const float k_zp,
   const float v_scale,
@@ -665,9 +677,10 @@ void paged_attention_v1_launcher(
   assert(head_size % thread_group_size == 0);
 
   // NOTE: alibi_slopes is optional.
-  const float* alibi_slopes_ptr = alibi_slopes ?
-    reinterpret_cast<const float*>(alibi_slopes.value().data_ptr())
-    : nullptr;
+  const float* alibi_slopes_ptr =
+      alibi_slopes ? reinterpret_cast<const float*>(alibi_slopes.value().data_ptr()) : nullptr;
+
+  const float* custom_bias_ptr = custom_bias ? reinterpret_cast<const float*>(custom_bias.value().data_ptr()) : nullptr;
 
   T* out_ptr = reinterpret_cast<T*>(out.data_ptr());
   T* query_ptr = reinterpret_cast<T*>(query.data_ptr());
@@ -728,6 +741,7 @@ void paged_attention_v1_launcher(
     context_lens,                                                            \
     max_context_len,                                                         \
     alibi_slopes,                                                            \
+    custom_bias,                                                             \
     k_scale,                                                                 \
     k_zp,                                                                    \
     v_scale,                                                                 \
@@ -763,6 +777,7 @@ void paged_attention_v1(
   int block_size,
   int max_context_len,
   const c10::optional<torch::Tensor>& alibi_slopes,
+  const c10::optional<torch::Tensor>& custom_bias,
   const std::string& kv_cache_dtype,
   const float k_scale = 1.0f,
   const float k_zp = 0.0f,
@@ -821,6 +836,7 @@ void paged_attention_v1(
     context_lens_ptr,                                                                         \
     max_num_blocks_per_seq,                                                                   \
     alibi_slopes_ptr,                                                                         \
+    custom_bias_ptr,                                                                          \
     q_stride,                                                                                 \
     kv_block_stride,                                                                          \
     kv_head_stride,                                                                           \
@@ -858,6 +874,7 @@ void paged_attention_v2_launcher(
   torch::Tensor& context_lens,
   int max_context_len,
   const c10::optional<torch::Tensor>& alibi_slopes,
+  const c10::optional<torch::Tensor>& custom_bias,
   const float k_scale,
   const float k_zp,
   const float v_scale,
@@ -874,9 +891,10 @@ void paged_attention_v2_launcher(
   assert(head_size % thread_group_size == 0);
 
   // NOTE: alibi_slopes is optional.
-  const float* alibi_slopes_ptr = alibi_slopes ?
-    reinterpret_cast<const float*>(alibi_slopes.value().data_ptr())
-    : nullptr;
+  const float* alibi_slopes_ptr =
+      alibi_slopes ? reinterpret_cast<const float*>(alibi_slopes.value().data_ptr()) : nullptr;
+
+  const float* custom_bias_ptr = custom_bias ? reinterpret_cast<const float*>(custom_bias.value().data_ptr()) : nullptr;
 
   T* out_ptr = reinterpret_cast<T*>(out.data_ptr());
   float* exp_sums_ptr = reinterpret_cast<float*>(exp_sums.data_ptr());
@@ -946,6 +964,7 @@ void paged_attention_v2_launcher(
     context_lens,                                                                \
     max_context_len,                                                             \
     alibi_slopes,                                                                \
+    custom_bias,                                                                 \
     k_scale,                                                                     \
     k_zp,                                                                        \
     v_scale,                                                                     \
@@ -984,6 +1003,7 @@ void paged_attention_v2(
   int block_size,
   int max_context_len,
   const c10::optional<torch::Tensor>& alibi_slopes,
+  const c10::optional<torch::Tensor>& custom_bias,
   const std::string& kv_cache_dtype,
   const float k_scale = 1.0f,
   const float k_zp = 0.0f,
