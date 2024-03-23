@@ -125,6 +125,9 @@ class AphroditeEngine:
             self.stat_logger = StatLogger(
                 local_interval=_LOCAL_LOGGING_INTERVAL_SEC,
                 labels=dict(model_name=model_config.model))
+    
+        self.is_encoder_decoder = getattr(self.model_config.hf_config,
+                                          "is_encoder_decoder", False)
 
     def get_tokenizer_for_seq(self, sequence: Sequence):
         return self.tokenizer.get_lora_tokenizer(sequence.lora_request)
@@ -462,7 +465,7 @@ class AphroditeEngine:
         block_size = self.cache_config.block_size
         seq_id = next(self.seq_counter)
         seq = Sequence(seq_id, prompt, prompt_token_ids, block_size,
-                       lora_request)
+                       self.is_encoder_decoder, lora_request)
 
         # Create the sequence group.
         seq_group = SequenceGroup(request_id, [seq], sampling_params,

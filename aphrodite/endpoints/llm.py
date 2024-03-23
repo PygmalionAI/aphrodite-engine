@@ -156,6 +156,10 @@ class LLM:
         if sampling_params is None:
             # Use default sampling params.
             sampling_params = SamplingParams()
+        
+        if self.llm_engine.is_encoder_decoder:
+            assert (self.llm_engine.cache_config.context_shift is None
+                    ), "Encoder-decoder models do not support context shift."
 
         # Add requests to the engine.
         num_requests = len(prompts) if prompts is not None else len(
