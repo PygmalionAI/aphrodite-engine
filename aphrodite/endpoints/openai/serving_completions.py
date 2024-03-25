@@ -122,7 +122,8 @@ class OpenAIServingCompletion(OpenAIServing):
         # Schedule the request and get the result generator.
         generators = []
         try:
-            sampling_params = request.to_sampling_params()
+            sampling_params = request.to_sampling_params(
+                self.tokenizer.vocab_size)
             lora_request = self._maybe_get_lora(request)
             guided_decode_logit_processor = (
                 await get_guided_decoding_logits_processor(
