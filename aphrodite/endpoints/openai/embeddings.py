@@ -67,7 +67,7 @@ def get_embeddings_model_name() -> str:
 
 def get_embeddings(input: list) -> np.ndarray:
     model = get_embeddings_model()
-    embedding = model.encode(input, convert_to_numpy=True, normalize_embeddings=True, convert_to_tensor=False)
+    embedding = model.encode(input, convert_to_numpy=True, normalize_embeddings=True, convert_to_tensor=False, show_progress_bar=False)
     return embedding
 
 
