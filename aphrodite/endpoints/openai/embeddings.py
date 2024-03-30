@@ -1,15 +1,11 @@
 import os
 import base64
-
 import numpy as np
 from transformers import AutoModel
-
-#from extensions.openai.errors import ServiceUnavailableError
-#from extensions.openai.utils import debug_msg, float_list_to_base64
-#from modules.logging_colors import logger
+from pydantic import BaseModel, Field
+from typing import List
 
 embeddings_params_initialized = False
-
 
 def initialize_embedding_params():
     '''
@@ -18,7 +14,6 @@ def initialize_embedding_params():
     '''
     global embeddings_params_initialized
     if not embeddings_params_initialized:
-        #from extensions.openai.script import params
 
         global st_model, embeddings_model, embeddings_device
 
@@ -52,7 +47,7 @@ def load_embedding_model(model: str):
         print(f"Loaded embedding model: {model}")
     except Exception as e:
         embeddings_model = None
-        raise HttpError(f"Error: Failed to load embedding model: {model}", internal_message=repr(e))
+        raise Exception(f"Error: Failed to load embedding model: {model}", internal_message=repr(e))
 
 
 def get_embeddings_model():
@@ -72,13 +67,11 @@ def get_embeddings_model_name() -> str:
 
 def get_embeddings(input: list) -> np.ndarray:
     model = get_embeddings_model()
-    print(f"embedding model : {model}")
     embedding = model.encode(input, convert_to_numpy=True, normalize_embeddings=True, convert_to_tensor=False)
-    print(f"embedding result : {embedding}")  # might be too long even for debug, use at you own will
     return embedding
 
 
-def embeddings(input: list, encoding_format: str) -> dict:
+async def embeddings(input: list, encoding_format: str) -> dict:
     embeddings = get_embeddings(input)
     if encoding_format == "base64":
         data = [{"object": "embedding", "embedding": float_list_to_base64(emb), "index": n} for n, emb in enumerate(embeddings)]
@@ -94,8 +87,6 @@ def embeddings(input: list, encoding_format: str) -> dict:
             "total_tokens": 0,
         }
     }
-
-    print(f"Embeddings return size: {len(embeddings[0])}, number: {len(embeddings)}")
     return response
 
 
@@ -113,3 +104,26 @@ def float_list_to_base64(float_array: np.ndarray) -> str:
     # Turn raw base64 encoded bytes into ASCII
     ascii_string = encoded_bytes.decode('ascii')
     return ascii_string
+
+
+
+class EmbeddingsRequest(BaseModel):
+    input: str | List[str] | List[int] | List[List[int]]
+    model: str | None = Field(default=None, description="Unused parameter. To change the model, set the OPENEDAI_EMBEDDING_MODEL and OPENEDAI_EMBEDDING_DEVICE environment variables before starting the server.")
+    encoding_format: str = Field(default="float", description="Can be float or base64.")
+    user: str | None = Field(default=None, description="Unused parameter.")
+
+
+class EmbeddingsResponse(BaseModel):
+    index: int
+    embedding: List[float]
+    object: str = "embedding"
+
+
+class EncodeRequest(BaseModel):
+    text: str
+
+
+class EncodeResponse(BaseModel):
+    tokens: List[int]
+    length: int

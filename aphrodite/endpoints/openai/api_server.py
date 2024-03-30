@@ -34,11 +34,7 @@ from aphrodite.endpoints.openai.serving_completions import (
 from aphrodite.endpoints.openai.protocol import KAIGenerationInputSchema
 from aphrodite.endpoints.openai.serving_engine import LoRA
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
-
 import aphrodite.endpoints.openai.embeddings as OAIembeddings
-
-from pydantic import BaseModel, Field
-
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
@@ -49,33 +45,6 @@ extra_api = APIRouter()
 kobold_lite_ui = ""
 sampler_json = ""
 gen_cache: dict = {}
-
-
-
-
-class EmbeddingsRequest(BaseModel):
-    input: str | List[str] | List[int] | List[List[int]]
-    model: str | None = Field(default=None, description="Unused parameter. To change the model, set the OPENEDAI_EMBEDDING_MODEL and OPENEDAI_EMBEDDING_DEVICE environment variables before starting the server.")
-    encoding_format: str = Field(default="float", description="Can be float or base64.")
-    user: str | None = Field(default=None, description="Unused parameter.")
-
-
-class EmbeddingsResponse(BaseModel):
-    index: int
-    embedding: List[float]
-    object: str = "embedding"
-
-
-class EncodeRequest(BaseModel):
-    text: str
-
-
-class EncodeResponse(BaseModel):
-    tokens: List[int]
-    length: int
-
-
-
 
 
 @asynccontextmanager
@@ -250,25 +219,18 @@ async def detokenize(request: Request,
     return JSONResponse(content=detokenized)
 
 
-@app.post("/v1/embeddings")   # , response_model=EmbeddingsResponse, dependencies=check_key
+@app.post("/v1/embeddings")
 async def handle_embeddings(request: Request):
-    print('serving /v1/embeddings')
-    print(request)
     request_data = await request.json()
-    #request_body = json.loads(request_body)
-    print('request body')
-    print(request_data)
     input = request_data["input"]
     if not input:
-        raise HTTPException(status_code=400, detail="Missing required argument input")
+        raise JSONResponse(status_code=400, content={"error": "Missing required argument input"})
 
     if type(input) is str:
         input = [input]
 
-    response = OAIembeddings.embeddings(input, request_data["encoding_format"])
-    print(response)
+    response = await OAIembeddings.embeddings(input, request_data["encoding_format"])
     return JSONResponse(response)
-
 
 
 @app.get("/version", description="Fetch the Aphrodite Engine version.")
