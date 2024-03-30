@@ -224,12 +224,15 @@ async def handle_embeddings(request: Request):
     request_data = await request.json()
     input = request_data["input"]
     if not input:
-        raise JSONResponse(status_code=400, content={"error": "Missing required argument input"})
+        raise JSONResponse(
+            status_code=400,
+            content={"error": "Missing required argument input"})
 
-    if type(input) is str:
+    if isinstance(input, str):
         input = [input]
 
-    response = await OAIembeddings.embeddings(input, request_data["encoding_format"])
+    response = await OAIembeddings.embeddings(input,
+                                              request_data["encoding_format"])
     return JSONResponse(response)
 
 
