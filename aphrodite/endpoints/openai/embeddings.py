@@ -1,3 +1,12 @@
+"""
+This file is derived from
+[text-generation-webui openai extension embeddings](https://github.com/oobabooga/text-generation-webui/blob/1a7c027386f43b84f3ca3b0ff04ca48d861c2d7a/extensions/openai/embeddings.py)
+and modified.
+The changes introduced are: Suppression of progress bar,
+typing/pydantic classes moved into this file,
+embeddings function declared async.
+"""
+
 import os
 import base64
 import numpy as np
