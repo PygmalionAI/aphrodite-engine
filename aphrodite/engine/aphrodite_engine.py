@@ -131,7 +131,7 @@ class AphroditeEngine:
             f"Context Length = {model_config.max_model_len}\n"
             f"Enforce Eager Mode = {model_config.enforce_eager}\n"
             f"KV Cache Data Type = {cache_config.cache_dtype}\n"
-            f"KV Cache Params Path = {cache_config.cache_quant_params_path}\n"
+            # f"KV Cache Params Path = {cache_config.cache_quant_params_path}\n"
             f"Device = {device_config.device}"
         )
         # TODO: Print more configs in debug mode.
@@ -228,7 +228,7 @@ class AphroditeEngine:
             distributed_init_method=distributed_init_method,
             lora_config=self.lora_config,
             kv_cache_dtype=self.cache_config.cache_dtype,
-            kv_quant_params_path=(self.cache_config.cache_quant_params_path),
+            # kv_quant_params_path=(self.cache_config.cache_quant_params_path),
             is_driver_worker=True,
         )
         self._run_workers("init_model")
@@ -330,7 +330,7 @@ class AphroditeEngine:
         device_config = copy.deepcopy(self.device_config)
         lora_config = copy.deepcopy(self.lora_config)
         kv_cache_dtype = self.cache_config.cache_dtype
-        kv_quant_params_path = self.cache_config.cache_quant_params_path
+        # kv_quant_params_path = self.cache_config.cache_quant_params_path
 
         for rank, (worker, (node_id, _)) in enumerate(
             zip(self.workers, worker_node_and_gpu_ids), start=1
@@ -347,7 +347,7 @@ class AphroditeEngine:
                     distributed_init_method,
                     lora_config=lora_config,
                     kv_cache_dtype=kv_cache_dtype,
-                    kv_quant_params_path=kv_quant_params_path,
+                    # kv_quant_params_path=kv_quant_params_path,
                 )
             )
 
@@ -363,7 +363,7 @@ class AphroditeEngine:
             distributed_init_method,
             lora_config=self.lora_config,
             kv_cache_dtype=kv_cache_dtype,
-            kv_quant_params_path=kv_quant_params_path,
+            # kv_quant_params_path=kv_quant_params_path,
             is_driver_worker=True,
         )
 

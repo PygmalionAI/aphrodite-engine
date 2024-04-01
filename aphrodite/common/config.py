@@ -75,7 +75,8 @@ class ModelConfig:
         trust_remote_code: bool,
         download_dir: Optional[str],
         load_format: str,
-        dtype: str,
+        # dtype: str,
+        dtype: Union[str, torch.dtype],
         seed: int,
         revision: Optional[str] = None,
         code_revision: Optional[str] = None,
@@ -386,7 +387,7 @@ class CacheConfig:
         gpu_memory_utilization: float,
         swap_space: int,
         cache_dtype: str,
-        cache_quant_params_path: Optional[str] = None,
+        # cache_quant_params_path: Optional[str] = None,
         sliding_window: Optional[int] = None,
         context_shift: bool = False,
     ) -> None:
@@ -395,7 +396,7 @@ class CacheConfig:
         self.swap_space_bytes = swap_space * _GB
         self.cache_dtype = cache_dtype
         self.sliding_window = sliding_window
-        self.cache_quant_params_path = cache_quant_params_path
+        # self.cache_quant_params_path = cache_quant_params_path
         self.context_shift = context_shift
         self._verify_args()
         self._verify_cache_dtype()
@@ -416,7 +417,8 @@ class CacheConfig:
                 f"{self.gpu_memory_utilization}.")
 
     def _verify_cache_dtype(self) -> None:
-        if self.cache_dtype in ["auto", "int8"]:
+        if self.cache_dtype == "auto":
+        # if self.cache_dtype in ["auto", "int8"]:
             pass
         elif self.cache_dtype == "fp8_e5m2":
             if is_hip():
