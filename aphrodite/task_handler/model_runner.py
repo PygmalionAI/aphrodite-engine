@@ -29,6 +29,7 @@ from aphrodite.common.sequence import (
     SequenceData,
     SequenceGroupMetadata,
 )
+from aphrodite.modeling.sampling_metadata import PersistentMetadata
 from aphrodite.lora.worker_manager import LRUCacheWorkerLoRAManager
 from aphrodite.lora.layers import LoRAMapping
 from aphrodite.lora.request import LoRARequest

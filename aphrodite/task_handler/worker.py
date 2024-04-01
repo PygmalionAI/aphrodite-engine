@@ -19,6 +19,7 @@ from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 from aphrodite.task_handler.cache_engine import CacheEngine
 from aphrodite.task_handler.model_runner import ModelRunner
 from aphrodite.lora.request import LoRARequest
+from aphrodite.common.utils import in_wsl
 
 
 class Worker:
