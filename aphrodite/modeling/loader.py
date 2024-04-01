@@ -2,13 +2,13 @@
 import contextlib
 import gc
 from contextlib import nullcontext
-from typing import Optional, Type
+from typing import Type
 from loguru import logger
 
 import torch
 import torch.nn as nn
 
-from aphrodite.common.config import DeviceConfig, ModelConfig, LoRAConfig
+from aphrodite.common.config import DeviceConfig, ModelConfig
 from aphrodite.modeling.models import ModelRegistry
 from aphrodite.modeling.hf_downloader import (get_quant_config,
                                               initialize_dummy_weights)
@@ -32,6 +32,7 @@ def _get_model_architecture(model_config: ModelConfig) -> Type[nn.Module]:
     if (model_config.quantization is not None
             and "MixtralForCausalLM" in architectures):
         architectures = ["QuantMixtralForCausalLM"]
+
     for arch in architectures:
         model_cls = ModelRegistry.load_model_cls(arch)
         if model_cls is not None:
@@ -41,9 +42,9 @@ def _get_model_architecture(model_config: ModelConfig) -> Type[nn.Module]:
         f"Supported architectures: {ModelRegistry.get_supported_archs()}")
 
 
-def get_model(model_config: ModelConfig,
-              device_config: DeviceConfig,
-              lora_config: Optional[LoRAConfig] = None) -> nn.Module:
+def get_model(model_config: ModelConfig, device_config: DeviceConfig,
+              **kwargs) -> nn.Module:
+    lora_config = kwargs.get("lora_config", None)
     model_class = _get_model_architecture(model_config)
 
     # Get the (maybe quantized) linear method.
