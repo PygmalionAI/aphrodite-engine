@@ -334,7 +334,7 @@ class AsyncAphrodite:
                  engine_use_ray: bool,
                  *args,
                  log_requests: bool = True,
-                 max_log_len: Optional[int] = None,
+                 max_log_len: int = 0,
                  start_engine_loop: bool = True,
                  **kwargs) -> None:
         self.worker_use_ray = worker_use_ray

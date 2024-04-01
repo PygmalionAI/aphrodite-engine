@@ -20,15 +20,22 @@ MAIN_CUDA_VERSION = "12.1"
 
 # Supported NVIDIA GPU architectures.
 NVIDIA_SUPPORTED_ARCHS = {"6.1", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"}
-ROCM_SUPPORTED_ARCHS = {"gfx90a", "gfx942", "gfx1100"}
+ROCM_SUPPORTED_ARCHS = {"gfx908", "gfx90a", "gfx942", "gfx1100"}
 
 
 def _is_hip() -> bool:
     return torch.version.hip is not None
 
+def _is_neuron() -> bool:
+    torch_neuronx_installed = True
+    try:
+        subprocess.run(["neuron-ls"], capture_output=True, check=True)
+    except (FileNotFoundError, PermissionError):
+        torch_neuronx_installed = False
+    return torch_neuronx_installed
 
 def _is_cuda() -> bool:
-    return torch.version.cuda is not None
+    return (torch.version.cuda is not None) and not _is_neuron()
 
 
 # Compiler flags.
@@ -79,6 +86,25 @@ def glob(pattern: str):
     return [str(p) for p in root.glob(pattern)]
 
 
+def get_neuronxcc_version():
+    import sysconfig
+    site_dir = sysconfig.get_paths()["purelib"]
+    version_file = os.path.join(site_dir, "neuronxcc", "version",
+                                "__init__.py")
+
+    # Check if the command was executed successfully
+    with open(version_file, "rt") as fp:
+        content = fp.read()
+
+    # Extract the version using a regular expression
+    match = re.search(r"__version__ = '(\S+)'", content)
+    if match:
+        # Return the version string
+        return match.group(1)
+    else:
+        raise RuntimeError("Could not find HIP version in the output")
+
+
 def get_nvcc_cuda_version(cuda_dir: str) -> Version:
     """Get the CUDA version from nvcc.
 
@@ -93,6 +119,15 @@ def get_nvcc_cuda_version(cuda_dir: str) -> Version:
 
 
 def get_pytorch_rocm_arch() -> Set[str]:
+    """Get the cross section of Pytorch, and aphrodite supported gfx arches
+
+    ROCM can get the supported gfx architectures in one of two ways
+    Either through the PYTORCH_ROCM_ARCH env var, or output from
+    rocm_agent_enumerator.
+
+    In either case we can generate a list of supported arch's and
+    cross reference with APHRODITE's own ROCM_SUPPORTED_ARCHs.
+    """
     env_arch_list = os.environ.get("PYTORCH_ROCM_ARCH", None)
 
     # If we don't have PYTORCH_ROCM_ARCH specified pull the list from
@@ -152,15 +187,15 @@ def get_torch_arch_list() -> Set[str]:
     # If none of the specified architectures are valid, raise an error.
     if not arch_list:
         raise RuntimeError(
-            "None of the CUDA/ROCM architectures in `TORCH_CUDA_ARCH_LIST` "
-            f"env variable ({env_arch_list}) is supported. "
+            "None of the CUDA architectures in `TORCH_CUDA_ARCH_LIST` env "
+            f"variable ({env_arch_list}) is supported. "
             f"Supported CUDA architectures are: {valid_archs}.")
     invalid_arch_list = torch_arch_list - valid_archs
     if invalid_arch_list:
         warnings.warn(
-            f"Unsupported CUDA/ROCM architectures ({invalid_arch_list}) are "
+            f"Unsupported CUDA architectures ({invalid_arch_list}) are "
             "excluded from the `TORCH_CUDA_ARCH_LIST` env variable "
-            f"({env_arch_list}). Supported CUDA/ROCM architectures are: "
+            f"({env_arch_list}). Supported CUDA architectures are: "
             f"{valid_archs}.",
             stacklevel=2)
     return arch_list
@@ -172,15 +207,16 @@ if _is_hip():
 else:
     # First, check the TORCH_CUDA_ARCH_LIST environment variable.
     compute_capabilities = get_torch_arch_list()
+
 if _is_cuda() and not compute_capabilities:
     # If TORCH_CUDA_ARCH_LIST is not defined or empty, target all available
     # GPUs on the current machine.
     device_count = torch.cuda.device_count()
     for i in range(device_count):
         major, minor = torch.cuda.get_device_capability(i)
-        if major < 6:
+        if major < 6 or (major == 6 and minor < 1):
             raise RuntimeError(
-                "GPUs with compute capability below 6.0 are not supported.")
+                "GPUs with compute capability below 6.1 are not supported.")
         compute_capabilities.add(f"{major}.{minor}")
 
 ext_modules = []
@@ -304,6 +340,9 @@ if _is_cuda():
                 },
             ))
 
+elif _is_neuron():
+    neuronxcc_version = get_neuronxcc_version()
+
 aphrodite_extension_sources = [
     "kernels/cache_kernels.cu",
     "kernels/attention/attention_kernels.cu",
@@ -350,23 +389,24 @@ if _is_cuda():
             },
         ))
 
-aphrodite_extension = CUDAExtension(
-    name="aphrodite._C",
-    sources=aphrodite_extension_sources,
-    extra_compile_args={
-        "cxx": CXX_FLAGS,
-        "nvcc": NVCC_FLAGS,
-    },
-    libraries=[
-        "cuda", "conda/envs/aphrodite-runtime/lib",
-        "conda/envs/aphrodite-runtime/lib/stubs"
-    ] if _is_cuda() else [],
-    library_dirs=[
-        "conda/envs/aphrodite-runtime/lib",
-        "conda/envs/aphrodite-runtime/lib/stubs"
-    ] if _is_cuda() else [],
-)
-ext_modules.append(aphrodite_extension)
+if not _is_neuron():
+    aphrodite_extension = CUDAExtension(
+        name="aphrodite._C",
+        sources=aphrodite_extension_sources,
+        extra_compile_args={
+            "cxx": CXX_FLAGS,
+            "nvcc": NVCC_FLAGS,
+        },
+        libraries=[
+            "cuda", "conda/envs/aphrodite-runtime/lib",
+            "conda/envs/aphrodite-runtime/lib/stubs"
+        ] if _is_cuda() else [],
+        library_dirs=[
+            "conda/envs/aphrodite-runtime/lib",
+            "conda/envs/aphrodite-runtime/lib/stubs"
+        ] if _is_cuda() else [],
+    )
+    ext_modules.append(aphrodite_extension)
 
 
 def get_path(*filepath) -> str:
@@ -390,12 +430,17 @@ def get_aphrodite_version() -> str:
     version = find_version(get_path("aphrodite", "__init__.py"))
 
     if _is_hip():
-        # get the HIP version
-
+        # Get the HIP version
         hipcc_version = get_hipcc_rocm_version()
         if hipcc_version != MAIN_CUDA_VERSION:
             rocm_version_str = hipcc_version.replace(".", "")[:3]
             version += f"+rocm{rocm_version_str}"
+    elif _is_neuron():
+        # Get the Neuron version
+        neuron_version = str(neuronxcc_version)
+        if neuron_version != MAIN_CUDA_VERSION:
+            neuron_version_str = neuron_version.replace(".", "")[:3]
+            version += f"+neuron{neuron_version_str}"
     else:
         cuda_version = str(nvcc_cuda_version)
         if cuda_version != MAIN_CUDA_VERSION:
@@ -419,11 +464,25 @@ def get_requirements() -> List[str]:
     if _is_hip():
         with open(get_path("requirements-rocm.txt")) as f:
             requirements = f.read().strip().split("\n")
+    elif _is_neuron():
+        with open(get_path("requirements-neuron.txt")) as f:
+            requirements = f.read().strip().split("\n")
     else:
         with open(get_path("requirements.txt")) as f:
             requirements = f.read().strip().split("\n")
     return requirements
 
+
+package_data={
+    "aphrodite": [
+        "endpoints/kobold/klite.embd",
+        "modeling/layers/quantization/hadamard.safetensors", "py.typed",
+        "modeling/layers/fused_moe/configs/*.json"
+    ]
+}
+if os.environ.get("APHRODITE_USE_PRECOMPILED"):
+    ext_modules = []
+    package_data["aphrodite"].append("*.so")
 
 setuptools.setup(
     name="aphrodite-engine",
@@ -453,12 +512,6 @@ setuptools.setup(
     python_requires=">=3.8",
     install_requires=get_requirements(),
     ext_modules=ext_modules,
-    cmdclass={"build_ext": BuildExtension},
-    package_data={
-        "aphrodite": [
-            "endpoints/kobold/klite.embd",
-            "modeling/layers/quantization/hadamard.safetensors", "py.typed"
-        ]
-    },
+    cmdclass={"build_ext": BuildExtension} if not _is_neuron() else {},
     include_package_data=True,
 )

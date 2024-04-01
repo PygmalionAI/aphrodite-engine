@@ -1,9 +1,10 @@
 """
-Internal logging utility. Adapted from
-https://github.com/theroyallab/tabbyAPI/blob/4cc0b59bdc94e6342b6d1d7acadbadc63c740ed9/common/logger.py
+Internal logging utility.
 """
 
 import logging
+import os
+
 from loguru import logger
 from rich.console import Console
 from rich.markup import escape
@@ -17,6 +18,7 @@ from rich.progress import (
 )
 
 RICH_CONSOLE = Console()
+LOG_LEVEL = os.getenv("APHRODITE_LOG_LEVEL", "INFO").upper()
 
 
 def unwrap(wrapped, default=None):
@@ -60,16 +62,15 @@ def _log_formatter(record: dict):
     message = unwrap(record.get("message"), "")
 
     # Replace once loguru allows for turning off str.format
-    message = message.replace("{{", "{{").replace("}}", "}}")
-    # Manually escape < and > characters
-    message = message.replace("<", "\\<").replace(">", "\\>")
+    message = message.replace("{", "{{").replace("}", "}}").replace("<", "\<")
+
+    # Escape markup tags from Rich
     message = escape(message)
     lines = message.splitlines()
 
     fmt = ""
     if len(lines) > 1:
-        fmt = "\n".join(
-            [f"{colored_level}{separator}{line}" for line in lines])
+        fmt = "\n".join([f"{colored_level}{separator}{line}" for line in lines])
     else:
         fmt = f"{colored_level}{separator}{message}"
 
@@ -79,28 +80,22 @@ def _log_formatter(record: dict):
 # Uvicorn log handler
 # Uvicorn log portions inspired from https://github.com/encode/uvicorn/discussions/2027#discussioncomment-6432362
 class UvicornLoggingHandler(logging.Handler):
-
     def emit(self, record: logging.LogRecord) -> None:
-        logger.opt(exception=record.exc_info).log(record.levelname,
-                                                  self.format(record).rstrip())
+        logger.opt(exception=record.exc_info).log(
+            record.levelname, self.format(record).rstrip()
+        )
 
 
-# Uvicorn config for logging. Passed into run when creating all loggers in
-#server
+# Uvicorn config for logging. Passed into run when creating all loggers in server
 UVICORN_LOG_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
     "handlers": {
         "uvicorn": {
-            "class":
-            f"{UvicornLoggingHandler.__module__}.{UvicornLoggingHandler.__qualname__}",  # noqa
+            "class": f"{UvicornLoggingHandler.__module__}.{UvicornLoggingHandler.__qualname__}",  # noqa
         },
     },
-    "root": {
-        "handlers": ["uvicorn"],
-        "propagate": False,
-        "level": "INFO"
-    },
+    "root": {"handlers": ["uvicorn"], "propagate": False, "level": LOG_LEVEL},
 }
 
 
@@ -111,7 +106,7 @@ def setup_logger():
 
     logger.add(
         RICH_CONSOLE.print,
-        level="INFO",
+        level=LOG_LEVEL,
         format=_log_formatter,
         colorize=True,
     )
