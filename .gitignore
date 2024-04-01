@@ -6,7 +6,6 @@ repos
 *.so
 .conda
 build
-*.json
 dist*
 .VSCodeCounter
 conda/

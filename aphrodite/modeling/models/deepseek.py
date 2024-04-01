@@ -32,7 +32,7 @@ from transformers import PretrainedConfig
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.modeling.layers.attention import Attention
-from aphrodite.modeling.layers.triton_kernel.fused_moe import fused_moe
+from aphrodite.modeling.layers.fused_moe.fused_moe import fused_moe
 from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (
     LinearMethodBase,
