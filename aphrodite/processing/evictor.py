@@ -7,8 +7,9 @@ from aphrodite.common.block import PhysicalTokenBlock
 
 class EvictionPolicy(enum.Enum):
     """Enum for eviction policy used by make_evictor to instantiate the correct
-       Evictor subclass.
+    Evictor subclass.
     """
+
     LRU = enum.auto()
     FIFO = enum.auto()
 
@@ -109,13 +110,13 @@ class LRUEvictor(Evictor):
     def remove(self, block_hash: int) -> PhysicalTokenBlock:
         if block_hash not in self.free_table:
             raise ValueError(
-                "Attempting to remove block that's not in the evictor")
+                "Attempting to remove block that's not in the evictor"
+            )
         block: PhysicalTokenBlock = self.free_table[block_hash]
         del self.free_table[block_hash]
         return block
 
     @property
-    # pylint: disable=invalid-overridden-method
     def num_blocks(self) -> int:
         return len(self.free_table)
 
@@ -143,13 +144,13 @@ class RandomEvictor(Evictor):
     def remove(self, block_hash: int) -> PhysicalTokenBlock:
         if block_hash not in self.free_table:
             raise ValueError(
-                "Attempting to remove block that's not in the evictor")
+                "Attempting to remove block that's not in the evictor"
+            )
         block: PhysicalTokenBlock = self.free_table[block_hash]
         del self.free_table[block_hash]
         return block
 
     @property
-    # pylint: disable=invalid-overridden-method
     def num_blocks(self) -> int:
         return len(self.free_table)
 
