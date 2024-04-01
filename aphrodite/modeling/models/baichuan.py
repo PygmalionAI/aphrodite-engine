@@ -27,7 +27,7 @@ from torch import nn
 
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import SiluAndMul
-from aphrodite.modeling.layers.attention import PagedAttention
+from aphrodite.modeling.layers.attention import Attention
 from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (
     LinearMethodBase,
@@ -187,7 +187,7 @@ class BaiChuanAttention(nn.Module):
             alibi_slopes = alibi_slopes[head_start:head_end].tolist()
 
             scaling = self.head_dim**-0.5
-            self.attn = PagedAttention(
+            self.attn = Attention(
                 self.num_heads,
                 self.head_dim,
                 scaling,
@@ -205,7 +205,7 @@ class BaiChuanAttention(nn.Module):
                 is_neox_style=is_neox_style,
             )
             self.scaling = self.head_dim**-0.5
-            self.attn = PagedAttention(self.num_heads, self.head_dim,
+            self.attn = Attention(self.num_heads, self.head_dim,
                                        self.scaling)
 
     def forward(

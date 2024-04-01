@@ -29,7 +29,7 @@ from transformers import FalconConfig as HF_FalconConfig
 
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import get_act_fn
-from aphrodite.modeling.layers.attention import PagedAttention
+from aphrodite.modeling.layers.attention import Attention
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               LinearMethodBase,
                                               QKVParallelLinear,
@@ -151,7 +151,7 @@ class FalconAttention(nn.Module):
                 max_position=max_position_embeddings,
                 base=rope_theta,
             )
-            self.attn = PagedAttention(self.num_heads,
+            self.attn = Attention(self.num_heads,
                                        self.head_dim,
                                        self.inv_norm_factor,
                                        num_kv_heads=self.num_kv_heads)
@@ -162,13 +162,13 @@ class FalconAttention(nn.Module):
             alibi_slopes = (_get_alibi_slopes(self.total_num_heads) *
                             self.inv_norm_factor)
             alibi_slopes = alibi_slopes[head_start:head_end].tolist()
-            self.attn = PagedAttention(self.num_heads,
+            self.attn = Attention(self.num_heads,
                                        self.head_dim,
                                        self.inv_norm_factor,
                                        num_kv_heads=self.num_kv_heads,
                                        alibi_slopes=alibi_slopes)
         else:
-            self.attn = PagedAttention(self.num_heads,
+            self.attn = Attention(self.num_heads,
                                        self.head_dim,
                                        scale=self.inv_norm_factor,
                                        num_kv_heads=self.num_kv_heads)

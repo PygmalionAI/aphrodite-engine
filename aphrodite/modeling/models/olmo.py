@@ -45,7 +45,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from aphrodite.modeling.metadata import InputMetadata
-from aphrodite.modeling.layers.attention import PagedAttention
+from aphrodite.modeling.layers.attention import Attention
 from aphrodite.modeling.layers.linear import (
     ColumnParallelLinear,
     LinearMethodBase,
@@ -131,7 +131,7 @@ class OlmoAttention(nn.Module):
                 base=rope_theta,
             )
         self.scaling = self.head_dim**-0.5
-        self.attn = PagedAttention(self.num_heads,
+        self.attn = Attention(self.num_heads,
                                    self.head_dim,
                                    scale=self.scaling)
 
