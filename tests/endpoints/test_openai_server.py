@@ -597,5 +597,19 @@ async def test_guided_decoding_type_error(server, client: openai.AsyncOpenAI):
             extra_body=dict(guided_regex=TEST_REGEX, guided_json=TEST_SCHEMA))
 
 
+async def test_embeddings(server, client: openai.AsyncOpenAI):
+    # model is ignored by the endpoint, but needed by the openai client.
+    model = "all-mpnet-base-v2"
+    text = "I'm the text to extract meaning from"
+    embedding_promise = await client.embeddings.create(input=[text],
+                                                       model=model)
+    response_data = embedding_promise.data[0]
+    embedding = response_data.embedding
+
+    assert isinstance(response_data, openai.types.Embedding)
+    assert isinstance(embedding, list)
+    assert (len(embedding) > 1)
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
