@@ -23,7 +23,9 @@ from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.endpoints.openai.protocol import (CompletionRequest,
                                                  ChatCompletionRequest,
-                                                 ErrorResponse, Prompt)
+                                                 ErrorResponse, Prompt,
+                                                 EmbeddingsResponse,
+                                                 EmbeddingsRequest)
 from aphrodite.common.logger import UVICORN_LOG_CONFIG
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams, _SAMPLING_EPS
@@ -220,21 +222,16 @@ async def detokenize(request: Request,
     return JSONResponse(content=detokenized)
 
 
-@app.post("/v1/embeddings")
-async def handle_embeddings(request: Request,
+@app.post("/v1/embeddings", response_model=EmbeddingsResponse)
+async def handle_embeddings(request: EmbeddingsRequest,
                             x_api_key: Optional[str] = Header(None)):
-    request_data = await request.json()
-    input = request_data["input"]
+    input = request.input
     if not input:
         raise JSONResponse(
             status_code=400,
             content={"error": "Missing required argument input"})
 
-    if isinstance(input, str):
-        input = [input]
-
-    response = await OAIembeddings.embeddings(input,
-                                              request_data["encoding_format"])
+    response = await OAIembeddings.embeddings(input, request.encoding_format)
     return JSONResponse(response)
 
 
