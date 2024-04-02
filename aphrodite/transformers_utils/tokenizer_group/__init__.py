@@ -9,8 +9,7 @@ from aphrodite.engine.ray_tools import ray
 
 if ray:
     from aphrodite.transformers_utils.tokenizer_group.ray_tokenizer_group import (  # noqa: E501
-        RayTokenizerGroupPool
-    )
+        RayTokenizerGroupPool)
 else:
     RayTokenizerGroupPool = None
 
@@ -25,9 +24,10 @@ def get_tokenizer_group(tokenizer_pool_config: Optional[TokenizerPoolConfig],
                 "RayTokenizerGroupPool is not available. Please install "
                 "the ray package to use the Ray tokenizer group pool.")
         return RayTokenizerGroupPool.from_config(tokenizer_pool_config,
-                                                **init_kwargs)
+                                                 **init_kwargs)
     else:
         raise ValueError(f"Unknown tokenizer pool type: "
-                        f"{tokenizer_pool_config.pool_type}")
-    
+                         f"{tokenizer_pool_config.pool_type}")
+
+
 __all__ = ["get_tokenizer_group", "BaseTokenizerGroup"]

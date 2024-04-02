@@ -483,11 +483,10 @@ class TokenizerPoolConfig:
             raise ValueError(f"Unknown pool type: {self.pool_type}.")
         if not isinstance(self.extra_config, dict):
             raise ValueError("extra_config must be a dictionary.")
-        
+
     @classmethod
     def create_config(
-        cls, tokenizer_pool_size: int,
-        tokenizer_pool_type: str,
+        cls, tokenizer_pool_size: int, tokenizer_pool_type: str,
         tokenizer_pool_extra_config: Optional[Union[str, dict]]
     ) -> Optional["TokenizerPoolConfig"]:
         """Create a TokenizerPoolConfig from the given parameters.
@@ -495,7 +494,7 @@ class TokenizerPoolConfig:
         If tokenizer_pool_size is 0, return None.
         
         Args:
-            tokenizer_pool_size: Number of tokenizer wokrers in the pool.
+            tokenizer_pool_size: Number of tokenizer workers in the pool.
             tokenizer_pool_type: Type of the tokenizer pool.
             tokenizer_pool_extra_config: Additional config for the pool.
                 The way the config will be used depends on the pool type.
@@ -513,6 +512,7 @@ class TokenizerPoolConfig:
         else:
             tokenizer_pool_config = None
         return tokenizer_pool_config
+
 
 class ParallelConfig:
     """Configuration for the distributed execution.

@@ -351,31 +351,25 @@ class EngineArgs:
             default=EngineArgs.disable_custom_all_reduce,
             help="See ParallelConfig",
         )
-        parser.add_argument(
-            "--tokenizer-pool-size",
-            type=int,
-            default=EngineArgs.tokenizer_pool_size,
-            help="Size of tokenizer pool to use for "
-            "asynchronous tokenization. If 0, will "
-            "use synchronous tokenization."
-        )
-        parser.add_argument(
-            "--tokenizer-pool-type",
-            type=str,
-            default=EngineArgs.tokenizer_pool_type,
-            help="The type of tokenizer pool to use for "
-            "asynchronous tokenization. Ignored if "
-            "tokenizer_pool_size is 0."
-        )
-        parser.add_argument(
-            "--tokenizer-pool-extra-config",
-            type=str,
-            default=EngineArgs.tokenizer_pool_extra_config,
-            help="Extra config for tokenizer pool. "
-            "This should be a JSON string that will be "
-            "parsed into a dictionary. Ignored if "
-            "tokenizer_pool_size is 0."
-        )
+        parser.add_argument("--tokenizer-pool-size",
+                            type=int,
+                            default=EngineArgs.tokenizer_pool_size,
+                            help="Size of tokenizer pool to use for "
+                            "asynchronous tokenization. If 0, will "
+                            "use synchronous tokenization.")
+        parser.add_argument("--tokenizer-pool-type",
+                            type=str,
+                            default=EngineArgs.tokenizer_pool_type,
+                            help="The type of tokenizer pool to use for "
+                            "asynchronous tokenization. Ignored if "
+                            "tokenizer_pool_size is 0.")
+        parser.add_argument("--tokenizer-pool-extra-config",
+                            type=str,
+                            default=EngineArgs.tokenizer_pool_extra_config,
+                            help="Extra config for tokenizer pool. "
+                            "This should be a JSON string that will be "
+                            "parsed into a dictionary. Ignored if "
+                            "tokenizer_pool_size is 0.")
         # LoRA related configs
         parser.add_argument(
             "--enable-lora",

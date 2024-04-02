@@ -8,7 +8,7 @@ from transformers.convert_slow_tokenizer import import_protobuf
 from loguru import logger
 
 from aphrodite.lora.request import LoRARequest
-from aphrodite.common.utils import make_async, LRUCache
+from aphrodite.common.utils import make_async
 from aphrodite.common.gguf import GGUFReader
 from aphrodite.transformers_utils.tokenizers import BaichuanTokenizer
 
@@ -64,8 +64,9 @@ def convert_gguf_to_tokenizer(checkpoint):
     os.unlink(temp_file_filename)
     return tokenizer
 
+
 def get_cached_tokenizer(
-        tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast]
+    tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast]
 ) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
     """Get tokenizer with cached properties.
     
@@ -86,19 +87,20 @@ def get_cached_tokenizer(
         @property
         def all_special_ids(self):
             return tokenizer_all_special_ids
-        
+
         @property
         def all_special_tokens(self):
             return tokenizer_all_special_tokens
-        
+
         @property
         def all_special_tokens_extended(self):
             return tokenizer_all_special_tokens_extended
-        
+
     CachedTokenizer.__name__ = f"Cached{tokenizer.__class__.__name__}"
 
     tokenizer.__class__ = CachedTokenizer
     return tokenizer
+
 
 def get_tokenizer(
     tokenizer_name: str,

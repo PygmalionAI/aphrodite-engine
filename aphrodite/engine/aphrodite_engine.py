@@ -29,12 +29,9 @@ from aphrodite.common.sequence import (
     SequenceOutput,
     SequenceStatus,
 )
-from aphrodite.transformers_utils.tokenizer import (
-    detokenize_incrementally)
-from aphrodite.transformers_utils.tokenizer_group import (
-    BaseTokenizerGroup,
-    get_tokenizer_group
-)
+from aphrodite.transformers_utils.tokenizer import (detokenize_incrementally)
+from aphrodite.transformers_utils.tokenizer_group import (BaseTokenizerGroup,
+                                                          get_tokenizer_group)
 from aphrodite.common.utils import (
     Counter, )
 from aphrodite.common.logger import setup_logger
