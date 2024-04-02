@@ -1197,7 +1197,7 @@ class AphroditeEngine:
 
         if version.parse(current_version) < version.parse(required_version):
             raise ValueError(f"Ray version {required_version} or greater is "
-                            f"required, but found {current_version}")
+                             f"required, but found {current_version}")
 
         from ray.dag import MultiOutputNode, InputNode
 
