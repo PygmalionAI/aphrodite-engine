@@ -631,3 +631,6 @@ if __name__ == "__main__":
                     log_config=UVICORN_LOG_CONFIG)
     except KeyboardInterrupt:
         logger.info("API server stopped by user. Exiting gracefully.")
+    except asyncio.exceptions.CancelledError:
+        logger.info("API server stopped due to a cancelled request. "
+                    "Exiting gracefully.")

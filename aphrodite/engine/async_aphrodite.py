@@ -630,6 +630,10 @@ class AsyncAphrodite:
 
             async for request_output in stream:
                 yield request_output
+        except asyncio.exceptions.CancelledError:
+            logger.info(f"Request {request_id} cancelled.")
+            self._abort(request_id)
+            raise
         except (Exception, asyncio.CancelledError) as e:
             # If there is an exception or coroutine is cancelled, abort the
             # request.
