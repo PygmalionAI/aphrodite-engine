@@ -527,104 +527,107 @@ async def get_kobold_lite_ui():
 # ============ KoboldAI API ============ #
 
 if __name__ == "__main__":
-    args = parse_args()
+    try:
+        args = parse_args()
 
-    if args.launch_kobold_api:
-        logger.warning("Launching Kobold API server in addition to OpenAI. "
-                       "Keep in mind that the Kobold API routes are NOT "
-                       "protected via the API key.")
-        app.include_router(kai_api, prefix="/api/v1")
-        app.include_router(kai_api,
-                           prefix="/api/latest",
-                           include_in_schema=False)
-        app.include_router(extra_api, prefix="/api/extra")
+        if args.launch_kobold_api:
+            logger.warning("Launching Kobold API server in addition to OpenAI. "
+                        "Keep in mind that the Kobold API routes are NOT "
+                        "protected via the API key.")
+            app.include_router(kai_api, prefix="/api/v1")
+            app.include_router(kai_api,
+                            prefix="/api/latest",
+                            include_in_schema=False)
+            app.include_router(extra_api, prefix="/api/extra")
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=args.allowed_origins,
-        allow_credentials=args.allow_credentials,
-        allow_methods=args.allowed_methods,
-        allow_headers=args.allowed_headers,
-    )
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=args.allowed_origins,
+            allow_credentials=args.allow_credentials,
+            allow_methods=args.allowed_methods,
+            allow_headers=args.allowed_headers,
+        )
 
-    if token := os.environ.get("APHRODITE_API_KEY") or args.api_keys:
-        admin_key = os.environ.get("APHRODITE_ADMIN_KEY") or args.admin_key
+        if token := os.environ.get("APHRODITE_API_KEY") or args.api_keys:
+            admin_key = os.environ.get("APHRODITE_ADMIN_KEY") or args.admin_key
 
-        if admin_key is None:
-            logger.warning("Admin key not provided. Admin operations will "
-                           "be disabled.")
+            if admin_key is None:
+                logger.warning("Admin key not provided. Admin operations will "
+                            "be disabled.")
 
-        @app.middleware("http")
-        async def authentication(request: Request, call_next):
-            excluded_paths = ["/api"]
-            if any(
-                    request.url.path.startswith(path)
-                    for path in excluded_paths):
-                return await call_next(request)
-            if not request.url.path.startswith("/v1"):
-                return await call_next(request)
-
-            auth_header = request.headers.get("Authorization")
-            api_key_header = request.headers.get("x-api-key")
-
-            if request.url.path.startswith("/v1/lora"):
-                if admin_key is not None and api_key_header == admin_key:
+            @app.middleware("http")
+            async def authentication(request: Request, call_next):
+                excluded_paths = ["/api"]
+                if any(
+                        request.url.path.startswith(path)
+                        for path in excluded_paths):
                     return await call_next(request)
-                return JSONResponse(content={"error": "Unauthorized"},
-                                    status_code=401)
+                if not request.url.path.startswith("/v1"):
+                    return await call_next(request)
 
-            if auth_header != "Bearer " + token and api_key_header != token:
-                return JSONResponse(content={"error": "Unauthorized"},
-                                    status_code=401)
-            return await call_next(request)
+                auth_header = request.headers.get("Authorization")
+                api_key_header = request.headers.get("x-api-key")
 
-    for middleware in args.middleware:
-        module_path, object_name = middleware.rsplit(".", 1)
-        imported = getattr(importlib.import_module(module_path), object_name)
-        if inspect.isclass(imported):
-            app.add_middleware(imported)
-        elif inspect.iscoroutinefunction(imported):
-            app.middleware("http")(imported)
+                if request.url.path.startswith("/v1/lora"):
+                    if admin_key is not None and api_key_header == admin_key:
+                        return await call_next(request)
+                    return JSONResponse(content={"error": "Unauthorized"},
+                                        status_code=401)
+
+                if auth_header != "Bearer " + token and api_key_header != token:
+                    return JSONResponse(content={"error": "Unauthorized"},
+                                        status_code=401)
+                return await call_next(request)
+
+        for middleware in args.middleware:
+            module_path, object_name = middleware.rsplit(".", 1)
+            imported = getattr(importlib.import_module(module_path), object_name)
+            if inspect.isclass(imported):
+                app.add_middleware(imported)
+            elif inspect.iscoroutinefunction(imported):
+                app.middleware("http")(imported)
+            else:
+                raise ValueError(f"Invalid middleware {middleware}. Must be a "
+                                "function or a class.")
+
+        logger.debug(f"args: {args}")
+
+        if args.served_model_name is not None:
+            served_model = args.served_model_name
         else:
-            raise ValueError(f"Invalid middleware {middleware}. Must be a "
-                             "function or a class.")
+            served_model = args.model
 
-    logger.debug(f"args: {args}")
+        engine_args = AsyncEngineArgs.from_cli_args(args)
+        engine = AsyncAphrodite.from_engine_args(engine_args)
+        tokenizer = get_tokenizer(
+            engine_args.tokenizer,
+            tokenizer_mode=engine_args.tokenizer_mode,
+            trust_remote_code=engine_args.trust_remote_code,
+        )
 
-    if args.served_model_name is not None:
-        served_model = args.served_model_name
-    else:
-        served_model = args.model
+        chat_template = args.chat_template
+        if chat_template is None and tokenizer.chat_template is not None:
+            chat_template = tokenizer.chat_template
 
-    engine_args = AsyncEngineArgs.from_cli_args(args)
-    engine = AsyncAphrodite.from_engine_args(engine_args)
-    tokenizer = get_tokenizer(
-        engine_args.tokenizer,
-        tokenizer_mode=engine_args.tokenizer_mode,
-        trust_remote_code=engine_args.trust_remote_code,
-    )
+        openai_serving_chat = OpenAIServingChat(engine, served_model,
+                                                args.response_role,
+                                                args.lora_modules,
+                                                args.chat_template)
+        openai_serving_completion = OpenAIServingCompletion(
+            engine, served_model, args.lora_modules)
+        engine_model_config = asyncio.run(engine.get_model_config())
 
-    chat_template = args.chat_template
-    if chat_template is None and tokenizer.chat_template is not None:
-        chat_template = tokenizer.chat_template
+        if args.launch_kobold_api:
+            _set_badwords(tokenizer, engine_model_config.hf_config)
 
-    openai_serving_chat = OpenAIServingChat(engine, served_model,
-                                            args.response_role,
-                                            args.lora_modules,
-                                            args.chat_template)
-    openai_serving_completion = OpenAIServingCompletion(
-        engine, served_model, args.lora_modules)
-    engine_model_config = asyncio.run(engine.get_model_config())
-
-    if args.launch_kobold_api:
-        _set_badwords(tokenizer, engine_model_config.hf_config)
-
-    app.root_path = args.root_path
-    uvicorn.run(app,
-                host=args.host,
-                port=args.port,
-                log_level="info",
-                timeout_keep_alive=TIMEOUT_KEEP_ALIVE,
-                ssl_keyfile=args.ssl_keyfile,
-                ssl_certfile=args.ssl_certfile,
-                log_config=UVICORN_LOG_CONFIG)
+        app.root_path = args.root_path
+        uvicorn.run(app,
+                    host=args.host,
+                    port=args.port,
+                    log_level="info",
+                    timeout_keep_alive=TIMEOUT_KEEP_ALIVE,
+                    ssl_keyfile=args.ssl_keyfile,
+                    ssl_certfile=args.ssl_certfile,
+                    log_config=UVICORN_LOG_CONFIG)
+    except KeyboardInterrupt:
+        logger.info("API server stopped by user. Exiting gracefully.")
