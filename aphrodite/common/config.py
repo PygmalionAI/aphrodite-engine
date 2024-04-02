@@ -85,7 +85,7 @@ class ModelConfig:
         load_in_4bit: bool = False,
         load_in_8bit: bool = False,
         load_in_smooth: bool = False,
-        enforce_eager: bool = False,
+        enforce_eager: bool = True,
         max_context_len_to_capture: Optional[int] = None,
         max_log_probs: int = 10,
     ) -> None:

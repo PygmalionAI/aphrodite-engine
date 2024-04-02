@@ -48,7 +48,7 @@ class EngineArgs:
     load_in_4bit: bool = False
     load_in_8bit: bool = False
     load_in_smooth: bool = False
-    enforce_eager: bool = False
+    enforce_eager: bool = True
     max_context_len_to_capture: int = 8192
     disable_custom_all_reduce: bool = False
     enable_lora: bool = False
@@ -327,7 +327,8 @@ class EngineArgs:
         )
         parser.add_argument(
             "--enforce-eager",
-            action="store_true",
+            type=lambda x: (str(x).lower() == 'true'),
+            default=EngineArgs.enforce_eager,
             help="Always use eager-mode PyTorch. If False, "
             "will use eager mode and CUDA graph in hybrid "
             "for maximal performance and flexibility.",
