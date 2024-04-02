@@ -1189,13 +1189,15 @@ class AphroditeEngine:
         return [driver_worker_output] + ray_worker_outputs
 
     def _compiled_ray_dag(self):
+        from packaging import version
         import pkg_resources
 
         required_version = "2.9"
         current_version = pkg_resources.get_distribution("ray").version
-        if current_version < required_version:
+
+        if version.parse(current_version) < version.parse(required_version):
             raise ValueError(f"Ray version {required_version} or greater is "
-                             f"required, but found {current_version}")
+                            f"required, but found {current_version}")
 
         from ray.dag import MultiOutputNode, InputNode
 
