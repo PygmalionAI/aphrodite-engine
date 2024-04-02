@@ -28,7 +28,7 @@ from transformers import PretrainedConfig
 
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import SiluAndMul
-from aphrodite.modeling.layers.attention import PagedAttention
+from aphrodite.modeling.layers.attention import Attention
 from aphrodite.modeling.layers.linear import (
     LinearMethodBase,
     MergedColumnParallelLinear,
@@ -188,7 +188,7 @@ class StablelmAttention(nn.Module):
             max_position=self.config.max_position_embeddings,
             base=self.config.rope_theta,
         )
-        self.attn = PagedAttention(
+        self.attn = Attention(
             self.num_heads,
             self.head_dim,
             self.scaling,

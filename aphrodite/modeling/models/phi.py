@@ -45,7 +45,7 @@ from transformers import PretrainedConfig
 
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import get_act_fn
-from aphrodite.modeling.layers.attention import PagedAttention
+from aphrodite.modeling.layers.attention import Attention
 from aphrodite.modeling.layers.linear import (
     ColumnParallelLinear,
     LinearMethodBase,
@@ -145,7 +145,7 @@ class PhiAttention(nn.Module):
             base=rope_theta,
             is_neox_style=is_neox_style,
         )
-        self.attn = PagedAttention(self.num_heads, self.head_size, scaling)
+        self.attn = Attention(self.num_heads, self.head_size, scaling)
 
     def forward(
         self,

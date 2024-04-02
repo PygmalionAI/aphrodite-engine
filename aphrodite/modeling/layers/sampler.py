@@ -802,7 +802,6 @@ def _get_logprobs(
         if (i < sampling_metadata.num_prompts
                 and sampling_params.prompt_logprobs is not None):
             num_logprobs = sampling_params.prompt_logprobs
-            prompt_len = sampling_metadata.prompt_lens[i]
             prompt_tokens = sampling_metadata.seq_data[
                 seq_ids[0]].prompt_token_ids
             group_prompt_logprobs: PromptLogprobs = [None]
@@ -876,7 +875,7 @@ def _build_sampler_output(
                                output_metadata.get(seq_ids[parent_id])))
         sampler_output.append(
             SequenceGroupOutput(seq_outputs, group_prompt_logprobs))
-    return sampler_output
+    return SamplerOutput(outputs=sampler_output)
 
 
 def _miro_store_args(seqids: List[int], mus: List[float],

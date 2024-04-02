@@ -1,7 +1,6 @@
 """A block manager that manages token blocks."""
-
 import enum
-from itertools import count
+from itertools import count, takewhile
 from os.path import commonprefix
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -19,14 +18,12 @@ class BlockAllocator:
     the reference count becomes zero, the block is added back to the free list.
     """
 
-    def __init__(
-        self,
-        device: Device,
-        block_size: int,
-        num_blocks: int,
-        eviction_policy: EvictionPolicy = EvictionPolicy.LRU,
-        enable_caching: bool = False,
-    ) -> None:
+    def __init__(self,
+                 device: Device,
+                 block_size: int,
+                 num_blocks: int,
+                 eviction_policy: EvictionPolicy = EvictionPolicy.LRU,
+                 enable_caching: bool = False) -> None:
         self.device = device
         self.block_size = block_size
         self.num_blocks = num_blocks
@@ -49,13 +46,11 @@ class BlockAllocator:
             block.block_hash = block_hash
             block.num_hashed_tokens = num_hashed_tokens
             return block
-        block = PhysicalTokenBlock(
-            device=self.device,
-            block_number=self.current_num_blocks,
-            block_size=self.block_size,
-            block_hash=block_hash,
-            num_hashed_tokens=num_hashed_tokens,
-        )
+        block = PhysicalTokenBlock(device=self.device,
+                                   block_number=self.current_num_blocks,
+                                   block_size=self.block_size,
+                                   block_hash=block_hash,
+                                   num_hashed_tokens=num_hashed_tokens)
         self.current_num_blocks += 1
         return block
 
@@ -126,7 +121,6 @@ class AllocStatus(enum.Enum):
     3. Never: seq_group can never be allocated.
       The seq_group is too large to allocated in GPU.
     """
-
     OK = enum.auto()
     LATER = enum.auto()
     NEVER = enum.auto()
@@ -150,10 +144,8 @@ class BlockSpaceManager:
 
         self.block_sliding_window = None
         if sliding_window is not None:
-            assert sliding_window % block_size == 0, (
-                sliding_window,
-                block_size,
-            )
+            assert sliding_window % block_size == 0, (sliding_window,
+                                                      block_size)
             self.block_sliding_window = sliding_window // block_size
 
         self.watermark = watermark
@@ -162,23 +154,19 @@ class BlockSpaceManager:
         self.enable_caching = enable_caching
 
         self.watermark_blocks = int(watermark * num_gpu_blocks)
-        self.gpu_allocator = BlockAllocator(
-            Device.GPU,
-            block_size,
-            num_gpu_blocks,
-            enable_caching=enable_caching,
-        )
-        self.cpu_allocator = BlockAllocator(
-            Device.CPU,
-            block_size,
-            num_cpu_blocks,
-            enable_caching=enable_caching,
-        )
+        self.gpu_allocator = BlockAllocator(Device.GPU,
+                                            block_size,
+                                            num_gpu_blocks,
+                                            enable_caching=enable_caching)
+        self.cpu_allocator = BlockAllocator(Device.CPU,
+                                            block_size,
+                                            num_cpu_blocks,
+                                            enable_caching=enable_caching)
         # Mapping: seq_id -> BlockTable.
         self.block_tables: Dict[int, BlockTable] = {}
 
     def can_allocate(self, seq_group: SequenceGroup) -> AllocStatus:
-        # FIXME(woosuk): Here we assume that all sequences in the group share
+        # FIXME: Here we assume that all sequences in the group share
         # the same prompt. This may not be true for preempted sequences.
         seq = seq_group.get_seqs(status=SequenceStatus.WAITING)[0]
         num_required_blocks = len(seq.logical_token_blocks)
@@ -213,8 +201,7 @@ class BlockSpaceManager:
             else:
                 block = self.gpu_allocator.allocate(
                     seq.hash_of_block(logical_idx),
-                    seq.num_hashed_tokens_of_block(logical_idx),
-                )
+                    seq.num_hashed_tokens_of_block(logical_idx))
             block_table.append(block)
 
         # Assign the block table for each sequence.
@@ -444,23 +431,29 @@ class BlockSpaceManager:
         for block in block_table:
             block.last_accessed = access_time
 
-    def compute_last_full_block_in_seq(self, seq: Sequence):
+    def compute_full_blocks_in_seq(self, seq: Sequence):
         if seq.seq_id not in self.block_tables:
             return
         max_full_block = seq.get_len() // self.block_size - 1
         block_table = self.block_tables[seq.seq_id]
         if max_full_block == -1:
             return
-        block_table[max_full_block].computed = True
+        for i in reversed(range(max_full_block)):
+            if block_table[i].computed:
+                break
+            block_table[i].computed = True
 
-    def get_all_block_ids_till_computed(self, seq: Sequence) -> List[int]:
+    def get_all_computed_blocks(self, seq: Sequence) -> List[int]:
         if seq.seq_id not in self.block_tables:
             return []
         block_table = self.block_tables[seq.seq_id]
-        for block_idx in reversed(range(len(block_table))):
-            if block_table[block_idx].computed:
-                return [b.block_number for b in block_table[:block_idx + 1]]
-        return []
+        # NOTE We exclude the last block to avoid the case where the entire
+        # prompt is cached. This would cause erroneous behavior in model
+        # runner.
+        return [
+            b.block_number
+            for b in takewhile(lambda b: b.computed, block_table[:-1])
+        ]
 
     def get_common_computed_block_ids(self,
                                       seq_group: SequenceGroup) -> List[int]:
@@ -469,14 +462,12 @@ class BlockSpaceManager:
             return []
 
         ids_list = [
-            self.get_all_block_ids_till_computed(seq)
+            self.get_all_computed_blocks(seq)
             for seq in iter(seq_group.seqs_dict.values())
         ]
         return commonprefix([ids for ids in ids_list if ids != []])
 
     def mark_blocks_as_computed(self, seq_group: SequenceGroup):
-        # NOTE: We only mark the last full block because with prefix caching,
-        # all blocks until the marked one are guaranteed to be computed.
         if self.enable_caching:
             for seq in seq_group.seqs_dict.values():
-                self.compute_last_full_block_in_seq(seq)
+                self.compute_full_blocks_in_seq(seq)

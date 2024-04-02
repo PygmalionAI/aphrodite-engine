@@ -30,7 +30,7 @@ from transformers import LlamaConfig
 
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import SiluAndMul
-from aphrodite.modeling.layers.attention import PagedAttention
+from aphrodite.modeling.layers.attention import Attention
 from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (
     LinearMethodBase,
@@ -199,7 +199,7 @@ class LlamaAttention(nn.Module):
             rope_scaling=rope_scaling,
             is_neox_style=is_neox_style,
         )
-        self.attn = PagedAttention(
+        self.attn = Attention(
             self.num_heads,
             self.head_dim,
             self.scaling,
@@ -213,7 +213,7 @@ class LlamaAttention(nn.Module):
         hidden_states: torch.Tensor,
         kv_cache: KVCache,
         input_metadata: InputMetadata,
-        kv_quant_param: List[float],
+        # kv_quant_param: List[float],
     ) -> torch.Tensor:
         if self.merge_weight:
             qkv, _ = self.qkv_proj(hidden_states)
@@ -225,8 +225,15 @@ class LlamaAttention(nn.Module):
             v, _ = self.v_proj(hidden_states)
         q, k = self.rotary_emb(positions, q, k)
         k_cache, v_cache = kv_cache
-        attn_output = self.attn(q, k, v, k_cache, v_cache, input_metadata,
-                                kv_quant_param)
+        attn_output = self.attn(
+            q,
+            k,
+            v,
+            k_cache,
+            v_cache,
+            input_metadata,
+            # kv_quant_param
+        )
         output, _ = self.o_proj(attn_output)
         return output
 
@@ -279,7 +286,7 @@ class LlamaDecoderLayer(nn.Module):
         kv_cache: KVCache,
         input_metadata: InputMetadata,
         residual: Optional[torch.Tensor],
-        kv_quant_param: List[float],
+        # kv_quant_param: List[float],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # Self Attention
         if residual is None:
@@ -293,7 +300,7 @@ class LlamaDecoderLayer(nn.Module):
             hidden_states=hidden_states,
             kv_cache=kv_cache,
             input_metadata=input_metadata,
-            kv_quant_param=kv_quant_param,
+            # kv_quant_param=kv_quant_param,
         )
 
         # Fully Connected
@@ -347,8 +354,8 @@ class LlamaModel(nn.Module):
                 kv_caches[i],
                 input_metadata,
                 residual,
-                input_metadata.kv_quant_params[i]
-                if input_metadata.kv_quant_params is not None else None,
+                # input_metadata.kv_quant_params[i]
+                # if input_metadata.kv_quant_params is not None else None,
             )
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
