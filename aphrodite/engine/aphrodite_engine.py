@@ -15,6 +15,7 @@ from typing import (
     Union,
 )
 from loguru import logger
+from transformers import PreTrainedTokenizer
 
 import aphrodite
 from aphrodite.lora.request import LoRARequest
@@ -193,7 +194,11 @@ class AphroditeEngine:
         # the closure used to initialize Ray worker actors
         raise RuntimeError("AphroditeEngine should not be pickled!")
 
-    def get_tokenizer_for_seq(self, sequence: Sequence):
+    def get_tokenizer(self) -> "PreTrainedTokenizer":
+        return self.tokenizer.get_lora_tokenizer()
+
+    def get_tokenizer_for_seq(self,
+                              sequence: Sequence) -> "PreTrainedTokenizer":
         return self.tokenizer.get_lora_tokenizer(sequence.lora_request)
 
     def _dispatch_worker(self):

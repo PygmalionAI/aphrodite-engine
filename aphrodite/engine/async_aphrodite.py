@@ -5,6 +5,7 @@ from functools import partial
 from typing import (Any, Dict, Iterable, List, Optional, Set, Tuple, Type,
                     Union, AsyncIterator, Callable)
 from loguru import logger
+from transformers import PreTrainedTokenizer
 
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.config import ModelConfig
@@ -377,8 +378,11 @@ class AsyncAphrodite:
         self.set_errored(exc)
         self._request_tracker.propagate_exception(exc)
 
-    def get_tokenizer(self):
-        return self.engine.tokenizer.tokenizer
+    async def get_tokenizer(self) -> "PreTrainedTokenizer":
+        if self.engine_use_ray:
+            return await self.engine.get_tokenizer.remote()
+        else:
+            return self.engine.get_tokenizer()
 
     def start_background_loop(self) -> None:
         """Start the background loop."""
