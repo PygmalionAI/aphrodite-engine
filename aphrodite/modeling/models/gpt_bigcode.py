@@ -27,7 +27,7 @@ from transformers import GPTBigCodeConfig
 
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import get_act_fn
-from aphrodite.modeling.layers.attention import PagedAttention
+from aphrodite.modeling.layers.attention import Attention
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               LinearMethodBase,
                                               QKVParallelLinear,
@@ -86,10 +86,10 @@ class GPTBigCodeAttention(nn.Module):
             bias=True,
             linear_method=linear_method,
         )
-        self.attn = PagedAttention(self.num_heads,
-                                   self.head_dim,
-                                   scale=self.scale,
-                                   num_kv_heads=self.num_kv_heads)
+        self.attn = Attention(self.num_heads,
+                              self.head_dim,
+                              scale=self.scale,
+                              num_kv_heads=self.num_kv_heads)
 
     def forward(
         self,

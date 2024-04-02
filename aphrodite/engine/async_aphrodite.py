@@ -15,7 +15,7 @@ from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 
 ENGINE_ITERATION_TIMEOUT_S = int(
-    os.environ.get("APHRODITE_ENGINE_ITERATION_TIMEOUT_S", 60))
+    os.environ.get("APHRODITE_ENGINE_ITERATION_TIMEOUT_S", "120"))
 
 
 class AsyncEngineDeadError(RuntimeError):
@@ -26,13 +26,18 @@ def _raise_exception_on_finish(
         task: asyncio.Task, error_callback: Callable[[Exception],
                                                      None]) -> None:
     msg = ("Task finished unexpectedly. This should never happen! "
-           "Please open an issue on Github.")
+           "Please open an issue on Github. Include your full error "
+           "log after killing the process with Ctrl+C.")
 
     exception = None
     try:
         task.result()
         # NOTE: This will be thrown if task exits normally (which it should not)
         raise AsyncEngineDeadError(msg)
+    except asyncio.exceptions.CancelledError:
+        pass
+    except KeyboardInterrupt:
+        raise
     except Exception as e:
         exception = e
         logger.error("Engine background task failed", exc_info=e)
@@ -318,6 +323,8 @@ class AsyncAphrodite:
             async frontend will be executed in a separate process as the
             model workers.
         log_requests: Whether to log the requests.
+        max_log_len: Maximum number of prompt characters or prompt ID numbers
+            being printed in log.
         start_engine_loop: If True, the background task to run the engine
             will be automatically started in the generate call.
         *args: Arguments for AphroditeEngine.
@@ -331,7 +338,7 @@ class AsyncAphrodite:
                  engine_use_ray: bool,
                  *args,
                  log_requests: bool = True,
-                 max_log_len: Optional[int] = None,
+                 max_log_len: int = 0,
                  start_engine_loop: bool = True,
                  **kwargs) -> None:
         self.worker_use_ray = worker_use_ray
@@ -456,23 +463,27 @@ class AsyncAphrodite:
 
     async def run_engine_loop(self):
         has_requests_in_progress = False
-        while True:
-            if not has_requests_in_progress:
-                logger.debug("Waiting for new requests...")
-                await self._request_tracker.wait_for_new_requests()
-                logger.debug("Got new requests!")
+        try:
+            while True:
+                if not has_requests_in_progress:
+                    logger.debug("Waiting for new requests...")
+                    await self._request_tracker.wait_for_new_requests()
+                    logger.debug("Got new requests!")
 
-            # Abort if iteration takes too long due to unrecoverable errors
-            # (eg. NCCL timeouts).
-            try:
-                has_requests_in_progress = await asyncio.wait_for(
-                    self.engine_step(), ENGINE_ITERATION_TIMEOUT_S)
-            except asyncio.TimeoutError as exc:
-                logger.error(
-                    "Engine iteration timed out. This should never happen!")
-                self.set_errored(exc)
-                raise
-            await asyncio.sleep(0)
+                # Abort if iteration takes too long due to unrecoverable errors
+                # (eg. NCCL timeouts).
+                try:
+                    has_requests_in_progress = await asyncio.wait_for(
+                        self.engine_step(), ENGINE_ITERATION_TIMEOUT_S)
+                except asyncio.TimeoutError as exc:
+                    logger.error(
+                        "Engine iteration timed out. This should never happen!"
+                    )
+                    self.set_errored(exc)
+                    raise
+                await asyncio.sleep(0)
+        except KeyboardInterrupt:
+            logger.info("Engine loop interrupted. Exiting gracefully.")
 
     async def add_request(
         self,
@@ -494,8 +505,7 @@ class AsyncAphrodite:
                                                               max_log_len]
             logger.info(f"Received request {request_id}: "
                         f"prompt: {shortened_prompt!r}, "
-                        f"sampling params: {sampling_params}, "
-                        f"prompt token ids: {shortened_token_ids}, "
+                        f"sampling_params: {sampling_params}, "
                         f"lora_request: {lora_request}.")
 
         if not self.is_running:
@@ -510,6 +520,7 @@ class AsyncAphrodite:
 
         if arrival_time is None:
             arrival_time = time.time()
+
         if self.engine_use_ray:
             prompt_token_ids = await self.engine.encode_request_async.remote(
                 request_id=request_id,
@@ -609,15 +620,21 @@ class AsyncAphrodite:
         arrival_time = time.monotonic()
 
         try:
-            stream = await self.add_request(request_id,
-                                            prompt,
-                                            sampling_params,
-                                            prompt_token_ids=prompt_token_ids,
-                                            arrival_time=arrival_time,
-                                            lora_request=lora_request)
+            stream = await self.add_request(
+                request_id,
+                prompt,
+                sampling_params,
+                prompt_token_ids=prompt_token_ids,
+                arrival_time=arrival_time,
+                lora_request=lora_request,
+            )
 
             async for request_output in stream:
                 yield request_output
+        except asyncio.exceptions.CancelledError:
+            logger.info(f"Request {request_id} cancelled.")
+            self._abort(request_id)
+            raise
         except (Exception, asyncio.CancelledError) as e:
             # If there is an exception or coroutine is cancelled, abort the
             # request.

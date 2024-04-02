@@ -26,7 +26,7 @@ from transformers import BloomConfig
 
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import get_act_fn
-from aphrodite.modeling.layers.attention import PagedAttention
+from aphrodite.modeling.layers.attention import Attention
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               LinearMethodBase,
                                               QKVParallelLinear,
@@ -108,10 +108,10 @@ class BloomAttention(nn.Module):
         alibi_slopes = alibi_slopes[head_start:head_end].tolist()
 
         scaling = self.head_dim**-0.5
-        self.attn = PagedAttention(self.num_heads,
-                                   self.head_dim,
-                                   scaling,
-                                   alibi_slopes=alibi_slopes)
+        self.attn = Attention(self.num_heads,
+                              self.head_dim,
+                              scaling,
+                              alibi_slopes=alibi_slopes)
 
     def forward(
         self,

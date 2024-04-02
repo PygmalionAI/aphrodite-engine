@@ -53,7 +53,7 @@ class ModelRunner:
         device_config: DeviceConfig,
         lora_config: Optional[LoRAConfig],
         kv_cache_dtype: Optional[str] = "auto",
-        kv_quant_params_path: Optional[str] = None,
+        # kv_quant_params_path: Optional[str] = None,
         is_driver_worker: bool = False,
     ):
         self.model_config = model_config
@@ -69,6 +69,7 @@ class ModelRunner:
         self.device_config = (device_config
                               if device_config is not None else DeviceConfig())
         self.device = self.device_config.device
+
         self.model = None
         self.block_size = None  # Set after initial profiling.
         self.lora_manager = None
@@ -89,45 +90,58 @@ class ModelRunner:
         # cache in_wsl result
         self.in_wsl = in_wsl()
         self.kv_cache_dtype = kv_cache_dtype
-        self.kv_quant_params = (self.load_kv_quant_params(
-            model_config, kv_quant_params_path)
-                                if self.kv_cache_dtype == "int8" else None)
+        # self.kv_quant_params = (
+        #     self.load_kv_quant_params(model_config, kv_quant_params_path)
+        #     if self.kv_cache_dtype == "int8"
+        #     else None
+        # )
 
-    def load_kv_quant_params(self, model_config: ModelConfig,
-                             kv_quant_params_path: str) -> List[List[float]]:
-        if model_config is None:
-            return None
-        # Remove it when all models support kv cache int8.
-        architectures = model_config.hf_config.architectures
-        for arch in architectures:
-            if arch not in ["LlamaForCausalLM", "LLaMAForCausalLM"]:
-                raise ValueError(
-                    "KV CACHE INT8 is not supported for model architectures "
-                    f"{arch} for now. "
-                    "Supported architectures: LlamaForCausalLM and "
-                    "LLaMAForCausalLM.")
-        num_layers = model_config.hf_config.num_hidden_layers
-        kv_quant_params = []
-        for i in range(num_layers):
-            if kv_quant_params_path is not None:
-                path = (kv_quant_params_path +
-                        f"/layers.{i}.past_kv_scale.0.weight")
-                kv_quant_param = list(np.fromfile(path, dtype=np.float32))
-            kv_quant_params.append(kv_quant_param)
-        return kv_quant_params
+        # Set enforce_eager to True for Neuron backend, to avoid capturing graph
+        if self.device_config.is_neuron:
+            self.model_config.enforce_eager = True
+
+    # def load_kv_quant_params(
+    #     self, model_config: ModelConfig, kv_quant_params_path: str
+    # ) -> List[List[float]]:
+    #     if model_config is None:
+    #         return None
+    #     # Remove it when all models support kv cache int8.
+    #     architectures = model_config.hf_config.architectures
+    #     for arch in architectures:
+    #         if arch not in ["LlamaForCausalLM", "LLaMAForCausalLM"]:
+    #             raise ValueError(
+    #                 "KV CACHE INT8 is not supported for model architectures "
+    #                 f"{arch} for now. "
+    #                 "Supported architectures: LlamaForCausalLM and "
+    #                 "LLaMAForCausalLM."
+    #             )
+    #     num_layers = model_config.hf_config.num_hidden_layers
+    #     kv_quant_params = []
+    #     for i in range(num_layers):
+    #         if kv_quant_params_path is not None:
+    #             path = (
+    #                 kv_quant_params_path + f"/layers.{i}.past_kv_scale.0.weight"  # noqa: E501
+    #             )
+    #             kv_quant_param = list(np.fromfile(path, dtype=np.float32))
+    #         kv_quant_params.append(kv_quant_param)
+    #     return kv_quant_params
 
     def load_model(self) -> None:
         with measure_cuda_memory() as m:
-            self.model = get_model(self.model_config, self.device_config,
-                                   self.lora_config)
+            self.model = get_model(
+                self.model_config,
+                self.device_config,
+                lora_config=self.lora_config,
+                parallel_config=self.parallel_config,
+                scheduler_config=self.scheduler_config,
+            )
+
         self.model_memory_usage = m.consumed_memory
         tp = get_tensor_model_parallel_world_size()
         logger.info(
             "Model weights loaded. Memory usage: "
             f"{self.model_memory_usage / float(2**30):.2f} GiB x {tp} = "
             f"{self.model_memory_usage * tp / float(2**30):.2f} GiB")
-
-        vocab_size = self.model.config.vocab_size
 
         if self.lora_config:
             assert (hasattr(self.model, "supported_lora_modules")
@@ -142,7 +156,7 @@ class ModelRunner:
                 self.scheduler_config.max_num_seqs,
                 self.scheduler_config.max_num_batched_tokens +
                 self.scheduler_config.max_paddings,
-                vocab_size,
+                self.vocab_size,
                 self.lora_config,
                 self.device,
                 self.model.embedding_modules,
@@ -250,6 +264,7 @@ class ModelRunner:
                 slot_mapping[-1].append(slot)
 
         max_prompt_len = max(subquery_lens)
+        assert max_prompt_len > 0
         input_tokens = _make_tensor_with_pad(
             input_tokens,
             max_prompt_len,
@@ -309,7 +324,7 @@ class ModelRunner:
             block_tables=block_tables,
             use_cuda_graph=False,
             kv_cache_dtype=self.kv_cache_dtype,
-            kv_quant_params=self.kv_quant_params,
+            # kv_quant_params=self.kv_quant_params,
         )
         return (
             input_tokens,
@@ -449,7 +464,7 @@ class ModelRunner:
             block_tables=block_tables,
             use_cuda_graph=use_captured_graph,
             kv_cache_dtype=self.kv_cache_dtype,
-            kv_quant_params=self.kv_quant_params,
+            # kv_quant_params=self.kv_quant_params,
         )
         return (
             input_tokens,
@@ -472,6 +487,7 @@ class ModelRunner:
         selected_token_start_idx = 0
         categorized_sample_indices = {t: [] for t in SamplingType}
         categorized_sample_indices_start_idx = 0
+        pin_memory = not self.in_wsl and not self.device_config.is_neuron
 
         max_subquery_len = max(subquery_lens) if subquery_lens else 1
         for i, seq_group_metadata in enumerate(seq_group_metadata_list):
@@ -501,8 +517,8 @@ class ModelRunner:
                 selected_token_indices.append(selected_token_start_idx +
                                               subquery_len - 1)
                 selected_token_start_idx += max_subquery_len
-                if (sampling_params.sampling_type == SamplingType.RANDOM_SEED):
-                    assert sampling_params.seed is not None
+
+                if sampling_params.seed is not None:
                     seq_group_metadata.state.generator = torch.Generator(
                         device="cuda").manual_seed(sampling_params.seed)
             else:
@@ -522,21 +538,21 @@ class ModelRunner:
                         ))
                 categorized_sample_indices_start_idx += num_seqs
 
-            if (seq_group_metadata.state.generator is not None):
+            if sampling_params.seed is not None:
                 generators.append(seq_group_metadata.state.generator)
 
         selected_token_indices = _async_h2d(
             selected_token_indices,
             dtype=torch.long,
             target_device=self.device,
-            pin_memory=not self.in_wsl,
+            pin_memory=pin_memory,
         )
         categorized_sample_indices = {
             t: _async_h2d(
                 seq_ids,
                 dtype=torch.int,
                 target_device=self.device,
-                pin_memory=not self.in_wsl,
+                pin_memory=pin_memory,
             )
             for t, seq_ids in categorized_sample_indices.items()
         }
@@ -621,9 +637,9 @@ class ModelRunner:
                 "block_tables": input_metadata.block_tables,
                 "use_cuda_graph": input_metadata.use_cuda_graph,
                 "kv_cache_dtype": input_metadata.kv_cache_dtype,
-                "kv_quant_params": input_metadata.kv_quant_params,
+                # "kv_quant_params": input_metadata.kv_quant_params,
                 "selected_token_indices":
-                sampling_metadata.selected_token_indices,  # noqa
+                sampling_metadata.selected_token_indices,
                 "lora_requests": lora_requests,
                 "lora_mapping": lora_mapping,
             }
@@ -645,7 +661,7 @@ class ModelRunner:
                 block_tables=metadata_dict["block_tables"],
                 use_cuda_graph=metadata_dict["use_cuda_graph"],
                 kv_cache_dtype=metadata_dict["kv_cache_dtype"],
-                kv_quant_params=metadata_dict["kv_quant_params"],
+                # kv_quant_params=metadata_dict["kv_quant_params"],
             )
             sampling_metadata = SamplingMetadata(
                 seq_groups=None,
@@ -707,8 +723,7 @@ class ModelRunner:
     @torch.inference_mode()
     def profile_run(self) -> None:
         # Enable top-k sampling to reflect the accurate memory usage.
-        vocab_size = self.model_config.get_vocab_size()
-        sampling_params = SamplingParams(top_p=0.99, top_k=vocab_size - 1)
+        sampling_params = SamplingParams(top_p=0.99, top_k=self.vocab_size - 1)
         max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens
         max_num_seqs = self.scheduler_config.max_num_seqs
 
@@ -789,8 +804,9 @@ class ModelRunner:
     @torch.inference_mode()
     def capture_model(self, kv_caches: List[KVCache]) -> None:
         # NOTE: This is a hack to ensure that the NCCL backend is never
-        # deleted before the CUDA graph
+        # deleted before the CUDA graphs.
         self.cupy_nccl_backend = cupy_utils.get_nccl_backend()
+
         assert not self.model_config.enforce_eager
         logger.info("Capturing the model for CUDA graphs. This may lead to "
                     "unexpected consequences if the model is not static. To "
@@ -818,8 +834,6 @@ class ModelRunner:
             bs for bs in _BATCH_SIZES_TO_CAPTURE if bs <= graph_batch_size
         ]
 
-        # NOTE: Capturing the largest batch size first may help reduce the
-        # memory usage of CUDA graph.
         # NOTE: There are 3 backends for all-reduce: custom all-reduce
         # kernel, CuPy NCCL, and PyTorch NCCL. When using CUDA graph, we use
         # either custom all-reduce kernel or CuPy NCCL. When not using CUDA
@@ -847,7 +861,7 @@ class ModelRunner:
                     block_tables=block_tables[:batch_size],
                     use_cuda_graph=True,
                     kv_cache_dtype=self.kv_cache_dtype,
-                    kv_quant_params=self.kv_quant_params,
+                    # kv_quant_params=self.kv_quant_params,
                 )
 
                 if self.lora_config:
@@ -881,6 +895,10 @@ class ModelRunner:
         # FIXME: This is a bit hacky. Find a more robust solution.
         self.graph_runners.clear()
         self.cupy_nccl_backend = None
+
+    @property
+    def vocab_size(self) -> int:
+        return self.model_config.get_vocab_size()
 
 
 class CUDAGraphRunner:
@@ -916,14 +934,14 @@ class CUDAGraphRunner:
         # NOTE: Python 3.8 does not support multi-line with statements.
         # https://stackoverflow.com/questions/31039022/python-multi-line-with-statement
         self.graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(self.graph,
-                              pool=memory_pool), _maybe_cupy_nccl():
-            hidden_states = self.model(
-                input_ids,
-                positions,
-                kv_caches,
-                input_metadata,
-            )
+        with torch.cuda.graph(self.graph, pool=memory_pool):  # noqa: SIM117
+            with _maybe_cupy_nccl():
+                hidden_states = self.model(
+                    input_ids,
+                    positions,
+                    kv_caches,
+                    input_metadata,
+                )
         torch.cuda.synchronize()
 
         # Save the input and output buffers.
