@@ -10,6 +10,7 @@ from aphrodite.common.config import (
     SchedulerConfig,
     LoRAConfig,
     DeviceConfig,
+    TokenizerPoolConfig,
 )
 
 
@@ -51,6 +52,9 @@ class EngineArgs:
     enforce_eager: bool = True
     max_context_len_to_capture: int = 8192
     disable_custom_all_reduce: bool = False
+    tokenizer_pool_size: int = 0
+    tokenizer_pool_type: str = "ray"
+    tokenizer_pool_extra_config: Optional[dict] = None
     enable_lora: bool = False
     max_loras: int = 1
     max_lora_rank: int = 16
@@ -347,6 +351,25 @@ class EngineArgs:
             default=EngineArgs.disable_custom_all_reduce,
             help="See ParallelConfig",
         )
+        parser.add_argument("--tokenizer-pool-size",
+                            type=int,
+                            default=EngineArgs.tokenizer_pool_size,
+                            help="Size of tokenizer pool to use for "
+                            "asynchronous tokenization. If 0, will "
+                            "use synchronous tokenization.")
+        parser.add_argument("--tokenizer-pool-type",
+                            type=str,
+                            default=EngineArgs.tokenizer_pool_type,
+                            help="The type of tokenizer pool to use for "
+                            "asynchronous tokenization. Ignored if "
+                            "tokenizer_pool_size is 0.")
+        parser.add_argument("--tokenizer-pool-extra-config",
+                            type=str,
+                            default=EngineArgs.tokenizer_pool_extra_config,
+                            help="Extra config for tokenizer pool. "
+                            "This should be a JSON string that will be "
+                            "parsed into a dictionary. Ignored if "
+                            "tokenizer_pool_size is 0.")
         # LoRA related configs
         parser.add_argument(
             "--enable-lora",
@@ -448,6 +471,11 @@ class EngineArgs:
             self.worker_use_ray,
             self.max_parallel_loading_workers,
             self.disable_custom_all_reduce,
+            TokenizerPoolConfig.create_config(
+                self.tokenizer_pool_size,
+                self.tokenizer_pool_type,
+                self.tokenizer_pool_extra_config,
+            ),
             self.ray_workers_use_nsight,
         )
         scheduler_config = SchedulerConfig(
