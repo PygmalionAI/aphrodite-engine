@@ -61,6 +61,16 @@ class cmake_build_ext(build_ext):
         except AttributeError:
             num_jobs = os.cpu_count()
 
+        # Check if MAX_JOBS environment variable is set
+        max_jobs = os.getenv("MAX_JOBS")
+        if max_jobs is not None:
+            try:
+                max_jobs = int(max_jobs)
+                num_jobs = min(num_jobs, max_jobs)
+            except ValueError:
+                # If MAX_JOBS is not a valid integer, ignore it
+                pass
+
         nvcc_cuda_version = get_nvcc_cuda_version()
         if nvcc_cuda_version >= Version("11.2"):
             nvcc_threads = int(os.getenv("NVCC_THREADS", 8))
