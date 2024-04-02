@@ -11,8 +11,6 @@ import os
 import base64
 import numpy as np
 from transformers import AutoModel
-from pydantic import BaseModel, Field
-from typing import List
 
 embeddings_params_initialized = False
 
@@ -137,30 +135,3 @@ def float_list_to_base64(float_array: np.ndarray) -> str:
     # Turn raw base64 encoded bytes into ASCII
     ascii_string = encoded_bytes.decode('ascii')
     return ascii_string
-
-
-class EmbeddingsRequest(BaseModel):
-    input: str | List[str] | List[int] | List[List[int]]
-    model: str | None = Field(
-        default=None,
-        description="Unused parameter. To change the model, " +
-        "set the OPENEDAI_EMBEDDING_MODEL and OPENEDAI_EMBEDDING_DEVICE" +
-        " environment variables before starting the server.")
-    encoding_format: str = Field(default="float",
-                                 description="Can be float or base64.")
-    user: str | None = Field(default=None, description="Unused parameter.")
-
-
-class EmbeddingsResponse(BaseModel):
-    index: int
-    embedding: List[float]
-    object: str = "embedding"
-
-
-class EncodeRequest(BaseModel):
-    text: str
-
-
-class EncodeResponse(BaseModel):
-    tokens: List[int]
-    length: int
