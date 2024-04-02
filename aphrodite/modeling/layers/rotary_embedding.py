@@ -202,7 +202,6 @@ class LinearScalingRotaryEmbedding(RotaryEmbedding):
         return torch.cat(cache_list, dim=0)
 
 
-
 class DynamicNTKScalingRotaryEmbedding(RotaryEmbedding):
     """RotaryEmbedding extended with Dynamic NTK scaling.
 
