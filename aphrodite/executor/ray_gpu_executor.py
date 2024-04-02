@@ -3,36 +3,33 @@ import copy
 from collections import defaultdict
 import os
 import pickle
+import importlib
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from loguru import logger
 
-from aphrodite.common.config import (
-    CacheConfig,
-    DeviceConfig,
-    ModelConfig,
-    ParallelConfig,
-    SchedulerConfig,
-    LoRAConfig,
-)
+from aphrodite.common.config import (CacheConfig, DeviceConfig, ModelConfig,
+                         ParallelConfig, SchedulerConfig, LoRAConfig)
 from aphrodite.engine.ray_tools import RayWorkerAphrodite, ray
 from aphrodite.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from aphrodite.executor.utils import check_block_size_valid
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
-from aphrodite.common.utils import (
-    set_cuda_visible_devices,
-    get_ip,
-    get_open_port,
-    get_distributed_init_method,
-    make_async,
-)
+from aphrodite.common.utils import (set_cuda_visible_devices, get_ip, get_open_port,
+                        get_distributed_init_method, make_async)
 
 if ray is not None:
     from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
+
+
+# A map between the device type (in device config) to its worker module.
+DEVICE_TO_WORKER_MODULE_MAP = {
+    "cuda": "aphrodite.task_handler.worker",
+    "neuron": "aphrodite.task_handler.neuron_worker",
+}
 
 # If the env var is set, it uses the Ray's compiled DAG API
 # which optimizes the control plane overhead.
@@ -75,6 +72,13 @@ class RayGPUExecutor(ExecutorBase):
         self.forward_dag = None
         if USE_RAY_COMPILED_DAG:
             self.forward_dag = self._compiled_ray_dag()
+
+    def _dispatch_worker(self):
+        worker_module = DEVICE_TO_WORKER_MODULE_MAP[
+            self.device_config.device_type]
+        imported_worker = importlib.import_module(worker_module)
+        Worker = imported_worker.Worker
+        return Worker
 
     def _init_workers_ray(self, placement_group: "PlacementGroup",
                           **ray_remote_kwargs):
@@ -151,7 +155,7 @@ class RayGPUExecutor(ExecutorBase):
 
         # Lazy import the Worker to avoid importing torch.cuda/xformers
         # before CUDA_VISIBLE_DEVICES is set in the Worker
-        from aphrodite.task_handler.worker import Worker
+        Worker = self._dispatch_worker()
 
         model_config = copy.deepcopy(self.model_config)
         parallel_config = copy.deepcopy(self.parallel_config)
@@ -195,13 +199,11 @@ class RayGPUExecutor(ExecutorBase):
             is_driver_worker=True,
         )
 
-        # FIXME(woosuk): We are not properly initializing cupy NCCL when
+        # FIXME: We are not properly initializing cupy NCCL when
         # we have multiple nodes.
-        self._run_workers(
-            "init_device",
-            cupy_port=get_open_port()
-            if not model_config.enforce_eager else None,
-        )
+        self._run_workers("init_model",
+                          cupy_port=get_open_port()
+                          if not model_config.enforce_eager else None)
         self._run_workers(
             "load_model",
             max_concurrent_workers=self.parallel_config.
@@ -228,7 +230,7 @@ class RayGPUExecutor(ExecutorBase):
         .. tip::
             You may limit the usage of GPU memory
             by adjusting the `gpu_memory_utilization` parameter.
-        """  # noqa: E501
+        """
         # Get the maximum number of blocks that can be allocated on GPU and CPU.
         num_blocks = self._run_workers(
             "profile_num_available_blocks",
@@ -265,13 +267,11 @@ class RayGPUExecutor(ExecutorBase):
         # if enforce_eager is False.
         self._run_workers("warm_up_model")
 
-    def execute_model(
-        self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-        blocks_to_swap_in: Dict[int, int],
-        blocks_to_swap_out: Dict[int, int],
-        blocks_to_copy: Dict[int, List[int]],
-    ) -> SamplerOutput:
+    def execute_model(self,
+                      seq_group_metadata_list: List[SequenceGroupMetadata],
+                      blocks_to_swap_in: Dict[int, int],
+                      blocks_to_swap_out: Dict[int, int],
+                      blocks_to_copy: Dict[int, List[int]]) -> SamplerOutput:
         all_outputs = self._run_workers(
             "execute_model",
             driver_kwargs={
@@ -280,8 +280,7 @@ class RayGPUExecutor(ExecutorBase):
                 "blocks_to_swap_out": blocks_to_swap_out,
                 "blocks_to_copy": blocks_to_copy,
             },
-            use_ray_compiled_dag=USE_RAY_COMPILED_DAG,
-        )
+            use_ray_compiled_dag=USE_RAY_COMPILED_DAG)
 
         # Only the driver worker returns the sampling results.
         output = all_outputs[0]
@@ -322,7 +321,7 @@ class RayGPUExecutor(ExecutorBase):
 
         if use_ray_compiled_dag:
             # Right now, compiled DAG can only accept a single
-            # input. TODO(sang): Fix it.
+            # input. TODO: Fix it.
             output_channels = self.forward_dag.execute(1)
         else:
             # Start the ray workers first.
@@ -359,7 +358,6 @@ class RayGPUExecutor(ExecutorBase):
 
     def _compiled_ray_dag(self):
         import pkg_resources
-
         required_version = "2.9"
         current_version = pkg_resources.get_distribution("ray").version
         if current_version < required_version:
@@ -367,7 +365,6 @@ class RayGPUExecutor(ExecutorBase):
                              f"required, but found {current_version}")
 
         from ray.dag import MultiOutputNode, InputNode
-
         assert self.parallel_config.worker_use_ray
 
         # Right now, compiled DAG requires at least 1 arg. We send
@@ -441,7 +438,7 @@ class RayGPUExecutorAsync(RayGPUExecutor, ExecutorAsyncBase):
                 "blocks_to_swap_out": blocks_to_swap_out,
                 "blocks_to_copy": blocks_to_copy,
             },
-        )
+            use_ray_compiled_dag=USE_RAY_COMPILED_DAG)
 
         # Only the driver worker returns the sampling results.
         output = all_outputs[0]
