@@ -3,6 +3,7 @@ import io
 import os
 import re
 import subprocess
+import sys
 from typing import List, Set
 import warnings
 from pathlib import Path
@@ -21,6 +22,9 @@ MAIN_CUDA_VERSION = "12.1"
 # Supported NVIDIA GPU architectures.
 NVIDIA_SUPPORTED_ARCHS = {"6.1", "7.0", "7.5", "8.0", "8.6", "8.9", "9.0"}
 ROCM_SUPPORTED_ARCHS = {"gfx908", "gfx90a", "gfx942", "gfx1100"}
+
+assert sys.platform.startswith(
+    "linux"), "Aphrodite only supports Linux at the moment (including WSL)."
 
 
 def _is_hip() -> bool:
@@ -443,11 +447,14 @@ def get_aphrodite_version() -> str:
         if neuron_version != MAIN_CUDA_VERSION:
             neuron_version_str = neuron_version.replace(".", "")[:3]
             version += f"+neuron{neuron_version_str}"
-    else:
+    elif _is_cuda():
         cuda_version = str(nvcc_cuda_version)
         if cuda_version != MAIN_CUDA_VERSION:
             cuda_version_str = cuda_version.replace(".", "")[:3]
             version += f"+cu{cuda_version_str}"
+    else:
+        raise RuntimeError("Unknown environment. Only "
+                           "CUDA, HIP, and Neuron are supported.")
 
     return version
 

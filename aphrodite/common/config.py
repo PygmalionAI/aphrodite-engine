@@ -308,7 +308,7 @@ class ModelConfig:
 
     def get_sliding_window(self) -> Optional[int]:
         if (hasattr(self.hf_config, "use_sliding_window")
-            and not self.hf_config.use_sliding_window):
+                and not self.hf_config.use_sliding_window):
             return None
         return getattr(self.hf_config, "sliding_window", None)
 
