@@ -221,7 +221,8 @@ async def detokenize(request: Request,
 
 
 @app.post("/v1/embeddings")
-async def handle_embeddings(request: Request):
+async def handle_embeddings(request: Request,
+                            x_api_key: Optional[str] = Header(None)):
     request_data = await request.json()
     input = request_data["input"]
     if not input:
