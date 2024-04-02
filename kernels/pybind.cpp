@@ -55,6 +55,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     "rotary_embedding",
     &rotary_embedding,
     "Apply GPT-NeoX or GPT-J style rotary embedding to query and key");
+  ops.def(
+    "batched_rotary_embedding",
+    &batched_rotary_embedding,
+    "Apply batched GPT-NeoX or GPT-J style rotary embedding to query and key");
 
 #ifndef USE_ROCM
   // Quantization ops
