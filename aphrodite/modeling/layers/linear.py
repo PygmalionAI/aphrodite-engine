@@ -605,7 +605,12 @@ class RowParallelLinear(torch.nn.Module):
 
     def forward(self, input_):
         # Set up backprop all-reduce.
-        if self.input_is_parallel:
+        is_exl2 = hasattr(self.linear_method, "quant_config"
+                          ) and self.linear_method.quant_config.get_name(
+                          ) == "exl2"
+        if self.input_is_parallel and is_exl2:
+            input_parallel = tensor_model_parallel_all_gather(input_)
+        elif self.input_is_parallel or is_exl2:
             input_parallel = input_
         else:
             tp_rank = get_tensor_model_parallel_rank()

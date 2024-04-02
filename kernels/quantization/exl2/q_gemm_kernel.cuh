@@ -141,6 +141,7 @@ typedef void (*fp_gemm_half_q_half_kernel)
     const int,
     const int,
     const int,
+    const int,
     const uint16_t*,
     const uint16_t*,
     const int,
@@ -163,6 +164,7 @@ __global__ void gemm_half_q_half_kernel
     const int size_m,
     const int size_n,
     const int size_k,
+    const int height,
     const int groups,
     const uint16_t* __restrict__ b_q_group_map,
     const uint16_t* __restrict__ b_q_perm,
@@ -189,7 +191,7 @@ __global__ void gemm_half_q_half_kernel
 
     int end_n = min(offset_n + EXL2_BLOCK_KN_SIZE * 4, size_n);
     int end_m = min(offset_m + m_count, size_m);
-    int end_k = min(offset_k + EXL2_BLOCK_KN_SIZE, size_k);
+    int end_k = min(offset_k + EXL2_BLOCK_KN_SIZE, height);
     int n = offset_n + t * 4;
 
     // Read weights
