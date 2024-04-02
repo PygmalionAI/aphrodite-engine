@@ -5,7 +5,7 @@ import torch
 
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import SequenceData
-from aphrodite.common.utils import in_wsl
+from aphrodite.common.utils import in_wsl, is_neuron
 
 _SAMPLING_EPS = 1e-5
 
@@ -225,7 +225,7 @@ class SamplingTensors:
 
         # Note that the performance will be very bad without pinned memory.
         # Pinned memory allows non-blocking transfers to device.
-        pin_memory = not in_wsl()
+        pin_memory = not in_wsl() and not is_neuron()
 
         def _tensor(contents: list, dtype) -> torch.Tensor:
             loc_t = torch.tensor(contents,

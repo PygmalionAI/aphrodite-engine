@@ -1,9 +1,10 @@
 """
-Internal logging utility. Adapted from
-https://github.com/theroyallab/tabbyAPI/blob/4cc0b59bdc94e6342b6d1d7acadbadc63c740ed9/common/logger.py
+Internal logging utility.
 """
 
 import logging
+import os
+
 from loguru import logger
 from rich.console import Console
 from rich.markup import escape
@@ -17,6 +18,7 @@ from rich.progress import (
 )
 
 RICH_CONSOLE = Console()
+LOG_LEVEL = os.getenv("APHRODITE_LOG_LEVEL", "INFO").upper()
 
 
 def unwrap(wrapped, default=None):
@@ -60,9 +62,9 @@ def _log_formatter(record: dict):
     message = unwrap(record.get("message"), "")
 
     # Replace once loguru allows for turning off str.format
-    message = message.replace("{{", "{{").replace("}}", "}}")
-    # Manually escape < and > characters
-    message = message.replace("<", "\\<").replace(">", "\\>")
+    message = message.replace("{", "{{").replace("}", "}}").replace("<", "\<")
+
+    # Escape markup tags from Rich
     message = escape(message)
     lines = message.splitlines()
 
@@ -86,7 +88,7 @@ class UvicornLoggingHandler(logging.Handler):
 
 
 # Uvicorn config for logging. Passed into run when creating all loggers in
-#server
+# server
 UVICORN_LOG_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -99,7 +101,7 @@ UVICORN_LOG_CONFIG = {
     "root": {
         "handlers": ["uvicorn"],
         "propagate": False,
-        "level": "INFO"
+        "level": LOG_LEVEL
     },
 }
 
@@ -111,7 +113,7 @@ def setup_logger():
 
     logger.add(
         RICH_CONSOLE.print,
-        level="INFO",
+        level=LOG_LEVEL,
         format=_log_formatter,
         colorize=True,
     )

@@ -55,6 +55,11 @@ class UsageInfo(BaseModel):
     completion_tokens: Optional[int] = 0
 
 
+class ResponseFormat(BaseModel):
+    # type must be "json_object" or "text"
+    type: str = Literal["text", "json_object"]
+
+
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: List[Dict[str, str]]
@@ -102,6 +107,8 @@ class ChatCompletionRequest(BaseModel):
     guided_json: Optional[Union[str, dict, BaseModel]] = None
     guided_regex: Optional[str] = None
     guided_choice: Optional[List[str]] = None
+    guided_grammar: Optional[str] = None
+    response_format: Optional[ResponseFormat] = None
 
     def to_sampling_params(self, vocab_size: int) -> SamplingParams:
         if self.logprobs and not self.top_logprobs:
@@ -224,6 +231,8 @@ class CompletionRequest(BaseModel):
     guided_json: Optional[Union[str, dict, BaseModel]] = None
     guided_regex: Optional[str] = None
     guided_choice: Optional[List[str]] = None
+    guided_grammar: Optional[str] = None
+    response_format: Optional[ResponseFormat] = None
 
     def to_sampling_params(self, vocab_size: int) -> SamplingParams:
         echo_without_generation = self.echo and self.max_tokens == 0
@@ -370,6 +379,37 @@ class ChatCompletionStreamResponse(BaseModel):
     choices: List[ChatCompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = Field(default=None)
     logprobs: Optional[LogProbs] = None
+
+
+class EmbeddingsRequest(BaseModel):
+    input: List[str] = Field(
+        ..., description="List of input texts to generate embeddings for.")
+    encoding_format: str = Field(
+        "float",
+        description="Encoding format for the embeddings. "
+        "Can be 'float' or 'base64'.")
+    model: Optional[str] = Field(
+        None,
+        description="Name of the embedding model to use. "
+        "If not provided, the default model will be used.")
+
+
+class EmbeddingObject(BaseModel):
+    object: str = Field("embedding", description="Type of the object.")
+    embedding: List[float] = Field(
+        ..., description="Embedding values as a list of floats.")
+    index: int = Field(
+        ...,
+        description="Index of the input text corresponding to "
+        "the embedding.")
+
+
+class EmbeddingsResponse(BaseModel):
+    object: str = Field("list", description="Type of the response object.")
+    data: List[EmbeddingObject] = Field(
+        ..., description="List of embedding objects.")
+    model: str = Field(..., description="Name of the embedding model used.")
+    usage: UsageInfo = Field(..., description="Information about token usage.")
 
 
 class Prompt(BaseModel):
