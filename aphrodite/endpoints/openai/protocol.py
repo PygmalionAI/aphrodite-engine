@@ -59,6 +59,7 @@ class ResponseFormat(BaseModel):
     # type must be "json_object" or "text"
     type: str = Literal["text", "json_object"]
 
+
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: List[Dict[str, str]]
