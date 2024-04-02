@@ -25,14 +25,14 @@ def initialize_embedding_params():
 
         global st_model, embeddings_model, embeddings_device
 
-        st_model = os.environ.get("OPENEDAI_EMBEDDING_MODEL",
+        st_model = os.environ.get("OPENAI_EMBEDDING_MODEL",
                                   'all-mpnet-base-v2')
         embeddings_model = None
-        # OPENEDAI_EMBEDDING_DEVICE: auto (best or cpu),
+        # OPENAI_EMBEDDING_DEVICE: auto (best or cpu),
         # cpu, cuda, ipu, xpu, mkldnn, opengl, opencl, ideep,
         # hip, ve, fpga, ort, xla, lazy, vulkan, mps, meta,
         # hpu, mtia, privateuseone
-        embeddings_device = os.environ.get("OPENEDAI_EMBEDDING_DEVICE", 'cpu')
+        embeddings_device = os.environ.get("OPENAI_EMBEDDING_DEVICE", 'cpu')
         if embeddings_device.lower() == 'auto':
             embeddings_device = None
 
