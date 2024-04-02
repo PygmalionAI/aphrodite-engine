@@ -44,6 +44,7 @@ class GeluAndMul(nn.Module):
         x: (batch_size, seq_len, 2 * d) or (num_tokens, 2 * d)
         return: (batch_size, seq_len, d) or (num_tokens, d)
     """
+
     def __init__(self, approximate: str = "none"):
         super().__init__()
         self.approximate = approximate
