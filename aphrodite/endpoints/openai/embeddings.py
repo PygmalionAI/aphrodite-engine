@@ -95,7 +95,14 @@ def get_embeddings(input: list) -> np.ndarray:
     return embedding
 
 
-async def embeddings(input: list, encoding_format: str) -> dict:
+async def embeddings(input: list,
+                     encoding_format: str,
+                     model: str = None) -> dict:
+    if model is None:
+        model = st_model
+    else:
+        load_embedding_model(model)
+
     embeddings = get_embeddings(input)
     if encoding_format == "base64":
         data = [{
@@ -113,7 +120,7 @@ async def embeddings(input: list, encoding_format: str) -> dict:
     response = {
         "object": "list",
         "data": data,
-        "model": st_model,  # return the real model
+        "model": st_model if model is None else model,
         "usage": {
             "prompt_tokens": 0,
             "total_tokens": 0,

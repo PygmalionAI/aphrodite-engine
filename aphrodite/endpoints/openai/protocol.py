@@ -389,6 +389,10 @@ class EmbeddingsRequest(BaseModel):
         description="Encoding format for the embeddings. "
         "Can be 'float' or 'base64'."
     )
+    model: Optional[str] = Field(
+        None, description="Name of the embedding model to use. "
+        "If not provided, the default model will be used."
+    )
 
 
 class EmbeddingObject(BaseModel):
