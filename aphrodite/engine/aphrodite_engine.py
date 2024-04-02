@@ -1,36 +1,40 @@
-import copy
-from collections import defaultdict
-import os
 import time
-from typing import (TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple,
-                    Union)
+from typing import Dict, Iterable, List, Optional, Tuple, Type, Union
 from loguru import logger
+from transformers import PreTrainedTokenizer
 
 import aphrodite
 from aphrodite.lora.request import LoRARequest
-from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
-                                     SchedulerConfig, LoRAConfig, DeviceConfig)
+from aphrodite.common.config import (
+    CacheConfig,
+    DeviceConfig,
+    ModelConfig,
+    ParallelConfig,
+    SchedulerConfig,
+    LoRAConfig,
+)
 from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
 from aphrodite.engine.args_tools import EngineArgs
+from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.engine.metrics import StatLogger, Stats
-from aphrodite.engine.ray_tools import (RayWorkerAphrodite, initialize_cluster,
-                                        ray)
-from aphrodite.common.logger import setup_logger
+from aphrodite.engine.ray_tools import (initialize_ray_cluster)
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.common.sequence import (SamplerOutput, Sequence, SequenceGroup,
-                                       SequenceGroupOutput, SequenceOutput,
-                                       SequenceStatus, Logprob)
-from aphrodite.transformers_utils.tokenizer import (detokenize_incrementally,
-                                                    TokenizerGroup)
-from aphrodite.common.utils import (Counter, set_cuda_visible_devices, get_ip,
-                                    get_open_port)
-
-if ray:
-    from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
-
-if TYPE_CHECKING:
-    from ray.util.placement_group import PlacementGroup
+from aphrodite.common.sequence import (
+    Logprob,
+    SamplerOutput,
+    Sequence,
+    SequenceGroup,
+    SequenceGroupOutput,
+    SequenceOutput,
+    SequenceStatus,
+)
+from aphrodite.transformers_utils.tokenizer import (detokenize_incrementally)
+from aphrodite.transformers_utils.tokenizer_group import (BaseTokenizerGroup,
+                                                          get_tokenizer_group)
+from aphrodite.common.utils import (
+    Counter, )
+from aphrodite.common.logger import setup_logger
 
 _LOCAL_LOGGING_INTERVAL_SEC = 5
 
@@ -59,8 +63,8 @@ class AphroditeEngine:
         scheduler_config: The configuration related to the request scheduler.
         device_config: The configuration related to the device.
         lora_config: The configuration related to LoRA.
-        placement_group: Ray placement group for distributed execution.
-            Required for distributed execution.
+        executor_class: The model executor class for managing distributed
+            execution.
         log_stats: Whether to log statistics.
     """
 
@@ -72,7 +76,7 @@ class AphroditeEngine:
         scheduler_config: SchedulerConfig,
         device_config: DeviceConfig,
         lora_config: Optional[LoRAConfig],
-        placement_group: Optional["PlacementGroup"],
+        executor_class: Type[ExecutorBase],
         log_stats: bool,
     ) -> None:
         logger.info(
@@ -88,7 +92,7 @@ class AphroditeEngine:
             f"Context Length = {model_config.max_model_len}\n"
             f"Enforce Eager Mode = {model_config.enforce_eager}\n"
             f"KV Cache Data Type = {cache_config.cache_dtype}\n"
-            f"KV Cache Params Path = {cache_config.cache_quant_params_path}\n"
+            # f"KV Cache Params Path = {cache_config.cache_quant_params_path}\n"
             f"Device = {device_config.device}")
         # TODO: Print more configs in debug mode.
 
@@ -104,187 +108,76 @@ class AphroditeEngine:
         self._init_tokenizer()
         self.seq_counter = Counter()
 
-        # Create the parallel GPU workers.
-        if self.parallel_config.worker_use_ray:
-            # Disable Ray usage stats collection.
-            ray_usage = os.environ.get("RAY_USAGE_STATS_ENABLED", "0")
-            if ray_usage != "1":
-                os.environ["RAY_USAGE_STATS_ENABLED"] = "0"
-            self._init_workers_ray(placement_group)
-        else:
-            self._init_workers()
+        self.model_executor = executor_class(model_config, cache_config,
+                                             parallel_config, scheduler_config,
+                                             device_config, lora_config)
 
-        # Profile the memory usage and initialize the cache.
-        self._init_cache()
+        # Ping the tokenizer to ensure it is loaded if
+        # it runs on a separate process.
+        self.tokenizer.ping()
 
         # Create the scheduler.
+        # NOTE: the cache_config here have been updated with the numbers of
+        # GPU and CPU blocks, which are profiled in the distributed executor.
         self.scheduler = Scheduler(scheduler_config, cache_config, lora_config)
 
         # Metric Logging.
         if self.log_stats:
             self.stat_logger = StatLogger(
                 local_interval=_LOCAL_LOGGING_INTERVAL_SEC,
-                labels=dict(model_name=model_config.model))
+                labels=dict(model_name=model_config.model),
+            )
+            self.stat_logger.info("cache_config", self.cache_config)
 
-    def get_tokenizer_for_seq(self, sequence: Sequence):
+    @classmethod
+    def from_engine_args(cls, engine_args: EngineArgs) -> "AphroditeEngine":
+        """Creates an LLM engine from the engine arguments."""
+        # Create the engine configs.
+        engine_configs = engine_args.create_engine_configs()
+        parallel_config = engine_configs[2]
+
+        # Initialize the cluster and specify the executor class.
+        if parallel_config.worker_use_ray:
+            initialize_ray_cluster(parallel_config)
+            from aphrodite.executor.ray_gpu_executor import RayGPUExecutor
+            executor_class = RayGPUExecutor
+        else:
+            assert parallel_config.world_size == 1, (
+                "Ray is required if parallel_config.world_size > 1.")
+            from aphrodite.executor.gpu_executor import GPUExecutor
+            executor_class = GPUExecutor
+
+        # Create the LLM engine.
+        engine = cls(*engine_configs,
+                     executor_class=executor_class,
+                     log_stats=not engine_args.disable_log_stats)
+        return engine
+
+    def __reduce__(self):
+        # This is to ensure that the AphroditeEngine is not referenced in
+        # the closure used to initialize Ray worker actors
+        raise RuntimeError("AphroditeEngine should not be pickled!")
+
+    def get_tokenizer(self) -> "PreTrainedTokenizer":
+        return self.tokenizer.get_lora_tokenizer()
+
+    def get_tokenizer_for_seq(self,
+                              sequence: Sequence) -> "PreTrainedTokenizer":
         return self.tokenizer.get_lora_tokenizer(sequence.lora_request)
-
-    def _init_workers(self):
-        # Lazy import the Worker to avoid importing torch.cuda/xformers
-        # before CUDA_VISIBLE_DEVICES is set in the Worker
-        # pylint: disable=import-outside-toplevel
-        from aphrodite.task_handler.worker import Worker
-
-        assert self.parallel_config.world_size == 1, (
-            "Ray is required if parallel_config.world_size > 1.")
-
-        self.workers: List[Worker] = []
-        distributed_init_method = f"tcp://{get_ip()}:{get_open_port()}"
-        self.driver_worker = Worker(
-            self.model_config,
-            self.parallel_config,
-            self.scheduler_config,
-            self.device_config,
-            local_rank=0,
-            rank=0,
-            distributed_init_method=distributed_init_method,
-            lora_config=self.lora_config,
-            kv_cache_dtype=self.cache_config.cache_dtype,
-            kv_quant_params_path=(self.cache_config.cache_quant_params_path),
-            is_driver_worker=True,
-        )
-        self._run_workers("init_model")
-        self._run_workers("load_model")
 
     def _init_tokenizer(self, **tokenizer_init_kwargs):
         init_kwargs = dict(
+            tokenizer_id=self.model_config.tokenizer,
             enable_lora=bool(self.lora_config),
             max_num_seqs=self.scheduler_config.max_num_seqs,
             max_input_length=None,
             tokenizer_mode=self.model_config.tokenizer_mode,
             trust_remote_code=self.model_config.trust_remote_code,
-            revision=self.model_config.tokenizer_revision)
+            revision=self.model_config.tokenizer_revision,
+        )
         init_kwargs.update(tokenizer_init_kwargs)
-        self.tokenizer: TokenizerGroup = TokenizerGroup(
-            self.model_config.tokenizer, **init_kwargs)
-
-    def _init_workers_ray(self, placement_group: "PlacementGroup",
-                          **ray_remote_kwargs):
-        if self.parallel_config.tensor_parallel_size == 1:
-            num_gpus = self.cache_config.gpu_memory_utilization
-        else:
-            num_gpus = 1
-
-        self.driver_dummy_worker: RayWorkerAphrodite = None
-        self.workers: List[RayWorkerAphrodite] = []
-
-        driver_ip = get_ip()
-        for bundle_id, bundle in enumerate(placement_group.bundle_specs):
-            if not bundle.get("GPU", 0):
-                continue
-            scheduling_strategy = PlacementGroupSchedulingStrategy(
-                placement_group=placement_group,
-                placement_group_capture_child_tasks=True,
-                placement_group_bundle_index=bundle_id,
-            )
-            worker = ray.remote(
-                num_cpus=0,
-                num_gpus=num_gpus,
-                scheduling_strategy=scheduling_strategy,
-                **ray_remote_kwargs,
-            )(RayWorkerAphrodite).remote(self.model_config.trust_remote_code)
-
-            worker_ip = ray.get(worker.get_node_ip.remote())
-            if worker_ip == driver_ip and self.driver_dummy_worker is None:
-                # If the worker is on the same node as the driver, we use it
-                # as the resource holder for the driver process.
-                self.driver_dummy_worker = worker
-            else:
-                self.workers.append(worker)
-
-        if self.driver_dummy_worker is None:
-            raise ValueError(
-                "Ray does not allocate any GPUs on the driver node. Consider "
-                "adjusting the Ray placement group or running the driver on a "
-                "GPU node.")
-
-        driver_node_id, driver_gpu_ids = ray.get(
-            self.driver_dummy_worker.get_node_and_gpu_ids.remote())
-        worker_node_and_gpu_ids = ray.get(
-            [worker.get_node_and_gpu_ids.remote() for worker in self.workers])
-
-        node_workers = defaultdict(list)
-        node_gpus = defaultdict(list)
-
-        node_workers[driver_node_id].append(0)
-        node_gpus[driver_node_id].extend(driver_gpu_ids)
-        for i, (node_id, gpu_ids) in enumerate(worker_node_and_gpu_ids,
-                                               start=1):
-            node_workers[node_id].append(i)
-            node_gpus[node_id].extend(gpu_ids)
-        for node_id, gpu_ids in node_gpus.items():
-            node_gpus[node_id] = sorted(gpu_ids)
-
-        # Set CUDA_VISIBLE_DEVICES for the driver.
-        set_cuda_visible_devices(node_gpus[driver_node_id])
-        for worker, (node_id, _) in zip(self.workers, worker_node_and_gpu_ids):
-            worker.set_cuda_visible_devices.remote(node_gpus[node_id])
-
-        distributed_init_method = f"tcp://{driver_ip}:{get_open_port()}"
-
-        # Lazy import the Worker to avoid importing torch.cuda/xformers
-        # before CUDA_VISIBLE_DEVICES is set in the Worker
-        # pylint: disable=import-outside-toplevel
-        from aphrodite.task_handler.worker import Worker
-
-        # Initialize torch distributed process group for the workers.
-        model_config = copy.deepcopy(self.model_config)
-        parallel_config = copy.deepcopy(self.parallel_config)
-        scheduler_config = copy.deepcopy(self.scheduler_config)
-        device_config = copy.deepcopy(self.device_config)
-
-        for rank, (worker, (node_id,
-                            _)) in enumerate(zip(self.workers,
-                                                 worker_node_and_gpu_ids),
-                                             start=1):
-            local_rank = node_workers[node_id].index(rank)
-            worker.init_worker.remote(
-                lambda rank=rank, local_rank=local_rank: Worker(
-                    model_config,
-                    parallel_config,
-                    scheduler_config,
-                    device_config,
-                    local_rank,
-                    rank,
-                    distributed_init_method,
-                    lora_config=self.lora_config,
-                    kv_cache_dtype=self.cache_config.cache_dtype,
-                    kv_quant_params_path=
-                    (self.cache_config.cache_quant_params_path),
-                ))
-
-        driver_rank = 0
-        driver_local_rank = node_workers[driver_node_id].index(driver_rank)
-        self.driver_worker = Worker(
-            model_config,
-            parallel_config,
-            scheduler_config,
-            device_config,
-            driver_local_rank,
-            driver_rank,
-            distributed_init_method,
-            lora_config=self.lora_config,
-            kv_cache_dtype=self.cache_config.cache_dtype,
-            kv_quant_params_path=(self.cache_config.cache_quant_params_path),
-            is_driver_worker=True,
-        )
-
-        self._run_workers("init_model", cupy_port=get_open_port())
-        self._run_workers(
-            "load_model",
-            max_concurrent_workers=self.parallel_config.
-            max_parallel_loading_workers,
-        )
+        self.tokenizer: BaseTokenizerGroup = get_tokenizer_group(
+            self.parallel_config.tokenizer_pool_config, **init_kwargs)
 
     def _verify_args(self) -> None:
         self.model_config.verify_with_parallel_config(self.parallel_config)
@@ -293,89 +186,6 @@ class AphroditeEngine:
             self.lora_config.verify_with_model_config(self.model_config)
             self.lora_config.verify_with_scheduler_config(
                 self.scheduler_config)
-
-    def _init_cache(self) -> None:
-        # ruff: noqa: E501
-        """Profiles the memory usage and initializes the KV cache.
-
-        The engine will first conduct a profiling of the existing memory usage.
-        Then, it calculate the maximum possible number of GPU and CPU blocks
-        that can be allocated with the remaining free memory.
-        More details can be found in the
-        # pylint: disable=line-too-long
-        :meth:`~aphrodite.task_handler.worker.Worker.profile_num_available_blocks` method
-        from class :class:`~aphrodite.task_handler.Worker`.
-
-        Afterwards, as there may be multiple workers,
-        we take the minimum number of blocks across all workers
-        to ensure this can be applied to all of them.
-
-        Finally, the engine will initialize the KV cache
-        with the calculated number of blocks.
-
-        .. tip::
-            You may limit the usage of GPU memory
-            by adjusting the `gpu_memory_utilization` parameters.
-        """
-        # Get the maximum number of blocks that can be allocated on GPU and CPU.
-        num_blocks = self._run_workers(
-            "profile_num_available_blocks",
-            block_size=self.cache_config.block_size,
-            gpu_memory_utilization=self.cache_config.gpu_memory_utilization,
-            cpu_swap_space=self.cache_config.swap_space_bytes,
-            cache_dtype=self.cache_config.cache_dtype,
-        )
-
-        # Since we use a shared centralized controller, we take the minimum
-        # number of blocks across all workers to make sure all the memory
-        # operators can be applied to all workers.
-        num_gpu_blocks = min(b[0] for b in num_blocks)
-        num_cpu_blocks = min(b[1] for b in num_blocks)
-        # FIXME: Change to debug log.
-        logger.info(f"# GPU blocks: {num_gpu_blocks}, "
-                    f"# CPU blocks: {num_cpu_blocks}")
-
-        logger.info(
-            f"Minimum concurrency: {num_gpu_blocks * self.cache_config.block_size / self.scheduler_config.max_model_len:.2f}x"
-        )
-
-        if num_gpu_blocks <= 0:
-            raise ValueError("No available memory for the cache blocks. "
-                             "Try increasing `gpu_memory_utilization` when "
-                             "initializing the engine.")
-        max_seq_len = self.cache_config.block_size * num_gpu_blocks
-        logger.info(f"Maximum sequence length allowed in the cache: "
-                    f"{max_seq_len}")
-        if self.model_config.max_model_len > max_seq_len:
-            raise ValueError(
-                f"The model's max seq len ({self.model_config.max_model_len}) "
-                "is larger than the maximum number of tokens that can be "
-                f"stored in KV cache ({max_seq_len}). Try increasing "
-                "`gpu_memory_utilization` or decreasing `max_model_len` when "
-                "initializing the engine.")
-
-        self.cache_config.num_gpu_blocks = num_gpu_blocks
-        self.cache_config.num_cpu_blocks = num_cpu_blocks
-
-        # Initialize the cache.
-        self._run_workers("init_cache_engine", cache_config=self.cache_config)
-        # Warm up the model. This includes capturing the model into CUDA graph
-        # if enforce_eager is False.
-        self._run_workers("warm_up_model")
-
-    @classmethod
-    def from_engine_args(cls, engine_args: EngineArgs) -> "AphroditeEngine":
-        """Creates an LLM engine from the engine arguments."""
-        # Create the engine configs.
-        engine_configs = engine_args.create_engine_configs()
-        parallel_config = engine_configs[2]
-        # Initialize the cluster.
-        placement_group = initialize_cluster(parallel_config)
-        # Create the LLM engine.
-        engine = cls(*engine_configs,
-                     placement_group,
-                     log_stats=not engine_args.disable_log_stats)
-        return engine
 
     def encode_request(
         self,
@@ -449,20 +259,34 @@ class AphroditeEngine:
                     sampling_params.prompt_logprobs
                     and sampling_params.prompt_logprobs > max_log_probs):
             raise ValueError(f"Cannot request more than "
-                             f"{max_log_probs} logprobs.")
+                             f"{max_log_probs} logprobs. "
+                             "Please increase the max_log_probs.")
         if arrival_time is None:
             arrival_time = time.monotonic()
         prompt_token_ids = self.encode_request(
             request_id=request_id,
             prompt=prompt,
             prompt_token_ids=prompt_token_ids,
-            lora_request=lora_request)
+            lora_request=lora_request,
+        )
 
         # Create the sequences.
         block_size = self.cache_config.block_size
         seq_id = next(self.seq_counter)
-        seq = Sequence(seq_id, prompt, prompt_token_ids, block_size,
-                       lora_request)
+        eos_token_id = self.tokenizer.get_lora_tokenizer(
+            lora_request).eos_token_id
+        seq = Sequence(
+            seq_id,
+            prompt,
+            prompt_token_ids,
+            block_size,
+            eos_token_id,
+            lora_request,
+        )
+
+        # Defensive copy of SamplingParams, which are used by the sampler,
+        # this doesn't deep-copy LogitsProcessor objects
+        sampling_params = sampling_params.clone()
 
         # Create the sequence group.
         seq_group = SequenceGroup(request_id, [seq], sampling_params,
@@ -514,15 +338,15 @@ class AphroditeEngine:
         if early_stopping is True:
             return True
 
-        current_worst_score = (current_worst_seq.get_beam_search_score(
+        current_worst_score = current_worst_seq.get_beam_search_score(
             length_penalty=length_penalty,
-            eos_token_id=self.get_tokenizer_for_seq(
-                current_worst_seq).eos_token_id))
+            eos_token_id=current_worst_seq.eos_token_id,
+        )
         if early_stopping is False:
-            highest_attainable_score = (best_running_seq.get_beam_search_score(
+            highest_attainable_score = best_running_seq.get_beam_search_score(
                 length_penalty=length_penalty,
-                eos_token_id=self.get_tokenizer_for_seq(
-                    best_running_seq).eos_token_id))
+                eos_token_id=best_running_seq.eos_token_id,
+            )
         else:
             assert early_stopping == "never"
             if length_penalty > 0.0:
@@ -532,13 +356,14 @@ class AphroditeEngine:
                 max_possible_length = max(
                     best_running_seq.get_prompt_len() +
                     sampling_params.max_tokens,
-                    self.scheduler_config.max_model_len)
+                    self.scheduler_config.max_model_len,
+                )
                 highest_attainable_score = (
                     best_running_seq.get_beam_search_score(
                         length_penalty=length_penalty,
-                        eos_token_id=self.get_tokenizer_for_seq(
-                            best_running_seq).eos_token_id,
-                        seq_len=max_possible_length))
+                        eos_token_id=best_running_seq.eos_token_id,
+                        seq_len=max_possible_length,
+                    ))
             else:
                 # Otherwise, beam search will prefer shorter sequences. The
                 # highest attainable score calculation is based on the current
@@ -546,8 +371,8 @@ class AphroditeEngine:
                 highest_attainable_score = (
                     best_running_seq.get_beam_search_score(
                         length_penalty=length_penalty,
-                        eos_token_id=self.get_tokenizer_for_seq(
-                            best_running_seq).eos_token_id))
+                        eos_token_id=best_running_seq.eos_token_id,
+                    ))
         return current_worst_score >= highest_attainable_score
 
     def _process_sequence_group_outputs(self, seq_group: SequenceGroup,
@@ -555,6 +380,16 @@ class AphroditeEngine:
         # Process prompt logprobs
         prompt_logprobs = outputs.prompt_logprobs
         if prompt_logprobs is not None:
+            # We can pick any sequence for the prompt.
+            seq = next(iter(seq_group.seqs_dict.values()))
+            all_token_ids = seq.get_token_ids()
+            for i, prompt_logprobs_for_token in enumerate(prompt_logprobs):
+                self._decode_logprobs(
+                    seq,
+                    seq_group.sampling_params,
+                    prompt_logprobs_for_token,
+                    all_token_ids[:i],
+                )
             seq_group.prompt_logprobs = prompt_logprobs
 
         # Process samples
@@ -638,10 +473,11 @@ class AphroditeEngine:
                              if seq.is_finished()]
         all_finished_seqs = existing_finished_seqs + new_finished_seqs
         # Sort the finished sequences by their scores.
-        all_finished_seqs.sort(key=lambda x: x[0].get_beam_search_score(
-            length_penalty=length_penalty,
-            eos_token_id=self.get_tokenizer_for_seq(x[0]).eos_token_id),
-                               reverse=True)
+        all_finished_seqs.sort(
+            key=lambda x: x[0].get_beam_search_score(
+                length_penalty=length_penalty, eos_token_id=x[0].eos_token_id),
+            reverse=True,
+        )
         for seq, parent, is_new in all_finished_seqs[:beam_width]:
             if is_new:
                 # A newly generated child sequence finishes and has a high
@@ -666,10 +502,11 @@ class AphroditeEngine:
         running_child_seqs = [(seq, parent) for seq, parent in child_seqs
                               if not seq.is_finished()]
         # Sort the running sequences by their scores.
-        running_child_seqs.sort(key=lambda x: x[0].get_beam_search_score(
-            length_penalty=length_penalty,
-            eos_token_id=self.get_tokenizer_for_seq(x[0]).eos_token_id),
-                                reverse=True)
+        running_child_seqs.sort(
+            key=lambda x: x[0].get_beam_search_score(
+                length_penalty=length_penalty, eos_token_id=x[0].eos_token_id),
+            reverse=True,
+        )
 
         # Check if we can stop the beam search.
         if len(running_child_seqs) == 0:
@@ -684,7 +521,10 @@ class AphroditeEngine:
             current_worst_seq = all_finished_seqs[beam_width - 1][0]
             stop_beam_search = self._check_beam_search_early_stopping(
                 seq_group.sampling_params.early_stopping,
-                seq_group.sampling_params, best_running_seq, current_worst_seq)
+                seq_group.sampling_params,
+                best_running_seq,
+                current_worst_seq,
+            )
 
         if stop_beam_search:
             # Stop the beam search and remove all the running sequences from
@@ -726,13 +566,16 @@ class AphroditeEngine:
     def _process_model_outputs(
             self, output: SamplerOutput,
             scheduler_outputs: SchedulerOutputs) -> List[RequestOutput]:
+        now = time.time()
         # Update the scheduled sequence groups with the model outputs.
         scheduled_seq_groups = scheduler_outputs.scheduled_seq_groups
+
         # If prefix caching is enabled, mark all blocks in the sequence groups
         # as completed so that future requests don't attempt to recompute them
         if self.cache_config.context_shift:
             for seq_group in scheduled_seq_groups:
                 self.scheduler.mark_blocks_as_computed(seq_group)
+
         for seq_group, outputs in zip(scheduled_seq_groups, output):
             self._process_sequence_group_outputs(seq_group, outputs)
 
@@ -742,6 +585,7 @@ class AphroditeEngine:
         # Create the outputs.
         request_outputs: List[RequestOutput] = []
         for seq_group in scheduled_seq_groups:
+            seq_group.maybe_set_first_token_time(now)
             request_output = RequestOutput.from_seq_group(seq_group)
             request_outputs.append(request_output)
         for seq_group in scheduler_outputs.ignored_seq_groups:
@@ -751,6 +595,7 @@ class AphroditeEngine:
         # Log stats.
         if self.log_stats:
             self.stat_logger.log(self._get_stats(scheduler_outputs))
+
         return request_outputs
 
     def step(self) -> List[RequestOutput]:
@@ -771,7 +616,7 @@ class AphroditeEngine:
                 - A Sequence Group (SG) refer to a group of sequences
                   that are generated from the same prompt.
 
-            - Step 2: Calls the workers to execute the model.
+            - Step 2: Calls the distributed executor to execute the model.
             - Step 3: Processes the model output. This mainly includes:
 
                 - Decodes the relevant outputs.
@@ -807,18 +652,10 @@ class AphroditeEngine:
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
 
         if not scheduler_outputs.is_empty():
-            # Execute the model.
-            all_outputs = self._run_workers(
-                "execute_model",
-                driver_kwargs={
-                    "seq_group_metadata_list": seq_group_metadata_list,
-                    "blocks_to_swap_in": scheduler_outputs.blocks_to_swap_in,
-                    "blocks_to_swap_out": scheduler_outputs.blocks_to_swap_out,
-                    "blocks_to_copy": scheduler_outputs.blocks_to_copy,
-                })
-
-            # Only the driver worker returns the sampling results.
-            output = all_outputs[0]
+            output = self.model_executor.execute_model(
+                seq_group_metadata_list, scheduler_outputs.blocks_to_swap_in,
+                scheduler_outputs.blocks_to_swap_out,
+                scheduler_outputs.blocks_to_copy)
         else:
             output = []
 
@@ -840,10 +677,10 @@ class AphroditeEngine:
         gpu_cache_usage = 1.0 - (num_free_gpu / num_total_gpu)
 
         num_total_cpu = self.cache_config.num_cpu_blocks
-        cpu_cache_usage = 0.
+        cpu_cache_usage = 0.0
         if num_total_cpu > 0:
-            num_free_cpu = self.scheduler.block_manager.get_num_free_cpu_blocks(
-            )
+            num_free_cpu = (
+                self.scheduler.block_manager.get_num_free_cpu_blocks())
             cpu_cache_usage = 1.0 - (num_free_cpu / num_total_cpu)
 
         # Scheduler State
@@ -874,7 +711,8 @@ class AphroditeEngine:
             # Latency Timings.
             time_last_iters = []
             for seq_group in scheduler_outputs.scheduled_seq_groups:
-                # Time since last token. (n.b. updates seq_group.metrics.last_token_time)
+                # Time since last token.
+                # (n.b. updates seq_group.metrics.last_token_time)
                 time_last_iters.append(seq_group.get_last_latency(now))
                 # Time since arrival for all finished requests.
                 if seq_group.is_finished():
@@ -898,16 +736,24 @@ class AphroditeEngine:
             time_e2e_requests=time_e2e_requests,
         )
 
-    def _decode_logprobs(self, seq: Sequence, prms: SamplingParams,
-                         logprobs: Dict[int, Logprob],
-                         all_input_ids: List[int]) -> None:
+    def _decode_logprobs(
+        self,
+        seq: Sequence,
+        prms: SamplingParams,
+        logprobs: Dict[int, Logprob],
+        all_input_ids: List[int],
+    ) -> None:
         if not logprobs:
             return
         for token_id, sample_logprob in logprobs.items():
-            if (sample_logprob.decoded_token is None and token_id != -1):
+            if sample_logprob.decoded_token is None and token_id != -1:
                 all_input_ids_with_logprob = all_input_ids[:-1] + [token_id]
-                # pylint: disable=unused-variable
-                _, new_text, prefix_offset, read_offset = detokenize_incrementally(
+                (
+                    _,
+                    new_text,
+                    prefix_offset,
+                    read_offset,
+                ) = detokenize_incrementally(
                     self.get_tokenizer_for_seq(seq),
                     all_input_ids=all_input_ids_with_logprob,
                     prev_tokens=seq.tokens,
@@ -924,16 +770,21 @@ class AphroditeEngine:
         all_input_ids = seq.get_token_ids()
         self._decode_logprobs(seq, prms, seq.output_logprobs[-1],
                               all_input_ids)
-        (new_tokens, new_output_text, prefix_offset,
-         read_offset) = detokenize_incrementally(
-             self.get_tokenizer_for_seq(seq),
-             all_input_ids=all_input_ids,
-             prev_tokens=seq.tokens,
-             prefix_offset=seq.prefix_offset,
-             read_offset=seq.read_offset,
-             skip_special_tokens=prms.skip_special_tokens,
-             spaces_between_special_tokens=prms.spaces_between_special_tokens,
-         )
+
+        (
+            new_tokens,
+            new_output_text,
+            prefix_offset,
+            read_offset,
+        ) = detokenize_incrementally(
+            self.get_tokenizer_for_seq(seq),
+            all_input_ids=all_input_ids,
+            prev_tokens=seq.tokens,
+            prefix_offset=seq.prefix_offset,
+            read_offset=seq.read_offset,
+            skip_special_tokens=prms.skip_special_tokens,
+            spaces_between_special_tokens=prms.spaces_between_special_tokens,
+        )
         if seq.tokens is None:
             seq.tokens = new_tokens
         else:
@@ -968,91 +819,33 @@ class AphroditeEngine:
             return
 
         # Check if the sequence has generated the EOS token.
-        if ((not sampling_params.ignore_eos) and seq.get_last_token_id()
-                == self.get_tokenizer_for_seq(seq).eos_token_id):
+        if (not sampling_params.ignore_eos
+            ) and seq.get_last_token_id() == seq.eos_token_id:
             seq.status = SequenceStatus.FINISHED_STOPPED
             return
 
     def _finalize_sequence(self, seq: Sequence,
                            sampling_params: SamplingParams,
                            stop_string: str) -> None:
-        if not sampling_params.include_stop_str_in_output and stop_string:
+        if sampling_params.include_stop_str_in_output:
+            return
+
+        if stop_string and seq.output_text.endswith(stop_string):
             # Truncate the output text so that the stop string is
             # not included in the output.
             seq.output_text = seq.output_text[:-len(stop_string)]
 
     def add_lora(self, lora_request: LoRARequest) -> bool:
-        assert lora_request.lora_int_id > 0, "lora_id must be greater than 0."
-        return self._run_workers(
-            "add_lora",
-            lora_request=lora_request,
-        )
+        return self.model_executor.add_lora(lora_request)
 
     def remove_lora(self, lora_id: int) -> bool:
-        assert lora_id > 0, "lora_id must be greater than 0."
-        return self._run_workers(
-            "remove_lora",
-            lora_id=lora_id,
-        )
+        return self.model_executor.remove_lora(lora_id)
 
     def list_loras(self) -> List[int]:
-        return self._run_workers("list_loras")
-
-    def _run_workers(
-        self,
-        method: str,
-        *args,
-        driver_args: Optional[List[Any]] = None,
-        driver_kwargs: Optional[Dict[str, Any]] = None,
-        max_concurrent_workers: Optional[int] = None,
-        **kwargs,
-    ) -> Any:
-        """Runs the given method on all workers."""
-
-        if max_concurrent_workers:
-            raise NotImplementedError(
-                "max_concurrent_workers is not supported yet.")
-
-        # Start the ray workers first.
-        ray_worker_outputs = [
-            worker.execute_method.remote(method, *args, **kwargs)
-            for worker in self.workers
-        ]
-
-        if driver_args is None:
-            driver_args = args
-        if driver_kwargs is None:
-            driver_kwargs = kwargs
-
-        # Start the driver worker after all the ray workers.
-        driver_worker_output = getattr(self.driver_worker,
-                                       method)(*driver_args, **driver_kwargs)
-
-        # Get the results of the ray workers.
-        if self.workers:
-            ray_worker_outputs = ray.get(ray_worker_outputs)
-
-        return [driver_worker_output] + ray_worker_outputs
+        return self.model_executor.list_loras()
 
     def check_health(self) -> None:
-        """Raises an error if engine is unhealthy."""
-        self._check_if_any_actor_is_dead()
-
-    def _check_if_any_actor_is_dead(self):
-        if not self.parallel_config.worker_use_ray:
-            return
-
-        if not self.workers:
-            return
-
-        dead_actors = []
-        for actor in self.workers:
-            actor_state = ray.state.actors(actor._ray_actor_id.hex())
-            if actor_state["State"] == "DEAD":
-                dead_actors.append(actor)
-        if dead_actors:
-            raise RuntimeError("At least one Worker is dead. "
-                               f"Dead workers: {dead_actors}")
+        self.model_executor.check_health()
 
 
 setup_logger()

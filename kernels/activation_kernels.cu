@@ -39,6 +39,17 @@ __device__ __forceinline__ T gelu_kernel(const T& x) {
   return (T) (f * 0.5f * (1.0f + ::erf(f * ALPHA)));
 }
 
+template<typename T>
+__device__ __forceinline__ T gelu_tanh_kernel(const T& x) {
+  // Equivalent to PyTorch GELU with `tanh` approximation
+  const float f = (float) x;
+  constexpr float BETA = M_SQRT2 * M_2_SQRTPI / 0.5f;
+  constexpr float KAPPA = 0.044715;
+  float x_cube = f * f * f;
+  float inner = BETA * (f + KAPPA * x_cube);
+  return (T) (0.5f * f * (1.0f + ::tanhf(inner)));
+}
+
 } // namespace aphrodite
 
 // Launch activation and gating kernel.
@@ -71,6 +82,13 @@ void gelu_and_mul(
   torch::Tensor& input)    // [..., 2 * d]
 {
   LAUNCH_ACTIVATION_GATE_KERNEL(aphrodite::gelu_kernel);
+}
+
+void gelu_tanh_and_mul(
+  torch::Tensor& out,      // [..., d]
+  torch::Tensor& input)    // [..., 2 * d]
+{
+  LAUNCH_ACTIVATION_GATE_KERNEL(aphrodite::gelu_tanh_kernel);
 }
 
 namespace aphrodite {

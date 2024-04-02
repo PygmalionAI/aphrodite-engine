@@ -2,20 +2,21 @@ import asyncio
 import os
 import time
 from functools import partial
-from typing import (Any, Dict, Iterable, List, Optional, Set, Tuple, Type,
-                    Union, AsyncIterator, Callable)
+from typing import (Callable, Dict, Iterable, List, Optional, Set, Tuple, Type,
+                    Union, AsyncIterator)
 from loguru import logger
+from transformers import PreTrainedTokenizer
 
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.config import ModelConfig
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
-from aphrodite.engine.ray_tools import initialize_cluster, ray
+from aphrodite.engine.ray_tools import initialize_ray_cluster, ray
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 
 ENGINE_ITERATION_TIMEOUT_S = int(
-    os.environ.get("APHRODITE_ENGINE_ITERATION_TIMEOUT_S", 60))
+    os.environ.get("APHRODITE_ENGINE_ITERATION_TIMEOUT_S", "120"))
 
 
 class AsyncEngineDeadError(RuntimeError):
@@ -26,13 +27,18 @@ def _raise_exception_on_finish(
         task: asyncio.Task, error_callback: Callable[[Exception],
                                                      None]) -> None:
     msg = ("Task finished unexpectedly. This should never happen! "
-           "Please open an issue on Github.")
+           "Please open an issue on Github. Include your full error "
+           "log after killing the process with Ctrl+C.")
 
     exception = None
     try:
         task.result()
         # NOTE: This will be thrown if task exits normally (which it should not)
         raise AsyncEngineDeadError(msg)
+    except asyncio.exceptions.CancelledError:
+        pass
+    except KeyboardInterrupt:
+        raise
     except Exception as e:
         exception = e
         logger.error("Engine background task failed", exc_info=e)
@@ -205,17 +211,10 @@ class _AsyncAphrodite(AphroditeEngine):
 
         if not scheduler_outputs.is_empty():
             # Execute the model.
-            all_outputs = await self._run_workers_async(
-                "execute_model",
-                driver_kwargs={
-                    "seq_group_metadata_list": seq_group_metadata_list,
-                    "blocks_to_swap_in": scheduler_outputs.blocks_to_swap_in,
-                    "blocks_to_swap_out": scheduler_outputs.blocks_to_swap_out,
-                    "blocks_to_copy": scheduler_outputs.blocks_to_copy,
-                })
-
-            # Only the driver worker returns the sampling results.
-            output = all_outputs[0]
+            output = await self.model_executor.execute_model_async(
+                seq_group_metadata_list, scheduler_outputs.blocks_to_swap_in,
+                scheduler_outputs.blocks_to_swap_out,
+                scheduler_outputs.blocks_to_copy)
         else:
             output = []
 
@@ -265,37 +264,8 @@ class _AsyncAphrodite(AphroditeEngine):
             lora_request=lora_request,
         )
 
-    async def _run_workers_async(
-        self,
-        method: str,
-        *args,
-        driver_args: Optional[List[Any]] = None,
-        driver_kwargs: Optional[Dict[str, Any]] = None,
-        **kwargs,
-    ) -> Any:
-        """Runs the given method on all workers."""
-        coros = []
-
-        if driver_args is None:
-            driver_args = args
-        if driver_kwargs is None:
-            driver_kwargs = kwargs
-
-        # Run the driver worker asynchronously.
-        driver_executor = getattr(self.driver_worker, method)
-        coros.append(asyncio.get_event_loop().run_in_executor(
-            None, partial(driver_executor, *driver_args, **driver_kwargs)))
-
-        # Run the ray workers asynchronously.
-        for worker in self.workers:
-            coros.append(worker.execute_method.remote(method, *args, **kwargs))
-
-        all_outputs = await asyncio.gather(*coros)
-        return all_outputs
-
-    async def check_health_async(self):
-        """Raises an error if engine is unhealthy."""
-        self._check_if_any_actor_is_dead()
+    async def check_health_async(self) -> None:
+        self.model_executor.check_health()
 
 
 class AsyncAphrodite:
@@ -318,6 +288,8 @@ class AsyncAphrodite:
             async frontend will be executed in a separate process as the
             model workers.
         log_requests: Whether to log the requests.
+        max_log_len: Maximum number of prompt characters or prompt ID numbers
+            being printed in log.
         start_engine_loop: If True, the background task to run the engine
             will be automatically started in the generate call.
         *args: Arguments for AphroditeEngine.
@@ -331,7 +303,7 @@ class AsyncAphrodite:
                  engine_use_ray: bool,
                  *args,
                  log_requests: bool = True,
-                 max_log_len: Optional[int] = None,
+                 max_log_len: int = 0,
                  start_engine_loop: bool = True,
                  **kwargs) -> None:
         self.worker_use_ray = worker_use_ray
@@ -348,6 +320,34 @@ class AsyncAphrodite:
         self.start_engine_loop = start_engine_loop
         self._request_tracker: Optional[RequestTracker] = None
         self._errored_with: Optional[BaseException] = None
+
+    @classmethod
+    def from_engine_args(cls,
+                         engine_args: AsyncEngineArgs,
+                         start_engine_loop: bool = True) -> "AsyncAphrodite":
+        """Creates an async LLM engine from the engine arguments."""
+        # Create the engine configs.
+        engine_configs = engine_args.create_engine_configs()
+        parallel_config = engine_configs[2]
+        if parallel_config.worker_use_ray or engine_args.engine_use_ray:
+            initialize_ray_cluster(parallel_config)
+            from aphrodite.executor.ray_gpu_executor import RayGPUExecutorAsync
+            executor_class = RayGPUExecutorAsync
+        else:
+            assert parallel_config.world_size == 1, (
+                "Ray is required if parallel_config.world_size > 1.")
+            from aphrodite.executor.gpu_executor import GPUExecutorAsync
+            executor_class = GPUExecutorAsync
+        # Create the async LLM engine.
+        engine = cls(parallel_config.worker_use_ray,
+                     engine_args.engine_use_ray,
+                     *engine_configs,
+                     executor_class,
+                     log_requests=not engine_args.disable_log_requests,
+                     log_stats=not engine_args.disable_log_stats,
+                     max_log_len=engine_args.max_log_len,
+                     start_engine_loop=start_engine_loop)
+        return engine
 
     @property
     def is_running(self) -> bool:
@@ -370,8 +370,11 @@ class AsyncAphrodite:
         self.set_errored(exc)
         self._request_tracker.propagate_exception(exc)
 
-    def get_tokenizer(self):
-        return self.engine.tokenizer.tokenizer
+    async def get_tokenizer(self) -> "PreTrainedTokenizer":
+        if self.engine_use_ray:
+            return await self.engine.get_tokenizer.remote()
+        else:
+            return self.engine.get_tokenizer()
 
     def start_background_loop(self) -> None:
         """Start the background loop."""
@@ -456,23 +459,27 @@ class AsyncAphrodite:
 
     async def run_engine_loop(self):
         has_requests_in_progress = False
-        while True:
-            if not has_requests_in_progress:
-                logger.debug("Waiting for new requests...")
-                await self._request_tracker.wait_for_new_requests()
-                logger.debug("Got new requests!")
+        try:
+            while True:
+                if not has_requests_in_progress:
+                    logger.debug("Waiting for new requests...")
+                    await self._request_tracker.wait_for_new_requests()
+                    logger.debug("Got new requests!")
 
-            # Abort if iteration takes too long due to unrecoverable errors
-            # (eg. NCCL timeouts).
-            try:
-                has_requests_in_progress = await asyncio.wait_for(
-                    self.engine_step(), ENGINE_ITERATION_TIMEOUT_S)
-            except asyncio.TimeoutError as exc:
-                logger.error(
-                    "Engine iteration timed out. This should never happen!")
-                self.set_errored(exc)
-                raise
-            await asyncio.sleep(0)
+                # Abort if iteration takes too long due to unrecoverable errors
+                # (eg. NCCL timeouts).
+                try:
+                    has_requests_in_progress = await asyncio.wait_for(
+                        self.engine_step(), ENGINE_ITERATION_TIMEOUT_S)
+                except asyncio.TimeoutError as exc:
+                    logger.error(
+                        "Engine iteration timed out. This should never happen!"
+                    )
+                    self.set_errored(exc)
+                    raise
+                await asyncio.sleep(0)
+        except KeyboardInterrupt:
+            logger.info("Engine loop interrupted. Exiting gracefully.")
 
     async def add_request(
         self,
@@ -494,8 +501,7 @@ class AsyncAphrodite:
                                                               max_log_len]
             logger.info(f"Received request {request_id}: "
                         f"prompt: {shortened_prompt!r}, "
-                        f"sampling params: {sampling_params}, "
-                        f"prompt token ids: {shortened_token_ids}, "
+                        f"sampling_params: {sampling_params}, "
                         f"lora_request: {lora_request}.")
 
         if not self.is_running:
@@ -510,6 +516,7 @@ class AsyncAphrodite:
 
         if arrival_time is None:
             arrival_time = time.time()
+
         if self.engine_use_ray:
             prompt_token_ids = await self.engine.encode_request_async.remote(
                 request_id=request_id,
@@ -564,7 +571,7 @@ class AsyncAphrodite:
             - If the engine is not running, start the background loop,
               which iteratively invokes
               # pylint: disable=line-too-long
-              :meth:`~aphrodite.engine.async_llm_engine.AsyncAphrodite.engine_step`
+              :meth:`~aphrodite.engine.async_aphrodite.AsyncAphrodite.engine_step`
               to process the waiting requests.
             - Add the request to the engine's `RequestTracker`.
               On the next background loop, this request will be sent to
@@ -609,15 +616,21 @@ class AsyncAphrodite:
         arrival_time = time.monotonic()
 
         try:
-            stream = await self.add_request(request_id,
-                                            prompt,
-                                            sampling_params,
-                                            prompt_token_ids=prompt_token_ids,
-                                            arrival_time=arrival_time,
-                                            lora_request=lora_request)
+            stream = await self.add_request(
+                request_id,
+                prompt,
+                sampling_params,
+                prompt_token_ids=prompt_token_ids,
+                arrival_time=arrival_time,
+                lora_request=lora_request,
+            )
 
             async for request_output in stream:
                 yield request_output
+        except asyncio.exceptions.CancelledError:
+            logger.info(f"Request {request_id} cancelled.")
+            self._abort(request_id)
+            raise
         except (Exception, asyncio.CancelledError) as e:
             # If there is an exception or coroutine is cancelled, abort the
             # request.
@@ -661,35 +674,13 @@ class AsyncAphrodite:
         else:
             return self.engine.get_model_config()
 
-    @classmethod
-    def from_engine_args(cls,
-                         engine_args: AsyncEngineArgs,
-                         start_engine_loop: bool = True) -> "AsyncAphrodite":
-        """Creates an async LLM engine from the engine arguments."""
-        # Create the engine configs.
-        engine_configs = engine_args.create_engine_configs()
-        parallel_config = engine_configs[2]
-        # Initialize the cluster.
-        placement_group = initialize_cluster(parallel_config,
-                                             engine_args.engine_use_ray)
-        # Create the async LLM engine.
-        engine = cls(parallel_config.worker_use_ray,
-                     engine_args.engine_use_ray,
-                     *engine_configs,
-                     placement_group,
-                     log_requests=not engine_args.disable_log_requests,
-                     log_stats=not engine_args.disable_log_stats,
-                     max_log_len=engine_args.max_log_len,
-                     start_engine_loop=start_engine_loop)
-        return engine
-
     async def do_log_stats(self) -> None:
         if self.engine_use_ray:
             await self.engine.do_log_stats.remote()
         else:
             self.engine.do_log_stats()
 
-    async def check_health(self):
+    async def check_health(self) -> None:
         """Raises an error if engine is unhealthy."""
         t = time.perf_counter()
         logger.debug("Starting health check...")

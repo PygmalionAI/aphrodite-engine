@@ -5,7 +5,7 @@ ray >= 2.9
 sentencepiece
 numpy
 torch == 2.2.0
-transformers @ git+https://github.com/huggingface/transformers.git@0e4a1c3401421d3342938a183c7b021cdac6fd79 # for cohere, remove when a new release drops
+transformers == 4.39.0 # needed for cohere
 uvicorn
 openai # for fastapi's openai proxy emulation
 xformers >= 0.0.24
@@ -26,3 +26,4 @@ outlines >= 0.0.27
 bitsandbytes >= 0.41.0
 loguru
 hf_transfer # for faster downloads
+sentence-transformers # for embeddings

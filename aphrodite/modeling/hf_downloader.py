@@ -21,15 +21,19 @@ from aphrodite.common.gguf import GGUFReader
 from aphrodite.modeling.layers.quantization import (get_quantization_config,
                                                     QuantizationConfig)
 
+_xdg_cache_home = os.getenv('XDG_CACHE_HOME', os.path.expanduser('~/.cache'))
+_aphrodite_filelocks_path = os.path.join(_xdg_cache_home, 'aphrodite/locks/')
 
-class Disabledtqdm(tqdm):  # pylint: disable=inconsistent-mro
+
+class Disabledtqdm(tqdm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs, disable=True)
 
 
 def get_lock(model_name_or_path: str, cache_dir: Optional[str] = None):
-    lock_dir = cache_dir if cache_dir is not None else "/tmp"
+    lock_dir = cache_dir if cache_dir is not None else _aphrodite_filelocks_path
+    os.makedirs(os.path.dirname(lock_dir), exist_ok=True)
     lock_file_name = model_name_or_path.replace("/", "-") + ".lock"
     lock = filelock.FileLock(os.path.join(lock_dir, lock_file_name))
     return lock
@@ -164,7 +168,7 @@ def prepare_hf_model_weights(
                 allow_patterns = [pattern]
                 break
 
-        logger.info(f"Downloading model weights {allow_patterns}")
+        logger.info(f"Using model weights format {allow_patterns}")
         # Use file lock to prevent multiple processes from
         # downloading the same model weights at the same time.
         with get_lock(model_name_or_path, cache_dir):
@@ -192,6 +196,7 @@ def prepare_hf_model_weights(
             "scheduler.pt",
             "scaler.pt",
             "trainer_state.json",
+            "hidden_states.safetensors",  # exllamav2
         ]
         hf_weights_files = [
             f for f in hf_weights_files

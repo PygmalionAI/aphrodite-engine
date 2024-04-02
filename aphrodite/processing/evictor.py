@@ -7,8 +7,9 @@ from aphrodite.common.block import PhysicalTokenBlock
 
 class EvictionPolicy(enum.Enum):
     """Enum for eviction policy used by make_evictor to instantiate the correct
-       Evictor subclass.
+    Evictor subclass.
     """
+
     LRU = enum.auto()
     FIFO = enum.auto()
 
@@ -115,7 +116,6 @@ class LRUEvictor(Evictor):
         return block
 
     @property
-    # pylint: disable=invalid-overridden-method
     def num_blocks(self) -> int:
         return len(self.free_table)
 
@@ -149,7 +149,6 @@ class RandomEvictor(Evictor):
         return block
 
     @property
-    # pylint: disable=invalid-overridden-method
     def num_blocks(self) -> int:
         return len(self.free_table)
 

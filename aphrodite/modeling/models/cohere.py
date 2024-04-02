@@ -30,7 +30,7 @@ from transformers import CohereConfig
 
 from aphrodite.modeling.metadata import InputMetadata
 from aphrodite.modeling.layers.activation import SiluAndMul
-from aphrodite.modeling.layers.attention import PagedAttention as Attention
+from aphrodite.modeling.layers.attention import Attention as Attention
 from aphrodite.modeling.layers.linear import (
     LinearMethodBase,
     MergedColumnParallelLinear,

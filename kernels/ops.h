@@ -14,11 +14,7 @@ void paged_attention_v1(
   int block_size,
   int max_context_len,
   const c10::optional<torch::Tensor>& alibi_slopes,
-  const std::string& kv_cache_dtype,
-  float k_scale = 1.0f,
-  float k_zp = 0.0f,
-  float v_scale = 1.0f,
-  float v_zp = 0.0f);
+  const std::string& kv_cache_dtype);
 
 void paged_attention_v2(
   torch::Tensor& out,
@@ -35,11 +31,7 @@ void paged_attention_v2(
   int block_size,
   int max_context_len,
   const c10::optional<torch::Tensor>& alibi_slopes,
-  const std::string& kv_cache_dtype,
-  float k_scale = 1.0f,
-  float k_zp = 0.0f,
-  float v_scale = 1.0f,
-  float v_zp = 0.0f);
+  const std::string& kv_cache_dtype);
 
 void rms_norm(
   torch::Tensor& out,
@@ -61,11 +53,25 @@ void rotary_embedding(
   torch::Tensor& cos_sin_cache,
   bool is_neox);
 
+void batched_rotary_embedding(
+  torch::Tensor& positions,
+  torch::Tensor& query,
+  torch::Tensor& key,
+  int head_size,
+  torch::Tensor& cos_sin_cache,
+  bool is_neox,
+  int rot_dim,
+  torch::Tensor& cos_sin_cache_offsets);
+
 void silu_and_mul(
   torch::Tensor& out,
   torch::Tensor& input);
 
 void gelu_and_mul(
+  torch::Tensor& out,
+  torch::Tensor& input);
+
+void gelu_tanh_and_mul(
   torch::Tensor& out,
   torch::Tensor& input);
 

@@ -2,16 +2,21 @@
 import copy
 import enum
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, TYPE_CHECKING
 
 from aphrodite.common.block import LogicalTokenBlock
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.lora.request import LoRARequest
 
+if TYPE_CHECKING:
+    import torch
+    from aphrodite.spec_decode.metrics import SpecDecodeWorkerMetrics
+
 
 @dataclass
 class Logprob:
     """Infos for supporting OpenAI compatible logprobs."""
+
     logprob: float
     decoded_token: Optional[str] = None
 
@@ -22,6 +27,7 @@ SampleLogprobs = List[Dict[int, Logprob]]
 
 class SequenceStatus(enum.Enum):
     """Status of a sequence."""
+
     WAITING = enum.auto()
     RUNNING = enum.auto()
     SWAPPED = enum.auto()
@@ -68,6 +74,7 @@ class RequestMetrics:
         time_in_queue: The time the request spent in the queue.
         finished_time: The time when the request was finished.
     """
+
     arrival_time: float
     last_token_time: float
     first_scheduled_time: Optional[float]
@@ -81,6 +88,8 @@ class SequenceData:
 
     Args:
         prompt_token_ids: The token IDs of the prompt.
+        output_token_ids: The token IDs of the output. Set to an empty list if
+            None.
 
     Attributes:
         prompt_token_ids: The token IDs of the prompt.
@@ -91,9 +100,13 @@ class SequenceData:
     def __init__(
         self,
         prompt_token_ids: List[int],
+        output_token_ids: Optional[List[int]] = None,
     ) -> None:
+        if output_token_ids is None:
+            output_token_ids = []
+
         self.prompt_token_ids = prompt_token_ids
-        self.output_token_ids: List[int] = []
+        self.output_token_ids = output_token_ids
         self.cumulative_logprob = 0.0
 
     def append_token_id(self, token_id: int, logprob: float) -> None:
@@ -116,6 +129,12 @@ class SequenceData:
         if not self.output_token_ids:
             return self.prompt_token_ids[-1]
         return self.output_token_ids[-1]
+
+    def get_prompt_token_ids(self) -> int:
+        return self.prompt_token_ids
+
+    def get_output_token_ids(self) -> int:
+        return self.output_token_ids
 
     def __repr__(self) -> str:
         return (f"SequenceData("
@@ -142,11 +161,13 @@ class Sequence:
         prompt: str,
         prompt_token_ids: List[int],
         block_size: int,
+        eos_token_id: Optional[int] = None,
         lora_request: Optional[LoRARequest] = None,
     ) -> None:
         self.seq_id = seq_id
         self.prompt = prompt
         self.block_size = block_size
+        self.eos_token_id = eos_token_id
         self.lora_request = lora_request
 
         self.data = SequenceData(prompt_token_ids)
@@ -163,7 +184,6 @@ class Sequence:
         self.read_offset = 0
         # Input + output tokens
         self.tokens: Optional[List[str]] = None
-        self.persistent_data = {}
         self.persistent_data = {}
 
     @property
@@ -235,10 +255,12 @@ class Sequence:
     def get_cumulative_logprob(self) -> float:
         return self.data.cumulative_logprob
 
-    def get_beam_search_score(self,
-                              length_penalty: float = 0.0,
-                              seq_len: Optional[int] = None,
-                              eos_token_id: Optional[int] = None) -> float:
+    def get_beam_search_score(
+        self,
+        length_penalty: float = 1.0,
+        seq_len: Optional[int] = None,
+        eos_token_id: Optional[int] = None,
+    ) -> float:
         """Calculate the beam search score with length penalty.
 
         Adapted from
@@ -298,11 +320,13 @@ class SequenceGroup:
         self.request_id = request_id
         self.seqs_dict = {seq.seq_id: seq for seq in seqs}
         self.sampling_params = sampling_params
-        self.metrics = RequestMetrics(arrival_time=arrival_time,
-                                      last_token_time=arrival_time,
-                                      first_scheduled_time=None,
-                                      first_token_time=None,
-                                      time_in_queue=None)
+        self.metrics = RequestMetrics(
+            arrival_time=arrival_time,
+            last_token_time=arrival_time,
+            first_scheduled_time=None,
+            first_token_time=None,
+            time_in_queue=None,
+        )
         self.lora_request = lora_request
         self.prompt_logprobs: Optional[PromptLogprobs] = None
         self.state = SequenceGroupState()
@@ -366,12 +390,9 @@ class SequenceGroup:
         self,
         status: Optional[SequenceStatus] = None,
     ) -> List[Sequence]:
-        if status is None:
-            return list(self.seqs_dict.values())
-        else:
-            return [
-                seq for seq in self.seqs_dict.values() if seq.status == status
-            ]
+        return (list(self.seqs_dict.values()) if status is None else [
+            seq for seq in self.seqs_dict.values() if seq.status == status
+        ])
 
     def get_unfinished_seqs(self) -> List[Sequence]:
         return [
@@ -517,6 +538,35 @@ class SequenceGroupOutput:
                 and self.prompt_logprobs == other.prompt_logprobs)
 
 
-# For each sequence group, we generate a list of SequenceOutput object,
-# each of which contains one possible candidate for the next token.
-SamplerOutput = List[SequenceGroupOutput]
+@dataclass
+class SamplerOutput:
+    """For each sequence group, we generate a list of SequenceOutput object,
+    each of which contains one possible candidate for the next token.
+
+    This datastructure implements methods so it can be used like a list, but
+    also has optional fields for device tensors.
+    """
+
+    outputs: List[SequenceGroupOutput]
+
+    # On-device tensor containing probabilities of each token.
+    sampled_token_probs: Optional["torch.Tensor"] = None
+
+    # On-device tensor containing the sampled token ids.
+    sampled_token_ids: Optional["torch.Tensor"] = None
+
+    # Spec decode metrics populated by workers.
+    spec_decode_worker_metrics: Optional["SpecDecodeWorkerMetrics"] = None
+
+    def __getitem__(self, idx: int):
+        return self.outputs[idx]
+
+    def __setitem__(self, idx: int, value):
+        self.outputs[idx] = value
+
+    def __len__(self):
+        return len(self.outputs)
+
+    def __eq__(self, other: object):
+        return (isinstance(other, self.__class__)
+                and self.outputs == other.outputs)
