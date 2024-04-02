@@ -1,16 +1,20 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 
-from aphrodite.common.config import (CacheConfig, DeviceConfig, ModelConfig,
-                                     ParallelConfig, SchedulerConfig,
-                                     LoRAConfig)
+from aphrodite.common.config import (
+    CacheConfig,
+    DeviceConfig,
+    ModelConfig,
+    ParallelConfig,
+    SchedulerConfig,
+    LoRAConfig,
+)
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 
 
 class ExecutorBase(ABC):
     """Base class for all executors.
-
     An executor is responsible for executing the model on a specific device
     type (e.g., CPU, GPU, Neuron, etc.). Or it can be a distributed executor
     that can execute the model on multiple devices.
@@ -29,11 +33,13 @@ class ExecutorBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def execute_model(self,
-                      seq_group_metadata_list: List[SequenceGroupMetadata],
-                      blocks_to_swap_in: Dict[int, int],
-                      blocks_to_swap_out: Dict[int, int],
-                      blocks_to_copy: Dict[int, List[int]]) -> SamplerOutput:
+    def execute_model(
+        self,
+        seq_group_metadata_list: List[SequenceGroupMetadata],
+        blocks_to_swap_in: Dict[int, int],
+        blocks_to_swap_out: Dict[int, int],
+        blocks_to_copy: Dict[int, List[int]],
+    ) -> SamplerOutput:
         """Executes one model step on the given sequences."""
         raise NotImplementedError
 

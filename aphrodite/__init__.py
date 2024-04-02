@@ -1,7 +1,7 @@
 from aphrodite.engine.args_tools import AsyncEngineArgs, EngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
-from aphrodite.engine.ray_tools import initialize_cluster
+from aphrodite.engine.ray_tools import initialize_ray_cluster
 from aphrodite.endpoints.llm import LLM
 from aphrodite.common.outputs import CompletionOutput, RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
@@ -17,5 +17,5 @@ __all__ = [
     "EngineArgs",
     "AsyncAphrodite",
     "AsyncEngineArgs",
-    "initialize_cluster",
+    "initialize_ray_cluster",
 ]
