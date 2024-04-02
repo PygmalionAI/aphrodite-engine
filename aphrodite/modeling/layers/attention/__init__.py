@@ -64,9 +64,8 @@ class Attention(nn.Module):
         value_cache: Optional[torch.Tensor],
         input_metadata: InputMetadata,
     ) -> torch.Tensor:
-        return self.backend.forward(
-            query, key, value, key_cache, value_cache, input_metadata
-        )
+        return self.backend.forward(query, key, value, key_cache, value_cache,
+                                    input_metadata)
 
 
 @lru_cache(maxsize=1)
@@ -81,16 +80,13 @@ def _use_flash_attn() -> bool:
         # AMD GPUs.
         return False
     if torch.cuda.get_device_capability()[0] < 8:
-        logger.info(
-            "flash_attn is not supported on Turing or older GPUs. "
-            "Using xformers backend."
-        )
+        logger.info("flash_attn is not supported on Turing or older GPUs. "
+                    "Using xformers backend.")
         return False
     if torch.get_default_dtype() not in (torch.float16, torch.bfloat16):
         logger.info(
             "flash_attn only supports torch.float16 or torch.bfloat16. "
-            "Using xformers backend."
-        )
+            "Using xformers backend.")
         return False
 
     logger.info("Using Flash Attention backend.")

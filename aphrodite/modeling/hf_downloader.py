@@ -21,7 +21,6 @@ from aphrodite.common.gguf import GGUFReader
 from aphrodite.modeling.layers.quantization import (get_quantization_config,
                                                     QuantizationConfig)
 
-
 _xdg_cache_home = os.getenv('XDG_CACHE_HOME', os.path.expanduser('~/.cache'))
 _aphrodite_filelocks_path = os.path.join(_xdg_cache_home, 'aphrodite/locks/')
 
@@ -197,7 +196,7 @@ def prepare_hf_model_weights(
             "scheduler.pt",
             "scaler.pt",
             "trainer_state.json",
-            "hidden_states.safetensors", # exllamav2
+            "hidden_states.safetensors",  # exllamav2
         ]
         hf_weights_files = [
             f for f in hf_weights_files

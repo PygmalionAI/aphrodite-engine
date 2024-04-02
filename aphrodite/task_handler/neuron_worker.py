@@ -15,8 +15,7 @@ from aphrodite.common.config import (
 from aphrodite.modeling import set_random_seed
 from aphrodite.modeling.megatron.communication_op import broadcast_tensor_dict
 from aphrodite.modeling.megatron.parallel_state import (
-    ensure_model_parallel_initialized,
-)
+    ensure_model_parallel_initialized, )
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 from aphrodite.task_handler.cache_engine import CacheEngine
 from aphrodite.task_handler.model_runner import ModelRunner
@@ -89,16 +88,16 @@ class Worker:
         cpu_swap_space: int = 0,
         cache_dtype: str = "float16",
     ) -> Tuple[int, int]:
-        """Simply returns max_num_seqs as num_gpu_blocks, 0 as num_cpu_blocks."""
+        """Simply returns max_num_seqs as num_gpu_blocks, 0 as num_cpu_blocks.
+        """
         num_gpu_blocks = self.scheduler_config.max_num_seqs
         num_cpu_blocks = 0
         return num_gpu_blocks, num_cpu_blocks
 
     def init_cache_engine(self, cache_config: CacheConfig) -> None:
         self.cache_config = cache_config
-        self.cache_engine = CacheEngine(
-            self.cache_config, self.model_config, self.parallel_config
-        )
+        self.cache_engine = CacheEngine(self.cache_config, self.model_config,
+                                        self.parallel_config)
         self.model_runner.set_block_size(self.cache_engine.block_size)
 
     def warm_up_model(self) -> None:
@@ -128,8 +127,7 @@ class Worker:
         # Wait for cache operations to finish.
         if cache_events is not None:
             raise NotImplementedError(
-                "cache operations are not implemented for neuron backend."
-            )
+                "cache operations are not implemented for neuron backend.")
 
     @torch.inference_mode()
     def execute_model(
@@ -165,9 +163,8 @@ class Worker:
         if num_seq_groups == 0:
             return {}
 
-        output = self.model_runner.execute_model(
-            seq_group_metadata_list, self.gpu_cache
-        )
+        output = self.model_runner.execute_model(seq_group_metadata_list,
+                                                 self.gpu_cache)
         return output
 
 
@@ -184,17 +181,14 @@ def _init_distributed_environment(
             raise RuntimeError(
                 "torch.distributed is already initialized but the torch world "
                 "size does not match parallel_config.world_size "
-                f"({torch_world_size} vs. {parallel_config.world_size})."
-            )
+                f"({torch_world_size} vs. {parallel_config.world_size}).")
     elif not distributed_init_method:
         raise ValueError(
             "distributed_init_method must be set if torch.distributed "
-            "is not already initialized"
-        )
+            "is not already initialized")
     else:
-        distributed_backend = (
-            distributed_backend if distributed_backend else "nccl"
-        )
+        distributed_backend = (distributed_backend
+                               if distributed_backend else "nccl")
         torch.distributed.init_process_group(
             backend=distributed_backend,
             world_size=parallel_config.world_size,

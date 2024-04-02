@@ -132,8 +132,8 @@ class OlmoAttention(nn.Module):
             )
         self.scaling = self.head_dim**-0.5
         self.attn = Attention(self.num_heads,
-                                   self.head_dim,
-                                   scale=self.scaling)
+                              self.head_dim,
+                              scale=self.scaling)
 
         # Attention output projection.
         self.attn_out = RowParallelLinear(

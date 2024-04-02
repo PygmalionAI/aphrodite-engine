@@ -4,12 +4,13 @@ from loguru import logger
 
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.config import (CacheConfig, DeviceConfig, ModelConfig,
-                         ParallelConfig, SchedulerConfig, LoRAConfig)
+                                     ParallelConfig, SchedulerConfig,
+                                     LoRAConfig)
 from aphrodite.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from aphrodite.executor.utils import check_block_size_valid
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
-from aphrodite.common.utils import (get_ip, get_open_port, get_distributed_init_method,
-                        make_async)
+from aphrodite.common.utils import (get_ip, get_open_port,
+                                    get_distributed_init_method, make_async)
 
 
 class GPUExecutor(ExecutorBase):

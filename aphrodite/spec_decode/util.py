@@ -9,19 +9,15 @@ SeqId = int
 
 
 def get_all_seq_ids(
-    seq_group_metadata_list: List[SequenceGroupMetadata]
-) -> List[SeqId]:
+        seq_group_metadata_list: List[SequenceGroupMetadata]) -> List[SeqId]:
     """Given a list of SequenceGroupMetadata, create a list of all
     sequence ids.
     """
     return list(
-        chain.from_iterable(
-            [
-                seq_group_metadata.seq_data.keys()
-                for seq_group_metadata in seq_group_metadata_list
-            ]
-        )
-    )
+        chain.from_iterable([
+            seq_group_metadata.seq_data.keys()
+            for seq_group_metadata in seq_group_metadata_list
+        ]))
 
 
 def split_batch_by_proposal_len(
@@ -40,18 +36,13 @@ def split_batch_by_proposal_len(
         predicate = lambda proposal_len: proposal_len != 0
 
     indices = [
-        i
-        for i, (_, proposal_len) in enumerate(
-            zip(seq_group_metadata_list, proposal_lens)
-        )
+        i for i, (_, proposal_len
+                  ) in enumerate(zip(seq_group_metadata_list, proposal_lens))
         if predicate(proposal_len)
     ]
     seq_groups = [
-        seq_group
-        for seq_group, proposal_len in zip(
-            seq_group_metadata_list, proposal_lens
-        )
-        if predicate(proposal_len)
+        seq_group for seq_group, proposal_len in zip(
+            seq_group_metadata_list, proposal_lens) if predicate(proposal_len)
     ]
 
     return seq_groups, indices

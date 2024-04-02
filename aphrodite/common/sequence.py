@@ -137,12 +137,10 @@ class SequenceData:
         return self.output_token_ids
 
     def __repr__(self) -> str:
-        return (
-            f"SequenceData("
-            f"prompt_token_ids={self.prompt_token_ids}, "
-            f"output_token_ids={self.output_token_ids}, "
-            f"cumulative_logprob={self.cumulative_logprob})"
-        )
+        return (f"SequenceData("
+                f"prompt_token_ids={self.prompt_token_ids}, "
+                f"output_token_ids={self.output_token_ids}, "
+                f"cumulative_logprob={self.cumulative_logprob})")
 
 
 class Sequence:
@@ -198,8 +196,7 @@ class Sequence:
         # this in the future.
         num_tokens = self.num_hashed_tokens_of_block(logical_idx)
         return hash(
-            (tuple(self.data.get_token_ids()[0:num_tokens]), self.lora_int_id)
-        )
+            (tuple(self.data.get_token_ids()[0:num_tokens]), self.lora_int_id))
 
     def num_hashed_tokens_of_block(self, logical_idx: int):
         return logical_idx * self.block_size + self.block_size
@@ -223,9 +220,8 @@ class Sequence:
                 last_block = self.logical_token_blocks[-1]
 
             num_empty_slots = last_block.get_num_empty_slots()
-            last_block.append_tokens(
-                token_ids[cursor : cursor + num_empty_slots]
-            )
+            last_block.append_tokens(token_ids[cursor:cursor +
+                                               num_empty_slots])
             cursor += num_empty_slots
 
     def append_token_id(
@@ -275,10 +271,8 @@ class Sequence:
             seq_len = self.get_len()
             # NOTE: HF implementation does not count the EOS token
             # towards the length, we align with that here for testing.
-            if (
-                eos_token_id is not None
-                and self.get_last_token_id() == eos_token_id
-            ):
+            if (eos_token_id is not None
+                    and self.get_last_token_id() == eos_token_id):
                 seq_len -= 1
         return self.get_cumulative_logprob() / (seq_len**length_penalty)
 
@@ -291,11 +285,9 @@ class Sequence:
         return new_seq
 
     def __repr__(self) -> str:
-        return (
-            f"Sequence(seq_id={self.seq_id}, "
-            f"status={self.status.name}, "
-            f"num_blocks={len(self.logical_token_blocks)})"
-        )
+        return (f"Sequence(seq_id={self.seq_id}, "
+                f"status={self.status.name}, "
+                f"num_blocks={len(self.logical_token_blocks)})")
 
 
 @dataclass
@@ -398,16 +390,14 @@ class SequenceGroup:
         self,
         status: Optional[SequenceStatus] = None,
     ) -> List[Sequence]:
-        return (
-            list(self.seqs_dict.values())
-            if status is None
-            else [
-                seq for seq in self.seqs_dict.values() if seq.status == status
-            ]
-        )
+        return (list(self.seqs_dict.values()) if status is None else [
+            seq for seq in self.seqs_dict.values() if seq.status == status
+        ])
 
     def get_unfinished_seqs(self) -> List[Sequence]:
-        return [seq for seq in self.seqs_dict.values() if not seq.is_finished()]
+        return [
+            seq for seq in self.seqs_dict.values() if not seq.is_finished()
+        ]
 
     def get_finished_seqs(self) -> List[Sequence]:
         return [seq for seq in self.seqs_dict.values() if seq.is_finished()]
@@ -440,11 +430,9 @@ class SequenceGroup:
         return all(seq.is_finished() for seq in self.get_seqs())
 
     def __repr__(self) -> str:
-        return (
-            f"SequenceGroup(request_id={self.request_id}, "
-            f"sampling_params={self.sampling_params}, "
-            f"num_seqs={len(self.seqs_dict)})"
-        )
+        return (f"SequenceGroup(request_id={self.request_id}, "
+                f"sampling_params={self.sampling_params}, "
+                f"num_seqs={len(self.seqs_dict)})")
 
 
 class SequenceGroupMetadata:
@@ -514,20 +502,16 @@ class SequenceOutput:
         self.persistent_data = persistent_data
 
     def __repr__(self) -> str:
-        return (
-            f"SequenceOutput(parent_seq_id={self.parent_seq_id}, "
-            f"output_token={self.output_token}, "
-            f"logprobs={self.logprobs}, "
-            f"persistent_data={self.persistent_data})"
-        )
+        return (f"SequenceOutput(parent_seq_id={self.parent_seq_id}, "
+                f"output_token={self.output_token}, "
+                f"logprobs={self.logprobs}, "
+                f"persistent_data={self.persistent_data})")
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SequenceOutput):
             raise NotImplementedError()
-        equal = (
-            self.parent_seq_id == other.parent_seq_id
-            and self.output_token == other.output_token
-        )
+        equal = (self.parent_seq_id == other.parent_seq_id
+                 and self.output_token == other.output_token)
         log_probs_equal = other.logprobs == self.logprobs
         return equal and log_probs_equal
 
@@ -544,18 +528,14 @@ class SequenceGroupOutput:
         self.prompt_logprobs = prompt_logprobs
 
     def __repr__(self) -> str:
-        return (
-            f"SequenceGroupOutput(samples={self.samples}, "
-            f"prompt_logprobs={self.prompt_logprobs})"
-        )
+        return (f"SequenceGroupOutput(samples={self.samples}, "
+                f"prompt_logprobs={self.prompt_logprobs})")
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SequenceGroupOutput):
             raise NotImplementedError()
-        return (
-            self.samples == other.samples
-            and self.prompt_logprobs == other.prompt_logprobs
-        )
+        return (self.samples == other.samples
+                and self.prompt_logprobs == other.prompt_logprobs)
 
 
 @dataclass
@@ -588,6 +568,5 @@ class SamplerOutput:
         return len(self.outputs)
 
     def __eq__(self, other: object):
-        return (
-            isinstance(other, self.__class__) and self.outputs == other.outputs
-        )
+        return (isinstance(other, self.__class__)
+                and self.outputs == other.outputs)

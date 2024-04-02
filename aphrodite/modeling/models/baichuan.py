@@ -205,8 +205,7 @@ class BaiChuanAttention(nn.Module):
                 is_neox_style=is_neox_style,
             )
             self.scaling = self.head_dim**-0.5
-            self.attn = Attention(self.num_heads, self.head_dim,
-                                       self.scaling)
+            self.attn = Attention(self.num_heads, self.head_dim, self.scaling)
 
     def forward(
         self,

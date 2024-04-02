@@ -477,7 +477,8 @@ class AsyncAphrodite:
                         self.engine_step(), ENGINE_ITERATION_TIMEOUT_S)
                 except asyncio.TimeoutError as exc:
                     logger.error(
-                        "Engine iteration timed out. This should never happen!")
+                        "Engine iteration timed out. This should never happen!"
+                    )
                     self.set_errored(exc)
                     raise
                 await asyncio.sleep(0)

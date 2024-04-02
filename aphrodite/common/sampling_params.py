@@ -375,7 +375,7 @@ class SamplingParams:
         if self.seed is not None:
             return SamplingType.RANDOM_SEED
         return SamplingType.RANDOM
-    
+
     def clone(self) -> "SamplingParams":
         """Deep copy excluding LogitsProcessor objects.
         LogitsProcessor objects are excluded because they may contain an

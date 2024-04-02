@@ -66,8 +66,7 @@ class EngineArgs:
 
     @staticmethod
     def add_cli_args(
-        parser: argparse.ArgumentParser
-    ) -> argparse.ArgumentParser:
+            parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         """Shared CLI arguments for the Aphrodite engine."""
 
         # NOTE: If you update any of the arguments below, please also
@@ -152,7 +151,9 @@ class EngineArgs:
             "--dtype",
             type=str,
             default=EngineArgs.dtype,
-            choices=["auto", "half", "float16", "bfloat16", "float", "float32"],
+            choices=[
+                "auto", "half", "float16", "bfloat16", "float", "float32"
+            ],
             help="data type for model weights and activations. "
             'The "auto" option will use FP16 precision '
             "for FP32 and FP16 models, and BF16 precision "
@@ -230,9 +231,10 @@ class EngineArgs:
             action="store_true",
             help="Enable context shifting.",
         )
-        parser.add_argument(
-            "--seed", type=int, default=EngineArgs.seed, help="random seed"
-        )
+        parser.add_argument("--seed",
+                            type=int,
+                            default=EngineArgs.seed,
+                            help="random seed")
         parser.add_argument(
             "--swap-space",
             type=int,
@@ -252,7 +254,8 @@ class EngineArgs:
             "--max-num-batched-tokens",
             type=int,
             default=EngineArgs.max_num_batched_tokens,
-            help="maximum number of batched tokens per " "iteration",
+            help="maximum number of batched tokens per "
+            "iteration",
         )
         parser.add_argument(
             "--max-num-seqs",
@@ -270,7 +273,8 @@ class EngineArgs:
             "--max-log-probs",
             type=int,
             default=EngineArgs.max_log_probs,
-            help="maximum number of log probabilities to " "return.",
+            help="maximum number of log probabilities to "
+            "return.",
         )
         parser.add_argument(
             "--disable-log-stats",
@@ -364,41 +368,33 @@ class EngineArgs:
             "--lora-extra-vocab-size",
             type=int,
             default=EngineArgs.lora_extra_vocab_size,
-            help=(
-                "Maximum size of extra vocabulary that can be "
-                "present in a LoRA adapter (added to the base "
-                "model vocabulary)."
-            ),
+            help=("Maximum size of extra vocabulary that can be "
+                  "present in a LoRA adapter (added to the base "
+                  "model vocabulary)."),
         )
         parser.add_argument(
             "--lora-dtype",
             type=str,
             default=EngineArgs.lora_dtype,
             choices=["auto", "float16", "bfloat16", "float32"],
-            help=(
-                "Data type for LoRA. If auto, will default to "
-                "base model dtype."
-            ),
+            help=("Data type for LoRA. If auto, will default to "
+                  "base model dtype."),
         )
         parser.add_argument(
             "--max-cpu-loras",
             type=int,
             default=EngineArgs.max_cpu_loras,
-            help=(
-                "Maximum number of LoRAs to store in CPU memory. "
-                "Must be >= than max_num_seqs. "
-                "Defaults to max_num_seqs."
-            ),
+            help=("Maximum number of LoRAs to store in CPU memory. "
+                  "Must be >= than max_num_seqs. "
+                  "Defaults to max_num_seqs."),
         )
         parser.add_argument(
             "--device",
             type=str,
             default=EngineArgs.device,
             choices=["cuda"],
-            help=(
-                "Device to use for model execution. "
-                'Currently, only "cuda" is supported.'
-            ),
+            help=("Device to use for model execution. "
+                  'Currently, only "cuda" is supported.'),
         )
         return parser
 
@@ -412,14 +408,8 @@ class EngineArgs:
 
     def create_engine_configs(
         self,
-    ) -> Tuple[
-        ModelConfig,
-        CacheConfig,
-        ParallelConfig,
-        SchedulerConfig,
-        DeviceConfig,
-        Optional[LoRAConfig],
-    ]:
+    ) -> Tuple[ModelConfig, CacheConfig, ParallelConfig, SchedulerConfig,
+               DeviceConfig, Optional[LoRAConfig], ]:
         device_config = DeviceConfig(self.device)
         model_config = ModelConfig(
             self.model,
@@ -465,19 +455,14 @@ class EngineArgs:
             model_config.max_model_len,
             self.max_paddings,
         )
-        lora_config = (
-            LoRAConfig(
-                max_lora_rank=self.max_lora_rank,
-                max_loras=self.max_loras,
-                lora_extra_vocab_size=self.lora_extra_vocab_size,
-                lora_dtype=self.lora_dtype,
-                max_cpu_loras=self.max_cpu_loras
-                if self.max_cpu_loras and self.max_cpu_loras > 0
-                else None,
-            )
-            if self.enable_lora
-            else None
-        )
+        lora_config = (LoRAConfig(
+            max_lora_rank=self.max_lora_rank,
+            max_loras=self.max_loras,
+            lora_extra_vocab_size=self.lora_extra_vocab_size,
+            lora_dtype=self.lora_dtype,
+            max_cpu_loras=self.max_cpu_loras
+            if self.max_cpu_loras and self.max_cpu_loras > 0 else None,
+        ) if self.enable_lora else None)
         return (
             model_config,
             cache_config,
@@ -498,8 +483,7 @@ class AsyncEngineArgs(EngineArgs):
 
     @staticmethod
     def add_cli_args(
-        parser: argparse.ArgumentParser
-    ) -> argparse.ArgumentParser:
+            parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         parser = EngineArgs.add_cli_args(parser)
         parser.add_argument(
             "--engine-use-ray",

@@ -132,8 +132,7 @@ class AphroditeEngine:
             f"Enforce Eager Mode = {model_config.enforce_eager}\n"
             f"KV Cache Data Type = {cache_config.cache_dtype}\n"
             # f"KV Cache Params Path = {cache_config.cache_quant_params_path}\n"
-            f"Device = {device_config.device}"
-        )
+            f"Device = {device_config.device}")
         # TODO: Print more configs in debug mode.
 
         self.model_config = model_config
@@ -199,8 +198,7 @@ class AphroditeEngine:
 
     def _dispatch_worker(self):
         worker_module = DEVICE_TO_WORKER_MODULE_MAP[
-            self.device_config.device_type
-        ]
+            self.device_config.device_type]
         imported_worker = importlib.import_module(worker_module)
         Worker = imported_worker.Worker
         return Worker
@@ -210,14 +208,12 @@ class AphroditeEngine:
         # before CUDA_VISIBLE_DEVICES is set in the Worker
         Worker = self._dispatch_worker()
 
-        assert (
-            self.parallel_config.world_size == 1
-        ), "Ray is required if parallel_config.world_size > 1."
+        assert (self.parallel_config.world_size == 1
+                ), "Ray is required if parallel_config.world_size > 1."
 
         self.workers: List[Worker] = []
         distributed_init_method = get_distributed_init_method(
-            get_ip(), get_open_port()
-        )
+            get_ip(), get_open_port())
         self.driver_worker = Worker(
             self.model_config,
             self.parallel_config,
@@ -245,12 +241,10 @@ class AphroditeEngine:
         )
         init_kwargs.update(tokenizer_init_kwargs)
         self.tokenizer: TokenizerGroup = TokenizerGroup(
-            self.model_config.tokenizer, **init_kwargs
-        )
+            self.model_config.tokenizer, **init_kwargs)
 
-    def _init_workers_ray(
-        self, placement_group: "PlacementGroup", **ray_remote_kwargs
-    ):
+    def _init_workers_ray(self, placement_group: "PlacementGroup",
+                          **ray_remote_kwargs):
         if self.parallel_config.tensor_parallel_size == 1:
             num_gpus = self.cache_config.gpu_memory_utilization
         else:
@@ -287,24 +281,20 @@ class AphroditeEngine:
             raise ValueError(
                 "Ray does not allocate any GPUs on the driver node. Consider "
                 "adjusting the Ray placement group or running the driver on a "
-                "GPU node."
-            )
+                "GPU node.")
 
         driver_node_id, driver_gpu_ids = ray.get(
-            self.driver_dummy_worker.get_node_and_gpu_ids.remote()
-        )
+            self.driver_dummy_worker.get_node_and_gpu_ids.remote())
         worker_node_and_gpu_ids = ray.get(
-            [worker.get_node_and_gpu_ids.remote() for worker in self.workers]
-        )
+            [worker.get_node_and_gpu_ids.remote() for worker in self.workers])
 
         node_workers = defaultdict(list)
         node_gpus = defaultdict(list)
 
         node_workers[driver_node_id].append(0)
         node_gpus[driver_node_id].extend(driver_gpu_ids)
-        for i, (node_id, gpu_ids) in enumerate(
-            worker_node_and_gpu_ids, start=1
-        ):
+        for i, (node_id, gpu_ids) in enumerate(worker_node_and_gpu_ids,
+                                               start=1):
             node_workers[node_id].append(i)
             node_gpus[node_id].extend(gpu_ids)
         for node_id, gpu_ids in node_gpus.items():
@@ -316,8 +306,7 @@ class AphroditeEngine:
             worker.set_cuda_visible_devices.remote(node_gpus[node_id])
 
         distributed_init_method = get_distributed_init_method(
-            driver_ip, get_open_port()
-        )
+            driver_ip, get_open_port())
 
         # Lazy import the Worker to avoid importing torch.cuda/xformers
         # before CUDA_VISIBLE_DEVICES is set in the Worker
@@ -332,9 +321,10 @@ class AphroditeEngine:
         kv_cache_dtype = self.cache_config.cache_dtype
         # kv_quant_params_path = self.cache_config.cache_quant_params_path
 
-        for rank, (worker, (node_id, _)) in enumerate(
-            zip(self.workers, worker_node_and_gpu_ids), start=1
-        ):
+        for rank, (worker, (node_id,
+                            _)) in enumerate(zip(self.workers,
+                                                 worker_node_and_gpu_ids),
+                                             start=1):
             local_rank = node_workers[node_id].index(rank)
             worker.init_worker.remote(
                 lambda rank=rank, local_rank=local_rank: Worker(
@@ -348,8 +338,7 @@ class AphroditeEngine:
                     lora_config=lora_config,
                     kv_cache_dtype=kv_cache_dtype,
                     # kv_quant_params_path=kv_quant_params_path,
-                )
-            )
+                ))
 
         driver_rank = 0
         driver_local_rank = node_workers[driver_node_id].index(driver_rank)
@@ -371,12 +360,12 @@ class AphroditeEngine:
         self._run_workers(
             "init_model",
             cupy_port=get_open_port()
-            if not model_config.enforce_eager
-            else None,
+            if not model_config.enforce_eager else None,
         )
         self._run_workers(
             "load_model",
-            max_concurrent_workers=self.parallel_config.max_parallel_loading_workers,
+            max_concurrent_workers=self.parallel_config.
+            max_parallel_loading_workers,
         )
 
     def _verify_args(self) -> None:
@@ -384,7 +373,8 @@ class AphroditeEngine:
         self.cache_config.verify_with_parallel_config(self.parallel_config)
         if self.lora_config:
             self.lora_config.verify_with_model_config(self.model_config)
-            self.lora_config.verify_with_scheduler_config(self.scheduler_config)
+            self.lora_config.verify_with_scheduler_config(
+                self.scheduler_config)
 
     def _init_cache(self) -> None:
         # ruff: noqa: E501
@@ -423,33 +413,27 @@ class AphroditeEngine:
         num_gpu_blocks = min(b[0] for b in num_blocks)
         num_cpu_blocks = min(b[1] for b in num_blocks)
         # FIXME: Change to debug log.
-        logger.info(
-            f"# GPU blocks: {num_gpu_blocks}, "
-            f"# CPU blocks: {num_cpu_blocks}"
-        )
+        logger.info(f"# GPU blocks: {num_gpu_blocks}, "
+                    f"# CPU blocks: {num_cpu_blocks}")
 
         logger.info(
             f"Minimum concurrency: {num_gpu_blocks * self.cache_config.block_size / self.scheduler_config.max_model_len:.2f}x"
         )
 
         if num_gpu_blocks <= 0:
-            raise ValueError(
-                "No available memory for the cache blocks. "
-                "Try increasing `gpu_memory_utilization` when "
-                "initializing the engine."
-            )
+            raise ValueError("No available memory for the cache blocks. "
+                             "Try increasing `gpu_memory_utilization` when "
+                             "initializing the engine.")
         max_seq_len = self.cache_config.block_size * num_gpu_blocks
-        logger.info(
-            f"Maximum sequence length allowed in the cache: " f"{max_seq_len}"
-        )
+        logger.info(f"Maximum sequence length allowed in the cache: "
+                    f"{max_seq_len}")
         if self.model_config.max_model_len > max_seq_len:
             raise ValueError(
                 f"The model's max seq len ({self.model_config.max_model_len}) "
                 "is larger than the maximum number of tokens that can be "
                 f"stored in KV cache ({max_seq_len}). Try increasing "
                 "`gpu_memory_utilization` or decreasing `max_model_len` when "
-                "initializing the engine."
-            )
+                "initializing the engine.")
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
@@ -485,9 +469,9 @@ class AphroditeEngine:
     ):
         if prompt_token_ids is None:
             assert prompt is not None
-            prompt_token_ids = self.tokenizer.encode(
-                request_id=request_id, prompt=prompt, lora_request=lora_request
-            )
+            prompt_token_ids = self.tokenizer.encode(request_id=request_id,
+                                                     prompt=prompt,
+                                                     lora_request=lora_request)
         return prompt_token_ids
 
     def add_request(
@@ -540,22 +524,16 @@ class AphroditeEngine:
             >>> ...
         """
         if lora_request is not None and not self.lora_config:
-            raise ValueError(
-                f"Got lora_request {lora_request} but LoRA is " "not enabled!"
-            )
+            raise ValueError(f"Got lora_request {lora_request} but LoRA is "
+                             "not enabled!")
         max_log_probs = self.get_model_config().max_log_probs
-        if (
-            sampling_params.logprobs
-            and sampling_params.logprobs > max_log_probs
-        ) or (
-            sampling_params.prompt_logprobs
-            and sampling_params.prompt_logprobs > max_log_probs
-        ):
-            raise ValueError(
-                f"Cannot request more than "
-                f"{max_log_probs} logprobs. "
-                "Please increase the max_log_probs."
-            )
+        if (sampling_params.logprobs
+                and sampling_params.logprobs > max_log_probs) or (
+                    sampling_params.prompt_logprobs
+                    and sampling_params.prompt_logprobs > max_log_probs):
+            raise ValueError(f"Cannot request more than "
+                             f"{max_log_probs} logprobs. "
+                             "Please increase the max_log_probs.")
         if arrival_time is None:
             arrival_time = time.monotonic()
         prompt_token_ids = self.encode_request(
@@ -569,8 +547,7 @@ class AphroditeEngine:
         block_size = self.cache_config.block_size
         seq_id = next(self.seq_counter)
         eos_token_id = self.tokenizer.get_lora_tokenizer(
-            lora_request
-        ).eos_token_id
+            lora_request).eos_token_id
         seq = Sequence(
             seq_id,
             prompt,
@@ -585,9 +562,8 @@ class AphroditeEngine:
         sampling_params = sampling_params.clone()
 
         # Create the sequence group.
-        seq_group = SequenceGroup(
-            request_id, [seq], sampling_params, arrival_time, lora_request
-        )
+        seq_group = SequenceGroup(request_id, [seq], sampling_params,
+                                  arrival_time, lora_request)
 
         # Add the sequence group to the scheduler.
         self.scheduler.add_seq_group(seq_group)
@@ -651,8 +627,8 @@ class AphroditeEngine:
                 # sequences. The highest attainable score calculation is
                 # based on the longest possible sequence length in this case.
                 max_possible_length = max(
-                    best_running_seq.get_prompt_len()
-                    + sampling_params.max_tokens,
+                    best_running_seq.get_prompt_len() +
+                    sampling_params.max_tokens,
                     self.scheduler_config.max_model_len,
                 )
                 highest_attainable_score = (
@@ -660,8 +636,7 @@ class AphroditeEngine:
                         length_penalty=length_penalty,
                         eos_token_id=best_running_seq.eos_token_id,
                         seq_len=max_possible_length,
-                    )
-                )
+                    ))
             else:
                 # Otherwise, beam search will prefer shorter sequences. The
                 # highest attainable score calculation is based on the current
@@ -670,13 +645,11 @@ class AphroditeEngine:
                     best_running_seq.get_beam_search_score(
                         length_penalty=length_penalty,
                         eos_token_id=best_running_seq.eos_token_id,
-                    )
-                )
+                    ))
         return current_worst_score >= highest_attainable_score
 
-    def _process_sequence_group_outputs(
-        self, seq_group: SequenceGroup, outputs: SequenceGroupOutput
-    ) -> None:
+    def _process_sequence_group_outputs(self, seq_group: SequenceGroup,
+                                        outputs: SequenceGroupOutput) -> None:
         # Process prompt logprobs
         prompt_logprobs = outputs.prompt_logprobs
         if prompt_logprobs is not None:
@@ -697,7 +670,8 @@ class AphroditeEngine:
         parent_seqs = seq_group.get_seqs(status=SequenceStatus.RUNNING)
         existing_finished_seqs = seq_group.get_finished_seqs()
         parent_child_dict = {
-            parent_seq.seq_id: [] for parent_seq in parent_seqs
+            parent_seq.seq_id: []
+            for parent_seq in parent_seqs
         }
         for sample in samples:
             parent_child_dict[sample.parent_seq_id].append(sample)
@@ -707,8 +681,7 @@ class AphroditeEngine:
         # Process the child samples for each parent sequence
         for parent in parent_seqs:
             child_samples: List[SequenceOutput] = parent_child_dict[
-                parent.seq_id
-            ]
+                parent.seq_id]
             if len(child_samples) == 0:
                 # This parent sequence has no children samples. Remove
                 # the parent sequence from the sequence group since it will
@@ -721,18 +694,16 @@ class AphroditeEngine:
             for child_sample in child_samples[:-1]:
                 new_child_seq_id = next(self.seq_counter)
                 child = parent.fork(new_child_seq_id)
-                child.append_token_id(
-                    child_sample.output_token, child_sample.logprobs
-                )
+                child.append_token_id(child_sample.output_token,
+                                      child_sample.logprobs)
                 child.persistent_data = child_sample.persistent_data
                 child_seqs.append((child, parent))
             # Continue the parent sequence for the last child sample.
             # We reuse the parent sequence here to reduce redundant memory
             # copies, especially when using non-beam search sampling methods.
             last_child_sample = child_samples[-1]
-            parent.append_token_id(
-                last_child_sample.output_token, last_child_sample.logprobs
-            )
+            parent.append_token_id(last_child_sample.output_token,
+                                   last_child_sample.logprobs)
             parent.persistent_data = last_child_sample.persistent_data
             child_seqs.append((parent, parent))
 
@@ -769,20 +740,15 @@ class AphroditeEngine:
         # Select the newly finished sequences with the highest scores
         # to replace existing finished sequences.
         # Tuple of (seq, parent, is_new)
-        existing_finished_seqs = [
-            (seq, None, False) for seq in existing_finished_seqs
-        ]
-        new_finished_seqs = [
-            (seq, parent, True)
-            for seq, parent in child_seqs
-            if seq.is_finished()
-        ]
+        existing_finished_seqs = [(seq, None, False)
+                                  for seq in existing_finished_seqs]
+        new_finished_seqs = [(seq, parent, True) for seq, parent in child_seqs
+                             if seq.is_finished()]
         all_finished_seqs = existing_finished_seqs + new_finished_seqs
         # Sort the finished sequences by their scores.
         all_finished_seqs.sort(
             key=lambda x: x[0].get_beam_search_score(
-                length_penalty=length_penalty, eos_token_id=x[0].eos_token_id
-            ),
+                length_penalty=length_penalty, eos_token_id=x[0].eos_token_id),
             reverse=True,
         )
         for seq, parent, is_new in all_finished_seqs[:beam_width]:
@@ -806,14 +772,12 @@ class AphroditeEngine:
         # select the top beam_width sequences from the running
         # sequences for the next iteration to continue the beam
         # search.
-        running_child_seqs = [
-            (seq, parent) for seq, parent in child_seqs if not seq.is_finished()
-        ]
+        running_child_seqs = [(seq, parent) for seq, parent in child_seqs
+                              if not seq.is_finished()]
         # Sort the running sequences by their scores.
         running_child_seqs.sort(
             key=lambda x: x[0].get_beam_search_score(
-                length_penalty=length_penalty, eos_token_id=x[0].eos_token_id
-            ),
+                length_penalty=length_penalty, eos_token_id=x[0].eos_token_id),
             reverse=True,
         )
 
@@ -873,8 +837,8 @@ class AphroditeEngine:
                 self.scheduler.free_seq(seq)
 
     def _process_model_outputs(
-        self, output: SamplerOutput, scheduler_outputs: SchedulerOutputs
-    ) -> List[RequestOutput]:
+            self, output: SamplerOutput,
+            scheduler_outputs: SchedulerOutputs) -> List[RequestOutput]:
         now = time.time()
         # Update the scheduled sequence groups with the model outputs.
         scheduled_seq_groups = scheduler_outputs.scheduled_seq_groups
@@ -985,9 +949,8 @@ class AphroditeEngine:
         if self.log_stats:
             self.stat_logger.log(self._get_stats(scheduler_outputs=None))
 
-    def _get_stats(
-        self, scheduler_outputs: Optional[SchedulerOutputs]
-    ) -> Stats:
+    def _get_stats(self,
+                   scheduler_outputs: Optional[SchedulerOutputs]) -> Stats:
         """Get Stats to be Logged to Prometheus."""
         now = time.monotonic()
 
@@ -1000,8 +963,7 @@ class AphroditeEngine:
         cpu_cache_usage = 0.0
         if num_total_cpu > 0:
             num_free_cpu = (
-                self.scheduler.block_manager.get_num_free_cpu_blocks()
-            )
+                self.scheduler.block_manager.get_num_free_cpu_blocks())
             cpu_cache_usage = 1.0 - (num_free_cpu / num_total_cpu)
 
         # Scheduler State
@@ -1022,12 +984,10 @@ class AphroditeEngine:
             if prompt_run:
                 num_prompt_tokens = sum(
                     len(seq_group.prompt_token_ids)
-                    for seq_group in scheduler_outputs.scheduled_seq_groups
-                )
+                    for seq_group in scheduler_outputs.scheduled_seq_groups)
                 num_generation_tokens = sum(
                     seq_group.num_seqs()
-                    for seq_group in scheduler_outputs.scheduled_seq_groups
-                )
+                    for seq_group in scheduler_outputs.scheduled_seq_groups)
             else:
                 num_generation_tokens = scheduler_outputs.num_batched_tokens
 
@@ -1038,9 +998,8 @@ class AphroditeEngine:
                 time_last_iters.append(seq_group.get_last_latency(now))
                 # Time since arrival for all finished requests.
                 if seq_group.is_finished():
-                    time_e2e_requests.append(
-                        now - seq_group.metrics.arrival_time
-                    )
+                    time_e2e_requests.append(now -
+                                             seq_group.metrics.arrival_time)
 
             time_to_first_tokens = time_last_iters if prompt_run else []
             time_per_output_tokens = [] if prompt_run else time_last_iters
@@ -1083,14 +1042,16 @@ class AphroditeEngine:
                     prefix_offset=seq.prefix_offset,
                     read_offset=seq.read_offset,
                     skip_special_tokens=prms.skip_special_tokens,
-                    spaces_between_special_tokens=prms.spaces_between_special_tokens,
+                    spaces_between_special_tokens=prms.
+                    spaces_between_special_tokens,
                 )
                 sample_logprob.decoded_token = new_text
 
     def _decode_sequence(self, seq: Sequence, prms: SamplingParams) -> None:
         """Decodes the new token for a sequence."""
         all_input_ids = seq.get_token_ids()
-        self._decode_logprobs(seq, prms, seq.output_logprobs[-1], all_input_ids)
+        self._decode_logprobs(seq, prms, seq.output_logprobs[-1],
+                              all_input_ids)
 
         (
             new_tokens,
@@ -1114,9 +1075,8 @@ class AphroditeEngine:
         seq.read_offset = read_offset
         seq.output_text += new_output_text
 
-    def _check_stop(
-        self, seq: Sequence, sampling_params: SamplingParams
-    ) -> None:
+    def _check_stop(self, seq: Sequence,
+                    sampling_params: SamplingParams) -> None:
         """Stop the finished sequences."""
         for stop_str in sampling_params.stop:
             if seq.output_text.endswith(stop_str):
@@ -1125,8 +1085,7 @@ class AphroditeEngine:
                 return
         if seq.get_last_token_id() in sampling_params.stop_token_ids:
             stop_str = self.get_tokenizer_for_seq(seq).convert_ids_to_tokens(
-                seq.get_last_token_id()
-            )
+                seq.get_last_token_id())
             self._finalize_sequence(seq, sampling_params, stop_str)
             seq.status = SequenceStatus.FINISHED_STOPPED
             return
@@ -1142,22 +1101,21 @@ class AphroditeEngine:
             return
 
         # Check if the sequence has generated the EOS token.
-        if (
-            not sampling_params.ignore_eos
-        ) and seq.get_last_token_id() == seq.eos_token_id:
+        if (not sampling_params.ignore_eos
+            ) and seq.get_last_token_id() == seq.eos_token_id:
             seq.status = SequenceStatus.FINISHED_STOPPED
             return
 
-    def _finalize_sequence(
-        self, seq: Sequence, sampling_params: SamplingParams, stop_string: str
-    ) -> None:
+    def _finalize_sequence(self, seq: Sequence,
+                           sampling_params: SamplingParams,
+                           stop_string: str) -> None:
         if sampling_params.include_stop_str_in_output:
             return
 
         if stop_string and seq.output_text.endswith(stop_string):
             # Truncate the output text so that the stop string is
             # not included in the output.
-            seq.output_text = seq.output_text[: -len(stop_string)]
+            seq.output_text = seq.output_text[:-len(stop_string)]
 
     def add_lora(self, lora_request: LoRARequest) -> bool:
         assert lora_request.lora_int_id > 0, "lora_id must be greater than 0."
@@ -1190,8 +1148,7 @@ class AphroditeEngine:
 
         if max_concurrent_workers:
             raise NotImplementedError(
-                "max_concurrent_workers is not supported yet."
-            )
+                "max_concurrent_workers is not supported yet.")
 
         if use_ray_compiled_dag:
             # Right now, compiled DAG can only accept a single
@@ -1211,9 +1168,8 @@ class AphroditeEngine:
             driver_kwargs = kwargs
 
         # Start the driver worker after all the ray workers.
-        driver_worker_output = getattr(self.driver_worker, method)(
-            *driver_args, **driver_kwargs
-        )
+        driver_worker_output = getattr(self.driver_worker,
+                                       method)(*driver_args, **driver_kwargs)
 
         # Get the results of the ray workers.
         if self.workers:
@@ -1238,10 +1194,8 @@ class AphroditeEngine:
         required_version = "2.9"
         current_version = pkg_resources.get_distribution("ray").version
         if current_version < required_version:
-            raise ValueError(
-                f"Ray version {required_version} or greater is "
-                f"required, but found {current_version}"
-            )
+            raise ValueError(f"Ray version {required_version} or greater is "
+                             f"required, but found {current_version}")
 
         from ray.dag import MultiOutputNode, InputNode
 
@@ -1250,12 +1204,10 @@ class AphroditeEngine:
         # Right now, compiled DAG requires at least 1 arg. We send
         # a dummy value for now. It will be fixed soon.
         with InputNode() as input_data:
-            forward_dag = MultiOutputNode(
-                [
-                    worker.execute_model_compiled_dag_remote.bind(input_data)
-                    for worker in self.workers
-                ]
-            )
+            forward_dag = MultiOutputNode([
+                worker.execute_model_compiled_dag_remote.bind(input_data)
+                for worker in self.workers
+            ])
         return forward_dag.experimental_compile()
 
     def check_health(self) -> None:
@@ -1275,9 +1227,8 @@ class AphroditeEngine:
             if actor_state["State"] == "DEAD":
                 dead_actors.append(actor)
         if dead_actors:
-            raise RuntimeError(
-                "At least one Worker is dead. " f"Dead Workers: {dead_actors}. "
-            )
+            raise RuntimeError("At least one Worker is dead. "
+                               f"Dead Workers: {dead_actors}. ")
 
 
 setup_logger()

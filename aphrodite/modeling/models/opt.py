@@ -115,8 +115,8 @@ class OPTAttention(nn.Module):
             linear_method=linear_method,
         )
         self.attn = Attention(self.num_heads,
-                                   self.head_dim,
-                                   scale=self.scaling)
+                              self.head_dim,
+                              scale=self.scaling)
 
     def forward(
         self,

@@ -21,7 +21,6 @@ from collections import OrderedDict
 from typing import Any, Hashable, Optional
 from loguru import logger
 
-
 T = TypeVar("T")
 
 STR_DTYPE_TO_TORCH_DTYPE = {
@@ -133,8 +132,8 @@ def get_max_shared_memory_bytes(gpu: int = 0) -> int:
     # the Neuron-X backend does not have the `cuda_utils` module.
     from aphrodite._C import cuda_utils
 
-    max_shared_mem = cuda_utils.get_max_shared_memory_per_block_device_attribute(
-        gpu)
+    max_shared_mem = (
+        cuda_utils.get_max_shared_memory_per_block_device_attribute(gpu))
     # value 0 will cause MAX_SEQ_LEN become negative and test_attention.py
     # will fail
     assert max_shared_mem > 0, "max_shared_mem can not be zero"
@@ -212,8 +211,7 @@ def get_nvcc_cuda_version() -> Optional[Version]:
         if os.path.isfile(cuda_home + '/bin/nvcc'):
             logger.info(
                 f'CUDA_HOME is not found in the environment. Using {cuda_home} '
-                'as CUDA_HOME.'
-            )
+                'as CUDA_HOME.')
         else:
             logger.warning(
                 f'Not found nvcc in {cuda_home}. Skip cuda version check!')

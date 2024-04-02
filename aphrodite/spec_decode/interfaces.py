@@ -23,12 +23,10 @@ class SpeculativeProposals:
     proposal_lens: torch.Tensor
 
     def __repr__(self):
-        return (
-            f"SpeculativeProposals("
-            f"proposal_token_ids={self.proposal_token_ids.shape}, "
-            f"proposal_probs={self.proposal_probs.shape}, "
-            f"proposal_lens={self.proposal_lens.shape})"
-        )
+        return (f"SpeculativeProposals("
+                f"proposal_token_ids={self.proposal_token_ids.shape}, "
+                f"proposal_probs={self.proposal_probs.shape}, "
+                f"proposal_lens={self.proposal_lens.shape})")
 
 
 @dataclass
@@ -45,14 +43,13 @@ class SpeculativeScores:
     token_ids: torch.Tensor
 
     def __repr__(self):
-        return (
-            f"SpeculativeScores("
-            f"probs={self.probs.shape}, "
-            f"token_ids={self.token_ids.shape})"
-        )
+        return (f"SpeculativeScores("
+                f"probs={self.probs.shape}, "
+                f"token_ids={self.token_ids.shape})")
 
 
 class SpeculativeProposer(ABC):
+
     @abstractmethod
     def get_proposals(
         self,
@@ -66,6 +63,7 @@ class SpeculativeProposer(ABC):
 
 
 class SpeculativeScorer(ABC):
+
     @abstractmethod
     def score_proposals(
         self,

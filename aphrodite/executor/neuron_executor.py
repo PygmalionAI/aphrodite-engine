@@ -1,14 +1,11 @@
 from typing import Dict, List, Optional
 
-from loguru import logger
-
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.config import (CacheConfig, DeviceConfig, ModelConfig,
-                         ParallelConfig, SchedulerConfig, LoRAConfig)
+                                     ParallelConfig, SchedulerConfig,
+                                     LoRAConfig)
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
-
-logger = init_logger(__name__)
 
 
 class NeuronExecutor(ExecutorBase):

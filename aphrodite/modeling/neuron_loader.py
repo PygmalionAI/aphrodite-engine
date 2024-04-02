@@ -29,13 +29,11 @@ def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
             return model_cls
     raise ValueError(
         f"Model architectures {architectures} are not supported for now. "
-        f"Supported architectures: {ModelRegistry.get_supported_archs()}"
-    )
+        f"Supported architectures: {ModelRegistry.get_supported_archs()}")
 
 
-def get_model(
-    model_config: ModelConfig, device_config: DeviceConfig, **kwargs
-) -> nn.Module:
+def get_model(model_config: ModelConfig, device_config: DeviceConfig,
+              **kwargs) -> nn.Module:
     from transformers_neuronx.config import (
         NeuronConfig,
         ContinuousBatchingConfig,
@@ -51,9 +49,9 @@ def get_model(
     model = model_class(model_config.hf_config, linear_method)
 
     continuous_batching_config = ContinuousBatchingConfig(
-        batch_size_for_shared_caches=scheduler_config.max_num_seqs
-    )
-    neuron_config = NeuronConfig(continuous_batching=continuous_batching_config)
+        batch_size_for_shared_caches=scheduler_config.max_num_seqs)
+    neuron_config = NeuronConfig(
+        continuous_batching=continuous_batching_config)
 
     # Load the weights from the cached or downloaded files.
     model.load_weights(

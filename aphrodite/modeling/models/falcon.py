@@ -152,9 +152,9 @@ class FalconAttention(nn.Module):
                 base=rope_theta,
             )
             self.attn = Attention(self.num_heads,
-                                       self.head_dim,
-                                       self.inv_norm_factor,
-                                       num_kv_heads=self.num_kv_heads)
+                                  self.head_dim,
+                                  self.inv_norm_factor,
+                                  num_kv_heads=self.num_kv_heads)
         elif self.use_alibi:
             tp_rank = get_tensor_model_parallel_rank()
             head_start = tp_rank * self.num_heads
@@ -163,15 +163,15 @@ class FalconAttention(nn.Module):
                             self.inv_norm_factor)
             alibi_slopes = alibi_slopes[head_start:head_end].tolist()
             self.attn = Attention(self.num_heads,
-                                       self.head_dim,
-                                       self.inv_norm_factor,
-                                       num_kv_heads=self.num_kv_heads,
-                                       alibi_slopes=alibi_slopes)
+                                  self.head_dim,
+                                  self.inv_norm_factor,
+                                  num_kv_heads=self.num_kv_heads,
+                                  alibi_slopes=alibi_slopes)
         else:
             self.attn = Attention(self.num_heads,
-                                       self.head_dim,
-                                       scale=self.inv_norm_factor,
-                                       num_kv_heads=self.num_kv_heads)
+                                  self.head_dim,
+                                  scale=self.inv_norm_factor,
+                                  num_kv_heads=self.num_kv_heads)
 
     def forward(
         self,

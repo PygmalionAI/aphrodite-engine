@@ -531,13 +531,14 @@ if __name__ == "__main__":
         args = parse_args()
 
         if args.launch_kobold_api:
-            logger.warning("Launching Kobold API server in addition to OpenAI. "
-                        "Keep in mind that the Kobold API routes are NOT "
-                        "protected via the API key.")
+            logger.warning(
+                "Launching Kobold API server in addition to OpenAI. "
+                "Keep in mind that the Kobold API routes are NOT "
+                "protected via the API key.")
             app.include_router(kai_api, prefix="/api/v1")
             app.include_router(kai_api,
-                            prefix="/api/latest",
-                            include_in_schema=False)
+                               prefix="/api/latest",
+                               include_in_schema=False)
             app.include_router(extra_api, prefix="/api/extra")
 
         app.add_middleware(
@@ -553,7 +554,7 @@ if __name__ == "__main__":
 
             if admin_key is None:
                 logger.warning("Admin key not provided. Admin operations will "
-                            "be disabled.")
+                               "be disabled.")
 
             @app.middleware("http")
             async def authentication(request: Request, call_next):
@@ -581,14 +582,15 @@ if __name__ == "__main__":
 
         for middleware in args.middleware:
             module_path, object_name = middleware.rsplit(".", 1)
-            imported = getattr(importlib.import_module(module_path), object_name)
+            imported = getattr(importlib.import_module(module_path),
+                               object_name)
             if inspect.isclass(imported):
                 app.add_middleware(imported)
             elif inspect.iscoroutinefunction(imported):
                 app.middleware("http")(imported)
             else:
                 raise ValueError(f"Invalid middleware {middleware}. Must be a "
-                                "function or a class.")
+                                 "function or a class.")
 
         logger.debug(f"args: {args}")
 

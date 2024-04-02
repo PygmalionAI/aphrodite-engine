@@ -2,7 +2,8 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, ModelConfig,
-                         ParallelConfig, SchedulerConfig, LoRAConfig)
+                                     ParallelConfig, SchedulerConfig,
+                                     LoRAConfig)
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 

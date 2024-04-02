@@ -48,14 +48,12 @@ class CompletionOutput:
         return self.finish_reason is not None
 
     def __repr__(self) -> str:
-        return (
-            f"CompletionOutput(index={self.index}, "
-            f"text={self.text!r}, "
-            f"token_ids={self.token_ids}, "
-            f"cumulative_logprob={self.cumulative_logprob}, "
-            f"logprobs={self.logprobs}, "
-            f"finish_reason={self.finish_reason})"
-        )
+        return (f"CompletionOutput(index={self.index}, "
+                f"text={self.text!r}, "
+                f"token_ids={self.token_ids}, "
+                f"cumulative_logprob={self.cumulative_logprob}, "
+                f"logprobs={self.logprobs}, "
+                f"finish_reason={self.finish_reason})")
 
 
 class RequestOutput:
@@ -102,8 +100,7 @@ class RequestOutput:
         else:
             if seq_group.sampling_params.use_beam_search:
                 sorting_key = lambda seq: seq.get_beam_search_score(
-                    seq_group.sampling_params.length_penalty
-                )
+                    seq_group.sampling_params.length_penalty)
             else:
                 sorting_key = lambda seq: seq.get_cumulative_logprob()
             sorted_seqs = sorted(seqs, key=sorting_key, reverse=True)
@@ -122,8 +119,7 @@ class RequestOutput:
                 seq.get_cumulative_logprob(),
                 seq.output_logprobs if include_logprobs else None,
                 SequenceStatus.get_finished_reason(seq.status),
-            )
-            for seq in top_n_seqs
+            ) for seq in top_n_seqs
         ]
 
         # Every sequence in the sequence group should have the same prompt.
@@ -145,13 +141,11 @@ class RequestOutput:
         )
 
     def __repr__(self) -> str:
-        return (
-            f"RequestOutput(request_id={self.request_id}, "
-            f"prompt={self.prompt!r}, "
-            f"prompt_token_ids={self.prompt_token_ids}, "
-            f"prompt_logprobs={self.prompt_logprobs}, "
-            f"outputs={self.outputs}, "
-            f"finished={self.finished}, "
-            f"metrics={self.metrics}, "
-            f"lora_request={self.lora_request})"
-        )
+        return (f"RequestOutput(request_id={self.request_id}, "
+                f"prompt={self.prompt!r}, "
+                f"prompt_token_ids={self.prompt_token_ids}, "
+                f"prompt_logprobs={self.prompt_logprobs}, "
+                f"outputs={self.outputs}, "
+                f"finished={self.finished}, "
+                f"metrics={self.metrics}, "
+                f"lora_request={self.lora_request})")

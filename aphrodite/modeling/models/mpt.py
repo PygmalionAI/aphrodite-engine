@@ -106,10 +106,10 @@ class MPTAttention(nn.Module):
         self.head_dim = self.d_model // self.total_num_heads
         scaling = self.head_dim**-0.5
         self.attn = Attention(self.num_heads,
-                                   self.head_dim,
-                                   scaling,
-                                   alibi_slopes=alibi_slopes,
-                                   num_kv_heads=self.num_kv_heads)
+                              self.head_dim,
+                              scaling,
+                              alibi_slopes=alibi_slopes,
+                              num_kv_heads=self.num_kv_heads)
 
     def forward(
         self,

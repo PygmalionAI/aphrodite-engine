@@ -19,8 +19,7 @@ from aphrodite.modeling.layers.quantization.bitsandbytes import (
     replace_quant_params,
 )
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_world_size,
-)
+    get_tensor_model_parallel_world_size, )
 
 
 @contextlib.contextmanager
@@ -36,10 +35,8 @@ def _get_model_architecture(model_config: ModelConfig) -> Type[nn.Module]:
     architectures = getattr(model_config.hf_config, "architectures", [])
     # Special handling for quantized Mixtral.
     # FIXME: This is a temporary hack.
-    if (
-        model_config.quantization is not None
-        and "MixtralForCausalLM" in architectures
-    ):
+    if (model_config.quantization is not None
+            and "MixtralForCausalLM" in architectures):
         architectures = ["QuantMixtralForCausalLM"]
 
     for arch in architectures:
@@ -48,13 +45,11 @@ def _get_model_architecture(model_config: ModelConfig) -> Type[nn.Module]:
             return model_cls
     raise ValueError(
         f"Model architectures {architectures} are not supported for now. "
-        f"Supported architectures: {ModelRegistry.get_supported_archs()}"
-    )
+        f"Supported architectures: {ModelRegistry.get_supported_archs()}")
 
 
-def get_model(
-    model_config: ModelConfig, device_config: DeviceConfig, **kwargs
-) -> nn.Module:
+def get_model(model_config: ModelConfig, device_config: DeviceConfig,
+              **kwargs) -> nn.Module:
     lora_config = kwargs.get("lora_config", None)
     model_class = _get_model_architecture(model_config)
 
@@ -69,8 +64,7 @@ def get_model(
                 f"The quantization method {model_config.quantization} is not "
                 "supported for the current GPU. "
                 f"Minimum capability: {quant_config.get_min_capability()}. "
-                f"Current capability: {capability}."
-            )
+                f"Current capability: {capability}.")
         supported_dtypes = quant_config.get_supported_act_dtypes()
         if model_config.dtype not in supported_dtypes:
             # set the dtype to float16 for quantized models
@@ -82,20 +76,17 @@ def get_model(
         # Create a model instance.
         # The weights will be initialized as empty tensors.
         with torch.device(device_config.device) if not (
-            isinstance(linear_method, BNBLinearMethod)
-            and linear_method.quant_config.from_float
-        ) else nullcontext():
+                isinstance(linear_method, BNBLinearMethod)
+                and linear_method.quant_config.from_float) else nullcontext():
             if hasattr(model_class, "supported_lora_modules"):
-                model = model_class(
-                    model_config.hf_config, linear_method, lora_config
-                )
+                model = model_class(model_config.hf_config, linear_method,
+                                    lora_config)
             elif lora_config:
                 raise ValueError(
                     f"Model {model_class.__name__} does not support LoRA, "
                     "but LoRA is enabled. Support for this model may "
                     "be added in the future. If this is important to you, "
-                    "please open an issue on github."
-                )
+                    "please open an issue on github.")
             else:
                 model = model_class(model_config.hf_config, linear_method)
         if model_config.load_format == "dummy":
@@ -126,19 +117,19 @@ def get_model(
                 "Memory allocated for converted model: {} GiB x {} = {} "
                 "GiB".format(
                     round(
-                        torch.cuda.memory_allocated(torch.cuda.current_device())
-                        / (1024 * 1024 * 1024),
+                        torch.cuda.memory_allocated(
+                            torch.cuda.current_device()) /
+                        (1024 * 1024 * 1024),
                         2,
                     ),
                     tp,
                     round(
-                        torch.cuda.memory_allocated(torch.cuda.current_device())
-                        * tp
-                        / (1024 * 1024 * 1024),
+                        torch.cuda.memory_allocated(
+                            torch.cuda.current_device()) * tp /
+                        (1024 * 1024 * 1024),
                         2,
                     ),
-                )
-            )
+                ))
             logger.info(
                 "Memory reserved for converted model: {} GiB x {} = {} "
                 "GiB".format(
@@ -150,10 +141,8 @@ def get_model(
                     tp,
                     round(
                         torch.cuda.memory_reserved(torch.cuda.current_device())
-                        * tp
-                        / (1024 * 1024 * 1024),
+                        * tp / (1024 * 1024 * 1024),
                         2,
                     ),
-                )
-            )
+                ))
     return model.eval()

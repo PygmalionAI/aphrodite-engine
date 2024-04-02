@@ -70,7 +70,8 @@ def _log_formatter(record: dict):
 
     fmt = ""
     if len(lines) > 1:
-        fmt = "\n".join([f"{colored_level}{separator}{line}" for line in lines])
+        fmt = "\n".join(
+            [f"{colored_level}{separator}{line}" for line in lines])
     else:
         fmt = f"{colored_level}{separator}{message}"
 
@@ -80,22 +81,28 @@ def _log_formatter(record: dict):
 # Uvicorn log handler
 # Uvicorn log portions inspired from https://github.com/encode/uvicorn/discussions/2027#discussioncomment-6432362
 class UvicornLoggingHandler(logging.Handler):
+
     def emit(self, record: logging.LogRecord) -> None:
-        logger.opt(exception=record.exc_info).log(
-            record.levelname, self.format(record).rstrip()
-        )
+        logger.opt(exception=record.exc_info).log(record.levelname,
+                                                  self.format(record).rstrip())
 
 
-# Uvicorn config for logging. Passed into run when creating all loggers in server
+# Uvicorn config for logging. Passed into run when creating all loggers in
+# server
 UVICORN_LOG_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
     "handlers": {
         "uvicorn": {
-            "class": f"{UvicornLoggingHandler.__module__}.{UvicornLoggingHandler.__qualname__}",  # noqa
+            "class":
+            f"{UvicornLoggingHandler.__module__}.{UvicornLoggingHandler.__qualname__}",  # noqa
         },
     },
-    "root": {"handlers": ["uvicorn"], "propagate": False, "level": LOG_LEVEL},
+    "root": {
+        "handlers": ["uvicorn"],
+        "propagate": False,
+        "level": LOG_LEVEL
+    },
 }
 
 

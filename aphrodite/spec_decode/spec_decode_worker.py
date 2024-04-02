@@ -76,11 +76,8 @@ class SpecDecodeWorker:
         self.scorer_worker = scorer_worker
         self.rejection_sampler = rejection_sampler
 
-        self._metrics = (
-            AsyncMetricsCollector(rejection_sampler)
-            if metrics_collector is None
-            else metrics_collector
-        )
+        self._metrics = (AsyncMetricsCollector(rejection_sampler)
+                         if metrics_collector is None else metrics_collector)
 
         self.probs_dtype = self.rejection_sampler.probs_dtype
         self.token_id_dtype = self.rejection_sampler.token_id_dtype
@@ -120,19 +117,14 @@ class SpecDecodeWorker:
             num_gpu_blocks,
             num_cpu_blocks,
         ) = self.scorer_worker.profile_num_available_blocks(
-            block_size, gpu_memory_utilization, cpu_swap_space, cache_dtype
-        )
+            block_size, gpu_memory_utilization, cpu_swap_space, cache_dtype)
 
         scorer_cache_block_size_bytes = (
             self.scorer_worker.get_cache_block_size_bytes(
-                block_size, cache_dtype
-            )
-        )
+                block_size, cache_dtype))
         proposer_cache_block_size_bytes = (
             self.proposer_worker.get_cache_block_size_bytes(
-                block_size, cache_dtype
-            )
-        )
+                block_size, cache_dtype))
 
         new_num_gpu_blocks = split_num_cache_blocks_evenly(
             scorer_cache_block_size_bytes,
@@ -158,8 +150,8 @@ class SpecDecodeWorker:
         """Perform speculative decoding on the input batch."""
 
         assert seq_group_metadata_list is not None, (
-            "speculative decoding " "requires non-None seq_group_metadata_list"
-        )
+            "speculative decoding "
+            "requires non-None seq_group_metadata_list")
 
         # If no spec tokens, call the proposer and scorer workers normally.
         # Used for prefill.
@@ -249,13 +241,11 @@ class SpecDecodeWorker:
             proposals,
         )
 
-        accepted_token_ids = self._verify_tokens(
-            seq_group_metadata_list, proposal_scores, proposals, k
-        )
+        accepted_token_ids = self._verify_tokens(seq_group_metadata_list,
+                                                 proposal_scores, proposals, k)
 
-        return self._create_output_sampler_list(
-            seq_group_metadata_list, accepted_token_ids, k
-        )
+        return self._create_output_sampler_list(seq_group_metadata_list,
+                                                accepted_token_ids, k)
 
     @nvtx_range("spec_decode_worker._verify_tokens")
     def _verify_tokens(
@@ -299,11 +289,11 @@ class SpecDecodeWorker:
 
         # Append output tokens from non-speculative sequences to
         # the accepted token ids tensor.
-        non_spec_token_ids = non_spec_token_ids.expand(
-            -1, max_proposal_len + 1
-        ).clone()
+        non_spec_token_ids = non_spec_token_ids.expand(-1, max_proposal_len +
+                                                       1).clone()
         non_spec_token_ids[:, 1:] = -1
-        accepted_token_ids = torch.cat([accepted_token_ids, non_spec_token_ids])
+        accepted_token_ids = torch.cat(
+            [accepted_token_ids, non_spec_token_ids])
 
         # Rearrange so that results are in the order of the original seq group
         # metadata.
@@ -325,7 +315,8 @@ class SpecDecodeWorker:
         seq_ids = get_all_seq_ids(seq_group_metadata_list)
 
         # shape: [k+1, batch_size]
-        accepted_token_ids_by_step = accepted_token_ids.transpose(0, 1).tolist()
+        accepted_token_ids_by_step = accepted_token_ids.transpose(0,
+                                                                  1).tolist()
         sampler_output_list = []
         for token_ids_by_step in accepted_token_ids_by_step:
             if all(token_id == -1 for token_id in token_ids_by_step):
@@ -345,19 +336,15 @@ class SpecDecodeWorker:
                             )
                         ],
                         prompt_logprobs=None,
-                    )
-                )
+                    ))
             sampler_output_list.append(
-                SamplerOutput(outputs=step_output_token_ids)
-            )
+                SamplerOutput(outputs=step_output_token_ids))
 
         maybe_rejsample_metrics = self._metrics.maybe_collect_rejsample_metrics(
-            k
-        )
+            k)
         if maybe_rejsample_metrics is not None:
             sampler_output_list[
-                0
-            ].spec_decode_worker_metrics = maybe_rejsample_metrics
+                0].spec_decode_worker_metrics = maybe_rejsample_metrics
 
         return sampler_output_list
 
@@ -401,9 +388,7 @@ def split_num_cache_blocks_evenly(
     blocks allocatable by the target model alone.
     """
     new_num_gpu_blocks = int(
-        total_num_gpu_blocks
-        * scorer_cache_block_size_bytes
-        / (proposer_cache_block_size_bytes + scorer_cache_block_size_bytes)
-    )
+        total_num_gpu_blocks * scorer_cache_block_size_bytes /
+        (proposer_cache_block_size_bytes + scorer_cache_block_size_bytes))
 
     return new_num_gpu_blocks

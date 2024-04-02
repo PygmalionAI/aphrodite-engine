@@ -8,9 +8,8 @@ import torch
 from transformers import PretrainedConfig
 
 from aphrodite.transformers_utils.config import get_config
-from aphrodite.common.utils import (
-    get_cpu_memory, is_hip, is_neuron, get_nvcc_cuda_version)
-
+from aphrodite.common.utils import (get_cpu_memory, is_hip, is_neuron,
+                                    get_nvcc_cuda_version)
 
 _GB = 1 << 30
 
@@ -108,8 +107,8 @@ class ModelConfig:
         self.max_context_len_to_capture = max_context_len_to_capture
         self.max_log_probs = max_log_probs
 
-        if os.environ.get("APHRODITE_USE_MODELSCOPE", "False").lower(
-        ) == "true":
+        if os.environ.get("APHRODITE_USE_MODELSCOPE",
+                          "False").lower() == "true":
             # download model from ModelScope hub,
             # lazy import so that modelscope is not required for normal use.
             from modelscope.hub.snapshot_download import snapshot_download  # pylint: disable=C
@@ -418,7 +417,7 @@ class CacheConfig:
 
     def _verify_cache_dtype(self) -> None:
         if self.cache_dtype == "auto":
-        # if self.cache_dtype in ["auto", "int8"]:
+            # if self.cache_dtype in ["auto", "int8"]:
             pass
         elif self.cache_dtype == "fp8_e5m2":
             if is_hip():
