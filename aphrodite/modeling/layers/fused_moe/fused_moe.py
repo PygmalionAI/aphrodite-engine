@@ -13,7 +13,6 @@ from aphrodite._C import ops
 from aphrodite.common.utils import is_hip
 
 
-
 @triton.jit
 def fused_moe_kernel(
     # Pointers to matrices
