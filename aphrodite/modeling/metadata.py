@@ -32,7 +32,7 @@ class InputMetadata:
     def __post_init__(self):
         # will not appear in the __repr__ and __init__
         self.attn_bias = None
-    
+
     def asdict_zerocopy(self) -> Dict[str, Any]:
         """Similar to dataclasses.asdict, but avoids deepcopying."""
         # Note that if we add dataclasses as fields, they will need
