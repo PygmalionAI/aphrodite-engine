@@ -232,8 +232,7 @@ async def handle_embeddings(request: EmbeddingsRequest,
             content={"error": "Missing required argument input"})
 
     model = request.model if request.model else None
-    response = await OAIembeddings.embeddings(input,
-                                              request.encoding_format,
+    response = await OAIembeddings.embeddings(input, request.encoding_format,
                                               model)
     return JSONResponse(response)
 
