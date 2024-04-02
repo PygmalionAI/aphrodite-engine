@@ -13,6 +13,7 @@ from aphrodite.modeling.models import ModelRegistry
 from aphrodite.modeling.hf_downloader import (
     get_quant_config,
     initialize_dummy_weights,
+    post_init_exl2,
 )
 from aphrodite.modeling.layers.quantization.bitsandbytes import (
     BNBLinearMethod,
@@ -101,6 +102,7 @@ def get_model(model_config: ModelConfig, device_config: DeviceConfig,
                 model_config.load_format,
                 model_config.revision,
             )
+
         if isinstance(linear_method, BNBLinearMethod):
             replace_quant_params(
                 model,
@@ -145,4 +147,10 @@ def get_model(model_config: ModelConfig, device_config: DeviceConfig,
                         2,
                     ),
                 ))
+    
+    # Patch exl2 model for tensor parallel
+    if model_config.quantization == "exl2":
+        for _, module in model.named_modules():
+            if "RowParallelLinear" in str(module.__class__):
+                post_init_exl2(module)
     return model.eval()
