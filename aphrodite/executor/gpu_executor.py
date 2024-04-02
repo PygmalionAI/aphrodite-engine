@@ -22,7 +22,6 @@ from aphrodite.common.utils import (
     make_async,
 )
 
-
 # A map between the device type (in device config) to its worker module.
 DEVICE_TO_WORKER_MODULE_MAP = {
     "cuda": "aphrodite.task_handler.worker",
@@ -31,6 +30,7 @@ DEVICE_TO_WORKER_MODULE_MAP = {
 
 
 class GPUExecutor(ExecutorBase):
+
     def __init__(
         self,
         model_config: ModelConfig,
@@ -55,8 +55,7 @@ class GPUExecutor(ExecutorBase):
 
     def _dispatch_worker(self):
         worker_module = DEVICE_TO_WORKER_MODULE_MAP[
-            self.device_config.device_type
-        ]
+            self.device_config.device_type]
         imported_worker = importlib.import_module(worker_module)
         Worker = imported_worker.Worker
         return Worker
@@ -66,13 +65,11 @@ class GPUExecutor(ExecutorBase):
         # before CUDA_VISIBLE_DEVICES is set in the Worker
         Worker = self._dispatch_worker()
 
-        assert (
-            self.parallel_config.world_size == 1
-        ), "GPUExecutor only supports single GPU."
+        assert (self.parallel_config.world_size == 1
+                ), "GPUExecutor only supports single GPU."
 
         distributed_init_method = get_distributed_init_method(
-            get_ip(), get_open_port()
-        )
+            get_ip(), get_open_port())
         self.driver_worker = Worker(
             self.model_config,
             self.parallel_config,
@@ -107,10 +104,8 @@ class GPUExecutor(ExecutorBase):
             cache_dtype=self.cache_config.cache_dtype,
         )
 
-        logger.info(
-            f"# GPU blocks: {num_gpu_blocks}, "
-            f"# CPU blocks: {num_cpu_blocks}"
-        )
+        logger.info(f"# GPU blocks: {num_gpu_blocks}, "
+                    f"# CPU blocks: {num_cpu_blocks}")
 
         logger.info(
             f"Minimum concurrency: {num_gpu_blocks * self.cache_config.block_size / self.scheduler_config.max_model_len:.2f}x"  # noqa: E501
@@ -164,6 +159,7 @@ class GPUExecutor(ExecutorBase):
 
 
 class GPUExecutorAsync(GPUExecutor, ExecutorAsyncBase):
+
     async def execute_model_async(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],

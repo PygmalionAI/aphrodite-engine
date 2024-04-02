@@ -17,9 +17,7 @@ from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.engine.metrics import StatLogger, Stats
-from aphrodite.engine.ray_tools import (
-    initialize_ray_cluster
-)
+from aphrodite.engine.ray_tools import (initialize_ray_cluster)
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (
@@ -36,10 +34,8 @@ from aphrodite.transformers_utils.tokenizer import (
     TokenizerGroup,
 )
 from aphrodite.common.utils import (
-    Counter,
-)
+    Counter, )
 from aphrodite.common.logger import setup_logger
-
 
 _LOCAL_LOGGING_INTERVAL_SEC = 5
 
@@ -166,7 +162,6 @@ class AphroditeEngine:
                               sequence: Sequence) -> "PreTrainedTokenizer":
         return self.tokenizer.get_lora_tokenizer(sequence.lora_request)
 
-
     def _init_tokenizer(self, **tokenizer_init_kwargs):
         init_kwargs = dict(
             enable_lora=bool(self.lora_config),
@@ -180,7 +175,6 @@ class AphroditeEngine:
         self.tokenizer: TokenizerGroup = TokenizerGroup(
             self.model_config.tokenizer, **init_kwargs)
 
-
     def _verify_args(self) -> None:
         self.model_config.verify_with_parallel_config(self.parallel_config)
         self.cache_config.verify_with_parallel_config(self.parallel_config)
@@ -188,7 +182,6 @@ class AphroditeEngine:
             self.lora_config.verify_with_model_config(self.model_config)
             self.lora_config.verify_with_scheduler_config(
                 self.scheduler_config)
-
 
     def encode_request(
         self,
@@ -714,7 +707,8 @@ class AphroditeEngine:
             # Latency Timings.
             time_last_iters = []
             for seq_group in scheduler_outputs.scheduled_seq_groups:
-                # Time since last token. (n.b. updates seq_group.metrics.last_token_time)
+                # Time since last token.
+                # (n.b. updates seq_group.metrics.last_token_time)
                 time_last_iters.append(seq_group.get_last_latency(now))
                 # Time since arrival for all finished requests.
                 if seq_group.is_finished():

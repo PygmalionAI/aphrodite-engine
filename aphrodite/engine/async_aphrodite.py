@@ -320,7 +320,7 @@ class AsyncAphrodite:
         self.start_engine_loop = start_engine_loop
         self._request_tracker: Optional[RequestTracker] = None
         self._errored_with: Optional[BaseException] = None
-    
+
     @classmethod
     def from_engine_args(cls,
                          engine_args: AsyncEngineArgs,

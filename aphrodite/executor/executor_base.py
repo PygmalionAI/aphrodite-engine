@@ -63,6 +63,7 @@ class ExecutorBase(ABC):
 
 
 class ExecutorAsyncBase(ExecutorBase):
+
     @abstractmethod
     async def execute_model_async(
         self,

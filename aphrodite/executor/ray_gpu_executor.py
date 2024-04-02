@@ -9,21 +9,22 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from loguru import logger
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, ModelConfig,
-                         ParallelConfig, SchedulerConfig, LoRAConfig)
+                                     ParallelConfig, SchedulerConfig,
+                                     LoRAConfig)
 from aphrodite.engine.ray_tools import RayWorkerAphrodite, ray
 from aphrodite.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from aphrodite.executor.utils import check_block_size_valid
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
-from aphrodite.common.utils import (set_cuda_visible_devices, get_ip, get_open_port,
-                        get_distributed_init_method, make_async)
+from aphrodite.common.utils import (set_cuda_visible_devices, get_ip,
+                                    get_open_port, get_distributed_init_method,
+                                    make_async)
 
 if ray is not None:
     from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
-
 
 # A map between the device type (in device config) to its worker module.
 DEVICE_TO_WORKER_MODULE_MAP = {
@@ -211,6 +212,7 @@ class RayGPUExecutor(ExecutorBase):
         )
 
     def _init_cache(self) -> None:
+        # ruff: noqa: E501
         """Profiles the memory usage and initializes the KV cache.
 
         The engine will first conduct a profiling of the existing memory usage.
