@@ -23,7 +23,9 @@ from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.endpoints.openai.protocol import (CompletionRequest,
                                                  ChatCompletionRequest,
-                                                 ErrorResponse, Prompt)
+                                                 ErrorResponse, Prompt,
+                                                 EmbeddingsResponse,
+                                                 EmbeddingsRequest)
 from aphrodite.common.logger import UVICORN_LOG_CONFIG
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams, _SAMPLING_EPS
@@ -34,6 +36,7 @@ from aphrodite.endpoints.openai.serving_completions import (
 from aphrodite.endpoints.openai.protocol import KAIGenerationInputSchema
 from aphrodite.endpoints.openai.serving_engine import LoRA
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
+import aphrodite.endpoints.openai.embeddings as OAIembeddings
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
@@ -217,6 +220,21 @@ async def detokenize(request: Request,
                      x_api_key: Optional[str] = Header(None)):
     detokenized = await openai_serving_chat.detokenize(token_ids)
     return JSONResponse(content=detokenized)
+
+
+@app.post("/v1/embeddings", response_model=EmbeddingsResponse)
+async def handle_embeddings(request: EmbeddingsRequest,
+                            x_api_key: Optional[str] = Header(None)):
+    input = request.input
+    if not input:
+        raise JSONResponse(
+            status_code=400,
+            content={"error": "Missing required argument input"})
+
+    model = request.model if request.model else None
+    response = await OAIembeddings.embeddings(input, request.encoding_format,
+                                              model)
+    return JSONResponse(response)
 
 
 @app.get("/version", description="Fetch the Aphrodite Engine version.")
