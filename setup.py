@@ -26,6 +26,7 @@ ROCM_SUPPORTED_ARCHS = {"gfx908", "gfx90a", "gfx942", "gfx1100"}
 assert sys.platform.startswith(
     "linux"), "Aphrodite only supports Linux at the moment (including WSL)."
 
+
 def _is_hip() -> bool:
     return torch.version.hip is not None
 
