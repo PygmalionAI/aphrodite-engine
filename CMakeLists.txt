@@ -48,30 +48,37 @@ endif()
 # Update cmake's `CMAKE_PREFIX_PATH` with torch location.
 append_cmake_prefix_path("torch" "torch.utils.cmake_prefix_path")
 
+# Ensure the 'nvcc' command is in the PATH
+find_program(NVCC_EXECUTABLE nvcc)
+if (CUDA_FOUND AND NOT NVCC_EXECUTABLE)
+    message(FATAL_ERROR "nvcc not found")
+endif()
+
 #[==============================================================================[
-Import torch cmake configuration.
-Torch also imports CUDA (and partially HIP) languages with some customizations,
-so there is no need to do this explicitly with check_language/enable_language,
-etc.
+# Import torch cmake configuration.
+# Torch also imports CUDA (and partially HIP) languages with some customizations,
+# so there is no need to do this explicitly with check_language/enable_language,
+# etc.
 #]==============================================================================]
 find_package(Torch REQUIRED)
 
 #[==============================================================================[
-Normally `torch.utils.cpp_extension.CUDAExtension` would add
-`libtorch_python.so` for linking against an extension. Torch's cmake
-configuration does not include this library (presumably since the cmake
-config is used for standalone C++ binaries that link against torch).
-The `libtorch_python.so` library defines some of the glue code between
-torch/python via pybind and is required by Aphrodite extensions for this
-reason. So, add it by manually using `append_torchlib_if_found` from
-torch's cmake setup.
+# Normally `torch.utils.cpp_extension.CUDAExtension` would add
+# `libtorch_python.so` for linking against an extension. Torch's cmake
+# configuration does not include this library (presumably since the cmake
+# config is used for standalone C++ binaries that link against torch).
+# The `libtorch_python.so` library defines some of the glue code between
+# torch/python via pybind and is required by Aphrodite extensions for this
+# reason. So, add it by manually with `find_library` using torch's
+# installed library path.
 #]==============================================================================]
-append_torchlib_if_found(torch_python)
+find_library(torch_python_LIBRARY torch_python PATHS
+  "${TORCH_INSTALL_PREFIX}/lib")
 
-#[====================================================================[
+#[==============================================================================[
 # Set up GPU language and check the torch version and warn if it isn't
 # what is expected.
-#]====================================================================]
+#]==============================================================================]
 if (NOT HIP_FOUND AND CUDA_FOUND)
   set(APHRODITE_GPU_LANG "CUDA")
 
