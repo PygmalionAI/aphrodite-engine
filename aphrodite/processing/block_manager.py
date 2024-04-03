@@ -285,7 +285,7 @@ class BlockSpaceManager:
             if (self.block_sliding_window is not None
                     and logical_idx >= self.block_sliding_window):
                 block = block_table[logical_idx % self.block_sliding_window]
-            # Set the reference counts of the token blocks.
+                # Set the reference counts of the token blocks.
                 block.ref_count = seq_group.num_seqs()
             elif self.enable_caching:
                 block = self.gpu_allocator.allocate(
