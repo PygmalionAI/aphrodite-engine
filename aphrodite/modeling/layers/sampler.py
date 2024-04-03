@@ -198,7 +198,7 @@ def _perform_sampling(
 
     # Sample the next tokens.
     sample_results = _sample(probs, logprobs, sampling_metadata,
-                                 sampling_tensors)
+                             sampling_tensors)
     # Get the logprobs query results.
     prompt_logprobs, sample_logprobs = _get_logprobs(logprobs,
                                                      sampling_metadata,

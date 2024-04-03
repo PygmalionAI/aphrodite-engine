@@ -245,7 +245,7 @@ class Sequence:
 
     def get_token_ids(self) -> List[int]:
         return self.data.get_token_ids()
-    
+
     def get_prompt_token_ids(self) -> List[int]:
         return self.data.get_prompt_token_ids()
 

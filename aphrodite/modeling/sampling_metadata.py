@@ -7,9 +7,8 @@ import torch
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import SequenceData
 from aphrodite.common.utils import in_wsl, is_neuron
-from aphrodite.modeling.layers.ops.sample import (
-    get_num_triton_sampler_splits
-)
+from aphrodite.modeling.layers.ops.sample import (get_num_triton_sampler_splits
+                                                  )
 
 _SAMPLING_EPS = 1e-5
 _SEED_0_REPLACEMENT = 3403598558
@@ -128,7 +127,7 @@ class SamplingTensors:
         extra_seeds_to_generate: int = 0,
         extra_entropy: Optional[Tuple[int, ...]] = None
     ) -> Tuple["SamplingTensors", bool, bool, bool, bool, bool, bool, bool,
-                bool, bool, bool, bool, bool]:
+               bool, bool, bool, bool, bool]:
         prompt_tokens: List[List[int]] = []
         output_tokens: List[List[int]] = []
         top_ks: List[int] = []
@@ -506,7 +505,7 @@ class SamplingTensors:
                                                non_blocking=True),
             extra_seeds=extra_seeds_gpu,
         )
-    
+
     @staticmethod
     def _get_sequence_seeds(
         seed: int,
