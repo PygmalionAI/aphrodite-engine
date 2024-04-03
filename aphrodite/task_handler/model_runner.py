@@ -333,7 +333,7 @@ class ModelRunner:
             block_tables=block_tables,
             use_cuda_graph=False,
             kv_cache_dtype=self.kv_cache_dtype,
-)
+        )
         return (
             input_tokens,
             input_positions,
@@ -471,7 +471,7 @@ class ModelRunner:
             block_tables=block_tables,
             use_cuda_graph=use_captured_graph,
             kv_cache_dtype=self.kv_cache_dtype,
-)
+        )
         return (
             input_tokens,
             input_positions,
@@ -857,7 +857,7 @@ class ModelRunner:
                     block_tables=block_tables[:batch_size],
                     use_cuda_graph=True,
                     kv_cache_dtype=self.kv_cache_dtype,
-                    )
+                )
 
                 if self.lora_config:
                     lora_mapping = LoRAMapping(

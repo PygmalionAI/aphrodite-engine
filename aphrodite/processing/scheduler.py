@@ -243,7 +243,6 @@ class Scheduler:
                         self.scheduler_config.max_num_seqs):
                     break
 
-
                 if lora_int_id > 0:
                     curr_loras.add(lora_int_id)
                 self.waiting.popleft()
