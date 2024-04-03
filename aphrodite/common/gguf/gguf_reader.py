@@ -1,100 +1,33 @@
+#
+# GGUF file reading/modification support. For API usage information,
+# please see the files scripts/ for some fairly simple examples.
+#
 from __future__ import annotations
 
 import os
-from enum import IntEnum
 from collections import OrderedDict
 from typing import Any, Literal, NamedTuple, TypeVar, Union
 
 import numpy as np
 import numpy.typing as npt
 
-GGUF_MAGIC = 0x46554747  # "GGUF"
-GGUF_VERSION = 3
-GGUF_DEFAULT_ALIGNMENT = 32
+if __name__ == "__main__":
+    import sys
+    from pathlib import Path
+
+    # Allow running file in package as a script.
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from .constants import (
+    GGML_QUANT_SIZES,
+    GGUF_DEFAULT_ALIGNMENT,
+    GGUF_MAGIC,
+    GGUF_VERSION,
+    GGMLQuantizationType,
+    GGUFValueType,
+)
+
 READER_SUPPORTED_VERSIONS = [2, GGUF_VERSION]
-
-
-class GGMLQuantizationType(IntEnum):
-    F32 = 0
-    F16 = 1
-    Q4_0 = 2
-    Q4_1 = 3
-    Q5_0 = 6
-    Q5_1 = 7
-    Q8_0 = 8
-    Q8_1 = 9
-    Q2_K = 10
-    Q3_K = 11
-    Q4_K = 12
-    Q5_K = 13
-    Q6_K = 14
-    Q8_K = 15
-    IQ2_XXS = 16
-    IQ2_XS = 17
-    IQ3_XXS = 18
-    IQ1_S = 19
-    IQ4_NL = 20
-    IQ3_S = 21
-    IQ2_S = 22
-    IQ4_XS = 23
-
-
-QK_K = 256
-# Items here are (block size, type size)
-GGML_QUANT_SIZES = {
-    GGMLQuantizationType.F32: (1, 4),
-    GGMLQuantizationType.F16: (1, 2),
-    GGMLQuantizationType.Q4_0: (32, 2 + 16),
-    GGMLQuantizationType.Q4_1: (32, 2 + 2 + 16),
-    GGMLQuantizationType.Q5_0: (32, 2 + 4 + 16),
-    GGMLQuantizationType.Q5_1: (32, 2 + 2 + 4 + 16),
-    GGMLQuantizationType.Q8_0: (32, 2 + 32),
-    GGMLQuantizationType.Q8_1: (32, 4 + 4 + 32),
-    GGMLQuantizationType.Q2_K: (256, 2 + 2 + QK_K // 16 + QK_K // 4),
-    GGMLQuantizationType.Q3_K: (256, 2 + QK_K // 4 + QK_K // 8 + 12),
-    GGMLQuantizationType.Q4_K: (256, 2 + 2 + QK_K // 2 + 12),
-    GGMLQuantizationType.Q5_K: (256, 2 + 2 + QK_K // 2 + QK_K // 8 + 12),
-    GGMLQuantizationType.Q6_K: (256, 2 + QK_K // 2 + QK_K // 4 + QK_K // 16),
-    GGMLQuantizationType.Q8_K: (256, 4 + QK_K + QK_K // 8),
-    GGMLQuantizationType.IQ2_XXS: (256, 2 + QK_K // 4),
-    GGMLQuantizationType.IQ2_XS: (256, 2 + QK_K // 4 + QK_K // 32),
-    GGMLQuantizationType.IQ3_XXS: (256, 2 + 3 * QK_K // 8),
-    GGMLQuantizationType.IQ1_S: (256, 2 + QK_K // 8 + QK_K // 16),
-    GGMLQuantizationType.IQ4_NL: (32, 2 + 32 // 2),
-    GGMLQuantizationType.IQ3_S:
-    (256, 2 + QK_K // 4 + QK_K // 32 + QK_K // 8 + QK_K // 64),
-    GGMLQuantizationType.IQ2_S: (256, 2 + QK_K // 4 + QK_K // 32 + QK_K // 32),
-    GGMLQuantizationType.IQ4_XS: (256, 2 + 2 + QK_K // 64 + QK_K // 2),
-}
-
-
-class GGUFValueType(IntEnum):
-    UINT8 = 0
-    INT8 = 1
-    UINT16 = 2
-    INT16 = 3
-    UINT32 = 4
-    INT32 = 5
-    FLOAT32 = 6
-    BOOL = 7
-    STRING = 8
-    ARRAY = 9
-    UINT64 = 10
-    INT64 = 11
-    FLOAT64 = 12
-
-    @staticmethod
-    def get_type(val: Any) -> GGUFValueType:
-        if isinstance(val, (str, bytes, bytearray)):
-            return GGUFValueType.STRING
-        elif isinstance(val, list):
-            return GGUFValueType.ARRAY
-        elif isinstance(val, float):
-            return GGUFValueType.FLOAT32
-        elif isinstance(val, bool):
-            return GGUFValueType.BOOL
-        elif isinstance(val, int):
-            return GGUFValueType.INT32
 
 
 class ReaderField(NamedTuple):
@@ -157,16 +90,15 @@ class GGUFReader:
         offs += 4
         temp_version = self._get(offs, np.uint32)
         if temp_version[0] & 65535 == 0:
-            # If we get 0 here that means it's (probably) a GGUF file created
-            # for the opposite byte order of the machine this script is
-            # running on.
+            # If we get 0 here that means it's (probably) a GGUF file created for
+            # the opposite byte order of the machine this script is running on.
             self.byte_order = 'S'
             temp_version = temp_version.newbyteorder(self.byte_order)
         version = temp_version[0]
         if version not in READER_SUPPORTED_VERSIONS:
             raise ValueError(
-                f'Sorry, file appears to be version {version} which we cannot '
-                'handle')
+                f'Sorry, file appears to be version {version} which we cannot handle'
+            )
         self.fields: OrderedDict[str, ReaderField] = OrderedDict()
         self.tensors: list[ReaderTensor] = []
         offs += self._push_field(
@@ -184,7 +116,7 @@ class GGUFReader:
         offs, tensors_fields = self._build_tensors_fields(offs, tensor_count)
         new_align = self.fields.get('general.alignment')
         if new_align is not None:
-            if new_align.types != [GGUFValueType.UINT64]:
+            if new_align.types != [GGUFValueType.UINT32]:
                 raise ValueError('Bad type for general.alignment field')
             self.alignment = new_align.parts[-1][0]
         padding = offs % self.alignment
@@ -218,8 +150,9 @@ class GGUFReader:
 
     def _push_field(self, field: ReaderField, skip_sum: bool = False) -> int:
         if field.name in self.fields:
-            raise KeyError(f'Duplicate {field.name} already in list at offset '
-                           f'{field.offset}')
+            raise KeyError(
+                f'Duplicate {field.name} already in list at offset {field.offset}'
+            )
         self.fields[field.name] = field
         return 0 if skip_sum else sum(int(part.nbytes) for part in field.parts)
 
@@ -257,8 +190,8 @@ class GGUFReader:
             aparts: list[npt.NDArray[Any]] = [raw_itype, alen]
             data_idxs: list[int] = []
             for idx in range(alen[0]):
-                curr_size, curr_parts, curr_idxs, curr_types = (
-                    self._get_field_parts(offs, raw_itype[0]))
+                curr_size, curr_parts, curr_idxs, curr_types = self._get_field_parts(
+                    offs, raw_itype[0])
                 if idx == 0:
                     types += curr_types
                 idxs_offs = len(aparts)
@@ -297,8 +230,8 @@ class GGUFReader:
             offs += int(raw_kv_type.nbytes)
             parts: list[npt.NDArray[Any]] = [kv_klen, kv_kdata, raw_kv_type]
             idxs_offs = len(parts)
-            field_size, field_parts, field_idxs, field_types = (
-                self._get_field_parts(offs, raw_kv_type[0]))
+            field_size, field_parts, field_idxs, field_types = self._get_field_parts(
+                offs, raw_kv_type[0])
             parts += field_parts
             self._push_field(ReaderField(
                 orig_offs,
@@ -324,21 +257,34 @@ class GGUFReader:
                        fields: list[ReaderField]) -> None:
         tensors = []
         for field in fields:
-            # pylint: disable=unused-variable
-            (_name_len, name_data, _n_dims, dims, raw_dtype,
-             offset_tensor) = field.parts
+            _name_len, name_data, _n_dims, dims, raw_dtype, offset_tensor = field.parts
             ggml_type = GGMLQuantizationType(raw_dtype[0])
             n_elems = np.prod(dims)
             block_size, type_size = GGML_QUANT_SIZES[ggml_type]
             n_bytes = n_elems * type_size // block_size
             data_offs = int(start_offs + offset_tensor[0])
             item_type: npt.DTypeLike
-            if ggml_type == GGMLQuantizationType.F32:
-                item_count = n_elems
-                item_type = np.float32
-            elif ggml_type == GGMLQuantizationType.F16:
+            if ggml_type == GGMLQuantizationType.F16:
                 item_count = n_elems
                 item_type = np.float16
+            elif ggml_type == GGMLQuantizationType.F32:
+                item_count = n_elems
+                item_type = np.float32
+            elif ggml_type == GGMLQuantizationType.F64:
+                item_count = n_elems
+                item_type = np.float64
+            elif ggml_type == GGMLQuantizationType.I8:
+                item_count = n_elems
+                item_type = np.int8
+            elif ggml_type == GGMLQuantizationType.I16:
+                item_count = n_elems
+                item_type = np.int16
+            elif ggml_type == GGMLQuantizationType.I32:
+                item_count = n_elems
+                item_type = np.int32
+            elif ggml_type == GGMLQuantizationType.I64:
+                item_count = n_elems
+                item_type = np.int64
             else:
                 item_count = n_bytes
                 item_type = np.uint8

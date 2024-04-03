@@ -8,16 +8,17 @@ from collections import defaultdict
 from typing import Any, Iterator, List, Optional, Tuple
 from loguru import logger
 
+from accelerate import init_empty_weights
 from huggingface_hub import snapshot_download, HfFileSystem
 import numpy as np
 from safetensors.torch import load_file, save_file, safe_open
 import torch
-from transformers import PretrainedConfig
+from transformers import PretrainedConfig, AutoModelForCausalLM
 from tqdm.auto import tqdm
 
 from aphrodite.common.config import ModelConfig
 from aphrodite.common.logger import get_loading_progress_bar
-from aphrodite.common.gguf import GGUFReader
+from aphrodite.common.gguf import GGUFReader, get_tensor_name_map, MODEL_ARCH_NAMES
 from aphrodite.modeling.layers.quantization import (get_quantization_config,
                                                     QuantizationConfig)
 
@@ -215,73 +216,51 @@ def convert_gguf_to_state_dict(checkpoint, config):
         raise RuntimeError(
             f"Cannot find any model weights with `{checkpoint}`")
 
-    result = GGUFReader(checkpoint)
-    # write tensor
-    kv_dim = (config.hidden_size // config.num_attention_heads *
-              config.num_key_value_heads)
-    tensor_mapping = {
-        "token_embd": ("model.embed_tokens", config.vocab_size),
-        "output": ("lm_head", config.vocab_size),
-        "output_norm": ("model.norm", -1),
-        "blk.{bid}.attn_norm": ("model.layers.{bid}.input_layernorm", -1),
-        "blk.{bid}.attn_q": ("model.layers.{bid}.self_attn.q_proj",
-                             config.hidden_size),
-        "blk.{bid}.attn_k": ("model.layers.{bid}.self_attn.k_proj", kv_dim),
-        "blk.{bid}.attn_v": ("model.layers.{bid}.self_attn.v_proj", kv_dim),
-        "blk.{bid}.attn_output": ("model.layers.{bid}.self_attn.o_proj",
-                                  config.hidden_size),
-        "blk.{bid}.attn_rot_embd":
-        ("model.layers.{bid}.self_attn.rotary_emb.inv_freq", -1),
-        "blk.{bid}.ffn_norm": ("model.layers.{bid}.post_attention_layernorm",
-                               -1),
-        "blk.{bid}.ffn_up": ("model.layers.{bid}.mlp.up_proj",
-                             config.intermediate_size),
-        "blk.{bid}.ffn_down": ("model.layers.{bid}.mlp.down_proj",
-                               config.hidden_size),
-        "blk.{bid}.ffn_gate": ("model.layers.{bid}.mlp.gate_proj",
-                               config.intermediate_size),
-        "blk.{bid}.ffn_up.{xid}":
-        ("model.layers.{bid}.block_sparse_moe.experts.{xid}.w3",
-         config.intermediate_size),
-        "blk.{bid}.ffn_down.{xid}":
-        ("model.layers.{bid}.block_sparse_moe.experts.{xid}.w2",
-         config.hidden_size),
-        "blk.{bid}.ffn_gate.{xid}":
-        ("model.layers.{bid}.block_sparse_moe.experts.{xid}.w1",
-         config.intermediate_size),
-        "blk.{bid}.ffn_gate_inp": ("model.layers.{bid}.block_sparse_moe.gate",
-                                   config.num_local_experts if hasattr(
-                                       config, "num_local_experts") else -1),
-    }
-    mapping = {}
-    # This is how llama.cpp handles name mapping,
-    # it's better to use regex match instead doe
-    max_block_num = 200
-    max_expert_num = 8
-    for k, v in tensor_mapping.items():
-        for i in range(max_block_num):
-            for j in range(max_expert_num):
-                fk = k.format(bid=i, xid=j)
-                fv = v[0].format(bid=i, xid=j)
-                if k not in mapping:
-                    mapping[fk] = (fv, v[1])
+    model_type = config.model_type
+    if model_type == "cohere":
+        model_type = "command-r"  # hack: gguf have a different name than transformers
+    arch = None
+    for key, value in MODEL_ARCH_NAMES.items():
+        if value == model_type:
+            arch = key
+            break
+    if arch is None:
+        raise RuntimeError(f"Unknown model_type: {model_type}")
+    num_layers = config.num_hidden_layers
+    name_map = get_tensor_name_map(arch, num_layers)
+    with init_empty_weights():
+        dummy_model = AutoModelForCausalLM.from_config(config)
+    state_dict = dummy_model.state_dict()
 
-    state_dict = {}
+    gguf_to_hf_name_map = {}
+    for hf_name in state_dict:
+        name, suffix = hf_name.rsplit(".", 1)
+        gguf_name = name_map.get_name(name)
+        if gguf_name:
+            gguf_to_hf_name_map[f"{gguf_name}.{suffix}"] = hf_name
+        else:
+            logger.warning(
+                f"GGUF tensor name for {hf_name} in hf state_dict not found.")
+
+    result = GGUFReader(checkpoint)
     with get_loading_progress_bar() as progress:
         task = progress.add_task("[cyan]Converting GGUF tensors to PyTorch...",
                                  total=len(result.tensors))
         for ts in result.tensors:
-            weight_type = torch.tensor(int(ts.tensor_type), dtype=torch.int)
-            layer, suffix = ts.name.rsplit(".", 1)
-            new_key, output_dim = mapping[layer]
-            new_key += f".{suffix}"
+            try:
+                hf_name = gguf_to_hf_name_map[ts.name]
+            except KeyError:
+                logger.warning(
+                    f"hf tensor name for {ts.name} in GGUF not found.")
+                continue
             data = torch.tensor(ts.data)
-            if output_dim != -1:
-                data = data.view(output_dim, -1)
+            if state_dict[hf_name].dim() == 2:
+                data = data.view(state_dict[hf_name].shape[0], -1)
+            state_dict[hf_name] = data
+            weight_type = torch.tensor(int(ts.tensor_type), dtype=torch.int)
             if weight_type > 1:
-                state_dict[new_key.replace("weight",
+                state_dict[hf_name.replace("weight",
                                            "weight_type")] = weight_type
-            state_dict[new_key] = data
             progress.update(task, advance=1)
     return state_dict
 
