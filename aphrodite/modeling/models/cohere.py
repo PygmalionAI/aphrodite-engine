@@ -39,6 +39,7 @@ from aphrodite.modeling.layers.linear import (
     RowParallelLinear,
 )
 from aphrodite.modeling.layers.rotary_embedding import get_rope
+from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
@@ -319,7 +320,11 @@ class CohereForCausalLM(nn.Module):
         self.unpadded_vocab_size = config.vocab_size
         self.linear_method = linear_method
         self.model = CohereModel(config, linear_method)
-        self.sampler = Sampler(config.vocab_size)
+        logit_scale = getattr(config, "logit_scale", 1.0)
+        self.logits_processor = LogitsProcessor(config.vocab_size,
+                                                None,
+                                                logit_scale)
+        self.sampler = Sampler()
 
     @torch.no_grad()
     def forward(
@@ -332,14 +337,19 @@ class CohereForCausalLM(nn.Module):
         hidden_states = self.model(input_ids, positions, kv_caches,
                                    input_metadata)
         return hidden_states
+    
+    def compute_logits(self, hidden_states: torch.Tensor,
+                       sampling_metadata: SamplingMetadata) -> torch.Tensor:
+        logits = self.logits_processor(self.lm_head.weight, hidden_states,
+                                       sampling_metadata)
+        return logits
 
     def sample(
         self,
-        hidden_states: torch.Tensor,
+        logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(self.model.embed_tokens.weight,
-                                   hidden_states, sampling_metadata)
+        next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
     def load_weights(
