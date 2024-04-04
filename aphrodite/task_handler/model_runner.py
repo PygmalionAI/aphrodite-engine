@@ -493,6 +493,7 @@ class ModelRunner:
         selected_token_start_idx = 0
         categorized_sample_indices = {t: [] for t in SamplingType}
         categorized_sample_indices_start_idx = 0
+        categorized_sampled_token_indices_start_idx = 0
         pin_memory = not self.in_wsl and not self.device_config.is_neuron
 
         for i, seq_group_metadata in enumerate(seq_group_metadata_list):
@@ -509,9 +510,12 @@ class ModelRunner:
                     categorized_sample_indices_start_idx += subquery_len - 1
 
                 categorized_sample_indices[
-                    sampling_params.sampling_type].append(
-                        categorized_sample_indices_start_idx)
+                    sampling_params.sampling_type].append([
+                        categorized_sample_indices_start_idx,
+                        categorized_sampled_token_indices_start_idx
+                    ])
                 categorized_sample_indices_start_idx += 1
+                categorized_sampled_token_indices_start_idx += 1
 
                 if sampling_params.prompt_logprobs is not None:
                     selected_token_indices.extend(
@@ -537,11 +541,17 @@ class ModelRunner:
 
                 categorized_sample_indices[
                     sampling_params.sampling_type].extend(
-                        range(
-                            categorized_sample_indices_start_idx,
-                            categorized_sample_indices_start_idx + num_seqs,
-                        ))
+                        zip(
+                            range(
+                                categorized_sample_indices_start_idx,
+                                categorized_sample_indices_start_idx +
+                                num_seqs),
+                            range(
+                                categorized_sampled_token_indices_start_idx,
+                                categorized_sampled_token_indices_start_idx +
+                                num_seqs)))
                 categorized_sample_indices_start_idx += num_seqs
+                categorized_sampled_token_indices_start_idx += num_seqs
 
             if sampling_params.seed is not None:
                 generators.append(seq_group_metadata.state.generator)
@@ -550,15 +560,14 @@ class ModelRunner:
             selected_token_indices,
             dtype=torch.long,
             target_device=self.device,
-            pin_memory=pin_memory,
+            pin_memory=not self.in_wsl,
         )
         categorized_sample_indices = {
-            t: _async_h2d(
-                seq_ids,
-                dtype=torch.int,
-                target_device=self.device,
-                pin_memory=pin_memory,
-            )
+            t: _maybe_expand_dim(
+                _async_h2d(seq_ids,
+                           dtype=torch.int,
+                           target_device=self.device,
+                           pin_memory=pin_memory), 2, 2)
             for t, seq_ids in categorized_sample_indices.items()
         }
 
@@ -1032,3 +1041,11 @@ def _async_h2d(
 ) -> torch.Tensor:
     t = torch.tensor(data, dtype=dtype, pin_memory=pin_memory, device="cpu")
     return t.to(device=target_device, non_blocking=True)
+
+
+def _maybe_expand_dim(tensor: torch.Tensor,
+                      target_dims: int,
+                      size: int = 1) -> torch.Tensor:
+    if tensor.ndim < target_dims:
+        tensor = tensor.view(-1, *([size] * (target_dims - tensor.ndim)))
+    return tensor
