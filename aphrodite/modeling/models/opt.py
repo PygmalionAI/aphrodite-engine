@@ -35,7 +35,8 @@ from aphrodite.modeling.layers.linear import (
     ReplicatedLinear,
     RowParallelLinear,
 )
-from aphrodite.modeling.layers.sampler import Sampler, QuantSampler
+from aphrodite.modeling.layers.logits_processor import LogitsProcessor
+from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding,
     ParallelLMHead,
