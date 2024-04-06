@@ -1,5 +1,5 @@
 import time
-from typing import Dict, Iterable, List, Optional, Tuple, Type, Union
+from typing import Iterable, List, Optional, Tuple, Type, Union
 from loguru import logger
 from transformers import PreTrainedTokenizer
 
@@ -21,7 +21,6 @@ from aphrodite.engine.ray_tools import (initialize_ray_cluster)
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (
-    Logprob,
     SamplerOutput,
     Sequence,
     SequenceGroup,
@@ -29,9 +28,9 @@ from aphrodite.common.sequence import (
     SequenceOutput,
     SequenceStatus,
 )
-from aphrodite.transformers_utils.tokenizer import (detokenize_incrementally)
 from aphrodite.transformers_utils.tokenizer_group import (BaseTokenizerGroup,
                                                           get_tokenizer_group)
+from aphrodite.transformers_utils.detokenizer import Detokenizer
 from aphrodite.common.utils import (
     Counter, )
 from aphrodite.common.logger import setup_logger
@@ -106,6 +105,7 @@ class AphroditeEngine:
         self._verify_args()
 
         self._init_tokenizer()
+        self.detokenizer = Detokenizer(self.tokenizer)
         self.seq_counter = Counter()
 
         self.model_executor = executor_class(model_config, cache_config,
@@ -163,7 +163,7 @@ class AphroditeEngine:
         raise RuntimeError("AphroditeEngine should not be pickled!")
 
     def get_tokenizer(self) -> "PreTrainedTokenizer":
-        return self.tokenizer.get_lora_tokenizer()
+        return self.tokenizer.get_lora_tokenizer(None)
 
     def get_tokenizer_for_seq(self,
                               sequence: Sequence) -> "PreTrainedTokenizer":
@@ -392,16 +392,8 @@ class AphroditeEngine:
         # Process prompt logprobs
         prompt_logprobs = outputs.prompt_logprobs
         if prompt_logprobs is not None:
-            # We can pick any sequence for the prompt.
-            seq = next(iter(seq_group.seqs_dict.values()))
-            all_token_ids = seq.get_token_ids()
-            for i, prompt_logprobs_for_token in enumerate(prompt_logprobs):
-                self._decode_logprobs(
-                    seq,
-                    seq_group.sampling_params,
-                    prompt_logprobs_for_token,
-                    all_token_ids[:i],
-                )
+            self.detokenizer.decode_prompt_logprobs_inplace(
+                seq_group, prompt_logprobs)
             seq_group.prompt_logprobs = prompt_logprobs
 
         # Process samples
@@ -447,7 +439,8 @@ class AphroditeEngine:
             child_seqs.append((parent, parent))
 
         for seq, _ in child_seqs:
-            self._decode_sequence(seq, seq_group.sampling_params)
+            self.detokenizer.decode_sequence_inplace(seq,
+                                                     seq_group.sampling_params)
             self._check_stop(seq, seq_group.sampling_params)
 
         # Non-beam search case
@@ -748,62 +741,6 @@ class AphroditeEngine:
             time_e2e_requests=time_e2e_requests,
         )
 
-    def _decode_logprobs(
-        self,
-        seq: Sequence,
-        prms: SamplingParams,
-        logprobs: Dict[int, Logprob],
-        all_input_ids: List[int],
-    ) -> None:
-        if not logprobs:
-            return
-        for token_id, sample_logprob in logprobs.items():
-            if sample_logprob.decoded_token is None and token_id != -1:
-                all_input_ids_with_logprob = all_input_ids[:-1] + [token_id]
-                (
-                    _,
-                    new_text,
-                    prefix_offset,
-                    read_offset,
-                ) = detokenize_incrementally(
-                    self.get_tokenizer_for_seq(seq),
-                    all_input_ids=all_input_ids_with_logprob,
-                    prev_tokens=seq.tokens,
-                    prefix_offset=seq.prefix_offset,
-                    read_offset=seq.read_offset,
-                    skip_special_tokens=prms.skip_special_tokens,
-                    spaces_between_special_tokens=prms.
-                    spaces_between_special_tokens,
-                )
-                sample_logprob.decoded_token = new_text
-
-    def _decode_sequence(self, seq: Sequence, prms: SamplingParams) -> None:
-        """Decodes the new token for a sequence."""
-        all_input_ids = seq.get_token_ids()
-        self._decode_logprobs(seq, prms, seq.output_logprobs[-1],
-                              all_input_ids)
-
-        (
-            new_tokens,
-            new_output_text,
-            prefix_offset,
-            read_offset,
-        ) = detokenize_incrementally(
-            self.get_tokenizer_for_seq(seq),
-            all_input_ids=all_input_ids,
-            prev_tokens=seq.tokens,
-            prefix_offset=seq.prefix_offset,
-            read_offset=seq.read_offset,
-            skip_special_tokens=prms.skip_special_tokens,
-            spaces_between_special_tokens=prms.spaces_between_special_tokens,
-        )
-        if seq.tokens is None:
-            seq.tokens = new_tokens
-        else:
-            seq.tokens.extend(new_tokens)
-        seq.prefix_offset = prefix_offset
-        seq.read_offset = read_offset
-        seq.output_text += new_output_text
 
     def _check_stop(self, seq: Sequence,
                     sampling_params: SamplingParams) -> None:
