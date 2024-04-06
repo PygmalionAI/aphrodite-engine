@@ -53,6 +53,7 @@ from aphrodite.modeling.layers.linear import (
     RowParallelLinear,
 )
 from aphrodite.modeling.layers.rotary_embedding import get_rope
+from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding,
@@ -337,7 +338,8 @@ class OLMoForCausalLM(nn.Module):
         self.config = config
         self.linear_method = linear_method
         self.model = OlmoModel(config, linear_method)
-        self.sampler = Sampler(config.vocab_size)
+        self.logits_processor = LogitsProcessor(config.vocab_size)
+        self.sampler = Sampler()
 
     def forward(
         self,
@@ -353,14 +355,19 @@ class OLMoForCausalLM(nn.Module):
             input_metadata=input_metadata,
         )
         return hidden_states
+    
+    def compute_logits(self, hidden_states: torch.Tensor,
+                       sampling_metadata: SamplingMetadata) -> torch.Tensor:
+        logits = self.logits_processor(self.lm_head_weight, hidden_states,
+                                       sampling_metadata)
+        return logits
 
     def sample(
         self,
-        hidden_states: torch.Tensor,
+        logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(
-            self.model.transformer.ff_out(hidden_states), sampling_metadata)
+        next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
     def load_weights(
