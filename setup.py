@@ -178,7 +178,7 @@ class cmake_build_ext(build_ext):
 
             subprocess.check_call(['cmake', *build_args], cwd=self.build_temp)
 def _is_cuda() -> bool:
-    return torch.version.cuda is not None
+    return torch.version.cuda is not None and not _is_neuron()
 
 def _is_hip() -> bool:
     return torch.version.hip is not None
