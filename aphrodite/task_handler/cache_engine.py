@@ -5,7 +5,10 @@ import torch
 from loguru import logger
 
 from aphrodite.common.config import CacheConfig, ModelConfig, ParallelConfig
-from aphrodite.common.utils import in_wsl, is_neuron, STR_DTYPE_TO_TORCH_DTYPE
+from aphrodite.common.utils import (
+    is_pin_memory_available,
+    STR_DTYPE_TO_TORCH_DTYPE,
+)
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
@@ -35,10 +38,6 @@ class CacheEngine:
         self.block_size = cache_config.block_size
         self.num_gpu_blocks = cache_config.num_gpu_blocks
         self.num_cpu_blocks = cache_config.num_cpu_blocks
-
-        # Skip initializing KV Cache for Neuron backend.
-        if is_neuron():
-            return
 
         if cache_config.cache_dtype == "auto":
             self.dtype = model_config.dtype
@@ -88,12 +87,7 @@ class CacheEngine:
         cpu_cache: List[KVCache] = []
         key_block_shape = self.get_key_block_shape()
         value_block_shape = self.get_value_block_shape()
-        pin_memory = not in_wsl()
-        if not pin_memory:
-            # Pinning memory in WSL is not supported.
-            # https://docs.nvidia.com/cuda/wsl-user-guide/index.html#known-limitations-for-linux-cuda-applications
-            logger.warning("Using 'pin_memory=False' as WSL is detected. "
-                           "This may slow down the performance.")
+        pin_memory = is_pin_memory_available()
         for _ in range(self.num_layers):
             key_blocks = torch.empty(
                 size=(self.num_cpu_blocks, *key_block_shape),
