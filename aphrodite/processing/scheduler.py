@@ -111,6 +111,13 @@ class Scheduler:
         # Sequence groups in the SWAPPED state.
         self.swapped: Deque[SequenceGroup] = deque()
 
+        # Time at previous scheduling step
+        self.prev_time = 0.0
+        # Did we schedule a prompt at previous step?
+        self.prev_prompt = False
+        # Latency of the last prompt step
+        self.last_prompt_latency = 0.0
+
     @property
     def lora_enabled(self) -> bool:
         return bool(self.lora_config)
@@ -140,7 +147,7 @@ class Scheduler:
             for seq_group in state_queue:
                 if not request_ids:
                     # Using 'break' here may add two extra iterations,
-                    # but is acceptable to reduce complexity .
+                    # but is acceptable to reduce complexity.
                     break
                 if seq_group.request_id in request_ids:
                     # Appending aborted group into pending list.
@@ -187,7 +194,7 @@ class Scheduler:
             # are added to the back.
             leftover_waiting_sequences = deque()
             num_batched_tokens = 0
-            while self.waiting:
+            while self._passed_delay(now) and self.waiting:
                 seq_group = self.waiting[0]
                 waiting_seqs = seq_group.get_seqs(
                     status=SequenceStatus.WAITING)
@@ -254,6 +261,7 @@ class Scheduler:
             self.waiting.extendleft(leftover_waiting_sequences)
 
             if scheduled or ignored_seq_groups:
+                self.prev_prompt = True
                 scheduler_outputs = SchedulerOutputs(
                     scheduled_seq_groups=scheduled,
                     prompt_run=True,
@@ -502,3 +510,19 @@ class Scheduler:
 
     def mark_blocks_as_computed(self, seq_group: SequenceGroup):
         self.block_manager.mark_blocks_as_computed(seq_group)
+
+    def _passed_delay(self, now: float) -> bool:
+        if self.prev_prompt:
+            self.last_prompt_latency = now - self.prev_time
+        self.prev_time, self.prev_prompt = now, False
+        # Delay scheduling prompts to let waiting queue fill up
+        if self.scheduler_config.delay_factor > 0 and self.waiting:
+            earliest_arrival_time = min(
+                [e.metrics.arrival_time for e in self.waiting])
+            passed_delay = (
+                (now - earliest_arrival_time) >
+                (self.scheduler_config.delay_factor * self.last_prompt_latency)
+                or not self.running)
+        else:
+            passed_delay = True
+        return passed_delay
