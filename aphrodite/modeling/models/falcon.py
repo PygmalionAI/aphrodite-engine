@@ -38,7 +38,7 @@ from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding, ParallelLMHead)
+    VocabParallelEmbedding)
 from aphrodite.modeling.megatron.communication_op import (
     tensor_model_parallel_all_reduce)
 from aphrodite.modeling.megatron.parallel_state import (
@@ -369,9 +369,7 @@ class FalconForCausalLM(nn.Module):
         self.config = config
         self.linear_method = linear_method
         self.transformer = FalconModel(config, linear_method)
-        self.lm_head = ParallelLMHead(config.vocab_size,
-                                      config.hidden_size,
-                                      linear_method=linear_method)
+        self.lm_head_weight = self.transformer.word_embeddings.weight
         self.logits_processor = LogitsProcessor(config.vocab_size)
         self.sampler = Sampler()
 
@@ -392,7 +390,7 @@ class FalconForCausalLM(nn.Module):
     
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
-        logits = self.logits_processor(self.lm_head.weight, hidden_states,
+        logits = self.logits_processor(self.lm_head_weight, hidden_states,
                                        sampling_metadata)
         return logits
 
@@ -417,10 +415,13 @@ class FalconForCausalLM(nn.Module):
         else:
             total_num_kv_heads = total_num_heads
         num_query_heads_per_kv_head = total_num_heads // total_num_kv_heads
-        params_dict = dict(self.named_parameters())
+        params_dict = dict(self.named_parameters(remove_duplicate=False))
         for name, loaded_weight in hf_model_weights_iterator(
                 model_name_or_path, cache_dir, load_format, revision,
                 self.config):
+            if name == "lm_head.weight":
+                # Falcon uses tied embeddings.
+                continue
             # Skip loading extra bias for GPTQ models.
             if name.endswith(".bias") and name not in params_dict:
                 continue
