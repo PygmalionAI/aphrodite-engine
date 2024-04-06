@@ -62,6 +62,7 @@ class EngineArgs:
     max_cpu_loras: Optional[int] = None
     device: str = "auto"
     ray_workers_use_nsight: bool = False
+    scheduler_delay_factor: float = 0.0
 
     def __post_init__(self):
         if self.tokenizer is None:
@@ -413,6 +414,13 @@ class EngineArgs:
             help=("Device to use for model execution. "
                   'Currently, only "cuda" is supported.'),
         )
+        parser.add_argument(
+            "--scheduler-delay-factor",
+            "-sdf",
+            type=float,
+            default=EngineArgs.scheduler_delay_factor,
+            help="Apply a delay (of delay factor multiplied by previous "
+            "prompt latency) before scheduling next prompt.")
         return parser
 
     @classmethod
@@ -475,6 +483,7 @@ class EngineArgs:
             self.max_num_batched_tokens,
             self.max_num_seqs,
             model_config.max_model_len,
+            self.scheduler_delay_factor,
         )
         lora_config = (LoRAConfig(
             max_lora_rank=self.max_lora_rank,
