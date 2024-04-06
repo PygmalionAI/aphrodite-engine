@@ -591,6 +591,9 @@ class SchedulerConfig:
             and generated text).
         delay_factor: Apply a delay (of delay factor multiplied by previous
             prompt latency) before scheduling the next prompt.
+        policy: Policy of sequence scheduling (`fcfs` or `reorder`).
+        reorder_window: Allowed reorder window size (in sec) for `reorder`
+            policy.
     """
 
     def __init__(
@@ -599,6 +602,8 @@ class SchedulerConfig:
         max_num_seqs: int,
         max_model_len: int,
         delay_factor: float = 0.0,
+        policy: str = "fcfs",
+        reorder_window: float = 0.0,
     ) -> None:
         if max_num_batched_tokens is not None:
             self.max_num_batched_tokens = max_num_batched_tokens
@@ -609,6 +614,8 @@ class SchedulerConfig:
         self.max_num_seqs = max_num_seqs
         self.max_model_len = max_model_len
         self.delay_factor = delay_factor
+        self.policy = policy
+        self.reorder_window = reorder_window
         self._verify_args()
 
     def _verify_args(self) -> None:
@@ -625,6 +632,14 @@ class SchedulerConfig:
                 f"max_num_batched_tokens ({self.max_num_batched_tokens}) must "
                 "be greater than or equal to max_num_seqs "
                 f"({self.max_num_seqs}).")
+        if self.reorder_window < 0:
+            raise ValueError(f"reorder_window ({self.reorder_window}) must "
+                             "be not be negative.")
+        if self.reorder_window != 0 and self.policy != 'reorder':
+            raise ValueError(
+                "fcfs policy doesn't support reorder_window "
+                f"({self.reorder_window})."
+            )
 
 
 class DeviceConfig:
