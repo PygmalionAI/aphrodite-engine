@@ -2,7 +2,6 @@
 from typing import Dict, List, Tuple
 
 import torch
-from loguru import logger
 
 from aphrodite.common.config import CacheConfig, ModelConfig, ParallelConfig
 from aphrodite.common.utils import (

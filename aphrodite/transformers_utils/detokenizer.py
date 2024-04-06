@@ -13,8 +13,7 @@ from aphrodite.transformers_utils.tokenizer import (
     convert_prompt_ids_to_tokens,
 )
 from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import (
-    BaseTokenizerGroup,
-)
+    BaseTokenizerGroup, )
 
 # Used eg. for marking rejected tokens in spec decoding.
 INVALID_TOKEN_ID = -1
@@ -26,9 +25,8 @@ class Detokenizer:
     def __init__(self, tokenizer_group: BaseTokenizerGroup):
         self.tokenizer_group = tokenizer_group
 
-    def get_tokenizer_for_seq(
-        self, sequence: Sequence
-    ) -> "PreTrainedTokenizer":
+    def get_tokenizer_for_seq(self,
+                              sequence: Sequence) -> "PreTrainedTokenizer":
         """Returns the HF tokenizer to use for a given sequence."""
         return self.tokenizer_group.get_lora_tokenizer(sequence.lora_request)
 
@@ -60,18 +58,16 @@ class Detokenizer:
         prev_tokens = None
 
         for token_position, prompt_logprobs_for_token in enumerate(
-            prompt_logprobs
-        ):
+                prompt_logprobs):
             if not prompt_logprobs_for_token:
                 continue
             for token_id, sample_logprob in prompt_logprobs_for_token.items():
-                if (
-                    sample_logprob.decoded_token is None
-                    and token_id != INVALID_TOKEN_ID
-                ):
-                    prompt_token_ids_with_token = prompt_token_ids[
-                        :token_position
-                    ] + [token_id]
+                if (sample_logprob.decoded_token is None
+                        and token_id != INVALID_TOKEN_ID):
+                    prompt_token_ids_with_token = prompt_token_ids[:
+                                                                   token_position] + [  # noqa: E501
+                                                                       token_id
+                                                                   ]
                     (
                         new_tokens,
                         new_text,
@@ -84,7 +80,8 @@ class Detokenizer:
                         prefix_offset=prefix_offset,
                         read_offset=read_offset,
                         skip_special_tokens=prms.skip_special_tokens,
-                        spaces_between_special_tokens=prms.spaces_between_special_tokens,
+                        spaces_between_special_tokens=prms.
+                        spaces_between_special_tokens,
                     )
 
                     sample_logprob.decoded_token = new_text
@@ -105,9 +102,8 @@ class Detokenizer:
             else:
                 prev_tokens.extend(next_iter_tokens)
 
-    def decode_sequence_inplace(
-        self, seq: Sequence, prms: SamplingParams
-    ) -> None:
+    def decode_sequence_inplace(self, seq: Sequence,
+                                prms: SamplingParams) -> None:
         """Decodes the new token for a sequence. In-place operation.
         Args:
             seq: The sequence to decode.
@@ -157,10 +153,8 @@ class Detokenizer:
                     sample_logprob.decoded_token = new_decoded_token_text
                     continue
 
-                if (
-                    sample_logprob.decoded_token is None
-                    and token_id != INVALID_TOKEN_ID
-                ):
+                if (sample_logprob.decoded_token is None
+                        and token_id != INVALID_TOKEN_ID):
                     all_input_ids_with_logprob = previous_tokens + [token_id]
                     (_, new_text, _, _) = detokenize_incrementally(
                         tokenizer=tokenizer,
@@ -169,7 +163,8 @@ class Detokenizer:
                         prefix_offset=seq.prefix_offset,
                         read_offset=seq.read_offset,
                         skip_special_tokens=prms.skip_special_tokens,
-                        spaces_between_special_tokens=prms.spaces_between_special_tokens,
+                        spaces_between_special_tokens=prms.
+                        spaces_between_special_tokens,
                     )
                     sample_logprob.decoded_token = new_text
 

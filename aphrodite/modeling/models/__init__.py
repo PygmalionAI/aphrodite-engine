@@ -61,7 +61,6 @@ _ROCM_PARTIALLY_SUPPORTED_MODELS = {
 }
 
 
-
 class ModelRegistry:
 
     @staticmethod

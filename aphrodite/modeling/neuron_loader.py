@@ -34,6 +34,7 @@ _NEURON_SUPPORTED_MODELS = {
                            "MistralForSampling", "MistralForCausalLM")
 }
 
+
 class NeuronCasualLM(nn.Module):
 
     def __init__(
@@ -93,6 +94,7 @@ class NeuronCasualLM(nn.Module):
         self.model = neuronx_model_cls.from_pretrained(split_model_dir,
                                                        **kwargs)
         self.model.to_neuron()
+
 
 def _get_model_architecture(config: PretrainedConfig) -> Type[nn.Module]:
     architectures = getattr(config, "architectures", [])

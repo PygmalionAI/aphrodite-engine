@@ -275,7 +275,7 @@ class MPTForCausalLM(nn.Module):
         hidden_states = self.transformer(input_ids, positions, kv_caches,
                                          input_metadata)
         return hidden_states
-    
+
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
         logits = self.logits_processor(self.lm_head_weight, hidden_states,

@@ -636,10 +636,8 @@ class SchedulerConfig:
             raise ValueError(f"reorder_window ({self.reorder_window}) must "
                              "be not be negative.")
         if self.reorder_window != 0 and self.policy != 'reorder':
-            raise ValueError(
-                "fcfs policy doesn't support reorder_window "
-                f"({self.reorder_window})."
-            )
+            raise ValueError("fcfs policy doesn't support reorder_window "
+                             f"({self.reorder_window}).")
 
 
 class DeviceConfig:
@@ -663,7 +661,6 @@ class DeviceConfig:
         else:
             # Set device with device type
             self.device = torch.device(self.device_type)
-
 
 
 @dataclass
