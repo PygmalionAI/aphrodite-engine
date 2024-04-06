@@ -4,11 +4,11 @@ import random
 
 import torch
 
-from aphrodite.common.sampling_params import SamplingParams, SamplingType
-from aphrodite.common.sequence import SequenceData
-from aphrodite.common.utils import in_wsl, is_neuron
 from aphrodite.modeling.layers.ops.sample import (get_num_triton_sampler_splits
                                                   )
+from aphrodite.common.sampling_params import SamplingParams, SamplingType
+from aphrodite.common.sequence import SequenceData
+from aphrodite.common.utils import is_pin_memory_available
 
 _SAMPLING_EPS = 1e-5
 _SEED_0_REPLACEMENT = 3403598558
@@ -341,7 +341,7 @@ class SamplingTensors:
                    dtype: torch.dtype) -> "SamplingTensors":
         # Note that the performance will be very bad without
         # pinned memory.
-        pin_memory = not in_wsl() and not is_neuron()
+        pin_memory = is_pin_memory_available()
         prompt_max_len = max(len(tokens) for tokens in prompt_tokens)
         prompt_padded_tokens = [
             tokens + [vocab_size] * (prompt_max_len - len(tokens))

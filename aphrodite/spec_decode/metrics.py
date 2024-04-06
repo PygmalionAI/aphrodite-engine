@@ -5,7 +5,7 @@ import time
 from typing import Callable
 
 from aphrodite.modeling.layers.rejection import RejectionSampler
-from aphrodite.common.utils import in_wsl
+from aphrodite.common.utils import is_pin_memory_available()
 
 
 @dataclass
@@ -65,7 +65,7 @@ class AsyncMetricsCollector:
 
         self._in_flight_copy: Optional[torch.cuda.Event] = None
 
-        pin_memory = not in_wsl()
+        pin_memory = is_pin_memory_available()
         self._aggregate_num_accepted_tokens = torch.tensor(
             0, dtype=torch.long, device="cpu", pin_memory=pin_memory)
         self._aggregate_num_emitted_tokens = torch.tensor(

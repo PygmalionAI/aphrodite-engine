@@ -4,7 +4,7 @@ from loguru import logger
 
 import torch.nn as nn
 
-from aphrodite.common.utils import is_hip, is_neuron
+from aphrodite.common.utils import is_hip
 
 # Architecture -> (module, class).
 _MODELS = {
@@ -60,10 +60,6 @@ _ROCM_PARTIALLY_SUPPORTED_MODELS = {
     "Sliding window attention is not yet supported in ROCm's flash attention",
 }
 
-_NEURON_SUPPORTED_MODELS = {
-    "LlamaForCausalLM": "neuron.llama",
-    "MistralForCausalLM": "neuron.mistral",
-}
 
 
 class ModelRegistry:
@@ -81,15 +77,8 @@ class ModelRegistry:
                 logger.warning(
                     f"Model architecture {model_arch} is partially supported "
                     "by ROCm: " + _ROCM_PARTIALLY_SUPPORTED_MODELS[model_arch])
-        elif is_neuron():
-            if model_arch not in _NEURON_SUPPORTED_MODELS:
-                raise ValueError(
-                    f"Model architecture {model_arch} is not supported by "
-                    "AWS Neuron for now.")
 
         module_name, model_cls_name = _MODELS[model_arch]
-        if is_neuron():
-            module_name = _NEURON_SUPPORTED_MODELS[model_arch]
         module = importlib.import_module(
             f"aphrodite.modeling.models.{module_name}")
         return getattr(module, model_cls_name, None)

@@ -3,7 +3,6 @@ import copy
 from collections import defaultdict
 import os
 import pickle
-import importlib
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from loguru import logger
@@ -25,12 +24,6 @@ if ray is not None:
 
 if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
-
-# A map between the device type (in device config) to its worker module.
-DEVICE_TO_WORKER_MODULE_MAP = {
-    "cuda": "aphrodite.task_handler.worker",
-    "neuron": "aphrodite.task_handler.neuron_worker",
-}
 
 # If the env var is set, it uses the Ray's compiled DAG API
 # which optimizes the control plane overhead.
@@ -73,13 +66,6 @@ class RayGPUExecutor(ExecutorBase):
         self.forward_dag = None
         if USE_RAY_COMPILED_DAG:
             self.forward_dag = self._compiled_ray_dag()
-
-    def _dispatch_worker(self):
-        worker_module = DEVICE_TO_WORKER_MODULE_MAP[
-            self.device_config.device_type]
-        imported_worker = importlib.import_module(worker_module)
-        Worker = imported_worker.Worker
-        return Worker
 
     def _init_workers_ray(self, placement_group: "PlacementGroup",
                           **ray_remote_kwargs):
@@ -156,7 +142,7 @@ class RayGPUExecutor(ExecutorBase):
 
         # Lazy import the Worker to avoid importing torch.cuda/xformers
         # before CUDA_VISIBLE_DEVICES is set in the Worker
-        Worker = self._dispatch_worker()
+        from aphrodite.task_handler.worker import Worker
 
         model_config = copy.deepcopy(self.model_config)
         parallel_config = copy.deepcopy(self.parallel_config)
@@ -202,7 +188,7 @@ class RayGPUExecutor(ExecutorBase):
 
         # FIXME: We are not properly initializing cupy NCCL when
         # we have multiple nodes.
-        self._run_workers("init_model",
+        self._run_workers("init_device",
                           cupy_port=get_open_port()
                           if not model_config.enforce_eager else None)
         self._run_workers(
