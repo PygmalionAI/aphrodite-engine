@@ -27,7 +27,7 @@ assert sys.platform.startswith(
     "linux"), "Aphrodite only supports Linux at the moment (including WSL)."
 
 def _is_cuda() -> bool:
-    return torch.version.cuda is not None
+    return torch.version.cuda is not None and not _is_neuron()
 
 def _is_hip() -> bool:
     return torch.version.hip is not None
