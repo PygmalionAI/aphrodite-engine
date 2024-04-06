@@ -1,12 +1,11 @@
-from collections import deque
-import enum
 import time
+from collections import deque
 from typing import Deque, Dict, Iterable, List, Optional, Tuple, Union, Set
 from loguru import logger
 
 from aphrodite.common.config import CacheConfig, LoRAConfig, SchedulerConfig
 from aphrodite.processing.block_manager import AllocStatus, BlockSpaceManager
-from aphrodite.processing.policy import PolicyFactory
+from aphrodite.processing.policy import PolicyFactory, PreemptionMode, FCFS
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.sequence import (
     Sequence,
@@ -15,20 +14,6 @@ from aphrodite.common.sequence import (
     SequenceGroupMetadata,
     SequenceStatus,
 )
-
-
-class PreemptionMode(enum.Enum):
-    """Preemption modes.
-
-    1. Swapping: Swap out the blocks of the preempted sequences to CPU memory
-    and swap them back in when the sequences are resumed.
-    2. Recomputation: Discard the blocks of the preempted sequences and
-    recompute them when the sequences are resumed, treating the sequences as
-    new prompts.
-    """
-
-    SWAP = enum.auto()
-    RECOMPUTE = enum.auto()
 
 
 class SchedulerOutputs:
@@ -94,7 +79,10 @@ class Scheduler:
         )
 
         # Instantiate the scheduling policy.
-        self.policy = PolicyFactory.get_policy(policy_name="fcfs")
+        self.policy = PolicyFactory.get_policy(
+            policy_name=self.scheduler_config.policy,
+            reorder_window=self.scheduler_config.reorder_window,
+        )
         # Create the block space manager.
         self.block_manager = BlockSpaceManager(
             block_size=self.cache_config.block_size,
@@ -189,10 +177,12 @@ class Scheduler:
                 seq_group.lora_int_id
                 for seq_group in self.running) if self.lora_enabled else None)
 
-            # Optimization: We do not sort the waiting queue since the preempted
-            # sequence groups are added to the front and the new sequence groups
-            # are added to the back.
+            # Optimization: We do not sort the waiting queue when using FCFS
+            # policy since the preempted sequence groups are added to the front
+            # and the new sequence groups are added to the back.
             leftover_waiting_sequences = deque()
+            if not isinstance(self.policy, FCFS):
+                self.waiting = self.policy.sort(self.waiting)
             num_batched_tokens = 0
             while self._passed_delay(now) and self.waiting:
                 seq_group = self.waiting[0]
@@ -277,11 +267,11 @@ class Scheduler:
         # to keep all the sequence groups in the RUNNING state.
         # In this case, the policy is responsible for deciding which sequence
         # groups to preempt.
-        self.running = self.policy.sort_by_priority(now, self.running)
 
         # Reserve new token slots for the running sequence groups.
         running: Deque[SequenceGroup] = deque()
         preempted: List[SequenceGroup] = []
+        self.running = self.policy.sort(self.running)
         while self.running:
             seq_group = self.running.popleft()
             while not self.block_manager.can_append_slot(seq_group):
@@ -302,8 +292,6 @@ class Scheduler:
                 running.append(seq_group)
         self.running = running
 
-        # Swap in the sequence groups in the SWAPPED state if possible.
-        self.swapped = self.policy.sort_by_priority(now, self.swapped)
         if not preempted:
             num_curr_seqs = sum(seq_group.get_max_num_running_seqs()
                                 for seq_group in self.running)
@@ -312,6 +300,9 @@ class Scheduler:
                 for seq_group in self.running) if self.lora_enabled else None)
 
             leftover_swapped = deque()
+
+            # Swap in the sequence groups in the SWAPPED state if possible.
+            self.swapped = self.policy.sort(self.swapped)
 
             while self.swapped:
                 seq_group = self.swapped[0]
@@ -450,10 +441,7 @@ class Scheduler:
         # TODO: Support recomputation for sequence groups with multiple
         # sequences. This may require a more sophisticated CUDA kernel.
         if preemption_mode is None:
-            if seq_group.get_max_num_running_seqs() == 1:
-                preemption_mode = PreemptionMode.RECOMPUTE
-            else:
-                preemption_mode = PreemptionMode.SWAP
+            preemption_mode = self.policy.get_preemption_mode(seq_group)
         if preemption_mode == PreemptionMode.RECOMPUTE:
             self._preempt_by_recompute(seq_group)
         elif preemption_mode == PreemptionMode.SWAP:
