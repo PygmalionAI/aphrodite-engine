@@ -401,6 +401,8 @@ class GemmaForCausalLM(nn.Module):
                 weight_loader(param, loaded_weight, shard_id)
                 break
             else:
+                if "lm_head.weight" in name:
+                    continue
                 # Skip loading extra layer for lora models.
                 if "lm_head" in name and name not in params_dict:
                     continue
