@@ -51,7 +51,6 @@ from aphrodite.modeling.hf_downloader import (
     default_weight_loader,
     hf_model_weights_iterator,
 )
-from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.common.sequence import SamplerOutput
 
 # limitations under the License.
@@ -76,9 +75,8 @@ class LayerNorm(nn.Module):
         hidden_states = (hidden_states -
                          mean) * torch.rsqrt(variance + self.variance_epsilon)
         hidden_states = self.weight.to(torch.float32) * hidden_states
-       
-        return hidden_states.to(input_dtype), residuals
 
+        return hidden_states.to(input_dtype), residuals
 
     def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
         tp_rank = get_tensor_model_parallel_rank()
@@ -91,6 +89,7 @@ class LayerNorm(nn.Module):
                                                  shard_size)
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
+
 
 ALL_LAYERNORM_LAYERS.append(LayerNorm)
 
@@ -321,8 +320,7 @@ class CohereForCausalLM(nn.Module):
         self.linear_method = linear_method
         self.model = CohereModel(config, linear_method)
         logit_scale = getattr(config, "logit_scale", 1.0)
-        self.logits_processor = LogitsProcessor(config.vocab_size,
-                                                None,
+        self.logits_processor = LogitsProcessor(config.vocab_size, None,
                                                 logit_scale)
         self.sampler = Sampler()
 
@@ -337,7 +335,7 @@ class CohereForCausalLM(nn.Module):
         hidden_states = self.model(input_ids, positions, kv_caches,
                                    input_metadata)
         return hidden_states
-    
+
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
         logits = self.logits_processor(self.model.embed_tokens.weight,

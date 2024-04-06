@@ -26,8 +26,10 @@ ROCM_SUPPORTED_ARCHS = {"gfx908", "gfx90a", "gfx942", "gfx1100"}
 assert sys.platform.startswith(
     "linux"), "Aphrodite only supports Linux at the moment (including WSL)."
 
+
 def _is_cuda() -> bool:
     return torch.version.cuda is not None and not _is_neuron()
+
 
 def _is_hip() -> bool:
     return torch.version.hip is not None
@@ -40,7 +42,6 @@ def _is_neuron() -> bool:
     except (FileNotFoundError, PermissionError, subprocess.CalledProcessError):
         torch_neuronx_installed = False
     return torch_neuronx_installed
-
 
 
 # Compiler flags.

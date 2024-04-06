@@ -37,6 +37,7 @@ class Sampler(nn.Module):
 
         return _perform_sampling(logits, sampling_metadata)
 
+
 def _perform_sampling(
         logits: torch.Tensor,
         sampling_metadata: SamplingMetadata) -> Optional[SamplerOutput]:
@@ -107,6 +108,7 @@ def _perform_sampling(
     return _build_sampler_output(sample_results, sampling_metadata,
                                  prompt_logprobs, sample_logprobs,
                                  output_metadata)
+
 
 def _get_bin_counts_and_mask(
     tokens: torch.Tensor,

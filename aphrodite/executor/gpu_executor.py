@@ -22,7 +22,6 @@ from aphrodite.common.utils import (
 )
 
 
-
 class GPUExecutor(ExecutorBase):
 
     def __init__(

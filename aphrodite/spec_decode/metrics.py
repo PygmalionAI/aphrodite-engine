@@ -5,7 +5,7 @@ import time
 from typing import Callable
 
 from aphrodite.modeling.layers.rejection import RejectionSampler
-from aphrodite.common.utils import is_pin_memory_available()
+from aphrodite.common.utils import is_pin_memory_available
 
 
 @dataclass

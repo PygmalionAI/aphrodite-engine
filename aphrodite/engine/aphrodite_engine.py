@@ -182,7 +182,7 @@ class AphroditeEngine:
         init_kwargs.update(tokenizer_init_kwargs)
         self.tokenizer: BaseTokenizerGroup = get_tokenizer_group(
             self.parallel_config.tokenizer_pool_config, **init_kwargs)
-        
+
         if len(self.get_tokenizer()) != self.model_config.get_vocab_size():
             logger.warning(
                 f"The tokenizer's vocabulary size {len(self.get_tokenizer())}"
@@ -740,7 +740,6 @@ class AphroditeEngine:
             time_per_output_tokens=time_per_output_tokens,
             time_e2e_requests=time_e2e_requests,
         )
-
 
     def _check_stop(self, seq: Sequence,
                     sampling_params: SamplingParams) -> None:

@@ -158,6 +158,7 @@ def _can_p2p(rank: int, world_size: int) -> bool:
             return False
     return True
 
+
 # code partly borrowed from
 # https://github.com/turboderp/exllamav2/blob/1c67f97f3d2a968605a9c31ab791a05c85bb7879/exllamav2/compat.py#L10
 # License: MIT

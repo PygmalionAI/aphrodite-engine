@@ -215,6 +215,7 @@ def _convert_tokens_to_string_with_added_encoders(
     else:
         return "".join(sub_texts)
 
+
 # 5 is an arbitrary value that should work for all
 # tokenizers (bigger = more conservative).
 INITIAL_INCREMENTAL_DETOKENIZATION_OFFSET = 5
@@ -240,6 +241,7 @@ def convert_prompt_ids_to_tokens(
         len(new_tokens) - INITIAL_INCREMENTAL_DETOKENIZATION_OFFSET, 0)
     read_offset = len(new_tokens)
     return new_tokens, prefix_offset, read_offset
+
 
 # Based on
 # https://github.com/huggingface/text-generation-inference/blob/v0.9.4/server/text_generation_server/models/model.py#L62C9-L62C15
