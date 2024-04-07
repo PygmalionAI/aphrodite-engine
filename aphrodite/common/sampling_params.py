@@ -106,6 +106,8 @@ class SamplingParams:
         ignore_eos: Whether to ignore the EOS token and continue generating
             tokens after the EOS token is generated.
         max_tokens: Maximum number of tokens to generate per output sequence.
+        min_tokens: Minimum number of tokens to generate per output sequence
+            before EOS or stop tokens are generated.
         logprobs: Number of log probabilities to return per output token.
             Note that the implementation follows the OpenAI API: The return
             result includes the log probabilities on the `logprobs` most likely
@@ -155,6 +157,7 @@ class SamplingParams:
         include_stop_str_in_output: bool = False,
         ignore_eos: bool = False,
         max_tokens: Optional[int] = 16,
+        min_tokens: int = 0,
         logprobs: Optional[int] = None,
         prompt_logprobs: Optional[int] = None,
         custom_token_bans: Optional[List[int]] = None,
@@ -197,6 +200,7 @@ class SamplingParams:
         self.stop_token_ids = stop_token_ids or []
         self.ignore_eos = ignore_eos
         self.max_tokens = max_tokens
+        self.min_tokens = min_tokens
         self.logprobs = logprobs
         self.prompt_logprobs = prompt_logprobs
         self.custom_token_bans = custom_token_bans or []
@@ -236,6 +240,7 @@ class SamplingParams:
             "stop_token_ids": [],
             "ignore_eos": False,
             "max_tokens": 16,
+            "min_tokens": 0,
             "logprobs": None,
             "prompt_logprobs": None,
             "custom_token_bans": [],
@@ -256,6 +261,8 @@ class SamplingParams:
                 self.min_p = 0.0
                 self.top_a = 0.0
                 self._verify_greedy_sampling()
+        # injected by the engine
+        self.eos_token_id = None
 
     def _verify_args(self) -> None:
         if self.n < 1:
@@ -325,6 +332,13 @@ class SamplingParams:
         if self.max_tokens is not None and self.max_tokens < 1:
             raise ValueError(
                 f"max_tokens must be at least 1, got {self.max_tokens}.")
+        if self.min_tokens < 0:
+            raise ValueError(f"min_tokens must be greater than or equal to 0, "
+                             f"got {self.min_tokens}.")
+        if self.max_tokens is not None and self.min_tokens > self.max_tokens:
+            raise ValueError(
+                f"min_tokens must be less than or equal to "
+                f"max_tokens={self.max_tokens}, got {self.min_tokens}.")
         if self.logprobs is not None and self.logprobs < 0:
             raise ValueError(
                 f"logprobs must be non-negative, got {self.logprobs}.")
