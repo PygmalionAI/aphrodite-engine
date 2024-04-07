@@ -5,7 +5,6 @@ import torch
 from torch.distributed import ReduceOp
 from loguru import logger
 
-
 try:
     from aphrodite.modeling.megatron.pynccl import (NCCLCommunicator,
                                                     ncclGetVersion)
