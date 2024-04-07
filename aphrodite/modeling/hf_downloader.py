@@ -18,11 +18,17 @@ from tqdm.auto import tqdm
 from aphrodite.common.config import ModelConfig
 from aphrodite.common.logger import get_loading_progress_bar
 from aphrodite.common.gguf import GGUFReader
-from aphrodite.modeling.layers.quantization import (get_quantization_config,
-                                                    QuantizationConfig)
+from aphrodite.modeling.layers.quantization import (
+    get_quantization_config,
+    QuantizationConfig,
+)
+from aphrodite.modeling.megatron.parallel_state import (
+    get_tensor_model_parallel_rank,
+    get_tensor_model_parallel_world_size,
+)
 
-_xdg_cache_home = os.getenv('XDG_CACHE_HOME', os.path.expanduser('~/.cache'))
-_aphrodite_filelocks_path = os.path.join(_xdg_cache_home, 'aphrodite/locks/')
+_xdg_cache_home = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
+_aphrodite_filelocks_path = os.path.join(_xdg_cache_home, "aphrodite/locks/")
 
 
 class Disabledtqdm(tqdm):
@@ -103,11 +109,13 @@ def get_quant_config(model_config: ModelConfig) -> QuantizationConfig:
     if not is_local:
         # Download the config files.
         with get_lock(model_name_or_path, model_config.download_dir):
-            hf_folder = snapshot_download(model_name_or_path,
-                                          revision=model_config.revision,
-                                          allow_patterns="*.json",
-                                          cache_dir=model_config.download_dir,
-                                          tqdm_class=Disabledtqdm)
+            hf_folder = snapshot_download(
+                model_name_or_path,
+                revision=model_config.revision,
+                allow_patterns="*.json",
+                cache_dir=model_config.download_dir,
+                tqdm_class=Disabledtqdm,
+            )
     else:
         hf_folder = model_name_or_path
     config_files = glob.glob(os.path.join(hf_folder, "*.json"))
@@ -172,11 +180,13 @@ def prepare_hf_model_weights(
         # Use file lock to prevent multiple processes from
         # downloading the same model weights at the same time.
         with get_lock(model_name_or_path, cache_dir):
-            hf_folder = snapshot_download(model_name_or_path,
-                                          allow_patterns=allow_patterns,
-                                          cache_dir=cache_dir,
-                                          tqdm_class=Disabledtqdm,
-                                          revision=revision)
+            hf_folder = snapshot_download(
+                model_name_or_path,
+                allow_patterns=allow_patterns,
+                cache_dir=cache_dir,
+                tqdm_class=Disabledtqdm,
+                revision=revision,
+            )
     else:
         hf_folder = model_name_or_path
     hf_weights_files: List[str] = []
@@ -224,34 +234,53 @@ def convert_gguf_to_state_dict(checkpoint, config):
         "output": ("lm_head", config.vocab_size),
         "output_norm": ("model.norm", -1),
         "blk.{bid}.attn_norm": ("model.layers.{bid}.input_layernorm", -1),
-        "blk.{bid}.attn_q": ("model.layers.{bid}.self_attn.q_proj",
-                             config.hidden_size),
+        "blk.{bid}.attn_q": (
+            "model.layers.{bid}.self_attn.q_proj",
+            config.hidden_size,
+        ),
         "blk.{bid}.attn_k": ("model.layers.{bid}.self_attn.k_proj", kv_dim),
         "blk.{bid}.attn_v": ("model.layers.{bid}.self_attn.v_proj", kv_dim),
-        "blk.{bid}.attn_output": ("model.layers.{bid}.self_attn.o_proj",
-                                  config.hidden_size),
-        "blk.{bid}.attn_rot_embd":
-        ("model.layers.{bid}.self_attn.rotary_emb.inv_freq", -1),
-        "blk.{bid}.ffn_norm": ("model.layers.{bid}.post_attention_layernorm",
-                               -1),
-        "blk.{bid}.ffn_up": ("model.layers.{bid}.mlp.up_proj",
-                             config.intermediate_size),
-        "blk.{bid}.ffn_down": ("model.layers.{bid}.mlp.down_proj",
-                               config.hidden_size),
-        "blk.{bid}.ffn_gate": ("model.layers.{bid}.mlp.gate_proj",
-                               config.intermediate_size),
-        "blk.{bid}.ffn_up.{xid}":
-        ("model.layers.{bid}.block_sparse_moe.experts.{xid}.w3",
-         config.intermediate_size),
-        "blk.{bid}.ffn_down.{xid}":
-        ("model.layers.{bid}.block_sparse_moe.experts.{xid}.w2",
-         config.hidden_size),
-        "blk.{bid}.ffn_gate.{xid}":
-        ("model.layers.{bid}.block_sparse_moe.experts.{xid}.w1",
-         config.intermediate_size),
-        "blk.{bid}.ffn_gate_inp": ("model.layers.{bid}.block_sparse_moe.gate",
-                                   config.num_local_experts if hasattr(
-                                       config, "num_local_experts") else -1),
+        "blk.{bid}.attn_output": (
+            "model.layers.{bid}.self_attn.o_proj",
+            config.hidden_size,
+        ),
+        "blk.{bid}.attn_rot_embd": (
+            "model.layers.{bid}.self_attn.rotary_emb.inv_freq",
+            -1,
+        ),
+        "blk.{bid}.ffn_norm": (
+            "model.layers.{bid}.post_attention_layernorm",
+            -1,
+        ),
+        "blk.{bid}.ffn_up": (
+            "model.layers.{bid}.mlp.up_proj",
+            config.intermediate_size,
+        ),
+        "blk.{bid}.ffn_down": (
+            "model.layers.{bid}.mlp.down_proj",
+            config.hidden_size,
+        ),
+        "blk.{bid}.ffn_gate": (
+            "model.layers.{bid}.mlp.gate_proj",
+            config.intermediate_size,
+        ),
+        "blk.{bid}.ffn_up.{xid}": (
+            "model.layers.{bid}.block_sparse_moe.experts.{xid}.w3",
+            config.intermediate_size,
+        ),
+        "blk.{bid}.ffn_down.{xid}": (
+            "model.layers.{bid}.block_sparse_moe.experts.{xid}.w2",
+            config.hidden_size,
+        ),
+        "blk.{bid}.ffn_gate.{xid}": (
+            "model.layers.{bid}.block_sparse_moe.experts.{xid}.w1",
+            config.intermediate_size,
+        ),
+        "blk.{bid}.ffn_gate_inp": (
+            "model.layers.{bid}.block_sparse_moe.gate",
+            config.num_local_experts
+            if hasattr(config, "num_local_experts") else -1,
+        ),
     }
     mapping = {}
     # This is how llama.cpp handles name mapping,
@@ -268,8 +297,10 @@ def convert_gguf_to_state_dict(checkpoint, config):
 
     state_dict = {}
     with get_loading_progress_bar() as progress:
-        task = progress.add_task("[cyan]Converting GGUF tensors to PyTorch...",
-                                 total=len(result.tensors))
+        task = progress.add_task(
+            "[cyan]Converting GGUF tensors to PyTorch...",
+            total=len(result.tensors),
+        )
         for ts in result.tensors:
             weight_type = torch.tensor(int(ts.tensor_type), dtype=torch.int)
             layer, suffix = ts.name.rsplit(".", 1)
@@ -305,7 +336,8 @@ def hf_model_weights_iterator(
         cache_dir=cache_dir,
         load_format=load_format,
         fall_back_to_pt=fall_back_to_pt,
-        revision=revision)
+        revision=revision,
+    )
 
     if load_format == "npcache":
         # Currently np_cache only support *.bin checkpoints
@@ -393,3 +425,59 @@ def initialize_dummy_weights(
     for param in model.state_dict().values():
         if torch.is_floating_point(param):
             param.data.uniform_(low, high)
+
+
+# Split the exl2 weight at group boundary
+def post_init_exl2(layer):
+    q_groups = layer.q_groups
+    num_groups = q_groups.shape[0] // 2
+    input_size = layer.q_invperm.shape[0]
+    tp_rank = get_tensor_model_parallel_rank()
+    tp_size = get_tensor_model_parallel_world_size()
+    rows = 0
+    # row_number, qrow_number, group_number
+    splits = [(0, 0, 0)]
+    index = 1
+    for i in range(num_groups - 1):
+        bits = q_groups[i * 2].item()
+        qrows = (q_groups[i * 2 + 3] - q_groups[i * 2 + 1]).item()
+        rows += qrows * 32 // bits
+
+        if rows >= input_size // tp_size * index:
+            splits.append((rows, q_groups[i * 2 + 3].item(), i + 1))
+            index += 1
+    splits.append((input_size, layer.q_weight.shape[0], num_groups))
+
+    shard_qweight = torch.nn.Parameter(
+        layer.q_weight[splits[tp_rank][1]:splits[tp_rank + 1][1]].clone(),
+        requires_grad=False,
+    )
+    del layer.q_weight
+    layer.linear_weights["q_weight"] = shard_qweight
+
+    shard_qgroups = torch.nn.Parameter(
+        layer.q_groups[splits[tp_rank][2] * 2:splits[tp_rank + 1][2] *
+                       2].clone(),
+        requires_grad=False,
+    )
+    shard_qgroups[1::2] -= int(shard_qgroups[1])
+    del layer.q_groups
+    layer.linear_weights["q_groups"] = shard_qgroups
+
+    shard_qscale = torch.nn.Parameter(
+        layer.q_scale[splits[tp_rank][2]:splits[tp_rank + 1][2]].clone(),
+        requires_grad=False,
+    )
+    del layer.q_scale
+    layer.linear_weights["q_scale"] = shard_qscale
+
+    shard_qscale_max = torch.nn.Parameter(
+        layer.q_scale_max[splits[tp_rank][2]:splits[tp_rank + 1][2]].clone(),
+        requires_grad=False,
+    )
+    del layer.q_scale_max
+    layer.linear_weights["q_scale_max"] = shard_qscale_max
+
+    q_perm = torch.argsort(layer.q_invperm).to(torch.short)
+    layer.linear_weights["q_perm"] = q_perm[splits[tp_rank][0]:splits[tp_rank +
+                                                                      1][0]]

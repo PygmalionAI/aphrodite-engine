@@ -39,7 +39,7 @@ class GGUFConfig(QuantizationConfig):
     """Config class for GGUF"""
 
     def __repr__(self) -> str:
-        return "GGUFConfig()"
+        return ("GGUFConfig()")
 
     def get_name(self) -> str:
         return "gguf"
@@ -48,7 +48,7 @@ class GGUFConfig(QuantizationConfig):
         return [torch.half]
 
     def get_min_capability(self) -> int:
-        return 61
+        return 70
 
     @staticmethod
     def get_config_filenames() -> List[str]:
@@ -73,9 +73,13 @@ class GGUFConfig(QuantizationConfig):
     def quant_vocab(self) -> Optional[bool]:
         return (True, True)
 
+    def support_fused_moe(self) -> bool:
+        return False
+
 
 class GGUFLinearMethod(LinearMethodBase):
     """Linear method for GGUF.
+
     Args:
         quant_config: The GGUF quantization config.
     """
@@ -83,14 +87,10 @@ class GGUFLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: GGUFConfig):
         self.quant_config = quant_config
 
-    def create_weights(
-        self,
-        input_size_per_partition: int,
-        output_partition_sizes: List[int],
-        input_size: int,
-        output_size: int,
-        params_dtype: torch.dtype,
-    ) -> Dict[str, Any]:
+    def create_weights(self, input_size_per_partition: int,
+                       output_partition_sizes: List[int], input_size: int,
+                       output_size: int,
+                       params_dtype: torch.dtype) -> Dict[str, Any]:
         # The type of weight is unknown until load state dict
         weight = torch.nn.parameter.UninitializedParameter(requires_grad=False)
         # No need for pack_factor because we don't fuse qkv layers anyway.
@@ -158,3 +158,10 @@ class GGUFLinearMethod(LinearMethodBase):
         dequant = ops.ggml_dequantize(quant, weight_type, hidden_size,
                                       x_flat.shape[0])
         return dequant.view(*x.shape, hidden_size)
+
+    def apply_moe_weights(self, w1: Dict[str,
+                                         torch.Tensor], w2: Dict[str,
+                                                                 torch.Tensor],
+                          x: torch.Tensor, gating_output: torch.Tensor,
+                          topk: int, renormalize: bool) -> torch.Tensor:
+        raise NotImplementedError

@@ -133,15 +133,12 @@ class PhiAttention(nn.Module):
         # https://huggingface.co/microsoft/phi-1_5/blob/d212a789620c380ff32ca1d1ee9943a777360987/modeling_phi.py#L518
         rope_theta = 10000
         max_position_embeddings = getattr(config, "n_positions", 2048)
-        is_neox_style = (True if linear_method is None
-                         or linear_method.quant_config.rope_style() is None
-                         else linear_method.quant_config.rope_style())
         self.rotary_emb = get_rope(
             self.head_size,
             rotary_dim=rotary_dim,
             max_position=max_position_embeddings,
             base=rope_theta,
-            is_neox_style=is_neox_style,
+            is_neox_style=True,
         )
         self.attn = Attention(self.num_heads, self.head_size, scaling)
 

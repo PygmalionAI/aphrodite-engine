@@ -297,8 +297,8 @@ class GGUFReader:
             offs += int(raw_kv_type.nbytes)
             parts: list[npt.NDArray[Any]] = [kv_klen, kv_kdata, raw_kv_type]
             idxs_offs = len(parts)
-            field_size, field_parts, field_idxs, field_types = (
-                self._get_field_parts(offs, raw_kv_type[0]))
+            (field_size, field_parts, field_idxs,
+             field_types) = self._get_field_parts(offs, raw_kv_type[0])
             parts += field_parts
             self._push_field(ReaderField(
                 orig_offs,
