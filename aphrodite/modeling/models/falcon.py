@@ -1,7 +1,6 @@
 # coding=utf-8
 # Adapted from
 # https://github.com/huggingface/transformers/blob/a5cc30d72ae2dc19af534e4b35c986cc28db1275/src/transformers/models/falcon/modeling_falcon.py
-# Copyright 2023 The PygmalionAI team.
 # Copyright 2023 The vLLM team.
 # Copyright 2023 the Falcon authors and HuggingFace Inc. team.  All rights
 # reserved.
@@ -20,25 +19,24 @@
 """PyTorch Falcon model."""
 
 import math
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 
 import torch
 from torch import nn
 from torch.nn import LayerNorm
 from transformers import FalconConfig as HF_FalconConfig
 
-from aphrodite.modeling.metadata import InputMetadata
+from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.modeling.layers.activation import get_act_fn
-from aphrodite.modeling.layers.attention import Attention
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               LinearMethodBase,
                                               QKVParallelLinear,
                                               RowParallelLinear)
-from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
+from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding)
+    ParallelLMHead, VocabParallelEmbedding)
 from aphrodite.modeling.megatron.communication_op import (
     tensor_model_parallel_all_reduce)
 from aphrodite.modeling.megatron.parallel_state import (
@@ -49,7 +47,6 @@ from aphrodite.modeling.hf_downloader import (default_weight_loader,
 from aphrodite.common.sequence import SamplerOutput
 from aphrodite.transformers_utils.configs import RWConfig
 
-KVCache = Tuple[torch.Tensor, torch.Tensor]
 FalconConfig = Union[HF_FalconConfig, RWConfig]
 
 
@@ -178,8 +175,8 @@ class FalconAttention(nn.Module):
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
-        kv_cache: KVCache,
-        input_metadata: InputMetadata,
+        kv_cache: torch.Tensor,
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         qkv, bias = self.query_key_value(hidden_states)
         if bias is not None:
@@ -187,8 +184,7 @@ class FalconAttention(nn.Module):
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         if self.use_rotary:
             q, k = self.rotary_emb(positions, q, k)
-        k_cache, v_cache = kv_cache
-        attn_output = self.attn(q, k, v, k_cache, v_cache, input_metadata)
+        attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         attn_output, bias = self.dense(attn_output)
         return attn_output, bias
 
@@ -264,8 +260,8 @@ class FalconDecoderLayer(nn.Module):
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
-        kv_cache: KVCache,
-        input_metadata: InputMetadata,
+        kv_cache: torch.Tensor,
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         residual = hidden_states
 
@@ -280,7 +276,7 @@ class FalconDecoderLayer(nn.Module):
             positions=positions,
             hidden_states=attention_layernorm_out,
             kv_cache=kv_cache,
-            input_metadata=input_metadata,
+            attn_metadata=attn_metadata,
         )
         if self.reduce_row_parallel_results and attention_bias is not None:
             attention_output += attention_bias
@@ -342,8 +338,8 @@ class FalconModel(nn.Module):
         self,
         input_ids: torch.LongTensor,
         positions: torch.Tensor,
-        kv_caches: List[KVCache],
-        input_metadata: InputMetadata,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         hidden_states = self.word_embeddings(input_ids)
         for i in range(len(self.h)):
@@ -352,7 +348,7 @@ class FalconModel(nn.Module):
                 positions,
                 hidden_states,
                 kv_caches[i],
-                input_metadata,
+                attn_metadata,
             )
         hidden_states = self.ln_f(hidden_states)
         return hidden_states
@@ -369,7 +365,9 @@ class FalconForCausalLM(nn.Module):
         self.config = config
         self.linear_method = linear_method
         self.transformer = FalconModel(config, linear_method)
-        self.lm_head_weight = self.transformer.word_embeddings.weight
+        self.lm_head = ParallelLMHead(config.vocab_size,
+                                      config.hidden_size,
+                                      linear_method=linear_method)
         self.logits_processor = LogitsProcessor(config.vocab_size)
         self.sampler = Sampler()
 
@@ -377,20 +375,20 @@ class FalconForCausalLM(nn.Module):
         self,
         input_ids: torch.LongTensor,
         positions: torch.Tensor,
-        kv_caches: List[KVCache],
-        input_metadata: InputMetadata,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         hidden_states = self.transformer(
             input_ids,
             positions,
             kv_caches,
-            input_metadata,
+            attn_metadata,
         )
         return hidden_states
 
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
-        logits = self.logits_processor(self.lm_head_weight, hidden_states,
+        logits = self.logits_processor(self.lm_head, hidden_states,
                                        sampling_metadata)
         return logits
 

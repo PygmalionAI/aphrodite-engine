@@ -19,15 +19,14 @@
 # limitations under the License.
 """Inference-only OPT model compatible with HuggingFace weights."""
 
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import torch
 from torch import nn
 from transformers import OPTConfig
 
-from aphrodite.modeling.metadata import InputMetadata
+from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.modeling.layers.activation import get_act_fn
-from aphrodite.modeling.layers.attention import Attention
 from aphrodite.modeling.layers.linear import (
     ColumnParallelLinear,
     LinearMethodBase,
@@ -49,8 +48,6 @@ from aphrodite.modeling.hf_downloader import (
     hf_model_weights_iterator,
 )
 from aphrodite.common.sequence import SamplerOutput
-
-KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 
 class OPTLearnedPositionalEmbedding(nn.Embedding):
@@ -122,8 +119,8 @@ class OPTAttention(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        kv_cache: KVCache,
-        input_metadata: InputMetadata,
+        kv_cache: torch.Tensor,
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         if self.merge_weight:
             qkv, _ = self.qkv_proj(hidden_states)
@@ -132,9 +129,7 @@ class OPTAttention(nn.Module):
             q, _ = self.q_proj(hidden_states)
             k, _ = self.k_proj(hidden_states)
             v, _ = self.v_proj(hidden_states)
-        key_cache, value_cache = kv_cache
-        attn_output = self.attn(q, k, v, key_cache, value_cache,
-                                input_metadata)
+        attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         output, _ = self.out_proj(attn_output)
         return output
 
@@ -184,8 +179,8 @@ class OPTDecoderLayer(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        kv_cache: KVCache,
-        input_metadata: InputMetadata,
+        kv_cache: torch.Tensor,
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         # Self Attention
         residual = hidden_states
@@ -195,7 +190,7 @@ class OPTDecoderLayer(nn.Module):
         hidden_states = self.self_attn(
             hidden_states=hidden_states,
             kv_cache=kv_cache,
-            input_metadata=input_metadata,
+            attn_metadata=attn_metadata,
         )
         hidden_states = residual + hidden_states
         # 350m applies layer norm AFTER attention
@@ -281,8 +276,8 @@ class OPTDecoder(nn.Module):
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        kv_caches: List[KVCache],
-        input_metadata: InputMetadata,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         inputs_embeds = self.embed_tokens(input_ids)
         pos_embeds = self.embed_positions(positions)
@@ -292,7 +287,7 @@ class OPTDecoder(nn.Module):
 
         for i in range(len(self.layers)):
             layer = self.layers[i]
-            hidden_states = layer(hidden_states, kv_caches[i], input_metadata)
+            hidden_states = layer(hidden_states, kv_caches[i], attn_metadata)
 
         if self.final_layer_norm is not None:
             hidden_states = self.final_layer_norm(hidden_states)
@@ -315,10 +310,10 @@ class OPTModel(nn.Module):
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        kv_caches: List[KVCache],
-        input_metadata: InputMetadata,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        return self.decoder(input_ids, positions, kv_caches, input_metadata)
+        return self.decoder(input_ids, positions, kv_caches, attn_metadata)
 
 
 class OPTForCausalLM(nn.Module):
@@ -342,16 +337,16 @@ class OPTForCausalLM(nn.Module):
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        kv_caches: List[KVCache],
-        input_metadata: InputMetadata,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         hidden_states = self.model(input_ids, positions, kv_caches,
-                                   input_metadata)
+                                   attn_metadata)
         return hidden_states
 
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
-        logits = self.logits_processor(self.lm_head_weight, hidden_states,
+        logits = self.logits_processor(self.lm_head, hidden_states,
                                        sampling_metadata)
         return logits
 
