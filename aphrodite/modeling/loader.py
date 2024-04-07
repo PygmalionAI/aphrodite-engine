@@ -14,6 +14,7 @@ from aphrodite.modeling.models.llava import LlavaForConditionalGeneration
 from aphrodite.modeling.hf_downloader import (
     get_quant_config,
     initialize_dummy_weights,
+    post_init_exl2,
 )
 from aphrodite.modeling.layers.quantization.bitsandbytes import (
     BNBLinearMethod,
@@ -38,11 +39,6 @@ def _set_default_torch_dtype(dtype: torch.dtype):
 
 def _get_model_architecture(model_config: ModelConfig) -> Type[nn.Module]:
     architectures = getattr(model_config.hf_config, "architectures", [])
-    # Special handling for quantized Mixtral.
-    # FIXME: This is a temporary hack.
-    if (model_config.quantization is not None
-            and "MixtralForCausalLM" in architectures):
-        architectures = ["QuantMixtralForCausalLM"]
 
     for arch in architectures:
         model_cls = ModelRegistry.load_model_cls(arch)
@@ -105,12 +101,15 @@ def get_model(model_config: ModelConfig, device_config: DeviceConfig,
             initialize_dummy_weights(model)
         else:
             # Load the weights from the cached or downloaded files.
-            model.load_weights(
-                model_config.model,
-                model_config.download_dir,
-                model_config.load_format,
-                model_config.revision,
-            )
+            model.load_weights(model_config.model, model_config.download_dir,
+                               model_config.load_format, model_config.revision)
+
+    # Patch for exl2 tensor parallel
+    if model_config.quantization == "exl2":
+        for _, module in model.named_modules():
+            if "RowParallelLinear" in str(module.__class__):
+                post_init_exl2(module)
+
         if isinstance(linear_method, BNBLinearMethod):
             replace_quant_params(
                 model,

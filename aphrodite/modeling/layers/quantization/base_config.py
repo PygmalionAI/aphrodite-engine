@@ -69,8 +69,10 @@ class QuantizationConfig(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def rope_style(self) -> Optional[bool]:
-        raise NotImplementedError
-
-    def quant_vocab(self) -> Optional[bool]:
+    def quant_vocab(self) -> List[bool]:
         return (False, False)
+
+    @abstractmethod
+    def support_fused_moe(self) -> bool:
+        """Whether fused moe kernel is implemented"""
+        raise NotImplementedError

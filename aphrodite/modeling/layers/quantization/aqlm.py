@@ -188,6 +188,12 @@ class AQLMConfig(QuantizationConfig):
     def rope_style(self) -> Optional[bool]:
         return None
 
+    def quant_vocab(self) -> List[bool]:
+        return [False, False]
+
+    def support_fused_moe(self) -> bool:
+        return False
+
 
 class AQLMLinearMethod(LinearMethodBase):
     """Linear method for AQLM.
@@ -331,3 +337,10 @@ class AQLMLinearMethod(LinearMethodBase):
         )
 
         return output
+
+    def apply_moe_weights(self, w1: Dict[str,
+                                         torch.Tensor], w2: Dict[str,
+                                                                 torch.Tensor],
+                          x: torch.Tensor, gating_output: torch.Tensor,
+                          topk: int, renormalize: bool) -> torch.Tensor:
+        raise NotImplementedError
