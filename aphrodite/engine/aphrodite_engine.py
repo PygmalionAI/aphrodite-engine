@@ -5,14 +5,9 @@ from transformers import PreTrainedTokenizer
 
 import aphrodite
 from aphrodite.lora.request import LoRARequest
-from aphrodite.common.config import (
-    CacheConfig,
-    DeviceConfig,
-    ModelConfig,
-    ParallelConfig,
-    SchedulerConfig,
-    LoRAConfig,
-)
+from aphrodite.common.config import (CacheConfig, DeviceConfig, ModelConfig,
+                                     ParallelConfig, SchedulerConfig,
+                                     LoRAConfig, VisionLanguageConfig)
 from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.executor.executor_base import ExecutorBase
@@ -20,14 +15,9 @@ from aphrodite.engine.metrics import StatLogger, Stats
 from aphrodite.engine.ray_tools import (initialize_ray_cluster)
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.common.sequence import (
-    SamplerOutput,
-    Sequence,
-    SequenceGroup,
-    SequenceGroupOutput,
-    SequenceOutput,
-    SequenceStatus,
-)
+from aphrodite.common.sequence import (SamplerOutput, Sequence, SequenceGroup,
+                                       SequenceGroupOutput, SequenceOutput,
+                                       SequenceStatus, MultiModalData)
 from aphrodite.transformers_utils.tokenizer_group import (BaseTokenizerGroup,
                                                           get_tokenizer_group)
 from aphrodite.transformers_utils.detokenizer import Detokenizer
@@ -75,6 +65,7 @@ class AphroditeEngine:
         scheduler_config: SchedulerConfig,
         device_config: DeviceConfig,
         lora_config: Optional[LoRAConfig],
+        vision_language_config: Optional["VisionLanguageConfig"],
         executor_class: Type[ExecutorBase],
         log_stats: bool,
     ) -> None:
@@ -98,6 +89,7 @@ class AphroditeEngine:
         self.model_config = model_config
         self.cache_config = cache_config
         self.lora_config = lora_config
+        self.vision_language_config = vision_language_config
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
         self.device_config = device_config
@@ -110,7 +102,8 @@ class AphroditeEngine:
 
         self.model_executor = executor_class(model_config, cache_config,
                                              parallel_config, scheduler_config,
-                                             device_config, lora_config)
+                                             device_config, lora_config,
+                                             vision_language_config)
 
         # Ping the tokenizer to ensure it is loaded if
         # it runs on a separate process.
@@ -221,6 +214,7 @@ class AphroditeEngine:
         prompt_token_ids: Optional[List[int]] = None,
         arrival_time: Optional[float] = None,
         lora_request: Optional[LoRARequest] = None,
+        multi_modal_data: Optional[MultiModalData] = None,
     ) -> None:
         """Add a request to the engine's request pool.
 
@@ -237,6 +231,7 @@ class AphroditeEngine:
                 use the tokenizer to convert the prompts to token IDs.
             arrival_time: The arrival time of the request. If None, we use
                 the current monotonic time.
+            multi_modal_data: The multimodal data for the request.
 
         Details:
             - Set arrival_time to the current time if it is None.
@@ -305,7 +300,7 @@ class AphroditeEngine:
 
         # Create the sequence group.
         seq_group = SequenceGroup(request_id, [seq], sampling_params,
-                                  arrival_time, lora_request)
+                                  arrival_time, lora_request, multi_modal_data)
 
         # Add the sequence group to the scheduler.
         self.scheduler.add_seq_group(seq_group)
