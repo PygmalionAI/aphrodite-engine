@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only Gemma model compatible with HuggingFace weights."""
-
+from functools import lru_cache
 from typing import List, Optional, Tuple
 
 import torch
@@ -49,12 +49,32 @@ from aphrodite.modeling.hf_downloader import (
 from aphrodite.common.sequence import SamplerOutput
 
 
+@lru_cache(maxsize=None)
+def _get_gemma_act_fn(
+    hidden_act: Optional[str],
+    hidden_activation: Optional[str],
+) -> nn.Module:
+    if hidden_activation is None:
+        if hidden_act is not None:
+            hidden_activation = hidden_act
+        return GeluAndMul(approximate="none")
+    elif hidden_activation == "gelu_pytorch_tanh":
+        return GeluAndMul(approximate="tanh")
+    elif hidden_activation == "gelu":
+        return GeluAndMul(approximate="none")
+    else:
+        raise ValueError(f"Activation function {hidden_act} is not "
+                         "supported for Gemma models.")
+
+
 class GemmaMLP(nn.Module):
 
     def __init__(
         self,
         hidden_size: int,
         intermediate_size: int,
+        hidden_act: Optional[str] = None,
+        hidden_activation: Optional[str] = None,
         linear_method: Optional[LinearMethodBase] = None,
     ) -> None:
         super().__init__()
@@ -87,7 +107,7 @@ class GemmaMLP(nn.Module):
             bias=False,
             linear_method=linear_method,
         )
-        self.act_fn = GeluAndMul()
+        self.act_fn = _get_gemma_act_fn(hidden_act, hidden_activation)
 
     def forward(self, x):
         if self.merge_weight:
@@ -228,6 +248,8 @@ class GemmaDecoderLayer(nn.Module):
         self.mlp = GemmaMLP(
             hidden_size=self.hidden_size,
             intermediate_size=config.intermediate_size,
+            hidden_act=config.hidden_act,
+            hidden_activation=getattr(config, "hidden_activation", None),
             linear_method=linear_method,
         )
         self.input_layernorm = RMSNorm(config.hidden_size,
@@ -283,6 +305,13 @@ class GemmaModel(nn.Module):
         ])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
+        # Normalize the embedding by sqrt(hidden_size)
+        # The normalizer's data type should be downcasted to the model's
+        # data type such as bfloat16, not float32.
+        # See https://github.com/huggingface/transformers/pull/29402
+        normalizer = self.config.hidden_size**0.5
+        self.register_buffer("normalizer", torch.tensor(normalizer))
+
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -291,8 +320,7 @@ class GemmaModel(nn.Module):
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         hidden_states = self.embed_tokens(input_ids)
-        # Normalize the embedding by sqrt(hidden_size)
-        hidden_states *= self.config.hidden_size**0.5
+        hidden_states *= self.normalizer
 
         residual = None
         for i in range(len(self.layers)):
