@@ -114,6 +114,8 @@ class ChatCompletionRequest(BaseModel):
     def to_sampling_params(self) -> SamplingParams:
         if self.logprobs and not self.top_logprobs:
             raise ValueError("Top logprobs must be set when logprobs is.")
+        if self.top_k == 0:
+            self.top_k = -1
 
         logits_processors = None
         if self.logit_bias:
@@ -244,6 +246,8 @@ class CompletionRequest(BaseModel):
 
     def to_sampling_params(self) -> SamplingParams:
         echo_without_generation = self.echo and self.max_tokens == 0
+        if self.top_k == 0:
+            self.top_k = -1
 
         logits_processors = None
         if self.logit_bias:
