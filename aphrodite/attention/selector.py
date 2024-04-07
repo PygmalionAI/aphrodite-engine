@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Type
 
 import torch
 from loguru import logger
@@ -8,7 +9,7 @@ from aphrodite.common.utils import is_hip
 
 
 @lru_cache(maxsize=None)
-def get_attn_backend(dtype: torch.dtype) -> AttentionBackend:
+def get_attn_backend(dtype: torch.dtype) -> Type[AttentionBackend]:
     if _can_use_flash_attn(dtype):
         logger.info("Using FlashAttention backend.")
         from aphrodite.attention.backends.flash_attn import FlashAttentionBackend  # noqa: E501

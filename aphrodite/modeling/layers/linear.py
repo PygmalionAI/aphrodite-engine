@@ -48,7 +48,6 @@ class LinearMethodBase(ABC):
                            output_partition_sizes: List[int], input_size: int,
                            output_size: int,
                            params_dtype: torch.dtype) -> Dict[str, Any]:
-        output_size_per_partition = sum(output_partition_sizes)
         """Creating moe weights"""
         linear_weights = self.create_weights(input_size_per_partition,
                                              output_partition_sizes,
