@@ -1,3 +1,4 @@
+"""A layer that compute logits from hidden_stats."""
 from typing import Optional
 
 import torch
@@ -10,6 +11,7 @@ from aphrodite.modeling.sampling_metadata import SamplingMetadata
 
 class LogitsProcessor(nn.Module):
     """Process logits and apply logits processors from sampling metadata.
+
     This layer does the following:
     1. Gather logits from model hidden_states.
     2. Scale logits if needed.
@@ -35,7 +37,7 @@ class LogitsProcessor(nn.Module):
 
     def forward(
         self,
-        embedding: torch.Tensor,
+        lm_head: nn.Module,
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
         embedding_bias: Optional[torch.Tensor] = None,
@@ -47,7 +49,7 @@ class LogitsProcessor(nn.Module):
                                                  sampling_metadata)
 
             # Get the logits for the next tokens.
-            logits = self._get_logits(hidden_states, embedding, embedding_bias)
+            logits = self._get_logits(hidden_states, lm_head, embedding_bias)
 
         if logits is not None:
             logits *= self.scale
@@ -57,10 +59,10 @@ class LogitsProcessor(nn.Module):
 
         return logits
 
-    def _get_logits(self, hidden_states: torch.Tensor, embedding: torch.Tensor,
+    def _get_logits(self, hidden_states: torch.Tensor, lm_head: nn.Module,
                     embedding_bias: Optional[torch.Tensor]) -> torch.Tensor:
         # Get the logits for the next tokens.
-        logits = torch.matmul(hidden_states, embedding.t())
+        logits = lm_head(hidden_states)
         if embedding_bias is not None:
             logits += embedding_bias
         logits = tensor_model_parallel_gather(logits)

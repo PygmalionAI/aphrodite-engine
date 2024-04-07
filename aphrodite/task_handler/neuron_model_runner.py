@@ -13,8 +13,6 @@ from aphrodite.common.sequence import (SamplerOutput, SequenceData,
 from aphrodite.common.utils import (async_tensor_h2d, is_pin_memory_available,
                                     make_tensor_with_pad, maybe_expand_dim)
 
-KVCache = Tuple[torch.Tensor, torch.Tensor]
-
 
 class NeuronModelRunner:
 

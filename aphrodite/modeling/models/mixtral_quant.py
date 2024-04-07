@@ -23,7 +23,7 @@
 # limitations under the License.
 """Inference-only Mixtral model."""
 
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import numpy as np
 
@@ -33,8 +33,7 @@ import torch.nn.functional as F
 from torch import nn
 from transformers import MixtralConfig
 
-from aphrodite.modeling.metadata import InputMetadata
-from aphrodite.modeling.layers.attention import Attention
+from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (
     LinearMethodBase,
@@ -62,8 +61,6 @@ from aphrodite.modeling.hf_downloader import (
     hf_model_weights_iterator,
 )
 from aphrodite.common.sequence import SamplerOutput
-
-KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 
 class MixtralMLP(nn.Module):
@@ -272,8 +269,8 @@ class MixtralAttention(nn.Module):
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
-        kv_cache: KVCache,
-        input_metadata: InputMetadata,
+        kv_cache: torch.Tensor,
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         if self.merge_weight:
             qkv, _ = self.qkv_proj(hidden_states)
@@ -284,8 +281,7 @@ class MixtralAttention(nn.Module):
             k, _ = self.k_proj(hidden_states)
             v, _ = self.v_proj(hidden_states)
         q, k = self.rotary_emb(positions, q, k)
-        k_cache, v_cache = kv_cache
-        attn_output = self.attn(q, k, v, k_cache, v_cache, input_metadata)
+        attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         output, _ = self.o_proj(attn_output)
         return output
 
@@ -321,8 +317,8 @@ class MixtralDecoderLayer(nn.Module):
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
-        kv_cache: KVCache,
-        input_metadata: InputMetadata,
+        kv_cache: torch.Tensor,
+        attn_metadata: AttentionMetadata,
         residual: Optional[torch.Tensor],
     ) -> torch.Tensor:
         # Self Attention
@@ -336,7 +332,7 @@ class MixtralDecoderLayer(nn.Module):
             positions=positions,
             hidden_states=hidden_states,
             kv_cache=kv_cache,
-            input_metadata=input_metadata,
+            attn_metadata=attn_metadata,
         )
 
         # Fully Connected
@@ -372,15 +368,15 @@ class MixtralModel(nn.Module):
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        kv_caches: List[KVCache],
-        input_metadata: InputMetadata,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         hidden_states = self.embed_tokens(input_ids)
         residual = None
         for i in range(len(self.layers)):
             layer = self.layers[i]
             hidden_states, residual = layer(positions, hidden_states,
-                                            kv_caches[i], input_metadata,
+                                            kv_caches[i], attn_metadata,
                                             residual)
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
@@ -409,16 +405,16 @@ class MixtralForCausalLM(nn.Module):
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        kv_caches: List[KVCache],
-        input_metadata: InputMetadata,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         hidden_states = self.model(input_ids, positions, kv_caches,
-                                   input_metadata)
+                                   attn_metadata)
         return hidden_states
 
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
-        logits = self.logits_processor(self.lm_head.weight, hidden_states,
+        logits = self.logits_processor(self.lm_head, hidden_states,
                                        sampling_metadata)
         return logits
 
