@@ -30,6 +30,7 @@ class EngineArgs:
     max_parallel_loading_workers: Optional[int] = None
     block_size: int = 16
     context_shift: bool = False
+    use_v2_block_manager: bool = False
     swap_space: int = 4  # GiB
     gpu_memory_utilization: float = 0.90
     max_num_batched_tokens: Optional[int] = None
@@ -59,6 +60,7 @@ class EngineArgs:
     max_cpu_loras: Optional[int] = None
     device: str = "auto"
     ray_workers_use_nsight: bool = False
+    forced_num_gpu_blocks: Optional[int] = None
     # Related to Vision-language models such as llava
     image_input_type: Optional[str] = None
     image_token_id: Optional[int] = None
@@ -237,6 +239,10 @@ class EngineArgs:
             action="store_true",
             help="Enable context shifting.",
         )
+        parser.add_argument(
+            "--use-v2-block-manager",
+            action="store_true",
+            help="Use the v2 block manager.")
         parser.add_argument("--seed",
                             type=int,
                             default=EngineArgs.seed,
@@ -256,6 +262,12 @@ class EngineArgs:
             "the model executor, which can range from 0 to 1."
             "If unspecified, will use the default value of 0.9.",
         )
+        parser.add_argument(
+            "--forced-num-gpu-blocks",
+            type=int,
+            default=None,
+            help="If specified, ignore GPU profiling result and use this "
+            "number of GPU blocks. Used for testing preemption.")
         parser.add_argument(
             "--max-num-batched-tokens",
             type=int,
@@ -501,6 +513,7 @@ class EngineArgs:
             self.swap_space,
             self.kv_cache_dtype,
             # self.kv_quant_params_path,
+            self.forced_num_gpu_blocks,
             model_config.get_sliding_window(),
             self.context_shift,
         )
@@ -521,6 +534,7 @@ class EngineArgs:
             self.max_num_batched_tokens,
             self.max_num_seqs,
             model_config.max_model_len,
+            self.use_v2_block_manager,
             self.scheduler_delay_factor,
             self.scheduler_policy,
             self.scheduler_reorder_window,
