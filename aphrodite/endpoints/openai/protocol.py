@@ -71,6 +71,7 @@ class ChatCompletionRequest(BaseModel):
     typical_p: Optional[float] = 1.0
     n: Optional[int] = 1
     max_tokens: Optional[int] = None
+    min_tokens: Optional[int] = 0
     seed: Optional[int] = None
     stop: Optional[Union[str, List[str]]] = Field(default_factory=list)
     include_stop_str_in_output: Optional[bool] = False
@@ -131,6 +132,7 @@ class ChatCompletionRequest(BaseModel):
         return SamplingParams(
             n=self.n,
             max_tokens=self.max_tokens,
+            min_tokens=self.min_tokens,
             logprobs=self.top_logprobs if self.logprobs else None,
             prompt_logprobs=self.top_logprobs if self.echo else None,
             temperature=self.temperature,
@@ -187,6 +189,7 @@ class CompletionRequest(BaseModel):
     prompt: Union[List[int], List[List[int]], str, List[str]]
     suffix: Optional[str] = None
     max_tokens: Optional[int] = 16
+    min_tokens: Optional[int] = 0
     temperature: Optional[float] = 1.0
     top_p: Optional[float] = 1.0
     tfs: Optional[float] = 1.0
@@ -257,6 +260,7 @@ class CompletionRequest(BaseModel):
         return SamplingParams(
             n=self.n,
             max_tokens=self.max_tokens if not echo_without_generation else 1,
+            min_tokens=self.min_tokens,
             temperature=self.temperature,
             top_p=self.top_p,
             tfs=self.tfs,
