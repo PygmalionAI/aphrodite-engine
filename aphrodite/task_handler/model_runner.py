@@ -14,11 +14,11 @@ from aphrodite.common.config import (DeviceConfig, ModelConfig, LoRAConfig,
 from aphrodite.common.logger import get_loading_progress_bar
 from aphrodite.modeling import SamplingMetadata
 from aphrodite.modeling.loader import get_model
-from aphrodite.modeling.megatron import cupy_utils
+from aphrodite.modeling.megatron import pynccl_utils, custom_all_reduce
 from aphrodite.modeling.megatron.communication_op import broadcast_tensor_dict
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_world_size,
-    with_cupy_nccl_for_all_reduce,
+    with_pynccl_for_all_reduce,
 )
 from aphrodite.modeling.megatron import custom_all_reduce
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
@@ -808,7 +808,7 @@ class ModelRunner:
         """
         # NOTE: This is a hack to ensure that the NCCL backend is never
         # deleted before the CUDA graphs.
-        self.cupy_nccl_backend = cupy_utils.get_nccl_backend()
+        self.pynccl_backend = pynccl_utils.get_nccl_backend()
 
         assert not self.model_config.enforce_eager
         logger.info("Capturing the model for CUDA graphs. This may lead to "
@@ -837,11 +837,11 @@ class ModelRunner:
         ]
 
         # NOTE: There are 3 backends for all-reduce: custom all-reduce
-        # kernel, CuPy NCCL, and PyTorch NCCL. When using CUDA graph, we use
-        # either custom all-reduce kernel or CuPy NCCL. When not using CUDA
+        # kernel, PyNCCL, and PyTorch NCCL. When using CUDA graph, we use
+        # either custom all-reduce kernel or PyNCCL. When not using CUDA
         # graph, we use either custom all-reduce kernel or PyTorch NCCL.
         # We always prioritize using custom all-reduce kernel but fall back
-        # to PyTorch or CuPy NCCL if it is disabled or not supported.
+        # to PyTorch or PyNCCL if it is disabled or not supported.
         # Initialize a new progress bar
         progress = get_loading_progress_bar()
         task = progress.add_task("[cyan]Capturing graph...",
@@ -895,12 +895,14 @@ class ModelRunner:
         logger.info(f"Graph capturing finished in {elapsed_time:.0f} secs.")
 
     def __del__(self) -> None:
-        # Delete the CUDA graphs before deleting the CuPy NCCL communicator.
+        # Delete the CUDA graphs before deleting the PyNCCL communicator.
         # NOTE: This is necessary because otherwise deadlocks can
         # happen.
         # FIXME: This is a bit hacky. Find a more robust solution.
+        # TODO: when we get enough user feedback that pynccl is
+        # more stable than cupy, we can remove this, e.g. in v0.4.1.
         self.graph_runners.clear()
-        self.cupy_nccl_backend = None
+        self.pynccl_backend = None
 
     @property
     def vocab_size(self) -> int:
@@ -928,7 +930,7 @@ class CUDAGraphRunner:
         # Run the model once without capturing the graph.
         # This is to make sure that the captured graph does not include the
         # kernel launches for initial benchmarking (e.g., Triton autotune).
-        with _maybe_cupy_nccl():
+        with _maybe_pynccl():
             self.model(
                 input_ids,
                 positions,
@@ -943,7 +945,7 @@ class CUDAGraphRunner:
         # https://stackoverflow.com/questions/31039022/python-multi-line-with-statement
         self.graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(self.graph, pool=memory_pool):  # noqa: SIM117
-            with _maybe_cupy_nccl():
+            with _maybe_pynccl():
                 hidden_states = self.model(
                     input_ids,
                     positions,
@@ -997,9 +999,10 @@ class CUDAGraphRunner:
 
 
 @contextlib.contextmanager
-def _maybe_cupy_nccl():
-    if cupy_utils.is_initialized() and not custom_all_reduce.is_initialized():
-        with with_cupy_nccl_for_all_reduce():
+def _maybe_pynccl():
+    if pynccl_utils.is_initialized(
+    ) and not custom_all_reduce.is_initialized():
+        with with_pynccl_for_all_reduce():
             yield
     else:
         yield

@@ -20,7 +20,6 @@ lark == 1.1.8 # for grammars
 pynvml == 11.5.0
 scipy # for quip
 rich
-cupy-cuda12x == 12.3.0 # install cupy-cuda11x for CUDA 11.8
 outlines >= 0.0.27
 bitsandbytes >= 0.41.0
 loguru
