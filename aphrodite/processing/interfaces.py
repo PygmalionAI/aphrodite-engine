@@ -20,21 +20,20 @@ class AllocStatus(enum.Enum):
 
 
 class BlockSpaceManager(ABC):
+
     @staticmethod
     def get_block_space_manager_class(version: str):
         version = version.lower()
 
         if version == "v1":
             from aphrodite.processing.block_manager_v1 import (
-                BlockSpaceManagerV1,
-            )
+                BlockSpaceManagerV1, )
 
             return BlockSpaceManagerV1
 
         if version == "v2":
             from aphrodite.processing.block_manager_v2 import (
-                BlockSpaceManagerV2,
-            )
+                BlockSpaceManagerV2, )
 
             return BlockSpaceManagerV2
 

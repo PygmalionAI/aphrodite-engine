@@ -239,10 +239,9 @@ class EngineArgs:
             action="store_true",
             help="Enable context shifting.",
         )
-        parser.add_argument(
-            "--use-v2-block-manager",
-            action="store_true",
-            help="Use the v2 block manager.")
+        parser.add_argument("--use-v2-block-manager",
+                            action="store_true",
+                            help="Use the v2 block manager.")
         parser.add_argument("--seed",
                             type=int,
                             default=EngineArgs.seed,

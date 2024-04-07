@@ -87,9 +87,8 @@ class PrefixCachingBlockAllocator(BlockAllocator):
             prefix_caching_allocator=allocator,
         )
 
-    def allocate_immutable(
-        self, prev_block: Optional[Block], token_ids: List[int]
-    ) -> Block:
+    def allocate_immutable(self, prev_block: Optional[Block],
+                           token_ids: List[int]) -> Block:
         """Allocates an immutable block with the given token IDs, reusing cached
         blocks if possible.
         Args:
@@ -111,7 +110,8 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         cached_block_id = self._cached_blocks.get(block.content_hash, None)
         if cached_block_id is not None:
             block.block_id = cached_block_id
-            self._incr_refcount_cached_block(block.content_hash, block.block_id)
+            self._incr_refcount_cached_block(block.content_hash,
+                                             block.block_id)
             return block
 
         block = self.allocate_mutable(prev_block)
@@ -133,8 +133,7 @@ class PrefixCachingBlockAllocator(BlockAllocator):
 
         try:
             return self._hashless_allocator.allocate_mutable(
-                prev_block=prev_block
-            )
+                prev_block=prev_block)
         except BlockAllocator.NoFreeBlocksError:
             # We must check the unused cached blocks before raising OOM.
             pass
@@ -162,9 +161,8 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         # No block available in hashless allocator, nor in unused cache blocks.
         raise BlockAllocator.NoFreeBlocksError()
 
-    def _incr_refcount_cached_block(
-        self, content_hash: int, block_id: BlockId
-    ) -> None:
+    def _incr_refcount_cached_block(self, content_hash: int,
+                                    block_id: BlockId) -> None:
         refcount = self._refcounter.incr(block_id)
         if refcount == 1:
             assert content_hash in self._unused_cached_blocks
@@ -176,14 +174,14 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         If the block has a content hash (meaning it is immutable), then we will
         keep the block around in case future allocations require it.
         """
-        assert (
-            block.block_id is not None
-        ), "freeing unallocated block is undefined"
+        assert (block.block_id
+                is not None), "freeing unallocated block is undefined"
 
         self._free_block_id_for_block(block.block_id, block)
         block.block_id = None
 
-    def _free_block_id_for_block(self, block_id: BlockId, block: Block) -> None:
+    def _free_block_id_for_block(self, block_id: BlockId,
+                                 block: Block) -> None:
         assert isinstance(block, PrefixCachingBlock)
 
         if block.content_hash is None:
@@ -221,8 +219,7 @@ class PrefixCachingBlockAllocator(BlockAllocator):
                     block_id=block.block_id,
                     block_size=self._block_size,
                     allocator=self,
-                )
-            )
+                ))
             prev_block = forked_blocks[-1]
 
         return forked_blocks
@@ -231,16 +228,14 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         # The number of free blocks is the number of hashless free blocks
         # plus the number of hashful blocks that are unused.
         return self._hashless_allocator.get_num_free_blocks() + len(
-            self._unused_cached_blocks
-        )
+            self._unused_cached_blocks)
 
     @property
     def all_block_ids(self) -> frozenset[int]:
         return self._hashless_allocator.all_block_ids
 
-    def promote_to_immutable_block(
-        self, block: "PrefixCachingBlock"
-    ) -> BlockId:
+    def promote_to_immutable_block(self,
+                                   block: "PrefixCachingBlock") -> BlockId:
         """Once a mutable block is full, it can be promoted to an immutable
         block. This means that its content can be referenced by future blocks
         having the same prefix.
@@ -264,8 +259,7 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         else:
             self._free_block_id_for_block(block.block_id, block)
             self._incr_refcount_cached_block(
-                block.content_hash, self._cached_blocks[block.content_hash]
-            )
+                block.content_hash, self._cached_blocks[block.content_hash])
 
         return self._cached_blocks[block.content_hash]
 
@@ -295,8 +289,7 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         pass
 
     def get_common_computed_block_ids(
-        self, seq_block_ids: List[List[int]]
-    ) -> List[int]:
+            self, seq_block_ids: List[List[int]]) -> List[int]:
         """Return the block ids that are common for a given sequence group.
         Used in prefill (can skip prefill of some blocks).
         """
@@ -371,9 +364,8 @@ class PrefixCachingBlock(Block):
         # Register ourselves with the allocator, potentially replacing the
         # physical block index.
         if self.content_hash is not None:
-            self.block_id = (
-                self._prefix_caching_allocator.promote_to_immutable_block(self)
-            )
+            self.block_id = (self._prefix_caching_allocator.
+                             promote_to_immutable_block(self))
 
     @property
     def block_id(self) -> Optional[int]:
@@ -420,9 +412,8 @@ class PrefixCachingBlock(Block):
             return None
 
         is_first_block = self._prev_block is None
-        prev_block_hash = (
-            None if is_first_block else self._prev_block.content_hash
-        )
+        prev_block_hash = (None if is_first_block else
+                           self._prev_block.content_hash)
 
         # Previous block exists but does not yet have a hash.
         # Return no hash in this case.
@@ -430,8 +421,9 @@ class PrefixCachingBlock(Block):
             return None
 
         self._cached_content_hash = PrefixCachingBlock.hash_block_tokens(
-            is_first_block, prev_block_hash, cur_block_token_ids=self.token_ids
-        )
+            is_first_block,
+            prev_block_hash,
+            cur_block_token_ids=self.token_ids)
         return self._cached_content_hash
 
     @staticmethod
