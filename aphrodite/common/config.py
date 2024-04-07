@@ -402,12 +402,14 @@ class CacheConfig:
         swap_space: int,
         cache_dtype: str,
         # cache_quant_params_path: Optional[str] = None,
+        forced_num_gpu_blocks: Optional[int] = None,
         sliding_window: Optional[int] = None,
         context_shift: bool = False,
     ) -> None:
         self.block_size = block_size
         self.gpu_memory_utilization = gpu_memory_utilization
         self.swap_space_bytes = swap_space * _GB
+        self.forced_num_gpu_blocks = forced_num_gpu_blocks
         self.cache_dtype = cache_dtype
         self.sliding_window = sliding_window
         # self.cache_quant_params_path = cache_quant_params_path
@@ -602,6 +604,7 @@ class SchedulerConfig:
         policy: Policy of sequence scheduling (`fcfs` or `reorder`).
         reorder_window: Allowed reorder window size (in sec) for `reorder`
             policy.
+        use_v2_block_manager: Whether to use the BlockSpaceManagerV2 or not.
     """
 
     def __init__(
@@ -609,6 +612,7 @@ class SchedulerConfig:
         max_num_batched_tokens: Optional[int],
         max_num_seqs: int,
         max_model_len: int,
+        use_v2_block_manager: bool = False,
         delay_factor: float = 0.0,
         policy: str = "fcfs",
         reorder_window: float = 0.0,
@@ -622,6 +626,7 @@ class SchedulerConfig:
         self.max_num_seqs = max_num_seqs
         self.max_model_len = max_model_len
         self.delay_factor = delay_factor
+        self.use_v2_block_manager = use_v2_block_manager
         self.policy = policy
         self.reorder_window = reorder_window
         self._verify_args()
