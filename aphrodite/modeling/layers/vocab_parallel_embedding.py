@@ -1,7 +1,6 @@
 from typing import Optional, Sequence
 
 import torch
-import torch.nn.functional as F
 from torch.nn.parameter import Parameter
 
 from aphrodite.modeling.layers.linear import UnquantizedLinearMethod
@@ -104,8 +103,8 @@ class VocabParallelEmbedding(torch.nn.Module):
             vocab_shape = list(loaded_weight.shape)
             if output_dim is not None:
                 if packed_dim == output_dim:
-                    vocab_shape[
-                        output_dim] = self.num_embeddings_per_partition // param.pack_factor
+                    vocab_shape[output_dim] = (
+                        self.num_embeddings_per_partition // param.pack_factor)
                 else:
                     vocab_shape[output_dim] = self.num_embeddings_per_partition
             param.materialize(vocab_shape, dtype=loaded_weight.dtype)
