@@ -14,6 +14,7 @@ from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.engine.ray_tools import initialize_ray_cluster, ray
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
+from aphrodite.common.sequence import MultiModalData
 
 ENGINE_ITERATION_TIMEOUT_S = int(
     os.environ.get("APHRODITE_ENGINE_ITERATION_TIMEOUT_S", "120"))
@@ -243,6 +244,7 @@ class _AsyncAphrodite(AphroditeEngine):
         prompt_token_ids: Optional[List[int]] = None,
         arrival_time: Optional[float] = None,
         lora_request: Optional[LoRARequest] = None,
+        multi_modal_data: Optional[MultiModalData] = None,
     ) -> None:
         if lora_request is not None and not self.lora_config:
             raise ValueError(f"Got lora_request {lora_request} but LoRA is "
@@ -255,14 +257,13 @@ class _AsyncAphrodite(AphroditeEngine):
             prompt_token_ids=prompt_token_ids,
             lora_request=lora_request)
 
-        return self.add_request(
-            request_id,
-            prompt=prompt,
-            prompt_token_ids=prompt_token_ids,
-            sampling_params=sampling_params,
-            arrival_time=arrival_time,
-            lora_request=lora_request,
-        )
+        return self.add_request(request_id,
+                                prompt=prompt,
+                                prompt_token_ids=prompt_token_ids,
+                                sampling_params=sampling_params,
+                                arrival_time=arrival_time,
+                                lora_request=lora_request,
+                                multi_modal_data=multi_modal_data)
 
     async def check_health_async(self) -> None:
         self.model_executor.check_health()

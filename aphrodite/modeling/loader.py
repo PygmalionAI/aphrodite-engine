@@ -10,6 +10,7 @@ import torch.nn as nn
 
 from aphrodite.common.config import DeviceConfig, ModelConfig
 from aphrodite.modeling.models import ModelRegistry
+from aphrodite.modeling.models.llava import LlavaForConditionalGeneration
 from aphrodite.modeling.hf_downloader import (
     get_quant_config,
     initialize_dummy_weights,
@@ -20,6 +21,10 @@ from aphrodite.modeling.layers.quantization.bitsandbytes import (
 )
 from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_world_size, )
+
+_VISION_MODEL_CLASSES = [
+    LlavaForConditionalGeneration,
+]
 
 
 @contextlib.contextmanager
@@ -51,6 +56,7 @@ def _get_model_architecture(model_config: ModelConfig) -> Type[nn.Module]:
 def get_model(model_config: ModelConfig, device_config: DeviceConfig,
               **kwargs) -> nn.Module:
     lora_config = kwargs.get("lora_config", None)
+    vision_language_config = kwargs.get("vision_language_config", None)
     model_class = _get_model_architecture(model_config)
 
     # Get the (maybe quantized) linear method.
@@ -88,7 +94,11 @@ def get_model(model_config: ModelConfig, device_config: DeviceConfig,
                     "be added in the future. If this is important to you, "
                     "please open an issue on github.")
             else:
-                model = model_class(model_config.hf_config, linear_method)
+                if model_class not in _VISION_MODEL_CLASSES:
+                    model = model_class(model_config.hf_config, linear_method)
+                else:
+                    model = model_class(model_config.hf_config,
+                                        vision_language_config, linear_method)
         if model_config.load_format == "dummy":
             # NOTE: For accurate performance evaluation, we assign
             # random values to the weights.

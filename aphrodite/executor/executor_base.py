@@ -1,14 +1,9 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 
-from aphrodite.common.config import (
-    CacheConfig,
-    DeviceConfig,
-    ModelConfig,
-    ParallelConfig,
-    SchedulerConfig,
-    LoRAConfig,
-)
+from aphrodite.common.config import (CacheConfig, DeviceConfig, ModelConfig,
+                                     ParallelConfig, SchedulerConfig,
+                                     LoRAConfig, VisionLanguageConfig)
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 
@@ -29,6 +24,7 @@ class ExecutorBase(ABC):
         scheduler_config: SchedulerConfig,
         device_config: DeviceConfig,
         lora_config: Optional[LoRAConfig],
+        vision_language_config: VisionLanguageConfig,
     ) -> None:
         raise NotImplementedError
 

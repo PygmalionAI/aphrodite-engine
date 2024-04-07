@@ -8,7 +8,7 @@ import torch.distributed
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, ModelConfig,
                                      ParallelConfig, SchedulerConfig,
-                                     LoRAConfig)
+                                     LoRAConfig, VisionLanguageConfig)
 from aphrodite.modeling import set_random_seed
 from aphrodite.modeling.megatron import cupy_utils
 from aphrodite.modeling.megatron.communication_op import (broadcast_tensor_dict
@@ -41,6 +41,7 @@ class Worker:
         rank: int,
         distributed_init_method: str,
         lora_config: Optional[LoRAConfig] = None,
+        vision_language_config: Optional[VisionLanguageConfig] = None,
         kv_cache_dtype: Optional[str] = "auto",
         # kv_quant_params_path: Optional[str] = None,
         is_driver_worker: bool = False,
@@ -57,6 +58,11 @@ class Worker:
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
 
+        self.vision_language_config = vision_language_config
+        if self.vision_language_config:
+            assert not self.lora_config, (
+                "To be tested: vision language model with LoRA settings.")
+
         self.model_runner = ModelRunner(
             model_config,
             parallel_config,
@@ -64,8 +70,9 @@ class Worker:
             device_config,
             lora_config=self.lora_config,
             kv_cache_dtype=kv_cache_dtype,
+            is_driver_worker=is_driver_worker,
             # kv_quant_params_path=kv_quant_params_path,
-            is_driver_worker=is_driver_worker)
+            vision_language_config=vision_language_config)
         # Uninitialized cache engine. Will be initialized by
         # self.init_cache_engine().
         self.cache_config = None
