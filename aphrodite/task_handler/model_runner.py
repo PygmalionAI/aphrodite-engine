@@ -20,7 +20,6 @@ from aphrodite.modeling.megatron.parallel_state import (
     get_tensor_model_parallel_world_size,
     with_pynccl_for_all_reduce,
 )
-from aphrodite.modeling.megatron import custom_all_reduce
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (SamplerOutput, SequenceData,
                                        SequenceGroupMetadata, MultiModalData)
