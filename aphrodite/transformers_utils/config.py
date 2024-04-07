@@ -3,7 +3,7 @@ from typing import Optional
 from transformers import AutoConfig, PretrainedConfig
 from transformers.models.auto.configuration_auto import CONFIG_MAPPING
 
-from aphrodite.transformers_utils.configs import (BaiChuanConfig,
+from aphrodite.transformers_utils.configs import (BaiChuanConfig, DbrxConfig,
                                                   ChatGLMConfig, MPTConfig,
                                                   QWenConfig, RWConfig)
 from aphrodite.common.gguf import GGUFReader
@@ -11,6 +11,7 @@ from aphrodite.common.gguf import GGUFReader
 _CONFIG_REGISTRY = {
     "baichuan": BaiChuanConfig,
     "chatglm": ChatGLMConfig,
+    "dbrx": DbrxConfig,
     "mpt": MPTConfig,
     "qwen": QWenConfig,
     "RefinedWeb": RWConfig,  # For tiiuae/falcon-40b(-instruct)

@@ -25,3 +25,4 @@ bitsandbytes >= 0.41.0
 loguru
 hf_transfer # for faster downloads
 sentence-transformers # for embeddings
+tiktoken == 0.6.0 # for DBRX tokenizer
