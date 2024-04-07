@@ -42,8 +42,7 @@ class NaiveBlockAllocator(BlockAllocator):
         assert len(self._all_block_indices) == num_blocks
 
         self._refcounter = RefCounter(
-            all_block_indices=self._free_block_indices
-        )
+            all_block_indices=self._free_block_indices)
         self._create_block = create_block
         self._block_size = block_size
 
@@ -52,9 +51,8 @@ class NaiveBlockAllocator(BlockAllocator):
             allocator=self,
         )
 
-    def allocate_immutable(
-        self, prev_block: Optional[Block], token_ids: List[int]
-    ) -> Block:
+    def allocate_immutable(self, prev_block: Optional[Block],
+                           token_ids: List[int]) -> Block:
         """Allocates a new immutable block with the given token IDs, linked to
         the previous block.
         Args:
@@ -118,8 +116,7 @@ class NaiveBlockAllocator(BlockAllocator):
                     block_id=block.block_id,
                     block_size=self._block_size,
                     allocator=self,
-                )
-            )
+                ))
             prev_block = forked_blocks[-1]
 
         return forked_blocks
@@ -177,8 +174,7 @@ class NaiveBlockAllocator(BlockAllocator):
         pass
 
     def get_common_computed_block_ids(
-        self, seq_block_ids: List[List[int]]
-    ) -> List[int]:
+            self, seq_block_ids: List[List[int]]) -> List[int]:
         """Determine blocks that can be skipped in prefill.
         Since the naive allocator does not support prefix caching, always return
         an empty list.
@@ -234,8 +230,7 @@ class NaiveBlock(Block):
 
         if self._block_id is not None:
             self._block_id = self._allocator.cow_block_if_not_appendable(
-                self._cow_target
-            )
+                self._cow_target)
 
     def _append_token_ids_no_cow(self, token_ids: List[int]) -> None:
         assert self.num_empty_slots >= len(token_ids)

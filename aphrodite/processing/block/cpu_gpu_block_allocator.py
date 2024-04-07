@@ -10,8 +10,7 @@ from aphrodite.processing.block.naive_block import (
     NaiveBlockAllocator,
 )
 from aphrodite.processing.block.prefix_caching_block import (
-    PrefixCachingBlockAllocator,
-)
+    PrefixCachingBlockAllocator, )
 from aphrodite.common.utils import Device
 
 
@@ -112,9 +111,8 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
             for block_id in allocator.all_block_ids:
                 self._block_ids_to_allocator[block_id] = allocator
 
-    def allocate_mutable(
-        self, prev_block: Optional[Block], device: Device
-    ) -> Block:
+    def allocate_mutable(self, prev_block: Optional[Block],
+                         device: Device) -> Block:
         """Allocates a new mutable block on the specified device.
         Args:
             prev_block (Optional[Block]): The previous block to in the sequence.
@@ -125,9 +123,8 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
         """
         return self._allocators[device].allocate_mutable(prev_block)
 
-    def allocate_immutable(
-        self, prev_block: Optional[Block], token_ids: List[int], device: Device
-    ) -> Block:
+    def allocate_immutable(self, prev_block: Optional[Block],
+                           token_ids: List[int], device: Device) -> Block:
         """Allocates a new immutable block with the provided token IDs on the
         specified device.
         Args:
@@ -141,8 +138,7 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
                 token IDs.
         """
         return self._allocators[device].allocate_immutable(
-            prev_block, token_ids
-        )
+            prev_block, token_ids)
 
     def free(self, block: Block) -> None:
         """Frees the memory occupied by the given block.
@@ -191,13 +187,11 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
         return self._allocators[device].mark_blocks_as_computed()
 
     def get_common_computed_block_ids(
-        self, seq_block_ids: List[List[int]]
-    ) -> List[int]:
+            self, seq_block_ids: List[List[int]]) -> List[int]:
         # Prefix caching only supported on GPU.
         device = Device.GPU
         return self._allocators[device].get_common_computed_block_ids(
-            seq_block_ids
-        )
+            seq_block_ids)
 
     def all_block_ids(self) -> frozenset[int]:
         return frozenset(self._block_ids_to_allocator.keys())

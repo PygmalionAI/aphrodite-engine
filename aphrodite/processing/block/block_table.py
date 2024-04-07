@@ -62,9 +62,9 @@ class BlockTable:
         """
         return cdiv(len(token_ids), block_size)
 
-    def allocate(
-        self, token_ids: List[int], device: Device = Device.GPU
-    ) -> None:
+    def allocate(self,
+                 token_ids: List[int],
+                 device: Device = Device.GPU) -> None:
         """Allocates memory blocks for storing the given sequence of token IDs.
         This method allocates the required number of blocks to store the given
         sequence of token IDs.
@@ -75,9 +75,9 @@ class BlockTable:
         """
         assert not self._is_allocated
         assert token_ids
-        self._blocks = self._allocate_blocks_for_token_ids(
-            prev_block=None, token_ids=token_ids, device=device
-        )
+        self._blocks = self._allocate_blocks_for_token_ids(prev_block=None,
+                                                           token_ids=token_ids,
+                                                           device=device)
         self._num_full_slots = len(token_ids)
 
     def append_token_ids(self, token_ids: List[int]) -> None:
@@ -97,13 +97,11 @@ class BlockTable:
 
         self.ensure_num_empty_slots(num_empty_slots=len(token_ids))
 
-        blocks = self._blocks[self._num_full_slots // self._block_size :]
-        first_chunk_size = self._block_size - (
-            self._num_full_slots % self._block_size
-        )
+        blocks = self._blocks[self._num_full_slots // self._block_size:]
+        first_chunk_size = self._block_size - (self._num_full_slots %
+                                               self._block_size)
         token_blocks = [token_ids[:first_chunk_size]] + chunk_list(
-            token_ids[first_chunk_size:], self._block_size
-        )
+            token_ids[first_chunk_size:], self._block_size)
 
         for block, token_block in zip(blocks, token_blocks):
             block.append_token_ids(token_block)
@@ -133,10 +131,8 @@ class BlockTable:
 
         for _ in range(blocks_to_allocate):
             self._blocks.append(
-                self._allocator.allocate_mutable(
-                    prev_block=self._blocks[-1], device=device
-                )
-            )
+                self._allocator.allocate_mutable(prev_block=self._blocks[-1],
+                                                 device=device))
 
     def fork(self) -> "BlockTable":
         """Creates a new BlockTable instance with a copy of the blocks from the
@@ -184,21 +180,19 @@ class BlockTable:
         assert self._is_allocated
         return [block.block_id for block in self._blocks]
 
-    def _allocate_blocks_for_token_ids(
-        self, prev_block: Optional[Block], token_ids: List[int], device: Device
-    ) -> List[Block]:
+    def _allocate_blocks_for_token_ids(self, prev_block: Optional[Block],
+                                       token_ids: List[int],
+                                       device: Device) -> List[Block]:
         blocks = []
         for block_token_ids in chunk_list(token_ids, self._block_size):
             if len(block_token_ids) == self._block_size:
                 # If the block is full, create an immutable block.
                 prev_block = self._allocator.allocate_immutable(
-                    prev_block, token_ids=block_token_ids, device=device
-                )
+                    prev_block, token_ids=block_token_ids, device=device)
             else:
                 # Else, partially fill a mutable block with token ids.
                 prev_block = self._allocator.allocate_mutable(
-                    prev_block=prev_block, device=device
-                )
+                    prev_block=prev_block, device=device)
                 prev_block.append_token_ids(block_token_ids)
             blocks.append(prev_block)
 

@@ -3,8 +3,7 @@ from typing import Dict, List, Optional, Tuple
 
 from aphrodite.processing.block.block_table import BlockTable
 from aphrodite.processing.block.cpu_gpu_block_allocator import (
-    CpuGpuBlockAllocator,
-)
+    CpuGpuBlockAllocator, )
 from aphrodite.processing.interfaces import AllocStatus, BlockSpaceManager
 from aphrodite.common.sequence import Sequence, SequenceGroup, SequenceStatus
 from aphrodite.common.utils import Device
@@ -78,19 +77,15 @@ class BlockSpaceManagerV2(BlockSpaceManager):
 
         assert self.block_sliding_window is None
         if self.block_sliding_window is not None:
-            num_required_blocks = min(
-                num_required_blocks, self.block_sliding_window
-            )
+            num_required_blocks = min(num_required_blocks,
+                                      self.block_sliding_window)
 
         num_free_gpu_blocks = self.block_allocator.get_num_free_blocks(
-            device=Device.GPU
-        )
+            device=Device.GPU)
 
         # Use watermark to avoid frequent cache eviction.
-        if (
-            self.num_total_gpu_blocks - num_required_blocks
-            < self.watermark_blocks
-        ):
+        if (self.num_total_gpu_blocks - num_required_blocks <
+                self.watermark_blocks):
             return AllocStatus.NEVER
         if num_free_gpu_blocks - num_required_blocks >= self.watermark_blocks:
             return AllocStatus.OK
@@ -99,9 +94,8 @@ class BlockSpaceManagerV2(BlockSpaceManager):
 
     def allocate(self, seq_group: SequenceGroup) -> None:
         waiting_seqs = seq_group.get_seqs(status=SequenceStatus.WAITING)
-        assert not (
-            set(seq.seq_id for seq in waiting_seqs) & self.block_tables.keys()
-        ), "block table already exists"
+        assert not (set(seq.seq_id for seq in waiting_seqs)
+                    & self.block_tables.keys()), "block table already exists"
 
         # NOTE: Here we assume that all sequences in the group have the same
         # prompt.
@@ -123,8 +117,7 @@ class BlockSpaceManagerV2(BlockSpaceManager):
         # Simple heuristic: If there is at least one free block
         # for each sequence, we can append.
         num_free_gpu_blocks = self.block_allocator.get_num_free_blocks(
-            Device.GPU
-        )
+            Device.GPU)
         num_seqs = seq_group.num_seqs(status=SequenceStatus.RUNNING)
         return num_seqs <= num_free_gpu_blocks
 
@@ -183,7 +176,8 @@ class BlockSpaceManagerV2(BlockSpaceManager):
         seq_block_ids = [
             self.block_tables[seq.seq_id].physical_block_ids for seq in seqs
         ]
-        return self.block_allocator.get_common_computed_block_ids(seq_block_ids)
+        return self.block_allocator.get_common_computed_block_ids(
+            seq_block_ids)
 
     def fork(self, parent_seq: Sequence, child_seq: Sequence) -> None:
         src_block_table = self.block_tables[parent_seq.seq_id]
