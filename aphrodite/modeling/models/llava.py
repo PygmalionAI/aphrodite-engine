@@ -19,7 +19,6 @@ from aphrodite.modeling.hf_downloader import (default_weight_loader,
                                               hf_model_weights_iterator)
 from aphrodite.common.sequence import SamplerOutput
 
-KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 _KEYS_TO_MODIFY_MAPPING = {
     "language_model.lm_head": "lm_head",
@@ -102,7 +101,7 @@ class LlavaForConditionalGeneration(nn.Module):
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        kv_caches: List[KVCache],
+        kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
         image_input: Optional[torch.Tensor] = None
     ) -> SamplerOutput:  # noqa: E501
