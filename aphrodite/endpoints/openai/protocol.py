@@ -323,6 +323,13 @@ class CompletionResponseChoice(BaseModel):
     text: str
     logprobs: Optional[LogProbs] = None
     finish_reason: Optional[Literal["stop", "length"]] = None
+    stop_reason: Union[None, int, str] = Field(
+        default=None,
+        description=(
+            "The stop string or token id that caused the completion "
+            "to stop, None if the completion finished for some other reason "
+            "including encountering the EOS token"),
+    )
 
 
 class CompletionResponse(BaseModel):
@@ -339,6 +346,13 @@ class CompletionResponseStreamChoice(BaseModel):
     text: str
     logprobs: Optional[LogProbs] = None
     finish_reason: Optional[Literal["stop", "length"]] = None
+    stop_reason: Union[None, int, str] = Field(
+        default=None,
+        description=(
+            "The stop string or token id that caused the completion "
+            "to stop, None if the completion finished for some other reason "
+            "including encountering the EOS token"),
+    )
 
 
 class CompletionStreamResponse(BaseModel):
@@ -360,6 +374,7 @@ class ChatCompletionResponseChoice(BaseModel):
     message: ChatMessage
     logprobs: Optional[LogProbs] = None
     finish_reason: Optional[Literal["stop", "length"]] = None
+    stop_reason: Union[None, int, str] = None
 
 
 class ChatCompletionResponse(BaseModel):
@@ -381,6 +396,7 @@ class ChatCompletionResponseStreamChoice(BaseModel):
     delta: DeltaMessage
     logprobs: Optional[LogProbs] = None
     finish_reason: Optional[Literal["stop", "length"]] = None
+    stop_reason: Union[None, int, str] = None
 
 
 class ChatCompletionStreamResponse(BaseModel):
