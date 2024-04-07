@@ -3,7 +3,7 @@ from typing import Dict, List, Optional
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.config import (CacheConfig, DeviceConfig, ModelConfig,
                                      ParallelConfig, SchedulerConfig,
-                                     LoRAConfig)
+                                     LoRAConfig, VisionLanguageConfig)
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 
@@ -18,6 +18,7 @@ class NeuronExecutor(ExecutorBase):
         scheduler_config: SchedulerConfig,
         device_config: DeviceConfig,
         lora_config: Optional[LoRAConfig],
+        vision_language_config: Optional[VisionLanguageConfig],
     ) -> None:
         self.model_config = model_config
         self.cache_config = cache_config
