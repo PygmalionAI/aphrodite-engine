@@ -51,5 +51,5 @@ exclude = "aphrodite/modeling/megatron/|aphrodite/modeling/models/|aphrodite/end
 
 
 [tool.codespell]
-ignore-words-list = "dout, te, indicies"
-skip = "./aphrodite/endpoints/kobold/klite.embd"
+ignore-words-list = "dout, te, indicies, ist"
+skip = "./aphrodite/endpoints/kobold/klite.embd,kernels/"
