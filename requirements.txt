@@ -4,7 +4,7 @@ ray >= 2.9
 sentencepiece
 numpy
 torch == 2.2.0
-transformers == 4.39.1 # needed for llava
+transformers == 4.39.3 # needed for llava
 uvicorn
 openai # for fastapi's openai proxy emulation
 xformers >= 0.0.24
