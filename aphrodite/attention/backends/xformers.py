@@ -10,12 +10,12 @@ from xformers.ops.fmha.attn_bias import (AttentionBias,
                                          LowerTriangularMaskWithTensorBias)
 from loguru import logger
 
-from aphrodite.attention.backends.abstract import (
-    AttentionBackend, AttentionImpl, AttentionMetadata)
-from aphrodite.attention.ops.paged_attn import (
-    PagedAttention, PagedAttentionMetadata)
+from aphrodite.attention.backends.abstract import (AttentionBackend,
+                                                   AttentionImpl,
+                                                   AttentionMetadata)
+from aphrodite.attention.ops.paged_attn import (PagedAttention,
+                                                PagedAttentionMetadata)
 from aphrodite.common.utils import is_hip
-
 
 
 class XFormersBackend(AttentionBackend):
@@ -133,6 +133,7 @@ class XFormersImpl(AttentionImpl):
     The prompts might have different lengths, while the generation tokens
     always have length 1.
     """
+
     def __init__(
         self,
         num_heads: int,
@@ -351,6 +352,8 @@ class XFormersImpl(AttentionImpl):
             output[start:end].copy_(out.squeeze(0))
             start += prompt_len
         return output
+
+
 def _make_alibi_bias(
     alibi_slopes: torch.Tensor,
     num_kv_heads: int,
