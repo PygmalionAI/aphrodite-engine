@@ -343,7 +343,7 @@ class ModelConfig:
             # Multi-query attention, only one KV head.
             # Currently, tensor parallelism is not supported in this case.
             return 1
-        
+
         # For DBRX and MPT
         if self.hf_config.model_type in ["dbrx", "mpt"]:
             return getattr(self.hf_config.attn_config, "kv_n_heads",

@@ -7,9 +7,9 @@ import torch.nn as nn
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.modeling.layers.fused_moe import fused_moe
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                               QKVParallelLinear,
-                                               ReplicatedLinear,
-                                               RowParallelLinear)
+                                              QKVParallelLinear,
+                                              ReplicatedLinear,
+                                              RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
