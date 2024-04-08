@@ -25,6 +25,7 @@ from typing import List, Optional, Tuple
 import torch
 import torch.utils.checkpoint
 from torch import nn
+from torch.nn.parameter import Parameter
 from transformers import CohereConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
@@ -44,8 +45,9 @@ from aphrodite.modeling.layers.vocab_parallel_embedding import (
     ParallelLMHead,
 )
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_world_size, )
+    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size, )
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
+from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.modeling.hf_downloader import (
     default_weight_loader,
     hf_model_weights_iterator,
@@ -60,6 +62,7 @@ class LayerNorm(nn.Module):
         self.weight = nn.Parameter(torch.ones(hidden_size))
         self.bias = nn.Parameter(torch.zeros(hidden_size)) if bias else None
         self.variance_epsilon = eps
+        set_weight_attrs(self.weight, {"weight_loader": self.weight_loader})
 
     def forward(self, hidden_states, residuals=None):
         input_dtype = hidden_states.dtype
@@ -72,6 +75,18 @@ class LayerNorm(nn.Module):
         if self.bias is not None:
             hidden_states = hidden_states + self.bias.to(torch.float32)
         return hidden_states.to(input_dtype), residuals
+    
+    def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
+        tp_rank = get_tensor_model_parallel_rank()
+        shard_dim = 0 if param.dim() != 1 else None
+        param_data = param.data
+        if shard_dim is not None:
+            shard_size = param_data.shape[shard_dim]
+            start_idx = tp_rank * shard_size
+            loaded_weight = loaded_weight.narrow(shard_dim, start_idx,
+                                                 shard_size)
+        assert param_data.shape == loaded_weight.shape
+        param_data.copy_(loaded_weight)
 
 
 # Copied from transformers.models.llama.modeling_llama.LlamaMLP Llama->Cohere
@@ -160,6 +175,7 @@ class CohereAttention(nn.Module):
         self.max_position_embeddings = config.max_position_embeddings
         self.rope_theta = config.rope_theta
         self.rope_scaling = getattr(config, "rope_scaling", None)
+        self.use_qk_norm = getattr(config, "use_qk_norm", False)
         if (linear_method is not None
                 and not linear_method.quant_config.merge_weight()):
             self.merge_weight = False
@@ -211,6 +227,22 @@ class CohereAttention(nn.Module):
             self.scaling,
             num_kv_heads=self.num_kv_heads,
         )
+        if self.use_qk_norm:
+            self.q_norm = LayerNorm(hidden_size=(self.num_heads,
+                                                 self.head_dim),
+                                    eps=config.layer_norm_eps)
+            self.k_norm = LayerNorm(hidden_size=(self.num_kv_heads,
+                                                 self.head_dim),
+                                    eps=config.layer_norm_eps)
+            
+    def _apply_qk_norm(self, q, k):
+        q = q.view(*q.shape[:-1], -1, self.head_dim)
+        k = k.view(*k.shape[:-1], -1, self.head_dim)
+        q, _ = self.q_norm(q)
+        k, _ = self.k_norm(k)
+        q = q.view(*q.shape[:-2], -1)
+        k = k.view(*k.shape[:-2], -1)
+        return q, k
 
     def forward(
         self,
@@ -227,10 +259,21 @@ class CohereAttention(nn.Module):
             q, _ = self.q_proj(hidden_states)
             k, _ = self.k_proj(hidden_states)
             v, _ = self.v_proj(hidden_states)
+        if self.use_qk_norm:
+            q, k = self._apply_qk_norm(q, k)
         q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         output, _ = self.o_proj(attn_output)
         return output
+
+
+class TieWordEmbeddingHead(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.embedding = None
+    
+    def forward(self, hidden_states):
+        return torch.matmul(hidden_states, self.embedding.t())
 
 
 class CohereDecoderLayer(nn.Module):
@@ -324,9 +367,7 @@ class CohereForCausalLM(nn.Module):
         super().__init__()
         self.config = config
         self.linear_method = linear_method
-        self.lm_head = ParallelLMHead(config.vocab_size,
-                                      config.hidden_size,
-                                      linear_method=linear_method)
+        self.lm_head = TieWordEmbeddingHead()
         self.logits_processor = LogitsProcessor(config.vocab_size,
                                                 scale=config.logit_scale)
         self.model = CohereModel(config, linear_method)
@@ -381,14 +422,6 @@ class CohereForCausalLM(nn.Module):
         for name, loaded_weight in hf_model_weights_iterator(
                 model_name_or_path, cache_dir, load_format, revision,
                 self.config):
-            if "model.embed_tokens" in name:
-                # Copy word embedding to lm_head
-                head_name = name.replace("model.embed_tokens", "lm_head")
-                if head_name in params_dict:
-                    lm_head_param = params_dict[head_name]
-                    weight_loader = getattr(lm_head_param, "weight_loader",
-                                            default_weight_loader)
-                    weight_loader(lm_head_param, loaded_weight)
             for param_name, shard_name, shard_id in stacked_params_mapping:
                 if shard_name not in name:
                     continue
@@ -409,3 +442,4 @@ class CohereForCausalLM(nn.Module):
                                         default_weight_loader)
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
+        self.lm_head.embedding = self.model.embed_tokens.weight
