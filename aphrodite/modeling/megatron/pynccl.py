@@ -52,8 +52,9 @@ except Exception as e:
     logger.error(
         f"Failed to load NCCL library from {so_file} ."
         "It is expected if you are not running on NVIDIA/AMD GPUs."
-        "Otherwise please set the environment variable VLLM_NCCL_SO_PATH"
-        " to point to the correct nccl library path.")
+        "Otherwise please set the environment variable APHRODITE_NCCL_SO_PATH"
+        " to point to the correct nccl library path. You can install nccl"
+        " with `conda install nccl` or `pip install nvidia-nccl-cu12`")
     raise e
 
 # === export types and functions from nccl to Python ===

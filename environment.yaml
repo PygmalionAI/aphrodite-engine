@@ -11,6 +11,7 @@ dependencies:
   - pytorch-cuda=12.1
   - cuda-nvcc=12.1
   - cuda-libraries-dev=12.1
+  - nccl
   - cxx-compiler
   - gxx=11.3
   - pip
