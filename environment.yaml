@@ -7,10 +7,11 @@ channels:
   - defaults
 dependencies:
   - python=3.11.*
-  - pytorch=2.2.*
+  - pytorch=2.2.0
   - pytorch-cuda=12.1
   - cuda-nvcc=12.1
   - cuda-libraries-dev=12.1
+  - nccl
   - cxx-compiler
   - gxx=11.3
   - pip
