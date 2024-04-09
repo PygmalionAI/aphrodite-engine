@@ -28,7 +28,7 @@ set(HIP_SUPPORTED_ARCHS "gfx908;gfx90a;gfx942;gfx1100")
 # requirements.txt files and should be kept consistent.  The ROCm torch
 # versions are derived from Dockerfile.rocm
 #
-set(TORCH_SUPPORTED_VERSION_CUDA "2.1.2")
+set(TORCH_SUPPORTED_VERSION_CUDA "2.2.0")
 set(TORCH_SUPPORTED_VERSION_ROCM_5X "2.0.1")
 set(TORCH_SUPPORTED_VERSION_ROCM_6X "2.1.1")
 
@@ -70,8 +70,8 @@ find_package(Torch REQUIRED)
 # config is used for standalone C++ binaries that link against torch).
 # The `libtorch_python.so` library defines some of the glue code between
 # torch/python via pybind and is required by APHRODITE extensions for this
-# reason. So, add it by manually with `find_library` using torch's
-# installed library path.
+# reason. So, add it by manually using `append_torchlib_if_found` from
+# torch's cmake setup.
 #
 find_library(torch_python_LIBRARY torch_python PATHS
   "${TORCH_INSTALL_PREFIX}/lib")
@@ -144,31 +144,31 @@ endif()
 #
 
 set(APHRODITE_EXT_SRC
-    "kernels/cache_kernels.cu"
-    "kernels/attention/attention_kernels.cu"
-    "kernels/pos_encoding_kernels.cu"
-    "kernels/activation_kernels.cu"
-    "kernels/layernorm_kernels.cu"
-    "kernels/quantization/squeezellm/quant_cuda_kernel.cu"
-    "kernels/quantization/gptq/q_gemm.cu"
-    "kernels/quantization/exl2/q_matrix.cu"
-    "kernels/quantization/exl2/q_gemm_exl2.cu"
-    "kernels/cuda_utils_kernels.cu"
-    "kernels/moe/align_block_size_kernel.cu"
-    "kernels/pybind.cpp")
+  "kernels/cache_kernels.cu"
+  "kernels/attention/attention_kernels.cu"
+  "kernels/pos_encoding_kernels.cu"
+  "kernels/activation_kernels.cu"
+  "kernels/layernorm_kernels.cu"
+  "kernels/quantization/squeezellm/quant_cuda_kernel.cu"
+  "kernels/quantization/gptq/q_gemm.cu"
+  "kernels/quantization/exl2/q_matrix.cu"
+  "kernels/quantization/exl2/q_gemm_exl2.cu"
+  "kernels/cuda_utils_kernels.cu"
+  "kernels/moe/align_block_size_kernel.cu"
+  "kernels/pybind.cpp")
 
 if(APHRODITE_GPU_LANG STREQUAL "CUDA")
   list(APPEND APHRODITE_EXT_SRC
     "kernels/quantization/gguf/gguf_kernel.cu"
     "kernels/quantization/awq/gemm_kernels.cu"
-    "kernels/quantization/marlin/marlin_cuda_kernel.cu"
+    "kernels/quantization/quip/origin_order.cu"
     "kernels/quantization/marlin/marlin_cuda_kernel.cu"
     "kernels/quantization/aqlm/aqlm_cuda_entry.cpp"
     "kernels/quantization/aqlm/aqlm_cuda_kernel.cu"
     "kernels/quantization/bitsandbytes/int4_fp16_gemm_kernels.cu"
     "kernels/quantization/bitsandbytes/format.cu"
     "kernels/quantization/bitsandbytes/gemm_s4_f16.cu"
-    "kernels/custom_all_reduce.cu")
+    "kernels/all_reduce/custom_all_reduce.cu")
 endif()
 
 define_gpu_extension_target(
@@ -261,60 +261,6 @@ else()
 endif()
 
 #
-# _hadamard_C extension
-#
-set(APHRODITE_HADAMARD_EXT_SRC
-  "kernels/hadamard/fast_hadamard_transform.cpp"
-  "kernels/hadamard/fast_hadamard_transform_cuda.cu")
-
-#
-# Copy GPU compilation flags + update for hadamard
-#
-set(APHRODITE_HADAMARD_GPU_FLAGS ${APHRODITE_GPU_FLAGS})
-# Apend flags
-list(APPEND APHRODITE_HADAMARD_GPU_FLAGS
-    "-U__CUDA_NO_HALF_OPERATORS__"
-    "-U__CUDA_NO_HALF_CONVERSIONS__"
-    "-U__CUDA_NO_BFLOAT16_OPERATORS__"
-    "-U__CUDA_NO_BFLOAT16_CONVERSIONS__"
-    "-U__CUDA_NO_BFLOAT162_OPERATORS__"
-    "-U__CUDA_NO_BFLOAT162_CONVERSIONS__"
-    "--expt-relaxed-constexpr"
-    "--expt-extended-lambda"
-    "--use_fast_math"
-    "--ptxas-options=-v"
-    "-lineinfo")
-
-#
-# Filter out CUDA archives < 7.0 for hadamard
-#
-if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
-  set(APHRODITE_HADAMARD_GPU_ARCHES)
-  foreach(ARCH ${APHRODITE_GPU_ARCHES})
-    string_to_ver(CODE_VER ${ARCH})
-    if (CODE_VER GREATER_EQUAL 7.0)
-      list(APPEND APHRODITE_HADAMARD_GPU_ARCHES ${ARCH})
-    endif()
-  endforeach()
-  message(STATUS "Hadamard target arches: ${APHRODITE_HADAMARD_GPU_ARCHES}")
-endif()
-
-if (APHRODITE_HADAMARD_GPU_ARCHES)
-  define_gpu_extension_target(
-    _hadamard_C
-    DESTINATION aphrodite
-    LANGUAGE ${APHRODITE_GPU_LANG}
-    SOURCES ${APHRODITE_HADAMARD_EXT_SRC}
-    COMPILE_FLAGS ${APHRODITE_HADAMARD_GPU_FLAGS}
-    ARCHITECTURES ${APHRODITE_HADAMARD_GPU_ARCHES}
-    WITH_SOABI)
-else()
-  message(WARNING "Unable to create _hadamard_C target because none of the "
-    "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 7.0")
-endif()
-
-
-#
 # Add the `default` target which detects which extensions should be
 # built based on platform/architecture.  This is the same logic that
 # setup.py uses to select which extensions should be built and should
@@ -345,10 +291,5 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
       (ENV{APHRODITE_INSTALL_PUNICA_KERNELS} OR APHRODITE_INSTALL_PUNICA_KERNELS))
     message(STATUS "Enabling punica extension.")
     add_dependencies(default _punica_C)
-  endif()
-  if (APHRODITE_HADAMARD_GPU_ARCHES AND
-      (ENV{APHRODITE_INSTALL_HADAMARD_KERNELS} OR APHRODITE_INSTALL_HADAMARD_KERNELS))
-    message(STATUS "Enabling hadamard extension.")
-    add_dependencies(default _hadamard_C)
   endif()
 endif()

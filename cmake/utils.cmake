@@ -237,7 +237,7 @@ macro(override_gpu_arches GPU_ARCHES GPU_LANG GPU_SUPPORTED_ARCHES)
         message(FATAL_ERROR
           "Could not determine virtual architecture from: ${_ARCH}.")
       endif()
-|
+
       # One of sm_ or compute_ must exist.
       if ((NOT _SM) AND (NOT _CODE))
         message(FATAL_ERROR

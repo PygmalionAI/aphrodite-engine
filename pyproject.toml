@@ -1,8 +1,9 @@
 [build-system]
 requires = [
+    "cmake>=3.21",
     "ninja",
     "packaging",
-    "setuptools",
+    "setuptools >= 49.4.0",
     "torch == 2.2.0",
     "wheel",
 ]
