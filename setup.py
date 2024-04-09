@@ -131,7 +131,9 @@ class cmake_build_ext(build_ext):
 
         # Pass the python executable to cmake so it can find an exact
         # match.
-        cmake_args += ['-DAPHRODITE_PYTHON_EXECUTABLE={}'.format(sys.executable)]
+        cmake_args += [
+            '-DAPHRODITE_PYTHON_EXECUTABLE={}'.format(sys.executable)
+        ]
 
         if _install_punica():
             cmake_args += ['-DAPHRODITE_INSTALL_PUNICA_KERNELS=ON']
@@ -203,6 +205,7 @@ def _is_neuron() -> bool:
 
 def _install_punica() -> bool:
     return bool(int(os.getenv("APHRODITE_INSTALL_PUNICA_KERNELS", "1")))
+
 
 def _install_hadamard() -> bool:
     return bool(int(os.getenv("APHRODITE_INSTALL_HADAMARD_KERNELS", "1")))
@@ -379,8 +382,7 @@ setup(
         "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",  # noqa: E501
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
-    packages=find_packages(exclude=("kernels", "examples",
-                                               "tests")),
+    packages=find_packages(exclude=("kernels", "examples", "tests")),
     python_requires=">=3.8",
     install_requires=get_requirements(),
     extras_require={"flash-attn": [
