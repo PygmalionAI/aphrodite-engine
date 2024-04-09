@@ -37,7 +37,7 @@ class LogitsProcessor(nn.Module):
 
     def forward(
         self,
-        lm_head: nn.Module,
+        lm_head: "ParallelLMHead",
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
         embedding_bias: Optional[torch.Tensor] = None,
@@ -47,7 +47,7 @@ class LogitsProcessor(nn.Module):
         else:
             hidden_states = _prune_hidden_states(hidden_states,
                                                  sampling_metadata)
-
+            logits = lm_head(hidden_states)
             # Get the logits for the next tokens.
             logits = self._get_logits(hidden_states, lm_head, embedding_bias)
 

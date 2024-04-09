@@ -22,7 +22,7 @@ class Sampler(nn.Module):
     1. Discard the hidden states that are not used for sampling (i.e., all
         tokens except the final one in each prompt).
     2. Compute the logits for the next tokens.
-    3. Apply presence and frequency penalties.
+    3. Apply presence, frequency and repetition penalties.
     4. Apply temperature scaling.
     5. Apply top-p and top-k truncation.
     6. Sample the next tokens.
@@ -35,84 +35,75 @@ class Sampler(nn.Module):
         logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
+        assert logits is not None
+        _, vocab_size = logits.shape
+        output_metadata = OutputMetadata()
+        # Apply min_tokens penalty which sets stop tokens to -inf if min_tokens
+        # have not been generated yet
+        logits = _apply_min_tokens_penalty(logits, sampling_metadata)
 
-        return _perform_sampling(logits, sampling_metadata)
+        # Prepare sampling tensors with pinned memory to avoid blocking.
+        (sampling_tensors, do_temperatures, do_penalties, do_topks, do_topps,
+        do_topas, do_minps, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
+        do_typical_ps, do_quadratic,
+        do_mirostat) = (SamplingTensors.from_sampling_metadata(
+            sampling_metadata, vocab_size, logits.device, logits.dtype))
 
+        if do_penalties:
+            logits = _apply_penalties(logits, sampling_tensors.prompt_tokens,
+                                    sampling_tensors.output_tokens,
+                                    sampling_tensors.presence_penalties,
+                                    sampling_tensors.frequency_penalties,
+                                    sampling_tensors.repetition_penalties)
 
-def _perform_sampling(
-        logits: torch.Tensor,
-        sampling_metadata: SamplingMetadata) -> Optional[SamplerOutput]:
-    assert logits is not None
-    _, vocab_size = logits.shape
+        if do_temperatures:
+            logits = _apply_temperature(logits, sampling_tensors.temperatures,
+                                        sampling_tensors.dynatemp_mins,
+                                        sampling_tensors.dynatemp_maxs,
+                                        sampling_tensors.dynatemp_exps)
 
-    output_metadata = OutputMetadata()
+        if do_topks or do_topps or do_topas or do_minps:
+            logits = _apply_alphabet_soup(logits, sampling_tensors.top_ps,
+                                        sampling_tensors.top_ks,
+                                        sampling_tensors.top_as,
+                                        sampling_tensors.min_ps)
+        if do_tfss:
+            logits = _apply_tfs(logits, sampling_tensors.tfss)
+        if do_eta_cutoffs:
+            logits = _apply_eta_cutoff(logits, sampling_tensors.eta_cutoffs)
+        if do_epsilon_cutoffs:
+            logits = _apply_epsilon_cutoff(logits,
+                                        sampling_tensors.epsilon_cutoffs)
+        if do_typical_ps:
+            logits = _apply_typical_sampling(logits, sampling_tensors.typical_ps)
+        if do_quadratic:
+            logits = _apply_quadratic_sampling(logits,
+                                            sampling_tensors.smoothing_factors,
+                                            sampling_tensors.smoothing_curves)
 
-    # Apply min_tokens penalty which sets stop tokens to -inf if
-    # min_tokens is not satisfied.
-    logits = _apply_min_tokens_penalty(logits, sampling_metadata)
+        banned_tokens = _get_custom_token_bans(sampling_metadata)
+        assert len(banned_tokens) == logits.shape[0]
+        logits = _apply_token_bans(logits, banned_tokens)
+        if do_mirostat:
+            logits = _mirostat(logits, sampling_tensors, output_metadata)
 
-    # Prepare sampling tensors with pinned memory to avoid blocking.
-    (sampling_tensors, do_temperatures, do_penalties, do_topks, do_topps,
-     do_topas, do_minps, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
-     do_typical_ps, do_quadratic,
-     do_mirostat) = (SamplingTensors.from_sampling_metadata(
-         sampling_metadata, vocab_size, logits.device, logits.dtype))
+        # We use float32 for probabilities and log probabilities.
+        # Compute the probabilities.
+        probs = torch.softmax(logits, dim=-1, dtype=torch.float)
+        # Compute the log probabilities.
+        # Use log_softmax to ensure numerical stability.
+        logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
 
-    if do_penalties:
-        logits = _apply_penalties(logits, sampling_tensors.prompt_tokens,
-                                  sampling_tensors.output_tokens,
-                                  sampling_tensors.presence_penalties,
-                                  sampling_tensors.frequency_penalties,
-                                  sampling_tensors.repetition_penalties)
-
-    if do_temperatures:
-        logits = _apply_temperature(logits, sampling_tensors.temperatures,
-                                    sampling_tensors.dynatemp_mins,
-                                    sampling_tensors.dynatemp_maxs,
-                                    sampling_tensors.dynatemp_exps)
-
-    if do_topks or do_topps or do_topas or do_minps:
-        logits = _apply_alphabet_soup(logits, sampling_tensors.top_ps,
-                                      sampling_tensors.top_ks,
-                                      sampling_tensors.top_as,
-                                      sampling_tensors.min_ps)
-    if do_tfss:
-        logits = _apply_tfs(logits, sampling_tensors.tfss)
-    if do_eta_cutoffs:
-        logits = _apply_eta_cutoff(logits, sampling_tensors.eta_cutoffs)
-    if do_epsilon_cutoffs:
-        logits = _apply_epsilon_cutoff(logits,
-                                       sampling_tensors.epsilon_cutoffs)
-    if do_typical_ps:
-        logits = _apply_typical_sampling(logits, sampling_tensors.typical_ps)
-    if do_quadratic:
-        logits = _apply_quadratic_sampling(logits,
-                                           sampling_tensors.smoothing_factors,
-                                           sampling_tensors.smoothing_curves)
-
-    banned_tokens = _get_custom_token_bans(sampling_metadata)
-    assert len(banned_tokens) == logits.shape[0]
-    logits = _apply_token_bans(logits, banned_tokens)
-    if do_mirostat:
-        logits = _mirostat(logits, sampling_tensors, output_metadata)
-
-    # We use float32 for probabilities and log probabilities.
-    # Compute the probabilities.
-    probs = torch.softmax(logits, dim=-1, dtype=torch.float)
-    # Compute the log probabilities.
-    # Use log_softmax to ensure numerical stability.
-    logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
-
-    # Sample the next tokens.
-    sample_results = _sample(probs, logprobs, sampling_metadata,
-                             sampling_tensors)
-    # Get the logprobs query results.
-    prompt_logprobs, sample_logprobs = _get_logprobs(logprobs,
-                                                     sampling_metadata,
-                                                     sample_results)
-    return _build_sampler_output(sample_results, sampling_metadata,
-                                 prompt_logprobs, sample_logprobs,
-                                 output_metadata)
+        # Sample the next tokens.
+        sample_results = _sample(probs, logprobs, sampling_metadata,
+                                sampling_tensors)
+        # Get the logprobs query results.
+        prompt_logprobs, sample_logprobs = _get_logprobs(logprobs,
+                                                        sampling_metadata,
+                                                        sample_results)
+        return _build_sampler_output(sample_results, sampling_metadata,
+                                    prompt_logprobs, sample_logprobs,
+                                    output_metadata)
 
 
 def _get_bin_counts_and_mask(
