@@ -261,6 +261,59 @@ else()
 endif()
 
 #
+# _hadamard_C extension
+#
+
+set(APHRODITE_HADAMARD_EXT_SRC
+  "kernels/hadamard/fast_hadamard_transform.cpp"
+  "kernels/hadamard/fast_hadamard_transform_cuda.cu")
+
+#
+# Copy GPU compilation flags+update for hadamard
+#
+set(APHRODITE_HADAMARD_GPU_FLAGS ${APHRODITE_GPU_FLAGS})
+list(APPEND APHRODITE_HADAMARD_GPU_FLAGS
+  "-U__CUDA_NO_HALF_OPERATORS__"
+  "-U__CUDA_NO_HALF_CONVERSIONS__"
+  "-U__CUDA_NO_BFLOAT16_OPERATORS__"
+  "-U__CUDA_NO_BFLOAT16_CONVERSIONS__"
+  "-U__CUDA_NO_BFLOAT162_OPERATORS__"
+  "-U__CUDA_NO_BFLOAT162_CONVERSIONS__"
+  "--expt-relaxed-constexpr"
+  "--expt-extended-lambda"
+  "--use_fast_math"
+  "--ptxas-options=-v"
+  "-lineinfo")
+
+#
+# Filter out CUDA architectures < 7.0 for hadamard.
+#
+if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
+  set(APHRODITE_HADAMARD_GPU_ARCHES)
+  foreach(ARCH ${APHRODITE_GPU_ARCHES})
+    string_to_ver(CODE_VER ${ARCH})
+    if (CODE_VER GREATER_EQUAL 7.0)
+      list(APPEND APHRODITE_HADAMARD_GPU_ARCHES ${ARCH})
+    endif()
+  endforeach()
+  message(STATUS "Hadamard target arches: ${APHRODITE_HADAMARD_GPU_ARCHES}")
+endif()
+
+if (APHRODITE_HADAMARD_GPU_ARCHES)
+  define_gpu_extension_target(
+    _hadamard_C
+    DESTINATION aphrodite
+    LANGUAGE ${APHRODITE_GPU_LANG}
+    SOURCES ${APHRODITE_HADAMARD_EXT_SRC}
+    COMPILE_FLAGS ${APHRODITE_HADAMARD_GPU_FLAGS}
+    ARCHITECTURES ${APHRODITE_HADAMARD_GPU_ARCHES}
+    WITH_SOABI)
+else()
+  message(WARNING "Unable to create _hadamard_C target because none of the "
+    "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 7.0")
+endif()
+
+#
 # Add the `default` target which detects which extensions should be
 # built based on platform/architecture.  This is the same logic that
 # setup.py uses to select which extensions should be built and should
@@ -291,5 +344,10 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
       (ENV{APHRODITE_INSTALL_PUNICA_KERNELS} OR APHRODITE_INSTALL_PUNICA_KERNELS))
     message(STATUS "Enabling punica extension.")
     add_dependencies(default _punica_C)
+  endif()
+  if (APHRODITE_HADAMARD_GPU_ARCHES AND
+      (ENV{APHRODITE_INSTALL_HADAMARD_KERNELS} OR APHRODITE_INSTALL_HADAMARD_KERNELS))
+    message(STATUS "Enabling hadamard extension.")
+    add_dependencies(default _hadamard_C)
   endif()
 endif()
