@@ -679,7 +679,7 @@ def _sample_with_torch(
     sample_metadata = {}
     multinomial_samples = {}
 
-    # Counterintiutively, having two loops here is actually faster.
+    # Counterintuitively, having two loops here is actually faster.
     # The first loop can run without waiting on GPU<->CPU sync.
     for sampling_type, sample_indices in categorized_sample_indices.items():
         sample_indices = sample_indices[:, 0]
@@ -714,11 +714,8 @@ def _sample_with_torch(
 
     # GPU<->CPU sync happens in the loop below.
 
-    for sampling_type in SamplingType:
-        if sampling_type not in sample_metadata:
-            continue
-        seq_group_ids, seq_groups, is_prompts, sample_indices = sample_metadata[
-            sampling_type]
+    for sampling_type, metadata in sample_metadata:
+        seq_group_ids, seq_groups, is_prompts, sample_indices = metadata
         if sampling_type == SamplingType.GREEDY:
             sample_results = _greedy_sample(seq_groups, greedy_samples)
         elif sampling_type in (SamplingType.RANDOM, SamplingType.RANDOM_SEED):
