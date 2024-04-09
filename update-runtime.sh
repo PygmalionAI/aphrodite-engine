@@ -11,5 +11,6 @@ bin/micromamba run -r conda -n aphrodite-runtime pip install -r requirements.txt
 # directory, since find will return the *first* result, leading to conflicts
 # if you have multiple environments and one of them does not contain CUDA runtime.
 export CUDA_HOME=$(realpath $(find ./ -type d -path "*/conda/envs/aphrodite-runtime" 2>/dev/null | head -n 1))
+export PATH=$CUDA_HOME/bin:$PATH
 bin/micromamba run -r conda -n aphrodite-runtime pip install -vvv -e .
 
