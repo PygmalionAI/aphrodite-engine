@@ -1,13 +1,16 @@
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional, TypeVar, Callable
+import random
 
 import torch
 
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import SequenceData
 from aphrodite.common.utils import in_wsl, is_neuron
+from aphrodite.modeling.layers.ops.sample import (get_num_triton_sampler_splits
+                                                  )
 
-_SAMPLING_EPS = 1e-5
+_SEED_0_REPLACEMENT = 3403598558  # chosen by fair roll of a die
 
 
 class PersistentMetadata:
@@ -117,6 +120,11 @@ class SamplingTensors:
     smoothing_indices: torch.Tensor
     smoothing_factors: torch.Tensor
     smoothing_curves: torch.Tensor
+
+    seed_indices: torch.Tensor
+    seed_transpose: torch.Tensor
+    extra_seed_transpose: Optional[torch.Tensor]
+
     prompt_tokens: torch.Tensor
     output_tokens: torch.Tensor
 
@@ -135,13 +143,20 @@ class SamplingTensors:
     do_mirostat: bool
 
     @classmethod
-    def from_sampling_metadata(cls, sampling_metadata: "SamplingMetadata",
-                               vocab_size: int, tgt_device: torch.device,
-                               float_dtype: torch.dtype) -> "SamplingTensors":
+    def from_sampling_metadata(
+            cls,
+            sampling_metadata: "SamplingMetadata",
+            vocab_size: int,
+            tgt_device: torch.device,
+            float_dtype: torch.dtype,
+            extra_seeds_to_generate: int = 0,
+            extra_entropy: Optional[Tuple[int,
+                                          ...]] = None) -> "SamplingTensors":
         prompt_lens = sampling_metadata.prompt_lens or []
         groups = sampling_metadata.seq_groups or []
         seq_data = sampling_metadata.seq_data or {}
         persistent = sampling_metadata.persistent_metadata
+        extra_entropy = extra_entropy or ()
 
         # Flattened list of (params, sid) matching the logits tensor.
         # `sid < 0` implies a prompt seq.
@@ -182,6 +197,20 @@ class SamplingTensors:
         quad_inds = _index(lambda p: p.smoothing_factor != 0)
         _quad_seqs = _filter(unrolled_seqs, quad_inds)
 
+        # We need one base seed per Triton slice.
+        triton_sampler_splits = get_num_triton_sampler_splits(vocab_size)
+        n_seeds = triton_sampler_splits + extra_seeds_to_generate
+
+        # Sequences get seeds. Prompt "sequences" do not.
+        seed_indices = _index(lambda p: True, prompt=False)
+        sampling_seeds = [
+            cls._get_sequence_seeds(p.seed, n_seeds,
+                                    p.sampling_type == SamplingType.GREEDY,
+                                    seq_data[sid].get_len(), *extra_entropy,
+                                    sid)
+            for p, sid in _filter(unrolled_seqs, seed_indices)
+        ]
+
         fvars = {  # noqa
             "temperatures": _unroll(lambda p: p.temperature),
             "top_ps": _unroll(lambda p: p.top_p),
@@ -212,6 +241,7 @@ class SamplingTensors:
                               if p.top_k == -1 else min(p.top_k, vocab_size)),
             "miro_indices": miro_inds,
             "smoothing_indices": quad_inds,
+            "seed_indices": seed_indices,
         }
 
         prompt_tokens = [[] if sid < 0 else seq_data[sid].prompt_token_ids
@@ -219,13 +249,15 @@ class SamplingTensors:
         output_tokens = [[] if sid < 0 else seq_data[sid].output_token_ids
                          for _, sid in unrolled_seqs]
 
-        def _unjagged(arrs: List[List[T]], padval: T) -> List[List[T]]:
-            max_len = max(len(arr) for arr in arrs)
-            return [arr + [padval] * (max_len - len(arr)) for arr in arrs]
+        # need to transpose and make contiguous to copy the tensor correctly.
+        # [batch_size, n_seeds] -> [n_seeds, batch_size]
+        seeds_transpose = list(map(list, zip(*sampling_seeds)))
+        seeds_gpu = seeds_transpose[:triton_sampler_splits]
+        extra_seeds_gpu = seeds_transpose[triton_sampler_splits:] or None
 
         # Note that the performance will be very bad without pinned memory.
         # Pinned memory allows non-blocking transfers to device.
-        pin_memory = not in_wsl() and not is_neuron()
+        pin_memory = not in_wsl() or is_neuron()
 
         def _tensor(contents: list, dtype) -> torch.Tensor:
             loc_t = torch.tensor(contents,
@@ -233,6 +265,10 @@ class SamplingTensors:
                                  device="cpu",
                                  pin_memory=pin_memory)
             return loc_t.to(device=tgt_device, non_blocking=True)
+
+        def _unjagged(arrs: List[List[T]], padval: T) -> List[List[T]]:
+            max_len = max(len(arr) for arr in arrs)
+            return [arr + [padval] * (max_len - len(arr)) for arr in arrs]
 
         return cls(
             #  Flags and non-tensor fields
@@ -264,4 +300,36 @@ class SamplingTensors:
                                   torch.long),
             output_tokens=_tensor(_unjagged(output_tokens, vocab_size),
                                   torch.long),
+            # Seeds (only for triton, though?)
+            seed_transpose=_tensor(seeds_gpu, torch.long),
+            extra_seed_transpose=(_tensor(extra_seeds_gpu, torch.long)
+                                  if extra_seeds_gpu else None),
         )
+
+    @staticmethod
+    def _get_sequence_seeds(
+        seed: Optional[int],
+        seeds_to_generate: int,
+        is_greedy: bool,
+        *extra_entropy: int,
+    ):
+        """Get `seeds_to_generate` child seeds from `seed` and extra entropy."""
+        if is_greedy:  # For the kernel, seed == 0 means greedy decoding.
+            return [0] * seeds_to_generate
+
+        if seed is None:
+            randint_fn = random.randint
+        else:
+            randint_fn = random.Random(str((seed, ) + extra_entropy)).randint
+
+        lo, hi = torch.iinfo(torch.long).min, torch.iinfo(torch.long).max
+        # If the user/random sets seed = 0 but request should
+        # have sampling, we need to change it to something
+        # else. We use a constant in that case.
+        # This way we don't need to create and load a bool
+        # matrix in the sampling kernel, which reduces CPU
+        # overhead and latency.
+        return [
+            randint_fn(lo, hi) or _SEED_0_REPLACEMENT
+            for _ in range(seeds_to_generate)
+        ]

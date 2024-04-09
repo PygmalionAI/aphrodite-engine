@@ -5,13 +5,13 @@ import subprocess
 import uuid
 import gc
 from platform import uname
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, Generic
 from packaging.version import parse, Version
 
 import psutil
 import torch
 import asyncio
-from functools import partial
+from functools import partial, lru_cache
 from typing import (
     Awaitable,
     Callable,
@@ -51,10 +51,10 @@ class Counter:
         self.counter = 0
 
 
-class LRUCache:
+class LRUCache(Generic[T]):
 
     def __init__(self, capacity: int):
-        self.cache = OrderedDict()
+        self.cache = OrderedDict[Hashable, T]()
         self.capacity = capacity
 
     def __contains__(self, key: Hashable) -> bool:
@@ -63,10 +63,10 @@ class LRUCache:
     def __len__(self) -> int:
         return len(self.cache)
 
-    def __getitem__(self, key: Hashable) -> Any:
+    def __getitem__(self, key: Hashable) -> T:
         return self.get(key)
 
-    def __setitem__(self, key: Hashable, value: Any) -> None:
+    def __setitem__(self, key: Hashable, value: T) -> None:
         self.put(key, value)
 
     def __delitem__(self, key: Hashable) -> None:
@@ -75,7 +75,9 @@ class LRUCache:
     def touch(self, key: Hashable) -> None:
         self.cache.move_to_end(key)
 
-    def get(self, key: Hashable, default_value: Optional[Any] = None) -> int:
+    def get(self,
+            key: Hashable,
+            default_value: Optional[T] = None) -> Optional[T]:
         if key in self.cache:
             value = self.cache[key]
             self.cache.move_to_end(key)
@@ -83,12 +85,12 @@ class LRUCache:
             value = default_value
         return value
 
-    def put(self, key: Hashable, value: Any) -> None:
+    def put(self, key: Hashable, value: T) -> None:
         self.cache[key] = value
         self.cache.move_to_end(key)
         self._remove_old_if_needed()
 
-    def _on_remove(self, key: Hashable, value: Any):
+    def _on_remove(self, key: Hashable, value: T):
         pass
 
     def remove_oldest(self):
@@ -101,7 +103,7 @@ class LRUCache:
         while len(self.cache) > self.capacity:
             self.remove_oldest()
 
-    def pop(self, key: int, default_value: Optional[Any] = None) -> Any:
+    def pop(self, key: Hashable, default_value: Optional[Any] = None) -> T:
         run_on_remove = key in self.cache
         value = self.cache.pop(key, default_value)
         if run_on_remove:
@@ -118,6 +120,7 @@ def is_hip() -> bool:
     return torch.version.hip is not None
 
 
+@lru_cache(maxsize=None)
 def is_neuron() -> bool:
     try:
         import transformers_neuronx
@@ -126,6 +129,7 @@ def is_neuron() -> bool:
     return transformers_neuronx is not None
 
 
+@lru_cache(maxsize=None)
 def get_max_shared_memory_bytes(gpu: int = 0) -> int:
     """Returns the maximum shared memory per thread block in bytes."""
     # NOTE: This import statement should be executed lazily since
@@ -149,6 +153,7 @@ def random_uuid() -> str:
     return str(uuid.uuid4().hex)
 
 
+@lru_cache(maxsize=None)
 def in_wsl() -> bool:
     # Reference: https://github.com/microsoft/WSL/issues/4071
     return "microsoft" in " ".join(uname()).lower()
@@ -204,6 +209,7 @@ def set_cuda_visible_devices(device_ids: List[int]) -> None:
     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, device_ids))
 
 
+@lru_cache(maxsize=None)
 def get_nvcc_cuda_version() -> Optional[Version]:
     cuda_home = os.environ.get('CUDA_HOME')
     if not cuda_home:

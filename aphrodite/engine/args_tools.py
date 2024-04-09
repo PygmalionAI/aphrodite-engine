@@ -39,7 +39,6 @@ class EngineArgs:
     gpu_memory_utilization: float = 0.90
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: int = 256
-    max_paddings: int = 256
     max_log_probs: int = 10  # OpenAI default is 5, setting to 10 because ST
     disable_log_stats: bool = False
     revision: Optional[str] = None
@@ -268,12 +267,6 @@ class EngineArgs:
             help="maximum number of sequences per iteration",
         )
         parser.add_argument(
-            "--max-paddings",
-            type=int,
-            default=EngineArgs.max_paddings,
-            help="maximum number of paddings in a batch",
-        )
-        parser.add_argument(
             "--max-log-probs",
             type=int,
             default=EngineArgs.max_log_probs,
@@ -482,7 +475,6 @@ class EngineArgs:
             self.max_num_batched_tokens,
             self.max_num_seqs,
             model_config.max_model_len,
-            self.max_paddings,
         )
         lora_config = (LoRAConfig(
             max_lora_rank=self.max_lora_rank,
