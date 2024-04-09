@@ -138,6 +138,9 @@ class cmake_build_ext(build_ext):
         if _install_punica():
             cmake_args += ['-DAPHRODITE_INSTALL_PUNICA_KERNELS=ON']
 
+        if _install_hadamard():
+            cmake_args += ['-DAPHRODITE_INSTALL_HADAMARD_KERNELS=ON']
+
         #
         # Setup parallelism and build tool
         #
@@ -204,11 +207,27 @@ def _is_neuron() -> bool:
 
 
 def _install_punica() -> bool:
-    return bool(int(os.getenv("APHRODITE_INSTALL_PUNICA_KERNELS", "1")))
+    install_punica = bool(
+        int(os.getenv("APHRODITE_INSTALL_PUNICA_KERNELS", "1")))
+    device_count = torch.cuda.device_count()
+    for i in range(device_count):
+        major, minor = torch.cuda.get_device_capability(i)
+        if major >= 8:
+            install_punica = False
+            break
+    return install_punica
 
 
 def _install_hadamard() -> bool:
-    return bool(int(os.getenv("APHRODITE_INSTALL_HADAMARD_KERNELS", "1")))
+    install_hadamard = bool(
+        int(os.getenv("APHRODITE_INSTALL_HADAMARD_KERNELS", "1")))
+    device_count = torch.cuda.device_count()
+    for i in range(device_count):
+        major, minor = torch.cuda.get_device_capability(i)
+        if major >= 7:
+            install_hadamard = False
+            break
+    return install_hadamard
 
 
 def get_hipcc_rocm_version():

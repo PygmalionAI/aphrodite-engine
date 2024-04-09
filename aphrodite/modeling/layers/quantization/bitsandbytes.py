@@ -66,7 +66,7 @@ class BitsandBytesConfig(QuantizationConfig):
         return None
     
     def quant_vocab(self) -> List[bool]:
-        return [True, True]
+        return [False, False]
 
     def support_fused_moe(self) -> bool:
         return False
