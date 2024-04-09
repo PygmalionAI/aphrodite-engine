@@ -70,8 +70,8 @@ class GGUFConfig(QuantizationConfig):
     def rope_style(self) -> Optional[bool]:
         return False
 
-    def quant_vocab(self) -> Optional[bool]:
-        return (True, True)
+    def quant_vocab(self) -> List[bool]:
+        return [True, True]
 
     def support_fused_moe(self) -> bool:
         return False

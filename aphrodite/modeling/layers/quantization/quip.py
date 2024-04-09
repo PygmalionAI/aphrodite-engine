@@ -66,7 +66,7 @@ class QuipConfig(QuantizationConfig):
         return False
 
     def quant_vocab(self) -> List[bool]:
-        return (False, False)
+        return [False, False]
 
     def support_fused_moe(self) -> bool:
         return False

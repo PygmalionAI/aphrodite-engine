@@ -64,7 +64,7 @@ class Exl2Config(QuantizationConfig):
         return False
 
     def quant_vocab(self) -> List[bool]:
-        return (False, True)
+        return [False, True]
 
     def support_fused_moe(self) -> bool:
         return False
