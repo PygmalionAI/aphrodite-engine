@@ -10,6 +10,7 @@ dependencies:
   - pytorch=2.2.0
   - pytorch-cuda=12.1
   - cuda-nvcc=12.1
+  - cuda-libraries-dev=12.1
   - cuda=12.1
   - nccl
   - cxx-compiler
