@@ -22,32 +22,45 @@
 
 namespace aphrodite {
 
-template<typename T>
+  template<typename T, int numLanes = 32>
 __inline__ __device__ T warpReduceSum(T val) {
+  static_assert(numLanes > 0 && (numLanes & (numLanes - 1)) == 0,
+  "numLanes is not a positive power of 2!");
+static_assert(numLanes <= 32);
 #pragma unroll
-  for (int mask = 16; mask > 0; mask >>= 1)
+for (int mask = numLanes >> 1; mask > 0; mask >>= 1)
     val += APHRODITE_SHFL_XOR_SYNC(val, mask);
   return val;
 }
 
+// Helper function to return the next largest power of 2
+static constexpr int _nextPow2(unsigned int num) {
+  if (num <= 1) return num;
+  return 1 << (CHAR_BIT * sizeof(num) - __builtin_clz(num - 1));
+}
+
 /* Calculate the sum of all elements in a block */
-template<typename T>
+template<typename T, int maxBlockSize = 1024>
 __inline__ __device__ T blockReduceSum(T val) {
-  static __shared__ T shared[32];
-  int lane = threadIdx.x & 0x1f;
-  int wid = threadIdx.x >> 5;
+  static_assert(maxBlockSize <= 1024);
+  if constexpr (maxBlockSize > 32) {
+    val = warpReduceSum<T>(val);
+    // Calculates max number of lanes that need to participate in the last warpReduce
+    constexpr int maxActiveLanes = (maxBlockSize + 32 - 1) / 32;
+    static __shared__ T shared[maxActiveLanes];
+    int lane = threadIdx.x % 32;
+    int wid = threadIdx.x / 32;
+    if (lane == 0)
+      shared[wid] = val;
 
-  val = warpReduceSum<T>(val);
+    __syncthreads();
 
-  if (lane == 0)
-    shared[wid] = val;
-
-  __syncthreads();
-
-  // Modify from blockDim.x << 5 to blockDim.x / 32. to prevent
-  // blockDim.x is not divided by 32
-  val = (threadIdx.x < (blockDim.x / 32.f)) ? shared[lane] : (T)(0.0f);
-  val = warpReduceSum<T>(val);
+    val = (threadIdx.x < blockDim.x / float(32)) ? shared[lane] : (T)(0.0f);
+    val = warpReduceSum<T, _nextPow2(maxActiveLanes)>(val);
+  } else {
+    // A single warpReduce is equal to blockReduce
+    val = warpReduceSum<T, _nextPow2(maxBlockSize)>(val);
+  }
   return val;
 }
 
