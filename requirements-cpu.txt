@@ -17,3 +17,5 @@ tiktoken == 0.6.0 # for DBRX tokenizer
 scipy # for quip
 einops # for phi
 loguru
+rich
+outlines >= 0.0.27

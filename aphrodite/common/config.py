@@ -10,7 +10,7 @@ import torch
 from transformers import PretrainedConfig
 
 from aphrodite.transformers_utils.config import get_config, get_hf_text_config
-from aphrodite.common.utils import (get_cpu_memory, is_hip, is_neuron,
+from aphrodite.common.utils import (get_cpu_memory, is_cpu, is_hip, is_neuron,
                                     get_nvcc_cuda_version)
 
 if TYPE_CHECKING:
@@ -677,6 +677,8 @@ class DeviceConfig:
                 self.device_type = "cuda"
             elif is_neuron():
                 self.device_type = "neuron"
+            elif is_cpu():
+                self.device_type = "cpu"
             else:
                 raise RuntimeError("No supported device detected.")
         else:
