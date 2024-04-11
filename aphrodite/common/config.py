@@ -599,12 +599,16 @@ class SchedulerConfig:
             iteration.
         max_model_len: Maximum length of a sequence (including prompt
             and generated text).
+        use_v2_block_manager: Whether to use the BlockSpaceManagerV2 or not.
+        num_lookahead_slots: The number of slots to allocate per sequence per
+            step, beyond the known token ids. This is used in speculative
+            decoding to store KV activations of tokens which may or may not be
+            accepted.
         delay_factor: Apply a delay (of delay factor multiplied by previous
             prompt latency) before scheduling the next prompt.
         policy: Policy of sequence scheduling (`fcfs` or `reorder`).
         reorder_window: Allowed reorder window size (in sec) for `reorder`
             policy.
-        use_v2_block_manager: Whether to use the BlockSpaceManagerV2 or not.
         enable_chunked_prefill: If True, prefill requests can be chunked
             based on the remaining max_num_batched_tokens.
     """
@@ -615,6 +619,7 @@ class SchedulerConfig:
         max_num_seqs: int,
         max_model_len: int,
         use_v2_block_manager: bool = False,
+        num_lookahead_slots: int = 0,
         delay_factor: float = 0.0,
         policy: str = "fcfs",
         reorder_window: float = 0.0,
@@ -628,8 +633,9 @@ class SchedulerConfig:
             self.max_num_batched_tokens = max(max_model_len, 2048)
         self.max_num_seqs = max_num_seqs
         self.max_model_len = max_model_len
-        self.delay_factor = delay_factor
         self.use_v2_block_manager = use_v2_block_manager
+        self.num_lookahead_slots = num_lookahead_slots
+        self.delay_factor = delay_factor
         self.policy = policy
         self.reorder_window = reorder_window
         self.chunked_prefill_enabled = enable_chunked_prefill
@@ -655,6 +661,11 @@ class SchedulerConfig:
         if self.reorder_window != 0 and self.policy != 'reorder':
             raise ValueError("fcfs policy doesn't support reorder_window "
                              f"({self.reorder_window}).")
+        if self.num_lookahead_slots < 0:
+            raise ValueError(
+                "num_lookahead_slots "
+                f"({self.num_lookahead_slots}) must be greater than or "
+                "equal to 0.")
 
 
 class DeviceConfig:

@@ -1,19 +1,19 @@
 import enum
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 from aphrodite.common.sequence import Sequence, SequenceGroup
 
 
 class AllocStatus(enum.Enum):
     """Result for BlockSpaceManager.can_allocate
+
     1. Ok: seq_group can be allocated now.
     2. Later: seq_group cannot be allocated.
       The capacity of allocator is larger than seq_group required.
     3. Never: seq_group can never be allocated.
       The seq_group is too large to allocated in GPU.
     """
-
     OK = enum.auto()
     LATER = enum.auto()
     NEVER = enum.auto()
@@ -26,15 +26,11 @@ class BlockSpaceManager(ABC):
         version = version.lower()
 
         if version == "v1":
-            from aphrodite.processing.block_manager_v1 import (
-                BlockSpaceManagerV1, )
-
+            from aphrodite.processing.block_manager_v1 import BlockSpaceManagerV1  # noqa: E501
             return BlockSpaceManagerV1
 
         if version == "v2":
-            from aphrodite.processing.block_manager_v2 import (
-                BlockSpaceManagerV2, )
-
+            from aphrodite.processing.block_manager_v2 import BlockSpaceManagerV2  # noqa: E501
             return BlockSpaceManagerV2
 
         raise ValueError(f"Unknown version {version=}")
@@ -48,14 +44,16 @@ class BlockSpaceManager(ABC):
         pass
 
     @abstractmethod
-    def can_append_slot(self, seq_group: SequenceGroup) -> bool:
+    def can_append_slots(self, seq_group: SequenceGroup,
+                         num_lookahead_slots: int) -> bool:
         pass
 
     @abstractmethod
-    def append_slot(
+    def append_slots(
         self,
         seq: Sequence,
-    ) -> Optional[Tuple[int, int]]:
+        num_lookahead_slots: int,
+    ) -> Dict[int, List[int]]:
         pass
 
     @abstractmethod
@@ -63,11 +61,13 @@ class BlockSpaceManager(ABC):
         pass
 
     @abstractmethod
-    def can_swap_in(self, seq_group: SequenceGroup) -> bool:
+    def can_swap_in(self, seq_group: SequenceGroup,
+                    num_lookahead_slots: int) -> bool:
         pass
 
     @abstractmethod
-    def swap_in(self, seq_group: SequenceGroup) -> Dict[int, int]:
+    def swap_in(self, seq_group: SequenceGroup,
+                num_lookahead_slots: int) -> Dict[int, int]:
         pass
 
     @abstractmethod

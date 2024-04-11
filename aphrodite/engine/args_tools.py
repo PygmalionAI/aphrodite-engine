@@ -61,6 +61,7 @@ class EngineArgs:
     device: str = "auto"
     ray_workers_use_nsight: bool = False
     forced_num_gpu_blocks: Optional[int] = None
+    num_lookahead_slots: int = 0
     # Related to Vision-language models such as llava
     image_input_type: Optional[str] = None
     image_token_id: Optional[int] = None
@@ -243,6 +244,14 @@ class EngineArgs:
         parser.add_argument("--use-v2-block-manager",
                             action="store_true",
                             help="Use the v2 block manager.")
+        parser.add_argument(
+            "--num-lookahead-slots",
+            type=int,
+            default=EngineArgs.num_lookahead_slots,
+            help="Experimental scheduling config necessary for "
+            "speculative decoding. This will be replaced by "
+            "speculative decoding config in the future; it is "
+            "present for testing purposes until then.")
         parser.add_argument("--seed",
                             type=int,
                             default=EngineArgs.seed,
@@ -540,9 +549,10 @@ class EngineArgs:
             self.max_num_seqs,
             model_config.max_model_len,
             self.use_v2_block_manager,
-            self.scheduler_delay_factor,
-            self.scheduler_policy,
-            self.scheduler_reorder_window,
+            num_lookahead_slots=self.num_lookahead_slots,
+            delay_factor=self.scheduler_delay_factor,
+            policy=self.scheduler_policy,
+            reorder_window=self.scheduler_reorder_window,
             enable_chunked_prefill=self.enable_chunked_prefill,
         )
         lora_config = (LoRAConfig(
