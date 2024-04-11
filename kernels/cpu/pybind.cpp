@@ -1,6 +1,6 @@
-#include "cache.h"
-#include "cuda_utils.h"
-#include "ops.h"
+#include "../cache.h"
+#include "../cuda_utils.h"
+#include "../ops.h"
 #include <torch/extension.h>
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {

@@ -2,7 +2,10 @@ cmake_minimum_required(VERSION 3.21)
 
 project(aphrodite_extensions LANGUAGES CXX)
 
+option(APHRODITE_TARGET_DEVICE "Target device backend for Aphrodite" "cuda")
+
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "Target device: ${APHRODITE_TARGET_DEVICE}")
 
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/utils.cmake)
 
@@ -75,6 +78,19 @@ find_package(Torch REQUIRED)
 #
 find_library(torch_python_LIBRARY torch_python PATHS
   "${TORCH_INSTALL_PREFIX}/lib")
+
+#
+# Forward the non-CUDA device extensions to external CMake scripts.
+#
+if (NOT APHRODITE_TARGET_DEVICE STREQUAL "cuda" AND
+    NOT APHRODITE_TARGET_DEVICE STREQUAL "rocm")
+    if (APHRODITE_TARGET_DEVICE STREQUAL "cpu")
+        include(${CMAKE_CURRENT_LIST_DIR}/cmake/cpu_extension.cmake)
+    else()
+        message(FATAL_ERROR "Unsupported Aphrodite target device: ${APHRODITE_TARGET_DEVICE}")
+    endif()
+    return()
+endif()
 
 #
 # Set up GPU language and check the torch version and warn if it isn't
