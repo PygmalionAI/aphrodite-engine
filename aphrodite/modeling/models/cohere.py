@@ -41,11 +41,11 @@ from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding,
-    ParallelLMHead,
-)
+    VocabParallelEmbedding, )
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size, )
+    get_tensor_model_parallel_rank,
+    get_tensor_model_parallel_world_size,
+)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.modeling.hf_downloader import (
@@ -75,7 +75,7 @@ class LayerNorm(nn.Module):
         if self.bias is not None:
             hidden_states = hidden_states + self.bias.to(torch.float32)
         return hidden_states.to(input_dtype), residuals
-    
+
     def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
         tp_rank = get_tensor_model_parallel_rank()
         shard_dim = 0 if param.dim() != 1 else None
@@ -234,7 +234,7 @@ class CohereAttention(nn.Module):
             self.k_norm = LayerNorm(hidden_size=(self.num_kv_heads,
                                                  self.head_dim),
                                     eps=config.layer_norm_eps)
-            
+
     def _apply_qk_norm(self, q, k):
         q = q.view(*q.shape[:-1], -1, self.head_dim)
         k = k.view(*k.shape[:-1], -1, self.head_dim)
@@ -268,10 +268,11 @@ class CohereAttention(nn.Module):
 
 
 class TieWordEmbeddingHead(nn.Module):
+
     def __init__(self):
         super().__init__()
         self.embedding = None
-    
+
     def forward(self, hidden_states):
         return torch.matmul(hidden_states, self.embedding.t())
 

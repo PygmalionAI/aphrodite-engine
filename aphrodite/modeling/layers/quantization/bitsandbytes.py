@@ -64,7 +64,7 @@ class BitsandBytesConfig(QuantizationConfig):
 
     def rope_style(self) -> Optional[bool]:
         return None
-    
+
     def quant_vocab(self) -> List[bool]:
         return [False, False]
 
