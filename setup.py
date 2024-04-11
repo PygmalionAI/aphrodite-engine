@@ -15,6 +15,8 @@ from torch.utils.cpp_extension import CUDA_HOME
 
 ROOT_DIR = os.path.dirname(__file__)
 logger = logging.getLogger(__name__)
+# Target device of Aphrodite, supporting [cuda (by default), rocm, neuron, cpu]
+APHRODITE_TARGET_DEVICE = os.getenv("APHRODITE_TARGET_DEVICE", "cuda")
 
 # Aphrodite only supports Linux platform
 assert sys.platform.startswith(
@@ -112,6 +114,7 @@ class cmake_build_ext(build_ext):
             '-DCMAKE_BUILD_TYPE={}'.format(cfg),
             '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={}'.format(outdir),
             '-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY={}'.format(self.build_temp),
+            '-DAPHRODITE_TARGET_DEVICE={}'.format(APHRODITE_TARGET_DEVICE),
         ]
 
         verbose = bool(int(os.getenv('VERBOSE', '0')))
@@ -190,11 +193,15 @@ class cmake_build_ext(build_ext):
 
 
 def _is_cuda() -> bool:
-    return torch.version.cuda is not None and not _is_neuron()
+    return APHRODITE_TARGET_DEVICE == "cuda" \
+            and torch.version.cuda is not None \
+            and not _is_neuron()
 
 
 def _is_hip() -> bool:
-    return torch.version.hip is not None
+    return (APHRODITE_TARGET_DEVICE == "cuda"
+            or APHRODITE_TARGET_DEVICE == "rocm") \
+            and torch.version.hip is not None
 
 
 def _is_neuron() -> bool:
@@ -204,6 +211,10 @@ def _is_neuron() -> bool:
     except (FileNotFoundError, PermissionError, subprocess.CalledProcessError):
         torch_neuronx_installed = False
     return torch_neuronx_installed
+
+
+def _is_cpu() -> bool:
+    return APHRODITE_TARGET_DEVICE == "cpu"
 
 
 def _install_punica() -> bool:
@@ -321,8 +332,11 @@ def get_aphrodite_version() -> str:
         if neuron_version != MAIN_CUDA_VERSION:
             neuron_version_str = neuron_version.replace(".", "")[:3]
             version += f"+neuron{neuron_version_str}"
+    elif _is_cpu():
+        version += "+cpu"
     else:
-        raise RuntimeError("Unknown runtime environment")
+        raise RuntimeError("Unknown runtime environment, "
+                           "must be either CUDA, ROCm, CPU, or Neuron.")
 
     return version
 
@@ -346,6 +360,9 @@ def get_requirements() -> List[str]:
             requirements = f.read().strip().split("\n")
     elif _is_neuron():
         with open(get_path("requirements-neuron.txt")) as f:
+            requirements = f.read().strip().split("\n")
+    elif _is_cpu():
+        with open(get_path("requirements-cpu.txt")) as f:
             requirements = f.read().strip().split("\n")
     else:
         raise ValueError(

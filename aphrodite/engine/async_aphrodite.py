@@ -335,6 +335,9 @@ class AsyncAphrodite:
         if device_config.device_type == "neuron":
             raise NotImplementedError("Neuron is not supported for "
                                       "async engine yet.")
+        elif device_config.device_type == "cpu":
+            from aphrodite.executor.cpu_executor import CPUExecutor
+            executor_class = CPUExecutor
         elif parallel_config.worker_use_ray or engine_args.engine_use_ray:
             initialize_ray_cluster(parallel_config)
             from aphrodite.executor.ray_gpu_executor import RayGPUExecutorAsync
