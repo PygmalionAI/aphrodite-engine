@@ -19,10 +19,12 @@ from aphrodite.common.utils import (
     get_distributed_init_method,
     get_ip,
     get_open_port,
+    make_async,
 )
 
 
 class CPUExecutor(ExecutorBase):
+
     def __init__(
         self,
         model_config: ModelConfig,
@@ -53,13 +55,11 @@ class CPUExecutor(ExecutorBase):
     def _init_worker(self):
         from aphrodite.task_handler.cpu_worker import CPUWorker
 
-        assert (
-            self.parallel_config.world_size == 1
-        ), "CPUExecutor only supports single CPU socket currently."
+        assert (self.parallel_config.world_size == 1
+                ), "CPUExecutor only supports single CPU socket currently."
 
         distributed_init_method = get_distributed_init_method(
-            get_ip(), get_open_port()
-        )
+            get_ip(), get_open_port())
         self.driver_worker = CPUWorker(
             self.model_config,
             self.parallel_config,
@@ -87,8 +87,7 @@ class CPUExecutor(ExecutorBase):
             raise ValueError(
                 "No available memory for the cache blocks. "
                 "Try increasing `APHRODITE_CPU_KVCACHE_SPACE` when "
-                "initializing the engine."
-            )
+                "initializing the engine.")
 
         max_seq_len = self.cache_config.block_size * num_cpu_blocks
         if self.model_config.max_model_len > max_seq_len:
@@ -96,9 +95,8 @@ class CPUExecutor(ExecutorBase):
                 f"The model's max seq len ({self.model_config.max_model_len}) "
                 "is larger than the maximum number of tokens that can be "
                 f"stored in KV cache ({max_seq_len}). Try increasing "
-                "`APHRODITE_CPU_KVCACHE_SPACE` or decreasing `max_model_len` when "
-                "initializing the engine."
-            )
+                "`APHRODITE_CPU_KVCACHE_SPACE` or decreasing `max_model_len` "
+                "when initializing the engine.")
 
         # Note: To reuse the cache management procedure,
         # use cpu cache as 'gpu cache'.
@@ -123,6 +121,20 @@ class CPUExecutor(ExecutorBase):
         )
         return output
 
+    async def execute_model_async(
+        self,
+        seq_group_metadata_list: List[SequenceGroupMetadata],
+        blocks_to_swap_in: Dict[int, int],
+        blocks_to_swap_out: Dict[int, int],
+        blocks_to_copy: Dict[int, List[int]],
+    ) -> SamplerOutput:
+        output = await make_async(self.driver_worker.execute_model)(
+            seq_group_metadata_list=seq_group_metadata_list,
+            blocks_to_swap_in=blocks_to_swap_in,
+            blocks_to_swap_out=blocks_to_swap_out,
+            blocks_to_copy=blocks_to_copy)
+        return output
+
     def add_lora(self, lora_request: LoRARequest) -> bool:
         raise NotImplementedError("LoRA is not implemented for cpu backend.")
 
@@ -144,8 +156,8 @@ def _verify_and_get_model_config(config: ModelConfig) -> ModelConfig:
         config.dtype = torch.bfloat16
     if not config.enforce_eager:
         logger.warning(
-            "CUDA graph is not supported on CPU, fallback to the eager " "mode."
-        )
+            "CUDA graph is not supported on CPU, fallback to the eager "
+            "mode.")
         config.enforce_eager = True
     return config
 
@@ -164,14 +176,12 @@ def _verify_and_get_cache_config(config: CacheConfig) -> CacheConfig:
             config.cpu_kvcache_space_bytes = 4 * _GB  # type: ignore
             logger.warning(
                 "Environment variable APHRODITE_CPU_KVCACHE_SPACE (GB) "
-                "for CPU backend is not set, using 4 by default."
-            )
+                "for CPU backend is not set, using 4 by default.")
         else:
             config.cpu_kvcache_space_bytes = kv_cache_space * _GB  # type: ignore
     else:
         raise RuntimeError(
             "Invalid environment variable APHRODITE_CPU_KVCACHE_SPACE"
-            f" {kv_cache_space}, expect a positive integer value."
-        )
+            f" {kv_cache_space}, expect a positive integer value.")
 
     return config

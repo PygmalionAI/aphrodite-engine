@@ -17,6 +17,7 @@ from aphrodite.modeling.megatron.parallel_state import \
     ensure_model_parallel_initialized
 from aphrodite.task_handler.model_runner import ModelRunner
 
+
 class CPUModelRunner(ModelRunner):
 
     def load_model(self) -> None:

@@ -212,6 +212,7 @@ def _is_neuron() -> bool:
         torch_neuronx_installed = False
     return torch_neuronx_installed
 
+
 def _is_cpu() -> bool:
     return APHRODITE_TARGET_DEVICE == "cpu"
 
