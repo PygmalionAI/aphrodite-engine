@@ -13,6 +13,7 @@ namespace aphrodite {
 
 namespace {
 __device__ __forceinline__ int32_t index(int32_t total_col, int32_t row, int32_t col) {
+    // don't worry about overflow because num_experts is relatively small
     return row * total_col + col;
 }
 }
@@ -27,16 +28,18 @@ __global__ void moe_align_block_size_kernel(scalar_t *__restrict__ topk_ids,
                                 size_t numel) {
     const size_t tokens_per_thread = CEILDIV(numel, blockDim.x);
     const size_t start_idx = threadIdx.x * tokens_per_thread;
+
     extern __shared__ int32_t shared_mem[];
 
-    int32_t* tokens_cnts = shared_mem;
-    int32_t* cumsum = shared_mem + (num_experts + 1) * num_experts;
+    int32_t* tokens_cnts = shared_mem; // 2d tensor with shape (num_experts + 1, num_experts)
+    int32_t* cumsum = shared_mem + (num_experts + 1) * num_experts; // 1d tensor with shape (num_experts + 1)
+
     for (int i = 0; i < num_experts; ++i) {
         tokens_cnts[index(num_experts, threadIdx.x + 1, i)] = 0;
     }
 
     /**
-    * In the first step we compute tokens_cnts[thread_index + 1][expert_index],
+    * In the first step we compute token_cnts[thread_index + 1][expert_index],
     * which counts how many tokens in the token shard of thread_index are assigned
     * to expert expert_index.
     */
@@ -103,10 +106,13 @@ void moe_align_block_size(
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     APHRODITE_DISPATCH_INTEGRAL_TYPES(
         topk_ids.scalar_type(), "moe_align_block_size_kernel", [&] {
+        // calc needed amount of shared mem for `tokens_cnts` and `cumsum` tensors
         const int32_t shared_mem = ((num_experts + 1) * num_experts + (num_experts + 1)) * sizeof(int32_t);
 
+        // set dynamic shared mem
         auto kernel = aphrodite::moe_align_block_size_kernel<scalar_t>;
-        AT_CUDA_CHECK(cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_mem));
+        AT_CUDA_CHECK(
+            APHRODITE_DevFuncAttribute_SET_MaxDynamicSharedMemorySize((void *)kernel, shared_mem));
         kernel<<<1, num_experts, shared_mem, stream>>>(
             topk_ids.data_ptr<scalar_t>(),
             sorted_token_ids.data_ptr<int32_t>(), 
