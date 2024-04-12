@@ -173,6 +173,7 @@ class XFormersImpl(AttentionImpl):
         value: torch.Tensor,
         kv_cache: Optional[torch.Tensor],
         attn_metadata: XFormersMetadata,
+        kv_scale: float,
     ) -> torch.Tensor:
         """Forward pass with xFormers and PagedAttention.
         Args:
@@ -199,7 +200,8 @@ class XFormersImpl(AttentionImpl):
             PagedAttention.write_to_paged_cache(key, value, key_cache,
                                                 value_cache,
                                                 attn_metadata.slot_mapping,
-                                                attn_metadata.kv_cache_dtype)
+                                                attn_metadata.kv_cache_dtype,
+                                                kv_scale)
 
         if attn_metadata.is_prompt:
             # Prompt run.
@@ -252,6 +254,9 @@ class XFormersImpl(AttentionImpl):
                     query, key, value, attn_metadata)
             else:
                 # prefix-enabled attention
+                # FIXME: This triton kernel has regression issues
+                # due to dealing with different dtypes between KV
+                # and FP8 KV cache.
                 output = PagedAttention.forward_prefix(
                     query,
                     key,
@@ -264,6 +269,7 @@ class XFormersImpl(AttentionImpl):
                     attn_metadata.context_lens,
                     attn_metadata.max_subquery_len,
                     self.alibi_slopes,
+                    kv_scale,
                 )
         else:
             # Decoding run.

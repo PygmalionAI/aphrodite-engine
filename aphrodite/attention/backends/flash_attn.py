@@ -157,6 +157,7 @@ class FlashAttentionImpl(AttentionImpl):
         value: torch.Tensor,
         kv_cache: torch.Tensor,
         attn_metadata: FlashAttentionMetadata,
+        kv_scale: float,
     ) -> torch.Tensor:
         """Forward pass with FlashAttention and PagedAttention.
         Args:
@@ -188,6 +189,7 @@ class FlashAttentionImpl(AttentionImpl):
                 value_cache,
                 attn_metadata.slot_mapping,
                 attn_metadata.kv_cache_dtype,
+                kv_scale,
             )
 
         if attn_metadata.is_prompt:
@@ -211,6 +213,9 @@ class FlashAttentionImpl(AttentionImpl):
                 )
             else:
                 # prefix-enabled attention
+                # FIXME: This triton kernel has regression issues
+                # due to dealing with different dtypes between KV
+                # and FP8 KV cache.
                 output = PagedAttention.forward_prefix(
                     query,
                     key,
@@ -223,6 +228,7 @@ class FlashAttentionImpl(AttentionImpl):
                     attn_metadata.context_lens,
                     attn_metadata.max_subquery_len,
                     self.alibi_slopes,
+                    kv_scale,
                 )
         else:
             # Decoding run.
@@ -237,6 +243,7 @@ class FlashAttentionImpl(AttentionImpl):
                 self.num_kv_heads,
                 self.scale,
                 self.alibi_slopes,
+                kv_scale,
             )
 
         # Reshape the output tensor.

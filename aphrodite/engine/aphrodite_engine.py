@@ -89,7 +89,7 @@ class AphroditeEngine:
             f"Context Length = {model_config.max_model_len}\n"
             f"Enforce Eager Mode = {model_config.enforce_eager}\n"
             f"KV Cache Data Type = {cache_config.cache_dtype}\n"
-            # f"KV Cache Params Path = {cache_config.cache_quant_params_path}\n"
+            f"KV Cache Params Path = {model_config.quantization_param_path}\n"
             f"Device = {device_config.device}")
         # TODO: Print more configs in debug mode.
 
