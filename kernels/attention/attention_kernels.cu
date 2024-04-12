@@ -16,39 +16,39 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- #ifdef USE_ROCM
- #include <hip/hip_runtime.h>
- #endif
- 
+
  #include <torch/extension.h>
  #include <ATen/cuda/CUDAContext.h>
  #include <c10/cuda/CUDAGuard.h>
  
  #include "attention_dtypes.h"
  #include "attention_utils.cuh"
+ 
  #if defined(ENABLE_FP8_E5M2)
  #include "../quantization/fp8_e5m2_kvcache/quant_utils.cuh"
  #elif defined(ENABLE_FP8_E4M3)
-#include "../quantization/fp8/amd_detail/quant_utils.cuh"
+ #include "../quantization/fp8/amd_detail/quant_utils.cuh"
  #endif
  
  #include <algorithm>
-
+ 
  #ifdef USE_ROCM
-  #include <hip/hip_bf16.h>
-  typedef __hip_bfloat16 __nv_bfloat16;
-#endif
+   #include <hip/hip_bf16.h>
+   typedef __hip_bfloat16 __nv_bfloat16;
+ #endif
  
  #ifndef USE_ROCM
  #define WARP_SIZE 32
  #else
  #define WARP_SIZE warpSize
  #endif
+ 
  #define MAX(a, b) ((a) > (b) ? (a) : (b))
  #define MIN(a, b) ((a) < (b) ? (a) : (b))
  #define DIVIDE_ROUND_UP(a, b) (((a) + (b) - 1) / (b))
  
  namespace aphrodite {
+ 
  // Utility function for attention softmax.
  template<int NUM_WARPS>
  inline __device__ float block_sum(float* red_smem, float sum) {
@@ -230,10 +230,10 @@
            // Vector conversion from Quant_vec to K_vec.
            k_vecs[j] = fp8_e5m2_unscaled::vec_conversion<K_vec, Quant_vec>(k_vec_quant);
  #elif defined(ENABLE_FP8_E4M3)
-          Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(k_ptr + offset1 * BLOCK_SIZE * x + offset2);
-          // Vector conversion from Quant_vec to K_vec. Use scaled_vec_conversion to convert FP8_E4M3 quantized k
-          // cache vec to k vec in higher precision (FP16, BFloat16, etc.)
-          k_vecs[j] = fp8_e4m3::scaled_vec_conversion<K_vec, Quant_vec>(k_vec_quant, kv_scale);
+           Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(k_ptr + offset1 * BLOCK_SIZE * x + offset2);
+           // Vector conversion from Quant_vec to K_vec. Use scaled_vec_conversion to convert FP8_E4M3 quantized k
+           // cache vec to k vec in higher precision (FP16, BFloat16, etc.)
+           k_vecs[j] = fp8_e4m3::scaled_vec_conversion<K_vec, Quant_vec>(k_vec_quant, kv_scale);
  #else
            assert(false);
  #endif
@@ -355,10 +355,10 @@
            // Vector conversion from V_quant_vec to V_vec.
            v_vec = fp8_e5m2_unscaled::vec_conversion<V_vec, V_quant_vec>(v_quant_vec);
  #elif defined(ENABLE_FP8_E4M3)
-          V_quant_vec v_quant_vec = *reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
-          // Vector conversion from V_quant_vec to V_vec. Use scaled_vec_conversion to convert
-          // FP8_E4M3 quantized v cache vec to v vec in higher precision (FP16, BFloat16, etc.)
-          v_vec = fp8_e4m3::scaled_vec_conversion<V_vec, V_quant_vec>(v_quant_vec, kv_scale);
+           V_quant_vec v_quant_vec = *reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
+           // Vector conversion from V_quant_vec to V_vec. Use scaled_vec_conversion to convert
+           // FP8_E4M3 quantized v cache vec to v vec in higher precision (FP16, BFloat16, etc.)
+           v_vec = fp8_e4m3::scaled_vec_conversion<V_vec, V_quant_vec>(v_quant_vec, kv_scale);
  #else
            assert(false);
  #endif
@@ -368,6 +368,7 @@
          if (block_idx == num_context_blocks - 1) {
            // NOTE: When v_vec contains the tokens that are out of the context,
            // we should explicitly zero out the values since they may contain NaNs.
+           // See https://github.com/aphrodite-project/aphrodite/issues/641#issuecomment-1682544472
            scalar_t* v_vec_ptr = reinterpret_cast<scalar_t*>(&v_vec);
  #pragma unroll
            for (int j = 0; j < V_VEC_SIZE; j++) {
@@ -603,12 +604,12 @@
  
  } // namespace aphrodite
  
- #define LAUNCH_PAGED_ATTENTION_V1(HEAD_SIZE)                                                       \
+ #define LAUNCH_PAGED_ATTENTION_V1(HEAD_SIZE)                                                  \
    APHRODITE_DevFuncAttribute_SET_MaxDynamicSharedMemorySize(                                       \
      ((void*)aphrodite::paged_attention_v1_kernel<T, CACHE_T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS,   \
-       IS_FP8_KV_CACHE>), shared_mem_size);                                                         \
+       IS_FP8_KV_CACHE>), shared_mem_size);                                                    \
    aphrodite::paged_attention_v1_kernel<T, CACHE_T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS,             \
-   IS_FP8_KV_CACHE><<<grid, block, shared_mem_size, stream>>>(                                      \
+   IS_FP8_KV_CACHE><<<grid, block, shared_mem_size, stream>>>(                                 \
      out_ptr,                                                                                  \
      query_ptr,                                                                                \
      key_cache_ptr,                                                                            \
@@ -670,7 +671,7 @@
    int padded_max_context_len = DIVIDE_ROUND_UP(max_context_len, BLOCK_SIZE) * BLOCK_SIZE;
    int logits_size = padded_max_context_len * sizeof(float);
    int outputs_size = (NUM_WARPS / 2) * head_size * sizeof(float);
-   // Python-side check in aphrodite.task_handler.worker._check_if_can_support_max_seq_len
+   // Python-side check in aphrodite.worker.worker._check_if_can_support_max_seq_len
    // Keep that in sync with the logic here!
    int shared_mem_size = std::max(logits_size, outputs_size);
  
@@ -722,7 +723,7 @@
  
  // NOTE: To reduce the compilation time, we omitted block sizes
  // 1, 2, 4, 64, 128, 256.
- #define CALL_V1_LAUNCHER_BLOCK_SIZE(T, CACHE_T, IS_FP8_KV_CACHE) \
+ #define CALL_V1_LAUNCHER_BLOCK_SIZE(T, CACHE_T, IS_FP8_KV_CACHE)      \
    switch (block_size) {                                               \
      case 8:                                                           \
        CALL_V1_LAUNCHER(T, CACHE_T, 8, IS_FP8_KV_CACHE);               \
@@ -778,7 +779,7 @@
  }
  
  #define LAUNCH_PAGED_ATTENTION_V2(HEAD_SIZE)                                                  \
-   aphrodite::paged_attention_v2_kernel<T, CACHE_T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS,        \
+   aphrodite::paged_attention_v2_kernel<T, CACHE_T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS,             \
    IS_FP8_KV_CACHE, PARTITION_SIZE>                                                            \
    <<<grid, block, shared_mem_size, stream>>>(                                                 \
      exp_sums_ptr,                                                                             \
@@ -796,7 +797,7 @@
      q_stride,                                                                                 \
      kv_block_stride,                                                                          \
      kv_head_stride,                                                                           \
-     kv_scale);
+     kv_scale);                                                                                \
    aphrodite::paged_attention_v2_reduce_kernel<T, HEAD_SIZE, NUM_THREADS, PARTITION_SIZE>           \
    <<<reduce_grid, block, reduce_shared_mem_size, stream>>>(                                   \
      out_ptr,                                                                                  \
@@ -978,4 +979,3 @@
  #undef MAX
  #undef MIN
  #undef DIVIDE_ROUND_UP
- 
