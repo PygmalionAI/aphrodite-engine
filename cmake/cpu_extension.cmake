@@ -7,7 +7,7 @@ if(DEFINED ENV{APHRODITE_CPU_AVX512BF16})
     set(ENABLE_AVX512BF16 ON)
 endif()
 
-include_directories("${CMAKE_SOURCE_DIR}/csrc")
+include_directories("${CMAKE_SOURCE_DIR}/kernels")
 
 #
 # Check the compile flags
