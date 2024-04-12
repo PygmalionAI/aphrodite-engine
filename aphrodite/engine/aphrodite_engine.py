@@ -711,7 +711,7 @@ class AphroditeEngine:
         time_per_output_tokens = []
         time_e2e_requests = []
         if scheduler_outputs is not None:
-            prompt_run = scheduler_outputs.prompt_run
+            prompt_run = scheduler_outputs.num_prefill_groups > 0
 
             # Number of Tokens.
             if prompt_run:

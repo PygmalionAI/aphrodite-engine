@@ -37,8 +37,6 @@ class EngineArgs:
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: int = 256
     max_log_probs: int = 10  # OpenAI default is 5, setting to 10 because ST
-    scheduler_policy: str = 'fcfs'
-    scheduler_reorder_window: float = 0
     disable_log_stats: bool = False
     revision: Optional[str] = None
     code_revision: Optional[str] = None
@@ -301,15 +299,6 @@ class EngineArgs:
             help="maximum number of log probabilities to "
             "return.",
         )
-        parser.add_argument("--scheduler-policy",
-                            type=str,
-                            default=EngineArgs.scheduler_policy,
-                            choices=["fcfs", "reorder"],
-                            help="scheduler policy")
-        parser.add_argument("--scheduler-reorder-window",
-                            type=float,
-                            default=EngineArgs.scheduler_reorder_window,
-                            help="allowed sequences reorder window (in sec)")
         parser.add_argument(
             "--disable-log-stats",
             action="store_true",
@@ -573,8 +562,6 @@ class EngineArgs:
                                  if speculative_config is None else
                                  speculative_config.num_lookahead_slots),
             delay_factor=self.scheduler_delay_factor,
-            policy=self.scheduler_policy,
-            reorder_window=self.scheduler_reorder_window,
             enable_chunked_prefill=self.enable_chunked_prefill,
         )
         lora_config = (LoRAConfig(
