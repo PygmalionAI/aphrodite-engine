@@ -7,7 +7,8 @@ import aphrodite
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.config import (CacheConfig, DeviceConfig, ModelConfig,
                                      ParallelConfig, SchedulerConfig,
-                                     LoRAConfig, VisionLanguageConfig)
+                                     LoRAConfig, VisionLanguageConfig,
+                                     SpeculativeConfig)
 from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.executor.executor_base import ExecutorBase
@@ -51,7 +52,11 @@ class AphroditeEngine:
         parallel_config: The configuration related to distributed execution.
         scheduler_config: The configuration related to the request scheduler.
         device_config: The configuration related to the device.
-        lora_config: The configuration related to LoRA.
+        lora_config (Optional): The configuration related to serving multi-LoRA.
+        vision_language_config (Optional): The configuration related to vision
+            language models.
+        speculative_config (Optional): The configuration related to speculative
+            decoding.
         executor_class: The model executor class for managing distributed
             execution.
         log_stats: Whether to log statistics.
@@ -65,7 +70,8 @@ class AphroditeEngine:
         scheduler_config: SchedulerConfig,
         device_config: DeviceConfig,
         lora_config: Optional[LoRAConfig],
-        vision_language_config: Optional["VisionLanguageConfig"],
+        vision_language_config: Optional[VisionLanguageConfig],
+        speculative_config: Optional[SpeculativeConfig],
         executor_class: Type[ExecutorBase],
         log_stats: bool,
     ) -> None:
@@ -73,6 +79,7 @@ class AphroditeEngine:
             f"Initializing the Aphrodite Engine (v{aphrodite.__version__}) "
             "with the following config:\n"
             f"Model = {model_config.model!r}\n"
+            f"Speculative Config = {speculative_config!r}\n"
             f"DataType = {model_config.dtype}\n"
             f"Model Load Format = {model_config.load_format}\n"
             f"Number of GPUs = {parallel_config.tensor_parallel_size}\n"
@@ -93,6 +100,7 @@ class AphroditeEngine:
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
         self.device_config = device_config
+        self.speculative_config = speculative_config
         self.log_stats = log_stats
         self._verify_args()
 
@@ -100,10 +108,16 @@ class AphroditeEngine:
         self.detokenizer = Detokenizer(self.tokenizer)
         self.seq_counter = Counter()
 
-        self.model_executor = executor_class(model_config, cache_config,
-                                             parallel_config, scheduler_config,
-                                             device_config, lora_config,
-                                             vision_language_config)
+        self.model_executor = executor_class(
+            model_config=model_config,
+            cache_config=cache_config,
+            parallel_config=parallel_config,
+            scheduler_config=scheduler_config,
+            device_config=device_config,
+            lora_config=lora_config,
+            vision_language_config=vision_language_config,
+            speculative_config=speculative_config,
+        )
 
         # Ping the tokenizer to ensure it is loaded if
         # it runs on a separate process.
@@ -126,29 +140,27 @@ class AphroditeEngine:
     def from_engine_args(cls, engine_args: EngineArgs) -> "AphroditeEngine":
         """Creates an LLM engine from the engine arguments."""
         # Create the engine configs.
-        engine_configs = engine_args.create_engine_configs()
-        parallel_config = engine_configs[2]
-        device_config = engine_configs[4]
+        engine_config = engine_args.create_engine_config()
 
         # Initialize the cluster and specify the executor class.
-        if device_config.device_type == "neuron":
+        if engine_config.device_config.device_type == "neuron":
             from aphrodite.executor.neuron_executor import NeuronExecutor
             executor_class = NeuronExecutor
-        elif device_config.device_type == "cpu":
+        elif engine_config.device_config.device_type == "cpu":
             from aphrodite.executor.cpu_executor import CPUExecutor
             executor_class = CPUExecutor
-        elif parallel_config.worker_use_ray:
-            initialize_ray_cluster(parallel_config)
+        elif engine_config.parallel_config.worker_use_ray:
+            initialize_ray_cluster(engine_config.parallel_config)
             from aphrodite.executor.ray_gpu_executor import RayGPUExecutor
             executor_class = RayGPUExecutor
         else:
-            assert parallel_config.world_size == 1, (
+            assert engine_config.parallel_config.world_size == 1, (
                 "Ray is required if parallel_config.world_size > 1.")
             from aphrodite.executor.gpu_executor import GPUExecutor
             executor_class = GPUExecutor
 
         # Create the LLM engine.
-        engine = cls(*engine_configs,
+        engine = cls(**engine_config.to_dict(),
                      executor_class=executor_class,
                      log_stats=not engine_args.disable_log_stats)
         return engine

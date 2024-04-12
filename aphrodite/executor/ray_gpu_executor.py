@@ -9,7 +9,8 @@ from loguru import logger
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, ModelConfig,
                                      ParallelConfig, SchedulerConfig,
-                                     LoRAConfig, VisionLanguageConfig)
+                                     LoRAConfig, VisionLanguageConfig,
+                                     SpeculativeConfig)
 from aphrodite.engine.ray_tools import RayWorkerAphrodite, ray
 from aphrodite.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from aphrodite.executor.utils import check_block_size_valid
@@ -41,7 +42,8 @@ class RayGPUExecutor(ExecutorBase):
         scheduler_config: SchedulerConfig,
         device_config: DeviceConfig,
         lora_config: Optional[LoRAConfig],
-        vision_language_config: VisionLanguageConfig,
+        vision_language_config: Optional[VisionLanguageConfig],
+        speculative_config: Optional[SpeculativeConfig],
     ) -> None:
         self.model_config = model_config
         self.cache_config = cache_config
@@ -50,6 +52,8 @@ class RayGPUExecutor(ExecutorBase):
         self.scheduler_config = scheduler_config
         self.device_config = device_config
         self.vision_language_config = vision_language_config
+        assert (not speculative_config
+                ), "Speculative decoding not yet supported for RayGPU backend."
 
         assert self.parallel_config.worker_use_ray
         placement_group = self.parallel_config.placement_group

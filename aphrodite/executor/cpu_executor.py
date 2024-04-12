@@ -4,14 +4,9 @@ from typing import Dict, List, Optional
 import torch
 from loguru import logger
 
-from aphrodite.common.config import (
-    CacheConfig,
-    DeviceConfig,
-    LoRAConfig,
-    ModelConfig,
-    ParallelConfig,
-    SchedulerConfig,
-)
+from aphrodite.common.config import (CacheConfig, DeviceConfig, LoRAConfig,
+                                     ModelConfig, ParallelConfig,
+                                     SchedulerConfig, SpeculativeConfig)
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
@@ -33,11 +28,14 @@ class CPUExecutor(ExecutorBase):
         scheduler_config: SchedulerConfig,
         device_config: DeviceConfig,
         lora_config: Optional[LoRAConfig],
+        speculative_config: Optional[SpeculativeConfig],
         *args,
         **kwargs,
     ) -> None:
         assert device_config.device_type == "cpu"
         assert lora_config is None, "cpu backend doesn't support LoRA"
+        assert (not speculative_config
+                ), "Speculative decoding not yet supported for CPU backend."
         model_config = _verify_and_get_model_config(model_config)
         cache_config = _verify_and_get_cache_config(cache_config)
 

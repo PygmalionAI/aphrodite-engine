@@ -3,7 +3,8 @@ from typing import Dict, List, Optional
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, ModelConfig,
                                      ParallelConfig, SchedulerConfig,
-                                     LoRAConfig, VisionLanguageConfig)
+                                     LoRAConfig, VisionLanguageConfig,
+                                     SpeculativeConfig)
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 
@@ -24,7 +25,8 @@ class ExecutorBase(ABC):
         scheduler_config: SchedulerConfig,
         device_config: DeviceConfig,
         lora_config: Optional[LoRAConfig],
-        vision_language_config: VisionLanguageConfig,
+        vision_language_config: Optional[VisionLanguageConfig],
+        speculative_config: Optional[SpeculativeConfig],
     ) -> None:
         raise NotImplementedError
 
