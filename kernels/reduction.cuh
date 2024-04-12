@@ -21,14 +21,13 @@
 #include "cuda_compat.h"
 
 namespace aphrodite {
-
-  template<typename T, int numLanes = 32>
+template<typename T, int numLanes = WARP_SIZE>
 __inline__ __device__ T warpReduceSum(T val) {
   static_assert(numLanes > 0 && (numLanes & (numLanes - 1)) == 0,
-  "numLanes is not a positive power of 2!");
-static_assert(numLanes <= 32);
-#pragma unroll
-for (int mask = numLanes >> 1; mask > 0; mask >>= 1)
+                "numLanes is not a positive power of 2!");
+  static_assert(numLanes <= WARP_SIZE);
+  #pragma unroll
+  for (int mask = numLanes >> 1; mask > 0; mask >>= 1)
     val += APHRODITE_SHFL_XOR_SYNC(val, mask);
   return val;
 }
@@ -43,19 +42,19 @@ static constexpr int _nextPow2(unsigned int num) {
 template<typename T, int maxBlockSize = 1024>
 __inline__ __device__ T blockReduceSum(T val) {
   static_assert(maxBlockSize <= 1024);
-  if constexpr (maxBlockSize > 32) {
+  if constexpr (maxBlockSize > WARP_SIZE) {
     val = warpReduceSum<T>(val);
     // Calculates max number of lanes that need to participate in the last warpReduce
-    constexpr int maxActiveLanes = (maxBlockSize + 32 - 1) / 32;
+    constexpr int maxActiveLanes = (maxBlockSize + WARP_SIZE - 1) / WARP_SIZE;
     static __shared__ T shared[maxActiveLanes];
-    int lane = threadIdx.x % 32;
-    int wid = threadIdx.x / 32;
+    int lane = threadIdx.x % WARP_SIZE;
+    int wid = threadIdx.x / WARP_SIZE;
     if (lane == 0)
       shared[wid] = val;
 
     __syncthreads();
 
-    val = (threadIdx.x < blockDim.x / float(32)) ? shared[lane] : (T)(0.0f);
+    val = (threadIdx.x < blockDim.x / float(WARP_SIZE)) ? shared[lane] : (T)(0.0f);
     val = warpReduceSum<T, _nextPow2(maxActiveLanes)>(val);
   } else {
     // A single warpReduce is equal to blockReduce
