@@ -167,8 +167,6 @@ set(APHRODITE_EXT_SRC
   "kernels/layernorm_kernels.cu"
   "kernels/quantization/squeezellm/quant_cuda_kernel.cu"
   "kernels/quantization/gptq/q_gemm.cu"
-  "kernels/quantization/exl2/q_matrix.cu"
-  "kernels/quantization/exl2/q_gemm_exl2.cu"
   "kernels/cuda_utils_kernels.cu"
   "kernels/moe/align_block_size_kernel.cu"
   "kernels/pybind.cpp")
@@ -184,6 +182,8 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     "kernels/quantization/bitsandbytes/int4_fp16_gemm_kernels.cu"
     "kernels/quantization/bitsandbytes/format.cu"
     "kernels/quantization/bitsandbytes/gemm_s4_f16.cu"
+    "kernels/quantization/exl2/q_matrix.cu"
+    "kernels/quantization/exl2/q_gemm_exl2.cu"
     "kernels/all_reduce/custom_all_reduce.cu")
 endif()
 
