@@ -64,7 +64,7 @@ function (hipify_sources_target OUT_SRCS NAME ORIG_SRCS)
   #
   # Generate ROCm/HIP source file names from CUDA file names.
   # Since HIP files are generated code, they will appear in the build area
-  # `CMAKE_CURRENT_BINARY_DIR` directory rather than the original csrc dir.
+  # `CMAKE_CURRENT_BINARY_DIR` directory rather than the original kernels dir.
   #
   set(HIP_SRCS)
   foreach (SRC ${SRCS})
@@ -73,10 +73,10 @@ function (hipify_sources_target OUT_SRCS NAME ORIG_SRCS)
     list(APPEND HIP_SRCS "${CMAKE_CURRENT_BINARY_DIR}/${SRC}")
   endforeach()
 
-  set(CSRC_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/csrc)
+  set(CSRC_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/kernels)
   add_custom_target(
     hipify${NAME}
-    COMMAND ${CMAKE_SOURCE_DIR}/cmake/hipify.py -p ${CMAKE_SOURCE_DIR}/csrc -o ${CSRC_BUILD_DIR} ${SRCS}
+    COMMAND ${CMAKE_SOURCE_DIR}/cmake/hipify.py -p ${CMAKE_SOURCE_DIR}/kernels -o ${CSRC_BUILD_DIR} ${SRCS}
     DEPENDS ${CMAKE_SOURCE_DIR}/cmake/hipify.py ${SRCS}
     BYPRODUCTS ${HIP_SRCS}
     COMMENT "Running hipify on ${NAME} extension source files.")
@@ -117,6 +117,7 @@ function (get_torch_gpu_compiler_flags OUT_GPU_FLAGS GPU_LANG)
 
     list(APPEND GPU_FLAGS
       "-DUSE_ROCM"
+      "-DENABLE_FP8_E4M3"
       "-U__HIP_NO_HALF_CONVERSIONS__"
       "-U__HIP_NO_HALF_OPERATORS__"
       "-fno-gpu-rdc")
@@ -332,7 +333,7 @@ function (define_gpu_extension_target GPU_MOD_NAME)
   target_compile_definitions(${GPU_MOD_NAME} PRIVATE
     "-DTORCH_EXTENSION_NAME=${GPU_MOD_NAME}")
 
-  target_include_directories(${GPU_MOD_NAME} PRIVATE csrc
+  target_include_directories(${GPU_MOD_NAME} PRIVATE kernels
     ${GPU_INCLUDE_DIRECTORIES})
 
   target_link_libraries(${GPU_MOD_NAME} PRIVATE torch ${torch_python_LIBRARY}

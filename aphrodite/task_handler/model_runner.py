@@ -1,6 +1,6 @@
 import contextlib
 import time
-from typing import Dict, List, Optional, Tuple, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import torch
@@ -8,28 +8,26 @@ import torch.nn as nn
 from loguru import logger
 
 from aphrodite.attention import AttentionMetadata, get_attn_backend
-from aphrodite.common.config import (DeviceConfig, ModelConfig, LoRAConfig,
+from aphrodite.common.config import (DeviceConfig, LoRAConfig, ModelConfig,
                                      ParallelConfig, SchedulerConfig,
                                      VisionLanguageConfig)
 from aphrodite.common.logger import get_loading_progress_bar
-from aphrodite.modeling import SamplingMetadata
-from aphrodite.modeling.loader import get_model
-from aphrodite.modeling.megatron import pynccl_utils, custom_all_reduce
-from aphrodite.modeling.megatron.communication_op import broadcast_tensor_dict
-from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_world_size,
-    with_pynccl_for_all_reduce,
-)
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
-from aphrodite.common.sequence import (SamplerOutput, SequenceData,
-                                       SequenceGroupMetadata, MultiModalData)
-from aphrodite.modeling.sampling_metadata import PersistentMetadata
-from aphrodite.lora.worker_manager import LRUCacheWorkerLoRAManager
+from aphrodite.common.sequence import (MultiModalData, SamplerOutput,
+                                       SequenceData, SequenceGroupMetadata)
+from aphrodite.common.utils import (CudaMemoryProfiler, async_tensor_h2d,
+                                    is_hip, is_pin_memory_available,
+                                    make_tensor_with_pad, maybe_expand_dim)
 from aphrodite.lora.layers import LoRAMapping
 from aphrodite.lora.request import LoRARequest
-from aphrodite.common.utils import (async_tensor_h2d, CudaMemoryProfiler,
-                                    is_pin_memory_available,
-                                    make_tensor_with_pad, maybe_expand_dim)
+from aphrodite.lora.worker_manager import LRUCacheWorkerLoRAManager
+from aphrodite.modeling import SamplingMetadata
+from aphrodite.modeling.loader import get_model
+from aphrodite.modeling.megatron import custom_all_reduce, pynccl_utils
+from aphrodite.modeling.megatron.communication_op import broadcast_tensor_dict
+from aphrodite.modeling.megatron.parallel_state import (
+    get_tensor_model_parallel_world_size, with_pynccl_for_all_reduce)
+from aphrodite.modeling.sampling_metadata import PersistentMetadata
 
 _PAD_SLOT_ID = -1
 LORA_WARMUP_RANK = 8
@@ -93,38 +91,6 @@ class ModelRunner:
         self.attn_backend = get_attn_backend(
             self.model_config.dtype if model_config is not None else None)
 
-        # self.kv_quant_params = (
-        #     self.load_kv_quant_params(model_config, kv_quant_params_path)
-        #     if self.kv_cache_dtype == "int8"
-        #     else None
-        # )
-
-    # def load_kv_quant_params(
-    #     self, model_config: ModelConfig, kv_quant_params_path: str
-    # ) -> List[List[float]]:
-    #     if model_config is None:
-    #         return None
-    #     # Remove it when all models support kv cache int8.
-    #     architectures = model_config.hf_config.architectures
-    #     for arch in architectures:
-    #         if arch not in ["LlamaForCausalLM", "LLaMAForCausalLM"]:
-    #             raise ValueError(
-    #                 "KV CACHE INT8 is not supported for model architectures "
-    #                 f"{arch} for now. "
-    #                 "Supported architectures: LlamaForCausalLM and "
-    #                 "LLaMAForCausalLM."
-    #             )
-    #     num_layers = model_config.hf_config.num_hidden_layers
-    #     kv_quant_params = []
-    #     for i in range(num_layers):
-    #         if kv_quant_params_path is not None:
-    #             path = (
-    #                 kv_quant_params_path + f"/layers.{i}.past_kv_scale.0.weight"  # noqa: E501
-    #             )
-    #             kv_quant_param = list(np.fromfile(path, dtype=np.float32))
-    #         kv_quant_params.append(kv_quant_param)
-    #     return kv_quant_params
-
     def load_model(self) -> None:
         with CudaMemoryProfiler() as m:
             self.model = get_model(
@@ -157,6 +123,27 @@ class ModelRunner:
                 self.lora_config, self.device, self.model.embedding_modules,
                 self.model.embedding_padding_modules)
             self.model = self.lora_manager.create_lora_manager(self.model)
+
+        if self.kv_cache_dtype == "fp8" and is_hip():
+            # Currently scaled KV cache is only enabled on ROCm
+            if self.model_config.quantization_param_path is not None:
+                if callable(getattr(self.model, "load_kv_cache_scales", None)):
+                    self.model.load_kv_cache_scales(
+                        self.model_config.quantization_param_path)
+                else:
+                    raise RuntimeError("Using FP8 KV cache and scaling "
+                                       "factors provided but model "
+                                       f"{self.model.__class__} does not "
+                                       "support loading scaling factors.")
+            else:
+                logger.warning(
+                    "Using FP8 KV cache but no scaling factors "
+                    "provided. Defaulting to scaling factors of 1.0. "
+                    "This may lead to less accurate results!")
+        elif self.model_config.quantization_param_path is not None:
+            logger.warning("KV cache scaling factors provided, "
+                           "but the KV cache data type is not FP8. "
+                           "KV cache scaling factors will not be used.")
 
     def set_block_size(self, block_size: int) -> None:
         self.block_size = block_size

@@ -22,7 +22,7 @@ class EngineArgs:
     load_format: str = "auto"
     dtype: str = "auto"
     kv_cache_dtype: str = "auto"
-    # kv_quant_params_path: str = None
+    quantization_param_path: Optional[str] = None
     seed: int = 0
     max_model_len: Optional[int] = None
     worker_use_ray: bool = False
@@ -172,23 +172,25 @@ class EngineArgs:
             "for BF16 models.",
         )
         parser.add_argument(
-            "--kv-cache-dtype",
+            '--kv-cache-dtype',
             type=str,
-            # choices=["auto", "fp8_e5m2", "int8"],
-            choices=['auto', 'fp8_e5m2'],
+            choices=['auto', 'fp8'],
             default=EngineArgs.kv_cache_dtype,
             help='Data type for kv cache storage. If "auto", will use model '
-            "data type. Note FP8 is not supported when cuda version is "
-            "lower than 11.8.",
-        )
-        # parser.add_argument(
-        #     "--kv-quant-params-path",
-        #     type=str,
-        #     default=EngineArgs.kv_quant_params_path,
-        #     help="Path to scales and zero points of KV cache "
-        #     "quantization. Only applicable when kv-cache-dtype "
-        #     "is int8.",
-        # )
+            'data type. FP8_E5M2 (without scaling) is only supported on cuda '
+            'version greater than 11.8. On ROCm (AMD GPU), FP8_E4M3 is instead '
+            'supported for common inference criteria. ')
+        parser.add_argument(
+            '--quantization-param-path',
+            type=str,
+            default=None,
+            help='Path to the JSON file containing the KV cache '
+            'scaling factors. This should generally be supplied, when '
+            'KV cache dtype is FP8. Otherwise, KV cache scaling factors '
+            'default to 1.0, which may cause accuracy issues. '
+            'FP8_E5M2 (without scaling) is only supported on cuda version'
+            'greater than 11.8. On ROCm (AMD GPU), FP8_E4M3 is instead '
+            'supported for common inference criteria. ')
         parser.add_argument(
             "--max-model-len",
             type=int,
@@ -519,6 +521,7 @@ class EngineArgs:
             self.load_in_4bit,
             self.load_in_8bit,
             self.load_in_smooth,
+            self.quantization_param_path,
             self.enforce_eager,
             self.max_context_len_to_capture,
             self.max_log_probs,

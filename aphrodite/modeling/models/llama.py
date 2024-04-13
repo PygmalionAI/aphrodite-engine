@@ -29,32 +29,27 @@ from torch import nn
 from transformers import LlamaConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
+from aphrodite.common.config import LoRAConfig
+from aphrodite.common.sequence import SamplerOutput
+from aphrodite.common.utils import is_hip
+from aphrodite.modeling.hf_downloader import (default_weight_loader,
+                                              hf_model_weights_iterator,
+                                              kv_cache_scales_loader)
 from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.modeling.layers.layernorm import RMSNorm
-from aphrodite.modeling.layers.linear import (
-    LinearMethodBase,
-    MergedColumnParallelLinear,
-    QKVParallelLinear,
-    RowParallelLinear,
-    ColumnParallelLinear,
-)
-from aphrodite.modeling.layers.rotary_embedding import get_rope
+from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
+                                              LinearMethodBase,
+                                              MergedColumnParallelLinear,
+                                              QKVParallelLinear,
+                                              RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
+from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding,
-    ParallelLMHead,
-    DEFAULT_VOCAB_PADDING_SIZE,
-)
+    DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, VocabParallelEmbedding)
 from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_world_size, )
+    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.modeling.hf_downloader import (
-    default_weight_loader,
-    hf_model_weights_iterator,
-)
-from aphrodite.common.sequence import SamplerOutput
-from aphrodite.common.config import LoRAConfig
 
 
 class LlamaMLP(nn.Module):
@@ -150,6 +145,15 @@ class LlamaAttention(nn.Module):
         self.rope_theta = rope_theta
         self.max_position_embeddings = max_position_embeddings
 
+        # This will be overwritten by model initialization if we are using it.
+        # N.B. currently we only support per tensor scalar scaling factors
+        # & only applicable to ROCm (AMD GPU).
+        # The scaling factor convention we are assuming is
+        # quantized_value * scaling_factor ~= true_value
+        # which is consistent with the practice of setting
+        # scaling_factor = tensor_amax / FPtype_max
+        self.kv_scale = 1.0
+
         if (linear_method is not None
                 and not linear_method.quant_config.merge_weight()):
             self.merge_weight = False
@@ -219,7 +223,8 @@ class LlamaAttention(nn.Module):
             k, _ = self.k_proj(hidden_states)
             v, _ = self.v_proj(hidden_states)
         q, k = self.rotary_emb(positions, q, k)
-        attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
+        attn_output = self.attn(q, k, v, kv_cache, attn_metadata,
+                                self.kv_scale)
         output, _ = self.o_proj(attn_output)
         return output
 
@@ -483,3 +488,27 @@ class LlamaForCausalLM(nn.Module):
                 weight_loader = getattr(param, "weight_loader",
                                         default_weight_loader)
                 weight_loader(param, loaded_weight)
+
+    # If this function is called, it should always initialize KV cache scale
+    # factors (or else raise an exception). Thus, handled exceptions should
+    # make sure to leave KV cache scale factors in a known good (dummy) state
+    def load_kv_cache_scales(self, quantization_param_path: str) -> None:
+        tp_size = get_tensor_model_parallel_world_size()
+        tp_rank = get_tensor_model_parallel_rank()
+        for layer_idx, scaling_factor in kv_cache_scales_loader(
+                quantization_param_path, tp_rank, tp_size,
+                self.config.num_hidden_layers,
+                self.config.__class__.model_type):
+            layer_self_attn = self.model.layers[layer_idx].self_attn
+
+            if is_hip():
+                # The scaling factor convention we are assuming is
+                # quantized_value * scaling_factor ~= true_value
+                # which is consistent with the practice of setting
+                # scaling_factor = tensor_amax / FPtype_max
+                scaling_factor *= 2
+            if hasattr(layer_self_attn, "kv_scale"):
+                layer_self_attn.kv_scale = scaling_factor
+            else:
+                raise RuntimeError("Self attention has no KV cache scaling "
+                                   "factor attribute!")
