@@ -115,6 +115,7 @@ class SamplingParams:
             log probability of the sampled token, so there  may be up to
             `logprobs+1` elements in the response.
         prompt_logprobs: Number of log probabilities to return per prompt token.
+        detokenize: Whether to detokenize the output. Defaults to True.
         custom_token_bans: List of token IDs to ban from generating
         skip_special_tokens: Whether to skip special tokens in the output.
             defaults to true.
@@ -160,6 +161,7 @@ class SamplingParams:
         min_tokens: int = 0,
         logprobs: Optional[int] = None,
         prompt_logprobs: Optional[int] = None,
+        detokenize: bool = True,
         custom_token_bans: Optional[List[int]] = None,
         skip_special_tokens: bool = True,
         spaces_between_special_tokens: bool = True,
@@ -203,6 +205,10 @@ class SamplingParams:
         self.min_tokens = min_tokens
         self.logprobs = logprobs
         self.prompt_logprobs = prompt_logprobs
+        # NOTE: This parameter is only exposed at the engine level for now.
+        # It is not exposed in the OpenAI API server, as the OpenAI API does
+        # not support returning only a list of token IDs.
+        self.detokenize = detokenize
         self.custom_token_bans = custom_token_bans or []
         self.skip_special_tokens = skip_special_tokens
         self.spaces_between_special_tokens = spaces_between_special_tokens
@@ -243,6 +249,7 @@ class SamplingParams:
             "min_tokens": 0,
             "logprobs": None,
             "prompt_logprobs": None,
+            "detokenize": True,
             "custom_token_bans": [],
             "skip_special_tokens": True,
             "spaces_between_special_tokens": True,
@@ -345,6 +352,10 @@ class SamplingParams:
         if self.prompt_logprobs is not None and self.prompt_logprobs < 0:
             raise ValueError("prompt_logprobs must be non-negative, got "
                              f"{self.prompt_logprobs}.")
+        if self.stop and not self.detokenize:
+            raise ValueError(
+                "stop strings are only supported when detokenize is True. "
+                "Set detokenize=True to use stop.")
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:

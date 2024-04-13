@@ -40,7 +40,9 @@ def enable_hf_transfer():
         except ImportError:
             pass
 
+
 enable_hf_transfer()
+
 
 class Disabledtqdm(tqdm):
 
