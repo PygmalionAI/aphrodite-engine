@@ -14,7 +14,7 @@ from aphrodite.modeling import set_random_seed
 from aphrodite.modeling.loader import get_model
 from aphrodite.modeling.megatron.communication_op import broadcast_tensor_dict
 from aphrodite.modeling.megatron.parallel_state import \
-    ensure_model_parallel_initialized
+    ensure_model_parallel_initialized, init_distributed_environment
 from aphrodite.task_handler.model_runner import ModelRunner
 
 
@@ -247,25 +247,12 @@ class CPUWorker:
         rank = self.rank
         distributed_init_method = self.distributed_init_method
 
-        if torch.distributed.is_initialized():
-            torch_world_size = torch.distributed.get_world_size()
-            if torch_world_size != parallel_config.world_size:
-                raise RuntimeError(
-                    "torch.distributed is already initialized but the torch "
-                    "world size does not match parallel_config.world_size "
-                    f"({torch_world_size} vs. {parallel_config.world_size}).")
-        elif not distributed_init_method:
-            raise ValueError(
-                "distributed_init_method must be set if torch.distributed "
-                "is not already initialized")
-        else:
-            backend = "gloo"
-            torch.distributed.init_process_group(
-                backend=backend,
-                world_size=parallel_config.world_size,
-                rank=rank,
-                init_method=distributed_init_method,
-            )
+        init_distributed_environment(
+            world_size=parallel_config.world_size,
+            rank=rank,
+            distributed_init_method=distributed_init_method,
+            backend="gloo",
+        )
 
         # A small all_reduce for warmup.
         torch.distributed.all_reduce(torch.zeros(1).cpu())
