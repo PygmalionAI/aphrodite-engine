@@ -284,6 +284,7 @@ class XFormersImpl(AttentionImpl):
                 self.num_kv_heads,
                 self.scale,
                 self.alibi_slopes,
+                kv_scale,
             )
         # Reshape the output tensor.
         return output.view(-1, self.num_heads * self.head_size)
