@@ -119,6 +119,7 @@ class TorchSDPABackendImpl(AttentionImpl):
         value: torch.Tensor,
         kv_cache: Optional[torch.Tensor],
         attn_metadata: TorchSDPAMetadata,
+        kv_scale: float,
     ) -> torch.Tensor:
         """Forward pass with torch SDPA and PagedAttention.
         Args:
@@ -146,6 +147,7 @@ class TorchSDPABackendImpl(AttentionImpl):
                 value_cache,
                 attn_metadata.slot_mapping,
                 attn_metadata.kv_cache_dtype,
+                kv_scale,
             )
 
         if attn_metadata.is_prompt:
@@ -213,6 +215,7 @@ class TorchSDPABackendImpl(AttentionImpl):
                 self.num_kv_heads,
                 self.scale,
                 self.alibi_slopes,
+                kv_scale,
             )
 
         # Reshape the output tensor.
