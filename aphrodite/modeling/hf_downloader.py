@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import Any, Iterable, Iterator, List, Optional, Tuple
 
 import filelock
+import huggingface_hub.constants
 import numpy as np
 import torch
 from huggingface_hub import HfFileSystem, snapshot_download
@@ -27,6 +28,19 @@ from aphrodite.modeling.megatron.parallel_state import (
 _xdg_cache_home = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
 _aphrodite_filelocks_path = os.path.join(_xdg_cache_home, "aphrodite/locks/")
 
+
+def enable_hf_transfer():
+    """automatically activates hf_transfer
+    """
+    if "HF_HUB_ENABLE_HF_TRANSFER" not in os.environ:
+        try:
+            # enable hf hub transfer if available
+            import hf_transfer  # type: ignore # noqa
+            huggingface_hub.constants.HF_HUB_ENABLE_HF_TRANSFER = True
+        except ImportError:
+            pass
+
+enable_hf_transfer()
 
 class Disabledtqdm(tqdm):
 
