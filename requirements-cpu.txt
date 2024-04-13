@@ -1,21 +1,6 @@
-cmake>=3.21
-ninja  # For faster builds.
-psutil
-ray >= 2.9
-sentencepiece  # Required for LLaMA tokenizer.
-numpy
-transformers >= 4.38.0  # Required for Gemma.
-fastapi
-uvicorn[standard]
-pydantic >= 2.0  # Required for OpenAI server.
-prometheus_client >= 0.18.0
-torch == 2.1.2+cpu 
-triton >= 2.1.0
-hf_transfer # for faster downloads
-sentence-transformers # for embeddings
-tiktoken == 0.6.0 # for DBRX tokenizer
-scipy # for quip
-einops # for phi
-loguru
-rich
-outlines >= 0.0.27
+# Common dependencies
+-r requirements-common.txt
+
+# Dependencies for x86_64 CPUs
+torch == 2.2.1+cpu
+triton >= 2.1.0  # FIXME: This is a hack to avoid import error.
