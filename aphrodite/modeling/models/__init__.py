@@ -1,5 +1,5 @@
 import importlib
-from typing import List, Optional, Type
+from typing import Dict, List, Optional, Type
 from loguru import logger
 
 import torch.nn as nn
@@ -49,6 +49,10 @@ _MODELS = {
     "StableLmForCausalLM": ("stablelm", "StablelmForCausalLM"),
 }
 
+# Architecture -> type.
+# out of tree models
+_OOT_MODELS: Dict[str, Type[nn.Module]] = {}
+
 # Models not supported by ROCm.
 _ROCM_UNSUPPORTED_MODELS = []
 
@@ -68,6 +72,8 @@ class ModelRegistry:
 
     @staticmethod
     def load_model_cls(model_arch: str) -> Optional[Type[nn.Module]]:
+        if model_arch in _OOT_MODELS:
+            return _OOT_MODELS[model_arch]
         if model_arch not in _MODELS:
             return None
         if is_hip():
@@ -88,6 +94,16 @@ class ModelRegistry:
     @staticmethod
     def get_supported_archs() -> List[str]:
         return list(_MODELS.keys())
+
+    @staticmethod
+    def register_model(model_arch: str, model_cls: Type[nn.Module]):
+        if model_arch in _MODELS:
+            logger.warning(
+                f"Model architecture {model_arch} is already registered, "
+                "and will be overwritten by the new model "
+                f"class {model_cls.__name__}.")
+        global _OOT_MODELS
+        _OOT_MODELS[model_arch] = model_cls
 
 
 __all__ = [

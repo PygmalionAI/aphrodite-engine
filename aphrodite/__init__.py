@@ -3,6 +3,7 @@ from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.engine.ray_tools import initialize_ray_cluster
 from aphrodite.endpoints.llm import LLM
+from aphrodite.modeling.models import ModelRegistry
 from aphrodite.common.outputs import CompletionOutput, RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 
@@ -10,6 +11,7 @@ __version__ = "0.5.2"
 
 __all__ = [
     "LLM",
+    "ModelRegistry",
     "SamplingParams",
     "RequestOutput",
     "CompletionOutput",
