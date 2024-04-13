@@ -5,6 +5,7 @@ from functools import cached_property
 from typing import Callable, List, Optional, Union
 
 import torch
+from pydantic import conint
 
 _SAMPLING_EPS = 1e-5
 
@@ -123,6 +124,9 @@ class SamplingParams:
             tokens in the output. Defaults to True.
         logits_processors: List of LogitsProcessors to change the probability
             of token prediction at runtime.
+        truncate_prompt_tokens: If set to an integer k, will use only the last
+            k tokens from the prompt (i.e. left-truncation). Defaults to None
+            (i.e. no truncation).
     """
 
     def __init__(
@@ -166,6 +170,7 @@ class SamplingParams:
         skip_special_tokens: bool = True,
         spaces_between_special_tokens: bool = True,
         logits_processors: Optional[List[LogitsProcessorFunc]] = None,
+        truncate_prompt_tokens: Optional[conint(ge=1)] = None,
     ) -> None:
         self.n = n
         self.best_of = best_of if best_of is not None else n
@@ -214,6 +219,7 @@ class SamplingParams:
         self.spaces_between_special_tokens = spaces_between_special_tokens
         self.logits_processors = logits_processors or []
         self.include_stop_str_in_output = include_stop_str_in_output
+        self.truncate_prompt_tokens = truncate_prompt_tokens
 
         self.default_values = {
             "n": 1,
@@ -253,7 +259,8 @@ class SamplingParams:
             "custom_token_bans": [],
             "skip_special_tokens": True,
             "spaces_between_special_tokens": True,
-            "include_stop_str_in_output": False
+            "include_stop_str_in_output": False,
+            "truncate_prompt_tokens": None,
         }
 
         self._verify_args()
@@ -352,6 +359,10 @@ class SamplingParams:
         if self.prompt_logprobs is not None and self.prompt_logprobs < 0:
             raise ValueError("prompt_logprobs must be non-negative, got "
                              f"{self.prompt_logprobs}.")
+        if (self.truncate_prompt_tokens is not None
+                and self.truncate_prompt_tokens < 1):
+            raise ValueError(f"truncate_prompt_tokens must be >= 1, "
+                             f"got {self.truncate_prompt_tokens}")
         if self.stop and not self.detokenize:
             raise ValueError(
                 "stop strings are only supported when detokenize is True. "
