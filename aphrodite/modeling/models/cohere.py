@@ -55,26 +55,30 @@ from aphrodite.modeling.hf_downloader import (
 from aphrodite.common.sequence import SamplerOutput
 
 
+@torch.compile
+def layer_norm_func(hidden_states, weight, variance_epsilon):
+    input_dtype = hidden_states.dtype
+    hidden_states = hidden_states.to(torch.float32)
+    mean = hidden_states.mean(-1, keepdim=True)
+    variance = (hidden_states - mean).pow(2).mean(-1, keepdim=True)
+    hidden_states = (hidden_states - mean) * torch.rsqrt(variance +
+                                                         variance_epsilon)
+    hidden_states = weight.to(torch.float32) * hidden_states
+    return hidden_states.to(input_dtype)
+
+
 class LayerNorm(nn.Module):
 
     def __init__(self, hidden_size, eps=1e-5, bias=False):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(hidden_size))
-        self.bias = nn.Parameter(torch.zeros(hidden_size)) if bias else None
         self.variance_epsilon = eps
         set_weight_attrs(self.weight, {"weight_loader": self.weight_loader})
 
     def forward(self, hidden_states, residuals=None):
-        input_dtype = hidden_states.dtype
-        hidden_states = hidden_states.to(torch.float32)
-        mean = hidden_states.mean(-1, keepdim=True)
-        variance = (hidden_states - mean).pow(2).mean(-1, keepdim=True)
-        hidden_states = (hidden_states -
-                         mean) * torch.rsqrt(variance + self.variance_epsilon)
-        hidden_states = self.weight.to(torch.float32) * hidden_states
-        if self.bias is not None:
-            hidden_states = hidden_states + self.bias.to(torch.float32)
-        return hidden_states.to(input_dtype), residuals
+        hidden_states = layer_norm_func(hidden_states, self.weight,
+                                        self.variance_epsilon)
+        return hidden_states, residuals
 
     def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
         tp_rank = get_tensor_model_parallel_rank()
@@ -172,7 +176,9 @@ class CohereAttention(nn.Module):
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
         self.scaling = self.head_dim**-0.5
-        self.max_position_embeddings = config.max_position_embeddings
+        self.max_position_embeddings = getattr(
+            config, "model_max_length", None) or getattr(
+                config, "max_position_embeddings", 8192)
         self.rope_theta = config.rope_theta
         self.rope_scaling = getattr(config, "rope_scaling", None)
         self.use_qk_norm = getattr(config, "use_qk_norm", False)
@@ -427,6 +433,7 @@ class CohereForCausalLM(nn.Module):
                 if shard_name not in name:
                     continue
                 name = name.replace(shard_name, param_name)
+                # Skip loading extra bias for GPTQ models.
                 if name.endswith(".bias") and name not in params_dict:
                     continue
                 param = params_dict[name]
@@ -434,8 +441,11 @@ class CohereForCausalLM(nn.Module):
                 weight_loader(param, loaded_weight, shard_id)
                 break
             else:
-                if "lm_head.weight" in name:
+                # lm_head is not used as it is tied with embed_token.
+                # To prevent errors, skip loading lm_head.
+                if "lm_head" in name:
                     continue
+                # Skip loading extra bias for GPTQ models.
                 if name.endswith(".bias") and name not in params_dict:
                     continue
                 param = params_dict[name]
