@@ -22,3 +22,4 @@ loguru
 hf_transfer # for faster downloads
 sentence-transformers # for embeddings
 tiktoken == 0.6.0 # for DBRX tokenizer
+outlines >= 0.0.27
