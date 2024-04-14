@@ -400,6 +400,8 @@ class CacheConfig:
         cache_dtype: Data Type for KV cache storage.
         cache_quant_params_path: Path to the scales and zero points
             of KV cache quantization when cache_dtype is int8.
+        num_gpu_blocks_override: Number of GPU blocks to use. This overrides
+            the profiled num_gpu_blocks if specified. Does nothing if None.
     """
 
     def __init__(
@@ -409,14 +411,14 @@ class CacheConfig:
         swap_space: int,
         cache_dtype: str,
         # cache_quant_params_path: Optional[str] = None,
-        forced_num_gpu_blocks: Optional[int] = None,
+        num_gpu_blocks_override: Optional[int] = None,
         sliding_window: Optional[int] = None,
         context_shift: bool = False,
     ) -> None:
         self.block_size = block_size
         self.gpu_memory_utilization = gpu_memory_utilization
         self.swap_space_bytes = swap_space * _GB
-        self.forced_num_gpu_blocks = forced_num_gpu_blocks
+        self.num_gpu_blocks_override = num_gpu_blocks_override
         self.cache_dtype = cache_dtype
         self.sliding_window = sliding_window
         # self.cache_quant_params_path = cache_quant_params_path
