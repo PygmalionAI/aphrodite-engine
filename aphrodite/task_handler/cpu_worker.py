@@ -21,19 +21,8 @@ from aphrodite.distributed import (
     init_distributed_environment,
 )
 from aphrodite.modeling import set_random_seed
-from aphrodite.modeling.loader import get_model
-from aphrodite.task_handler.model_runner import ModelRunner
+from aphrodite.task_handler.cpu_model_runner import CPUModelRunner
 from aphrodite.task_handler.worker_base import LoraNotSupportedWorkerBase
-
-
-class CPUModelRunner(ModelRunner):
-
-    def load_model(self) -> None:
-        self.model = get_model(self.model_config,
-                               self.device_config,
-                               lora_config=self.lora_config,
-                               parallel_config=self.parallel_config,
-                               scheduler_config=self.scheduler_config)
 
 
 class CPUCacheEngine:
@@ -177,8 +166,8 @@ class CPUWorker(LoraNotSupportedWorkerBase):
         KV cache space.
         Note that since Aphrodite assumes a block resides on GPU if it can be
         modified, we return num_gpu_blocks=num_cpu_blocks and num_cpu_blocks=0.
-        This allows us to reuse the scheduler of Aphrodite without generalizing it
-        to different devices.
+        This allows us to reuse the scheduler of Aphrodite without generalizing
+        it to different devices.
         """
         # For CPU device, the block number will be calculated based on the
         # cpu_kvcache_space.

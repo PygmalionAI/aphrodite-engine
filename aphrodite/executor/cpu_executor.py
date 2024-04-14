@@ -38,6 +38,7 @@ class CPUExecutor(ExecutorBase):
                 ), "Speculative decoding not yet supported for CPU backend."
         model_config = _verify_and_get_model_config(model_config)
         cache_config = _verify_and_get_cache_config(cache_config)
+        scheduler_config = _verify_and_get_scheduler_config(scheduler_config)
 
         self.model_config = model_config
         self.cache_config = cache_config
@@ -143,6 +144,15 @@ def _verify_and_get_model_config(config: ModelConfig) -> ModelConfig:
             "CUDA graph is not supported on CPU, fallback to the eager "
             "mode.")
         config.enforce_eager = True
+    return config
+
+
+def _verify_and_get_scheduler_config(
+        config: SchedulerConfig) -> SchedulerConfig:
+    if config.chunked_prefill_enabled:
+        logger.warning("Chunked prefill is not supported on CPU, disable it.")
+        config.chunked_prefill_enabled = False
+
     return config
 
 
