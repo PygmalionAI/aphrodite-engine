@@ -61,7 +61,7 @@ class OpenAIServing:
             # there is already a running event loop
             event_loop.create_task(self._post_init())
         else:
-            # When using single vLLM without engine_use_ray
+            # When using single Aphrodite without engine_use_ray
             asyncio.run(self._post_init())
 
     async def _post_init(self):

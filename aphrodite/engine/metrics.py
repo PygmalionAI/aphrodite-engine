@@ -164,7 +164,7 @@ class StatLogger:
 
     def __init__(self, local_interval: float, labels: Dict[str, str]) -> None:
         # Metadata for logging locally.
-        self.last_local_log = time.time()
+        self.last_local_log = time.monotonic()
         self.local_interval = local_interval
 
         # Tracked stats over current local logging interval.
