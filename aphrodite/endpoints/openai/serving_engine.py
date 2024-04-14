@@ -139,7 +139,9 @@ class OpenAIServing:
                 logprobs.top_logprobs = [{
                     k: v if v > -1000 else -1000
                     for k, v in top_logprob.items()
-                } for top_logprob in logprobs.top_logprobs if top_logprob is not None]  # noqa: E501
+                } for top_logprob in logprobs.top_logprobs
+                                         if top_logprob is not None
+                                         ]  # noqa: E501
 
             if len(logprobs.text_offset) == 0:
                 logprobs.text_offset.append(initial_text_offset)

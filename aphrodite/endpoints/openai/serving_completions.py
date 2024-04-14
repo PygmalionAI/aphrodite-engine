@@ -11,7 +11,6 @@ from typing import (
 )
 
 from fastapi import Request
-from loguru import logger
 
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.utils import random_uuid
@@ -27,8 +26,7 @@ from aphrodite.endpoints.openai.protocol import (
 from aphrodite.endpoints.openai.serving_engine import LoRA, OpenAIServing
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.modeling.outlines_decoding import (
-    get_guided_decoding_logits_processor,
-)
+    get_guided_decoding_logits_processor, )
 
 TypeTokenIDs = List[int]
 TypeTopLogProbs = List[Optional[Dict[int, float]]]

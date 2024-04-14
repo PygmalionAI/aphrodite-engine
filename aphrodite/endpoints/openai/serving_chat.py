@@ -21,8 +21,7 @@ from aphrodite.endpoints.openai.protocol import (
 from aphrodite.endpoints.openai.serving_engine import LoRA, OpenAIServing
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.modeling.outlines_decoding import (
-    get_guided_decoding_logits_processor,
-)
+    get_guided_decoding_logits_processor, )
 
 
 class OpenAIServingChat(OpenAIServing):
