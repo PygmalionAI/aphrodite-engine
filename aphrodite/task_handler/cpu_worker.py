@@ -175,9 +175,9 @@ class CPUWorker(LoraNotSupportedWorkerBase):
         """Determine the number of blocks available for the KV cache.
         This determines how many KV blocks can fit into the configured CPU
         KV cache space.
-        Note that since vLLM assumes a block resides on GPU if it can be
+        Note that since Aphrodite assumes a block resides on GPU if it can be
         modified, we return num_gpu_blocks=num_cpu_blocks and num_cpu_blocks=0.
-        This allows us to reuse the scheduler of vLLM without generalizing it
+        This allows us to reuse the scheduler of Aphrodite without generalizing it
         to different devices.
         """
         # For CPU device, the block number will be calculated based on the

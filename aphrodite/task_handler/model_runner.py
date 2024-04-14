@@ -981,7 +981,7 @@ class ModelRunner:
         Note that CUDA graph's performance gain is negligible if number
         of batched tokens are larger than 200. And since CUDA graph
         requires fixed sized tensors, supporting large/variable batch
-        size requires high GPU memory overhead. Thus, vLLM only captures
+        size requires high GPU memory overhead. Thus, Aphrodite only captures
         decoding requests. Mixed batch (chunked prefill + decoding) or
         prefill requests are not captured.
 
