@@ -1,25 +1,20 @@
+import asyncio
 import enum
+import gc
 import os
 import socket
 import subprocess
 import uuid
-import gc
+from collections import OrderedDict, defaultdict
+from functools import lru_cache, partial
 from platform import uname
-from typing import List, Tuple, Union, Generic
-from packaging.version import parse, Version
+from typing import (Any, Awaitable, Callable, Dict, Generic, Hashable, List,
+                    Optional, Tuple, TypeVar, Union)
 
 import psutil
 import torch
-import asyncio
-from functools import partial, lru_cache
-from typing import (
-    Awaitable,
-    Callable,
-    TypeVar,
-)
-from collections import OrderedDict, defaultdict
-from typing import Any, Hashable, Optional
 from loguru import logger
+from packaging.version import Version, parse
 
 T = TypeVar("T")
 
@@ -435,8 +430,8 @@ def maybe_expand_dim(tensor: torch.Tensor,
     return tensor
 
 
-def merge_dicts(dict1: dict[Any, list[Any]],
-                dict2: dict[Any, list[Any]]) -> dict[Any, list[Any]]:
+def merge_dicts(dict1: Dict[Any, List[Any]],
+                dict2: Dict[Any, List[Any]]) -> Dict[Any, List[Any]]:
     """Merge 2 dicts that have key -> List of items.
     
     When a key conflicts, the values in dict1 is prioritized.
