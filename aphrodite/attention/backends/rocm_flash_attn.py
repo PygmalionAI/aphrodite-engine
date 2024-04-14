@@ -1,13 +1,10 @@
-"""Attention layer with Flash and PagedAttention.
-NOTE: At the moment, this file includes a lot of duplicated code from
-XFormers backend. The duplicated code will be removed once we use flash-attn or
-flashinfer for all the attention operations.
-"""
+"""Attention layer ROCm GPUs."""
+import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Type
 
 import torch
-from flash_attn import flash_attn_varlen_func
+from loguru import logger
 
 from aphrodite.attention.backends.abstract import (
     AttentionBackend,
@@ -20,15 +17,15 @@ from aphrodite.attention.ops.paged_attn import (
 )
 
 
-class FlashAttentionBackend(AttentionBackend):
+class ROCmFlashAttentionBackend(AttentionBackend):
 
     @staticmethod
-    def get_impl_cls() -> Type["FlashAttentionImpl"]:
-        return FlashAttentionImpl
+    def get_impl_cls() -> Type["ROCmFlashAttentionImpl"]:
+        return ROCmFlashAttentionImpl
 
     @staticmethod
-    def make_metadata(*args, **kwargs) -> "FlashAttentionMetadata":
-        return FlashAttentionMetadata(*args, **kwargs)
+    def make_metadata(*args, **kwargs) -> "ROCmFlashAttentionMetadata":
+        return ROCmFlashAttentionMetadata(*args, **kwargs)
 
     @staticmethod
     def get_kv_cache_shape(
@@ -57,7 +54,7 @@ class FlashAttentionBackend(AttentionBackend):
 
 
 @dataclass
-class FlashAttentionMetadata(AttentionMetadata, PagedAttentionMetadata):
+class ROCmFlashAttentionMetadata(AttentionMetadata, PagedAttentionMetadata):
     """Metadata for FlashAttentionBackend.
     NOTE: Any python object stored here is not updated when it is
     cuda-graph replayed. If you have values that need to be changed
@@ -107,13 +104,13 @@ class FlashAttentionMetadata(AttentionMetadata, PagedAttentionMetadata):
     use_cuda_graph: bool
 
 
-class FlashAttentionImpl(AttentionImpl):
+class ROCmFlashAttentionImpl(AttentionImpl):
     """
     If the input tensors contain prompt tokens, the layout is as follows:
-    |<--------------- num_prompt_tokens -------------->|	
+    |<--------------- num_prompt_tokens -------------->|
     |<--prompt_0-->|<--prompt_1-->|...|<--prompt_N-1-->|
-    Otherwise, the layout is as follows:	
-    |<------------------ num_generation_tokens (M) ----------------->|	
+    Otherwise, the layout is as follows:
+    |<------------------ num_generation_tokens (M) ----------------->|
     |<--generation_0-->|..........|<--generation_M-1-->|<--padding-->|
     Generation tokens can contain padding when cuda-graph is used.
     Currently, prompt tokens don't contain any padding.
@@ -149,14 +146,43 @@ class FlashAttentionImpl(AttentionImpl):
                 f"Head size {head_size} is not supported by PagedAttention. "
                 f"Supported head sizes are: {suppored_head_sizes}.")
 
+        self.use_naive_attn = torch.cuda.get_device_capability()[0] != 9
+        # NOTE: Allow for switching between Triton and CK. Defaulting to triton.
+        self.use_triton_flash_attn = (os.environ.get(
+            "APHRODITE_USE_TRITON_FLASH_ATTN", "True").lower()
+                                      in ("true", "1"))
+        if self.use_naive_attn:
+            # AMD Radeon 7900 series (gfx1100) currently does not support
+            # xFormers nor FlashAttention. As a temporary workaround, we use
+            # naive PyTorch implementation of attention.
+            self.attn_fuc = _naive_attention()
+            logger.debug("Using naive attention in ROCmBackend")
+        elif self.use_triton_flash_attn:
+            from aphrodite.attention.ops.triton_flash_attention import (  # noqa: F401
+                triton_attention, )
+            self.attn_func = triton_attention
+            logger.debug("Using Triton FA in ROCmBackend")
+        else:
+            from flash_attn import flash_attn_varlen_func  # noqa: F401
+            self.attn_func = flash_attn_varlen_func
+            logger.debug("Using CK FA in ROCmBackend")
+
+    def repeat_kv(self, x: torch.Tensor, n_rep: int) -> torch.Tensor:
+        """torch.repeat_interleave(x, dim=1, repeats=n_rep)"""
+        tokens, n_kv_heads, head_dim = x.shape
+        return (x[:, :,
+                  None, :].expand(tokens, n_kv_heads, n_rep,
+                                  head_dim).reshape(tokens, n_kv_heads * n_rep,
+                                                    head_dim))
+
     def forward(
         self,
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
         kv_cache: torch.Tensor,
-        attn_metadata: FlashAttentionMetadata,
-        kv_scale: float,
+        attn_metadata: ROCmFlashAttentionMetadata,
+        kv_scale: float = 1.0,
     ) -> torch.Tensor:
         """Forward pass with FlashAttention and PagedAttention.
         Args:
@@ -181,36 +207,63 @@ class FlashAttentionImpl(AttentionImpl):
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
-            PagedAttention.write_to_paged_cache(key, value, key_cache,
-                                                value_cache,
-                                                attn_metadata.slot_mapping,
-                                                attn_metadata.kv_cache_dtype,
-                                                kv_scale)
+            PagedAttention.write_to_paged_cache(
+                key,
+                value,
+                key_cache,
+                value_cache,
+                attn_metadata.slot_mapping,
+                attn_metadata.kv_cache_dtype,
+                kv_scale,
+            )
 
         if attn_metadata.is_prompt:
             # Prompt run.
             if kv_cache is None or attn_metadata.block_tables.numel() == 0:
-                # normal attention
+                # triton attention
                 # When block_tables are not filled, it means q and k are the
                 # prompt, and they have the same length.
-                output = flash_attn_varlen_func(
-                    q=query,
-                    k=key,
-                    v=value,
-                    cu_seqlens_q=attn_metadata.seq_start_loc,
-                    cu_seqlens_k=attn_metadata.seq_start_loc,
-                    max_seqlen_q=attn_metadata.max_prompt_len,
-                    max_seqlen_k=attn_metadata.max_prompt_len,
-                    softmax_scale=self.scale,
-                    causal=True,
-                    window_size=self.sliding_window,
-                    alibi_slopes=self.alibi_slopes,
-                )
+                if self.use_naive_attn or self.use_triton_flash_attn:
+                    if self.num_kv_heads != self.num_heads:
+                        # Interleave for MQA workaround.
+                        key = self.repeat_kv(key, self.num_queries_per_kv)
+                        value = self.repeat_kv(value, self.num_queries_per_kv)
+                    if self.use_naive_attn:
+                        output = self.attn_fuc(
+                            query,
+                            key,
+                            value,
+                            attn_metadata.prompt_lens,
+                            self.scale,
+                        )
+                    else:
+                        output, _ = self.attn_func(
+                            query,
+                            key,
+                            value,
+                            None,
+                            attn_metadata.seq_start_loc,
+                            attn_metadata.seq_start_loc,
+                            attn_metadata.max_prompt_len,
+                            attn_metadata.max_prompt_len,
+                            True,
+                            self.scale,
+                        )
+                else:
+                    output = self.attn_func(
+                        q=query,
+                        k=key,
+                        v=value,
+                        cu_seqlens_q=attn_metadata.seq_start_loc,
+                        cu_seqlens_k=attn_metadata.seq_start_loc,
+                        max_seqlen_q=attn_metadata.max_prompt_len,
+                        max_seqlen_k=attn_metadata.max_prompt_len,
+                        softmax_scale=self.scale,
+                        causal=True,
+                    )
+
             else:
                 # prefix-enabled attention
-                # TODO: this triton kernel has regression issue (broke) to
-                # deal with different data types between KV and FP8 KV cache,
-                # to be addressed separately.
                 output = PagedAttention.forward_prefix(
                     query,
                     key,
@@ -242,3 +295,53 @@ class FlashAttentionImpl(AttentionImpl):
 
         # Reshape the output tensor.
         return output.view(num_tokens, hidden_size)
+
+
+def _naive_attention(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    prompt_lens: List[int],
+    scale: float,
+) -> torch.Tensor:
+    num_tokens = query.shape[0]
+    output = torch.empty_like(query)
+    start = 0
+    for _, prompt_len in enumerate(prompt_lens):
+        end = start + prompt_len
+        out = _naive_masked_attention(
+            query[None, start:end],
+            key[None, start:end],
+            value[None, start:end],
+            scale,
+        )
+        # TODO: Unnecessary copy. Optimize.
+        output[start:end].copy_(out)
+        start += prompt_len
+
+    # Using view got RuntimeError: view size is not compatible
+    # with input tensor's size and stride (at least one
+    # dimension spans across two contiguous subspaces).
+    # Use reshape instead.
+    return output.reshape(num_tokens, -1)
+
+
+def _naive_masked_attention(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    scale: float,
+) -> torch.Tensor:
+    seq_len, _, _ = query.shape
+    attn_mask = torch.triu(torch.ones(seq_len,
+                                      seq_len,
+                                      dtype=query.dtype,
+                                      device=query.device),
+                           diagonal=1)
+    attn_mask = attn_mask * torch.finfo(query.dtype).min
+
+    attn_weights = scale * torch.einsum("qhd,khd->hqk", query, key).float()
+    attn_weights = attn_weights + attn_mask.float()
+    attn_weights = torch.softmax(attn_weights, dim=-1).to(value.dtype)
+    out = torch.einsum("hqk,khd->qhd", attn_weights, value)
+    return out
