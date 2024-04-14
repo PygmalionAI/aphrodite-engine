@@ -22,8 +22,8 @@ from aphrodite.common.logger import get_loading_progress_bar
 from aphrodite.modeling.layers.quantization import (QuantizationConfig,
                                                     get_quantization_config)
 from aphrodite.modeling.layers.quantization.schema import QuantParamSchema
-from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
+from aphrodite.distributed import (get_tensor_model_parallel_rank,
+                                   get_tensor_model_parallel_world_size)
 
 _xdg_cache_home = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
 _aphrodite_filelocks_path = os.path.join(_xdg_cache_home, "aphrodite/locks/")

@@ -5,8 +5,6 @@ from loguru import logger
 import torch
 import torch.distributed as dist
 
-from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_world_size, get_tensor_model_parallel_rank)
 
 try:
     from aphrodite._C import custom_ar
@@ -22,6 +20,9 @@ _SUPPORTED_WORLD_SIZES = [2, 4, 6, 8]
 
 
 def init_custom_ar() -> None:
+    from aphrodite.distributed import (
+        get_tensor_model_parallel_rank,
+        get_tensor_model_parallel_world_size)
     global _CA_HANDLE
     if _CA_HANDLE is not None:
         return

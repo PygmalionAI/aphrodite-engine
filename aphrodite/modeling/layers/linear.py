@@ -3,16 +3,18 @@ from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn.functional as F
-from torch.nn.parameter import Parameter
 from loguru import logger
+from torch.nn.parameter import Parameter
 
+from aphrodite.distributed import (
+    divide,
+    get_tensor_model_parallel_rank,
+    get_tensor_model_parallel_world_size,
+    split_tensor_along_last_dim,
+    tensor_model_parallel_all_gather,
+    tensor_model_parallel_all_reduce,
+)
 from aphrodite.modeling.layers.fused_moe import fused_moe
-from aphrodite.modeling.megatron.communication_op import (
-    tensor_model_parallel_all_gather, tensor_model_parallel_all_reduce)
-from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
-from aphrodite.modeling.megatron.utils import (divide,
-                                               split_tensor_along_last_dim)
 from aphrodite.modeling.utils import set_weight_attrs
 
 

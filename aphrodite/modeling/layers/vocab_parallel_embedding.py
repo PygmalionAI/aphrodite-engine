@@ -3,12 +3,13 @@ from typing import Optional, Sequence
 import torch
 from torch.nn.parameter import Parameter
 
+from aphrodite.distributed import (
+    divide,
+    get_tensor_model_parallel_rank,
+    get_tensor_model_parallel_world_size,
+    tensor_model_parallel_all_reduce,
+)
 from aphrodite.modeling.layers.linear import UnquantizedLinearMethod
-from aphrodite.modeling.megatron.utils import divide
-from aphrodite.modeling.megatron.communication_op import (
-    tensor_model_parallel_all_reduce)
-from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from aphrodite.modeling.utils import set_weight_attrs
 
 DEFAULT_VOCAB_PADDING_SIZE = 64

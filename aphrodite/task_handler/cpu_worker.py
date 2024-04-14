@@ -15,13 +15,13 @@ from aphrodite.common.config import (
 )
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 from aphrodite.common.utils import STR_DTYPE_TO_TORCH_DTYPE
-from aphrodite.modeling import set_random_seed
-from aphrodite.modeling.loader import get_model
-from aphrodite.modeling.megatron.communication_op import broadcast_tensor_dict
-from aphrodite.modeling.megatron.parallel_state import (
+from aphrodite.distributed import (
+    broadcast_tensor_dict,
     ensure_model_parallel_initialized,
     init_distributed_environment,
 )
+from aphrodite.modeling import set_random_seed
+from aphrodite.modeling.loader import get_model
 from aphrodite.task_handler.model_runner import ModelRunner
 from aphrodite.task_handler.worker_base import LoraNotSupportedWorkerBase
 

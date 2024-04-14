@@ -9,8 +9,6 @@ from typing import Optional
 
 import torch
 
-from aphrodite.modeling.megatron import pynccl_utils
-
 # Tensor model parallel group that the current rank belongs to.
 _TENSOR_MODEL_PARALLEL_GROUP = None
 # Pipeline model parallel group that the current rank belongs to.
@@ -267,6 +265,7 @@ def destroy_model_parallel():
     _PIPELINE_MODEL_PARALLEL_GROUP = None
     global _PIPELINE_GLOBAL_RANKS
     _PIPELINE_GLOBAL_RANKS = None
+    from aphrodite.distributed.device_communicators import pynccl_utils
     # Destroy the pynccl states if any.
     pynccl_utils.destroy_process_group()
 
@@ -280,6 +279,7 @@ _ENABLE_PYNCCL_FOR_ALL_REDUCE = False
 @contextlib.contextmanager
 def with_pynccl_for_all_reduce():
     """use Pynccl instead of torch.distributed for all reduce"""
+    from aphrodite.distributed.device_communicators import pynccl_utils
     tp_size = get_tensor_model_parallel_world_size()
     if tp_size == 1:
         # No-op.

@@ -8,25 +8,44 @@ import torch.nn as nn
 from loguru import logger
 
 from aphrodite.attention import AttentionMetadata, get_attn_backend
-from aphrodite.common.config import (DeviceConfig, LoRAConfig, ModelConfig,
-                                     ParallelConfig, SchedulerConfig,
-                                     VisionLanguageConfig)
+from aphrodite.common.config import (
+    DeviceConfig,
+    LoRAConfig,
+    ModelConfig,
+    ParallelConfig,
+    SchedulerConfig,
+    VisionLanguageConfig,
+)
 from aphrodite.common.logger import get_loading_progress_bar
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
-from aphrodite.common.sequence import (MultiModalData, SamplerOutput,
-                                       SequenceData, SequenceGroupMetadata)
-from aphrodite.common.utils import (CudaMemoryProfiler, async_tensor_h2d,
-                                    is_hip, is_pin_memory_available,
-                                    make_tensor_with_pad, maybe_expand_dim)
+from aphrodite.common.sequence import (
+    MultiModalData,
+    SamplerOutput,
+    SequenceData,
+    SequenceGroupMetadata,
+)
+from aphrodite.common.utils import (
+    CudaMemoryProfiler,
+    async_tensor_h2d,
+    is_hip,
+    is_pin_memory_available,
+    make_tensor_with_pad,
+    maybe_expand_dim,
+)
+from aphrodite.distributed import (
+    broadcast_tensor_dict,
+    get_tensor_model_parallel_world_size,
+    with_pynccl_for_all_reduce,
+)
+from aphrodite.distributed.device_communicators import (
+    custom_all_reduce,
+    pynccl_utils,
+)
 from aphrodite.lora.layers import LoRAMapping
 from aphrodite.lora.request import LoRARequest
 from aphrodite.lora.worker_manager import LRUCacheWorkerLoRAManager
 from aphrodite.modeling import SamplingMetadata
 from aphrodite.modeling.loader import get_model
-from aphrodite.modeling.megatron import custom_all_reduce, pynccl_utils
-from aphrodite.modeling.megatron.communication_op import broadcast_tensor_dict
-from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_world_size, with_pynccl_for_all_reduce)
 from aphrodite.modeling.sampling_metadata import PersistentMetadata
 
 _PAD_SLOT_ID = -1

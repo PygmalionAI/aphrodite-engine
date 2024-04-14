@@ -18,15 +18,16 @@ from aphrodite.common.config import (
 )
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 from aphrodite.common.utils import in_wsl
-from aphrodite.lora.request import LoRARequest
-from aphrodite.modeling import set_random_seed
-from aphrodite.modeling.megatron import pynccl_utils
-from aphrodite.modeling.megatron.communication_op import broadcast_tensor_dict
-from aphrodite.modeling.megatron.custom_all_reduce import init_custom_ar
-from aphrodite.modeling.megatron.parallel_state import (
+from aphrodite.distributed import (
+    broadcast_tensor_dict,
     ensure_model_parallel_initialized,
     init_distributed_environment,
 )
+from aphrodite.distributed.device_communicators import pynccl_utils
+from aphrodite.distributed.device_communicators.custom_all_reduce import (
+    init_custom_ar, )
+from aphrodite.lora.request import LoRARequest
+from aphrodite.modeling import set_random_seed
 from aphrodite.task_handler.cache_engine import CacheEngine
 from aphrodite.task_handler.model_runner import ModelRunner
 from aphrodite.task_handler.worker_base import WorkerBase

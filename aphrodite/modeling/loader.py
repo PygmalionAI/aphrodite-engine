@@ -20,7 +20,7 @@ from aphrodite.modeling.layers.quantization.bitsandbytes import (
     BNBLinearMethod,
     replace_quant_params,
 )
-from aphrodite.modeling.megatron.parallel_state import (
+from aphrodite.distributed import (
     get_tensor_model_parallel_world_size, )
 
 _VISION_MODEL_CLASSES = [

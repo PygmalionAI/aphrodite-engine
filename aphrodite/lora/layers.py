@@ -9,12 +9,13 @@ import torch.nn.functional as F
 from transformers import PretrainedConfig
 
 from aphrodite.common.config import LoRAConfig
+from aphrodite.distributed import (get_tensor_model_parallel_rank,
+                                   get_tensor_model_parallel_world_size,
+                                   split_tensor_along_last_dim,
+                                   tensor_model_parallel_all_gather,
+                                   tensor_model_parallel_all_reduce,
+                                   tensor_model_parallel_gather)
 from aphrodite.lora.punica import add_lora, add_lora_slice, bgmv
-from aphrodite.modeling.megatron.communication_op import (
-    tensor_model_parallel_all_gather,
-    tensor_model_parallel_all_reduce,
-    tensor_model_parallel_gather,
-)
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               RowParallelLinear,
                                               QKVParallelLinear,
@@ -22,9 +23,6 @@ from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding, ParallelLMHead)
-from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
-from aphrodite.modeling.megatron.utils import split_tensor_along_last_dim
 
 if TYPE_CHECKING:
     pass

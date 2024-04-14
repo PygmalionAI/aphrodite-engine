@@ -4,8 +4,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
-from aphrodite.modeling.megatron.communication_op import (
-    tensor_model_parallel_gather)
+from aphrodite.distributed import tensor_model_parallel_gather
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 
 
