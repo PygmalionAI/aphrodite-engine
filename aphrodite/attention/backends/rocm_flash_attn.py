@@ -158,7 +158,7 @@ class ROCmFlashAttentionImpl(AttentionImpl):
             self.attn_fuc = _naive_attention()
             logger.debug("Using naive attention in ROCmBackend")
         elif self.use_triton_flash_attn:
-            from aphrodite.attention.ops.triton_flash_attention import (  # noqa: F401
+            from aphrodite.attention.ops.triton_flash_attn import (  # noqa: F401
                 triton_attention, )
             self.attn_func = triton_attention
             logger.debug("Using Triton FA in ROCmBackend")
