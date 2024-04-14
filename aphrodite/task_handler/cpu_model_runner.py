@@ -1,7 +1,6 @@
 from typing import Dict, List, Optional, Tuple
 
 import torch
-from loguru import logger
 
 from aphrodite.attention import AttentionMetadata, get_attn_backend
 from aphrodite.common.config import (
