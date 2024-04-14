@@ -59,7 +59,7 @@ class EngineArgs:
     max_cpu_loras: Optional[int] = None
     device: str = "auto"
     ray_workers_use_nsight: bool = False
-    forced_num_gpu_blocks: Optional[int] = None
+    num_gpu_blocks_override: Optional[int] = None
     num_lookahead_slots: int = 0
     # Related to Vision-language models such as llava
     image_input_type: Optional[str] = None
@@ -276,7 +276,7 @@ class EngineArgs:
             "If unspecified, will use the default value of 0.9.",
         )
         parser.add_argument(
-            "--forced-num-gpu-blocks",
+            "--num-gpu-blocks-override",
             type=int,
             default=None,
             help="If specified, ignore GPU profiling result and use this "
@@ -532,7 +532,7 @@ class EngineArgs:
             self.swap_space,
             self.kv_cache_dtype,
             # self.kv_quant_params_path,
-            self.forced_num_gpu_blocks,
+            self.num_gpu_blocks_override,
             model_config.get_sliding_window(),
             self.context_shift,
         )
