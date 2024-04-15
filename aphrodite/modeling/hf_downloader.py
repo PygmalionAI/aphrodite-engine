@@ -18,7 +18,8 @@ from tqdm.auto import tqdm
 from transformers import PretrainedConfig, AutoModelForCausalLM
 
 from aphrodite.common.config import ModelConfig
-from aphrodite.common.gguf import GGUFReader, get_tensor_name_map, MODEL_ARCH_NAMES
+from aphrodite.common.gguf import (GGUFReader, get_tensor_name_map,
+                                   MODEL_ARCH_NAMES)
 from aphrodite.common.logger import get_loading_progress_bar
 from aphrodite.modeling.layers.quantization import (QuantizationConfig,
                                                     get_quantization_config)
@@ -240,8 +241,9 @@ def convert_gguf_to_state_dict(checkpoint, config):
             f"Cannot find any model weights with `{checkpoint}`")
 
     model_type = config.model_type
+    # hack: ggufs have a different name than transformers
     if model_type == "cohere":
-        model_type = "command-r"  # hack: gguf have a different name than transformers
+        model_type = "command-r"
     arch = None
     for key, value in MODEL_ARCH_NAMES.items():
         if value == model_type:
@@ -264,10 +266,9 @@ def convert_gguf_to_state_dict(checkpoint, config):
             gguf_to_hf_name_map[f"{gguf_name}.{suffix}"] = hf_name
         elif name == "lm_head":
             keys_to_remove.append(hf_name)
-            # state_dict["lm_head.weight"] = torch.tensor(0, dtype=torch.int) # tie word embeddings, create a dummy weight
             logger.warning(
-                f"GGUF tensor name for {hf_name} not found, this is normal if the model uses tie word embeddings."
-            )
+                f"GGUF tensor name for {hf_name} not found, "
+                "this is normal if the model uses tie word embeddings.")
         else:
             logger.warning(
                 f"GGUF tensor name for {hf_name} in hf state_dict not found.")

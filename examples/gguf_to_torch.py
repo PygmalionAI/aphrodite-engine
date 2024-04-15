@@ -1,6 +1,6 @@
 from accelerate import init_empty_weights
 from loguru import logger
-from transformers import AutoConfig, AutoModelForCausalLM, LlamaForCausalLM
+from transformers import AutoConfig, AutoModelForCausalLM
 
 from aphrodite.modeling.hf_downloader import convert_gguf_to_state_dict
 from aphrodite.transformers_utils.config import extract_gguf_config
@@ -12,8 +12,7 @@ def convert_save_model(checkpoint, save_dir, max_shard_size):
         config = AutoConfig.from_pretrained(save_dir)
     except Exception:
         logger.warning(
-            f"Unable to load config from {save_dir}, trying to extract from GGUF"
-        )
+            f"Unable to load config from {save_dir}, extracting from GGUF")
         config = extract_gguf_config(checkpoint)
 
     with init_empty_weights():
