@@ -233,14 +233,22 @@ def convert_gguf_to_state_dict(checkpoint, config):
     state_dict = dummy_model.state_dict()
 
     gguf_to_hf_name_map = {}
+    keys_to_remove = []
     for hf_name in state_dict:
         name, suffix = hf_name.rsplit(".", 1)
         gguf_name = name_map.get_name(name)
         if gguf_name:
             gguf_to_hf_name_map[f"{gguf_name}.{suffix}"] = hf_name
+        elif name == "lm_head":
+            keys_to_remove.append(hf_name)
+            # state_dict["lm_head.weight"] = torch.tensor(0, dtype=torch.int) # tie word embeddings, create a dummy weight
+            logger.warning(
+                f"GGUF tensor name for {hf_name} not found, this is normal if the model uses tie word embeddings.")
         else:
             logger.warning(
                 f"GGUF tensor name for {hf_name} in hf state_dict not found.")
+    for key in keys_to_remove:
+        state_dict.pop(key)
 
     result = GGUFReader(checkpoint)
     with get_loading_progress_bar() as progress:

@@ -10,7 +10,7 @@ class TensorNameMap:
         # Token embeddings
         MODEL_TENSOR.TOKEN_EMBD: (
             "gpt_neox.embed_in",  # gptneox
-            "transformer.wte",  # gpt2 gpt-j mpt refact qwen
+            "transformer.wte",  # gpt2 gpt-j mpt refact qwen dbrx
             "transformer.word_embeddings",  # falcon
             "word_embeddings",  # bloom
             "model.embed_tokens",  # llama-hf
@@ -48,7 +48,7 @@ class TensorNameMap:
         # Output
         MODEL_TENSOR.OUTPUT: (
             "embed_out",  # gptneox
-            "lm_head",  # gpt2 mpt falcon llama-hf baichuan qwen mamba
+            "lm_head",  # gpt2 mpt falcon llama-hf baichuan qwen mamba dbrx
             "output",  # llama-pth bloom internlm2
             "word_embeddings_for_head",  # persimmon
             "lm_head.linear",  # phi2
@@ -60,7 +60,7 @@ class TensorNameMap:
             "transformer.ln_f",  # gpt2 gpt-j falcon
             "model.norm",  # llama-hf baichuan internlm2
             "norm",  # llama-pth
-            "transformer.norm_f",  # mpt
+            "transformer.norm_f",  # mpt dbrx
             "ln_f",  # refact bloom qwen gpt2
             "language_model.encoder.final_layernorm",  # persimmon
             "model.final_layernorm",  # persimmon
@@ -96,6 +96,7 @@ class TensorNameMap:
             "model.layers.{bid}.norm",  # mamba-qbert
             "backbone.layers.{bid}.norm",  # mamba
             "transformer.decoder_layer.{bid}.rms_norm",  # Grok
+            "transformer.blocks.{bid}.norm_attn_norm.norm_1",  # dbrx
         ),
 
         # Attention norm 2
@@ -108,6 +109,7 @@ class TensorNameMap:
             "gpt_neox.layers.{bid}.attention.query_key_value",  # gptneox
             "transformer.h.{bid}.attn.c_attn",  # gpt2 qwen
             "transformer.blocks.{bid}.attn.Wqkv",  # mpt
+            "transformer.blocks.{bid}.norm_attn_norm.attn.Wqkv",  # dbrx
             "transformer.h.{bid}.self_attention.query_key_value",  # falcon
             "h.{bid}.self_attention.query_key_value",  # bloom
             "language_model.encoder.layers.{bid}.self_attention.query_key_value",  # persimmon
@@ -168,7 +170,8 @@ class TensorNameMap:
             "model.layers.layers.{bid}.self_attn.o_proj",  # plamo
             "model.layers.{bid}.attention.wo",  # internlm2
             "encoder.layers.{bid}.attn.out_proj",  # nomic-bert
-            "transformer.decoder_layer.{bid}.multi_head_attention.linear"  # Grok
+            "transformer.decoder_layer.{bid}.multi_head_attention.linear",  # Grok
+            "transformer.blocks.{bid}.norm_attn_norm.attn.out_proj",  # dbrx
         ),
 
         # Attention output norm
@@ -176,6 +179,7 @@ class TensorNameMap:
             "encoder.layer.{bid}.attention.output.LayerNorm",  # bert
             "encoder.layers.{bid}.norm1",  # nomic-bert
             "transformer.decoder_layer.{bid}.rms_norm_1",  # Grok
+            "transformer.blocks.{bid}.norm_attn_norm.norm_2",  # dbrx
         ),
 
         # Rotary embeddings
@@ -203,7 +207,8 @@ class TensorNameMap:
         MODEL_TENSOR.FFN_GATE_INP: (
             "layers.{bid}.feed_forward.gate",  # mixtral
             "model.layers.{bid}.block_sparse_moe.gate",  # mixtral
-            "transformer.decoder_layer.{bid}.router"  # Grok
+            "transformer.decoder_layer.{bid}.router",  # Grok
+            "transformer.blocks.{bid}.ffn.router.layer",  # dbrx
         ),
 
         # Feed-forward up
@@ -229,9 +234,9 @@ class TensorNameMap:
             "model.layers.{bid}.mlp.c_fc",  # starcoder2
         ),
         MODEL_TENSOR.FFN_UP_EXP: (
-            "layers.{bid}.feed_forward.experts.{xid}.w3",  # mixtral
-            "model.layers.{bid}.block_sparse_moe.experts.{xid}.w3",  # mixtral
-            "transformer.decoder_layer.{bid}.moe.{xid}.linear_v",  # Grok
+            "layers.{bid}.feed_forward.experts.w3",  # mixtral (merged)
+            "transformer.decoder_layer.{bid}.moe.linear_v",  # Grok (merged)
+            "transformer.blocks.{bid}.ffn.experts.mlp.v1",  # dbrx
         ),
 
         # AWQ-activation gate
@@ -249,9 +254,9 @@ class TensorNameMap:
             "encoder.layers.{bid}.mlp.fc12",  # nomic-bert
         ),
         MODEL_TENSOR.FFN_GATE_EXP: (
-            "layers.{bid}.feed_forward.experts.{xid}.w1",  # mixtral
-            "model.layers.{bid}.block_sparse_moe.experts.{xid}.w1",  # mixtral
-            "transformer.decoder_layer.{bid}.moe.{xid}.linear"  # Grok
+            "layers.{bid}.feed_forward.experts.w1",  # mixtral (merged)
+            "transformer.decoder_layer.{bid}.moe.linear",  # Grok (merged)
+            "transformer.blocks.{bid}.ffn.experts.mlp.w1",  # dbrx
         ),
 
         # Feed-forward down
@@ -276,17 +281,21 @@ class TensorNameMap:
             "model.layers.{bid}.mlp.c_proj",  # starcoder2
         ),
         MODEL_TENSOR.FFN_DOWN_EXP: (
-            "layers.{bid}.feed_forward.experts.{xid}.w2",  # mixtral
-            "model.layers.{bid}.block_sparse_moe.experts.{xid}.w2",  # mixtral
-            "transformer.decoder_layer.{bid}.moe.{xid}.linear_1",  # Grok
+            "layers.{bid}.feed_forward.experts.w2",  # mixtral (merged)
+            "transformer.decoder_layer.{bid}.moe.linear_1",  # Grok (merged)
+            "transformer.blocks.{bid}.ffn.experts.mlp.w2",  # dbrx
         ),
         MODEL_TENSOR.ATTN_Q_NORM: (
             "language_model.encoder.layers.{bid}.self_attention.q_layernorm",
             "model.layers.{bid}.self_attn.q_layernorm",  # persimmon
+            "model.layers.{bid}.self_attn.q_norm",  # cohere
+            "transformer.blocks.{bid}.attn.q_ln",  # sea-lion
         ),
         MODEL_TENSOR.ATTN_K_NORM: (
             "language_model.encoder.layers.{bid}.self_attention.k_layernorm",
             "model.layers.{bid}.self_attn.k_layernorm",  # persimmon
+            "model.layers.{bid}.self_attn.k_norm",  # cohere
+            "transformer.blocks.{bid}.attn.k_ln",  # sea-lion
         ),
         MODEL_TENSOR.ROPE_FREQS: (
             "language_model.encoder.layers.{bid}.self_attention.rotary_emb.inv_freq",  # persimmon
