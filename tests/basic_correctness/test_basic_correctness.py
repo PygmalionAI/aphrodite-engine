@@ -5,7 +5,7 @@ Run `pytest tests/basic_correctness/test_basic_correctness.py`.
 import pytest
 
 MODELS = [
-    "facebook/opt-125m",
+    "alpindale/gemma-2b",
     "mistralai/Mistral-7B-Instruct-v0.2",
 ]
 
