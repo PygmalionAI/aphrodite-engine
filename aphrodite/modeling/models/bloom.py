@@ -18,30 +18,28 @@
 # limitations under the License.
 """Inference-only BLOOM model compatible with HuggingFace weights."""
 import math
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import torch
 from torch import nn
 from transformers import BloomConfig
 
-from aphrodite.modeling.metadata import InputMetadata
+from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.modeling.layers.activation import get_act_fn
-from aphrodite.modeling.layers.attention import Attention
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               LinearMethodBase,
                                               QKVParallelLinear,
                                               RowParallelLinear)
-from aphrodite.modeling.layers.sampler import Sampler, QuantSampler
+from aphrodite.modeling.layers.logits_processor import LogitsProcessor
+from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding, ParallelLMHead)
-from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
+from aphrodite.distributed import (get_tensor_model_parallel_rank,
+                                   get_tensor_model_parallel_world_size)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (default_weight_loader,
                                               hf_model_weights_iterator)
 from aphrodite.common.sequence import SamplerOutput
-
-KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 
 def _get_alibi_slopes(total_num_heads: int) -> torch.Tensor:
@@ -117,14 +115,13 @@ class BloomAttention(nn.Module):
         self,
         position_ids: torch.Tensor,
         hidden_states: torch.Tensor,
-        kv_cache: KVCache,
-        input_metadata: InputMetadata,
+        kv_cache: torch.Tensor,
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         del position_ids  # Unused.
         qkv, _ = self.query_key_value(hidden_states)
         q, k, v = qkv.chunk(chunks=3, dim=-1)
-        k_cache, v_cache = kv_cache
-        attn_output = self.attn(q, k, v, k_cache, v_cache, input_metadata)
+        attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         output, _ = self.dense(attn_output)
         return output
 
@@ -181,8 +178,8 @@ class BloomBlock(nn.Module):
         self,
         position_ids: torch.Tensor,
         hidden_states: torch.Tensor,
-        kv_cache: KVCache,
-        input_metadata: InputMetadata,
+        kv_cache: torch.Tensor,
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         # Layer norm at the beginning of the transformer layer.
         layernorm_output = self.input_layernorm(hidden_states)
@@ -198,7 +195,7 @@ class BloomBlock(nn.Module):
             position_ids=position_ids,
             hidden_states=layernorm_output,
             kv_cache=kv_cache,
-            input_metadata=input_metadata,
+            attn_metadata=attn_metadata,
         )
         attention_output = attention_output + residual
         layernorm_output = self.post_attention_layernorm(attention_output)
@@ -243,8 +240,8 @@ class BloomModel(nn.Module):
         self,
         input_ids: torch.Tensor,
         position_ids: torch.Tensor,
-        kv_caches: List[KVCache],
-        input_metadata: InputMetadata,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         hidden_states = self.word_embeddings(input_ids)
         hidden_states = self.word_embeddings_layernorm(hidden_states)
@@ -254,7 +251,7 @@ class BloomModel(nn.Module):
                 position_ids,
                 hidden_states,
                 kv_caches[i],
-                input_metadata,
+                attn_metadata,
             )
         hidden_states = self.ln_f(hidden_states)
         return hidden_states
@@ -271,36 +268,36 @@ class BloomForCausalLM(nn.Module):
         self.config = config
         self.linear_method = linear_method
         self.transformer = BloomModel(config, linear_method)
-        # self.lm_head_weight = self.transformer.word_embeddings.weight
+        self.lm_head_weight = self.transformer.word_embeddings.weight
         self.lm_head = ParallelLMHead(config.vocab_size,
                                       config.hidden_size,
                                       linear_method=linear_method)
-        self.sampler = Sampler(config.vocab_size)
-        self.quant_sampler = QuantSampler(config.vocab_size)
+        self.logits_processor = LogitsProcessor(config.vocab_size)
+        self.sampler = Sampler()
 
     def forward(
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        kv_caches: List[KVCache],
-        input_metadata: InputMetadata,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         hidden_states = self.transformer(input_ids, positions, kv_caches,
-                                         input_metadata)
+                                         attn_metadata)
         return hidden_states
+
+    def compute_logits(self, hidden_states: torch.Tensor,
+                       sampling_metadata: SamplingMetadata) -> torch.Tensor:
+        logits = self.logits_processor(self.lm_head, hidden_states,
+                                       sampling_metadata)
+        return logits
 
     def sample(
         self,
-        hidden_states: torch.Tensor,
+        logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        if (self.linear_method is not None
-                and not self.linear_method.quant_config.merge_weight()):
-            next_tokens = self.quant_sampler(self.lm_head(hidden_states),
-                                             sampling_metadata)
-        else:
-            next_tokens = self.sampler(self.lm_head.weight, hidden_states,
-                                       sampling_metadata)
+        next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
     def load_weights(self,

@@ -4,7 +4,8 @@ import torch
 from torch.nn.parameter import Parameter
 
 from aphrodite._C import ops
-from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
+from aphrodite.modeling.layers.linear import (LinearMethodBase,
+                                              set_weight_attrs)
 from aphrodite.modeling.layers.quantization.base_config import (
     QuantizationConfig)
 
@@ -23,9 +24,9 @@ class MarlinConfig(QuantizationConfig):
         self.group_size = group_size
         if self.group_size != 128 and self.group_size != -1:
             raise ValueError(
-                "Currently, only group size 128 and -1 (channelwise) is "
-                f"supported for Marlin, but got group_size of {self.group_size}"
-            )
+                "Currently, only group size 128 and -1 (channelwise) "
+                "is supported for Marlin, but got group_size of "
+                f"{self.group_size}")
 
         # 4 Bits packed into 32 bit datatype.
         self.pack_factor = 32 // 4
@@ -39,15 +40,15 @@ class MarlinConfig(QuantizationConfig):
         # Min in_features dim
         self.min_k_threads = 128
 
-        # Max parallel problems to solve at once (improves large batch
-        # performance)
+        # Max parallel problems to solve at once (improves large
+        # batch performance)
         self.max_parallel = 16
 
         # Permutation length used by the marlin kernels.
         self.perm_len = 1024
 
     def __repr__(self) -> str:
-        return f"MarlinConfig(group_size={self.group_size}"
+        return f"MarlinConfig(group_size={self.group_size})"
 
     @classmethod
     def get_name(cls) -> str:
@@ -78,10 +79,13 @@ class MarlinConfig(QuantizationConfig):
         return []
 
     def merge_weight(self) -> bool:
-        return False
+        return True
 
-    def rope_style(self) -> Optional[bool]:
-        return None
+    def quant_vocab(self) -> List[bool]:
+        return [False, False]
+
+    def support_fused_moe(self) -> bool:
+        return False
 
 
 class MarlinLinearMethod(LinearMethodBase):
@@ -112,27 +116,26 @@ class MarlinLinearMethod(LinearMethodBase):
         # Validate output_size_per_partition
         if output_size_per_partition % self.quant_config.min_n_threads != 0:
             raise ValueError(
-                "Weight output_size_per_partition = "
+                f"Weight output_size_per_partition = "
                 f"{output_size_per_partition} is not divisible by "
                 f"min_n_threads = {self.quant_config.min_n_threads}.")
         if output_size_per_partition % self.quant_config.pack_factor != 0:
             raise ValueError(
                 f"Weight output_size_per_partition = "
-                f"{output_size_per_partition} is not divisible by pack_factor "
-                f"= {self.quant_config.pack_factor}.")
+                f"{output_size_per_partition} is not divisible by "
+                f"pack_factor = {self.quant_config.pack_factor}.")
 
         # Validate input_size_per_partition
         if input_size_per_partition % self.quant_config.min_k_threads != 0:
             raise ValueError(
-                f"Weight input_size_per_partition = {input_size_per_partition}"
-                " is not divisible by min_k_threads = "
-                f"{self.quant_config.min_k_threads}.")
+                f"Weight input_size_per_partition = "
+                f"{input_size_per_partition} is not divisible by "
+                f"min_k_threads = {self.quant_config.min_k_threads}.")
         if (self.quant_config.group_size != -1 and
                 input_size_per_partition % self.quant_config.group_size != 0):
-            raise ValueError(
-                f"Weight input_size_per_partition = {input_size_per_partition} "
-                "is not divisible by group_size = "
-                f"{self.quant_config.group_size}.")
+            raise ValueError(f"Weight input_size_per_partition = "
+                             f"{input_size_per_partition} is not divisible by "
+                             f"group_size = {self.quant_config.group_size}.")
 
         # Check that we have at least 4 tiles horizontally in the shard
         num_tiles_per_perm = self.quant_config.perm_len // (
@@ -225,3 +228,10 @@ class MarlinLinearMethod(LinearMethodBase):
             output.add_(bias)  # In-place add
 
         return output
+
+    def apply_moe_weights(self, w1: Dict[str,
+                                         torch.Tensor], w2: Dict[str,
+                                                                 torch.Tensor],
+                          x: torch.Tensor, gating_output: torch.Tensor,
+                          topk: int, renormalize: bool) -> torch.Tensor:
+        raise NotImplementedError

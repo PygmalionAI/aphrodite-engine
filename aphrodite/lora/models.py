@@ -11,7 +11,7 @@ import torch
 from torch import nn
 
 from aphrodite.common.config import LoRAConfig
-from aphrodite.common.utils import LRUCache, in_wsl
+from aphrodite.common.utils import LRUCache, is_pin_memory_available
 
 from aphrodite.lora.layers import (BaseLayerWithLoRA, LoRAMapping, from_layer,
                                    from_layer_logits_processor)
@@ -143,7 +143,7 @@ class LoRAModel:
         embedding_padding_modules: Optional[List[str]] = None,
     ) -> "LoRAModel":
         """Create a LoRAModel from a dictionary of tensors."""
-        pin_memory = str(device) == "cpu" and not in_wsl()
+        pin_memory = str(device) == "cpu" and not is_pin_memory_available()
         loras: Dict[str, LoRALayerWeights] = {}
         for tensor_name, tensor in tensors.items():
             result = parse_fine_tuned_lora_name(tensor_name)

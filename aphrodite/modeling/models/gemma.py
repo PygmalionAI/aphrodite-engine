@@ -15,16 +15,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only Gemma model compatible with HuggingFace weights."""
-
+from functools import lru_cache
 from typing import List, Optional, Tuple
 
 import torch
 from torch import nn
 from transformers import GemmaConfig
 
-from aphrodite.modeling.metadata import InputMetadata
+from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.modeling.layers.activation import GeluAndMul
-from aphrodite.modeling.layers.attention import Attention
 from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (
     LinearMethodBase,
@@ -34,12 +33,13 @@ from aphrodite.modeling.layers.linear import (
     ColumnParallelLinear,
 )
 from aphrodite.modeling.layers.rotary_embedding import get_rope
-from aphrodite.modeling.layers.sampler import Sampler, QuantSampler
+from aphrodite.modeling.layers.logits_processor import LogitsProcessor
+from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding,
     ParallelLMHead,
 )
-from aphrodite.modeling.megatron.parallel_state import (
+from aphrodite.distributed import (
     get_tensor_model_parallel_world_size, )
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (
@@ -48,7 +48,23 @@ from aphrodite.modeling.hf_downloader import (
 )
 from aphrodite.common.sequence import SamplerOutput
 
-KVCache = Tuple[torch.Tensor, torch.Tensor]
+
+@lru_cache(maxsize=None)
+def _get_gemma_act_fn(
+    hidden_act: Optional[str],
+    hidden_activation: Optional[str],
+) -> nn.Module:
+    if hidden_activation is None:
+        if hidden_act is not None:
+            hidden_activation = hidden_act
+        return GeluAndMul(approximate="none")
+    elif hidden_activation == "gelu_pytorch_tanh":
+        return GeluAndMul(approximate="tanh")
+    elif hidden_activation == "gelu":
+        return GeluAndMul(approximate="none")
+    else:
+        raise ValueError(f"Activation function {hidden_act} is not "
+                         "supported for Gemma models.")
 
 
 class GemmaMLP(nn.Module):
@@ -57,6 +73,8 @@ class GemmaMLP(nn.Module):
         self,
         hidden_size: int,
         intermediate_size: int,
+        hidden_act: Optional[str] = None,
+        hidden_activation: Optional[str] = None,
         linear_method: Optional[LinearMethodBase] = None,
     ) -> None:
         super().__init__()
@@ -89,7 +107,7 @@ class GemmaMLP(nn.Module):
             bias=False,
             linear_method=linear_method,
         )
-        self.act_fn = GeluAndMul()
+        self.act_fn = _get_gemma_act_fn(hidden_act, hidden_activation)
 
     def forward(self, x):
         if self.merge_weight:
@@ -192,8 +210,8 @@ class GemmaAttention(nn.Module):
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
-        kv_cache: KVCache,
-        input_metadata: InputMetadata,
+        kv_cache: torch.Tensor,
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         if self.merge_weight:
             qkv, _ = self.qkv_proj(hidden_states)
@@ -204,8 +222,7 @@ class GemmaAttention(nn.Module):
             k, _ = self.k_proj(hidden_states)
             v, _ = self.v_proj(hidden_states)
         q, k = self.rotary_emb(positions, q, k)
-        k_cache, v_cache = kv_cache
-        attn_output = self.attn(q, k, v, k_cache, v_cache, input_metadata)
+        attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         output, _ = self.o_proj(attn_output)
         return output
 
@@ -231,6 +248,8 @@ class GemmaDecoderLayer(nn.Module):
         self.mlp = GemmaMLP(
             hidden_size=self.hidden_size,
             intermediate_size=config.intermediate_size,
+            hidden_act=config.hidden_act,
+            hidden_activation=getattr(config, "hidden_activation", None),
             linear_method=linear_method,
         )
         self.input_layernorm = RMSNorm(config.hidden_size,
@@ -242,8 +261,8 @@ class GemmaDecoderLayer(nn.Module):
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
-        kv_cache: KVCache,
-        input_metadata: InputMetadata,
+        kv_cache: torch.Tensor,
+        attn_metadata: AttentionMetadata,
         residual: Optional[torch.Tensor],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # Self Attention
@@ -257,7 +276,7 @@ class GemmaDecoderLayer(nn.Module):
             positions=positions,
             hidden_states=hidden_states,
             kv_cache=kv_cache,
-            input_metadata=input_metadata,
+            attn_metadata=attn_metadata,
         )
 
         # Fully Connected
@@ -286,16 +305,22 @@ class GemmaModel(nn.Module):
         ])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
+        # Normalize the embedding by sqrt(hidden_size)
+        # The normalizer's data type should be downcasted to the model's
+        # data type such as bfloat16, not float32.
+        # See https://github.com/huggingface/transformers/pull/29402
+        normalizer = self.config.hidden_size**0.5
+        self.register_buffer("normalizer", torch.tensor(normalizer))
+
     def forward(
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        kv_caches: List[KVCache],
-        input_metadata: InputMetadata,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         hidden_states = self.embed_tokens(input_ids)
-        # Normalize the embedding by sqrt(hidden_size)
-        hidden_states *= self.config.hidden_size**0.5
+        hidden_states *= self.normalizer
 
         residual = None
         for i in range(len(self.layers)):
@@ -304,7 +329,7 @@ class GemmaModel(nn.Module):
                 positions,
                 hidden_states,
                 kv_caches[i],
-                input_metadata,
+                attn_metadata,
                 residual,
             )
         hidden_states, _ = self.norm(hidden_states, residual)
@@ -325,33 +350,33 @@ class GemmaForCausalLM(nn.Module):
         self.lm_head = ParallelLMHead(config.vocab_size,
                                       config.hidden_size,
                                       linear_method=linear_method)
-        self.sampler = Sampler(config.vocab_size)
-        self.quant_sampler = QuantSampler(config.vocab_size)
+        self.logits_processor = LogitsProcessor(config.vocab_size)
+        self.sampler = Sampler()
 
     @torch.no_grad()
     def forward(
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        kv_caches: List[KVCache],
-        input_metadata: InputMetadata,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         hidden_states = self.model(input_ids, positions, kv_caches,
-                                   input_metadata)
+                                   attn_metadata)
         return hidden_states
+
+    def compute_logits(self, hidden_states: torch.Tensor,
+                       sampling_metadata: SamplingMetadata) -> torch.Tensor:
+        logits = self.logits_processor(self.lm_head, hidden_states,
+                                       sampling_metadata)
+        return logits
 
     def sample(
         self,
-        hidden_states: torch.Tensor,
+        logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        if (self.linear_method is not None
-                and not self.linear_method.quant_config.merge_weight()):
-            next_tokens = self.quant_sampler(self.lm_head(hidden_states),
-                                             sampling_metadata)
-        else:
-            next_tokens = self.sampler(self.lm_head.weight, hidden_states,
-                                       sampling_metadata)
+        next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
     def load_weights(
@@ -400,6 +425,8 @@ class GemmaForCausalLM(nn.Module):
                 weight_loader(param, loaded_weight, shard_id)
                 break
             else:
+                if "lm_head.weight" in name:
+                    continue
                 # Skip loading extra layer for lora models.
                 if "lm_head" in name and name not in params_dict:
                     continue

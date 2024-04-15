@@ -18,6 +18,7 @@ from aphrodite.modeling.layers.quantization.quip_utils import (
 
 class QuipConfig(QuantizationConfig):
     """Config class for Quip.
+
     Reference: https://cornell-relaxml.github.io/quip-sharp/
     """
 
@@ -64,12 +65,16 @@ class QuipConfig(QuantizationConfig):
     def merge_weight(self) -> bool:
         return False
 
-    def rope_style(self) -> Optional[bool]:
-        return None
+    def quant_vocab(self) -> List[bool]:
+        return [False, False]
+
+    def support_fused_moe(self) -> bool:
+        return False
 
 
 class QuipLinearMethod(LinearMethodBase):
     """Linear method for Quip.
+
     Args:
         quant_config: The Quip quantization config.
     """
@@ -199,3 +204,10 @@ class QuipLinearMethod(LinearMethodBase):
         out = out.view(*x.shape[:-1], out.shape[-1])
         out = out + bias if bias is not None else out
         return out
+
+    def apply_moe_weights(self, w1: Dict[str,
+                                         torch.Tensor], w2: Dict[str,
+                                                                 torch.Tensor],
+                          x: torch.Tensor, gating_output: torch.Tensor,
+                          topk: int, renormalize: bool) -> torch.Tensor:
+        raise NotImplementedError

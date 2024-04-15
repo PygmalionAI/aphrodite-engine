@@ -65,6 +65,12 @@ class BitsandBytesConfig(QuantizationConfig):
     def rope_style(self) -> Optional[bool]:
         return None
 
+    def quant_vocab(self) -> List[bool]:
+        return [False, False]
+
+    def support_fused_moe(self) -> bool:
+        return False
+
     @staticmethod
     def get_config_filenames() -> List[str]:
         return [
@@ -209,6 +215,13 @@ class BNBLinearMethod(LinearMethodBase):
                 del state.CB
                 weight.data = state.CxB
             return out
+
+    def apply_moe_weights(self, w1: Dict[str,
+                                         torch.Tensor], w2: Dict[str,
+                                                                 torch.Tensor],
+                          x: torch.Tensor, gating_output: torch.Tensor,
+                          topk: int, renormalize: bool) -> torch.Tensor:
+        raise NotImplementedError
 
 
 T = TypeVar("T", bound="torch.nn.Module")

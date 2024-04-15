@@ -1,4 +1,3 @@
-"""Modeling utilities for Exllamav2 Quantization"""
 from typing import Any, Dict, List, Optional
 
 import torch
@@ -29,9 +28,7 @@ def make_group_map(q_groups, num_qrows):
 
 
 class Exl2Config(QuantizationConfig):
-    """Config class for Exl2.
-    Reference: https://github.com/turboderp/exllamav2
-    """
+    """Config class for Exl2."""
 
     def __repr__(self) -> str:
         return "Exl2Config()"
@@ -66,15 +63,16 @@ class Exl2Config(QuantizationConfig):
     def merge_weight(self) -> bool:
         return False
 
-    def quant_vocab(self) -> Optional[bool]:
-        return (False, True)
+    def quant_vocab(self) -> List[bool]:
+        return [False, True]
 
-    def rope_style(self) -> Optional[bool]:
-        return None
+    def support_fused_moe(self) -> bool:
+        return False
 
 
 class Exl2LinearMethod(LinearMethodBase):
     """Linear method for Exl2.
+
     Args:
         quant_config: The Exl2 quantization config.
     """
@@ -86,22 +84,23 @@ class Exl2LinearMethod(LinearMethodBase):
                        output_partition_sizes: List[int], input_size: int,
                        output_size: int,
                        params_dtype: torch.dtype) -> Dict[str, Any]:
-        output_size_per_partition = sum(output_partition_sizes)
-        if (input_size != input_size_per_partition
-                or output_size != output_size_per_partition):
-            raise ValueError(
-                "Currently exl2 doesn't support tensor parallel yet")
         # The shape of weight is unknown until load state dict
         # q_groups, q_invperm, q_scale, q_scale_max, q_weight, q_groups
         state_dict = {"exllama_state": 0}
         qweight = torch.nn.parameter.UninitializedParameter(
             requires_grad=False)
-        set_weight_attrs(qweight, {
-            "input_dim": 0,
-            "output_dim": 1,
-        })
+        set_weight_attrs(qweight, {"output_dim": 1, "ignore_warning": True})
         state_dict["q_weight"] = qweight
-        for name in ["q_groups", "q_invperm", "q_scale", "q_scale_max"]:
+        qscale = torch.nn.parameter.UninitializedParameter(requires_grad=False)
+        set_weight_attrs(
+            qscale, {
+                "output_dim": 1,
+                "packed_dim": 1,
+                "pack_factor": 8,
+                "ignore_warning": True
+            })
+        state_dict["q_scale"] = qscale
+        for name in ["q_groups", "q_invperm", "q_scale_max"]:
             fake_weight = torch.nn.parameter.UninitializedParameter(
                 requires_grad=False)
             set_weight_attrs(fake_weight, {"ignore_warning": True})
@@ -118,8 +117,9 @@ class Exl2LinearMethod(LinearMethodBase):
         if weights["exllama_state"] == 0:
             weights["q_scale_max"] /= 256
             weights["q_invperm"] = weights["q_invperm"].short()
-            weights["q_perm"] = torch.argsort(weights["q_invperm"]).to(
-                torch.short)
+            if "q_perm" not in weights:
+                weights["q_perm"] = torch.argsort(weights["q_invperm"]).to(
+                    torch.short)
             if "q_group_map" not in weights:
                 weights["q_group_map"] = make_group_map(
                     weights["q_groups"], weights["q_weight"].shape[0])
@@ -138,3 +138,10 @@ class Exl2LinearMethod(LinearMethodBase):
         if bias is not None:
             output = output + bias
         return output.reshape(out_shape)
+
+    def apply_moe_weights(self, w1: Dict[str,
+                                         torch.Tensor], w2: Dict[str,
+                                                                 torch.Tensor],
+                          x: torch.Tensor, gating_output: torch.Tensor,
+                          topk: int, renormalize: bool) -> torch.Tensor:
+        raise NotImplementedError

@@ -1,18 +1,14 @@
 import time
-from typing import Dict, Iterable, List, Optional, Tuple, Type, Union
+from typing import Iterable, List, Optional, Tuple, Type, Union
 from loguru import logger
 from transformers import PreTrainedTokenizer
 
 import aphrodite
 from aphrodite.lora.request import LoRARequest
-from aphrodite.common.config import (
-    CacheConfig,
-    DeviceConfig,
-    ModelConfig,
-    ParallelConfig,
-    SchedulerConfig,
-    LoRAConfig,
-)
+from aphrodite.common.config import (CacheConfig, DeviceConfig, ModelConfig,
+                                     ParallelConfig, SchedulerConfig,
+                                     LoRAConfig, VisionLanguageConfig,
+                                     SpeculativeConfig)
 from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.executor.executor_base import ExecutorBase
@@ -20,18 +16,12 @@ from aphrodite.engine.metrics import StatLogger, Stats
 from aphrodite.engine.ray_tools import (initialize_ray_cluster)
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.common.sequence import (
-    Logprob,
-    SamplerOutput,
-    Sequence,
-    SequenceGroup,
-    SequenceGroupOutput,
-    SequenceOutput,
-    SequenceStatus,
-)
-from aphrodite.transformers_utils.tokenizer import (detokenize_incrementally)
+from aphrodite.common.sequence import (SamplerOutput, Sequence, SequenceGroup,
+                                       SequenceGroupOutput, SequenceOutput,
+                                       SequenceStatus, MultiModalData)
 from aphrodite.transformers_utils.tokenizer_group import (BaseTokenizerGroup,
                                                           get_tokenizer_group)
+from aphrodite.transformers_utils.detokenizer import Detokenizer
 from aphrodite.common.utils import (
     Counter, )
 from aphrodite.common.logger import setup_logger
@@ -62,7 +52,11 @@ class AphroditeEngine:
         parallel_config: The configuration related to distributed execution.
         scheduler_config: The configuration related to the request scheduler.
         device_config: The configuration related to the device.
-        lora_config: The configuration related to LoRA.
+        lora_config (Optional): The configuration related to serving multi-LoRA.
+        vision_language_config (Optional): The configuration related to vision
+            language models.
+        speculative_config (Optional): The configuration related to speculative
+            decoding.
         executor_class: The model executor class for managing distributed
             execution.
         log_stats: Whether to log statistics.
@@ -76,6 +70,8 @@ class AphroditeEngine:
         scheduler_config: SchedulerConfig,
         device_config: DeviceConfig,
         lora_config: Optional[LoRAConfig],
+        vision_language_config: Optional[VisionLanguageConfig],
+        speculative_config: Optional[SpeculativeConfig],
         executor_class: Type[ExecutorBase],
         log_stats: bool,
     ) -> None:
@@ -83,6 +79,7 @@ class AphroditeEngine:
             f"Initializing the Aphrodite Engine (v{aphrodite.__version__}) "
             "with the following config:\n"
             f"Model = {model_config.model!r}\n"
+            f"Speculative Config = {speculative_config!r}\n"
             f"DataType = {model_config.dtype}\n"
             f"Model Load Format = {model_config.load_format}\n"
             f"Number of GPUs = {parallel_config.tensor_parallel_size}\n"
@@ -92,25 +89,37 @@ class AphroditeEngine:
             f"Context Length = {model_config.max_model_len}\n"
             f"Enforce Eager Mode = {model_config.enforce_eager}\n"
             f"KV Cache Data Type = {cache_config.cache_dtype}\n"
-            # f"KV Cache Params Path = {cache_config.cache_quant_params_path}\n"
+            f"KV Cache Params Path = {model_config.quantization_param_path}\n"
             f"Device = {device_config.device}")
         # TODO: Print more configs in debug mode.
 
         self.model_config = model_config
         self.cache_config = cache_config
         self.lora_config = lora_config
+        self.vision_language_config = vision_language_config
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
         self.device_config = device_config
+        self.speculative_config = speculative_config
         self.log_stats = log_stats
         self._verify_args()
 
         self._init_tokenizer()
+        self.detokenizer = Detokenizer(self.tokenizer)
         self.seq_counter = Counter()
 
-        self.model_executor = executor_class(model_config, cache_config,
-                                             parallel_config, scheduler_config,
-                                             device_config, lora_config)
+        self.model_executor = executor_class(
+            model_config=model_config,
+            cache_config=cache_config,
+            parallel_config=parallel_config,
+            scheduler_config=scheduler_config,
+            device_config=device_config,
+            lora_config=lora_config,
+            vision_language_config=vision_language_config,
+            speculative_config=speculative_config,
+        )
+
+        self._initialize_kv_caches()
 
         # Ping the tokenizer to ensure it is loaded if
         # it runs on a separate process.
@@ -129,26 +138,50 @@ class AphroditeEngine:
             )
             self.stat_logger.info("cache_config", self.cache_config)
 
+    def _initialize_kv_caches(self) -> None:
+        """Initialize the KV cache in the worker(s).
+        The workers will determine the number of blocks in both the GPU cache
+        and the swap CPU cache.
+        """
+        num_gpu_blocks, num_cpu_blocks = (
+            self.model_executor.determine_num_available_blocks())
+
+        if self.cache_config.num_gpu_blocks_override is not None:
+            num_gpu_blocks_override = self.cache_config.num_gpu_blocks_override
+            logger.info(f"Overriding {num_gpu_blocks=} with "
+                        f"{num_gpu_blocks_override=}")
+            num_gpu_blocks = num_gpu_blocks_override
+
+        self.cache_config.num_gpu_blocks = num_gpu_blocks
+        self.cache_config.num_cpu_blocks = num_cpu_blocks
+
+        self.model_executor.initialize_cache(num_gpu_blocks, num_cpu_blocks)
+
     @classmethod
     def from_engine_args(cls, engine_args: EngineArgs) -> "AphroditeEngine":
         """Creates an LLM engine from the engine arguments."""
         # Create the engine configs.
-        engine_configs = engine_args.create_engine_configs()
-        parallel_config = engine_configs[2]
+        engine_config = engine_args.create_engine_config()
 
         # Initialize the cluster and specify the executor class.
-        if parallel_config.worker_use_ray:
-            initialize_ray_cluster(parallel_config)
+        if engine_config.device_config.device_type == "neuron":
+            from aphrodite.executor.neuron_executor import NeuronExecutor
+            executor_class = NeuronExecutor
+        elif engine_config.device_config.device_type == "cpu":
+            from aphrodite.executor.cpu_executor import CPUExecutor
+            executor_class = CPUExecutor
+        elif engine_config.parallel_config.worker_use_ray:
+            initialize_ray_cluster(engine_config.parallel_config)
             from aphrodite.executor.ray_gpu_executor import RayGPUExecutor
             executor_class = RayGPUExecutor
         else:
-            assert parallel_config.world_size == 1, (
+            assert engine_config.parallel_config.world_size == 1, (
                 "Ray is required if parallel_config.world_size > 1.")
             from aphrodite.executor.gpu_executor import GPUExecutor
             executor_class = GPUExecutor
 
         # Create the LLM engine.
-        engine = cls(*engine_configs,
+        engine = cls(**engine_config.to_dict(),
                      executor_class=executor_class,
                      log_stats=not engine_args.disable_log_stats)
         return engine
@@ -159,7 +192,7 @@ class AphroditeEngine:
         raise RuntimeError("AphroditeEngine should not be pickled!")
 
     def get_tokenizer(self) -> "PreTrainedTokenizer":
-        return self.tokenizer.get_lora_tokenizer()
+        return self.tokenizer.get_lora_tokenizer(None)
 
     def get_tokenizer_for_seq(self,
                               sequence: Sequence) -> "PreTrainedTokenizer":
@@ -178,6 +211,14 @@ class AphroditeEngine:
         init_kwargs.update(tokenizer_init_kwargs)
         self.tokenizer: BaseTokenizerGroup = get_tokenizer_group(
             self.parallel_config.tokenizer_pool_config, **init_kwargs)
+
+        if len(self.get_tokenizer()) != self.model_config.get_vocab_size():
+            logger.warning(
+                f"The tokenizer's vocabulary size {len(self.get_tokenizer())}"
+                f" does not match the model's vocabulary size "
+                f"{self.model_config.get_vocab_size()}. This might "
+                f"cause an error in decoding. Please change config.json "
+                "to match the tokenizer's vocabulary size.")
 
     def _verify_args(self) -> None:
         self.model_config.verify_with_parallel_config(self.parallel_config)
@@ -209,6 +250,7 @@ class AphroditeEngine:
         prompt_token_ids: Optional[List[int]] = None,
         arrival_time: Optional[float] = None,
         lora_request: Optional[LoRARequest] = None,
+        multi_modal_data: Optional[MultiModalData] = None,
     ) -> None:
         """Add a request to the engine's request pool.
 
@@ -225,6 +267,7 @@ class AphroditeEngine:
                 use the tokenizer to convert the prompts to token IDs.
             arrival_time: The arrival time of the request. If None, we use
                 the current monotonic time.
+            multi_modal_data: The multimodal data for the request.
 
         Details:
             - Set arrival_time to the current time if it is None.
@@ -287,10 +330,13 @@ class AphroditeEngine:
         # Defensive copy of SamplingParams, which are used by the sampler,
         # this doesn't deep-copy LogitsProcessor objects
         sampling_params = sampling_params.clone()
+        # Inject the eos token id into the sampling_params to support min_tokens
+        # processing
+        sampling_params.eos_token_id = seq.eos_token_id
 
         # Create the sequence group.
         seq_group = SequenceGroup(request_id, [seq], sampling_params,
-                                  arrival_time, lora_request)
+                                  arrival_time, lora_request, multi_modal_data)
 
         # Add the sequence group to the scheduler.
         self.scheduler.add_seq_group(seq_group)
@@ -379,17 +425,9 @@ class AphroditeEngine:
                                         outputs: SequenceGroupOutput) -> None:
         # Process prompt logprobs
         prompt_logprobs = outputs.prompt_logprobs
-        if prompt_logprobs is not None:
-            # We can pick any sequence for the prompt.
-            seq = next(iter(seq_group.seqs_dict.values()))
-            all_token_ids = seq.get_token_ids()
-            for i, prompt_logprobs_for_token in enumerate(prompt_logprobs):
-                self._decode_logprobs(
-                    seq,
-                    seq_group.sampling_params,
-                    prompt_logprobs_for_token,
-                    all_token_ids[:i],
-                )
+        if prompt_logprobs is not None and seq_group.sampling_params.detokenize:
+            self.detokenizer.decode_prompt_logprobs_inplace(
+                seq_group, prompt_logprobs)
             seq_group.prompt_logprobs = prompt_logprobs
 
         # Process samples
@@ -435,8 +473,12 @@ class AphroditeEngine:
             child_seqs.append((parent, parent))
 
         for seq, _ in child_seqs:
-            self._decode_sequence(seq, seq_group.sampling_params)
-            self._check_stop(seq, seq_group.sampling_params)
+            if seq_group.sampling_params.detokenize:
+                new_char_count = self.detokenizer.decode_sequence_inplace(
+                    seq, seq_group.sampling_params)
+            else:
+                new_char_count = 0
+            self._check_stop(seq, new_char_count, seq_group.sampling_params)
 
         # Non-beam search case
         if not seq_group.sampling_params.use_beam_search:
@@ -569,22 +611,22 @@ class AphroditeEngine:
         now = time.time()
         # Update the scheduled sequence groups with the model outputs.
         scheduled_seq_groups = scheduler_outputs.scheduled_seq_groups
-
-        # If prefix caching is enabled, mark all blocks in the sequence groups
-        # as completed so that future requests don't attempt to recompute them
-        if self.cache_config.context_shift:
-            for seq_group in scheduled_seq_groups:
-                self.scheduler.mark_blocks_as_computed(seq_group)
-
-        for seq_group, outputs in zip(scheduled_seq_groups, output):
-            self._process_sequence_group_outputs(seq_group, outputs)
+        for scheduled_seq_group, outputs in zip(scheduled_seq_groups, output):
+            seq_group = scheduled_seq_group.seq_group
+            seq_group.update_num_computed_tokens(
+                scheduled_seq_group.token_chunk_size)
+            # If uncomputed tokens > 0, it means prefill is chunked.
+            # We don't need to process outputs in that case.
+            if seq_group.get_num_uncomputed_tokens() == 0:
+                self._process_sequence_group_outputs(seq_group, outputs)
 
         # Free the finished sequence groups.
         self.scheduler.free_finished_seq_groups()
 
         # Create the outputs.
         request_outputs: List[RequestOutput] = []
-        for seq_group in scheduled_seq_groups:
+        for scheduled_seq_group in scheduled_seq_groups:
+            seq_group = scheduled_seq_group.seq_group
             seq_group.maybe_set_first_token_time(now)
             request_output = RequestOutput.from_seq_group(seq_group)
             request_outputs.append(request_output)
@@ -695,22 +737,25 @@ class AphroditeEngine:
         time_per_output_tokens = []
         time_e2e_requests = []
         if scheduler_outputs is not None:
-            prompt_run = scheduler_outputs.prompt_run
+            prompt_run = scheduler_outputs.num_prefill_groups > 0
 
             # Number of Tokens.
             if prompt_run:
                 num_prompt_tokens = sum(
-                    len(seq_group.prompt_token_ids)
-                    for seq_group in scheduler_outputs.scheduled_seq_groups)
+                    len(scheduled_seq_group.seq_group.prompt_token_ids)
+                    for scheduled_seq_group in
+                    scheduler_outputs.scheduled_seq_groups)
                 num_generation_tokens = sum(
-                    seq_group.num_seqs()
-                    for seq_group in scheduler_outputs.scheduled_seq_groups)
+                    scheduled_seq_group.seq_group.num_seqs()
+                    for scheduled_seq_group in
+                    scheduler_outputs.scheduled_seq_groups)
             else:
                 num_generation_tokens = scheduler_outputs.num_batched_tokens
 
             # Latency Timings.
             time_last_iters = []
-            for seq_group in scheduler_outputs.scheduled_seq_groups:
+            for scheduled_seq_group in scheduler_outputs.scheduled_seq_groups:
+                seq_group = scheduled_seq_group.seq_group
                 # Time since last token.
                 # (n.b. updates seq_group.metrics.last_token_time)
                 time_last_iters.append(seq_group.get_last_latency(now))
@@ -736,76 +781,43 @@ class AphroditeEngine:
             time_e2e_requests=time_e2e_requests,
         )
 
-    def _decode_logprobs(
-        self,
-        seq: Sequence,
-        prms: SamplingParams,
-        logprobs: Dict[int, Logprob],
-        all_input_ids: List[int],
-    ) -> None:
-        if not logprobs:
-            return
-        for token_id, sample_logprob in logprobs.items():
-            if sample_logprob.decoded_token is None and token_id != -1:
-                all_input_ids_with_logprob = all_input_ids[:-1] + [token_id]
-                (
-                    _,
-                    new_text,
-                    prefix_offset,
-                    read_offset,
-                ) = detokenize_incrementally(
-                    self.get_tokenizer_for_seq(seq),
-                    all_input_ids=all_input_ids_with_logprob,
-                    prev_tokens=seq.tokens,
-                    prefix_offset=seq.prefix_offset,
-                    read_offset=seq.read_offset,
-                    skip_special_tokens=prms.skip_special_tokens,
-                    spaces_between_special_tokens=prms.
-                    spaces_between_special_tokens,
-                )
-                sample_logprob.decoded_token = new_text
-
-    def _decode_sequence(self, seq: Sequence, prms: SamplingParams) -> None:
-        """Decodes the new token for a sequence."""
-        all_input_ids = seq.get_token_ids()
-        self._decode_logprobs(seq, prms, seq.output_logprobs[-1],
-                              all_input_ids)
-
-        (
-            new_tokens,
-            new_output_text,
-            prefix_offset,
-            read_offset,
-        ) = detokenize_incrementally(
-            self.get_tokenizer_for_seq(seq),
-            all_input_ids=all_input_ids,
-            prev_tokens=seq.tokens,
-            prefix_offset=seq.prefix_offset,
-            read_offset=seq.read_offset,
-            skip_special_tokens=prms.skip_special_tokens,
-            spaces_between_special_tokens=prms.spaces_between_special_tokens,
-        )
-        if seq.tokens is None:
-            seq.tokens = new_tokens
-        else:
-            seq.tokens.extend(new_tokens)
-        seq.prefix_offset = prefix_offset
-        seq.read_offset = read_offset
-        seq.output_text += new_output_text
-
-    def _check_stop(self, seq: Sequence,
+    def _check_stop(self, seq: Sequence, new_char_count: int,
                     sampling_params: SamplingParams) -> None:
-        """Stop the finished sequences."""
-        for stop_str in sampling_params.stop:
-            if seq.output_text.endswith(stop_str):
-                self._finalize_sequence(seq, sampling_params, stop_str)
-                seq.status = SequenceStatus.FINISHED_STOPPED
-                return
-        if seq.get_last_token_id() in sampling_params.stop_token_ids:
-            stop_str = self.get_tokenizer_for_seq(seq).convert_ids_to_tokens(
-                seq.get_last_token_id())
-            self._finalize_sequence(seq, sampling_params, stop_str)
+        """Stop the finished sequences.
+
+       new_char_count is the number of chars added to the
+           sequence's output text for the newly generated token
+        """
+
+        # Check if the minimum number of tokens has been generated yet;
+        # skip the stop string/token checks if not
+        if seq.get_output_len() < sampling_params.min_tokens:
+            return
+
+        # Check if the sequence has generated the EOS token.
+        if ((not sampling_params.ignore_eos)
+                and seq.get_last_token_id() == seq.eos_token_id):
             seq.status = SequenceStatus.FINISHED_STOPPED
+            return
+
+        # Check if a stop token was encountered.
+        # This assumes a single token produced per step.
+        last_token_id = seq.get_last_token_id()
+        if last_token_id in sampling_params.stop_token_ids:
+            if new_char_count and (
+                    not sampling_params.include_stop_str_in_output):
+                # Remove last token
+                seq.output_text = seq.output_text[:-new_char_count]
+            seq.status = SequenceStatus.FINISHED_STOPPED
+            seq.stop_reason = last_token_id
+            return
+
+        # Check if any stop strings are matched.
+        stop_str = self._check_stop_strings(seq, new_char_count,
+                                            sampling_params)
+        if stop_str is not None:
+            seq.status = SequenceStatus.FINISHED_STOPPED
+            seq.stop_reason = stop_str
             return
 
         # Check if the sequence has reached max_model_len.
@@ -818,22 +830,37 @@ class AphroditeEngine:
             seq.status = SequenceStatus.FINISHED_LENGTH_CAPPED
             return
 
-        # Check if the sequence has generated the EOS token.
-        if (not sampling_params.ignore_eos
-            ) and seq.get_last_token_id() == seq.eos_token_id:
-            seq.status = SequenceStatus.FINISHED_STOPPED
-            return
+    @staticmethod
+    def _check_stop_strings(seq: Sequence, new_char_count: int,
+                            sampling_params: SamplingParams) -> Optional[str]:
+        """Check if any stop strings are matched and truncate sequence
+        output text accordingly.
 
-    def _finalize_sequence(self, seq: Sequence,
-                           sampling_params: SamplingParams,
-                           stop_string: str) -> None:
-        if sampling_params.include_stop_str_in_output:
-            return
+        Returns the stop string if matched or else None.
+        """
+        if not new_char_count:
+            return None
 
-        if stop_string and seq.output_text.endswith(stop_string):
-            # Truncate the output text so that the stop string is
-            # not included in the output.
-            seq.output_text = seq.output_text[:-len(stop_string)]
+        for stop_str in sampling_params.stop:
+            stop_string_len = len(stop_str)
+            # Avoid searching already-searched text.
+            stop_index = seq.output_text.find(
+                stop_str, -new_char_count - stop_string_len)
+            if stop_index == -1:
+                continue
+
+            if sampling_params.include_stop_str_in_output:
+                # Truncate to end of stop string.
+                stop_index += stop_string_len
+                if stop_index >= len(seq.output_text):
+                    # No truncation required.
+                    return stop_str
+
+            # Truncate the output text to either the beginning
+            # or end of the stop string.
+            seq.output_text = seq.output_text[:stop_index]
+            return stop_str
+        return None
 
     def add_lora(self, lora_request: LoRARequest) -> bool:
         return self.model_executor.add_lora(lora_request)

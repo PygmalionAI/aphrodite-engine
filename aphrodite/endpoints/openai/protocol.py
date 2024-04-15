@@ -3,12 +3,12 @@
 import time
 from typing import Dict, List, Literal, Optional, Union
 
-from pydantic import (AliasChoices, BaseModel, Field, model_validator,
-                      root_validator)
 import torch
+from pydantic import (AliasChoices, BaseModel, Field, conint, model_validator,
+                      root_validator)
 
-from aphrodite.common.utils import random_uuid
 from aphrodite.common.sampling_params import SamplingParams
+from aphrodite.common.utils import random_uuid
 
 
 class ErrorResponse(BaseModel):
@@ -31,7 +31,7 @@ class ModelPermission(BaseModel):
     allow_fine_tuning: bool = False
     organization: str = "*"
     group: Optional[str] = None
-    is_blocking: str = False
+    is_blocking: bool = False
 
 
 class ModelCard(BaseModel):
@@ -71,6 +71,7 @@ class ChatCompletionRequest(BaseModel):
     typical_p: Optional[float] = 1.0
     n: Optional[int] = 1
     max_tokens: Optional[int] = None
+    min_tokens: Optional[int] = 0
     seed: Optional[int] = None
     stop: Optional[Union[str, List[str]]] = Field(default_factory=list)
     include_stop_str_in_output: Optional[bool] = False
@@ -113,6 +114,8 @@ class ChatCompletionRequest(BaseModel):
     def to_sampling_params(self) -> SamplingParams:
         if self.logprobs and not self.top_logprobs:
             raise ValueError("Top logprobs must be set when logprobs is.")
+        if self.top_k == 0:
+            self.top_k = -1
 
         logits_processors = None
         if self.logit_bias:
@@ -131,6 +134,7 @@ class ChatCompletionRequest(BaseModel):
         return SamplingParams(
             n=self.n,
             max_tokens=self.max_tokens,
+            min_tokens=self.min_tokens,
             logprobs=self.top_logprobs if self.logprobs else None,
             prompt_logprobs=self.top_logprobs if self.echo else None,
             temperature=self.temperature,
@@ -187,6 +191,7 @@ class CompletionRequest(BaseModel):
     prompt: Union[List[int], List[List[int]], str, List[str]]
     suffix: Optional[str] = None
     max_tokens: Optional[int] = 16
+    min_tokens: Optional[int] = 0
     temperature: Optional[float] = 1.0
     top_p: Optional[float] = 1.0
     tfs: Optional[float] = 1.0
@@ -231,6 +236,7 @@ class CompletionRequest(BaseModel):
     custom_token_bans: Optional[List[int]] = Field(default_factory=list)
     skip_special_tokens: Optional[bool] = True
     spaces_between_special_tokens: Optional[bool] = True
+    truncate_prompt_tokens: Optional[conint(ge=1)] = None
     grammar: Optional[str] = None
     length_penalty: Optional[float] = 1.0
     guided_json: Optional[Union[str, dict, BaseModel]] = None
@@ -241,6 +247,8 @@ class CompletionRequest(BaseModel):
 
     def to_sampling_params(self) -> SamplingParams:
         echo_without_generation = self.echo and self.max_tokens == 0
+        if self.top_k == 0:
+            self.top_k = -1
 
         logits_processors = None
         if self.logit_bias:
@@ -257,6 +265,7 @@ class CompletionRequest(BaseModel):
         return SamplingParams(
             n=self.n,
             max_tokens=self.max_tokens if not echo_without_generation else 1,
+            min_tokens=self.min_tokens,
             temperature=self.temperature,
             top_p=self.top_p,
             tfs=self.tfs,
@@ -290,6 +299,7 @@ class CompletionRequest(BaseModel):
             include_stop_str_in_output=self.include_stop_str_in_output,
             seed=self.seed,
             logits_processors=logits_processors,
+            truncate_prompt_tokens=self.truncate_prompt_tokens,
         )
 
     @model_validator(mode="before")
@@ -311,7 +321,7 @@ class LogProbs(BaseModel):
     text_offset: List[int] = Field(default_factory=list)
     token_logprobs: List[Optional[float]] = Field(default_factory=list)
     tokens: List[str] = Field(default_factory=list)
-    top_logprobs: Optional[List[Optional[Dict[int, float]]]] = None
+    top_logprobs: Optional[List[Optional[Dict[str, float]]]] = None
 
 
 class CompletionResponseChoice(BaseModel):
@@ -319,6 +329,13 @@ class CompletionResponseChoice(BaseModel):
     text: str
     logprobs: Optional[LogProbs] = None
     finish_reason: Optional[Literal["stop", "length"]] = None
+    stop_reason: Union[None, int, str] = Field(
+        default=None,
+        description=(
+            "The stop string or token id that caused the completion "
+            "to stop, None if the completion finished for some other reason "
+            "including encountering the EOS token"),
+    )
 
 
 class CompletionResponse(BaseModel):
@@ -335,6 +352,13 @@ class CompletionResponseStreamChoice(BaseModel):
     text: str
     logprobs: Optional[LogProbs] = None
     finish_reason: Optional[Literal["stop", "length"]] = None
+    stop_reason: Union[None, int, str] = Field(
+        default=None,
+        description=(
+            "The stop string or token id that caused the completion "
+            "to stop, None if the completion finished for some other reason "
+            "including encountering the EOS token"),
+    )
 
 
 class CompletionStreamResponse(BaseModel):
@@ -356,6 +380,7 @@ class ChatCompletionResponseChoice(BaseModel):
     message: ChatMessage
     logprobs: Optional[LogProbs] = None
     finish_reason: Optional[Literal["stop", "length"]] = None
+    stop_reason: Union[None, int, str] = None
 
 
 class ChatCompletionResponse(BaseModel):
@@ -377,6 +402,7 @@ class ChatCompletionResponseStreamChoice(BaseModel):
     delta: DeltaMessage
     logprobs: Optional[LogProbs] = None
     finish_reason: Optional[Literal["stop", "length"]] = None
+    stop_reason: Union[None, int, str] = None
 
 
 class ChatCompletionStreamResponse(BaseModel):

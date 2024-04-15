@@ -1,4 +1,5 @@
 """A layer that samples the next tokens from the model's outputs."""
+import itertools
 from typing import Dict, List, Tuple, Optional
 
 import torch
@@ -21,7 +22,7 @@ class Sampler(nn.Module):
     1. Discard the hidden states that are not used for sampling (i.e., all
         tokens except the final one in each prompt).
     2. Compute the logits for the next tokens.
-    3. Apply presence and frequency penalties.
+    3. Apply presence, frequency and repetition penalties.
     4. Apply temperature scaling.
     5. Apply top-p and top-k truncation.
     6. Sample the next tokens.
@@ -34,79 +35,76 @@ class Sampler(nn.Module):
         logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
+        assert logits is not None
+        _, vocab_size = logits.shape
+        output_metadata = OutputMetadata()
+        # Apply min_tokens penalty which sets stop tokens to -inf if min_tokens
+        # have not been generated yet
+        logits = _apply_min_tokens_penalty(logits, sampling_metadata)
 
-        return _perform_sampling(logits, sampling_metadata)
+        # Prepare sampling tensors with pinned memory to avoid blocking.
+        (sampling_tensors, do_temperatures, do_penalties, do_topks, do_topps,
+         do_topas, do_minps, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
+         do_typical_ps, do_quadratic,
+         do_mirostat) = (SamplingTensors.from_sampling_metadata(
+             sampling_metadata, vocab_size, logits.device, logits.dtype))
 
-def _perform_sampling(
-        logits: torch.Tensor,
-        sampling_metadata: SamplingMetadata) -> Optional[SamplerOutput]:
-    assert logits is not None
-    _, vocab_size = logits.shape
+        if do_penalties:
+            logits = _apply_penalties(logits, sampling_tensors.prompt_tokens,
+                                      sampling_tensors.output_tokens,
+                                      sampling_tensors.presence_penalties,
+                                      sampling_tensors.frequency_penalties,
+                                      sampling_tensors.repetition_penalties)
 
-    output_metadata = OutputMetadata()
+        if do_temperatures:
+            logits = _apply_temperature(logits, sampling_tensors.temperatures,
+                                        sampling_tensors.dynatemp_mins,
+                                        sampling_tensors.dynatemp_maxs,
+                                        sampling_tensors.dynatemp_exps)
 
-    # Prepare sampling tensors with pinned memory to avoid blocking.
-    (sampling_tensors, do_temperatures, do_penalties, do_topks, do_topps,
-     do_topas, do_minps, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
-     do_typical_ps, do_quadratic,
-     do_mirostat) = (SamplingTensors.from_sampling_metadata(
-         sampling_metadata, vocab_size, logits.device, logits.dtype))
+        if do_topks or do_topps or do_topas or do_minps:
+            logits = _apply_alphabet_soup(logits, sampling_tensors.top_ps,
+                                          sampling_tensors.top_ks,
+                                          sampling_tensors.top_as,
+                                          sampling_tensors.min_ps)
+        if do_tfss:
+            logits = _apply_tfs(logits, sampling_tensors.tfss)
+        if do_eta_cutoffs:
+            logits = _apply_eta_cutoff(logits, sampling_tensors.eta_cutoffs)
+        if do_epsilon_cutoffs:
+            logits = _apply_epsilon_cutoff(logits,
+                                           sampling_tensors.epsilon_cutoffs)
+        if do_typical_ps:
+            logits = _apply_typical_sampling(logits,
+                                             sampling_tensors.typical_ps)
+        if do_quadratic:
+            logits = _apply_quadratic_sampling(
+                logits, sampling_tensors.smoothing_factors,
+                sampling_tensors.smoothing_curves)
 
-    if do_penalties:
-        logits = _apply_penalties(logits, sampling_tensors.prompt_tokens,
-                                  sampling_tensors.output_tokens,
-                                  sampling_tensors.presence_penalties,
-                                  sampling_tensors.frequency_penalties,
-                                  sampling_tensors.repetition_penalties)
+        banned_tokens = _get_custom_token_bans(sampling_metadata)
+        assert len(banned_tokens) == logits.shape[0]
+        logits = _apply_token_bans(logits, banned_tokens)
+        if do_mirostat:
+            logits = _mirostat(logits, sampling_tensors, output_metadata)
 
-    if do_temperatures:
-        logits = _apply_temperature(logits, sampling_tensors.temperatures,
-                                    sampling_tensors.dynatemp_mins,
-                                    sampling_tensors.dynatemp_maxs,
-                                    sampling_tensors.dynatemp_exps)
+        # We use float32 for probabilities and log probabilities.
+        # Compute the probabilities.
+        probs = torch.softmax(logits, dim=-1, dtype=torch.float)
+        # Compute the log probabilities.
+        # Use log_softmax to ensure numerical stability.
+        logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
 
-    if do_topks or do_topps or do_topas or do_minps:
-        logits = _apply_alphabet_soup(logits, sampling_tensors.top_ps,
-                                      sampling_tensors.top_ks,
-                                      sampling_tensors.top_as,
-                                      sampling_tensors.min_ps)
-    if do_tfss:
-        logits = _apply_tfs(logits, sampling_tensors.tfss)
-    if do_eta_cutoffs:
-        logits = _apply_eta_cutoff(logits, sampling_tensors.eta_cutoffs)
-    if do_epsilon_cutoffs:
-        logits = _apply_epsilon_cutoff(logits,
-                                       sampling_tensors.epsilon_cutoffs)
-    if do_typical_ps:
-        logits = _apply_typical_sampling(logits, sampling_tensors.typical_ps)
-    if do_quadratic:
-        logits = _apply_quadratic_sampling(logits,
-                                           sampling_tensors.smoothing_factors,
-                                           sampling_tensors.smoothing_curves)
+        # Sample the next tokens.
+        sample_results = _sample(probs, logprobs, sampling_metadata,
+                                 sampling_tensors)
+        # Get the logprobs query results.
+        prompt_logprobs, sample_logprobs = _get_logprobs(
+            logprobs, sampling_metadata, sample_results)
+        return _build_sampler_output(sample_results, sampling_metadata,
+                                     prompt_logprobs, sample_logprobs,
+                                     output_metadata)
 
-    banned_tokens = _get_custom_token_bans(sampling_metadata)
-    assert len(banned_tokens) == logits.shape[0]
-    logits = _apply_token_bans(logits, banned_tokens)
-    if do_mirostat:
-        logits = _mirostat(logits, sampling_tensors, output_metadata)
-
-    # We use float32 for probabilities and log probabilities.
-    # Compute the probabilities.
-    probs = torch.softmax(logits, dim=-1, dtype=torch.float)
-    # Compute the log probabilities.
-    # Use log_softmax to ensure numerical stability.
-    logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
-
-    # Sample the next tokens.
-    sample_results = _sample(probs, logprobs, sampling_metadata,
-                             sampling_tensors)
-    # Get the logprobs query results.
-    prompt_logprobs, sample_logprobs = _get_logprobs(logprobs,
-                                                     sampling_metadata,
-                                                     sample_results)
-    return _build_sampler_output(sample_results, sampling_metadata,
-                                 prompt_logprobs, sample_logprobs,
-                                 output_metadata)
 
 def _get_bin_counts_and_mask(
     tokens: torch.Tensor,
@@ -168,6 +166,42 @@ def _apply_token_bans(logits: torch.Tensor,
         if not banned_token_ids:
             continue
         logits[i, banned_token_ids] = -float("inf")
+    return logits
+
+
+def _apply_min_tokens_penalty(
+    logits: torch.Tensor,
+    sampling_metadata: SamplingMetadata,
+) -> torch.Tensor:
+    # list of indices in logits that will be set to -inf
+    logits_to_penalize = []
+    start_idx = 0
+    for seq_ids, sampling_params in sampling_metadata.seq_groups:
+        min_tokens = sampling_params.min_tokens
+        if min_tokens > 0:
+            seqs_to_penalize = []
+            for i, seq_id in enumerate(seq_ids):
+                seq_data = sampling_metadata.seq_data[seq_id]
+                if len(seq_data.output_token_ids) < min_tokens:
+                    seqs_to_penalize.append(i)
+
+            if seqs_to_penalize:
+                # convert to the index into logits
+                seqs_to_penalize = [start_idx + i for i in seqs_to_penalize]
+                # use set() to remove any duplicates
+                token_ids_to_penalize = set(sampling_params.stop_token_ids +
+                                            [sampling_params.eos_token_id])
+                # itertools.product pairs each seq index with every token id
+                logits_to_penalize.extend(
+                    itertools.product(seqs_to_penalize, token_ids_to_penalize))
+
+        start_idx += len(seq_ids)
+
+    if logits_to_penalize:
+        # use zip and * to group indices along each dimension
+        # eg. [ (1,2), (1,3), (5,6) ] -> ( (1,1,5), (2,3,6) )
+        logits[tuple(zip(*logits_to_penalize))] = -float("inf")
+
     return logits
 
 
@@ -684,6 +718,23 @@ def _sample(
     #                                   sampling_tensors)
 
 
+def _get_ranks(x: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
+    """
+    This function calculates the ranks of the chosen tokens in a logprob tensor.
+    Args:
+        x (torch.Tensor): 2D logprob tensor of shape (N, M)
+                        where N is the no. of tokens and M is the vocab dim.
+        indices (torch.Tensor): List of chosen token indices.
+    Returns:
+        torch.Tensor: 1D tensor of shape (N,) where N is the no. of tokens.
+                    Each element in the returned tensor represents the rank 
+                    of the chosen token in the input logprob tensor.
+    """
+    vals = x[torch.arange(0, len(x), device=x.device, dtype=indices.dtype),
+             indices]
+    return (x > vals[:, None]).long().sum(1).add_(1)
+
+
 def _get_logprobs(
     logprobs: torch.Tensor,
     sampling_metadata: SamplingMetadata,
@@ -693,7 +744,8 @@ def _get_logprobs(
     # Prepare query indices
     batched_logprobs_query_seq_indices: List[int] = []
     batched_logprobs_query_token_indices: List[int] = []
-    largest_num_logprobs = 0
+    # at least get one logprob for each token
+    largest_num_logprobs = 1
     sample_idx = 0
     for i, (seq_group, sample_result) in enumerate(
             zip(sampling_metadata.seq_groups, sample_results)):
@@ -721,12 +773,18 @@ def _get_logprobs(
         sample_idx += num_parent_seqs
     assert sample_idx == logprobs.size(0)
 
+    batched_logprobs_query_seq_indices_gpu = torch.tensor(
+        batched_logprobs_query_seq_indices, device=logprobs.device)
+    batched_logprobs_query_token_indices_gpu = torch.tensor(
+        batched_logprobs_query_token_indices, device=logprobs.device)
     # Batched query for logprobs of selected token
     batched_logprobs_query_result = logprobs[[
-        batched_logprobs_query_seq_indices,
-        batched_logprobs_query_token_indices
+        batched_logprobs_query_seq_indices_gpu,
+        batched_logprobs_query_token_indices_gpu
     ]]
-
+    batched_ranks_query_result = _get_ranks(
+        logprobs[batched_logprobs_query_seq_indices_gpu],
+        batched_logprobs_query_token_indices_gpu)
     # Batched query for logprobs of topk tokens
     if largest_num_logprobs > 0:
         top_logprobs, top_token_ids = torch.topk(logprobs,
@@ -739,6 +797,8 @@ def _get_logprobs(
 
     batched_logprobs_query_result = batched_logprobs_query_result.cpu()
 
+    batched_ranks_query_result = batched_ranks_query_result.cpu()
+
     # Gather results
     result_prompt_logprobs: List[Optional[PromptLogprobs]] = []
     result_sample_logprobs: List[SampleLogprobs] = []
@@ -748,7 +808,6 @@ def _get_logprobs(
             zip(sampling_metadata.seq_groups, sample_results)):
         seq_ids, sampling_params = seq_group
         next_token_ids, parent_ids = sample_result
-
         # Prompt logprobs
         if (i < sampling_metadata.num_prompts
                 and sampling_params.prompt_logprobs is not None):
@@ -759,22 +818,26 @@ def _get_logprobs(
             for token_id in prompt_tokens[1:]:
                 prompt_logprobs_dict = {
                     token_id:
-                    batched_logprobs_query_result[query_result_idx].item()
+                    (batched_logprobs_query_result[query_result_idx].item(),
+                     batched_ranks_query_result[query_result_idx].item())
                 }
                 if num_logprobs > 0:
                     prompt_logprobs_dict.update(
-                        zip(top_token_ids[sample_idx, :num_logprobs].tolist(),
-                            top_logprobs[sample_idx, :num_logprobs].tolist()))
+                        zip(
+                            top_token_ids[sample_idx, :num_logprobs].tolist(),
+                            zip(
+                                top_logprobs[
+                                    sample_idx, :num_logprobs].tolist(),
+                                range(1, num_logprobs + 1))))
                 group_prompt_logprobs.append({
-                    token_id: Logprob(logprob)
-                    for token_id, logprob in prompt_logprobs_dict.items()
+                    token_id: Logprob(*logprob_rank)
+                    for token_id, logprob_rank in prompt_logprobs_dict.items()
                 })
                 sample_idx += 1
                 query_result_idx += 1
             result_prompt_logprobs.append(group_prompt_logprobs)
         else:
             result_prompt_logprobs.append(None)
-
         # Sample logprobs
         num_logprobs = sampling_params.logprobs
         if num_logprobs is None:
@@ -783,23 +846,25 @@ def _get_logprobs(
         for next_token_id, parent_id in zip(next_token_ids, parent_ids):
             sample_logprobs_dict = {
                 next_token_id:
-                batched_logprobs_query_result[query_result_idx].item()
+                (batched_logprobs_query_result[query_result_idx].item(),
+                 batched_ranks_query_result[query_result_idx].item())
             }
             query_result_idx += 1
-            if num_logprobs > 0:
+            if num_logprobs >= 0:
                 sample_logprobs_dict.update(
                     zip(
                         top_token_ids[sample_idx +
                                       parent_id, :num_logprobs].tolist(),
-                        top_logprobs[sample_idx +
-                                     parent_id, :num_logprobs].tolist()))
+                        zip(
+                            top_logprobs[sample_idx +
+                                         parent_id, :num_logprobs].tolist(),
+                            range(1, num_logprobs + 1))))
             group_sample_logprobs.append({
-                token_id: Logprob(logprob)
-                for token_id, logprob in sample_logprobs_dict.items()
+                token_id: Logprob(*logprob_rank)
+                for token_id, logprob_rank in sample_logprobs_dict.items()
             })
         result_sample_logprobs.append(group_sample_logprobs)
         sample_idx += len(seq_ids)
-
     return result_prompt_logprobs, result_sample_logprobs
 
 

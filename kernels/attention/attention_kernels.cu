@@ -16,27 +16,33 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- #ifdef USE_ROCM
- #include <hip/hip_runtime.h>
- #endif
- 
+
  #include <torch/extension.h>
  #include <ATen/cuda/CUDAContext.h>
  #include <c10/cuda/CUDAGuard.h>
  
  #include "attention_dtypes.h"
  #include "attention_utils.cuh"
- #ifdef ENABLE_FP8_E5M2
+ 
+ #if defined(ENABLE_FP8_E5M2)
  #include "../quantization/fp8_e5m2_kvcache/quant_utils.cuh"
+ #elif defined(ENABLE_FP8_E4M3)
+ #include "../quantization/fp8/amd_detail/quant_utils.cuh"
  #endif
  
  #include <algorithm>
+ 
+ #ifdef USE_ROCM
+   #include <hip/hip_bf16.h>
+   typedef __hip_bfloat16 __nv_bfloat16;
+ #endif
  
  #ifndef USE_ROCM
  #define WARP_SIZE 32
  #else
  #define WARP_SIZE warpSize
  #endif
+ 
  #define MAX(a, b) ((a) > (b) ? (a) : (b))
  #define MIN(a, b) ((a) < (b) ? (a) : (b))
  #define DIVIDE_ROUND_UP(a, b) (((a) + (b) - 1) / (b))
@@ -87,7 +93,7 @@
    int HEAD_SIZE,
    int BLOCK_SIZE,
    int NUM_THREADS,
-   bool IS_FP8_E5M2_KV_CACHE,
+   bool IS_FP8_KV_CACHE,
    int PARTITION_SIZE = 0> // Zero means no partitioning.
  __device__ void paged_attention_kernel(
    float* __restrict__ exp_sums,           // [num_seqs, num_heads, max_num_partitions]
@@ -104,7 +110,8 @@
    const float* __restrict__ alibi_slopes, // [num_heads]
    const int q_stride,
    const int kv_block_stride,
-   const int kv_head_stride) {
+   const int kv_head_stride,
+   const float kv_scale) {
    const int seq_idx = blockIdx.y;
    const int partition_idx = blockIdx.z;
    const int max_num_partitions = gridDim.z;
@@ -151,7 +158,7 @@
    constexpr int VEC_SIZE = MAX(16 / (THREAD_GROUP_SIZE * sizeof(scalar_t)), 1);
    using K_vec = typename Vec<scalar_t, VEC_SIZE>::Type;
    using Q_vec = typename Vec<scalar_t, VEC_SIZE>::Type;
- #ifdef ENABLE_FP8_E5M2
+ #if defined(ENABLE_FP8_E5M2) || defined(ENABLE_FP8_E4M3)
    using Quant_vec = typename Vec<cache_t, VEC_SIZE>::Type;
  #endif
  
@@ -217,11 +224,16 @@
          const int vec_idx = thread_group_offset + j * THREAD_GROUP_SIZE;
          const int offset1 = (vec_idx * VEC_SIZE) / x;
          const int offset2 = (vec_idx * VEC_SIZE) % x;
-         if constexpr (IS_FP8_E5M2_KV_CACHE) {
- #ifdef ENABLE_FP8_E5M2
+         if constexpr (IS_FP8_KV_CACHE) {
+ #if defined(ENABLE_FP8_E5M2)
            Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(k_ptr + offset1 * BLOCK_SIZE * x + offset2);
            // Vector conversion from Quant_vec to K_vec.
            k_vecs[j] = fp8_e5m2_unscaled::vec_conversion<K_vec, Quant_vec>(k_vec_quant);
+ #elif defined(ENABLE_FP8_E4M3)
+           Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(k_ptr + offset1 * BLOCK_SIZE * x + offset2);
+           // Vector conversion from Quant_vec to K_vec. Use scaled_vec_conversion to convert FP8_E4M3 quantized k
+           // cache vec to k vec in higher precision (FP16, BFloat16, etc.)
+           k_vecs[j] = fp8_e4m3::scaled_vec_conversion<K_vec, Quant_vec>(k_vec_quant, kv_scale);
  #else
            assert(false);
  #endif
@@ -301,7 +313,7 @@
    constexpr int V_VEC_SIZE = MIN(16 / sizeof(scalar_t), BLOCK_SIZE);
    using V_vec = typename Vec<scalar_t, V_VEC_SIZE>::Type;
    using L_vec = typename Vec<scalar_t, V_VEC_SIZE>::Type;
- #ifdef ENABLE_FP8_E5M2
+ #if defined(ENABLE_FP8_E5M2) || defined(ENABLE_FP8_E4M3)
    using V_quant_vec = typename Vec<cache_t, V_VEC_SIZE>::Type;
  #endif
    using Float_L_vec = typename FloatVec<L_vec>::Type;
@@ -337,11 +349,16 @@
        if (row_idx < HEAD_SIZE) {
          const int offset = row_idx * BLOCK_SIZE + physical_block_offset;
          V_vec v_vec;
-         if constexpr (IS_FP8_E5M2_KV_CACHE) {
- #ifdef ENABLE_FP8_E5M2
+         if constexpr (IS_FP8_KV_CACHE) {
+ #if defined(ENABLE_FP8_E5M2)
            V_quant_vec v_quant_vec = *reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
            // Vector conversion from V_quant_vec to V_vec.
            v_vec = fp8_e5m2_unscaled::vec_conversion<V_vec, V_quant_vec>(v_quant_vec);
+ #elif defined(ENABLE_FP8_E4M3)
+           V_quant_vec v_quant_vec = *reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
+           // Vector conversion from V_quant_vec to V_vec. Use scaled_vec_conversion to convert
+           // FP8_E4M3 quantized v cache vec to v vec in higher precision (FP16, BFloat16, etc.)
+           v_vec = fp8_e4m3::scaled_vec_conversion<V_vec, V_quant_vec>(v_quant_vec, kv_scale);
  #else
            assert(false);
  #endif
@@ -351,6 +368,7 @@
          if (block_idx == num_context_blocks - 1) {
            // NOTE: When v_vec contains the tokens that are out of the context,
            // we should explicitly zero out the values since they may contain NaNs.
+           // See https://github.com/aphrodite-project/aphrodite/issues/641#issuecomment-1682544472
            scalar_t* v_vec_ptr = reinterpret_cast<scalar_t*>(&v_vec);
  #pragma unroll
            for (int j = 0; j < V_VEC_SIZE; j++) {
@@ -431,7 +449,7 @@
    int HEAD_SIZE,
    int BLOCK_SIZE,
    int NUM_THREADS,
-   bool IS_FP8_E5M2_KV_CACHE>
+   bool IS_FP8_KV_CACHE>
  __global__ void paged_attention_v1_kernel(
    scalar_t* __restrict__ out,             // [num_seqs, num_heads, head_size]
    const scalar_t* __restrict__ q,         // [num_seqs, num_heads, head_size]
@@ -445,11 +463,12 @@
    const float* __restrict__ alibi_slopes, // [num_heads]
    const int q_stride,
    const int kv_block_stride,
-   const int kv_head_stride) {
-   paged_attention_kernel<scalar_t, cache_t, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS, IS_FP8_E5M2_KV_CACHE>(
+   const int kv_head_stride,
+   const float kv_scale) {
+   paged_attention_kernel<scalar_t, cache_t, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS, IS_FP8_KV_CACHE>(
      /* exp_sums */ nullptr, /* max_logits */ nullptr,
      out, q, k_cache, v_cache, num_kv_heads, scale, block_tables, context_lens,
-     max_num_blocks_per_seq, alibi_slopes, q_stride, kv_block_stride, kv_head_stride);
+     max_num_blocks_per_seq, alibi_slopes, q_stride, kv_block_stride, kv_head_stride, kv_scale);
  }
  
  // Grid: (num_heads, num_seqs, max_num_partitions).
@@ -459,7 +478,7 @@
    int HEAD_SIZE,
    int BLOCK_SIZE,
    int NUM_THREADS,
-   bool IS_FP8_E5M2_KV_CACHE,
+   bool IS_FP8_KV_CACHE,
    int PARTITION_SIZE>
  __global__ void paged_attention_v2_kernel(
    float* __restrict__ exp_sums,           // [num_seqs, num_heads, max_num_partitions]
@@ -476,11 +495,12 @@
    const float* __restrict__ alibi_slopes, // [num_heads]
    const int q_stride,
    const int kv_block_stride,
-   const int kv_head_stride) {
-   paged_attention_kernel<scalar_t, cache_t, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS, IS_FP8_E5M2_KV_CACHE, PARTITION_SIZE>(
+   const int kv_head_stride,
+   const float kv_scale) {
+   paged_attention_kernel<scalar_t, cache_t, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS, IS_FP8_KV_CACHE, PARTITION_SIZE>(
      exp_sums, max_logits, tmp_out, q, k_cache, v_cache, num_kv_heads, scale,
      block_tables, context_lens, max_num_blocks_per_seq, alibi_slopes,
-     q_stride, kv_block_stride, kv_head_stride);
+     q_stride, kv_block_stride, kv_head_stride, kv_scale);
  }
  
  // Grid: (num_heads, num_seqs).
@@ -587,9 +607,9 @@
  #define LAUNCH_PAGED_ATTENTION_V1(HEAD_SIZE)                                                  \
    APHRODITE_DevFuncAttribute_SET_MaxDynamicSharedMemorySize(                                       \
      ((void*)aphrodite::paged_attention_v1_kernel<T, CACHE_T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS,   \
-       IS_FP8_E5M2_KV_CACHE>), shared_mem_size);                                               \
+       IS_FP8_KV_CACHE>), shared_mem_size);                                                    \
    aphrodite::paged_attention_v1_kernel<T, CACHE_T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS,             \
-   IS_FP8_E5M2_KV_CACHE><<<grid, block, shared_mem_size, stream>>>(                            \
+   IS_FP8_KV_CACHE><<<grid, block, shared_mem_size, stream>>>(                                 \
      out_ptr,                                                                                  \
      query_ptr,                                                                                \
      key_cache_ptr,                                                                            \
@@ -602,14 +622,15 @@
      alibi_slopes_ptr,                                                                         \
      q_stride,                                                                                 \
      kv_block_stride,                                                                          \
-     kv_head_stride);
+     kv_head_stride,                                                                           \
+     kv_scale);
  
  // TODO: Tune NUM_THREADS.
  template<
    typename T,
    typename CACHE_T,
    int BLOCK_SIZE,
-   bool IS_FP8_E5M2_KV_CACHE,
+   bool IS_FP8_KV_CACHE,
    int NUM_THREADS = 128>
  void paged_attention_v1_launcher(
    torch::Tensor& out,
@@ -621,7 +642,8 @@
    torch::Tensor& block_tables,
    torch::Tensor& context_lens,
    int max_context_len,
-   const c10::optional<torch::Tensor>& alibi_slopes) {
+   const c10::optional<torch::Tensor>& alibi_slopes,
+   float kv_scale) {
    int num_seqs = query.size(0);
    int num_heads = query.size(1);
    int head_size = query.size(2);
@@ -649,7 +671,7 @@
    int padded_max_context_len = DIVIDE_ROUND_UP(max_context_len, BLOCK_SIZE) * BLOCK_SIZE;
    int logits_size = padded_max_context_len * sizeof(float);
    int outputs_size = (NUM_WARPS / 2) * head_size * sizeof(float);
-   // Python-side check in aphrodite.task_handler.worker._check_if_can_support_max_seq_len
+   // Python-side check in aphrodite.worker.worker._check_if_can_support_max_seq_len
    // Keep that in sync with the logic here!
    int shared_mem_size = std::max(logits_size, outputs_size);
  
@@ -685,8 +707,8 @@
    }
  }
  
- #define CALL_V1_LAUNCHER(T, CACHE_T, BLOCK_SIZE, IS_FP8_E5M2_KV_CACHE)       \
-   paged_attention_v1_launcher<T, CACHE_T, BLOCK_SIZE, IS_FP8_E5M2_KV_CACHE>( \
+ #define CALL_V1_LAUNCHER(T, CACHE_T, BLOCK_SIZE, IS_FP8_KV_CACHE)            \
+   paged_attention_v1_launcher<T, CACHE_T, BLOCK_SIZE, IS_FP8_KV_CACHE>(      \
      out,                                                                     \
      query,                                                                   \
      key_cache,                                                               \
@@ -696,20 +718,21 @@
      block_tables,                                                            \
      context_lens,                                                            \
      max_context_len,                                                         \
-     alibi_slopes);
+     alibi_slopes,                                                            \
+     kv_scale);
  
  // NOTE: To reduce the compilation time, we omitted block sizes
  // 1, 2, 4, 64, 128, 256.
- #define CALL_V1_LAUNCHER_BLOCK_SIZE(T, CACHE_T, IS_FP8_E5M2_KV_CACHE) \
+ #define CALL_V1_LAUNCHER_BLOCK_SIZE(T, CACHE_T, IS_FP8_KV_CACHE)      \
    switch (block_size) {                                               \
      case 8:                                                           \
-       CALL_V1_LAUNCHER(T, CACHE_T, 8, IS_FP8_E5M2_KV_CACHE);          \
+       CALL_V1_LAUNCHER(T, CACHE_T, 8, IS_FP8_KV_CACHE);               \
        break;                                                          \
      case 16:                                                          \
-       CALL_V1_LAUNCHER(T, CACHE_T, 16, IS_FP8_E5M2_KV_CACHE);         \
+       CALL_V1_LAUNCHER(T, CACHE_T, 16, IS_FP8_KV_CACHE);              \
        break;                                                          \
      case 32:                                                          \
-       CALL_V1_LAUNCHER(T, CACHE_T, 32, IS_FP8_E5M2_KV_CACHE);         \
+       CALL_V1_LAUNCHER(T, CACHE_T, 32, IS_FP8_KV_CACHE);              \
        break;                                                          \
      default:                                                          \
        TORCH_CHECK(false, "Unsupported block size: ", block_size);     \
@@ -728,7 +751,8 @@
    int block_size,
    int max_context_len,
    const c10::optional<torch::Tensor>& alibi_slopes,
-   const std::string& kv_cache_dtype) {
+   const std::string& kv_cache_dtype,
+   float kv_scale) {
    if (kv_cache_dtype == "auto") {
      if (query.dtype() == at::ScalarType::Float) {
        CALL_V1_LAUNCHER_BLOCK_SIZE(float, float, false);
@@ -739,7 +763,7 @@
      } else {
        TORCH_CHECK(false, "Unsupported data type: ", query.dtype());
      }
-   } else if (kv_cache_dtype == "fp8_e5m2") {
+   } else if (kv_cache_dtype == "fp8") {
      if (query.dtype() == at::ScalarType::Float) {
        CALL_V1_LAUNCHER_BLOCK_SIZE(float, uint8_t, true);
      } else if (query.dtype() == at::ScalarType::Half) {
@@ -756,7 +780,7 @@
  
  #define LAUNCH_PAGED_ATTENTION_V2(HEAD_SIZE)                                                  \
    aphrodite::paged_attention_v2_kernel<T, CACHE_T, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS,             \
-   IS_FP8_E5M2_KV_CACHE, PARTITION_SIZE>                                                       \
+   IS_FP8_KV_CACHE, PARTITION_SIZE>                                                            \
    <<<grid, block, shared_mem_size, stream>>>(                                                 \
      exp_sums_ptr,                                                                             \
      max_logits_ptr,                                                                           \
@@ -772,7 +796,8 @@
      alibi_slopes_ptr,                                                                         \
      q_stride,                                                                                 \
      kv_block_stride,                                                                          \
-     kv_head_stride);                                                                          \
+     kv_head_stride,                                                                           \
+     kv_scale);                                                                                \
    aphrodite::paged_attention_v2_reduce_kernel<T, HEAD_SIZE, NUM_THREADS, PARTITION_SIZE>           \
    <<<reduce_grid, block, reduce_shared_mem_size, stream>>>(                                   \
      out_ptr,                                                                                  \
@@ -786,7 +811,7 @@
    typename T,
    typename CACHE_T,
    int BLOCK_SIZE,
-   bool IS_FP8_E5M2_KV_CACHE,
+   bool IS_FP8_KV_CACHE,
    int NUM_THREADS = 128,
    int PARTITION_SIZE = 512>
  void paged_attention_v2_launcher(
@@ -802,7 +827,8 @@
    torch::Tensor& block_tables,
    torch::Tensor& context_lens,
    int max_context_len,
-   const c10::optional<torch::Tensor>& alibi_slopes) {
+   const c10::optional<torch::Tensor>& alibi_slopes,
+   float kv_scale) {
    int num_seqs = query.size(0);
    int num_heads = query.size(1);
    int head_size = query.size(2);
@@ -872,8 +898,8 @@
    }
  }
  
- #define CALL_V2_LAUNCHER(T, CACHE_T, BLOCK_SIZE, IS_FP8_E5M2_KV_CACHE)           \
-   paged_attention_v2_launcher<T, CACHE_T, BLOCK_SIZE, IS_FP8_E5M2_KV_CACHE>(     \
+ #define CALL_V2_LAUNCHER(T, CACHE_T, BLOCK_SIZE, IS_FP8_KV_CACHE)                \
+   paged_attention_v2_launcher<T, CACHE_T, BLOCK_SIZE, IS_FP8_KV_CACHE>(          \
      out,                                                                         \
      exp_sums,                                                                    \
      max_logits,                                                                  \
@@ -886,20 +912,21 @@
      block_tables,                                                                \
      context_lens,                                                                \
      max_context_len,                                                             \
-     alibi_slopes);
+     alibi_slopes,                                                                \
+     kv_scale);
  
  // NOTE: To reduce the compilation time, we omitted block sizes
  // 1, 2, 4, 64, 128, 256.
- #define CALL_V2_LAUNCHER_BLOCK_SIZE(T, CACHE_T, IS_FP8_E5M2_KV_CACHE)       \
+ #define CALL_V2_LAUNCHER_BLOCK_SIZE(T, CACHE_T, IS_FP8_KV_CACHE)            \
    switch (block_size) {                                                     \
      case 8:                                                                 \
-       CALL_V2_LAUNCHER(T, CACHE_T, 8, IS_FP8_E5M2_KV_CACHE);                \
+       CALL_V2_LAUNCHER(T, CACHE_T, 8, IS_FP8_KV_CACHE);                     \
        break;                                                                \
      case 16:                                                                \
-       CALL_V2_LAUNCHER(T, CACHE_T, 16, IS_FP8_E5M2_KV_CACHE);               \
+       CALL_V2_LAUNCHER(T, CACHE_T, 16, IS_FP8_KV_CACHE);                    \
        break;                                                                \
      case 32:                                                                \
-       CALL_V2_LAUNCHER(T, CACHE_T, 32, IS_FP8_E5M2_KV_CACHE);               \
+       CALL_V2_LAUNCHER(T, CACHE_T, 32, IS_FP8_KV_CACHE);                    \
        break;                                                                \
      default:                                                                \
        TORCH_CHECK(false, "Unsupported block size: ", block_size);           \
@@ -921,7 +948,8 @@
    int block_size,
    int max_context_len,
    const c10::optional<torch::Tensor>& alibi_slopes,
-   const std::string& kv_cache_dtype) {
+   const std::string& kv_cache_dtype,
+   float kv_scale) {
    if (kv_cache_dtype == "auto") {
      if (query.dtype() == at::ScalarType::Float) {
        CALL_V2_LAUNCHER_BLOCK_SIZE(float, float, false);
@@ -932,7 +960,7 @@
      } else {
        TORCH_CHECK(false, "Unsupported data type: ", query.dtype());
      }
-   } else if (kv_cache_dtype == "fp8_e5m2") {
+   } else if (kv_cache_dtype == "fp8") {
      if (query.dtype() == at::ScalarType::Float) {
        CALL_V2_LAUNCHER_BLOCK_SIZE(float, uint8_t, true);
      } else if (query.dtype() == at::ScalarType::Half) {
@@ -951,4 +979,3 @@
  #undef MAX
  #undef MIN
  #undef DIVIDE_ROUND_UP
- 

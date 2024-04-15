@@ -60,8 +60,11 @@ class SqueezeLLMConfig(QuantizationConfig):
     def merge_weight(self) -> bool:
         return True
 
-    def rope_style(self) -> Optional[bool]:
-        return None
+    def quant_vocab(self) -> List[bool]:
+        return [False, False]
+
+    def support_fused_moe(self) -> bool:
+        return False
 
 
 class SqueezeLLMLinearMethod(LinearMethodBase):
@@ -74,14 +77,10 @@ class SqueezeLLMLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: SqueezeLLMConfig):
         self.quant_config = quant_config
 
-    def create_weights(
-        self,
-        input_size_per_partition: int,
-        output_partition_sizes: List[int],
-        input_size: int,
-        output_size: int,
-        params_dtype: torch.dtype,
-    ) -> Dict[str, Any]:
+    def create_weights(self, input_size_per_partition: int,
+                       output_partition_sizes: List[int], input_size: int,
+                       output_size: int,
+                       params_dtype: torch.dtype) -> Dict[str, Any]:
         if input_size_per_partition % self.quant_config.pack_factor != 0:
             raise ValueError(
                 "The input size is not aligned with the quantized "
@@ -139,3 +138,10 @@ class SqueezeLLMLinearMethod(LinearMethodBase):
         if bias is not None:
             out = out + bias
         return out.reshape(out_shape)
+
+    def apply_moe_weights(self, w1: Dict[str,
+                                         torch.Tensor], w2: Dict[str,
+                                                                 torch.Tensor],
+                          x: torch.Tensor, gating_output: torch.Tensor,
+                          topk: int, renormalize: bool) -> torch.Tensor:
+        raise NotImplementedError

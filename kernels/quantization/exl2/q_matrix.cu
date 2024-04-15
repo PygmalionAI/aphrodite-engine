@@ -350,7 +350,8 @@ void QMatrix::reconstruct(half* out)
 
     {
         gridDim.x = DIVIDE(width, BLOCK_KN_SIZE);
-        reconstruct_kernel<<<gridDim, blockDim>>>
+        const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+        reconstruct_kernel<<<gridDim, blockDim, 0, stream>>>
         (
             cuda_q_weight,
             cuda_q_perm,

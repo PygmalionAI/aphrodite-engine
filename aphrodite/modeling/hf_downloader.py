@@ -1,29 +1,48 @@
 """Utilities for downloading and initializing model weights."""
-import filelock
-import glob
 import fnmatch
+import glob
 import json
 import os
 from collections import defaultdict
-from typing import Any, Iterator, List, Optional, Tuple
-from loguru import logger
+from typing import Any, Iterable, Iterator, List, Optional, Tuple
 
 from accelerate import init_empty_weights
-from huggingface_hub import snapshot_download, HfFileSystem
+import filelock
+import huggingface_hub.constants
 import numpy as np
-from safetensors.torch import load_file, save_file, safe_open
 import torch
-from transformers import PretrainedConfig, AutoModelForCausalLM
+from huggingface_hub import HfFileSystem, snapshot_download
+from loguru import logger
+from safetensors.torch import load_file, safe_open, save_file
 from tqdm.auto import tqdm
+from transformers import PretrainedConfig, AutoModelForCausalLM
 
 from aphrodite.common.config import ModelConfig
-from aphrodite.common.logger import get_loading_progress_bar
 from aphrodite.common.gguf import GGUFReader, get_tensor_name_map, MODEL_ARCH_NAMES
-from aphrodite.modeling.layers.quantization import (get_quantization_config,
-                                                    QuantizationConfig)
+from aphrodite.common.logger import get_loading_progress_bar
+from aphrodite.modeling.layers.quantization import (QuantizationConfig,
+                                                    get_quantization_config)
+from aphrodite.modeling.layers.quantization.schema import QuantParamSchema
+from aphrodite.distributed import (get_tensor_model_parallel_rank,
+                                   get_tensor_model_parallel_world_size)
 
-_xdg_cache_home = os.getenv('XDG_CACHE_HOME', os.path.expanduser('~/.cache'))
-_aphrodite_filelocks_path = os.path.join(_xdg_cache_home, 'aphrodite/locks/')
+_xdg_cache_home = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
+_aphrodite_filelocks_path = os.path.join(_xdg_cache_home, "aphrodite/locks/")
+
+
+def enable_hf_transfer():
+    """automatically activates hf_transfer
+    """
+    if "HF_HUB_ENABLE_HF_TRANSFER" not in os.environ:
+        try:
+            # enable hf hub transfer if available
+            import hf_transfer  # type: ignore # noqa
+            huggingface_hub.constants.HF_HUB_ENABLE_HF_TRANSFER = True
+        except ImportError:
+            pass
+
+
+enable_hf_transfer()
 
 
 class Disabledtqdm(tqdm):
@@ -36,7 +55,7 @@ def get_lock(model_name_or_path: str, cache_dir: Optional[str] = None):
     lock_dir = cache_dir if cache_dir is not None else _aphrodite_filelocks_path
     os.makedirs(os.path.dirname(lock_dir), exist_ok=True)
     lock_file_name = model_name_or_path.replace("/", "-") + ".lock"
-    lock = filelock.FileLock(os.path.join(lock_dir, lock_file_name))
+    lock = filelock.SoftFileLock(os.path.join(lock_dir, lock_file_name))
     return lock
 
 
@@ -104,11 +123,13 @@ def get_quant_config(model_config: ModelConfig) -> QuantizationConfig:
     if not is_local:
         # Download the config files.
         with get_lock(model_name_or_path, model_config.download_dir):
-            hf_folder = snapshot_download(model_name_or_path,
-                                          revision=model_config.revision,
-                                          allow_patterns="*.json",
-                                          cache_dir=model_config.download_dir,
-                                          tqdm_class=Disabledtqdm)
+            hf_folder = snapshot_download(
+                model_name_or_path,
+                revision=model_config.revision,
+                allow_patterns="*.json",
+                cache_dir=model_config.download_dir,
+                tqdm_class=Disabledtqdm,
+            )
     else:
         hf_folder = model_name_or_path
     config_files = glob.glob(os.path.join(hf_folder, "*.json"))
@@ -173,11 +194,13 @@ def prepare_hf_model_weights(
         # Use file lock to prevent multiple processes from
         # downloading the same model weights at the same time.
         with get_lock(model_name_or_path, cache_dir):
-            hf_folder = snapshot_download(model_name_or_path,
-                                          allow_patterns=allow_patterns,
-                                          cache_dir=cache_dir,
-                                          tqdm_class=Disabledtqdm,
-                                          revision=revision)
+            hf_folder = snapshot_download(
+                model_name_or_path,
+                allow_patterns=allow_patterns,
+                cache_dir=cache_dir,
+                tqdm_class=Disabledtqdm,
+                revision=revision,
+            )
     else:
         hf_folder = model_name_or_path
     hf_weights_files: List[str] = []
@@ -252,8 +275,10 @@ def convert_gguf_to_state_dict(checkpoint, config):
 
     result = GGUFReader(checkpoint)
     with get_loading_progress_bar() as progress:
-        task = progress.add_task("[cyan]Converting GGUF tensors to PyTorch...",
-                                 total=len(result.tensors))
+        task = progress.add_task(
+            "[cyan]Converting GGUF tensors to PyTorch...",
+            total=len(result.tensors),
+        )
         for ts in result.tensors:
             try:
                 hf_name = gguf_to_hf_name_map[ts.name]
@@ -292,7 +317,8 @@ def hf_model_weights_iterator(
         cache_dir=cache_dir,
         load_format=load_format,
         fall_back_to_pt=fall_back_to_pt,
-        revision=revision)
+        revision=revision,
+    )
 
     if load_format == "npcache":
         # Currently np_cache only support *.bin checkpoints
@@ -341,6 +367,46 @@ def hf_model_weights_iterator(
             torch.cuda.empty_cache()
 
 
+def kv_cache_scales_loader(
+        filename: str, tp_rank: int, tp_size: int, num_hidden_layers: int,
+        model_type: Optional[str]) -> Iterable[Tuple[int, float]]:
+    """
+    A simple utility to read in KV cache scaling factors that have been
+    previously serialized to disk. Used by the model to populate the appropriate
+    KV cache scaling factors. The serialization should represent a dictionary
+    whose keys are the TP ranks and values are another dictionary mapping layers
+    to their KV cache scaling factors.
+    Keep this function in sync with the output of examples/fp8/extract_scales.py
+    """
+    try:
+        with open(filename) as f:
+            context = {
+                "model_type": model_type,
+                "num_hidden_layers": num_hidden_layers,
+                "tp_rank": tp_rank,
+                "tp_size": tp_size,
+            }
+            schema_dct = json.load(f)
+            schema = QuantParamSchema.model_validate(schema_dct,
+                                                     context=context)
+            layer_scales_map = schema.kv_cache.scaling_factor[tp_rank]
+            return layer_scales_map.items()
+
+    except FileNotFoundError:
+        logger.error(f"File or directory '{filename}' not found.")
+    except json.JSONDecodeError:
+        logger.error(f"Error decoding JSON in file '{filename}'.")
+    except Exception as e:
+        logger.error(f"An error occurred while reading '{filename}': {e}")
+    # This section is reached if and only if any of the excepts are hit
+    # Return an empty iterable (list) => no KV cache scales are loaded
+    # which ultimately defaults to 1.0 scales
+    logger.warning("Defaulting to KV cache scaling factors = 1.0 "
+                   f"for all layers in TP rank {tp_rank} "
+                   "as an error occurred during loading.")
+    return []
+
+
 def convert_pyslice_to_tensor(x: Any) -> torch.Tensor:
     """convert PySafeSlice object from safetensors to torch.Tensor
 
@@ -380,3 +446,59 @@ def initialize_dummy_weights(
     for param in model.state_dict().values():
         if torch.is_floating_point(param):
             param.data.uniform_(low, high)
+
+
+# Split the exl2 weight at group boundary
+def post_init_exl2(layer):
+    q_groups = layer.q_groups
+    num_groups = q_groups.shape[0] // 2
+    input_size = layer.q_invperm.shape[0]
+    tp_rank = get_tensor_model_parallel_rank()
+    tp_size = get_tensor_model_parallel_world_size()
+    rows = 0
+    # row_number, qrow_number, group_number
+    splits = [(0, 0, 0)]
+    index = 1
+    for i in range(num_groups - 1):
+        bits = q_groups[i * 2].item()
+        qrows = (q_groups[i * 2 + 3] - q_groups[i * 2 + 1]).item()
+        rows += qrows * 32 // bits
+
+        if rows >= input_size // tp_size * index:
+            splits.append((rows, q_groups[i * 2 + 3].item(), i + 1))
+            index += 1
+    splits.append((input_size, layer.q_weight.shape[0], num_groups))
+
+    shard_qweight = torch.nn.Parameter(
+        layer.q_weight[splits[tp_rank][1]:splits[tp_rank + 1][1]].clone(),
+        requires_grad=False,
+    )
+    del layer.q_weight
+    layer.linear_weights["q_weight"] = shard_qweight
+
+    shard_qgroups = torch.nn.Parameter(
+        layer.q_groups[splits[tp_rank][2] * 2:splits[tp_rank + 1][2] *
+                       2].clone(),
+        requires_grad=False,
+    )
+    shard_qgroups[1::2] -= int(shard_qgroups[1])
+    del layer.q_groups
+    layer.linear_weights["q_groups"] = shard_qgroups
+
+    shard_qscale = torch.nn.Parameter(
+        layer.q_scale[splits[tp_rank][2]:splits[tp_rank + 1][2]].clone(),
+        requires_grad=False,
+    )
+    del layer.q_scale
+    layer.linear_weights["q_scale"] = shard_qscale
+
+    shard_qscale_max = torch.nn.Parameter(
+        layer.q_scale_max[splits[tp_rank][2]:splits[tp_rank + 1][2]].clone(),
+        requires_grad=False,
+    )
+    del layer.q_scale_max
+    layer.linear_weights["q_scale_max"] = shard_qscale_max
+
+    q_perm = torch.argsort(layer.q_invperm).to(torch.short)
+    layer.linear_weights["q_perm"] = q_perm[splits[tp_rank][0]:splits[tp_rank +
+                                                                      1][0]]

@@ -3,7 +3,7 @@ from typing import Optional
 from transformers import AutoConfig, PretrainedConfig
 from transformers.models.auto.configuration_auto import CONFIG_MAPPING
 
-from aphrodite.transformers_utils.configs import (BaiChuanConfig,
+from aphrodite.transformers_utils.configs import (BaiChuanConfig, DbrxConfig,
                                                   ChatGLMConfig, MPTConfig,
                                                   QWenConfig, RWConfig)
 from aphrodite.common.gguf import GGUFReader
@@ -11,6 +11,7 @@ from aphrodite.common.gguf import GGUFReader
 _CONFIG_REGISTRY = {
     "baichuan": BaiChuanConfig,
     "chatglm": ChatGLMConfig,
+    "dbrx": DbrxConfig,
     "mpt": MPTConfig,
     "qwen": QWenConfig,
     "RefinedWeb": RWConfig,  # For tiiuae/falcon-40b(-instruct)
@@ -108,3 +109,19 @@ def get_config(model: str,
                                               revision=revision,
                                               code_revision=code_revision)
     return config
+
+
+def get_hf_text_config(config: PretrainedConfig):
+    """Get the `sub` config relevant to multimodal models.
+    No-op for text models.
+    """
+    if hasattr(config, "text_config"):
+        # The code operates under the assumption that
+        # text_config should have `num_attention_heads`
+        # (among others). Assert here to fail early
+        # if transformer config doesn't align with
+        # the assumption.
+        assert hasattr(config.text_config, "num_attention_heads")
+        return config.text_config
+    else:
+        return config

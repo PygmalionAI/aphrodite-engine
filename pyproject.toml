@@ -1,9 +1,10 @@
 [build-system]
 requires = [
+    "cmake>=3.21",
     "ninja",
     "packaging",
-    "setuptools",
-    "torch >= 2.2.0",
+    "setuptools >= 49.4.0",
+    "torch == 2.2.1",
     "wheel",
 ]
 build-backend = "setuptools.build_meta"
@@ -46,9 +47,9 @@ ignore_missing_imports = true
 
 files = "aphrodite"
 # TODO: Include the code from Megatron and HuggingFace.
-exclude = "aphrodite/modeling/megatron/|aphrodite/modeling/models/|aphrodite/endpoints/kobold/klite.embd"
+exclude = "aphrodite/modeling/models/|aphrodite/endpoints/kobold/klite.embd"
 
 
 [tool.codespell]
-ignore-words-list = "dout, te, indicies"
-skip = "./aphrodite/endpoints/kobold/klite.embd"
+ignore-words-list = "dout, te, indicies, ist"
+skip = "./aphrodite/endpoints/kobold/klite.embd,./kernels/"
