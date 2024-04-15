@@ -41,7 +41,10 @@ from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding, )
+    ParallelLMHead,
+    ParallelTWEHead,
+    VocabParallelEmbedding,
+)
 from aphrodite.distributed import (
     get_tensor_model_parallel_rank,
     get_tensor_model_parallel_world_size,
@@ -374,10 +377,15 @@ class CohereForCausalLM(nn.Module):
         super().__init__()
         self.config = config
         self.linear_method = linear_method
-        self.lm_head = TieWordEmbeddingHead()
+        self.model = CohereModel(config, linear_method)
+        if self.config.tie_word_embeddings:
+            self.lm_head = ParallelTWEHead(self.model.embed_tokens)
+        else:
+            self.lm_head = ParallelLMHead(config.vocab_size,
+                                          config.hidden_size,
+                                          linear_method=linear_method)
         self.logits_processor = LogitsProcessor(config.vocab_size,
                                                 scale=config.logit_scale)
-        self.model = CohereModel(config, linear_method)
         self.sampler = Sampler()
 
     @torch.no_grad()
@@ -443,7 +451,7 @@ class CohereForCausalLM(nn.Module):
             else:
                 # lm_head is not used as it is tied with embed_token.
                 # To prevent errors, skip loading lm_head.
-                if "lm_head" in name:
+                if self.config.tie_word_embeddings and "lm_head" in name:
                     continue
                 # Skip loading extra bias for GPTQ models.
                 if name.endswith(".bias") and name not in params_dict:
@@ -453,4 +461,3 @@ class CohereForCausalLM(nn.Module):
                                         default_weight_loader)
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
-        self.lm_head.embedding = self.model.embed_tokens.weight
