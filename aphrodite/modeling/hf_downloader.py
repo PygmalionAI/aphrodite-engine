@@ -266,7 +266,8 @@ def convert_gguf_to_state_dict(checkpoint, config):
             keys_to_remove.append(hf_name)
             # state_dict["lm_head.weight"] = torch.tensor(0, dtype=torch.int) # tie word embeddings, create a dummy weight
             logger.warning(
-                f"GGUF tensor name for {hf_name} not found, this is normal if the model uses tie word embeddings.")
+                f"GGUF tensor name for {hf_name} not found, this is normal if the model uses tie word embeddings."
+            )
         else:
             logger.warning(
                 f"GGUF tensor name for {hf_name} in hf state_dict not found.")
