@@ -315,6 +315,7 @@ class EngineArgs:
                 "aqlm",
                 "awq",
                 "bnb",
+                "eetq",
                 "exl2",
                 "gguf",
                 "gptq",
