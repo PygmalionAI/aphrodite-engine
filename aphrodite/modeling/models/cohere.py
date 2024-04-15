@@ -276,16 +276,6 @@ class CohereAttention(nn.Module):
         return output
 
 
-class TieWordEmbeddingHead(nn.Module):
-
-    def __init__(self):
-        super().__init__()
-        self.embedding = None
-
-    def forward(self, hidden_states):
-        return torch.matmul(hidden_states, self.embedding.t())
-
-
 class CohereDecoderLayer(nn.Module):
 
     def __init__(
