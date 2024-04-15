@@ -7,12 +7,11 @@ from aphrodite.transformers_utils.config import extract_gguf_config
 from aphrodite.transformers_utils.tokenizer import convert_gguf_to_tokenizer
 
 
-def convert_save_model(checkpoint, save_dir, max_shard_size):
-    try:
-        config = AutoConfig.from_pretrained(save_dir)
-    except Exception:
-        logger.warning(
-            f"Unable to load config from {save_dir}, extracting from GGUF")
+def convert_save_model(checkpoint, config_path, save_dir, max_shard_size):
+    if config_path is not None:
+        config = AutoConfig.from_pretrained(config_path)
+    else:
+        logger.info("Extracting config from GGUF")
         config = extract_gguf_config(checkpoint)
 
     with init_empty_weights():
@@ -40,6 +39,12 @@ if __name__ == '__main__':
                         type=str,
                         help='The path to output directory')
     parser.add_argument(
+        '--config-path',
+        default=None,
+        type=str,
+        help='The path to model config. This should point to the unquantized'
+        'original repo of the model (not the gguf file or repo).')
+    parser.add_argument(
         '--tokenizer',
         action='store_true',
         help='Extract the tokenizer from GGUF file. Only llama is supported')
@@ -49,7 +54,8 @@ if __name__ == '__main__':
         type=str,
         help='Shard the model in specified shard size, e.g. 5GB')
     args = parser.parse_args()
-    convert_save_model(args.input, args.output, args.max_shard_size)
+    convert_save_model(args.input, args.config_path, args.output,
+                       args.max_shard_size)
 
     if args.tokenizer:
         convert_save_tokenizer(args.input, args.output)
