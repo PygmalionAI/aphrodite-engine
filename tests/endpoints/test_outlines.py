@@ -1,11 +1,11 @@
 # This unit test should be moved to a new
 # tests/test_guided_decoding directory.
 
-from transformers import AutoTokenizer
 import torch
+from transformers import AutoTokenizer
 
 from aphrodite.modeling.outlines_logits_processors import (
-    RegexLogitsProcessor, JSONLogitsProcessor)
+    JSONLogitsProcessor, RegexLogitsProcessor)
 
 TEST_SCHEMA = {
     "type": "object",
@@ -46,8 +46,8 @@ TEST_SCHEMA = {
     "required": ["name", "age", "skills", "work history"]
 }
 
-TEST_REGEX = r"((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.){3}" + \
-             r"(25[0-5]|(2[0-4]|1\d|[1-9]|)\d)"
+TEST_REGEX = (r"((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.){3}"
+              r"(25[0-5]|(2[0-4]|1\d|[1-9]|)\d)")
 
 
 def test_guided_logits_processors():
