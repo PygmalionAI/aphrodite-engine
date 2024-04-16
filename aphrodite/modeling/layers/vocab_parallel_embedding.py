@@ -181,3 +181,23 @@ class ParallelLMHead(VocabParallelEmbedding):
         if self.bias is not None:
             logits += self.bias
         return logits
+
+
+class ParallelTWEHead(torch.nn.Module):
+    """Parallelized tie word embeddings head.
+
+    Output logits weight matrices used in the Sampler. The weight and bias
+    tensors are read from a VocabParallelEmbedding.
+
+    Args:
+        embeddings: the VocabParallelEmbedding to mirror
+    """
+
+    def __init__(self, embeddings: VocabParallelEmbedding):
+        super().__init__()
+        self.linear_method = embeddings.linear_method
+        self.linear_weights = embeddings.linear_weights
+
+    def forward(self, input_):
+        logits = self.linear_method.apply_weights(self.linear_weights, input_)
+        return logits
