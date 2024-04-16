@@ -273,7 +273,6 @@ if __name__ == "__main__":
                         help="enable chunked prefill for the Aphrodite backend")
     parser.add_argument("--max-num-batched-tokens",
                         type=int,
-                        default=2048,
                         help="maximum number of batched tokens for the "
                         "Aphrodite backend")
     args = parser.parse_args()
