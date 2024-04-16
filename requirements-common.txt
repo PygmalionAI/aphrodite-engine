@@ -4,6 +4,7 @@ psutil
 sentencepiece
 numpy
 transformers == 4.39.3 # needed for llava
+accelerate
 uvicorn
 openai # for fastapi's openai proxy emulation
 einops  # Required for phi-1_5
