@@ -1,4 +1,4 @@
-from accelerate import init_empty_weights
+import torch
 from loguru import logger
 from transformers import AutoConfig, AutoModelForCausalLM
 
@@ -14,7 +14,7 @@ def convert_save_model(checkpoint, config_path, save_dir, max_shard_size):
         logger.info("Extracting config from GGUF")
         config = extract_gguf_config(checkpoint)
 
-    with init_empty_weights():
+    with torch.device("meta"):
         model = AutoModelForCausalLM.from_config(config)
     state_dict = convert_gguf_to_state_dict(checkpoint, config)
     logger.info(f"Saving model to {save_dir}...")

@@ -6,7 +6,6 @@ import os
 from collections import defaultdict
 from typing import Any, Iterable, Iterator, List, Optional, Tuple
 
-from accelerate import init_empty_weights
 import filelock
 import huggingface_hub.constants
 import numpy as np
@@ -253,7 +252,7 @@ def convert_gguf_to_state_dict(checkpoint, config):
         raise RuntimeError(f"Unknown model_type: {model_type}")
     num_layers = config.num_hidden_layers
     name_map = get_tensor_name_map(arch, num_layers)
-    with init_empty_weights():
+    with torch.device("meta"):
         dummy_model = AutoModelForCausalLM.from_config(config)
     state_dict = dummy_model.state_dict()
 
