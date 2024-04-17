@@ -1,6 +1,6 @@
 from .conv1d import causal_conv1d_fn, causal_conv1d_update
 from .selective_scan import selective_scan_fn
-from .ops.selective_state_update import selective_state_update
+from .selective_state_update import selective_state_update
 
 __all__ = [
     "causal_conv1d_fn",
