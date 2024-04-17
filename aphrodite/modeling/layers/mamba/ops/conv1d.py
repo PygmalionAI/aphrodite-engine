@@ -3,11 +3,11 @@
 
 import torch
 
-
 import aphrodite._conv1d_C as causal_conv1d_cuda
 
 
 class CausalConv1dFn(torch.autograd.Function):
+
     @staticmethod
     def forward(
         ctx,
@@ -21,21 +21,20 @@ class CausalConv1dFn(torch.autograd.Function):
         activation=None,
     ):
         if activation not in [None, "silu", "swish"]:
-            raise NotImplementedError("activation must be None, silu, or swish")
+            raise NotImplementedError(
+                "activation must be None, silu, or swish")
         if x.stride(2) != 1 and x.stride(1) != 1:
             x = x.contiguous()
         bias = bias.contiguous() if bias is not None else None
         if seq_idx is not None:
-            assert (
-                initial_states is None
-            ), "initial_states must be None if seq_idx is not None"
+            assert (initial_states is
+                    None), "initial_states must be None if seq_idx is not None"
             assert (
                 not return_final_states
             ), "If seq_idx is not None, we don't return final_states_out"
         seq_idx = seq_idx.contiguous() if seq_idx is not None else None
-        if initial_states is not None and (
-            initial_states.stride(2) != 1 and initial_states.stride(1) != 1
-        ):
+        if initial_states is not None and (initial_states.stride(2) != 1
+                                           and initial_states.stride(1) != 1):
             initial_states = initial_states.contiguous()
         if return_final_states:
             assert (
@@ -49,21 +48,22 @@ class CausalConv1dFn(torch.autograd.Function):
             else:
                 batch, dim, seqlen = x.shape
                 width = weight.shape[1]
-                final_states_out = torch.empty(
-                    batch, width - 1, dim, device=x.device, dtype=x.dtype
-                ).transpose(1, 2)
+                final_states_out = torch.empty(batch,
+                                               width - 1,
+                                               dim,
+                                               device=x.device,
+                                               dtype=x.dtype).transpose(1, 2)
         else:
             final_states_out = None
         ctx.activation = activation in ["silu", "swish"]
-        out = causal_conv1d_cuda.causal_conv1d_fwd(
-            x, weight, bias, seq_idx, initial_states,
-            final_states_out, ctx.activation
-        )
+        out = causal_conv1d_cuda.causal_conv1d_fwd(x, weight, bias, seq_idx,
+                                                   initial_states,
+                                                   final_states_out,
+                                                   ctx.activation)
         ctx.save_for_backward(x, weight, bias, seq_idx, initial_states)
         ctx.return_final_states = return_final_states
-        ctx.return_dinitial_states = (
-            initial_states is not None and initial_states.requires_grad
-        )
+        ctx.return_dinitial_states = (initial_states is not None
+                                      and initial_states.requires_grad)
         return out if not return_final_states else (out, final_states_out)
 
 
@@ -112,6 +112,5 @@ def causal_conv1d_update(x, conv_state, weight, bias=None, activation=None):
     if activation not in [None, "silu", "swish"]:
         raise NotImplementedError("activation must be None, silu, or swish")
     activation = activation in ["silu", "swish"]
-    return causal_conv1d_cuda.causal_conv1d_update(
-        x, conv_state, weight, bias, activation
-    )
+    return causal_conv1d_cuda.causal_conv1d_update(x, conv_state, weight, bias,
+                                                   activation)
