@@ -47,6 +47,7 @@ _MODELS = {
     "RWForCausalLM": ("falcon", "FalconForCausalLM"),
     "StableLMEpochForCausalLM": ("stablelm", "StablelmForCausalLM"),
     "StableLmForCausalLM": ("stablelm", "StablelmForCausalLM"),
+    "JambaForCausalLM": ("jamba", "JambaForCausalLM"),
 }
 
 # Architecture -> type.

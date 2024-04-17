@@ -1024,6 +1024,7 @@ def _get_and_verify_max_len(
         "max_sequence_length",
         "max_seq_length",
         "seq_len",
+        "n_ctx",
     ]
     for key in possible_keys:
         max_len_key = getattr(hf_config, key, None)
