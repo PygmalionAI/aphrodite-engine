@@ -1,7 +1,7 @@
+# Copyright (c) 2024, PygmalionAI
 # Copyright (c) 2024, Tri Dao.
 
 import torch
-import torch.nn.functional as F
 
 
 import aphrodite._conv1d_C as causal_conv1d_cuda
