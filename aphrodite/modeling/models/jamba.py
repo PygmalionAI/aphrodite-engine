@@ -1,7 +1,6 @@
 # coding=utf-8
 """Inference-only Jurassic model."""
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import torch
 from torch import nn
@@ -18,12 +17,9 @@ from aphrodite.modeling.hf_downloader import (default_weight_loader,
                                               hf_model_weights_iterator)
 from aphrodite.modeling.layers.fused_moe import fused_moe
 from aphrodite.modeling.layers.layernorm import RMSNorm
-from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
-                                              LinearMethodBase,
-                                              MergedColumnParallelLinear,
-                                              QKVParallelLinear,
-                                              ReplicatedLinear,
-                                              RowParallelLinear)
+from aphrodite.modeling.layers.linear import (
+    ColumnParallelLinear, LinearMethodBase, MergedColumnParallelLinear,
+    QKVParallelLinear, ReplicatedLinear, RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.mamba import (MambaCacheParams,
                                              causal_conv1d_fn,
@@ -76,7 +72,7 @@ class JambaMambaMixer(nn.Module):
         self.in_proj = MergedColumnParallelLinear(self.hidden_size,
                                                   [self.intermediate_size] * 2,
                                                   bias=self.use_bias)
-        # selective projection used to make dt, B and C input dependant
+        # selective projection used to make dt, B and C input dependent
         self.x_proj = RowParallelLinear(
             self.intermediate_size,
             self.time_step_rank + self.ssm_state_size * 2,
@@ -570,13 +566,14 @@ class JambaModel(nn.Module):
 
         module_list = []
         for i in range(config.num_hidden_layers):
-            is_attn = (True if (i - self.config.attn_layer_offset) %
-                       self.config.attn_layer_period == 0 else False)
-            is_expert = (True if (i - self.config.expert_layer_offset) %
-                         self.config.expert_layer_period == 0 else False)
+            is_attn = ((i - self.config.attn_layer_offset) %
+                       self.config.attn_layer_period == 0)
+            is_expert = ((i - self.config.expert_layer_offset) %
+                         self.config.expert_layer_period == 0)
 
             actual_num_experts = config.num_experts if is_expert else 1
-            actual_num_experts_per_tok = config.num_experts_per_tok if is_expert else 1
+            actual_num_experts_per_tok = config.num_experts_per_tok if \
+                is_expert else 1
 
             if is_attn:
                 module_list.append(
