@@ -80,6 +80,10 @@ class ExecutorBase(ABC):
         exception."""
         raise NotImplementedError
 
+    @abstractmethod
+    def release_mamba_cache(self, requests_id: List[str]) -> None:
+        raise NotImplementedError
+
 
 class ExecutorAsyncBase(ExecutorBase):
 

@@ -364,6 +364,11 @@ class RayGPUExecutor(ExecutorBase):
             raise RuntimeError("At least one Worker is dead. "
                                f"Dead Workers: {dead_actors}. ")
 
+    def release_mamba_cache(self, requests_id: List[str]) -> None:
+        self._run_workers("release_mamba_cache",
+                          requests_id=requests_id,
+                          use_ray_compiled_dag=USE_RAY_COMPILED_DAG)
+
 
 class RayGPUExecutorAsync(RayGPUExecutor, ExecutorAsyncBase):
 

@@ -143,10 +143,10 @@ class cmake_build_ext(build_ext):
 
         if _install_hadamard():
             cmake_args += ['-DAPHRODITE_INSTALL_HADAMARD_KERNELS=ON']
-        
+
         if _install_causal_conv1d():
             cmake_args += ['-DAPHRODITE_INSTALL_CONV1D_KERNELS=ON']
-        
+
         if _install_selective_scan():
             cmake_args += ['-DAPHRODITE_INSTALL_SELECTIVE_SCAN_KERNELS=ON']
 
@@ -246,6 +246,7 @@ def _install_hadamard() -> bool:
             break
     return install_hadamard
 
+
 def _install_causal_conv1d() -> bool:
     install_causal_conv1d = bool(
         int(os.getenv("APHRODITE_INSTALL_CONV1D_KERNELS", "1")))
@@ -256,6 +257,7 @@ def _install_causal_conv1d() -> bool:
             install_causal_conv1d = False
             break
     return install_causal_conv1d
+
 
 def _install_selective_scan() -> bool:
     install_selective_scan = bool(
@@ -419,7 +421,7 @@ if _is_cuda():
 
     if _install_causal_conv1d():
         ext_modules.append(CMakeExtension(name="aphrodite._conv1d_C"))
-    
+
     if _install_selective_scan():
         ext_modules.append(CMakeExtension(name="aphrodite._selective_scan_C"))
 
