@@ -143,6 +143,9 @@ class cmake_build_ext(build_ext):
 
         if _install_hadamard():
             cmake_args += ['-DAPHRODITE_INSTALL_HADAMARD_KERNELS=ON']
+        
+        if _install_causal_conv1d():
+            cmake_args += ['-DAPHRODITE_INSTALL_CONV1D_KERNELS=ON']
 
         #
         # Setup parallelism and build tool
@@ -239,6 +242,17 @@ def _install_hadamard() -> bool:
             install_hadamard = False
             break
     return install_hadamard
+
+def _install_causal_conv1d() -> bool:
+    install_causal_conv1d = bool(
+        int(os.getenv("APHRODITE_INSTALL_CONV1D_KERNELS", "1")))
+    device_count = torch.cuda.device_count()
+    for i in range(device_count):
+        major, minor = torch.cuda.get_device_capability(i)
+        if major <= 5:
+            install_causal_conv1d = False
+            break
+    return install_causal_conv1d
 
 
 def get_hipcc_rocm_version():
@@ -388,6 +402,9 @@ if _is_cuda():
 
     if _install_hadamard():
         ext_modules.append(CMakeExtension(name="aphrodite._hadamard_C"))
+
+    if _install_causal_conv1d():
+        ext_modules.append(CMakeExtension(name="aphrodite._conv1d_C"))
 
 if not _is_neuron():
     ext_modules.append(CMakeExtension(name="aphrodite._C"))

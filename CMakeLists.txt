@@ -329,6 +329,49 @@ else()
     "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 7.0")
 endif()
 
+
+#
+# _conv1d_C extension
+#
+
+set(APHRODITE_CONV1D_EXT_SRC
+  "kernels/causal_conv1d/causal_conv1d.cpp"
+  "kernels/causal_conv1d/causal_conv1d_fwd.cu"
+  "kernels/causal_conv1d/causal_conv1d_update.cu")
+
+#
+# Use the hadamard compilation flags
+#
+set(APHRODITE_CONV1D_GPU_FLAGS ${APHRODITE_HADAMARD_GPU_FLAGS})
+
+#
+# Filter out arches < 6.0 for conv1d.
+#
+if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
+  set(APHRODITE_CONV1D_GPU_ARCHES)
+  foreach(ARCH ${APHRODITE_GPU_ARCHES})
+    string_to_ver(CODE_VER ${ARCH})
+    if (CODE_VER GREATER_EQUAL 6.0)
+      list(APPEND APHRODITE_CONV1D_GPU_ARCHES ${ARCH})
+    endif()
+  endforeach()
+  message(STATUS "Conv1d target arches: ${APHRODITE_CONV1D_GPU_ARCHES}")
+endif()
+
+if (APHRODITE_CONV1D_GPU_ARCHES)
+  define_gpu_extension_target(
+    _conv1d_C
+    DESTINATION aphrodite
+    LANGUAGE ${APHRODITE_GPU_LANG}
+    SOURCES ${APHRODITE_CONV1D_EXT_SRC}
+    COMPILE_FLAGS ${APHRODITE_CONV1D_GPU_FLAGS}
+    ARCHITECTURES ${APHRODITE_CONV1D_GPU_ARCHES}
+    WITH_SOABI)
+else()
+  message(WARNING "Unable to create _conv1d_C target because none of the "
+    "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 6.0")
+endif()
+
 #
 # Add the `default` target which detects which extensions should be
 # built based on platform/architecture.  This is the same logic that
@@ -353,9 +396,7 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
   message(STATUS "Enabling moe extension.")
   add_dependencies(default _moe_C)
 
-  # Enable punica if -DAPHRODITE_INSTALL_PUNICA_KERNELS=ON or
-  # APHRODITE_INSTALL_PUNICA_KERNELS is set in the environment and
-  # there are supported target arches.
+  # Enable the extra kernels if the appropriate flags are set.
   if (APHRODITE_PUNICA_GPU_ARCHES AND
       (ENV{APHRODITE_INSTALL_PUNICA_KERNELS} OR APHRODITE_INSTALL_PUNICA_KERNELS))
     message(STATUS "Enabling punica extension.")
@@ -365,5 +406,10 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
       (ENV{APHRODITE_INSTALL_HADAMARD_KERNELS} OR APHRODITE_INSTALL_HADAMARD_KERNELS))
     message(STATUS "Enabling hadamard extension.")
     add_dependencies(default _hadamard_C)
+  endif()
+  if (APHRODITE_CONV1D_GPU_ARCHES AND
+      (ENV{APHRODITE_INSTALL_CONV1D_KERNELS} OR APHRODITE_INSTALL_CONV1D_KERNELS))
+    message(STATUS "Enabling conv1d extension.")
+    add_dependencies(default _conv1d_C)
   endif()
 endif()
