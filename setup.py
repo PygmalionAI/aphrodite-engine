@@ -146,6 +146,9 @@ class cmake_build_ext(build_ext):
         
         if _install_causal_conv1d():
             cmake_args += ['-DAPHRODITE_INSTALL_CONV1D_KERNELS=ON']
+        
+        if _install_selective_scan():
+            cmake_args += ['-DAPHRODITE_INSTALL_SELECTIVE_SCAN_KERNELS=ON']
 
         #
         # Setup parallelism and build tool
@@ -253,6 +256,17 @@ def _install_causal_conv1d() -> bool:
             install_causal_conv1d = False
             break
     return install_causal_conv1d
+
+def _install_selective_scan() -> bool:
+    install_selective_scan = bool(
+        int(os.getenv("APHRODITE_INSTALL_SELECTIVE_SCAN_KERNELS", "1")))
+    device_count = torch.cuda.device_count()
+    for i in range(device_count):
+        major, minor = torch.cuda.get_device_capability(i)
+        if major <= 5:
+            install_selective_scan = False
+            break
+    return install_selective_scan
 
 
 def get_hipcc_rocm_version():
@@ -405,6 +419,9 @@ if _is_cuda():
 
     if _install_causal_conv1d():
         ext_modules.append(CMakeExtension(name="aphrodite._conv1d_C"))
+    
+    if _install_selective_scan():
+        ext_modules.append(CMakeExtension(name="aphrodite._selective_scan_C"))
 
 if not _is_neuron():
     ext_modules.append(CMakeExtension(name="aphrodite._C"))

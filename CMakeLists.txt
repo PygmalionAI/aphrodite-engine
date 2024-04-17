@@ -345,13 +345,13 @@ set(APHRODITE_CONV1D_EXT_SRC
 set(APHRODITE_CONV1D_GPU_FLAGS ${APHRODITE_HADAMARD_GPU_FLAGS})
 
 #
-# Filter out arches < 6.0 for conv1d.
+# Filter out arches < 5.3 for conv1d.
 #
 if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
   set(APHRODITE_CONV1D_GPU_ARCHES)
   foreach(ARCH ${APHRODITE_GPU_ARCHES})
     string_to_ver(CODE_VER ${ARCH})
-    if (CODE_VER GREATER_EQUAL 6.0)
+    if (CODE_VER GREATER_EQUAL 5.3)
       list(APPEND APHRODITE_CONV1D_GPU_ARCHES ${ARCH})
     endif()
   endforeach()
@@ -369,8 +369,53 @@ if (APHRODITE_CONV1D_GPU_ARCHES)
     WITH_SOABI)
 else()
   message(WARNING "Unable to create _conv1d_C target because none of the "
-    "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 6.0")
+    "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 5.3")
 endif()
+
+
+#
+# _selective_scan_C extension
+#
+
+set(APHRODITE_SELECTIVE_SCAN_EXT_SRC
+  "kernels/selective_scan/selective_scan.cpp"
+  "kernels/selective_scan/selective_scan_fwd_fp32.cu"
+  "kernels/selective_scan/selective_scan_fwd_fp16.cu"
+  "kernels/selective_scan/selective_scan_fwd_bf16.cu")
+
+#
+# Use the hadamard compilation flags
+#
+set(APHRODITE_SELECTIVE_SCAN_GPU_FLAGS ${APHRODITE_HADAMARD_GPU_FLAGS})
+
+#
+# Filter out arches < 6.0 for selective_scan.
+#
+if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
+  set(APHRODITE_SELECTIVE_SCAN_GPU_ARCHES)
+  foreach(ARCH ${APHRODITE_GPU_ARCHES})
+    string_to_ver(CODE_VER ${ARCH})
+    if (CODE_VER GREATER_EQUAL 5.3)
+      list(APPEND APHRODITE_SELECTIVE_SCAN_GPU_ARCHES ${ARCH})
+    endif()
+  endforeach()
+  message(STATUS "Selective scan target arches: ${APHRODITE_SELECTIVE_SCAN_GPU_ARCHES}")
+endif()
+
+if (APHRODITE_SELECTIVE_SCAN_GPU_ARCHES)
+  define_gpu_extension_target(
+    _selective_scan_C
+    DESTINATION aphrodite
+    LANGUAGE ${APHRODITE_GPU_LANG}
+    SOURCES ${APHRODITE_SELECTIVE_SCAN_EXT_SRC}
+    COMPILE_FLAGS ${APHRODITE_SELECTIVE_SCAN_GPU_FLAGS}
+    ARCHITECTURES ${APHRODITE_SELECTIVE_SCAN_GPU_ARCHES}
+    WITH_SOABI)
+else()
+  message(WARNING "Unable to create _selective_scan_C target because none of the "
+    "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 5.3")
+endif()
+
 
 #
 # Add the `default` target which detects which extensions should be
@@ -411,5 +456,10 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
       (ENV{APHRODITE_INSTALL_CONV1D_KERNELS} OR APHRODITE_INSTALL_CONV1D_KERNELS))
     message(STATUS "Enabling conv1d extension.")
     add_dependencies(default _conv1d_C)
+  endif()
+  if (APHRODITE_SELECTIVE_SCAN_GPU_ARCHES AND
+      (ENV{APHRODITE_INSTALL_SELECTIVE_SCAN_KERNELS} OR APHRODITE_INSTALL_SELECTIVE_SCAN_KERNELS))
+    message(STATUS "Enabling selective_scan extension.")
+    add_dependencies(default _selective_scan_C)
   endif()
 endif()
