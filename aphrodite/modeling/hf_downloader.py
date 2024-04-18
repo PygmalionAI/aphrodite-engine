@@ -276,7 +276,7 @@ def convert_gguf_to_state_dict(checkpoint, config):
         results = [
             GGUFReader(os.path.join(checkpoint, file))
             for file in os.listdir(checkpoint)
-            if os.path.splitext(file)[-1].lower() == "gguf"
+            if os.path.splitext(file)[-1].lower() == ".gguf"
         ]
     else:
         raise RuntimeError(

@@ -24,7 +24,7 @@ def convert_gguf_to_tokenizer(checkpoint):
 
         all_gguf_files = sorted([
             file for file in os.listdir(checkpoint)
-            if os.path.splitext(file)[-1].lower() == "gguf"
+            if os.path.splitext(file)[-1].lower() == ".gguf"
         ])
         # assume the tokenizer is always in the first shard
         result = GGUFReader(os.path.join(checkpoint, all_gguf_files[0]))

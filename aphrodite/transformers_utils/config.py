@@ -32,7 +32,7 @@ def extract_gguf_config(checkpoint):
 
         all_gguf_files = sorted([
             file for file in os.listdir(checkpoint)
-            if os.path.splitext(file)[-1].lower() == "gguf"
+            if os.path.splitext(file)[-1].lower() == ".gguf"
         ])
         # assume the config is always in the first shard
         result = GGUFReader(os.path.join(checkpoint, all_gguf_files[0]))
