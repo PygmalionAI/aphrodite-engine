@@ -235,10 +235,6 @@ def prepare_hf_model_weights(
 
 
 def convert_gguf_to_state_dict(checkpoint, config):
-    if not os.path.isfile(checkpoint):
-        raise RuntimeError(
-            f"Cannot find any model weights with `{checkpoint}`")
-
     model_type = config.model_type
     # hack: ggufs have a different name than transformers
     if model_type == "cohere":
@@ -274,28 +270,41 @@ def convert_gguf_to_state_dict(checkpoint, config):
     for key in keys_to_remove:
         state_dict.pop(key)
 
-    result = GGUFReader(checkpoint)
+    if os.path.isfile(checkpoint):
+        results = [GGUFReader(checkpoint)]
+    elif os.path.isdir(checkpoint):
+        results = [
+            GGUFReader(os.path.join(checkpoint, file))
+            for file in os.listdir(checkpoint)
+            if os.path.splitext(file)[-1].lower() == "gguf"
+        ]
+    else:
+        raise RuntimeError(
+            f"Cannot find any model weights with `{checkpoint}`")
+
     with get_loading_progress_bar() as progress:
         task = progress.add_task(
             "[cyan]Converting GGUF tensors to PyTorch...",
-            total=len(result.tensors),
+            total=sum([len(result.tensors) for result in results]),
         )
-        for ts in result.tensors:
-            try:
-                hf_name = gguf_to_hf_name_map[ts.name]
-            except KeyError:
-                logger.warning(
-                    f"hf tensor name for {ts.name} in GGUF not found.")
-                continue
-            data = torch.tensor(ts.data)
-            if state_dict[hf_name].dim() == 2:
-                data = data.view(state_dict[hf_name].shape[0], -1)
-            state_dict[hf_name] = data
-            weight_type = torch.tensor(int(ts.tensor_type), dtype=torch.int)
-            if weight_type > 1:
-                state_dict[hf_name.replace("weight",
-                                           "weight_type")] = weight_type
-            progress.update(task, advance=1)
+        for result in results:
+            for ts in result.tensors:
+                try:
+                    hf_name = gguf_to_hf_name_map[ts.name]
+                except KeyError:
+                    logger.warning(
+                        f"hf tensor name for {ts.name} in GGUF not found.")
+                    continue
+                data = torch.tensor(ts.data)
+                if state_dict[hf_name].dim() == 2:
+                    data = data.view(state_dict[hf_name].shape[0], -1)
+                state_dict[hf_name] = data
+                weight_type = torch.tensor(int(ts.tensor_type),
+                                           dtype=torch.int)
+                if weight_type > 1:
+                    state_dict[hf_name.replace("weight",
+                                               "weight_type")] = weight_type
+                progress.update(task, advance=1)
     return state_dict
 
 

@@ -14,7 +14,24 @@ from aphrodite.transformers_utils.tokenizers import BaichuanTokenizer
 
 
 def convert_gguf_to_tokenizer(checkpoint):
-    result = GGUFReader(checkpoint)
+    if os.path.isfile(checkpoint):
+        result = GGUFReader(checkpoint)
+    elif os.path.isdir(checkpoint):
+        try:
+            return AutoTokenizer.from_pretrained(checkpoint)
+        except Exception:
+            pass
+
+        all_gguf_files = sorted([
+            file for file in os.listdir(checkpoint)
+            if os.path.splitext(file)[-1].lower() == "gguf"
+        ])
+        # assume the tokenizer is always in the first shard
+        result = GGUFReader(os.path.join(checkpoint, all_gguf_files[0]))
+    else:
+        raise RuntimeError(f"Cannot find any tokenizer with `{checkpoint}`")
+
+    logger.info("Converting tokenizer from GGUF...")
     # write vocab
     sentencepiece_model_pb2 = import_protobuf()
     vocab = sentencepiece_model_pb2.ModelProto()
