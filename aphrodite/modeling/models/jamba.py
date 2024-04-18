@@ -33,7 +33,6 @@ from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.transformers_utils.configs.jamba import JambaConfig
 
-KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 
 # Adapted from transformers.models.mamba.modeling_mamba.MambaMixer
@@ -680,7 +679,7 @@ class JambaForCausalLM(nn.Module):
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        kv_caches: List[KVCache],
+        kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
         conv_state: torch.Tensor,
         ssm_state: torch.Tensor,
