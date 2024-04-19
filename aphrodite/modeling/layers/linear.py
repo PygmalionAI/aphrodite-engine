@@ -53,9 +53,9 @@ def post_init_exl2(layer):
     )
     # the outer model.named_parameters() during loading still keeps a reference
     # so we have to force release memory
-    layer.q_weight.data = torch.empty(0)
+    layer.q_weight.data = torch.empty(0, device="cpu")
     del layer.q_weight
-    layer.linear_weights["q_weight"] = shard_qweight
+    layer.linear_weights["q_weight"] = shard_qweight.to(layer.device)
 
     shard_qgroups = torch.nn.Parameter(
         layer.q_groups[splits[tp_rank][2] * 2:splits[tp_rank + 1][2] *
@@ -63,29 +63,30 @@ def post_init_exl2(layer):
         requires_grad=False,
     )
     shard_qgroups[1::2] -= int(shard_qgroups[1])
-    layer.q_groups.data = torch.empty(0)
+    layer.q_groups.data = torch.empty(0, device="cpu")
     del layer.q_groups
-    layer.linear_weights["q_groups"] = shard_qgroups
+    layer.linear_weights["q_groups"] = shard_qgroups.to(layer.device)
 
     shard_qscale = torch.nn.Parameter(
         layer.q_scale[splits[tp_rank][2]:splits[tp_rank + 1][2]].clone(),
         requires_grad=False,
     )
-    layer.q_scale.data = torch.empty(0)
+    layer.q_scale.data = torch.empty(0, device="cpu")
     del layer.q_scale
-    layer.linear_weights["q_scale"] = shard_qscale
+    layer.linear_weights["q_scale"] = shard_qscale.to(layer.device)
 
     shard_qscale_max = torch.nn.Parameter(
         layer.q_scale_max[splits[tp_rank][2]:splits[tp_rank + 1][2]].clone(),
         requires_grad=False,
     )
-    layer.q_scale_max.data = torch.empty(0)
+    layer.q_scale_max.data = torch.empty(0, device="cpu")
     del layer.q_scale_max
-    layer.linear_weights["q_scale_max"] = shard_qscale_max
+    layer.linear_weights["q_scale_max"] = shard_qscale_max.to(layer.device)
 
     q_perm = torch.argsort(layer.q_invperm).to(torch.short)
-    layer.linear_weights["q_perm"] = q_perm[splits[tp_rank][0]:splits[tp_rank +
-                                                                      1][0]]
+    # q_invperm is not used later, probably we should remove it too
+    layer.linear_weights["q_perm"] = q_perm[
+        splits[tp_rank][0]:splits[tp_rank + 1][0]].to(layer.device)
 
 
 class LinearMethodBase(ABC):
@@ -739,7 +740,14 @@ class RowParallelLinear(torch.nn.Module):
             loaded_weight = loaded_weight.narrow(input_dim, start_idx,
                                                  shard_size)
         if isinstance(param, torch.nn.parameter.UninitializedParameter):
-            param.materialize(loaded_weight.shape, dtype=loaded_weight.dtype)
+            if self.is_exl2():
+                self.device = param.device
+                param.materialize(loaded_weight.shape,
+                                  dtype=loaded_weight.dtype,
+                                  device="cpu")
+            else:
+                param.materialize(loaded_weight.shape,
+                                  dtype=loaded_weight.dtype)
             param_data = param.data
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
