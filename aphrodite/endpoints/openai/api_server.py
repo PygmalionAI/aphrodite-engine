@@ -1,42 +1,39 @@
-import argparse
 import asyncio
-import json
-from contextlib import asynccontextmanager
-import os
 import importlib
 import inspect
-from typing import List, Tuple, AsyncGenerator, Optional
+import json
+import os
+from contextlib import asynccontextmanager
+from http import HTTPStatus
+from typing import AsyncGenerator, List, Optional, Tuple
 
-from prometheus_client import make_asgi_app
 import fastapi
 import uvicorn
-from http import HTTPStatus
-from fastapi import Request, APIRouter, Header
+from fastapi import APIRouter, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import (JSONResponse, StreamingResponse, Response,
-                               HTMLResponse)
+from fastapi.responses import (HTMLResponse, JSONResponse, Response,
+                               StreamingResponse)
 from loguru import logger
+from prometheus_client import make_asgi_app
 
 import aphrodite
-from aphrodite.engine.args_tools import AsyncEngineArgs
-from aphrodite.engine.async_aphrodite import AsyncAphrodite
-from aphrodite.endpoints.openai.protocol import (CompletionRequest,
-                                                 ChatCompletionRequest,
-                                                 ErrorResponse, Prompt,
-                                                 EmbeddingsResponse,
-                                                 EmbeddingsRequest)
+import aphrodite.endpoints.openai.embeddings as OAIembeddings
 from aphrodite.common.logger import UVICORN_LOG_CONFIG
 from aphrodite.common.outputs import RequestOutput
-from aphrodite.common.sampling_params import SamplingParams, _SAMPLING_EPS
+from aphrodite.common.sampling_params import _SAMPLING_EPS, SamplingParams
 from aphrodite.common.utils import random_uuid
+from aphrodite.endpoints.openai.args import make_arg_parser
+from aphrodite.endpoints.openai.protocol import (
+    ChatCompletionRequest, CompletionRequest, EmbeddingsRequest,
+    EmbeddingsResponse, ErrorResponse, KAIGenerationInputSchema, Prompt)
 from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
-from aphrodite.endpoints.openai.serving_completions import (
-    OpenAIServingCompletion)
-from aphrodite.endpoints.openai.protocol import KAIGenerationInputSchema
-from aphrodite.endpoints.openai.serving_engine import LoRA
+from aphrodite.endpoints.openai.serving_completions import \
+    OpenAIServingCompletion
+from aphrodite.engine.args_tools import AsyncEngineArgs
+from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
-import aphrodite.endpoints.openai.embeddings as OAIembeddings
+from aphrodite.endpoints.openai.serving_engine import LoRA
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
@@ -70,113 +67,8 @@ app = fastapi.FastAPI(title="Aphrodite Engine",
                       lifespan=lifespan)
 
 
-class LoRAParserAction(argparse.Action):
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        lora_list = []
-        for item in values:
-            name, path = item.split('=')
-            lora_list.append(LoRA(name, path))
-        setattr(namespace, self.dest, lora_list)
-
-
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Aphrodite OpenAI-Compatible RESTful API server.")
-    parser.add_argument("--host", type=str, default=None, help="host name")
-    parser.add_argument("--port", type=int, default=2242, help="port number")
-    parser.add_argument("--allow-credentials",
-                        action="store_true",
-                        help="allow credentials")
-    parser.add_argument("--allowed-origins",
-                        type=json.loads,
-                        default=["*"],
-                        help="allowed origins")
-    parser.add_argument("--allowed-methods",
-                        type=json.loads,
-                        default=["*"],
-                        help="allowed methods")
-    parser.add_argument("--allowed-headers",
-                        type=json.loads,
-                        default=["*"],
-                        help="allowed headers")
-    parser.add_argument(
-        "--api-keys",
-        type=str,
-        default=None,
-        help=
-        "If provided, the server will require this key to be presented in the "
-        "header.")
-    parser.add_argument(
-        "--admin-key",
-        type=str,
-        default=None,
-        help=
-        "If provided, the server will require this key to be presented in the "
-        "header for admin operations.")
-    parser.add_argument(
-        "--launch-kobold-api",
-        action="store_true",
-        help=
-        "Launch the Kobold API server in addition to the OpenAI API server.")
-    parser.add_argument("--max-length",
-                        type=int,
-                        default=256,
-                        help="The maximum length of the generated response. "
-                        "For use with Kobold Horde.")
-    parser.add_argument("--served-model-name",
-                        type=str,
-                        default=None,
-                        help="The model name used in the API. If not "
-                        "specified, the model name will be the same as "
-                        "the huggingface name.")
-    parser.add_argument(
-        "--lora-modules",
-        type=str,
-        default=None,
-        nargs='+',
-        action=LoRAParserAction,
-        help=
-        "LoRA module configurations in the format name=path. Multiple modules "
-        "can be specified.")
-    parser.add_argument("--chat-template",
-                        type=str,
-                        default=None,
-                        help="The file path to the chat template, "
-                        "or the template in single-line form "
-                        "for the specified model")
-    parser.add_argument("--response-role",
-                        type=str,
-                        default="assistant",
-                        help="The role name to return if "
-                        "`request.add_generation_prompt=true`.")
-    parser.add_argument("--ssl-keyfile",
-                        type=str,
-                        default=None,
-                        help="The file path to the SSL key file")
-    parser.add_argument("--ssl-certfile",
-                        type=str,
-                        default=None,
-                        help="The file path to the SSL cert file")
-    parser.add_argument(
-        "--root-path",
-        type=str,
-        default=None,
-        help="FastAPI root_path when app is behind a path based routing proxy")
-    parser.add_argument(
-        "--middleware",
-        type=str,
-        action="append",
-        default=[],
-        help="Additional ASGI middleware to apply to the app. "
-        "We accept multiple --middleware arguments. "
-        "The value should be an import path. "
-        "If a function is provided, Aphrodite will add it to the server using "
-        "@app.middleware('http'). "
-        "If a class is provided, Aphrodite will add it to the server using "
-        "app.add_middleware(). ")
-
-    parser = AsyncEngineArgs.add_cli_args(parser)
+    parser = make_arg_parser()
     return parser.parse_args()
 
 

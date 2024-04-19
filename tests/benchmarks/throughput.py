@@ -268,9 +268,10 @@ if __name__ == "__main__":
                         type=lambda x: (str(x).lower() == 'true'),
                         default=True,
                         help="enforce eager mode for the Aphrodite backend")
-    parser.add_argument("--enable-chunked-prefill",
-                        action="store_true",
-                        help="enable chunked prefill for the Aphrodite backend")
+    parser.add_argument(
+        "--enable-chunked-prefill",
+        action="store_true",
+        help="enable chunked prefill for the Aphrodite backend")
     parser.add_argument("--max-num-batched-tokens",
                         type=int,
                         help="maximum number of batched tokens for the "

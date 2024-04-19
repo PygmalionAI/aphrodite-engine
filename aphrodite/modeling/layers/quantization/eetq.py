@@ -21,6 +21,7 @@ class EETQConfig(QuantizationConfig):
     """Config class for eetq.
     https://github.com/NetEase-FuXi/EETQ/tree/main
     """
+
     def __init__(
         self,
         weight_bits: int,
@@ -65,7 +66,7 @@ class EETQConfig(QuantizationConfig):
 
     def get_scaled_act_names(self) -> List[str]:
         return []
-    
+
     def merge_weight(self) -> bool:
         return True
 
@@ -92,22 +93,16 @@ class EETQLinearMethod(LinearMethodBase):
         output_size_per_partition = sum(output_partition_sizes)
         qweight = Parameter(torch.empty(input_size_per_partition,
                                         output_size_per_partition,
-                                       dtype=torch.int8),
+                                        dtype=torch.int8),
                             requires_grad=False)
         weight_scales = Parameter(torch.empty(output_size_per_partition,
-                                       dtype=torch.float16),
-                            requires_grad=False)
-        set_weight_attrs(
-            qweight, {
-                "input_dim": 0,
-                "output_dim": 1,
-            })
-        set_weight_attrs(
-            weight_scales, {
-                "input_dim": 0,
-                "output_dim": 0
-            }
-        )
+                                              dtype=torch.float16),
+                                  requires_grad=False)
+        set_weight_attrs(qweight, {
+            "input_dim": 0,
+            "output_dim": 1,
+        })
+        set_weight_attrs(weight_scales, {"input_dim": 0, "output_dim": 0})
         return {"qweight": qweight, "weight_scales": weight_scales}
 
     def apply_weights(self,
@@ -124,7 +119,7 @@ class EETQLinearMethod(LinearMethodBase):
                               "https://github.com/NetEase-FuXi/EETQ")
 
         return output
-    
+
     def apply_moe_weights(self, w1: Dict[str,
                                          torch.Tensor], w2: Dict[str,
                                                                  torch.Tensor],
