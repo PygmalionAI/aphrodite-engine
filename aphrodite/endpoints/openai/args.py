@@ -6,7 +6,6 @@ purposes.
 
 import argparse
 import json
-import ssl
 
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.endpoints.openai.serving_engine import LoRA
@@ -22,9 +21,10 @@ class LoRAParserAction(argparse.Action):
         setattr(namespace, self.dest, lora_list)
 
 
-def make_arg_parser():
-    parser = argparse.ArgumentParser(
-        description="Aphrodite OpenAI-Compatible RESTful API server.")
+def make_arg_parser(parser=None):
+    if parser is None:
+        parser = argparse.ArgumentParser(
+            description="Aphrodite OpenAI-Compatible RESTful API server.")
     parser.add_argument("--host", type=str, default=None, help="host name")
     parser.add_argument("--port", type=int, default=2242, help="port number")
     parser.add_argument("--allow-credentials",
