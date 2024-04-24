@@ -44,10 +44,9 @@ if __name__ == '__main__':
         default=None,
         type=str,
         help='The path to the unquantized model to copy config and tokenizer')
-    parser.add_argument(
-        '--no-tokenizer',
-        action='store_true',
-        help='Do not try to copy or extract the tokenizer')
+    parser.add_argument('--no-tokenizer',
+                        action='store_true',
+                        help='Do not try to copy or extract the tokenizer')
     parser.add_argument(
         '--max-shard-size',
         default="5GB",

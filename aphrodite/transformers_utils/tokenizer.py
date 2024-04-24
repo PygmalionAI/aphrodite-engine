@@ -31,7 +31,7 @@ def convert_gguf_to_tokenizer(checkpoint):
     else:
         raise RuntimeError(f"Cannot find any tokenizer with `{checkpoint}`")
 
-    logger.info("Converting tokenizer from GGUF...")
+    logger.log_once("INFO", "Converting tokenizer from GGUF...")
     # write vocab
     sentencepiece_model_pb2 = import_protobuf()
     vocab = sentencepiece_model_pb2.ModelProto()
