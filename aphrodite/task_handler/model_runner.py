@@ -608,7 +608,8 @@ class ModelRunner:
                                               subquery_len - 1)
                 selected_token_start_idx += subquery_len
 
-                if sampling_params.seed is not None:
+                if sampling_params.sampling_type == SamplingType.RANDOM_SEED:
+                    assert sampling_params.seed is not None
                     seq_group_metadata.state.generator = torch.Generator(
                         device=self.device).manual_seed(sampling_params.seed)
             else:
@@ -632,7 +633,7 @@ class ModelRunner:
                 categorized_sample_indices_start_idx += num_seqs
                 categorized_sampled_token_indices_start_idx += num_seqs
 
-            if sampling_params.seed is not None:
+            if seq_group_metadata.state.generator is not None:
                 generators.append(seq_group_metadata.state.generator)
 
         selected_token_indices = async_tensor_h2d(selected_token_indices,
