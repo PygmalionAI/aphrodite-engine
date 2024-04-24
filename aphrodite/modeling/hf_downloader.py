@@ -23,8 +23,6 @@ from aphrodite.common.logger import get_loading_progress_bar
 from aphrodite.modeling.layers.quantization import (QuantizationConfig,
                                                     get_quantization_config)
 from aphrodite.modeling.layers.quantization.schema import QuantParamSchema
-from aphrodite.distributed import (get_tensor_model_parallel_rank,
-                                   get_tensor_model_parallel_world_size)
 
 _xdg_cache_home = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
 _aphrodite_filelocks_path = os.path.join(_xdg_cache_home, "aphrodite/locks/")
@@ -235,10 +233,6 @@ def prepare_hf_model_weights(
 
 
 def convert_gguf_to_state_dict(checkpoint, config):
-    if not os.path.isfile(checkpoint):
-        raise RuntimeError(
-            f"Cannot find any model weights with `{checkpoint}`")
-
     model_type = config.model_type
     # hack: ggufs have a different name than transformers
     if model_type == "cohere":
@@ -274,28 +268,41 @@ def convert_gguf_to_state_dict(checkpoint, config):
     for key in keys_to_remove:
         state_dict.pop(key)
 
-    result = GGUFReader(checkpoint)
+    if os.path.isfile(checkpoint):
+        results = [GGUFReader(checkpoint)]
+    elif os.path.isdir(checkpoint):
+        results = [
+            GGUFReader(os.path.join(checkpoint, file))
+            for file in os.listdir(checkpoint)
+            if os.path.splitext(file)[-1].lower() == ".gguf"
+        ]
+    else:
+        raise RuntimeError(
+            f"Cannot find any model weights with `{checkpoint}`")
+
     with get_loading_progress_bar() as progress:
         task = progress.add_task(
             "[cyan]Converting GGUF tensors to PyTorch...",
-            total=len(result.tensors),
+            total=sum([len(result.tensors) for result in results]),
         )
-        for ts in result.tensors:
-            try:
-                hf_name = gguf_to_hf_name_map[ts.name]
-            except KeyError:
-                logger.warning(
-                    f"hf tensor name for {ts.name} in GGUF not found.")
-                continue
-            data = torch.tensor(ts.data)
-            if state_dict[hf_name].dim() == 2:
-                data = data.view(state_dict[hf_name].shape[0], -1)
-            state_dict[hf_name] = data
-            weight_type = torch.tensor(int(ts.tensor_type), dtype=torch.int)
-            if weight_type > 1:
-                state_dict[hf_name.replace("weight",
-                                           "weight_type")] = weight_type
-            progress.update(task, advance=1)
+        for result in results:
+            for ts in result.tensors:
+                try:
+                    hf_name = gguf_to_hf_name_map[ts.name]
+                except KeyError:
+                    logger.warning(
+                        f"hf tensor name for {ts.name} in GGUF not found.")
+                    continue
+                data = torch.tensor(ts.data)
+                if state_dict[hf_name].dim() == 2:
+                    data = data.view(state_dict[hf_name].shape[0], -1)
+                state_dict[hf_name] = data
+                weight_type = torch.tensor(int(ts.tensor_type),
+                                           dtype=torch.int)
+                if weight_type > 1:
+                    state_dict[hf_name.replace("weight",
+                                               "weight_type")] = weight_type
+                progress.update(task, advance=1)
     return state_dict
 
 
@@ -447,59 +454,3 @@ def initialize_dummy_weights(
     for param in model.state_dict().values():
         if torch.is_floating_point(param):
             param.data.uniform_(low, high)
-
-
-# Split the exl2 weight at group boundary
-def post_init_exl2(layer):
-    q_groups = layer.q_groups
-    num_groups = q_groups.shape[0] // 2
-    input_size = layer.q_invperm.shape[0]
-    tp_rank = get_tensor_model_parallel_rank()
-    tp_size = get_tensor_model_parallel_world_size()
-    rows = 0
-    # row_number, qrow_number, group_number
-    splits = [(0, 0, 0)]
-    index = 1
-    for i in range(num_groups - 1):
-        bits = q_groups[i * 2].item()
-        qrows = (q_groups[i * 2 + 3] - q_groups[i * 2 + 1]).item()
-        rows += qrows * 32 // bits
-
-        if rows >= input_size // tp_size * index:
-            splits.append((rows, q_groups[i * 2 + 3].item(), i + 1))
-            index += 1
-    splits.append((input_size, layer.q_weight.shape[0], num_groups))
-
-    shard_qweight = torch.nn.Parameter(
-        layer.q_weight[splits[tp_rank][1]:splits[tp_rank + 1][1]].clone(),
-        requires_grad=False,
-    )
-    del layer.q_weight
-    layer.linear_weights["q_weight"] = shard_qweight
-
-    shard_qgroups = torch.nn.Parameter(
-        layer.q_groups[splits[tp_rank][2] * 2:splits[tp_rank + 1][2] *
-                       2].clone(),
-        requires_grad=False,
-    )
-    shard_qgroups[1::2] -= int(shard_qgroups[1])
-    del layer.q_groups
-    layer.linear_weights["q_groups"] = shard_qgroups
-
-    shard_qscale = torch.nn.Parameter(
-        layer.q_scale[splits[tp_rank][2]:splits[tp_rank + 1][2]].clone(),
-        requires_grad=False,
-    )
-    del layer.q_scale
-    layer.linear_weights["q_scale"] = shard_qscale
-
-    shard_qscale_max = torch.nn.Parameter(
-        layer.q_scale_max[splits[tp_rank][2]:splits[tp_rank + 1][2]].clone(),
-        requires_grad=False,
-    )
-    del layer.q_scale_max
-    layer.linear_weights["q_scale_max"] = shard_qscale_max
-
-    q_perm = torch.argsort(layer.q_invperm).to(torch.short)
-    layer.linear_weights["q_perm"] = q_perm[splits[tp_rank][0]:splits[tp_rank +
-                                                                      1][0]]

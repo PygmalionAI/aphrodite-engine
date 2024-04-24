@@ -1,7 +1,9 @@
+import os
 from typing import Optional
 
 from transformers import AutoConfig, PretrainedConfig
 from transformers.models.auto.configuration_auto import CONFIG_MAPPING
+from loguru import logger
 
 from aphrodite.transformers_utils.configs import (BaiChuanConfig, DbrxConfig,
                                                   ChatGLMConfig, MPTConfig,
@@ -20,7 +22,24 @@ _CONFIG_REGISTRY = {
 
 
 def extract_gguf_config(checkpoint):
-    result = GGUFReader(checkpoint)
+    if os.path.isfile(checkpoint):
+        result = GGUFReader(checkpoint)
+    elif os.path.isdir(checkpoint):
+        try:
+            return AutoConfig.from_pretrained(checkpoint)
+        except Exception:
+            pass
+
+        all_gguf_files = sorted([
+            file for file in os.listdir(checkpoint)
+            if os.path.splitext(file)[-1].lower() == ".gguf"
+        ])
+        # assume the config is always in the first shard
+        result = GGUFReader(os.path.join(checkpoint, all_gguf_files[0]))
+    else:
+        raise RuntimeError(f"Cannot find any model config with `{checkpoint}`")
+
+    logger.info("Extracting config from GGUF...")
     architecture = result.fields['general.architecture']
     architecture = str(bytes(architecture.parts[architecture.data[0]]),
                        encoding='utf-8')
