@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional
+from contextlib import suppress
 
 import torch
 from loguru import logger
@@ -9,12 +10,9 @@ from aphrodite.modeling.layers.quantization.base_config import \
     QuantizationConfig
 
 HAS_EETQ = False
-try:
+with suppress(ImportError):
     from eetq import w8_a16_gemm
     HAS_EETQ = True
-except ImportError:
-    logger.warning("You have not installed EETQ. Please refer to "
-                   "https://github.com/NetEase-FuXi/EETQ")
 
 
 class EETQConfig(QuantizationConfig):
