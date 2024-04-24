@@ -10,10 +10,10 @@ class LogitsProcessor(ABC):
                  logits: torch.Tensor) -> torch.Tensor:
         """Logits are edited in-place"""
         pass
-    
+
     @abstractmethod
     def batched(self, logits: torch.Tensor,
-                 output_tokens: List[List[int]]) -> None:
+                output_tokens: List[List[int]]) -> None:
         """Logits are edited in-place"""
         pass
 
@@ -32,7 +32,7 @@ class BiasLogitsProcessor(LogitsProcessor):
                                    dtype=torch.float)
 
     def batched(self, logits: torch.Tensor,
-             output_tokens: List[List[int]]) -> None:
+                output_tokens: List[List[int]]) -> None:
         values = self.values.to(logits.device)
         keys = self.keys.to(logits.device)
         logits[:, keys] += values
@@ -43,10 +43,6 @@ class BiasLogitsProcessor(LogitsProcessor):
         keys = self.keys.to(logits.device)
         logits[:, keys] += values
         return logits
-
-
-
-        
 
 
 class BanEOSUntil(LogitsProcessor):
@@ -65,10 +61,10 @@ class BanEOSUntil(LogitsProcessor):
         if len(output_tokens) < self._min_tokens:
             logits[self._eos_token_id] = -float("inf")
         return logits
-    
+
     def batched(self, logits: torch.Tensor,
-                 output_tokens: List[List[int]]) -> None:
-        terminate_mask = torch.tensor([len(toks) < self._min_tokens
-                                       for toks in output_tokens],
-                                       device=logits.device)
+                output_tokens: List[List[int]]) -> None:
+        terminate_mask = torch.tensor(
+            [len(toks) < self._min_tokens for toks in output_tokens],
+            device=logits.device)
         logits[terminate_mask, self._eos_token_id] = -float("inf")

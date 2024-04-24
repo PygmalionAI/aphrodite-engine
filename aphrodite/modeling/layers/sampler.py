@@ -1,5 +1,6 @@
 """A layer that samples the next tokens from the model's outputs."""
-import itertools, math
+import itertools
+import math
 from typing import Dict, List, Tuple, Optional
 
 import torch
@@ -48,10 +49,10 @@ class Sampler(nn.Module):
 
         if sampling_tensors.do_penalties:
             logits = _apply_penalties(logits, sampling_tensors.prompt_tokens,
-                                    sampling_tensors.output_tokens,
-                                    sampling_tensors.pres_penalties,
-                                    sampling_tensors.freq_penalties,
-                                    sampling_tensors.rep_penalties)
+                                      sampling_tensors.output_tokens,
+                                      sampling_tensors.pres_penalties,
+                                      sampling_tensors.freq_penalties,
+                                      sampling_tensors.rep_penalties)
 
         if sampling_tensors.do_temperatures or sampling_tensors.do_dynatemps:
             logits = _apply_temperature(logits, sampling_tensors.temperatures,
@@ -62,9 +63,9 @@ class Sampler(nn.Module):
         if (sampling_tensors.do_top_ks or sampling_tensors.do_top_ps
                 or sampling_tensors.do_top_as or sampling_tensors.do_min_ps):
             logits = _apply_alphabet_soup(logits, sampling_tensors.top_ps,
-                                        sampling_tensors.top_ks,
-                                        sampling_tensors.top_as,
-                                        sampling_tensors.min_ps)
+                                          sampling_tensors.top_ks,
+                                          sampling_tensors.top_as,
+                                          sampling_tensors.min_ps)
 
         if sampling_tensors.do_tfss:
             logits = _apply_tfs(logits, sampling_tensors.tfss)
@@ -72,15 +73,16 @@ class Sampler(nn.Module):
             logits = _apply_eta_cutoff(logits, sampling_tensors.eta_cutoffs)
         if sampling_tensors.do_epsilon_cutoffs:
             logits = _apply_epsilon_cutoff(logits,
-                                        sampling_tensors.epsilon_cutoffs)
+                                           sampling_tensors.epsilon_cutoffs)
         if sampling_tensors.do_typical_ps:
-            logits = _apply_typical_sampling(logits, sampling_tensors.typical_ps)
+            logits = _apply_typical_sampling(logits,
+                                             sampling_tensors.typical_ps)
 
         if sampling_tensors.do_quadratic:
-            logits = _apply_quadratic_sampling(logits,
-                                            sampling_tensors.smoothing_indices,
-                                            sampling_tensors.smoothing_factors,
-                                            sampling_tensors.smoothing_curves)
+            logits = _apply_quadratic_sampling(
+                logits, sampling_tensors.smoothing_indices,
+                sampling_tensors.smoothing_factors,
+                sampling_tensors.smoothing_curves)
 
         banned_tokens = _get_custom_token_bans(sampling_metadata)
         assert len(banned_tokens) == logits.shape[0]
@@ -97,18 +99,17 @@ class Sampler(nn.Module):
 
         # Sample the next tokens.
         sample_results = _sample(probs, logprobs, sampling_metadata,
-                                sampling_tensors)
+                                 sampling_tensors)
 
         if sampling_tensors.do_mirostat:
             _mirostat_store_args(logits, sampling_tensors, sample_results,
-                                sampling_metadata, output_metadata)
+                                 sampling_metadata, output_metadata)
         # Get the logprobs query results.
-        prompt_logprobs, sample_logprobs = _get_logprobs(logprobs,
-                                                        sampling_metadata,
-                                                        sample_results)
+        prompt_logprobs, sample_logprobs = _get_logprobs(
+            logprobs, sampling_metadata, sample_results)
         return _build_sampler_output(sample_results, sampling_metadata,
-                                    prompt_logprobs, sample_logprobs,
-                                    output_metadata)
+                                     prompt_logprobs, sample_logprobs,
+                                     output_metadata)
 
 
 def _get_bin_counts_and_mask(

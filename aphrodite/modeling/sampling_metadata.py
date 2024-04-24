@@ -144,15 +144,15 @@ class SamplingTensors:
 
     @classmethod
     def from_sampling_metadata(
-        cls,
-        sampling_metadata: "SamplingMetadata",
-        vocab_size: int,
-        tgt_device: torch.device,
-        float_dtype: torch.dtype,
-        *,
-        extra_seeds_to_generate: int = 0,
-        extra_entropy: Optional[Tuple[int, ...]] = None
-    ) -> "SamplingTensors":
+            cls,
+            sampling_metadata: "SamplingMetadata",
+            vocab_size: int,
+            tgt_device: torch.device,
+            float_dtype: torch.dtype,
+            *,
+            extra_seeds_to_generate: int = 0,
+            extra_entropy: Optional[Tuple[int,
+                                          ...]] = None) -> "SamplingTensors":
         prompt_lens = sampling_metadata.prompt_lens or []
         groups = sampling_metadata.seq_groups or []
         seq_data = sampling_metadata.seq_data or {}
