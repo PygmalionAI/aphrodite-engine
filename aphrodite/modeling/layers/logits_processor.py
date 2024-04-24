@@ -4,8 +4,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
-from aphrodite.modeling.megatron.communication_op import (
-    tensor_model_parallel_gather)
+from aphrodite.distributed import tensor_model_parallel_gather
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 
 
@@ -37,7 +36,7 @@ class LogitsProcessor(nn.Module):
 
     def forward(
         self,
-        lm_head: "ParallelLMHead",
+        lm_head: nn.Module,
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
         embedding_bias: Optional[torch.Tensor] = None,
@@ -47,7 +46,6 @@ class LogitsProcessor(nn.Module):
         else:
             hidden_states = _prune_hidden_states(hidden_states,
                                                  sampling_metadata)
-            logits = lm_head(hidden_states)
             # Get the logits for the next tokens.
             logits = self._get_logits(hidden_states, lm_head, embedding_bias)
 
@@ -86,8 +84,15 @@ def _apply_logits_processors(
 ) -> torch.Tensor:
     logits_row_idx = 0
     found_logits_processors = False
-    for seq_ids, sampling_params in sampling_metadata.seq_groups:
+    for i, seq_group in enumerate(sampling_metadata.seq_groups):
+        seq_ids, sampling_params = seq_group
         logits_processors = sampling_params.logits_processors
+        # handle prompt_logprobs by skipping rows in logits added for
+        # the prompt tokens (prompt logprobs are not processed)
+        if (i < sampling_metadata.num_prompts
+                and sampling_params.prompt_logprobs is not None):
+            assert len(seq_ids) == 1
+            logits_row_idx += sampling_metadata.prompt_lens[i] - 1
         if logits_processors:
             found_logits_processors = True
             for seq_id in seq_ids:
@@ -100,5 +105,6 @@ def _apply_logits_processors(
         else:
             logits_row_idx += len(seq_ids)
     if found_logits_processors:
+        # Ensure that no rows in logits were unexpectedly skipped.
         assert logits_row_idx == logits.shape[0]
     return logits

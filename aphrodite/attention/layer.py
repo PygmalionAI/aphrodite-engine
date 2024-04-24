@@ -4,7 +4,8 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 
-from aphrodite.attention.backends.abstract import AttentionMetadata
+from aphrodite.attention.backends.abstract import (AttentionMetadata,
+                                                   AttentionMetadataPerStage)
 from aphrodite.attention.selector import get_attn_backend
 
 
@@ -39,6 +40,8 @@ class Attention(nn.Module):
         key: torch.Tensor,
         value: torch.Tensor,
         kv_cache: Optional[torch.Tensor],
-        attn_metadata: AttentionMetadata,
+        attn_metadata: AttentionMetadata[AttentionMetadataPerStage],
+        kv_scale: float = 1.0,
     ) -> torch.Tensor:
-        return self.impl.forward(query, key, value, kv_cache, attn_metadata)
+        return self.impl.forward(query, key, value, kv_cache, attn_metadata,
+                                 kv_scale)

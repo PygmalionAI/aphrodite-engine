@@ -2,12 +2,14 @@ import contextlib
 from typing import Optional
 
 import torch
-from torch.distributed import ReduceOp
 from loguru import logger
+from torch.distributed import ReduceOp
 
 try:
-    from aphrodite.modeling.megatron.pynccl import (NCCLCommunicator,
-                                                    ncclGetVersion)
+    from aphrodite.distributed.device_communicators.pynccl import (
+        NCCLCommunicator,
+        ncclGetVersion,
+    )
 except Exception as e:
     # in non-NVIDIA environments, we can't import the nccl module
     # e.g. when running on machines with AMD GPUs

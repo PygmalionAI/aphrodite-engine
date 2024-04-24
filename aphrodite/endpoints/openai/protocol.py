@@ -3,12 +3,12 @@
 import time
 from typing import Dict, List, Literal, Optional, Union
 
-from pydantic import (AliasChoices, BaseModel, Field, model_validator,
-                      root_validator)
 import torch
+from pydantic import (AliasChoices, BaseModel, Field, conint, model_validator,
+                      root_validator)
 
-from aphrodite.common.utils import random_uuid
 from aphrodite.common.sampling_params import SamplingParams
+from aphrodite.common.utils import random_uuid
 
 
 class ErrorResponse(BaseModel):
@@ -236,6 +236,7 @@ class CompletionRequest(BaseModel):
     custom_token_bans: Optional[List[int]] = Field(default_factory=list)
     skip_special_tokens: Optional[bool] = True
     spaces_between_special_tokens: Optional[bool] = True
+    truncate_prompt_tokens: Optional[conint(ge=1)] = None
     grammar: Optional[str] = None
     length_penalty: Optional[float] = 1.0
     guided_json: Optional[Union[str, dict, BaseModel]] = None
@@ -298,6 +299,7 @@ class CompletionRequest(BaseModel):
             include_stop_str_in_output=self.include_stop_str_in_output,
             seed=self.seed,
             logits_processors=logits_processors,
+            truncate_prompt_tokens=self.truncate_prompt_tokens,
         )
 
     @model_validator(mode="before")

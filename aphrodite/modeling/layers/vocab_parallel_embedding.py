@@ -3,12 +3,13 @@ from typing import Optional, Sequence
 import torch
 from torch.nn.parameter import Parameter
 
+from aphrodite.distributed import (
+    divide,
+    get_tensor_model_parallel_rank,
+    get_tensor_model_parallel_world_size,
+    tensor_model_parallel_all_reduce,
+)
 from aphrodite.modeling.layers.linear import UnquantizedLinearMethod
-from aphrodite.modeling.megatron.utils import divide
-from aphrodite.modeling.megatron.communication_op import (
-    tensor_model_parallel_all_reduce)
-from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from aphrodite.modeling.utils import set_weight_attrs
 
 DEFAULT_VOCAB_PADDING_SIZE = 64
@@ -179,4 +180,24 @@ class ParallelLMHead(VocabParallelEmbedding):
         logits = self.linear_method.apply_weights(self.linear_weights, input_)
         if self.bias is not None:
             logits += self.bias
+        return logits
+
+
+class ParallelTWEHead(torch.nn.Module):
+    """Parallelized tie word embeddings head.
+
+    Output logits weight matrices used in the Sampler. The weight and bias
+    tensors are read from a VocabParallelEmbedding.
+
+    Args:
+        embeddings: the VocabParallelEmbedding to mirror
+    """
+
+    def __init__(self, embeddings: VocabParallelEmbedding):
+        super().__init__()
+        self.linear_method = embeddings.linear_method
+        self.linear_weights = embeddings.linear_weights
+
+    def forward(self, input_):
+        logits = self.linear_method.apply_weights(self.linear_weights, input_)
         return logits

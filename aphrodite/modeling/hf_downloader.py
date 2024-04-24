@@ -1,34 +1,48 @@
 """Utilities for downloading and initializing model weights."""
-import filelock
-import glob
 import fnmatch
+import glob
 import json
 import os
 from collections import defaultdict
-from typing import Any, Iterator, List, Optional, Tuple
-from loguru import logger
+from typing import Any, Iterable, Iterator, List, Optional, Tuple
 
-from huggingface_hub import snapshot_download, HfFileSystem
+import filelock
+import huggingface_hub.constants
 import numpy as np
-from safetensors.torch import load_file, save_file, safe_open
 import torch
-from transformers import PretrainedConfig
+from huggingface_hub import HfFileSystem, snapshot_download
+from loguru import logger
+from safetensors.torch import load_file, safe_open, save_file
 from tqdm.auto import tqdm
+from transformers import PretrainedConfig, AutoModelForCausalLM
 
 from aphrodite.common.config import ModelConfig
+from aphrodite.common.gguf import (GGUFReader, get_tensor_name_map,
+                                   MODEL_ARCH_NAMES)
 from aphrodite.common.logger import get_loading_progress_bar
-from aphrodite.common.gguf import GGUFReader
-from aphrodite.modeling.layers.quantization import (
-    get_quantization_config,
-    QuantizationConfig,
-)
-from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_rank,
-    get_tensor_model_parallel_world_size,
-)
+from aphrodite.modeling.layers.quantization import (QuantizationConfig,
+                                                    get_quantization_config)
+from aphrodite.modeling.layers.quantization.schema import QuantParamSchema
+from aphrodite.distributed import (get_tensor_model_parallel_rank,
+                                   get_tensor_model_parallel_world_size)
 
 _xdg_cache_home = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
 _aphrodite_filelocks_path = os.path.join(_xdg_cache_home, "aphrodite/locks/")
+
+
+def enable_hf_transfer():
+    """automatically activates hf_transfer
+    """
+    if "HF_HUB_ENABLE_HF_TRANSFER" not in os.environ:
+        try:
+            # enable hf hub transfer if available
+            import hf_transfer  # type: ignore # noqa
+            huggingface_hub.constants.HF_HUB_ENABLE_HF_TRANSFER = True
+        except ImportError:
+            pass
+
+
+enable_hf_transfer()
 
 
 class Disabledtqdm(tqdm):
@@ -225,94 +239,62 @@ def convert_gguf_to_state_dict(checkpoint, config):
         raise RuntimeError(
             f"Cannot find any model weights with `{checkpoint}`")
 
-    result = GGUFReader(checkpoint)
-    # write tensor
-    kv_dim = (config.hidden_size // config.num_attention_heads *
-              config.num_key_value_heads)
-    tensor_mapping = {
-        "token_embd": ("model.embed_tokens", config.vocab_size),
-        "output": ("lm_head", config.vocab_size),
-        "output_norm": ("model.norm", -1),
-        "blk.{bid}.attn_norm": ("model.layers.{bid}.input_layernorm", -1),
-        "blk.{bid}.attn_q": (
-            "model.layers.{bid}.self_attn.q_proj",
-            config.hidden_size,
-        ),
-        "blk.{bid}.attn_k": ("model.layers.{bid}.self_attn.k_proj", kv_dim),
-        "blk.{bid}.attn_v": ("model.layers.{bid}.self_attn.v_proj", kv_dim),
-        "blk.{bid}.attn_output": (
-            "model.layers.{bid}.self_attn.o_proj",
-            config.hidden_size,
-        ),
-        "blk.{bid}.attn_rot_embd": (
-            "model.layers.{bid}.self_attn.rotary_emb.inv_freq",
-            -1,
-        ),
-        "blk.{bid}.ffn_norm": (
-            "model.layers.{bid}.post_attention_layernorm",
-            -1,
-        ),
-        "blk.{bid}.ffn_up": (
-            "model.layers.{bid}.mlp.up_proj",
-            config.intermediate_size,
-        ),
-        "blk.{bid}.ffn_down": (
-            "model.layers.{bid}.mlp.down_proj",
-            config.hidden_size,
-        ),
-        "blk.{bid}.ffn_gate": (
-            "model.layers.{bid}.mlp.gate_proj",
-            config.intermediate_size,
-        ),
-        "blk.{bid}.ffn_up.{xid}": (
-            "model.layers.{bid}.block_sparse_moe.experts.{xid}.w3",
-            config.intermediate_size,
-        ),
-        "blk.{bid}.ffn_down.{xid}": (
-            "model.layers.{bid}.block_sparse_moe.experts.{xid}.w2",
-            config.hidden_size,
-        ),
-        "blk.{bid}.ffn_gate.{xid}": (
-            "model.layers.{bid}.block_sparse_moe.experts.{xid}.w1",
-            config.intermediate_size,
-        ),
-        "blk.{bid}.ffn_gate_inp": (
-            "model.layers.{bid}.block_sparse_moe.gate",
-            config.num_local_experts
-            if hasattr(config, "num_local_experts") else -1,
-        ),
-    }
-    mapping = {}
-    # This is how llama.cpp handles name mapping,
-    # it's better to use regex match instead doe
-    max_block_num = 200
-    max_expert_num = 8
-    for k, v in tensor_mapping.items():
-        for i in range(max_block_num):
-            for j in range(max_expert_num):
-                fk = k.format(bid=i, xid=j)
-                fv = v[0].format(bid=i, xid=j)
-                if k not in mapping:
-                    mapping[fk] = (fv, v[1])
+    model_type = config.model_type
+    # hack: ggufs have a different name than transformers
+    if model_type == "cohere":
+        model_type = "command-r"
+    arch = None
+    for key, value in MODEL_ARCH_NAMES.items():
+        if value == model_type:
+            arch = key
+            break
+    if arch is None:
+        raise RuntimeError(f"Unknown model_type: {model_type}")
+    num_layers = config.num_hidden_layers
+    name_map = get_tensor_name_map(arch, num_layers)
+    with torch.device("meta"):
+        dummy_model = AutoModelForCausalLM.from_config(config)
+    state_dict = dummy_model.state_dict()
 
-    state_dict = {}
+    gguf_to_hf_name_map = {}
+    keys_to_remove = []
+    for hf_name in state_dict:
+        name, suffix = hf_name.rsplit(".", 1)
+        gguf_name = name_map.get_name(name)
+        if gguf_name:
+            gguf_to_hf_name_map[f"{gguf_name}.{suffix}"] = hf_name
+        elif name == "lm_head":
+            keys_to_remove.append(hf_name)
+            logger.warning(
+                f"GGUF tensor name for {hf_name} not found, "
+                "this is normal if the model uses tie word embeddings.")
+        else:
+            logger.warning(
+                f"GGUF tensor name for {hf_name} in hf state_dict not found.")
+    for key in keys_to_remove:
+        state_dict.pop(key)
+
+    result = GGUFReader(checkpoint)
     with get_loading_progress_bar() as progress:
         task = progress.add_task(
             "[cyan]Converting GGUF tensors to PyTorch...",
             total=len(result.tensors),
         )
         for ts in result.tensors:
-            weight_type = torch.tensor(int(ts.tensor_type), dtype=torch.int)
-            layer, suffix = ts.name.rsplit(".", 1)
-            new_key, output_dim = mapping[layer]
-            new_key += f".{suffix}"
+            try:
+                hf_name = gguf_to_hf_name_map[ts.name]
+            except KeyError:
+                logger.warning(
+                    f"hf tensor name for {ts.name} in GGUF not found.")
+                continue
             data = torch.tensor(ts.data)
-            if output_dim != -1:
-                data = data.view(output_dim, -1)
+            if state_dict[hf_name].dim() == 2:
+                data = data.view(state_dict[hf_name].shape[0], -1)
+            state_dict[hf_name] = data
+            weight_type = torch.tensor(int(ts.tensor_type), dtype=torch.int)
             if weight_type > 1:
-                state_dict[new_key.replace("weight",
+                state_dict[hf_name.replace("weight",
                                            "weight_type")] = weight_type
-            state_dict[new_key] = data
             progress.update(task, advance=1)
     return state_dict
 
@@ -384,6 +366,46 @@ def hf_model_weights_iterator(
                 yield name, param
             del state
             torch.cuda.empty_cache()
+
+
+def kv_cache_scales_loader(
+        filename: str, tp_rank: int, tp_size: int, num_hidden_layers: int,
+        model_type: Optional[str]) -> Iterable[Tuple[int, float]]:
+    """
+    A simple utility to read in KV cache scaling factors that have been
+    previously serialized to disk. Used by the model to populate the appropriate
+    KV cache scaling factors. The serialization should represent a dictionary
+    whose keys are the TP ranks and values are another dictionary mapping layers
+    to their KV cache scaling factors.
+    Keep this function in sync with the output of examples/fp8/extract_scales.py
+    """
+    try:
+        with open(filename) as f:
+            context = {
+                "model_type": model_type,
+                "num_hidden_layers": num_hidden_layers,
+                "tp_rank": tp_rank,
+                "tp_size": tp_size,
+            }
+            schema_dct = json.load(f)
+            schema = QuantParamSchema.model_validate(schema_dct,
+                                                     context=context)
+            layer_scales_map = schema.kv_cache.scaling_factor[tp_rank]
+            return layer_scales_map.items()
+
+    except FileNotFoundError:
+        logger.error(f"File or directory '{filename}' not found.")
+    except json.JSONDecodeError:
+        logger.error(f"Error decoding JSON in file '{filename}'.")
+    except Exception as e:
+        logger.error(f"An error occurred while reading '{filename}': {e}")
+    # This section is reached if and only if any of the excepts are hit
+    # Return an empty iterable (list) => no KV cache scales are loaded
+    # which ultimately defaults to 1.0 scales
+    logger.warning("Defaulting to KV cache scaling factors = 1.0 "
+                   f"for all layers in TP rank {tp_rank} "
+                   "as an error occurred during loading.")
+    return []
 
 
 def convert_pyslice_to_tensor(x: Any) -> torch.Tensor:

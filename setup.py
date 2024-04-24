@@ -15,6 +15,8 @@ from torch.utils.cpp_extension import CUDA_HOME
 
 ROOT_DIR = os.path.dirname(__file__)
 logger = logging.getLogger(__name__)
+# Target device of Aphrodite, supporting [cuda (by default), rocm, neuron, cpu]
+APHRODITE_TARGET_DEVICE = os.getenv("APHRODITE_TARGET_DEVICE", "cuda")
 
 # Aphrodite only supports Linux platform
 assert sys.platform.startswith(
@@ -112,6 +114,7 @@ class cmake_build_ext(build_ext):
             '-DCMAKE_BUILD_TYPE={}'.format(cfg),
             '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={}'.format(outdir),
             '-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY={}'.format(self.build_temp),
+            '-DAPHRODITE_TARGET_DEVICE={}'.format(APHRODITE_TARGET_DEVICE),
         ]
 
         verbose = bool(int(os.getenv('VERBOSE', '0')))
@@ -190,11 +193,15 @@ class cmake_build_ext(build_ext):
 
 
 def _is_cuda() -> bool:
-    return torch.version.cuda is not None and not _is_neuron()
+    return APHRODITE_TARGET_DEVICE == "cuda" \
+            and torch.version.cuda is not None \
+            and not _is_neuron()
 
 
 def _is_hip() -> bool:
-    return torch.version.hip is not None
+    return (APHRODITE_TARGET_DEVICE == "cuda"
+            or APHRODITE_TARGET_DEVICE == "rocm") \
+            and torch.version.hip is not None
 
 
 def _is_neuron() -> bool:
@@ -206,13 +213,17 @@ def _is_neuron() -> bool:
     return torch_neuronx_installed
 
 
+def _is_cpu() -> bool:
+    return APHRODITE_TARGET_DEVICE == "cpu"
+
+
 def _install_punica() -> bool:
     install_punica = bool(
         int(os.getenv("APHRODITE_INSTALL_PUNICA_KERNELS", "1")))
     device_count = torch.cuda.device_count()
     for i in range(device_count):
         major, minor = torch.cuda.get_device_capability(i)
-        if major >= 8:
+        if major <= 8:
             install_punica = False
             break
     return install_punica
@@ -224,7 +235,7 @@ def _install_hadamard() -> bool:
     device_count = torch.cuda.device_count()
     for i in range(device_count):
         major, minor = torch.cuda.get_device_capability(i)
-        if major >= 7:
+        if major <= 7:
             install_hadamard = False
             break
     return install_hadamard
@@ -321,8 +332,11 @@ def get_aphrodite_version() -> str:
         if neuron_version != MAIN_CUDA_VERSION:
             neuron_version_str = neuron_version.replace(".", "")[:3]
             version += f"+neuron{neuron_version_str}"
+    elif _is_cpu():
+        version += "+cpu"
     else:
-        raise RuntimeError("Unknown runtime environment")
+        raise RuntimeError("Unknown runtime environment, "
+                           "must be either CUDA, ROCm, CPU, or Neuron.")
 
     return version
 
@@ -338,19 +352,29 @@ def read_readme() -> str:
 
 def get_requirements() -> List[str]:
     """Get Python package dependencies from requirements.txt."""
+
+    def _read_requirements(filename: str) -> List[str]:
+        with open(get_path(filename)) as f:
+            requirements = f.read().strip().split("\n")
+        resolved_requirements = []
+        for line in requirements:
+            if line.startswith("-r "):
+                resolved_requirements += _read_requirements(line.split()[1])
+            else:
+                resolved_requirements.append(line)
+        return resolved_requirements
+
     if _is_cuda():
-        with open(get_path("requirements.txt")) as f:
-            requirements = f.read().strip().split("\n")
+        requirements = _read_requirements("requirements-cuda.txt")
     elif _is_hip():
-        with open(get_path("requirements-rocm.txt")) as f:
-            requirements = f.read().strip().split("\n")
+        requirements = _read_requirements("requirements-rocm.txt")
     elif _is_neuron():
-        with open(get_path("requirements-neuron.txt")) as f:
-            requirements = f.read().strip().split("\n")
+        requirements = _read_requirements("requirements-neuron.txt")
+    elif _is_cpu():
+        requirements = _read_requirements("requirements-cpu.txt")
     else:
         raise ValueError(
-            "Unsupported platform, please use CUDA, ROCM or Neuron.")
-
+            "Unsupported platform, please use CUDA, ROCm, Neuron, or CPU.")
     return requirements
 
 
@@ -410,4 +434,9 @@ setup(
     ext_modules=ext_modules,
     cmdclass={"build_ext": cmake_build_ext} if not _is_neuron() else {},
     package_data=package_data,
+    entry_points={
+        "console_scripts": [
+            "aphrodite=aphrodite.endpoints.cli:main",
+        ],
+    },
 )

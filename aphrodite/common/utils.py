@@ -1,25 +1,20 @@
+import asyncio
 import enum
+import gc
 import os
 import socket
 import subprocess
 import uuid
-import gc
+from collections import OrderedDict, defaultdict
+from functools import lru_cache, partial
 from platform import uname
-from typing import List, Tuple, Union, Generic
-from packaging.version import parse, Version
+from typing import (Any, AsyncIterator, Awaitable, Callable, Dict, Generic,
+                    Hashable, List, Optional, Tuple, TypeVar, Union)
 
 import psutil
 import torch
-import asyncio
-from functools import partial, lru_cache
-from typing import (
-    Awaitable,
-    Callable,
-    TypeVar,
-)
-from collections import OrderedDict
-from typing import Any, Hashable, Optional
 from loguru import logger
+from packaging.version import Version, parse
 
 T = TypeVar("T")
 
@@ -27,8 +22,7 @@ STR_DTYPE_TO_TORCH_DTYPE = {
     "half": torch.half,
     "bfloat16": torch.bfloat16,
     "float": torch.float,
-    "fp8_e5m2": torch.uint8,
-    # "int8": torch.int8,
+    "fp8": torch.uint8,
 }
 
 
@@ -121,6 +115,15 @@ def is_hip() -> bool:
 
 
 @lru_cache(maxsize=None)
+def is_cpu() -> bool:
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return "cpu" in version("aphrodite-engine")
+    except PackageNotFoundError:
+        return False
+
+
+@lru_cache(maxsize=None)
 def is_neuron() -> bool:
     try:
         import transformers_neuronx
@@ -173,6 +176,41 @@ def make_async(func: Callable[..., T]) -> Callable[..., Awaitable[T]]:
         return loop.run_in_executor(executor=None, func=p_func)
 
     return _async_wrapper
+
+
+def merge_async_iterators(
+        *iterators: AsyncIterator[T]) -> AsyncIterator[Tuple[int, T]]:
+    """Merge multiple asynchronous iterators into a single iterator.
+    This method handle the case where some iterators finish before others.
+    When it yields, it yields a tuple (i, item) where i is the index of the
+    iterator that yields the item.
+    """
+    queue: asyncio.Queue[Union[Tuple[int, T], Exception]] = asyncio.Queue()
+
+    finished = [False] * len(iterators)
+
+    async def producer(i: int, iterator: AsyncIterator[T]):
+        try:
+            async for item in iterator:
+                await queue.put((i, item))
+        except Exception as e:
+            await queue.put(e)
+        finished[i] = True
+
+    _tasks = [
+        asyncio.create_task(producer(i, iterator))
+        for i, iterator in enumerate(iterators)
+    ]
+
+    async def consumer():
+        while not all(finished) or not queue.empty():
+            item = await queue.get()
+            if isinstance(item, Exception):
+                raise item
+            yield item
+        await asyncio.gather(*_tasks)
+
+    return consumer()
 
 
 def get_ip() -> str:
@@ -242,7 +280,7 @@ def get_nvcc_cuda_version() -> Optional[Version]:
     return nvcc_cuda_version
 
 
-def _generate_random_fp8_e5m2(
+def _generate_random_fp8(
     tensor: torch.tensor,
     low: float,
     high: float,
@@ -258,7 +296,7 @@ def _generate_random_fp8_e5m2(
     from aphrodite._C import cache_ops
     tensor_tmp = torch.empty_like(tensor, dtype=torch.float16)
     tensor_tmp.uniform_(low, high)
-    cache_ops.convert_fp8_e5m2(tensor_tmp, tensor)
+    cache_ops.convert_fp8(tensor_tmp, tensor)
     del tensor_tmp
 
 
@@ -287,7 +325,7 @@ def create_kv_caches_with_random(
                 raise ValueError(f"Invalid model dtype: {model_dtype}")
         elif cache_dtype in ["half", "bfloat16", "float"]:
             torch_dtype = STR_DTYPE_TO_TORCH_DTYPE[cache_dtype]
-        elif cache_dtype == "fp8_e5m2":
+        elif cache_dtype == "fp8":
             torch_dtype = torch.uint8
         else:
             raise ValueError(f"Invalid kv cache dtype: {cache_dtype}")
@@ -304,12 +342,10 @@ def create_kv_caches_with_random(
         key_cache = torch.empty(size=key_cache_shape,
                                 dtype=torch_dtype,
                                 device=device)
-        if cache_dtype == 'fp8_e5m2':
-            _generate_random_fp8_e5m2(key_cache, -scale, scale)
-        # elif cache_dtype == 'int8':
-        #     torch.randint(-128, 127, key_cache.size(), out=key_cache)
-        elif torch_dtype in [torch.half, torch.bfloat16, torch.float]:
+        if cache_dtype in ["auto", "half", "bfloat16", "float"]:
             key_cache.uniform_(-scale, scale)
+        elif cache_dtype == 'fp8':
+            _generate_random_fp8(key_cache, -scale, scale)
         else:
             raise ValueError(
                 f"Does not support key cache of type {cache_dtype}")
@@ -321,12 +357,10 @@ def create_kv_caches_with_random(
         value_cache = torch.empty(size=value_cache_shape,
                                   dtype=torch_dtype,
                                   device=device)
-        if cache_dtype == 'fp8_e5m2':
-            _generate_random_fp8_e5m2(value_cache, -scale, scale)
-        # elif cache_dtype == 'int8':
-        #     torch.randint(-128, 127, value_cache.size(), out=value_cache)
-        elif torch_dtype in [torch.half, torch.bfloat16, torch.float]:
+        if cache_dtype in ["auto", "half", "bfloat16", "float"]:
             value_cache.uniform_(-scale, scale)
+        elif cache_dtype == 'fp8':
+            _generate_random_fp8(value_cache, -scale, scale)
         else:
             raise ValueError(
                 f"Does not support value cache of type {cache_dtype}")
@@ -350,6 +384,8 @@ def is_pin_memory_available() -> bool:
         return False
     elif is_neuron():
         print_warning_once("Pin memory is not supported on Neuron.")
+        return False
+    elif is_cpu():
         return False
     return True
 
@@ -426,3 +462,20 @@ def maybe_expand_dim(tensor: torch.Tensor,
     if tensor.ndim < target_dims:
         tensor = tensor.view(-1, *([size] * (target_dims - tensor.ndim)))
     return tensor
+
+
+def merge_dicts(dict1: Dict[Any, List[Any]],
+                dict2: Dict[Any, List[Any]]) -> Dict[Any, List[Any]]:
+    """Merge 2 dicts that have key -> List of items.
+    
+    When a key conflicts, the values in dict1 is prioritized.
+    """
+    merged_dict = defaultdict(list)
+
+    for key, value in dict1.items():
+        merged_dict[key].extend(value)
+
+    for key, value in dict2.items():
+        merged_dict[key].extend(value)
+
+    return dict(merged_dict)

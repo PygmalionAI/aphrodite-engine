@@ -14,11 +14,6 @@ _PARTITION_SIZE = 512
 @dataclass
 class PagedAttentionMetadata:
     """Metadata for PagedAttention."""
-    # (num_tokens,). The indices of the token slots that input tokens will be
-    # stored into. E.g., if `slot_mapping` is [35, 2, 17] and the block size
-    # is 16, the three tokens are stored in the 3rd slot in block 2, 2nd slot
-    # in block 0, and 1st slot in block 1, respectively.
-    slot_mapping: torch.Tensor
     # (batch_size,). The length of context (tokens stored in KV cache) per
     # sequence. WARNING: When it is a prefill request, it doesn't include new
     # tokens. When it is for decoding, it includes a new token.
@@ -32,7 +27,6 @@ class PagedAttentionMetadata:
     # 2nd dimensions are padded up to max_blocks_per_seq if it is cuda-graph
     # captured.
     block_tables: Optional[torch.Tensor]
-    kv_cache_dtype: str
 
 
 class PagedAttention:
@@ -74,6 +68,7 @@ class PagedAttention:
         value_cache: torch.Tensor,
         slot_mapping: torch.Tensor,
         kv_cache_dtype: str,
+        kv_scale: float,
     ) -> None:
         cache_ops.reshape_and_cache(
             key,
@@ -82,6 +77,7 @@ class PagedAttention:
             value_cache,
             slot_mapping.flatten(),
             kv_cache_dtype,
+            kv_scale,
         )
 
     @staticmethod
@@ -96,6 +92,7 @@ class PagedAttention:
         num_kv_heads: int,
         scale: float,
         alibi_slopes: Optional[torch.Tensor],
+        kv_scale: float,
     ) -> torch.Tensor:
         output = torch.empty_like(query)
 
@@ -127,6 +124,7 @@ class PagedAttention:
                 max_context_len,
                 alibi_slopes,
                 kv_cache_dtype,
+                kv_scale,
             )
         else:
             # Run PagedAttention V2.
@@ -158,6 +156,7 @@ class PagedAttention:
                 max_context_len,
                 alibi_slopes,
                 kv_cache_dtype,
+                kv_scale,
             )
         return output
 

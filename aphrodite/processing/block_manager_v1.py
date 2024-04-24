@@ -1,14 +1,17 @@
 """A block manager that manages token blocks."""
+from abc import ABC, abstractmethod
 from itertools import count, takewhile
 from os.path import commonprefix
-from typing import Dict, List, Optional, Set, Tuple
-from abc import ABC, abstractmethod
+from typing import Dict, List, Optional, Set
+
+from loguru import logger
 
 from aphrodite.common.block import BlockTable, PhysicalTokenBlock
+from aphrodite.processing.evictor import EvictionPolicy, Evictor, make_evictor
+from aphrodite.processing.interfaces import AllocStatus, BlockSpaceManager
 from aphrodite.common.sequence import Sequence, SequenceGroup, SequenceStatus
 from aphrodite.common.utils import Device
-from aphrodite.processing.evictor import Evictor, EvictionPolicy, make_evictor
-from aphrodite.processing.interfaces import AllocStatus, BlockSpaceManager
+
 
 
 class BlockAllocatorBase(ABC):
@@ -52,6 +55,7 @@ class BlockAllocatorBase(ABC):
 
 class CachedBlockAllocator(BlockAllocatorBase):
     """Manages free physical token blocks for a device.
+
     The allocator maintains a list of free blocks and allocates a block when
     requested. When a block is freed, its reference count is decremented. If
     the reference count becomes zero, the block is added back to the free list.
@@ -91,7 +95,6 @@ class CachedBlockAllocator(BlockAllocatorBase):
     def allocate(self,
                  block_hash: Optional[int] = None,
                  num_hashed_tokens: int = 0) -> PhysicalTokenBlock:
-
         if block_hash is None:
             block_hash = next(self.default_hash_ctr)
         if block_hash in self.evictor:
@@ -139,6 +142,7 @@ class CachedBlockAllocator(BlockAllocatorBase):
 
 class UncachedBlockAllocator(BlockAllocatorBase):
     """Manages free physical token blocks for a device.
+
     The allocator maintains a list of free blocks and allocates a block when
     requested. When a block is freed, its reference count is decremented. If
     the reference count becomes zero, the block is added back to the free list.
@@ -210,7 +214,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
 
         if enable_caching and sliding_window is not None:
             raise NotImplementedError(
-                "Sliding window is not allowed with prefix caching enabled!")
+                "Sliding window is not allowed with Context Shift enabled!")
 
         self.block_sliding_window = None
         if sliding_window is not None:
@@ -226,6 +230,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         self.watermark_blocks = int(watermark * num_gpu_blocks)
 
         if self.enable_caching:
+            logger.info("Context Shift is enabled.")
             self.gpu_allocator = CachedBlockAllocator(Device.GPU, block_size,
                                                       num_gpu_blocks)
             self.cpu_allocator = CachedBlockAllocator(Device.CPU, block_size,
@@ -287,7 +292,12 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         for seq in seq_group.get_seqs(status=SequenceStatus.WAITING):
             self.block_tables[seq.seq_id] = block_table.copy()
 
-    def can_append_slot(self, seq_group: SequenceGroup) -> bool:
+    def can_append_slots(self,
+                         seq_group: SequenceGroup,
+                         num_lookahead_slots: int = 0) -> bool:
+        assert (num_lookahead_slots == 0
+                ), "lookahead allocation not supported in BlockSpaceManagerV1"
+
         # Simple heuristic: If there is at least one free block
         # for each sequence, we can append.
         num_free_gpu_blocks = self.gpu_allocator.get_num_free_blocks()
@@ -305,8 +315,8 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         # Sequences
         new_hash = seq.hash_of_block(len(seq.logical_token_blocks) - 1)
 
-        # if new_hash is already in the cached table, then free last_block and
-        # return the cached version
+        # if new_hash is already in the cached table, then free last_block
+        # and return the cached version
         if self.gpu_allocator.contains_block(new_hash):
             self.gpu_allocator.free(last_block)
             return self.gpu_allocator.allocate(new_hash)
@@ -318,7 +328,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         self,
         seq: Sequence,
     ) -> bool:
-        token_ids_len = len(seq.data.get_token_ids())
+        token_ids_len = seq.data.get_len()
         return token_ids_len > 0 and token_ids_len % seq.block_size == 0
 
     def _maybe_promote_last_block(
@@ -343,24 +353,27 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         if not self.enable_caching:
             return self.gpu_allocator.allocate()
         block_hash: Optional[int] = None
-        if self._is_last_block_full(seq):
+        if (self._is_last_block_full(seq)):
             block_hash = seq.hash_of_block(len(seq.logical_token_blocks) - 1)
         num_hashed_tokens = seq.num_hashed_tokens_of_block(
             len(seq.logical_token_blocks) - 1)
+
         # num_hashed_tokens is used to compute future hashes
         # (e.g. in the hashing function, it is used to ask the sequence for
         # prefix tokens)
         new_block = self.gpu_allocator.allocate(block_hash, num_hashed_tokens)
+
         # If the block has is None, then the block is not full.
         # If the block is not full, then we expect it to have a refcount of 1.
         if block_hash is None:
             assert new_block.ref_count == 1
         return new_block
 
-    def append_slot(
+    def append_slots(
         self,
         seq: Sequence,
-    ) -> Optional[Tuple[int, int]]:
+        num_lookahead_slots: int = 0,
+    ) -> Dict[int, List[int]]:
         """Allocate a physical slot for a new token."""
         logical_blocks = seq.logical_token_blocks
         block_table = self.block_tables[seq.seq_id]
@@ -379,7 +392,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                 # Allocate a new physical block.
                 new_block = self._allocate_last_physical_block(seq)
                 block_table.append(new_block)
-                return None
+                return {}
 
         # We want to append the token to the last physical block.
         last_block = block_table[-1]
@@ -392,7 +405,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                 maybe_new_block = self._maybe_promote_last_block(
                     seq, last_block)
                 block_table[-1] = maybe_new_block
-            return None
+            return {}
         else:
             # The last block is shared with other sequences.
             # Copy on Write: Allocate a new block and copy the tokens.
@@ -400,18 +413,18 @@ class BlockSpaceManagerV1(BlockSpaceManager):
 
             block_table[-1] = new_block
             self.gpu_allocator.free(last_block)
-            return last_block.block_number, new_block.block_number
+            return {last_block.block_number: [new_block.block_number]}
 
     def fork(self, parent_seq: Sequence, child_seq: Sequence) -> None:
         # NOTE: fork does not allocate a new physical block.
         # Thus, it is always safe from OOM.
         src_block_table = self.block_tables[parent_seq.seq_id]
         self.block_tables[child_seq.seq_id] = src_block_table.copy()
-        # When using sliding window, blocks will be eventually reused.
-        # In this case, the block tables will contain repeated blocks.
+        # When using a sliding window, blocks will be eventually reused.
+        # In this case the block tables will contain repeated blocks.
         # When forking, we must make sure that each block's `ref_count`
-        # is only incremented by one, so we deduplicate them by
-        # wrapping them in a set.
+        # is only incremented by one, so we deduplicate them by wrapping
+        # them in a set.
         for block in set(src_block_table):
             block.ref_count += 1
 
@@ -426,7 +439,11 @@ class BlockSpaceManagerV1(BlockSpaceManager):
             blocks.update(self.block_tables[seq.seq_id])
         return list(blocks)
 
-    def can_swap_in(self, seq_group: SequenceGroup) -> bool:
+    def can_swap_in(self,
+                    seq_group: SequenceGroup,
+                    num_lookahead_slots: int = 0) -> bool:
+        assert (num_lookahead_slots == 0
+                ), "BlockSpaceManagerV1 does not support lookahead allocation"
         blocks = self._get_physical_blocks(seq_group)
         num_swapped_seqs = seq_group.num_seqs(status=SequenceStatus.SWAPPED)
         num_free_blocks = self.gpu_allocator.get_num_free_blocks()
@@ -436,7 +453,12 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         num_required_blocks = len(blocks) + num_swapped_seqs
         return num_free_blocks - num_required_blocks >= self.watermark_blocks
 
-    def swap_in(self, seq_group: SequenceGroup) -> Dict[int, int]:
+    def swap_in(self,
+                seq_group: SequenceGroup,
+                num_lookahead_slots: int = 0) -> Dict[int, int]:
+        assert (num_lookahead_slots == 0
+                ), "BlockSpaceManagerV1 does not support lookahead allocation"
+
         # CPU block -> GPU block.
         mapping: Dict[PhysicalTokenBlock, PhysicalTokenBlock] = {}
         for seq in seq_group.get_seqs(status=SequenceStatus.SWAPPED):
@@ -493,12 +515,11 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         return block_number_mapping
 
     def _free_block_table(self, block_table: BlockTable) -> None:
-        # When using sliding window, each seq will only use up
+        # when using a sliding window, each seq will only use up
         # to `self.block_sliding_window` blocks. When freeing
-        # the block table, we must make sure to not free blocks
-        # more than once. If no sliding window is used, there is
-        # no block reuse in the block table, so we must free all
-        # blocks.
+        # the block table, we must make sure to not free blocks more
+        # than once. If no sliding window is used, there is no block
+        # reuse in the block table, so we must free all blocks.
         blocks_to_free = (block_table[-self.block_sliding_window:]
                           if self.block_sliding_window is not None else
                           block_table)
@@ -569,6 +590,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
 
     def get_common_computed_block_ids(self, seqs: List[Sequence]) -> List[int]:
         """Return the block ids that are common for a given sequence group.
+
         Used in prefill (can skip prefill of some blocks).
         """
         # Can return non-empty result only with prefix caching enabled.

@@ -1,11 +1,18 @@
-import asyncio
 import time
-from fastapi import Request
-from typing import (AsyncGenerator, AsyncIterator, Callable, List, Optional,
-                    Dict, Tuple)
+from typing import (
+    AsyncGenerator,
+    AsyncIterator,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+)
 
-from aphrodite.common.utils import random_uuid
-from aphrodite.engine.async_aphrodite import AsyncAphrodite
+from fastapi import Request
+
+from aphrodite.common.outputs import RequestOutput
+from aphrodite.common.utils import merge_async_iterators, random_uuid
 from aphrodite.endpoints.openai.protocol import (
     CompletionRequest,
     CompletionResponse,
@@ -15,10 +22,10 @@ from aphrodite.endpoints.openai.protocol import (
     LogProbs,
     UsageInfo,
 )
-from aphrodite.common.outputs import RequestOutput
-from aphrodite.endpoints.openai.serving_engine import OpenAIServing, LoRA
+from aphrodite.endpoints.openai.serving_engine import LoRA, OpenAIServing
+from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.modeling.outlines_decoding import (
-    get_guided_decoding_logits_processor)
+    get_guided_decoding_logits_processor, )
 
 TypeTokenIDs = List[int]
 TypeTopLogProbs = List[Optional[Dict[int, float]]]
@@ -44,45 +51,9 @@ def parse_prompt_format(prompt) -> Tuple[bool, list]:
             prompt_is_tokens = True
             prompts = prompt  # case 4: array of token arrays
         else:
-            raise ValueError(
-                "prompt must be a string, array of strings, array of tokens, "
-                "or array of token arrays")
+            raise ValueError("prompt must be a string, array of strings, "
+                             "array of tokens, or array of token arrays")
     return prompt_is_tokens, prompts
-
-
-def merge_async_iterators(*iterators):
-    """Merge multiple asynchronous iterators into a single iterator.
-
-    This method handle the case where some iterators finish before others.
-    When it yields, it yields a tuple (i, item) where i is the index of the
-    iterator that yields the item.
-    """
-    queue = asyncio.Queue()
-
-    finished = [False] * len(iterators)
-
-    async def producer(i, iterator):
-        try:
-            async for item in iterator:
-                await queue.put((i, item))
-        except Exception as e:
-            await queue.put(e)
-        finished[i] = True
-
-    _tasks = [
-        asyncio.create_task(producer(i, iterator))
-        for i, iterator in enumerate(iterators)
-    ]
-
-    async def consumer():
-        while not all(finished) or not queue.empty():
-            item = await queue.get()
-            if isinstance(item, Exception):
-                raise item
-            yield item
-        await asyncio.gather(*_tasks)
-
-    return consumer()
 
 
 class OpenAIServingCompletion(OpenAIServing):
@@ -117,7 +88,7 @@ class OpenAIServingCompletion(OpenAIServing):
 
         model_name = request.model
         request_id = f"cmpl-{random_uuid()}"
-        created_time = int(time.monotonic())
+        created_time = int(time.time())
 
         # Schedule the request and get the result generator.
         generators = []
@@ -136,27 +107,35 @@ class OpenAIServingCompletion(OpenAIServing):
 
             for i, prompt in enumerate(prompts):
                 if prompt_is_tokens:
-                    input_ids = self._validate_prompt_and_tokenize(
-                        request, prompt_ids=prompt)
+                    prompt_formats = self._validate_prompt_and_tokenize(
+                        request,
+                        prompt_ids=prompt,
+                        truncate_prompt_tokens=sampling_params.
+                        truncate_prompt_tokens)
                 else:
-                    input_ids = self._validate_prompt_and_tokenize(
-                        request, prompt=prompt)
+                    prompt_formats = self._validate_prompt_and_tokenize(
+                        request,
+                        prompt=prompt,
+                        truncate_prompt_tokens=sampling_params.
+                        truncate_prompt_tokens)
+                prompt_ids, prompt_text = prompt_formats
 
                 generators.append(
-                    self.engine.generate(prompt,
+                    self.engine.generate(prompt_text,
                                          sampling_params,
                                          f"{request_id}-{i}",
-                                         prompt_token_ids=input_ids,
+                                         prompt_token_ids=prompt_ids,
                                          lora_request=lora_request))
         except ValueError as e:
+            # TODO: Use a specific-specific Validation Error
             return self.create_error_response(str(e))
 
         result_generator: AsyncIterator[Tuple[
             int, RequestOutput]] = merge_async_iterators(*generators)
 
         # Similar to the OpenAI API, when n != best_of, we do not stream the
-        # results. In addition, we do not stream the results when use beam
-        # search.
+        # results. In addition, we do not stream the results when use
+        # beam search.
         stream = (request.stream
                   and (request.best_of is None or request.n == request.best_of)
                   and not request.use_beam_search)
@@ -223,8 +202,8 @@ class OpenAIServingCompletion(OpenAIServing):
 
                 for output in res.outputs:
                     i = output.index + prompt_idx * request.n
-                    # TODO: optimize the performance by avoiding full text
-                    # O(n^2) sending.
+                    # TODO: optimize the performance by avoiding full
+                    # text O(n^2) sending.
 
                     if request.echo and request.max_tokens == 0:
                         # only return the prompt
@@ -289,12 +268,10 @@ class OpenAIServingCompletion(OpenAIServing):
                         usage=final_usage,
                     ).model_dump_json(exclude_unset=True)
                     yield f"data: {response_json}\n\n"
-
         except ValueError as e:
             # TODO: Use an aphrodite-specific Validation Error
             data = self.create_streaming_error_response(str(e))
             yield f"data: {data}\n\n"
-
         yield "data: [DONE]\n\n"
 
     def request_output_to_completion_response(
@@ -321,7 +298,8 @@ class OpenAIServingCompletion(OpenAIServing):
                     output_text = prompt_text
                 elif request.echo and request.max_tokens > 0:
                     token_ids = prompt_token_ids + output.token_ids
-                    top_logprobs = prompt_logprobs + output.logprobs
+                    top_logprobs = (prompt_logprobs + output.logprobs
+                                    if request.logprobs else None)
                     output_text = prompt_text + output.text
                 else:
                     token_ids = output.token_ids
@@ -329,6 +307,9 @@ class OpenAIServingCompletion(OpenAIServing):
                     output_text = output.text
 
                 if request.logprobs is not None:
+                    assert top_logprobs is not None, (
+                        "top_logprobs must be provided when logprobs "
+                        "is requested")
                     logprobs = self._create_logprobs(
                         token_ids=token_ids,
                         top_logprobs=top_logprobs,

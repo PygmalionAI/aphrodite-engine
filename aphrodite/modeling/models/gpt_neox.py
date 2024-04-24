@@ -39,7 +39,7 @@ from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding,
     ParallelLMHead,
 )
-from aphrodite.modeling.megatron.parallel_state import (
+from aphrodite.distributed import (
     get_tensor_model_parallel_world_size, )
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (
@@ -283,6 +283,11 @@ class GPTNeoXForCausalLM(nn.Module):
                 self.config):
             if ("attention.bias" in name or "attention.masked_bias" in name
                     or "rotary_emb.inv_freq" in name):
+                continue
+            if ("rotary_emb.cos_cached" in name
+                    or "rotary_emb.sin_cached" in name):
+                # Models trained using OpenRLHF may include
+                # these tensors in the checkpoint. Skip them.
                 continue
             param = params_dict[name]
 

@@ -1,8 +1,10 @@
 import ray
 
-from aphrodite.common.config import ParallelConfig
 from aphrodite.common.utils import get_open_port
-from aphrodite.task_handler.worker import init_distributed_environment
+from aphrodite.distributed import (
+    ensure_model_parallel_initialized,
+    init_distributed_environment,
+)
 
 
 def init_test_distributed_environment(
@@ -10,13 +12,16 @@ def init_test_distributed_environment(
     tensor_parallel_size: int,
     rank: int,
     distributed_init_port: str,
+    local_rank: int = -1,
 ) -> None:
-    parallel_config = ParallelConfig(pipeline_parallel_size,
-                                     tensor_parallel_size,
-                                     worker_use_ray=True)
     distributed_init_method = f"tcp://localhost:{distributed_init_port}"
-    init_distributed_environment(parallel_config, rank,
-                                 distributed_init_method)
+    init_distributed_environment(
+        world_size=pipeline_parallel_size * tensor_parallel_size,
+        rank=rank,
+        distributed_init_method=distributed_init_method,
+        local_rank=local_rank)
+    ensure_model_parallel_initialized(tensor_parallel_size,
+                                      pipeline_parallel_size)
 
 
 def multi_process_tensor_parallel(
@@ -26,7 +31,6 @@ def multi_process_tensor_parallel(
     # Using ray helps debugging the error when it failed
     # as compared to multiprocessing.
     ray.init()
-
     distributed_init_port = get_open_port()
     refs = []
     for rank in range(tensor_parallel_size):
@@ -35,4 +39,5 @@ def multi_process_tensor_parallel(
                                distributed_init_port))
     ray.get(refs)
 
-    ray.shutdown()
+
+ray.shutdown()

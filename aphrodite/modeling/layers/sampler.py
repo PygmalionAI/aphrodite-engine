@@ -66,7 +66,6 @@ class Sampler(nn.Module):
                                           sampling_tensors.top_ks,
                                           sampling_tensors.top_as,
                                           sampling_tensors.min_ps)
-
         if sampling_tensors.do_tfss:
             logits = _apply_tfs(logits, sampling_tensors.tfss)
         if sampling_tensors.do_eta_cutoffs:

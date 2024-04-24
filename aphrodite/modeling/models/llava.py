@@ -144,7 +144,7 @@ class LlavaForConditionalGeneration(nn.Module):
                     f"plus "
                     f"{self.vision_language_config.image_input_shape[1:]}."
                     f" You supplied {image_input.shape}. "
-                    f"If you are using vLLM's entrypoint, make sure your "
+                    f"If you are using Aphrodite's endpoint, make sure your "
                     f"supplied image input is consistent with "
                     f"image_input_shape in engine args.")
             if self.vision_tower is not None:
