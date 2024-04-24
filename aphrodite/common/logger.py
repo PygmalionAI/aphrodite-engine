@@ -78,6 +78,15 @@ def _log_formatter(record: dict):
     return fmt
 
 
+_logged_messages = set()
+
+
+def log_once(level, message, *args, **kwargs):
+    if message not in _logged_messages:
+        _logged_messages.add(message)
+        logger.log(level, message, *args, **kwargs)
+
+
 # Uvicorn log handler
 # Uvicorn log portions inspired from https://github.com/encode/uvicorn/discussions/2027#discussioncomment-6432362
 class UvicornLoggingHandler(logging.Handler):
@@ -117,3 +126,8 @@ def setup_logger():
         format=_log_formatter,
         colorize=True,
     )
+
+    logger.log_once = log_once
+
+
+setup_logger()

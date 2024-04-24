@@ -1,17 +1,16 @@
 import torch
 from loguru import logger
-from transformers import AutoConfig, AutoModelForCausalLM
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 from aphrodite.modeling.hf_downloader import convert_gguf_to_state_dict
 from aphrodite.transformers_utils.config import extract_gguf_config
 from aphrodite.transformers_utils.tokenizer import convert_gguf_to_tokenizer
 
 
-def convert_save_model(checkpoint, config_path, save_dir, max_shard_size):
-    if config_path is not None:
-        config = AutoConfig.from_pretrained(config_path)
+def convert_save_model(checkpoint, unquantized_path, save_dir, max_shard_size):
+    if unquantized_path is not None:
+        config = AutoConfig.from_pretrained(unquantized_path)
     else:
-        logger.info("Extracting config from GGUF")
         config = extract_gguf_config(checkpoint)
 
     with torch.device("meta"):
@@ -23,9 +22,11 @@ def convert_save_model(checkpoint, config_path, save_dir, max_shard_size):
                           max_shard_size=max_shard_size)
 
 
-def convert_save_tokenizer(checkpoint, save_dir):
-    logger.info("Converting tokenizer...")
-    tokenizer = convert_gguf_to_tokenizer(checkpoint)
+def convert_save_tokenizer(checkpoint, unquantized_path, save_dir):
+    if unquantized_path is not None:
+        tokenizer = AutoTokenizer.from_pretrained(unquantized_path)
+    else:
+        tokenizer = convert_gguf_to_tokenizer(checkpoint)
     tokenizer.save_pretrained(save_dir)
 
 
@@ -39,23 +40,20 @@ if __name__ == '__main__':
                         type=str,
                         help='The path to output directory')
     parser.add_argument(
-        '--config-path',
+        '--unquantized-path',
         default=None,
         type=str,
-        help='The path to model config. This should point to the unquantized'
-        'original repo of the model (not the gguf file or repo).')
-    parser.add_argument(
-        '--tokenizer',
-        action='store_true',
-        help='Extract the tokenizer from GGUF file. Only llama is supported')
+        help='The path to the unquantized model to copy config and tokenizer')
+    parser.add_argument('--no-tokenizer',
+                        action='store_true',
+                        help='Do not try to copy or extract the tokenizer')
     parser.add_argument(
         '--max-shard-size',
         default="5GB",
         type=str,
         help='Shard the model in specified shard size, e.g. 5GB')
     args = parser.parse_args()
-    convert_save_model(args.input, args.config_path, args.output,
+    convert_save_model(args.input, args.unquantized_path, args.output,
                        args.max_shard_size)
-
-    if args.tokenizer:
-        convert_save_tokenizer(args.input, args.output)
+    if not args.no_tokenizer:
+        convert_save_tokenizer(args.input, args.unquantized_path, args.output)
