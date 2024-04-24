@@ -23,8 +23,6 @@ from aphrodite.common.logger import get_loading_progress_bar
 from aphrodite.modeling.layers.quantization import (QuantizationConfig,
                                                     get_quantization_config)
 from aphrodite.modeling.layers.quantization.schema import QuantParamSchema
-from aphrodite.distributed import (get_tensor_model_parallel_rank,
-                                   get_tensor_model_parallel_world_size)
 
 _xdg_cache_home = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
 _aphrodite_filelocks_path = os.path.join(_xdg_cache_home, "aphrodite/locks/")
@@ -456,59 +454,3 @@ def initialize_dummy_weights(
     for param in model.state_dict().values():
         if torch.is_floating_point(param):
             param.data.uniform_(low, high)
-
-
-# Split the exl2 weight at group boundary
-def post_init_exl2(layer):
-    q_groups = layer.q_groups
-    num_groups = q_groups.shape[0] // 2
-    input_size = layer.q_invperm.shape[0]
-    tp_rank = get_tensor_model_parallel_rank()
-    tp_size = get_tensor_model_parallel_world_size()
-    rows = 0
-    # row_number, qrow_number, group_number
-    splits = [(0, 0, 0)]
-    index = 1
-    for i in range(num_groups - 1):
-        bits = q_groups[i * 2].item()
-        qrows = (q_groups[i * 2 + 3] - q_groups[i * 2 + 1]).item()
-        rows += qrows * 32 // bits
-
-        if rows >= input_size // tp_size * index:
-            splits.append((rows, q_groups[i * 2 + 3].item(), i + 1))
-            index += 1
-    splits.append((input_size, layer.q_weight.shape[0], num_groups))
-
-    shard_qweight = torch.nn.Parameter(
-        layer.q_weight[splits[tp_rank][1]:splits[tp_rank + 1][1]].clone(),
-        requires_grad=False,
-    )
-    del layer.q_weight
-    layer.linear_weights["q_weight"] = shard_qweight
-
-    shard_qgroups = torch.nn.Parameter(
-        layer.q_groups[splits[tp_rank][2] * 2:splits[tp_rank + 1][2] *
-                       2].clone(),
-        requires_grad=False,
-    )
-    shard_qgroups[1::2] -= int(shard_qgroups[1])
-    del layer.q_groups
-    layer.linear_weights["q_groups"] = shard_qgroups
-
-    shard_qscale = torch.nn.Parameter(
-        layer.q_scale[splits[tp_rank][2]:splits[tp_rank + 1][2]].clone(),
-        requires_grad=False,
-    )
-    del layer.q_scale
-    layer.linear_weights["q_scale"] = shard_qscale
-
-    shard_qscale_max = torch.nn.Parameter(
-        layer.q_scale_max[splits[tp_rank][2]:splits[tp_rank + 1][2]].clone(),
-        requires_grad=False,
-    )
-    del layer.q_scale_max
-    layer.linear_weights["q_scale_max"] = shard_qscale_max
-
-    q_perm = torch.argsort(layer.q_invperm).to(torch.short)
-    layer.linear_weights["q_perm"] = q_perm[splits[tp_rank][0]:splits[tp_rank +
-                                                                      1][0]]
