@@ -71,6 +71,9 @@ def run_aphrodite(
     enforce_eager: bool,
     enable_chunked_prefill: bool,
     max_num_batched_tokens: int,
+    speculative_model: Optional[str] = None,
+    num_speculative_tokens: Optional[int] = None,
+    use_v2_block_manager: bool = False,
 ) -> float:
     llm = LLM(
         model=model,
@@ -86,6 +89,9 @@ def run_aphrodite(
         enforce_eager=enforce_eager,
         enable_chunked_prefill=enable_chunked_prefill,
         max_num_batched_tokens=max_num_batched_tokens,
+        speculative_model=speculative_model,
+        num_speculative_tokens=num_speculative_tokens,
+        use_v2_block_manager=use_v2_block_manager,
     )
 
     # Add the requests to the engine.
@@ -276,6 +282,16 @@ if __name__ == "__main__":
                         type=int,
                         help="maximum number of batched tokens for the "
                         "Aphrodite backend")
+    parser.add_argument("--speculative-model",
+                        type=str,
+                        help="speculative model for the Aphrodite backend")
+    parser.add_argument("--num-speculative-tokens",
+                        type=int,
+                        help="number of speculative tokens for the "
+                        "Aphrodite backend")
+    parser.add_argument("--use-v2-block-manager",
+                        action="store_true",
+                        help="use v2 block manager for the Aphrodite backend")
     args = parser.parse_args()
 
     if args.backend == "aphrodite":

@@ -215,11 +215,14 @@ class _AsyncAphrodite(AphroditeEngine):
             output = await self.model_executor.execute_model_async(
                 seq_group_metadata_list, scheduler_outputs.blocks_to_swap_in,
                 scheduler_outputs.blocks_to_swap_out,
-                scheduler_outputs.blocks_to_copy)
+                scheduler_outputs.blocks_to_copy,
+                scheduler_outputs.num_lookahead_slots)
         else:
             output = []
 
-        return self._process_model_outputs(output, scheduler_outputs)
+        return self._process_model_outputs(
+            output, scheduler_outputs.scheduled_seq_groups,
+            scheduler_outputs.ignored_seq_groups)
 
     async def encode_request_async(
         self,

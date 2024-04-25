@@ -132,10 +132,10 @@ class CFGLogitsProcessor(BaseLogitsProcessor):
 
 @lru_cache
 def _adapt_tokenizer(tokenizer: PreTrainedTokenizerBase):
-    """Adapt vLLM's tokenizer to use to compile the FSM.
+    """Adapt Aphrodite's tokenizer to use to compile the FSM.
     The API of Outlines tokenizers is slightly different to that of
     `transformers`. The decoder of outlines, returns a list whereas
-    the decode of vLLM returns an str. To sync the vLLM decoder with
+    the decode of Aphrodite returns an str. To sync the Aphrodite decoder with
     outlines internal api, the decoder should be adapted. In addition
     we need to handle the missing spaces to Llama's tokenizer to be
     able to compile FSMs for this model.
