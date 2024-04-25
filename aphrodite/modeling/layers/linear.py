@@ -260,6 +260,7 @@ class ColumnParallelLinear(torch.nn.Module):
         linear_method: (Maybe quantized) linear method.
         output_sizes: list of output sizes packed into one output, like for
                       QKV the list would be size 3.
+        num_experts: number of experts for sparse moe models.
     """
 
     def __init__(
