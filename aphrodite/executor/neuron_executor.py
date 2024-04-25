@@ -1,34 +1,16 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Set
 
 from aphrodite.lora.request import LoRARequest
-from aphrodite.common.config import (CacheConfig, DeviceConfig, ModelConfig,
-                                     ParallelConfig, SchedulerConfig,
-                                     LoRAConfig, VisionLanguageConfig,
-                                     SpeculativeConfig)
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 
 
 class NeuronExecutor(ExecutorBase):
 
-    def __init__(
-        self,
-        model_config: ModelConfig,
-        cache_config: CacheConfig,
-        parallel_config: ParallelConfig,
-        scheduler_config: SchedulerConfig,
-        device_config: DeviceConfig,
-        lora_config: Optional[LoRAConfig],
-        vision_language_config: Optional[VisionLanguageConfig],
-        speculative_config: Optional[SpeculativeConfig],
-    ) -> None:
-        self.model_config = model_config
-        self.cache_config = cache_config
-        assert lora_config is None, "LoRA is not supported for Neuron backend."
-        self.parallel_config = parallel_config
-        self.scheduler_config = scheduler_config
-        self.device_config = device_config
-        assert (not speculative_config
+    def _init_executor(self) -> None:
+        assert (self.lora_config is
+                None), "LoRA is not supported for Neuron backend."
+        assert (not self.speculative_config
                 ), "Speculative decoding not yet supported for Neuron backend."
 
         # Instantiate the worker and load the model to the device.
@@ -78,7 +60,7 @@ class NeuronExecutor(ExecutorBase):
     def remove_lora(self, lora_id: int) -> bool:
         return self.driver_worker.remove_lora(lora_id)
 
-    def list_loras(self) -> List[int]:
+    def list_loras(self) -> Set[int]:
         return self.driver_worker.list_loras()
 
     def check_health(self) -> None:

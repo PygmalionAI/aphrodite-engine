@@ -2,7 +2,6 @@ from typing import Any, Dict, List, Optional
 from contextlib import suppress
 
 import torch
-from loguru import logger
 from torch.nn.parameter import Parameter
 
 from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
