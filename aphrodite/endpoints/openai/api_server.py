@@ -400,7 +400,7 @@ async def get_preloaded_story() -> JSONResponse:
 @extra_api.get("/version")
 async def get_extra_version():
     """Impersonate KoboldCpp"""
-    return JSONResponse({"result": "KoboldCpp", "version": "1.60.1"})
+    return JSONResponse({"result": "KoboldCpp", "version": "1.63"})
 
 
 @router.get("/")
