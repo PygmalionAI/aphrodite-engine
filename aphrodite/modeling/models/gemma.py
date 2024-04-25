@@ -160,19 +160,19 @@ class GemmaAttention(nn.Module):
             self.merge_weight = False
             self.q_proj = ColumnParallelLinear(
                 hidden_size,
-                self.q_size,
+                self.total_num_heads * self.head_dim,
                 bias=False,
                 linear_method=linear_method,
             )
             self.k_proj = ColumnParallelLinear(
                 hidden_size,
-                self.kv_size,
+                self.total_num_kv_heads * self.head_dim,
                 bias=False,
                 linear_method=linear_method,
             )
             self.v_proj = ColumnParallelLinear(
                 hidden_size,
-                self.kv_size,
+                self.total_num_kv_heads * self.head_dim,
                 bias=False,
                 linear_method=linear_method,
             )
