@@ -1,7 +1,7 @@
 from typing import Optional, Union
 
 from aphrodite.endpoints.openai.protocol import (ChatCompletionRequest,
-                                              CompletionRequest)
+                                                 CompletionRequest)
 from aphrodite.modeling.guided_decoding.lm_format_enforcer_decoding import (
     get_lm_format_enforcer_guided_decoding_logits_processor)
 from aphrodite.modeling.guided_decoding.outlines_decoding import (

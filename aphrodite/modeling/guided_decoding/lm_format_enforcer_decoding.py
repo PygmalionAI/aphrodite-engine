@@ -50,8 +50,8 @@ async def get_lm_format_enforcer_guided_decoding_logits_processor(
     else:
         return None
 
-    logits_processor = build_aphrodite_logits_processor(tokenizer_data,
-                                                        character_level_parser)
+    logits_processor = build_aphrodite_logits_processor(
+        tokenizer_data, character_level_parser)
     return logits_processor
 
 
