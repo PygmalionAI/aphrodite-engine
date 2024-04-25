@@ -336,8 +336,7 @@ class AsyncAphrodite:
         elif engine_config.device_config.device_type == "cpu":
             from aphrodite.executor.cpu_executor import CPUExecutor
             executor_class = CPUExecutor
-        elif (engine_config.parallel_config.worker_use_ray
-              or engine_args.engine_use_ray):
+        elif engine_config.parallel_config.worker_use_ray:
             initialize_ray_cluster(engine_config.parallel_config)
             from aphrodite.executor.ray_gpu_executor import RayGPUExecutorAsync
             executor_class = RayGPUExecutorAsync
@@ -410,8 +409,8 @@ class AsyncAphrodite:
         else:
             # FIXME: This is a bit hacky. Be careful when changing the
             # order of the arguments.
-            cache_config = args[1]
-            parallel_config = args[2]
+            cache_config = kwargs["cache_config"]
+            parallel_config = kwargs["parallel_config"]
             if parallel_config.tensor_parallel_size == 1:
                 num_gpus = cache_config.gpu_memory_utilization
             else:
