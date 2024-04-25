@@ -3,10 +3,11 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Optional
 
-from aphrodite.common.config import (CacheConfig, ModelConfig, ParallelConfig,
-                                     SchedulerConfig, LoRAConfig, DeviceConfig,
+from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
+                                     EngineConfig, LoRAConfig, ModelConfig,
+                                     ParallelConfig, SchedulerConfig,
                                      SpeculativeConfig, TokenizerPoolConfig,
-                                     VisionLanguageConfig, EngineConfig)
+                                     VisionLanguageConfig)
 from aphrodite.common.utils import str_to_int_tuple
 
 
@@ -68,6 +69,7 @@ class EngineArgs:
     image_feature_size: Optional[int] = None
     scheduler_delay_factor: float = 0.0
     enable_chunked_prefill: bool = False
+    guided_decoding_backend: str = 'outlines'
     # Speculative decoding config
     speculative_model: Optional[str] = None
     num_speculative_tokens: Optional[int] = None
@@ -198,6 +200,13 @@ class EngineArgs:
             help="model context length. If unspecified, "
             "will be automatically derived from the model.",
         )
+        parser.add_argument(
+            '--guided-decoding-backend',
+            type=str,
+            default='outlines',
+            choices=['outlines', 'lm-format-enforcer'],
+            help='Which engine will be used for guided decoding'
+            ' (JSON schema / regex etc)')
         # Parallel arguments
         parser.add_argument(
             "--worker-use-ray",
@@ -591,6 +600,9 @@ class EngineArgs:
             )
         else:
             vision_language_config = None
+
+        decoding_config = DecodingConfig(
+            guided_decoding_backend=self.guided_decoding_backend)
         return EngineConfig(model_config=model_config,
                             cache_config=cache_config,
                             parallel_config=parallel_config,
@@ -598,7 +610,8 @@ class EngineArgs:
                             device_config=device_config,
                             lora_config=lora_config,
                             vision_language_config=vision_language_config,
-                            speculative_config=speculative_config)
+                            speculative_config=speculative_config,
+                            decoding_config=decoding_config)
 
 
 @dataclass

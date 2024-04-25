@@ -110,6 +110,12 @@ class ChatCompletionRequest(BaseModel):
     guided_choice: Optional[List[str]] = None
     guided_grammar: Optional[str] = None
     response_format: Optional[ResponseFormat] = None
+    guided_decoding_backend: Optional[str] = Field(
+        default=None,
+        description=(
+            "If specified, will override the default guided decoding backend "
+            "of the server for this specific request. If set, must be either "
+            "'outlines' / 'lm-format-enforcer'"))
 
     def to_sampling_params(self) -> SamplingParams:
         if self.logprobs and not self.top_logprobs:
@@ -244,6 +250,12 @@ class CompletionRequest(BaseModel):
     guided_choice: Optional[List[str]] = None
     guided_grammar: Optional[str] = None
     response_format: Optional[ResponseFormat] = None
+    guided_decoding_backend: Optional[str] = Field(
+        default=None,
+        description=(
+            "If specified, will override the default guided decoding backend "
+            "of the server for this specific request. If set, must be one of "
+            "'outlines' / 'lm-format-enforcer'"))
 
     def to_sampling_params(self) -> SamplingParams:
         echo_without_generation = self.echo and self.max_tokens == 0

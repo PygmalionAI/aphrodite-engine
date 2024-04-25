@@ -1065,6 +1065,21 @@ def _get_and_verify_max_len(
     return int(max_model_len)
 
 
+@dataclass
+class DecodingConfig:
+    """Dataclass which contains the decoding strategy of the engine"""
+
+    # Which guided decoding algo to use. 'outlines' / 'lm-format-enforcer'
+    guided_decoding_backend: str = 'outlines'
+
+    def __post_init__(self):
+        valid_guided_backends = ['outlines', 'lm-format-enforcer']
+        backend = self.guided_decoding_backend
+        if backend not in valid_guided_backends:
+            raise ValueError(f"Invalid guided_decoding_backend '{backend}',"
+                             f"must be one of {valid_guided_backends}")
+
+
 @dataclass(frozen=True)
 class EngineConfig:
     """Dataclass which contains all engine-related configuration. This
@@ -1079,6 +1094,7 @@ class EngineConfig:
     lora_config: Optional[LoRAConfig]
     vision_language_config: Optional[VisionLanguageConfig]
     speculative_config: Optional[SpeculativeConfig]
+    decoding_config: Optional[DecodingConfig]
 
     def __post_init__(self):
         """Verify configs are valid & consistent with each other.

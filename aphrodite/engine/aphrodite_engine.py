@@ -1,30 +1,30 @@
 import time
 from typing import Iterable, List, Optional, Tuple, Type, Union
+
 from loguru import logger
 from transformers import PreTrainedTokenizer
 
 import aphrodite
-from aphrodite.lora.request import LoRARequest
-from aphrodite.common.config import (CacheConfig, DeviceConfig, ModelConfig,
-                                     ParallelConfig, SchedulerConfig,
-                                     LoRAConfig, VisionLanguageConfig,
-                                     SpeculativeConfig)
-from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
-from aphrodite.engine.args_tools import EngineArgs
-from aphrodite.executor.executor_base import ExecutorBase
-from aphrodite.engine.metrics import StatLogger, Stats
-from aphrodite.engine.ray_tools import (initialize_ray_cluster)
+from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
+                                     LoRAConfig, ModelConfig, ParallelConfig,
+                                     SchedulerConfig, SpeculativeConfig,
+                                     VisionLanguageConfig)
+from aphrodite.common.logger import setup_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.common.sequence import (SamplerOutput, Sequence, SequenceGroup,
-                                       SequenceGroupOutput, SequenceOutput,
-                                       SequenceStatus, MultiModalData)
+from aphrodite.common.sequence import (MultiModalData, SamplerOutput, Sequence,
+                                       SequenceGroup, SequenceGroupOutput,
+                                       SequenceOutput, SequenceStatus)
+from aphrodite.common.utils import Counter
+from aphrodite.engine.args_tools import EngineArgs
+from aphrodite.engine.metrics import StatLogger, Stats
+from aphrodite.engine.ray_tools import initialize_ray_cluster
+from aphrodite.executor.executor_base import ExecutorBase
+from aphrodite.lora.request import LoRARequest
+from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
+from aphrodite.transformers_utils.detokenizer import Detokenizer
 from aphrodite.transformers_utils.tokenizer_group import (BaseTokenizerGroup,
                                                           get_tokenizer_group)
-from aphrodite.transformers_utils.detokenizer import Detokenizer
-from aphrodite.common.utils import (
-    Counter, )
-from aphrodite.common.logger import setup_logger
 
 _LOCAL_LOGGING_INTERVAL_SEC = 5
 
@@ -72,6 +72,7 @@ class AphroditeEngine:
         lora_config: Optional[LoRAConfig],
         vision_language_config: Optional[VisionLanguageConfig],
         speculative_config: Optional[SpeculativeConfig],
+        decoding_config: Optional[DecodingConfig],
         executor_class: Type[ExecutorBase],
         log_stats: bool,
     ) -> None:
@@ -90,7 +91,8 @@ class AphroditeEngine:
             f"Enforce Eager Mode = {model_config.enforce_eager}\n"
             f"KV Cache Data Type = {cache_config.cache_dtype}\n"
             f"KV Cache Params Path = {model_config.quantization_param_path}\n"
-            f"Device = {device_config.device}")
+            f"Device = {device_config.device}\n"
+            f"Guided Decoding Backend = {decoding_config!r}\n")
         # TODO: Print more configs in debug mode.
 
         self.model_config = model_config
@@ -101,6 +103,7 @@ class AphroditeEngine:
         self.scheduler_config = scheduler_config
         self.device_config = device_config
         self.speculative_config = speculative_config
+        self.decoding_config = decoding_config or DecodingConfig()
         self.log_stats = log_stats
         self._verify_args()
 
