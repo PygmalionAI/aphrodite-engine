@@ -42,8 +42,9 @@ def post_init_exl2(layer):
         qrows = (q_groups[i * 2 + 3] - q_groups[i * 2 + 1]).item()
         rows += qrows * 32 // bits
 
-        if rows >= input_size // tp_size * index:
-            splits.append((rows, q_groups[i * 2 + 3].item(), i + 1))
+        q_rows_end = q_groups[i * 2 + 3].item()
+        if q_rows_end >= layer.q_weight.shape[0] // tp_size * index:
+            splits.append((rows, q_rows_end, i + 1))
             index += 1
     splits.append((input_size, layer.q_weight.shape[0], num_groups))
 
