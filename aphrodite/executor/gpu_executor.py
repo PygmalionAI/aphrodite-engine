@@ -56,7 +56,6 @@ class GPUExecutor(ExecutorBase):
         """
         assert self.speculative_config is not None
 
-        from aphrodite.spec_decode.multi_step_worker import MultiStepWorker
         from aphrodite.spec_decode.spec_decode_worker import SpecDecodeWorker
         from aphrodite.task_handler.worker import Worker
 
@@ -77,22 +76,10 @@ class GPUExecutor(ExecutorBase):
             is_driver_worker=True,
         )
 
-        draft_worker = MultiStepWorker(
-            model_config=self.speculative_config.draft_model_config,
-            parallel_config=self.speculative_config.draft_parallel_config,
-            scheduler_config=self.scheduler_config,
-            device_config=self.device_config,
-            cache_config=self.cache_config,
-            local_rank=0,
-            rank=0,
-            distributed_init_method=distributed_init_method,
-            lora_config=self.lora_config,
-            vision_language_config=self.vision_language_config,
-            is_driver_worker=True,
+        spec_decode_worker = SpecDecodeWorker.create_worker(
+            scorer_worker=target_worker,
+            speculative_config=self.speculative_config,
         )
-
-        spec_decode_worker = SpecDecodeWorker.from_workers(
-            proposer_worker=draft_worker, scorer_worker=target_worker)
 
         assert self.parallel_config.world_size == 1, (
             "GPUExecutor only supports single GPU.")
