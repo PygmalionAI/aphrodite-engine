@@ -1075,6 +1075,8 @@ def _get_and_verify_max_len(
     """Get and verify the model's maximum length."""
     derived_max_model_len = float("inf")
     possible_keys = [
+        # Cohere: needs to prioritize this over "max_position_embeddings"
+        "model_max_length",
         # OPT
         "max_position_embeddings",
         # GPT-2
@@ -1092,6 +1094,7 @@ def _get_and_verify_max_len(
         max_len_key = getattr(hf_config, key, None)
         if max_len_key is not None:
             derived_max_model_len = min(derived_max_model_len, max_len_key)
+            break
     if derived_max_model_len == float("inf"):
         if max_model_len is not None:
             # If max_model_len is specified, we use it.
