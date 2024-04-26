@@ -467,6 +467,13 @@ def build_app(args):
                 return await call_next(request)
             if not request.url.path.startswith("/v1"):
                 return await call_next(request)
+            
+            # Browsers may send OPTIONS requests to check CORS headers
+            # before sending the actual request. We should allow these
+            # requests to pass through without authentication.
+            # See https://github.com/PygmalionAI/aphrodite-engine/issues/434
+            if request.method == "OPTIONS":
+                return await call_next(request)
 
             auth_header = request.headers.get("Authorization")
             api_key_header = request.headers.get("x-api-key")
