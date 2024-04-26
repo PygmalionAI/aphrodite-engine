@@ -726,6 +726,8 @@ class SpeculativeConfig:
         speculative_max_model_len: Optional[int],
         enable_chunked_prefill: bool,
         use_v2_block_manager: bool,
+        ngram_prompt_lookup_max: Optional[int],
+        ngram_prompt_lookup_min: Optional[int],
     ) -> Optional["SpeculativeConfig"]:
         """Create a SpeculativeConfig if possible, else return None.
         This function attempts to create a SpeculativeConfig object based on the
@@ -750,6 +752,10 @@ class SpeculativeConfig:
             use_v2_block_manager (bool): Whether Aphrodite is configured to
                 use the v2 block manager or not. Used for raising an error
                 since the v2 block manager is required with spec decode.
+            ngram_prompt_lookup_max (Optional[int]): Max size of ngram token
+                window, if provided.
+            ngram_prompt_lookup_min (Optional[int]): Min size of ngram token
+                window, if provided.
         Returns:
             Optional["SpeculativeConfig"]: An instance of SpeculativeConfig if
                 the necessary conditions are met, else None.
@@ -782,41 +788,55 @@ class SpeculativeConfig:
         draft_code_revision = None
         draft_quantization = None
 
-        draft_model_config = ModelConfig(
-            model=speculative_model,
-            tokenizer=target_model_config.tokenizer,
-            tokenizer_mode=target_model_config.tokenizer_mode,
-            trust_remote_code=target_model_config.trust_remote_code,
-            download_dir=target_model_config.download_dir,
-            load_format=target_model_config.load_format,
-            dtype=target_model_config.dtype,
-            seed=target_model_config.seed,
-            revision=draft_revision,
-            code_revision=draft_code_revision,
-            tokenizer_revision=target_model_config.tokenizer_revision,
-            max_model_len=None,
-            quantization=draft_quantization,
-            enforce_eager=target_model_config.enforce_eager,
-            max_context_len_to_capture=target_model_config.
-            max_context_len_to_capture,
-            max_log_probs=target_model_config.max_log_probs,
-        )
+        if speculative_model == "[ngram]":
+            assert (ngram_prompt_lookup_max is not None
+                    and ngram_prompt_lookup_max > 0)
+            if ngram_prompt_lookup_min is None:
+                ngram_prompt_lookup_min = 0
+            else:
+                assert ngram_prompt_lookup_max > ngram_prompt_lookup_min
+            draft_model_config = target_model_config
+            draft_parallel_config = target_parallel_config
+        else:
+            ngram_prompt_lookup_max = 0
+            ngram_prompt_lookup_min = 0
+            draft_model_config = ModelConfig(
+                model=speculative_model,
+                download_dir=target_model_config.download_dir,
+                load_format=target_model_config.load_format,
+                tokenizer=target_model_config.tokenizer,
+                tokenizer_mode=target_model_config.tokenizer_mode,
+                trust_remote_code=target_model_config.trust_remote_code,
+                dtype=target_model_config.dtype,
+                seed=target_model_config.seed,
+                revision=draft_revision,
+                code_revision=draft_code_revision,
+                tokenizer_revision=target_model_config.tokenizer_revision,
+                max_model_len=None,
+                quantization=draft_quantization,
+                enforce_eager=target_model_config.enforce_eager,
+                max_context_len_to_capture=target_model_config.
+                max_context_len_to_capture,
+                max_log_probs=target_model_config.max_log_probs,
+            )
 
-        draft_model_config.max_model_len = (
-            SpeculativeConfig._maybe_override_draft_max_model_len(
-                speculative_max_model_len,
-                draft_model_config.max_model_len,
-                target_model_config.max_model_len,
-            ))
+            draft_model_config.max_model_len = (
+                SpeculativeConfig._maybe_override_draft_max_model_len(
+                    speculative_max_model_len,
+                    draft_model_config.max_model_len,
+                    target_model_config.max_model_len,
+                ))
 
-        draft_parallel_config = (
-            SpeculativeConfig.create_draft_parallel_config(
-                target_parallel_config))
+            draft_parallel_config = (
+                SpeculativeConfig.create_draft_parallel_config(
+                    target_parallel_config))
 
         return SpeculativeConfig(
             draft_model_config,
             draft_parallel_config,
             num_speculative_tokens,
+            ngram_prompt_lookup_max,
+            ngram_prompt_lookup_min,
         )
 
     @staticmethod
@@ -881,6 +901,8 @@ class SpeculativeConfig:
         draft_model_config: ModelConfig,
         draft_parallel_config: ParallelConfig,
         num_speculative_tokens: int,
+        ngram_prompt_lookup_max: int,
+        ngram_prompt_lookup_min: int,
     ):
         """Create a SpeculativeConfig object.
         Args:
@@ -892,6 +914,8 @@ class SpeculativeConfig:
         self.draft_model_config = draft_model_config
         self.draft_parallel_config = draft_parallel_config
         self.num_speculative_tokens = num_speculative_tokens
+        self.ngram_prompt_lookup_max = ngram_prompt_lookup_max
+        self.ngram_prompt_lookup_min = ngram_prompt_lookup_min
 
         self._verify_args()
 
@@ -914,7 +938,10 @@ class SpeculativeConfig:
         return self.num_speculative_tokens
 
     def __repr__(self) -> str:
-        draft_model = self.draft_model_config.model
+        if self.ngram_prompt_lookup_max > 0:
+            draft_model = "[ngram]"
+        else:
+            draft_model = self.draft_model_config.model
         num_spec_tokens = self.num_speculative_tokens
         return f"SpeculativeConfig({draft_model=}, {num_spec_tokens=})"
 
@@ -1075,6 +1102,8 @@ def _get_and_verify_max_len(
     """Get and verify the model's maximum length."""
     derived_max_model_len = float("inf")
     possible_keys = [
+        # Cohere: needs to prioritize this over "max_position_embeddings"
+        "model_max_length",
         # OPT
         "max_position_embeddings",
         # GPT-2
@@ -1092,6 +1121,7 @@ def _get_and_verify_max_len(
         max_len_key = getattr(hf_config, key, None)
         if max_len_key is not None:
             derived_max_model_len = min(derived_max_model_len, max_len_key)
+            break
     if derived_max_model_len == float("inf"):
         if max_model_len is not None:
             # If max_model_len is specified, we use it.

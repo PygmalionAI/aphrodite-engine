@@ -8,7 +8,8 @@ from aphrodite.engine.output_processor.interfaces import (
 from aphrodite.engine.output_processor.stop_checker import StopChecker
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (Logprob, Sequence, SequenceGroup,
-                           SequenceGroupOutput, SequenceOutput, SequenceStatus)
+                                       SequenceGroupOutput, SequenceOutput,
+                                       SequenceStatus)
 from aphrodite.transformers_utils.detokenizer import Detokenizer
 
 
