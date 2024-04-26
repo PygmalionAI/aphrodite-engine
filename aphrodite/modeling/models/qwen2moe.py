@@ -377,7 +377,8 @@ class Qwen2MoeForCausalLM(nn.Module):
         self.linear_method = linear_method
         self.model = Qwen2MoeModel(config, linear_method)
         self.lm_head = ParallelLMHead(config.vocab_size, config.hidden_size)
-        self.logits_processor = LogitsProcessor(config.vocab_size)
+        self.logits_processor = LogitsProcessor(config.vocab_size,
+                                                config.tokenizer_vocab_size)
         self.sampler = Sampler()
 
     def forward(
