@@ -49,8 +49,8 @@ def split_batch_by_proposal_len(
 
 
 def sampler_output_to_torch(
-    sampler_output_list: List[SamplerOutput],
-) -> Tuple[torch.Tensor, torch.Tensor]:
+        sampler_output_list: List[SamplerOutput],
+        sampler_transposed: bool) -> Tuple[torch.Tensor, torch.Tensor]:
     """Utility function which converts a list of SamplerOutput to tensors.
 
         Returns:
@@ -68,7 +68,10 @@ def sampler_output_to_torch(
             for sampler_output in sampler_output_list
         ],
         dim=0,
-    ).transpose(0, 1)
+    )
+
+    if sampler_transposed:
+        sampled_token_probs = sampled_token_probs.transpose(0, 1)
 
     # shape: [batch_size, num_sampler_output]
     sampled_token_ids = torch.stack(
@@ -77,7 +80,10 @@ def sampler_output_to_torch(
             for sampler_output in sampler_output_list
         ],
         dim=0,
-    ).transpose(0, 1)
+    )
+
+    if sampler_transposed:
+        sampled_token_ids = sampled_token_ids.transpose(0, 1)
 
     return sampled_token_ids, sampled_token_probs
 
