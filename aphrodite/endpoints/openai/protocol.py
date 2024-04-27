@@ -111,7 +111,7 @@ class ChatCompletionRequest(BaseModel):
     guided_grammar: Optional[str] = None
     response_format: Optional[ResponseFormat] = None
     guided_decoding_backend: Optional[str] = Field(
-        default=None,
+        default="outlines",
         description=(
             "If specified, will override the default guided decoding backend "
             "of the server for this specific request. If set, must be either "
@@ -251,7 +251,7 @@ class CompletionRequest(BaseModel):
     guided_grammar: Optional[str] = None
     response_format: Optional[ResponseFormat] = None
     guided_decoding_backend: Optional[str] = Field(
-        default=None,
+        default="outlines",
         description=(
             "If specified, will override the default guided decoding backend "
             "of the server for this specific request. If set, must be one of "

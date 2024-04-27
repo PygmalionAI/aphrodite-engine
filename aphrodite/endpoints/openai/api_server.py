@@ -467,7 +467,7 @@ def build_app(args):
                 return await call_next(request)
             if not request.url.path.startswith("/v1"):
                 return await call_next(request)
-            
+
             # Browsers may send OPTIONS requests to check CORS headers
             # before sending the actual request. We should allow these
             # requests to pass through without authentication.
