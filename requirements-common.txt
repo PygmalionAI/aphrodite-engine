@@ -3,7 +3,7 @@ ninja
 psutil
 sentencepiece
 numpy
-transformers == 4.39.3 # needed for llava
+transformers == 4.40.0 # needed for llama
 uvicorn
 openai # for fastapi's openai proxy emulation
 einops  # Required for phi-1_5

@@ -3,7 +3,6 @@
 import time
 from typing import Dict, List, Literal, Optional, Union
 
-import torch
 from pydantic import (AliasChoices, BaseModel, Field, conint, model_validator,
                       root_validator)
 
