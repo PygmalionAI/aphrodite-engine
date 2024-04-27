@@ -31,18 +31,18 @@ class BiasLogitsProcessor(LogitsProcessor):
         self.values = torch.tensor(list(self.biases.values()),
                                    dtype=torch.float)
 
+    def __call__(self, output_tokens: List[int],
+                 logits: torch.Tensor) -> torch.Tensor:
+        values = self.values.to(logits.device)
+        keys = self.keys.to(logits.device)
+        logits[keys] += values
+        return logits
+
     def batched(self, logits: torch.Tensor,
                 output_tokens: List[List[int]]) -> None:
         values = self.values.to(logits.device)
         keys = self.keys.to(logits.device)
         logits[:, keys] += values
-
-    def __call__(self, output_tokens: List[int],
-                 logits: torch.Tensor) -> torch.Tensor:
-        values = self.values.to(logits.device)
-        keys = self.keys.to(logits.device)
-        logits[:, keys] += values
-        return logits
 
 
 class BanEOSUntil(LogitsProcessor):
