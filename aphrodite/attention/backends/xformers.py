@@ -106,6 +106,7 @@ class XFormersMetadata(AttentionMetadataPerStage, PagedAttentionMetadata):
     # Cuda-graph is currently enabled for decoding only.
     # TODO: Move `use_cuda_graph` out since it's unrelated to attention.
     use_cuda_graph: bool
+    tree_width: Optional[int] = 1
 
     def __post_init__(self):
         # Set during the execution of the first attention op.
@@ -267,6 +268,8 @@ class XFormersImpl(AttentionImpl):
                 self.scale,
                 self.alibi_slopes,
                 kv_scale,
+                decode_meta.prompt_lens_tensor,
+                decode_meta.tree_width,
             )
 
         # Reshape the output tensor.

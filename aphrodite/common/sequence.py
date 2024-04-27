@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Union, TYPE_CHECKING
 
 from aphrodite.common.block import LogicalTokenBlock
-from aphrodite.common.sampling_params import SamplingParams
+from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.lora.request import LoRARequest
 
 if TYPE_CHECKING:
@@ -121,6 +121,8 @@ class SequenceData:
         # The number of tokens that are computed (that run against the model).
         self._num_computed_tokens = 0
         self._stage: SequenceStage = SequenceStage.PREFILL
+        # The ID to identify the sequences in the same group
+        self.inner_id = 0
 
     def append_token_id(self, token_id: int, logprob: float) -> None:
         self.output_token_ids.append(token_id)
@@ -231,6 +233,9 @@ class Sequence:
         # Input + output tokens
         self.tokens: Optional[List[str]] = None
         self.persistent_data = {}
+        self.seq_group: Optional[SequenceGroup] = None
+        # The id to identify the sequences in same Group
+        self.inner_id = 0
 
     @property
     def lora_int_id(self) -> int:
@@ -286,7 +291,24 @@ class Sequence:
         logprobs: Dict[int, Logprob],
     ) -> None:
         assert token_id in logprobs
-        self._append_tokens_to_blocks([token_id])
+        seq_group = self.seq_group
+
+        def calc(seq_group):
+            num_token = 0
+            for block in seq_group.find(
+                    seq_group.root_seq_id).logical_token_blocks:
+                num_token += block.num_tokens
+            return num_token
+
+        # allocate block for root seq if sampling type is RANDOM_SEED and
+        # generate multiple sequence per prompt
+        if self.seq_id != seq_group.root_seq_id and \
+            seq_group.sampling_params.sampling_type in (
+                SamplingType.RANDOM, SamplingType.RANDOM_SEED):
+            buffer_seq = seq_group.find(self.seq_group.root_seq_id)
+        else:
+            buffer_seq = self
+        buffer_seq._append_tokens_to_blocks([token_id])
         self.output_logprobs.append(logprobs)
         self.data.append_token_id(token_id, logprobs[token_id].logprob)
 
@@ -339,7 +361,11 @@ class Sequence:
         return SequenceStatus.is_finished(self.status)
 
     def fork(self, new_seq_id: int) -> "Sequence":
+        seq_group = self.seq_group
+        self.seq_group = None
         new_seq = copy.deepcopy(self)
+        self.seq_group = seq_group
+        new_seq.seq_group = seq_group
         new_seq.seq_id = new_seq_id
         return new_seq
 
@@ -427,6 +453,9 @@ class SequenceGroup:
         self.prompt_logprobs: Optional[PromptLogprobs] = None
         self.state = SequenceGroupState()
         self.multi_modal_data = multi_modal_data
+        # Sequence group should have only one sequence when init.
+        seqs[0].seq_group = self
+        self.root_seq_id = seqs[0].seq_id
 
     @property
     def prompt(self) -> str:
@@ -529,6 +558,9 @@ class SequenceGroup:
     def add(self, seq: Sequence) -> None:
         if seq.seq_id in self.seqs_dict:
             raise ValueError(f"Sequence {seq.seq_id} already exists.")
+        seq.seq_group = self
+        seq.inner_id = len(self.seqs_dict)
+        seq.data.inner_id = seq.inner_id
         self.seqs_dict[seq.seq_id] = seq
 
     def remove(self, seq_id: int) -> None:
@@ -542,6 +574,9 @@ class SequenceGroup:
     def is_prefill(self) -> bool:
         # Every sequences should be in the same stage.
         return self.get_seqs()[0].is_prefill()
+
+    def get_root(self) -> Sequence:
+        return self.find(self.root_seq_id)
 
     def __repr__(self) -> str:
         return (f"SequenceGroup(request_id={self.request_id}, "
@@ -580,6 +615,7 @@ class SequenceGroupMetadata:
         computed_block_nums: Optional[List[int]] = None,
         state: Optional[SequenceGroupState] = None,
         multi_modal_data: Optional[MultiModalData] = None,
+        root_seq_id: Optional[int] = None,
     ) -> None:
         self.request_id = request_id
         self.is_prompt = is_prompt
@@ -592,6 +628,7 @@ class SequenceGroupMetadata:
         self.state = SequenceGroupState() if state is None else state
         self.multi_modal_data = multi_modal_data
         self._token_chunk_size = token_chunk_size
+        self.root_seq_id = root_seq_id
 
         if self._token_chunk_size is None:
             if is_prompt:

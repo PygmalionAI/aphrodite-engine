@@ -451,9 +451,33 @@ class ModelRunner:
         lora_index_mapping: List[int] = []
         lora_prompt_mapping: List[int] = []
         lora_requests: Set[LoRARequest] = set()
+        prompt_lens = None
+        prompt_lens_tensor = None
+        tree_width = 1
 
         if len(seq_group_metadata_list) == 0:
             return PrepareDecodeMetadata.empty()
+
+        use_captured_graph = (
+            not self.model_config.enforce_eager
+            and batch_size <= _BATCH_SIZES_TO_CAPTURE[-1]  # noqa: F821
+            and
+            max_context_len <= self.max_context_len_to_capture  # noqa: F821
+        )
+
+        def is_tree_parallel_decoding(meta_data: SequenceGroupMetadata):
+            sampling_params = meta_data.sampling_params
+            return len(meta_data.seq_data)>1 and \
+                sampling_params.sampling_type in \
+                    (SamplingType.RANDOM, SamplingType.RANDOM_SEED) and not \
+                        use_captured_graph and sampling_params.best_of<=32
+
+        enable_tree_attn = all(
+            is_tree_parallel_decoding(data)
+            for data in seq_group_metadata_list)
+        if enable_tree_attn:
+            prompt_lens = []
+            tree_width = seq_group_metadata_list[0].sampling_params.best_of
 
         for seq_group_metadata in seq_group_metadata_list:
             assert not seq_group_metadata.is_prompt
@@ -465,42 +489,76 @@ class ModelRunner:
             if lora_id > 0:
                 lora_requests.add(seq_group_metadata.lora_request)
 
-            for seq_id in seq_ids:
-                seq_data = seq_group_metadata.seq_data[seq_id]
-                generation_token = seq_data.get_last_token_id()
-                input_tokens.append(generation_token)
-
-                seq_len = seq_data.get_len()
-                position = seq_len - 1
-                input_positions.append(position)
-
-                context_len = seq_len if self.sliding_window is None else min(
-                    seq_len, self.sliding_window)
+            # Parallel decoding with tree attention
+            if enable_tree_attn:
+                root_seq = seq_group_metadata.seq_data[
+                    seq_group_metadata.root_seq_id]
+                prompt_len = root_seq.get_prompt_len()
+                # In Parallel Decoding with tree attention, sequences will stop
+                # when every sequence in the group has stopped.
+                seq_len = (root_seq.get_len() -
+                           prompt_len) * tree_width + prompt_len
+                # used for calculating the slot mapping
+                position = [seq_len - x for x in range(tree_width, 0, -1)]
+                # Don't support sliding_widonw currently
+                context_len = seq_len
+                block_table = seq_group_metadata.block_tables[
+                    seq_group_metadata.root_seq_id]
+                block_tables.append(block_table)
                 context_lens.append(context_len)
+                prompt_lens.append(prompt_len)
+                seq_group_input_token = [0] * tree_width
+                for seq in seq_group_metadata.seq_data.values():
+                    seq_group_input_token[
+                        seq.inner_id] = seq.get_last_token_id()
+                input_tokens.extend(seq_group_input_token)
+                for pos in position:
+                    block_number = block_table[pos // self.block_size]
+                    block_offset = pos % self.block_size
+                    slot = block_number * self.block_size + block_offset
+                    slot_mapping.append(slot)
+                # used for calculating position embedding
+                position = [
+                    int((seq_len - prompt_len) / tree_width + prompt_len)
+                ] * tree_width
+                input_positions.extend(position)
 
-                block_table = seq_group_metadata.block_tables[seq_id]
-                block_number = block_table[position // self.block_size]
-                block_offset = position % self.block_size
-                slot = block_number * self.block_size + block_offset
-                slot_mapping.append(slot)
                 lora_index_mapping.append(lora_id)
                 lora_prompt_mapping.append(lora_id)
 
-                if self.sliding_window is not None:
-                    sliding_window_blocks = (self.sliding_window //
-                                             self.block_size)
-                    block_table = block_table[-sliding_window_blocks:]
-                block_tables.append(block_table)
+            else:
+                for seq_id in seq_ids:
+                    seq_data = seq_group_metadata.seq_data[seq_id]
+                    generation_token = seq_data.get_last_token_id()
+                    input_tokens.append(generation_token)
+
+                    seq_len = seq_data.get_len()
+                    position = seq_len - 1
+                    input_positions.append(position)
+
+                    context_len = seq_len if self.sliding_window is None else \
+                        min(seq_len, self.sliding_window)
+                    context_lens.append(context_len)
+
+                    block_table = seq_group_metadata.block_tables[seq_id]
+                    block_number = block_table[position // self.block_size]
+                    block_offset = position % self.block_size
+                    slot = block_number * self.block_size + block_offset
+                    slot_mapping.append(slot)
+                    lora_index_mapping.append(lora_id)
+                    lora_prompt_mapping.append(lora_id)
+
+                    if self.sliding_window is not None:
+                        sliding_window_blocks = (self.sliding_window //
+                                                 self.block_size)
+                        block_table = block_table[-sliding_window_blocks:]
+                    block_tables.append(block_table)
 
         # Aphrodite uses CUDA graph only for decoding requests.
         # See `capture_model` API for more details.
         # For decoding requests, batch_size == input_tokens.
         batch_size = len(input_tokens)
         max_context_len = max(context_lens)
-        use_captured_graph = (
-            not self.model_config.enforce_eager
-            and batch_size <= _BATCH_SIZES_TO_CAPTURE[-1]
-            and max_context_len <= self.max_context_len_to_capture)
         if use_captured_graph:
             graph_batch_size = _get_graph_batch_size(batch_size)
             assert graph_batch_size >= batch_size
@@ -516,6 +574,10 @@ class ModelRunner:
         context_lens = torch.tensor(context_lens,
                                     dtype=torch.int,
                                     device=self.device)
+        if enable_tree_attn:
+            prompt_lens_tensor = torch.tensor(prompt_lens,
+                                              dtype=torch.long,
+                                              device=self.device)
 
         if use_captured_graph:
             # When using cuda-graph all these tensors should be
@@ -544,8 +606,8 @@ class ModelRunner:
 
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=False,
-            prompt_lens=None,
-            prompt_lens_tensor=None,
+            prompt_lens=prompt_lens,
+            prompt_lens_tensor=prompt_lens_tensor,
             max_subquery_len=None,
             max_context_len=max_context_len,
             max_prompt_len=None,
@@ -554,6 +616,7 @@ class ModelRunner:
             context_lens=context_lens,
             block_tables=block_tables,
             use_cuda_graph=use_captured_graph,
+            tree_width=tree_width,
         )
         return PrepareDecodeMetadata(
             input_tokens=input_tokens,
