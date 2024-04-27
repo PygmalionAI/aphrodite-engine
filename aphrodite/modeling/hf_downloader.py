@@ -17,12 +17,12 @@ from tqdm.auto import tqdm
 from transformers import PretrainedConfig, AutoModelForCausalLM
 
 from aphrodite.common.config import ModelConfig
-from aphrodite.common.gguf import (GGUFReader, get_tensor_name_map,
-                                   MODEL_ARCH_NAMES)
+from aphrodite.quantization.gguf_utils import (GGUFReader, get_tensor_name_map,
+                                               MODEL_ARCH_NAMES)
 from aphrodite.common.logger import get_loading_progress_bar
-from aphrodite.modeling.layers.quantization import (QuantizationConfig,
-                                                    get_quantization_config)
-from aphrodite.modeling.layers.quantization.schema import QuantParamSchema
+from aphrodite.quantization import (QuantizationConfig,
+                                    get_quantization_config)
+from aphrodite.quantization.schema import QuantParamSchema
 
 _xdg_cache_home = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
 _aphrodite_filelocks_path = os.path.join(_xdg_cache_home, "aphrodite/locks/")

@@ -10,7 +10,7 @@ from aphrodite._C import ops
 from aphrodite.modeling.layers.fused_moe import (fused_moe, fused_topk,
                                                  moe_align_block_size)
 from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
-from aphrodite.modeling.layers.quantization.base_config import (
+from aphrodite.quantization.base_config import (
     QuantizationConfig, )
 
 

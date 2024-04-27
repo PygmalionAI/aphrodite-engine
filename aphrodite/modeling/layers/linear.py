@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 import torch
+from torch import nn
 import torch.nn.functional as F
 from loguru import logger
 from torch.nn.parameter import Parameter
@@ -138,6 +139,11 @@ class LinearMethodBase(ABC):
                           topk: int, renormalize: bool) -> torch.Tensor:
         """Apply the weights to the input tensor."""
         raise NotImplementedError
+
+    def process_weights_after_loading(self, layer: nn.Module) -> None:
+        """Process the weight after loading.
+        This can be used to transpose weights for computation, for example."""
+        return
 
 
 class UnquantizedLinearMethod(LinearMethodBase):
