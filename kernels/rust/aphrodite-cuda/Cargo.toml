@@ -1,0 +1,31 @@
+[package]
+name = "aphrodite-cuda"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.75"
+clap = "4.4.8"
+serde_json = "1.0.108"
+serde = { version = "1.0.193", features = ["derive"] }
+rand = "0.8.5"
+log = "0.4.20"
+actix-web = "4.4.0"
+tch = { version = "0.14.0" }
+
+cudarc = { version = "0.10.0", features = ["f16"], optional = true }
+tch-cuda = { path = "../tch-cuda", optional = true }
+
+aphrodite = { path = "../aphrodite-base" }
+aicirt = { path = "../../aicirt" }
+indicatif = "0.17.7"
+memmap2 = "0.9.0"
+safetensors = "0.4.1"
+
+[[bin]]
+name = "aphrodite-cuda"
+path = "aphrodite-cuda.rs"
+
+[features]
+default = ["cuda"]
+cuda = ["dep:tch-cuda", "dep:cudarc"]

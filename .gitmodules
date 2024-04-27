@@ -1,0 +1,3 @@
+[submodule "kernels/rust/tch-cuda/cutlass"]
+	path = kernels/rust/tch-cuda/cutlass
+	url = https://github.com/NVIDIA/cutlass
