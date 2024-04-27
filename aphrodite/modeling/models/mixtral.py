@@ -459,7 +459,7 @@ class MixtralForCausalLM(nn.Module):
             if not lora_config else lora_config.lora_vocab_padding_size,
         )
         self.logits_processor = LogitsProcessor(self.unpadded_vocab_size,
-                                                config.vocab_size)
+                                                config.tokenizer_vocab_size)
         self.sampler = Sampler()
 
     def forward(

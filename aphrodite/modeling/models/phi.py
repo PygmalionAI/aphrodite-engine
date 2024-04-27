@@ -291,7 +291,8 @@ class PhiForCausalLM(nn.Module):
             bias=True,
             linear_method=linear_method,
         )
-        self.logits_processor = LogitsProcessor(config.vocab_size)
+        self.logits_processor = LogitsProcessor(config.vocab_size,
+                                                config.tokenizer_vocab_size)
         self.sampler = Sampler()
 
     def forward(

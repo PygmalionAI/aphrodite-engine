@@ -363,8 +363,9 @@ class DbrxForCausalLM(nn.Module):
                                       org_num_embeddings=config.vocab_size,
                                       padding_size=DEFAULT_VOCAB_PADDING_SIZE,
                                       linear_method=linear_method)
-        self.logits_processor = LogitsProcessor(self.unpadded_vocab_size,
-                                                config.vocab_size)
+        self.logits_processor = LogitsProcessor(
+            self.unpadded_vocab_size,
+            min(config.vocab_size, config.tokenizer_vocab_size))
         self.sampler = Sampler()
 
     def forward(

@@ -245,7 +245,8 @@ class GPTNeoXForCausalLM(nn.Module):
         self.embed_out = ParallelLMHead(config.vocab_size,
                                         config.hidden_size,
                                         linear_method=linear_method)
-        self.logits_processor = LogitsProcessor(config.vocab_size)
+        self.logits_processor = LogitsProcessor(config.vocab_size,
+                                                config.tokenizer_vocab_size)
         self.sampler = Sampler()
 
     def forward(
