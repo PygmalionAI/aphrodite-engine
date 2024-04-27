@@ -192,12 +192,15 @@ class BaiChuanAttention(nn.Module):
                 alibi_slopes=alibi_slopes,
             )
         else:
+            is_neox_style = (True if linear_method is None
+                             or linear_method.quant_config.rope_style() is None
+                             else linear_method.quant_config.rope_style())
             self.rotary_emb = get_rope(
                 self.head_dim,
                 rotary_dim=self.head_dim,
                 max_position=self.max_position_embeddings,
                 base=self.rope_theta,
-                is_neox_style=True,
+                is_neox_style=is_neox_style,
             )
             self.scaling = self.head_dim**-0.5
             self.attn = Attention(self.num_heads, self.head_dim, self.scaling)
@@ -338,7 +341,8 @@ class BaiChuanBaseForCausalLM(nn.Module):
         self.lm_head = ParallelLMHead(config.vocab_size,
                                       config.hidden_size,
                                       linear_method=linear_method)
-        self.logits_processor = LogitsProcessor(config.vocab_size)
+        self.logits_processor = LogitsProcessor(config.vocab_size,
+                                                config.tokenizer_vocab_size)
         self.sampler = Sampler()
 
     def forward(

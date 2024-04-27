@@ -32,7 +32,10 @@ class LogitsProcessor(nn.Module):
         # Whether the input is logits (default is hidden states).
         self.logits_as_input = logits_as_input
         # original vocabulary size (without LoRA).
-        self.org_vocab_size = org_vocab_size or vocab_size
+        if org_vocab_size is not None:
+            self.org_vocab_size = min(org_vocab_size, vocab_size)
+        else:
+            self.org_vocab_size = vocab_size
 
     def forward(
         self,

@@ -343,7 +343,8 @@ class ChatGLMForCausalLM(nn.Module):
         self.config: ChatGLMConfig = config
         self.linear_method = linear_method
         self.transformer = ChatGLMModel(config, linear_method)
-        self.logits_processor = LogitsProcessor(config.padded_vocab_size)
+        self.logits_processor = LogitsProcessor(config.padded_vocab_size,
+                                                config.tokenizer_vocab_size)
         self.sampler = Sampler()
 
     def forward(

@@ -192,13 +192,16 @@ class LlamaAttention(nn.Module):
             linear_method=linear_method,
         )
 
+        is_neox_style = (True if linear_method is None
+                         or linear_method.quant_config.rope_style() is None
+                         else linear_method.quant_config.rope_style())
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.head_dim,
             max_position=max_position_embeddings,
             base=rope_theta,
             rope_scaling=rope_scaling,
-            is_neox_style=True,
+            is_neox_style=is_neox_style,
         )
         self.attn = Attention(
             self.num_heads,
@@ -417,8 +420,9 @@ class LlamaForCausalLM(nn.Module):
             if not lora_config else lora_config.lora_vocab_padding_size,
         )
         logit_scale = getattr(config, "logit_scale", 1.0)
-        self.logits_processor = LogitsProcessor(self.unpadded_vocab_size,
-                                                config.vocab_size, logit_scale)
+        self.logits_processor = LogitsProcessor(
+            self.unpadded_vocab_size,
+            min(config.vocab_size, config.tokenizer_vocab_size), logit_scale)
         self.sampler = Sampler()
 
     def forward(

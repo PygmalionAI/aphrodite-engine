@@ -238,11 +238,9 @@ class AphroditeEngine:
             logger.warning(
                 f"The tokenizer's vocabulary size {len(self.get_tokenizer())}"
                 f" does not match the model's vocabulary size "
-                f"{self.model_config.get_vocab_size()}. This might "
-                f"cause an error in decoding. Please change config.json "
-                "to match the tokenizer's vocabulary size.")
-        self.model_config.hf_config.tokenizer_vocab_size = min(
-            self.model_config.get_vocab_size(), len(self.get_tokenizer()))
+                f"{self.model_config.get_vocab_size()}.")
+        self.model_config.hf_config.tokenizer_vocab_size = len(
+            self.get_tokenizer())
 
     def _verify_args(self) -> None:
         self.model_config.verify_with_parallel_config(self.parallel_config)

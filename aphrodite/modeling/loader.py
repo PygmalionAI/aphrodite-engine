@@ -103,46 +103,48 @@ def get_model(model_config: ModelConfig, device_config: DeviceConfig,
             model.load_weights(model_config.model, model_config.download_dir,
                                model_config.load_format, model_config.revision)
 
-    if isinstance(linear_method, BNBLinearMethod):
-        replace_quant_params(
-            model,
-            quant_config=linear_method.quant_config,
-            modules_to_not_convert="lm_head",
-        )
-        torch.cuda.synchronize()
-        if linear_method.quant_config.from_float:
-            model = model.cuda()
-        gc.collect()
-        torch.cuda.empty_cache()
-        tp = get_tensor_model_parallel_world_size()
-        logger.info(
-            "Memory allocated for converted model: {} GiB x {} = {} "
-            "GiB".format(
-                round(
-                    torch.cuda.memory_allocated(torch.cuda.current_device()) /
-                    (1024 * 1024 * 1024),
-                    2,
-                ),
-                tp,
-                round(
-                    torch.cuda.memory_allocated(torch.cuda.current_device()) *
-                    tp / (1024 * 1024 * 1024),
-                    2,
-                ),
-            ))
-        logger.info(
-            "Memory reserved for converted model: {} GiB x {} = {} "
-            "GiB".format(
-                round(
-                    torch.cuda.memory_reserved(torch.cuda.current_device()) /
-                    (1024 * 1024 * 1024),
-                    2,
-                ),
-                tp,
-                round(
-                    torch.cuda.memory_reserved(torch.cuda.current_device()) *
-                    tp / (1024 * 1024 * 1024),
-                    2,
-                ),
-            ))
+        if isinstance(linear_method, BNBLinearMethod):
+            replace_quant_params(
+                model,
+                quant_config=linear_method.quant_config,
+                modules_to_not_convert="lm_head",
+            )
+            torch.cuda.synchronize()
+            if linear_method.quant_config.from_float:
+                model = model.cuda()
+            gc.collect()
+            torch.cuda.empty_cache()
+            tp = get_tensor_model_parallel_world_size()
+            logger.info(
+                "Memory allocated for converted model: {} GiB x {} = {} "
+                "GiB".format(
+                    round(
+                        torch.cuda.memory_allocated(
+                            torch.cuda.current_device()) /
+                        (1024 * 1024 * 1024),
+                        2,
+                    ),
+                    tp,
+                    round(
+                        torch.cuda.memory_allocated(
+                            torch.cuda.current_device()) * tp /
+                        (1024 * 1024 * 1024),
+                        2,
+                    ),
+                ))
+            logger.info(
+                "Memory reserved for converted model: {} GiB x {} = {} "
+                "GiB".format(
+                    round(
+                        torch.cuda.memory_reserved(torch.cuda.current_device())
+                        / (1024 * 1024 * 1024),
+                        2,
+                    ),
+                    tp,
+                    round(
+                        torch.cuda.memory_reserved(torch.cuda.current_device())
+                        * tp / (1024 * 1024 * 1024),
+                        2,
+                    ),
+                ))
     return model.eval()

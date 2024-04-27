@@ -268,12 +268,15 @@ class MixtralAttention(nn.Module):
             bias=False,
             linear_method=linear_method,
         )
+        is_neox_style = (True if linear_method is None
+                         or linear_method.quant_config.rope_style() is None
+                         else linear_method.quant_config.rope_style())
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.head_dim,
             max_position=max_position,
             base=int(self.rope_theta),
-            is_neox_style=True,
+            is_neox_style=is_neox_style,
         )
         self.attn = Attention(
             self.num_heads,
@@ -456,7 +459,7 @@ class MixtralForCausalLM(nn.Module):
             if not lora_config else lora_config.lora_vocab_padding_size,
         )
         self.logits_processor = LogitsProcessor(self.unpadded_vocab_size,
-                                                config.vocab_size)
+                                                config.tokenizer_vocab_size)
         self.sampler = Sampler()
 
     def forward(
