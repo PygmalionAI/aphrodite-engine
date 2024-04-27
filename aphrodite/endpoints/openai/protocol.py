@@ -9,6 +9,7 @@ from pydantic import (AliasChoices, BaseModel, Field, conint, model_validator,
 
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.utils import random_uuid
+from aphrodite.common.logits_processor import BiasLogitsProcessor
 
 
 class ErrorResponse(BaseModel):
@@ -117,25 +118,20 @@ class ChatCompletionRequest(BaseModel):
             "of the server for this specific request. If set, must be either "
             "'outlines' / 'lm-format-enforcer'"))
 
-    def to_sampling_params(self) -> SamplingParams:
+    def to_sampling_params(self, vocab_size: int) -> SamplingParams:
         if self.logprobs and not self.top_logprobs:
             raise ValueError("Top logprobs must be set when logprobs is.")
         if self.top_k == 0:
             self.top_k = -1
 
-        logits_processors = None
+        logits_processors = []
         if self.logit_bias:
-
-            def logit_bias_logits_processor(
-                    token_ids: List[int],
-                    logits: torch.Tensor) -> torch.Tensor:
-                for token_id, bias in self.logit_bias.items():
-                    # Clamp the bias between -100 and 100 per OpenAI API spec
-                    bias = min(100, max(-100, bias))
-                    logits[int(token_id)] += bias
-                return logits
-
-            logits_processors = [logit_bias_logits_processor]
+            biases = {
+                int(tok): max(-100, min(float(bias), 100))
+                for tok, bias in self.logit_bias.items()
+                if 0 < int(tok) < vocab_size
+            }
+            logits_processors.append(BiasLogitsProcessor(biases))
 
         return SamplingParams(
             n=self.n,
@@ -257,23 +253,20 @@ class CompletionRequest(BaseModel):
             "of the server for this specific request. If set, must be one of "
             "'outlines' / 'lm-format-enforcer'"))
 
-    def to_sampling_params(self) -> SamplingParams:
+    def to_sampling_params(self, vocab_size: int) -> SamplingParams:
         echo_without_generation = self.echo and self.max_tokens == 0
         if self.top_k == 0:
             self.top_k = -1
 
-        logits_processors = None
+        logits_processors = []
         if self.logit_bias:
+            biases = {
+                int(tok): max(-100, min(float(bias), 100))
+                for tok, bias in self.logit_bias.items()
+                if 0 < int(tok) < vocab_size
+            }
+            logits_processors.append(BiasLogitsProcessor(biases))
 
-            def logit_bias_logits_processor(
-                    token_ids: List[int],
-                    logits: torch.Tensor) -> torch.Tensor:
-                for token_id, bias in self.logit_bias.items():
-                    bias = min(100, max(-100, bias))
-                    logits[int(token_id)] += bias
-                return logits
-
-            logits_processors = [logit_bias_logits_processor]
         return SamplingParams(
             n=self.n,
             max_tokens=self.max_tokens if not echo_without_generation else 1,

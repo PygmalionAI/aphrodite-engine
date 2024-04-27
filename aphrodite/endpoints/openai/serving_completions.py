@@ -93,7 +93,8 @@ class OpenAIServingCompletion(OpenAIServing):
         # Schedule the request and get the result generator.
         generators = []
         try:
-            sampling_params = request.to_sampling_params()
+            sampling_params = request.to_sampling_params(
+                self.tokenizer.vocab_size)
             lora_request = self._maybe_get_lora(request)
             decoding_config = self.engine.engine.decoding_config
             guided_decoding_backend = request.guided_decoding_backend \
@@ -103,8 +104,6 @@ class OpenAIServingCompletion(OpenAIServing):
                     guided_decoding_backend, request, await
                     self.engine.get_tokenizer()))
             if guided_decode_logit_processor is not None:
-                if sampling_params.logits_processors is None:
-                    sampling_params.logits_processors = []
                 sampling_params.logits_processors.append(
                     guided_decode_logit_processor)
             prompt_is_tokens, prompts = parse_prompt_format(request.prompt)
