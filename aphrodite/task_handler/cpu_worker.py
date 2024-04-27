@@ -249,6 +249,7 @@ class CPUWorker(LoraNotSupportedWorkerBase):
         blocks_to_swap_in: Optional[Dict[int, int]] = None,
         blocks_to_swap_out: Optional[Dict[int, int]] = None,
         blocks_to_copy: Optional[Dict[int, List[int]]] = None,
+        num_lookahead_slots: Optional[int] = None,
     ) -> List[SamplerOutput]:
         if self.is_driver_worker:
             assert seq_group_metadata_list is not None

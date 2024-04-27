@@ -80,6 +80,7 @@ class CPUExecutor(ExecutorBase):
             blocks_to_swap_in=blocks_to_swap_in,
             blocks_to_swap_out=blocks_to_swap_out,
             blocks_to_copy=blocks_to_copy,
+            num_lookahead_slots=num_lookahead_slots,
         )
         return output
 
