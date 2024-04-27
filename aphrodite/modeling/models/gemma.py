@@ -192,12 +192,15 @@ class GemmaAttention(nn.Module):
             bias=False,
             linear_method=linear_method,
         )
+        is_neox_style = (True if linear_method is None
+                         or linear_method.quant_config.rope_style() is None
+                         else linear_method.quant_config.rope_style())
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.head_dim,
             max_position=max_position_embeddings,
             base=self.rope_theta,
-            is_neox_style=True,
+            is_neox_style=is_neox_style,
         )
         self.attn = Attention(
             self.num_heads,
