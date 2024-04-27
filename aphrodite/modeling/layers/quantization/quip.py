@@ -70,6 +70,9 @@ class QuipConfig(QuantizationConfig):
 
     def support_fused_moe(self) -> bool:
         return False
+    
+    def rope_style(self) -> Optional[bool]:
+        return None
 
 
 class QuipLinearMethod(LinearMethodBase):
