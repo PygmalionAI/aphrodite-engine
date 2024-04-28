@@ -18,7 +18,7 @@ class HadamardTransformFn(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, scale=1.0):
         ctx._hadamard_transform_scale = scale  # pylint: disable=protected-access
-        return hadamard_C.hadamard_transform(x, scale=scale)
+        return hadamard_C.fast_hadamard_transform(x, scale)
 
 
 def hadamard_transform(x, scale=1.0):
