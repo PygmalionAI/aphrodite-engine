@@ -16,7 +16,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/cmake/utils.cmake)
 set(PYTHON_SUPPORTED_VERSIONS "3.8" "3.9" "3.10" "3.11")
 
 # Supported NVIDIA architectures.
-set(CUDA_SUPPORTED_ARCHS "6.1;7.0;7.5;8.0;8.6;8.9;9.0")
+set(CUDA_SUPPORTED_ARCHS "6.0;6.1;7.0;7.5;8.0;8.6;8.9;9.0")
 
 # Supported AMD GPU architectures.
 set(HIP_SUPPORTED_ARCHS "gfx906;gfx908;gfx90a;gfx940;gfx941;gfx942;gfx1030;gfx1100")
@@ -308,7 +308,7 @@ if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
   set(APHRODITE_HADAMARD_GPU_ARCHES)
   foreach(ARCH ${APHRODITE_GPU_ARCHES})
     string_to_ver(CODE_VER ${ARCH})
-    if (CODE_VER GREATER_EQUAL 7.0)
+    if (CODE_VER GREATER_EQUAL 6.0)
       list(APPEND APHRODITE_HADAMARD_GPU_ARCHES ${ARCH})
     endif()
   endforeach()
@@ -326,7 +326,7 @@ if (APHRODITE_HADAMARD_GPU_ARCHES)
     WITH_SOABI)
 else()
   message(WARNING "Unable to create _hadamard_C target because none of the "
-    "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 7.0")
+    "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 6.0")
 endif()
 
 #
