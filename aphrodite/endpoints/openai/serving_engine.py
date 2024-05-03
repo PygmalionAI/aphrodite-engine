@@ -91,11 +91,19 @@ class OpenAIServing:
         model_cards.extend(lora_cards)
         return ModelList(data=model_cards)
 
-    async def tokenize(self, prompt: Prompt):
+    async def tokenize(self, prompt: Prompt, noIds: bool = False):
         """Tokenize a given prompt."""
+
         tokenized_prompt = self.tokenizer.tokenize(prompt.prompt)
-        token_ids = self.tokenizer.convert_tokens_to_ids(tokenized_prompt)
-        return {"value": len(tokenized_prompt), "ids": token_ids}
+        result = {"value": len(tokenized_prompt)}
+
+        if not noIds:
+            token_ids = self.tokenizer.convert_tokens_to_ids(tokenized_prompt)
+            result["ids"] = token_ids
+        else:
+            result["ids"] = []
+
+        return result
 
     async def detokenize(self, token_ids: List[int]):
         """Detokenize a given list of token IDs."""
