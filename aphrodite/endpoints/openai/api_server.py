@@ -97,10 +97,11 @@ async def tokenize_batch(request: Request,
                          prompts: List[Prompt],
                          no_ids: Optional[bool] = False,
                          x_api_key: Optional[str] = Header(None)):
-    tokenized_responses = []
-    for p in prompts:
-        tokenized = await openai_serving_chat.tokenize(p, noIds=no_ids)
-        tokenized_responses.append(tokenized)
+    tasks = [
+        asyncio.create_task(openai_serving_chat.tokenize(p, noIds=no_ids))
+        for p in prompts
+    ]
+    tokenized_responses = asyncio.gather(*tasks)
     return JSONResponse(content=tokenized_responses)
 
 
