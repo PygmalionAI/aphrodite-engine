@@ -231,6 +231,7 @@ def _install_quants() -> bool:
             break
     return install_quants
 
+
 def _install_punica() -> bool:
     install_punica = bool(
         int(os.getenv("APHRODITE_INSTALL_PUNICA_KERNELS", "1")))

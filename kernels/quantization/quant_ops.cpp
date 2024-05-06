@@ -3,7 +3,7 @@
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   // Aphrodite quantization ops
-  pybind11::module quant_ops = m.def_submodule("ops", "Aphrodite custom quant operators");
+  pybind11::module quant_ops = m.def_submodule("quant_ops", "Aphrodite custom quant operators");
 
 #ifndef USE_ROCM
   // AQLM

@@ -12,7 +12,7 @@ from aphrodite.distributed import (
     get_tensor_model_parallel_rank,
     get_tensor_model_parallel_world_size,
 )
-from aphrodite.modeling.layers.quantization import QuantizationConfig
+from aphrodite.quantization import QuantizationConfig
 from aphrodite.modeling.utils import set_weight_attrs
 
 
