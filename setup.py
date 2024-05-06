@@ -398,6 +398,9 @@ ext_modules = []
 if _is_cuda():
     ext_modules.append(CMakeExtension(name="aphrodite._moe_C"))
 
+    if _install_quants():
+        ext_modules.append(CMakeExtension(name="aphrodite._quant_C"))
+
     if _install_punica():
         ext_modules.append(CMakeExtension(name="aphrodite._punica_C"))
 
@@ -410,7 +413,7 @@ if not _is_neuron():
 package_data = {
     "aphrodite": [
         "endpoints/kobold/klite.embd",
-        "modeling/layers/quantization/hadamard.safetensors", "py.typed",
+        "quantization/hadamard.safetensors", "py.typed",
         "modeling/layers/fused_moe/configs/*.json"
     ]
 }
