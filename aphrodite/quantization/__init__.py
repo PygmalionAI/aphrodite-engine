@@ -1,5 +1,7 @@
 from typing import Type
 
+from loguru import logger
+
 from aphrodite.quantization.aqlm import AQLMConfig
 from aphrodite.quantization.awq import AWQConfig
 from aphrodite.quantization.base_config import \
