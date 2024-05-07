@@ -521,6 +521,7 @@ def run_server(args):
         engine_args.tokenizer,
         tokenizer_mode=engine_args.tokenizer_mode,
         trust_remote_code=engine_args.trust_remote_code,
+        revision=engine_args.revision,
     )
 
     chat_template = args.chat_template
