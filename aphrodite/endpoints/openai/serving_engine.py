@@ -65,7 +65,8 @@ class OpenAIServing:
         self.tokenizer = get_tokenizer(
             engine_model_config.tokenizer,
             tokenizer_mode=engine_model_config.tokenizer_mode,
-            trust_remote_code=engine_model_config.trust_remote_code)
+            trust_remote_code=engine_model_config.trust_remote_code,
+            revision=engine_model_config.revision,)
 
     async def show_available_models(self) -> ModelList:
         """Show available models. Right now we only have one model."""
