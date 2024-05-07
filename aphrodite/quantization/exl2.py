@@ -1,20 +1,17 @@
 from typing import Any, Dict, List, Optional
+from contextlib import suppress
 
 import torch
-from loguru import logger
 
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.quantization.base_config import (
     QuantizationConfig)
 
-try:
+HAS_QUANTS = False
+with suppress(ImportError):
     from aphrodite._quant_C import quant_ops as ops
-except ImportError:
-    logger.warning("The Quantization Kernels are not installed. "
-                   "To use quantization with Aphrodite, make sure "
-                   "you've exported the `APHRODITE_INSTALL_QUANT_KERNELS=1`"
-                   "environment variable during the compilation process.")
+    HAS_QUANTS = True
 
 
 def make_group_map(q_groups, num_qrows):
@@ -134,18 +131,24 @@ class Exl2LinearMethod(LinearMethodBase):
             if "q_group_map" not in weights:
                 weights["q_group_map"] = make_group_map(
                     weights["q_groups"], weights["q_weight"].shape[0])
-            weights["q_matrix"] = ops.exl2_make_q_matrix(
-                weights["q_weight"],
-                weights["q_perm"],
-                weights["q_invperm"],
-                weights["q_scale"],
-                weights["q_scale_max"],
-                weights["q_groups"],
-                weights["q_group_map"],
-            )
-            weights["exllama_state"] = 1
+            if HAS_QUANTS:
+                weights["q_matrix"] = ops.exl2_make_q_matrix(
+                    weights["q_weight"],
+                    weights["q_perm"],
+                    weights["q_invperm"],
+                    weights["q_scale"],
+                    weights["q_scale_max"],
+                    weights["q_groups"],
+                    weights["q_group_map"],
+                )
+                weights["exllama_state"] = 1
+            else:
+                raise ImportError("The quantization kernels are not installed.")
 
-        output = ops.exl2_gemm(reshaped_x, weights["q_matrix"])
+        if HAS_QUANTS:
+            output = ops.exl2_gemm(reshaped_x, weights["q_matrix"])
+        else:
+            raise ImportError("The quantization kernels are not installed.")
         if bias is not None:
             output = output + bias
         return output.reshape(out_shape)

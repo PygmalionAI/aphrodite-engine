@@ -14,6 +14,14 @@ from aphrodite.quantization.marlin import MarlinConfig
 from aphrodite.quantization.quip import QuipConfig
 from aphrodite.quantization.squeezellm import SqueezeLLMConfig
 
+try:
+    from aphrodite._quant_C import quant_ops as ops
+except ImportError:
+    logger.warning("The Quantization Kernels are not installed. "
+                   "To use quantization with Aphrodite, make sure "
+                   "you've exported the `APHRODITE_INSTALL_QUANT_KERNELS=1`"
+                   "environment variable during the compilation process.")
+
 _QUANTIZATION_CONFIG_REGISTRY = {
     "aqlm": AQLMConfig,
     "awq": AWQConfig,

@@ -1,21 +1,18 @@
 from typing import Any, Dict, List, Optional
+from contextlib import suppress
 
 import torch
 from torch.nn.parameter import Parameter
-from loguru import logger
 
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.quantization.base_config import (
     QuantizationConfig)
 
-try:
+HAS_QUANTS = False
+with suppress(ImportError):
     from aphrodite._quant_C import quant_ops as ops
-except ImportError:
-    logger.warning("The Quantization Kernels are not installed. "
-                   "To use quantization with Aphrodite, make sure "
-                   "you've exported the `APHRODITE_INSTALL_QUANT_KERNELS=1`"
-                   "environment variable during the compilation process.")
+    HAS_QUANTS = True
 
 
 class MarlinConfig(QuantizationConfig):
@@ -230,8 +227,11 @@ class MarlinLinearMethod(LinearMethodBase):
         size_k = x_2d.shape[1]
         size_n = scales.shape[1]
 
-        output_2d = ops.marlin_gemm(x_2d, qweight, scales, workspace, size_m,
-                                    size_n, size_k)
+        if HAS_QUANTS:
+            output_2d = ops.marlin_gemm(x_2d, qweight, scales, workspace, size_m,
+                                        size_n, size_k)
+        else:
+            raise ImportError("The quantization kernels are not installed.")
 
         output = output_2d.view(x.shape[:-1] + (output_2d.shape[1], ))
 

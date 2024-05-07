@@ -3,6 +3,7 @@
 # https://arxiv.org/pdf/2401.06118.pdf
 
 from typing import Any, Dict, List, Optional
+from contextlib import suppress
 
 import math
 import torch
@@ -14,13 +15,10 @@ from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
 from aphrodite.quantization.base_config import (
     QuantizationConfig)
 
-try:
+HAS_QUANTS = False
+with suppress(ImportError):
     from aphrodite._quant_C import quant_ops as ops
-except ImportError:
-    logger.warning("The Quantization Kernels are not installed. "
-                   "To use quantization with Aphrodite, make sure "
-                   "you've exported the `APHRODITE_INSTALL_QUANT_KERNELS=1`"
-                   "environment variable during the compilation process.")
+    HAS_QUANTS = True
     
 
 
@@ -328,22 +326,25 @@ class AQLMLinearMethod(LinearMethodBase):
 
         use_gemv = math.prod(
             x.shape[:-1]) <= 32 or output_partition_sizes is None
-
-        output = ops.aqlm_gemm(
-            x,
-            codes,
-            codebooks,
-            scales,
-            output_partition_sizes,
-            bias,
-        ) if use_gemv else dequantize_partioned_gemm(
-            x,
-            codes,
-            codebooks,
-            scales,
-            output_partition_sizes,
-            bias,
-        )
+        
+        if HAS_QUANTS:
+            output = ops.aqlm_gemm(
+                x,
+                codes,
+                codebooks,
+                scales,
+                output_partition_sizes,
+                bias,
+            ) if use_gemv else dequantize_partioned_gemm(
+                x,
+                codes,
+                codebooks,
+                scales,
+                output_partition_sizes,
+                bias,
+            )
+        else:
+            raise ImportError("The quantization kernels are not installed.")
 
         return output
 

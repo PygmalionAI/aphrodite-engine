@@ -2,10 +2,10 @@ import enum
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from fractions import Fraction
+from contextlib import suppress
 
 import torch
 from torch.nn.parameter import Parameter
-from loguru import logger
 
 from aphrodite.modeling.layers.fused_moe import (fused_moe, fused_topk,
                                                  moe_align_block_size)
@@ -13,13 +13,10 @@ from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
 from aphrodite.quantization.base_config import (
     QuantizationConfig, )
 
-try:
+HAS_QUANTS = False
+with suppress(ImportError):
     from aphrodite._quant_C import quant_ops as ops
-except ImportError:
-    logger.warning("The Quantization Kernels are not installed. "
-                   "To use quantization with Aphrodite, make sure "
-                   "you've exported the `APHRODITE_INSTALL_QUANT_KERNELS=1`"
-                   "environment variable during the compilation process.")
+    HAS_QUANTS = True
 
 
 class GPTQConfig(QuantizationConfig):
@@ -233,20 +230,27 @@ class GPTQLinearMethod(LinearMethodBase):
             else:
                 weights["g_idx"] = torch.empty((1, 1), device="meta")
             weights["exllama_state"] = ExllamaState.READY
-            ops.gptq_shuffle(
+            if HAS_QUANTS:
+                ops.gptq_shuffle(
+                    weights["qweight"],
+                    weights["g_idx"],
+                    self.quant_config.weight_bits,
+                )
+            else:
+                raise ImportError(
+                    "The quantization kernels are not installed.")
+        if HAS_QUANTS:
+            output = ops.gptq_gemm(
+                reshaped_x,
                 weights["qweight"],
+                weights["qzeros"],
+                weights["scales"],
                 weights["g_idx"],
+                weights["exllama_state"] == ExllamaState.READY,
                 self.quant_config.weight_bits,
             )
-        output = ops.gptq_gemm(
-            reshaped_x,
-            weights["qweight"],
-            weights["qzeros"],
-            weights["scales"],
-            weights["g_idx"],
-            weights["exllama_state"] == ExllamaState.READY,
-            self.quant_config.weight_bits,
-        )
+        else:
+            raise ImportError("The quantization kernels are not installed.")
         if bias is not None:
             output = output + bias
         return output.reshape(out_shape)
@@ -270,26 +274,34 @@ class GPTQLinearMethod(LinearMethodBase):
                 else:
                     w["g_idx"] = torch.empty((1, 1), device="meta")
                 w["exllama_state"] = ExllamaState.READY
-                ops.gptq_shuffle(w["qweight"], w["g_idx"],
-                                 self.quant_config.weight_bits)
+                if HAS_QUANTS:
+                    ops.gptq_shuffle(w["qweight"], w["g_idx"],
+                                    self.quant_config.weight_bits)
+                else:
+                    raise ImportError(
+                        "The quantization kernels are not installed.")
 
         if x.shape[0] >= 128:
-            dequant_w1 = ops.dequant_gptq(
-                w1["qweight"],
-                w1["qzeros"],
-                w1["scales"],
-                w1["g_idx"],
-                self.quant_config.weight_bits,
-                w1["exllama_state"] == ExllamaState.READY,
-            ).permute(0, 2, 1)
-            dequant_w2 = ops.dequant_gptq(
-                w2["qweight"],
-                w2["qzeros"],
-                w2["scales"],
-                w2["g_idx"],
-                self.quant_config.weight_bits,
-                w2["exllama_state"] == ExllamaState.READY,
-            ).permute(0, 2, 1)
+            if HAS_QUANTS:
+                dequant_w1 = ops.dequant_gptq(
+                    w1["qweight"],
+                    w1["qzeros"],
+                    w1["scales"],
+                    w1["g_idx"],
+                    self.quant_config.weight_bits,
+                    w1["exllama_state"] == ExllamaState.READY,
+                ).permute(0, 2, 1)
+                dequant_w2 = ops.dequant_gptq(
+                    w2["qweight"],
+                    w2["qzeros"],
+                    w2["scales"],
+                    w2["g_idx"],
+                    self.quant_config.weight_bits,
+                    w2["exllama_state"] == ExllamaState.READY,
+                ).permute(0, 2, 1)
+            else:
+                raise ImportError(
+                    "The quantization kernels are not installed.")
             return fused_moe(x, dequant_w1, dequant_w2, gating_output, topk,
                              renormalize)
 
@@ -301,39 +313,45 @@ class GPTQLinearMethod(LinearMethodBase):
         ) = moe_align_block_size(topk_ids, 8, w1["qweight"].shape[0])
 
         x = x.view(x.shape[0], 1, *x.shape[1:])
-        gate_up = ops.group_gptq_gemm(
-            x,
-            w1["qweight"],
-            w1["qzeros"],
-            w1["scales"],
-            w1["g_idx"],
-            topk_weights,
-            sorted_token_ids,
-            expert_ids,
-            num_tokens_post_padded,
-            False,
-            w1["exllama_state"] == ExllamaState.READY,
-        )
+        if HAS_QUANTS:
+            gate_up = ops.group_gptq_gemm(
+                x,
+                w1["qweight"],
+                w1["qzeros"],
+                w1["scales"],
+                w1["g_idx"],
+                topk_weights,
+                sorted_token_ids,
+                expert_ids,
+                num_tokens_post_padded,
+                False,
+                w1["exllama_state"] == ExllamaState.READY,
+            )
+        else:
+            raise ImportError("The quantization kernels are not installed.")
 
         out = torch.empty(
             (gate_up.shape[:-1] + (gate_up.shape[-1] // 2, )),
             dtype=x.dtype,
             device=x.device,
         )
-        ops.silu_and_mul(out, gate_up)
+        if HAS_QUANTS:
+            ops.silu_and_mul(out, gate_up)
 
-        out = ops.group_gptq_gemm(
-            out,
-            w2["qweight"],
-            w2["qzeros"],
-            w2["scales"],
-            w2["g_idx"],
-            topk_weights,
-            sorted_token_ids,
-            expert_ids,
-            num_tokens_post_padded,
-            True,
-            w2["exllama_state"] == ExllamaState.READY,
-        )
+            out = ops.group_gptq_gemm(
+                out,
+                w2["qweight"],
+                w2["qzeros"],
+                w2["scales"],
+                w2["g_idx"],
+                topk_weights,
+                sorted_token_ids,
+                expert_ids,
+                num_tokens_post_padded,
+                True,
+                w2["exllama_state"] == ExllamaState.READY,
+            )
+        else:
+            raise ImportError("The quantization kernels are not installed.")
 
         return torch.sum(out, dim=1)

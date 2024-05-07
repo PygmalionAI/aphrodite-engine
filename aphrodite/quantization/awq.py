@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional
+from contextlib import suppress
 
 import torch
 from torch.nn.parameter import Parameter
@@ -11,13 +12,10 @@ from aphrodite.modeling.layers.linear import (LinearMethodBase,
 from aphrodite.quantization.base_config import (
     QuantizationConfig)
 
-try:
+HAS_QUANTS = False
+with suppress(ImportError):
     from aphrodite._quant_C import quant_ops as ops
-except ImportError:
-    logger.warning("The Quantization Kernels are not installed. "
-                   "To use quantization with Aphrodite, make sure "
-                   "you've exported the `APHRODITE_INSTALL_QUANT_KERNELS=1`"
-                   "environment variable during the compilation process.")
+    HAS_QUANTS = True
 
 class AWQConfig(QuantizationConfig):
     """Config class for AWQ.
@@ -180,14 +178,17 @@ class AWQLinearMethod(LinearMethodBase):
         # num_tokens >= threshold
         FP16_MATMUL_HEURISTIC_CONDITION = x.shape[:-1].numel() >= 256
 
-        if FP16_MATMUL_HEURISTIC_CONDITION:
-            out = ops.awq_dequantize(qweight, scales, qzeros, 0, 0, 0)
-            out = torch.matmul(reshaped_x, out)
+        if HAS_QUANTS:
+            if FP16_MATMUL_HEURISTIC_CONDITION:
+                out = ops.awq_dequantize(qweight, scales, qzeros, 0, 0, 0)
+                out = torch.matmul(reshaped_x, out)
+            else:
+                out = ops.awq_gemm(reshaped_x, qweight, scales, qzeros,
+                                pack_factor)
+            if bias is not None:
+                out = out + bias
         else:
-            out = ops.awq_gemm(reshaped_x, qweight, scales, qzeros,
-                               pack_factor)
-        if bias is not None:
-            out = out + bias
+            raise ImportError("The quantization kernels are not installed.")
         return out.reshape(out_shape)
 
     def apply_moe_weights(self, w1: Dict[str,

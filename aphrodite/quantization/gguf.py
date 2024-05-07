@@ -1,21 +1,18 @@
 from typing import Any, Dict, List, Optional
+from contextlib import suppress
 
 import torch
 from torch.nn.parameter import Parameter
-from loguru import logger
 
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.quantization.base_config import (
     QuantizationConfig)
 
-try:
+HAS_QUANTS = False
+with suppress(ImportError):
     from aphrodite._quant_C import quant_ops as ops
-except ImportError:
-    logger.warning("The Quantization Kernels are not installed. "
-                   "To use quantization with Aphrodite, make sure "
-                   "you've exported the `APHRODITE_INSTALL_QUANT_KERNELS=1`"
-                   "environment variable during the compilation process.")
+    HAS_QUANTS = True
 
 GGML_QUANT_SIZES = {
     0: (1, 4),  # F32
@@ -134,14 +131,23 @@ class GGUFLinearMethod(LinearMethodBase):
 
         xshape = x.view(-1, x.shape[-1])
         if xshape.shape[0] == 1:
-            out = ops.ggml_mul_mat_vec_a8(weight, reshaped_x, weight_type,
-                                          outfeatures)
+            if HAS_QUANTS:
+                out = ops.ggml_mul_mat_vec_a8(weight, reshaped_x, weight_type,
+                                            outfeatures)
+            else:
+                raise ImportError("The quantization kernels are not installed.")
         elif xshape.shape[0] < 8 and weight_type < 16:
-            out = ops.ggml_mul_mat_a8(weight, reshaped_x, weight_type,
-                                      outfeatures)
+            if HAS_QUANTS:
+                out = ops.ggml_mul_mat_a8(weight, reshaped_x, weight_type,
+                                        outfeatures)
+            else:
+                raise ImportError("The quantization kernels are not installed.")
         else:
-            weight = ops.ggml_dequantize(weight, weight_type, outfeatures,
-                                         infeatures)
+            if HAS_QUANTS:
+                weight = ops.ggml_dequantize(weight, weight_type, outfeatures,
+                                            infeatures)
+            else:
+                raise ImportError("The quantization kernels are not installed.")
             out = reshaped_x @ weight.T
 
         if bias is not None:
@@ -163,8 +169,11 @@ class GGUFLinearMethod(LinearMethodBase):
         quant = torch.index_select(weight.view(vocab_size, -1),
                                    dim=0,
                                    index=x_flat)
-        dequant = ops.ggml_dequantize(quant, weight_type, hidden_size,
-                                      x_flat.shape[0])
+        if HAS_QUANTS:
+            dequant = ops.ggml_dequantize(quant, weight_type, hidden_size,
+                                        x_flat.shape[0])
+        else:
+            raise ImportError("The quantization kernels are not installed.")
         return dequant.view(*x.shape, hidden_size)
 
     def apply_moe_weights(self, w1: Dict[str,

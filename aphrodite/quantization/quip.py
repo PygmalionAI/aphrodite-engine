@@ -1,8 +1,8 @@
 from typing import Any, Dict, List, Optional
+from contextlib import suppress
 
 import torch
 from torch.nn.parameter import Parameter
-from loguru import logger
 
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
@@ -15,13 +15,10 @@ from aphrodite.quantization.quip_utils import (
     matmul_hadU_cuda,
 )
 
-try:
+HAS_QUANTS = False
+with suppress(ImportError):
     from aphrodite._quant_C import quant_ops as ops
-except ImportError:
-    logger.warning("The Quantization Kernels are not installed. "
-                   "To use quantization with Aphrodite, make sure "
-                   "you've exported the `APHRODITE_INSTALL_QUANT_KERNELS=1`"
-                   "environment variable during the compilation process.")
+    HAS_QUANTS = True
 
 
 class QuipConfig(QuantizationConfig):
@@ -196,15 +193,23 @@ class QuipLinearMethod(LinearMethodBase):
 
         m, n = weights["Qidxs"].shape
         if reshaped_x.size(0) < 32:
-            out = ops.quip_gemv(reshaped_x, weights["Qidxs"],
-                                self.grid_packed_abs)
+            if HAS_QUANTS:
+                out = ops.quip_gemv(reshaped_x, weights["Qidxs"],
+                                    self.grid_packed_abs)
+            else:
+                raise ImportError(
+                    "The quantization kernels are not installed.")
         else:
             W_decompressed = torch.empty(m,
                                          n * 8,
                                          dtype=torch.float16,
                                          device=x.device)
-            ops.quip_decompress(weights["Qidxs"], self.grid_packed_abs,
-                                W_decompressed)
+            if HAS_QUANTS:
+                ops.quip_decompress(weights["Qidxs"], self.grid_packed_abs,
+                                    W_decompressed)
+            else:
+                raise ImportError(
+                    "The quantization kernels are not installed.")
             out = reshaped_x @ W_decompressed.T
 
         out = matmul_hadU_cuda(out, weights.get("had_right",

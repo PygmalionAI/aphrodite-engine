@@ -1,6 +1,7 @@
 import torch
 from torch.nn.parameter import Parameter
 from typing import List, Dict, Any, Optional, TypeVar, NamedTuple
+from contextlib import suppress
 from loguru import logger
 
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
@@ -11,13 +12,10 @@ from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               QKVParallelLinear,
                                               RowParallelLinear)
 
-try:
+HAS_QUANTS = False
+with suppress(ImportError):
     from aphrodite._quant_C import quant_ops as ops
-except ImportError:
-    logger.warning("The Quantization Kernels are not installed. "
-                   "To use quantization with Aphrodite, make sure "
-                   "you've exported the `APHRODITE_INSTALL_QUANT_KERNELS=1`"
-                   "environment variable during the compilation process.")
+    HAS_QUANTS = True
 
 
 class BitsandBytesConfig(QuantizationConfig):
@@ -201,7 +199,10 @@ class BNBLinearMethod(LinearMethodBase):
             pack_factor = self.quant_config.pack_factor
             out_shape = (x.shape[:-1] + (qweight.shape[-1] * pack_factor, ))
             reshaped_x = x.reshape(-1, x.shape[-1])
-            out = ops.autoquant_s4_f16_gemm(reshaped_x, qweight, scales_zeros)
+            if HAS_QUANTS:
+                out = ops.autoquant_s4_f16_gemm(reshaped_x, qweight, scales_zeros)
+            else:
+                raise ImportError("The quantization kernels are not installed.")
             if bias is not None:
                 out = out + bias
             return out.reshape(out_shape)
