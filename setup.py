@@ -250,7 +250,7 @@ def _install_hadamard() -> bool:
     device_count = torch.cuda.device_count()
     for i in range(device_count):
         major, minor = torch.cuda.get_device_capability(i)
-        if major <= 6:
+        if major <= 7:
             install_hadamard = False
             break
     return install_hadamard
