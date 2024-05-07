@@ -412,9 +412,8 @@ if not _is_neuron():
 
 package_data = {
     "aphrodite": [
-        "endpoints/kobold/klite.embd",
-        "quantization/hadamard.safetensors", "py.typed",
-        "modeling/layers/fused_moe/configs/*.json"
+        "endpoints/kobold/klite.embd", "quantization/hadamard.safetensors",
+        "py.typed", "modeling/layers/fused_moe/configs/*.json"
     ]
 }
 if os.environ.get("APHRODITE_USE_PRECOMPILED"):

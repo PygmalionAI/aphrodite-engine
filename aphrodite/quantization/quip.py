@@ -2,8 +2,8 @@ from typing import Any, Dict, List, Optional
 
 import torch
 from torch.nn.parameter import Parameter
+from loguru import logger
 
-from aphrodite._quant_C import quant_ops as ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.quantization.base_config import (
@@ -14,6 +14,14 @@ from aphrodite.quantization.quip_utils import (
     matmul_hadUt_cuda,
     matmul_hadU_cuda,
 )
+
+try:
+    from aphrodite._quant_C import quant_ops as ops
+except ImportError:
+    logger.warning("The Quantization Kernels are not installed. "
+                   "To use quantization with Aphrodite, make sure "
+                   "you've exported the `APHRODITE_INSTALL_QUANT_KERNELS=1`"
+                   "environment variable during the compilation process.")
 
 
 class QuipConfig(QuantizationConfig):

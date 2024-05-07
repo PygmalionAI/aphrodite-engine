@@ -5,13 +5,21 @@ from fractions import Fraction
 
 import torch
 from torch.nn.parameter import Parameter
+from loguru import logger
 
-from aphrodite._quant_C import quant_ops as ops
 from aphrodite.modeling.layers.fused_moe import (fused_moe, fused_topk,
                                                  moe_align_block_size)
 from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
 from aphrodite.quantization.base_config import (
     QuantizationConfig, )
+
+try:
+    from aphrodite._quant_C import quant_ops as ops
+except ImportError:
+    logger.warning("The Quantization Kernels are not installed. "
+                   "To use quantization with Aphrodite, make sure "
+                   "you've exported the `APHRODITE_INSTALL_QUANT_KERNELS=1`"
+                   "environment variable during the compilation process.")
 
 
 class GPTQConfig(QuantizationConfig):
