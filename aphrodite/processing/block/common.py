@@ -161,11 +161,10 @@ def get_all_blocks_recursively(last_block: Block) -> List[Block]:
             appear.
     """
 
-    def recurse(block: Block, lst: List[Block]) -> None:
-        if block.prev_block is not None:
-            recurse(block.prev_block, lst)
-        lst.append(block)
-
-    all_blocks = []
-    recurse(last_block, all_blocks)
+    block = last_block
+    all_blocks = [block]
+    while block.prev_block is not None:
+        block = block.prev_block
+        all_blocks.append(block)
+    all_blocks.reverse()
     return all_blocks
