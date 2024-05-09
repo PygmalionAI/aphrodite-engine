@@ -68,7 +68,7 @@ inline bool launch_bgmv_kernel(out_T *Y, const in_T *X, const W_T *W,
   }
   switch (pack_u32(in_features, out_features)) {
 #define CASE_ONESIDE(_in_T, _out_T, _W_T, feat_in, feat_out)                   \
-  case pack_u32(feat_in, feat_out):                                            \                                   \
+  case pack_u32(feat_in, feat_out):                                            \
     bgmv_kernel<feat_in, feat_out>(Y, X, W, lora_indices, y_offset,            \
                                    full_y_size, batch_size, num_layers,        \
                                    layer_idx, scale);                          \
