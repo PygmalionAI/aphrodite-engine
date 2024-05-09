@@ -1,6 +1,7 @@
 from typing import List, Optional
 
 import torch
+
 from aphrodite.common.utils import is_pin_memory_available
 
 
@@ -64,7 +65,7 @@ class LoRALayerWeights:
             dtype: torch.dtype,
             device: torch.device,
             embeddings_tensor_dim: Optional[int] = None) -> "LoRALayerWeights":
-        pin_memory = str(device) == "cpu" and not is_pin_memory_available()
+        pin_memory = str(device) == "cpu" and is_pin_memory_available()
         lora_a = torch.zeros([input_dim, rank],
                              dtype=dtype,
                              device=device,
