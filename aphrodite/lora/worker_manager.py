@@ -1,17 +1,14 @@
-import logging
 from abc import ABC, abstractmethod, abstractproperty
 from typing import Any, Dict, List, Optional, Set, Type
 
 import torch
 
+from aphrodite.common.config import LoRAConfig
+from aphrodite.lora.layers import LoRAMapping
 from aphrodite.lora.models import (LoRAModel, LoRAModelManager,
                                    LRUCacheLoRAModelManager,
                                    create_lora_manager)
 from aphrodite.lora.request import LoRARequest
-from aphrodite.lora.layers import LoRAMapping
-from aphrodite.common.config import LoRAConfig
-
-logger = logging.getLogger(__name__)
 
 
 class AbstractWorkerLoRAManager(ABC):
@@ -63,7 +60,6 @@ class AbstractWorkerLoRAManager(ABC):
         ...
 
 
-# pylint: disable=function-redefined
 class WorkerLoRAManager(AbstractWorkerLoRAManager):
     """WorkerLoRAManager that manages LoRA models on the worker side.
 
@@ -91,7 +87,6 @@ class WorkerLoRAManager(AbstractWorkerLoRAManager):
                          lora_config, device)
 
     @property
-    # pylint: disable=invalid-overridden-method
     def is_enabled(self) -> bool:
         return True
 
@@ -139,8 +134,19 @@ class WorkerLoRAManager(AbstractWorkerLoRAManager):
 
     def _load_lora(self, lora_request: LoRARequest) -> LoRAModel:
         try:
+            model = self._lora_manager.model
+            supported_lora_modules = model.supported_lora_modules
+            packed_modules_mapping = model.packed_modules_mapping
+            expected_lora_modules = []
+            for module in supported_lora_modules:
+                if module in packed_modules_mapping:
+                    expected_lora_modules.extend(
+                        packed_modules_mapping[module])
+                else:
+                    expected_lora_modules.append(module)
             lora = self._lora_model_cls.from_local_checkpoint(
                 lora_request.lora_local_path,
+                expected_lora_modules,
                 lora_model_id=lora_request.lora_int_id,
                 device="cpu",
                 dtype=self.lora_config.lora_dtype,
@@ -157,10 +163,9 @@ class WorkerLoRAManager(AbstractWorkerLoRAManager):
                 f"LoRA rank {lora.rank} is greater than max_lora_rank "
                 f"{self.lora_config.max_lora_rank}.")
         if lora.extra_vocab_size > self.lora_config.lora_extra_vocab_size:
-            raise ValueError(
-                f"LoRA added vocab size {lora.extra_vocab_size} is "
-                "greater than lora_extra_vocab_size "
-                f"{self.lora_config.lora_extra_vocab_size}.")
+            raise ValueError(f"LoRA added vocab size {lora.extra_vocab_size} "
+                             f"is greater than lora_extra_vocab_size "
+                             f"{self.lora_config.lora_extra_vocab_size}.")
         return lora
 
     def add_dummy_lora(self, lora_request: LoRARequest, rank: int) -> bool:

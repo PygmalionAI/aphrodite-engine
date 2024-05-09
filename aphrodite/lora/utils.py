@@ -1,9 +1,6 @@
-import logging
 from typing import Tuple
 
 from torch import nn
-
-logger = logging.getLogger(__name__)
 
 
 def replace_submodule(model: nn.Module, module_name: str,

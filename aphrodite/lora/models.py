@@ -1,24 +1,21 @@
 import copy
 import json
-import logging
 import math
 import os
 import re
-from typing import (Callable, Dict, Hashable, List, Optional, Tuple, Type)
+from typing import Callable, Dict, Hashable, List, Optional, Tuple, Type
 
 import safetensors.torch
 import torch
+from loguru import logger
 from torch import nn
 
 from aphrodite.common.config import LoRAConfig
 from aphrodite.common.utils import LRUCache, is_pin_memory_available
-
 from aphrodite.lora.layers import (BaseLayerWithLoRA, LoRAMapping, from_layer,
                                    from_layer_logits_processor)
 from aphrodite.lora.lora import LoRALayerWeights, PackedLoRALayerWeights
 from aphrodite.lora.utils import parse_fine_tuned_lora_name, replace_submodule
-
-logger = logging.getLogger(__name__)
 
 _GLOBAL_LORA_ID = 0
 
@@ -143,48 +140,46 @@ class LoRAModel:
         embedding_padding_modules: Optional[List[str]] = None,
     ) -> "LoRAModel":
         """Create a LoRAModel from a dictionary of tensors."""
-        pin_memory = str(device) == "cpu" and not is_pin_memory_available()
+        pin_memory = str(device) == "cpu" and is_pin_memory_available()
         loras: Dict[str, LoRALayerWeights] = {}
         for tensor_name, tensor in tensors.items():
-            result = parse_fine_tuned_lora_name(tensor_name)
-            if result is not None:
-                module_name, is_lora_a = result
-                if module_name not in loras:
-                    lora_embeddings_tensor = None
-                    if embeddings:
-                        embeddings_module = next(
-                            (k for k in embedding_modules if k in module_name),
-                            None)
-                        if embeddings_module:
-                            lora_embeddings_tensor = embeddings[
-                                embedding_modules[embeddings_module]].to(
-                                    device=device, dtype=dtype)
-                            if pin_memory:
-                                lora_embeddings_tensor = (
-                                    lora_embeddings_tensor.pin_memory())
-                    loras[module_name] = LoRALayerWeights(
-                        module_name, rank, lora_alpha, None, None,
-                        lora_embeddings_tensor)
-                if is_lora_a:
-                    loras[module_name].lora_a = tensor.to(device=device,
-                                                          dtype=dtype).t()
-                    if pin_memory:
-                        loras[module_name].lora_a = loras[
-                            module_name].lora_a.pin_memory()
-                else:
-                    loras[module_name].lora_b = tensor.to(device=device,
-                                                          dtype=dtype).t()
-                    if any(name in module_name
-                           for name in embedding_padding_modules
-                           ) and target_embedding_padding is not None:
-                        lora_b = loras[module_name].lora_b
-                        assert target_embedding_padding >= lora_b.shape[1]
-                        addition = target_embedding_padding - lora_b.shape[1]
-                        loras[module_name].lora_b = torch.nn.functional.pad(
-                            lora_b, (0, addition))
-                    if pin_memory:
-                        loras[module_name].lora_b = loras[
-                            module_name].lora_b.pin_memory()
+            module_name, is_lora_a = parse_fine_tuned_lora_name(tensor_name)
+            if module_name not in loras:
+                lora_embeddings_tensor = None
+                if embeddings:
+                    embeddings_module = next(
+                        (k for k in embedding_modules if k in module_name),
+                        None)
+                    if embeddings_module:
+                        lora_embeddings_tensor = embeddings[
+                            embedding_modules[embeddings_module]].to(
+                                device=device, dtype=dtype)
+                        if pin_memory:
+                            lora_embeddings_tensor = (
+                                lora_embeddings_tensor.pin_memory())
+                loras[module_name] = LoRALayerWeights(module_name, rank,
+                                                      lora_alpha, None, None,
+                                                      lora_embeddings_tensor)
+            if is_lora_a:
+                loras[module_name].lora_a = tensor.to(device=device,
+                                                      dtype=dtype).t()
+                if pin_memory:
+                    loras[module_name].lora_a = loras[
+                        module_name].lora_a.pin_memory()
+            else:
+                loras[module_name].lora_b = tensor.to(device=device,
+                                                      dtype=dtype).t()
+                if any(name in module_name
+                       for name in embedding_padding_modules
+                       ) and target_embedding_padding is not None:
+                    lora_b = loras[module_name].lora_b
+                    assert target_embedding_padding >= lora_b.shape[1]
+                    addition = target_embedding_padding - lora_b.shape[1]
+                    loras[module_name].lora_b = torch.nn.functional.pad(
+                        lora_b, (0, addition))
+                if pin_memory:
+                    loras[module_name].lora_b = loras[
+                        module_name].lora_b.pin_memory()
 
         for lora in loras.values():
             lora.optimize()
@@ -194,6 +189,7 @@ class LoRAModel:
     def from_local_checkpoint(
         cls,
         lora_dir: str,
+        expected_lora_modules: List[str],
         lora_model_id: Optional[int] = None,
         device: str = "cuda",
         dtype: Optional[torch.dtype] = None,
@@ -209,6 +205,20 @@ class LoRAModel:
             lora_dir, "new_embeddings.safetensors")
         new_embeddings_bin_file_path = os.path.join(lora_dir,
                                                     "new_embeddings.bin")
+        with open(lora_config_path) as f:
+            config = json.load(f)
+        target_modules = config["target_modules"]
+        unexpected_modules = []
+        for module in target_modules:
+            if module not in expected_lora_modules:
+                unexpected_modules.append(module)
+        # loaded lora's target modules must be a subset of expected_lora_modules
+        if unexpected_modules:
+            raise ValueError(
+                f"While loading {lora_dir}, expected"
+                f" target modules in {expected_lora_modules}"
+                f" but received {unexpected_modules}."
+                f" Please verify that the loaded LoRA module is correct")
         if os.path.isfile(lora_tensor_path):
             tensors = safetensors.torch.load_file(lora_tensor_path)
         elif os.path.isfile(lora_bin_file_path):
@@ -223,8 +233,6 @@ class LoRAModel:
         elif os.path.isfile(new_embeddings_bin_file_path):
             embeddings = torch.load(new_embeddings_bin_file_path)
 
-        with open(lora_config_path) as f:
-            config = json.load(f)
         rank = config["r"]
         lora_alpha = config["lora_alpha"]
         return cls.from_lora_tensors(
@@ -284,7 +292,7 @@ class LoRAModelManager:
                                               dtype=torch.long,
                                               device="cuda")
         self.offsets = []
-        # 4 is the number of indices tensors defined above
+        # 4 is the number of indicies tensors defined above
         # base_indices, sampler_indices, sampler_indices_padded,
         # embeddings_indices
         self.indices_len = [None] * 4
@@ -416,11 +424,12 @@ class LoRAModelManager:
         for module_name, module in self.model.named_modules():
             if not self._match_target_modules(module_name):
                 continue
-
+            parts = module_name.split(".")[-1]
+            packed_moduled_lst = self.packed_modules_mapping.get(parts, [])
             new_module = replace_submodule(
                 self.model, module_name,
                 from_layer(module, self.lora_slots, self.lora_config,
-                           self.model.config))
+                           packed_moduled_lst, self.model.config))
             # (yard1): TODO make this more robust
             if "lm_head" in module_name:
                 logits_processor_module = self.model.get_submodule(
@@ -513,8 +522,10 @@ class LoRAModelManager:
     def _register_packed_modules(self, module_full_name: str) -> None:
         parts = module_full_name.split(".")
         module_name = parts[-1]
-        replacements = self.packed_modules_mapping.get(module_name)
-        if not replacements:
+        replacements = self.packed_modules_mapping.get(module_name, [])
+        # When replacements is less than or equal to 1, it indicates that this
+        # module is not a packed module.
+        if len(replacements) <= 1:
             return
         prefix = ".".join(parts[:-1])
         self.packed_modules[module_full_name] = [
