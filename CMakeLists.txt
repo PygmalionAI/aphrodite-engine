@@ -219,23 +219,11 @@ define_gpu_extension_target(
 
 set(APHRODITE_PUNICA_EXT_SRC
   "kernels/punica/bgmv/bgmv_bf16_bf16_bf16.cu"
-  "kernels/punica/bgmv/bgmv_bf16_bf16_fp16.cu"
-  "kernels/punica/bgmv/bgmv_bf16_fp16_bf16.cu"
-  "kernels/punica/bgmv/bgmv_bf16_fp16_fp16.cu"
   "kernels/punica/bgmv/bgmv_bf16_fp32_bf16.cu"
-  "kernels/punica/bgmv/bgmv_bf16_fp32_fp16.cu"
-  "kernels/punica/bgmv/bgmv_fp16_bf16_bf16.cu"
-  "kernels/punica/bgmv/bgmv_fp16_bf16_fp16.cu"
-  "kernels/punica/bgmv/bgmv_fp16_fp16_bf16.cu"
   "kernels/punica/bgmv/bgmv_fp16_fp16_fp16.cu"
-  "kernels/punica/bgmv/bgmv_fp16_fp32_bf16.cu"
   "kernels/punica/bgmv/bgmv_fp16_fp32_fp16.cu"
   "kernels/punica/bgmv/bgmv_fp32_bf16_bf16.cu"
-  "kernels/punica/bgmv/bgmv_fp32_bf16_fp16.cu"
-  "kernels/punica/bgmv/bgmv_fp32_fp16_bf16.cu"
   "kernels/punica/bgmv/bgmv_fp32_fp16_fp16.cu"
-  "kernels/punica/bgmv/bgmv_fp32_fp32_bf16.cu"
-  "kernels/punica/bgmv/bgmv_fp32_fp32_fp16.cu"
   "kernels/punica/punica_ops.cc")
 
 #
