@@ -29,6 +29,10 @@ from transformers import PreTrainedTokenizerBase
 
 class BaseLogitsProcessor:
 
+    def __init__(self):
+        # Child class should use initialize in their init.
+        self.fsm: Union[RegexFSM, CFGFSM]
+
     def init_state(self):
         """Initialize the FSM states."""
         self.fsm_state: DefaultDict[int, int] = defaultdict(int)
@@ -128,6 +132,11 @@ class CFGLogitsProcessor(BaseLogitsProcessor):
         tokenizer = _adapt_tokenizer(tokenizer)
         fsm = CFGFSM(cfg, tokenizer)
         self.fsm = fsm
+
+    def init_state(self):
+        """Initialize state with a CFGFSM copy."""
+        super().init_state()
+        self.fsm = self.fsm.copy()
 
 
 @lru_cache
