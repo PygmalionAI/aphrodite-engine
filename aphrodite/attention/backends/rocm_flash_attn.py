@@ -160,7 +160,7 @@ class ROCmFlashAttentionImpl(AttentionImpl):
             # AMD Radeon 7900 series (gfx1100) currently does not support
             # xFormers nor FlashAttention. As a temporary workaround, we use
             # naive PyTorch implementation of attention.
-            self.attn_fuc = _naive_attention()
+            self.attn_fuc = _naive_attention
             logger.debug("Using naive attention in ROCmBackend")
         elif self.use_triton_flash_attn:
             from aphrodite.attention.ops.triton_flash_attn import (  # noqa: F401
@@ -336,9 +336,9 @@ def _naive_attention(
     for _, prompt_len in enumerate(prompt_lens):
         end = start + prompt_len
         out = _naive_masked_attention(
-            query[None, start:end],
-            key[None, start:end],
-            value[None, start:end],
+            query[start:end],
+            key[start:end],
+            value[start:end],
             scale,
         )
         # TODO: Unnecessary copy. Optimize.
@@ -349,7 +349,7 @@ def _naive_attention(
     # with input tensor's size and stride (at least one
     # dimension spans across two contiguous subspaces).
     # Use reshape instead.
-    return output.reshape(num_tokens, -1)
+    return output
 
 
 def _naive_masked_attention(
@@ -358,7 +358,7 @@ def _naive_masked_attention(
     value: torch.Tensor,
     scale: float,
 ) -> torch.Tensor:
-    seq_len, _, _ = query.shape
+    seq_len, head_size, head_dim = query.shape
     attn_mask = torch.triu(torch.ones(seq_len,
                                       seq_len,
                                       dtype=query.dtype,

@@ -42,7 +42,30 @@ namespace exl2 {
 #define EXL2_BLOCK_KN_SIZE 64
 #define EXL2_BLOCK_M_SIZE_MAX 8
 #define EXL2_MAX_GROUPS_IN_BLOCK (EXL2_BLOCK_KN_SIZE / 32)
-
+#if defined(USE_ROCM)
+__host__ __forceinline__ hipblasStatus_t __compat_hipblasHgemm(hipblasHandle_t    handle,
+                                                               hipblasOperation_t transA,
+                                                               hipblasOperation_t transB,
+                                                               int                m,
+                                                               int                n,
+                                                               int                k,
+                                                               const half*        alpha,
+                                                               const half*        AP,
+                                                               int                lda,
+                                                               const half*        BP,
+                                                               int                ldb,
+                                                               const half*        beta,
+                                                               half*              CP,
+                                                               int                ldc) {
+    return hipblasHgemm(handle, transA, transB, m, n, k,
+                        reinterpret_cast<const hipblasHalf *>(alpha),
+                        reinterpret_cast<const hipblasHalf *>(AP), lda,
+                        reinterpret_cast<const hipblasHalf *>(BP), ldb,
+                        reinterpret_cast<const hipblasHalf *>(beta),
+                        reinterpret_cast<hipblasHalf *>(CP), ldc);
+}
+#define hipblasHgemm __compat_hipblasHgemm
+#endif
 #define DIVIDE(x, size) (((x) + (size) - 1) / (size))
 
 void gemm_half_q_half_cuda_part

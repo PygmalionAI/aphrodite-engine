@@ -71,19 +71,18 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   ops.def("quip_decompress", &decompress_e8p_origorder, "decompress_packed_e8p");
   ops.def("quip_gemv", &e8p_mm_origorder, "e8p_mm_origorder");
   ops.def("marlin_gemm", &marlin_gemm, "Marlin Optimized Quantized GEMM for GPTQ");
+  ops.def("ggml_dequantize", &ggml_dequantize, "ggml_dequantize");
+  ops.def("ggml_mul_mat_vec", &ggml_mul_mat_vec, "ggml_mul_mat_vec");
+  ops.def("ggml_mul_mat_vec_a8", &ggml_mul_mat_vec_a8, "ggml_mul_mat_vec_a8");
+  ops.def("ggml_mul_mat_a8", &ggml_mul_mat_a8, "ggml_mul_mat_a8");
 #endif
   ops.def("gptq_gemm", &gptq_gemm, "Quantized GEMM for GPTQ");
   ops.def("gptq_shuffle", &gptq_shuffle, "Post processing for GPTQ");
   ops.def("group_gptq_gemm", &group_gptq_gemm, "Grouped Quantized GEMM for GPTQ");
   ops.def("dequant_gptq", &dequant_gptq, "Dequantize gptq weight to half");
-  ops.def("squeezellm_gemm", &squeezellm_gemm, "Quantized GEMM for SqueezeLLM");
-  ops.def("ggml_dequantize", &ggml_dequantize, "ggml_dequantize");
-  ops.def("ggml_mul_mat_vec", &ggml_mul_mat_vec, "ggml_mul_mat_vec");
-  ops.def("ggml_mul_mat_vec_a8", &ggml_mul_mat_vec_a8, "ggml_mul_mat_vec_a8");
-  ops.def("ggml_mul_mat_a8", &ggml_mul_mat_a8, "ggml_mul_mat_a8");
+  ops.def("squeezellm_gemm", &squeezellm_gemm, "Quantized GEMM for SqueezeLLM"); 
   ops.def("exl2_make_q_matrix",&make_q_matrix, "preprocess for exl2");
   ops.def("exl2_gemm", &exl2_gemm, "exl2 gemm");
-  
   ops.def("moe_align_block_size",
           &moe_align_block_size,
           "Aligning the number of tokens to be processed by each expert such that it is divisible by the block size.");
