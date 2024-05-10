@@ -28,6 +28,8 @@ class AWQConfig(QuantizationConfig):
         group_size: int,
         zero_point: bool,
     ) -> None:
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         self.weight_bits = weight_bits
         self.group_size = group_size
         self.zero_point = zero_point
@@ -177,17 +179,14 @@ class AWQLinearMethod(LinearMethodBase):
         # num_tokens >= threshold
         FP16_MATMUL_HEURISTIC_CONDITION = x.shape[:-1].numel() >= 256
 
-        if HAS_QUANTS:
-            if FP16_MATMUL_HEURISTIC_CONDITION:
-                out = ops.awq_dequantize(qweight, scales, qzeros, 0, 0, 0)
-                out = torch.matmul(reshaped_x, out)
-            else:
-                out = ops.awq_gemm(reshaped_x, qweight, scales, qzeros,
-                                pack_factor)
-            if bias is not None:
-                out = out + bias
+        if FP16_MATMUL_HEURISTIC_CONDITION:
+            out = ops.awq_dequantize(qweight, scales, qzeros, 0, 0, 0)
+            out = torch.matmul(reshaped_x, out)
         else:
-            raise ImportError("The quantization kernels are not installed.")
+            out = ops.awq_gemm(reshaped_x, qweight, scales, qzeros,
+                            pack_factor)
+        if bias is not None:
+            out = out + bias
         return out.reshape(out_shape)
 
     def apply_moe_weights(self, w1: Dict[str,

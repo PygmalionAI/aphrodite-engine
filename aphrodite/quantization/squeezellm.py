@@ -26,6 +26,8 @@ class SqueezeLLMConfig(QuantizationConfig):
         self,
         weight_bits: int,
     ) -> None:
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         self.weight_bits = weight_bits
 
         if self.weight_bits != 4:
@@ -136,20 +138,12 @@ class SqueezeLLMLinearMethod(LinearMethodBase):
         reshaped_x = x.reshape(-1, x.shape[-1])
         if is_hip():
             out_f = torch.zeros(out_shape, dtype=torch.float)
-            if HAS_QUANTS:
-                ops.squeezellm_gemm(reshaped_x, qweight, out_f, lookup_table)
-            else:
-                raise ImportError(
-                    "The quantization kernels are not installed.")
+            ops.squeezellm_gemm(reshaped_x, qweight, out_f, lookup_table)
             out = out_f.to(dtype=torch.float16)
         else:
             # NOTE: The output tensor should be zero-initialized.
             out = torch.zeros(out_shape, dtype=torch.float16)
-            if HAS_QUANTS:
-                ops.squeezellm_gemm(reshaped_x, qweight, out, lookup_table)
-            else:
-                raise ImportError(
-                    "The quantization kernels are not installed.")
+            ops.squeezellm_gemm(reshaped_x, qweight, out, lookup_table)
 
         if bias is not None:
             out = out + bias

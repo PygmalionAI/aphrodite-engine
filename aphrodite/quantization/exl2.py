@@ -86,6 +86,8 @@ class Exl2LinearMethod(LinearMethodBase):
     """
 
     def __init__(self, quant_config: Exl2Config):
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         self.quant_config = quant_config
 
     def create_weights(self, input_size_per_partition: int,
@@ -131,24 +133,19 @@ class Exl2LinearMethod(LinearMethodBase):
             if "q_group_map" not in weights:
                 weights["q_group_map"] = make_group_map(
                     weights["q_groups"], weights["q_weight"].shape[0])
-            if HAS_QUANTS:
-                weights["q_matrix"] = ops.exl2_make_q_matrix(
-                    weights["q_weight"],
-                    weights["q_perm"],
-                    weights["q_invperm"],
-                    weights["q_scale"],
-                    weights["q_scale_max"],
-                    weights["q_groups"],
-                    weights["q_group_map"],
-                )
-                weights["exllama_state"] = 1
-            else:
-                raise ImportError("The quantization kernels are not installed.")
+            weights["q_matrix"] = ops.exl2_make_q_matrix(
+                weights["q_weight"],
+                weights["q_perm"],
+                weights["q_invperm"],
+                weights["q_scale"],
+                weights["q_scale_max"],
+                weights["q_groups"],
+                weights["q_group_map"],
+            )
+            weights["exllama_state"] = 1
 
-        if HAS_QUANTS:
-            output = ops.exl2_gemm(reshaped_x, weights["q_matrix"])
-        else:
-            raise ImportError("The quantization kernels are not installed.")
+        output = ops.exl2_gemm(reshaped_x, weights["q_matrix"])
+
         if bias is not None:
             output = output + bias
         return output.reshape(out_shape)

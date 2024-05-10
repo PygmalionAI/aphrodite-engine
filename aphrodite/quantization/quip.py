@@ -28,6 +28,8 @@ class QuipConfig(QuantizationConfig):
     """
 
     def __init__(self, codebook: int, use_rand: bool) -> None:
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         self.codebook = codebook
         self.use_rand = use_rand
 
@@ -193,23 +195,15 @@ class QuipLinearMethod(LinearMethodBase):
 
         m, n = weights["Qidxs"].shape
         if reshaped_x.size(0) < 32:
-            if HAS_QUANTS:
-                out = ops.quip_gemv(reshaped_x, weights["Qidxs"],
-                                    self.grid_packed_abs)
-            else:
-                raise ImportError(
-                    "The quantization kernels are not installed.")
+            out = ops.quip_gemv(reshaped_x, weights["Qidxs"],
+                                self.grid_packed_abs)
         else:
             W_decompressed = torch.empty(m,
                                          n * 8,
                                          dtype=torch.float16,
                                          device=x.device)
-            if HAS_QUANTS:
-                ops.quip_decompress(weights["Qidxs"], self.grid_packed_abs,
-                                    W_decompressed)
-            else:
-                raise ImportError(
-                    "The quantization kernels are not installed.")
+            ops.quip_decompress(weights["Qidxs"], self.grid_packed_abs,
+                                W_decompressed)
             out = reshaped_x @ W_decompressed.T
 
         out = matmul_hadU_cuda(out, weights.get("had_right",

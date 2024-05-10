@@ -30,6 +30,8 @@ class BitsandBytesConfig(QuantizationConfig):
             from_float: bool,
             quant_mode: str,  # llm_int8, smoothquant, weight_only
     ) -> None:
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         self.weight_bits = weight_bits
         self.group_size = group_size
         self.zero_point = zero_point
@@ -198,10 +200,7 @@ class BNBLinearMethod(LinearMethodBase):
             pack_factor = self.quant_config.pack_factor
             out_shape = (x.shape[:-1] + (qweight.shape[-1] * pack_factor, ))
             reshaped_x = x.reshape(-1, x.shape[-1])
-            if HAS_QUANTS:
-                out = ops.autoquant_s4_f16_gemm(reshaped_x, qweight, scales_zeros)
-            else:
-                raise ImportError("The quantization kernels are not installed.")
+            out = ops.autoquant_s4_f16_gemm(reshaped_x, qweight, scales_zeros)
             if bias is not None:
                 out = out + bias
             return out.reshape(out_shape)
@@ -277,10 +276,8 @@ def convert_s4(qw: torch.Tensor,
     _qw = torch.zeros_like(qw)
     _sz = torch.zeros_like(s, dtype=torch.int32)  # half2
     _ws = torch.zeros_like(s)
-    if HAS_QUANTS:
-        ops.autoquant_convert_s4_k_m8(_qw, _sz, _ws, qw, s, qz,
-                                    qw.size(-1) * 8, qw.size(0), group_size)
-    raise ImportError("The quantization kernels are not installed.")
+    ops.autoquant_convert_s4_k_m8(_qw, _sz, _ws, qw, s, qz,
+                                qw.size(-1) * 8, qw.size(0), group_size)
     return _qw, _sz
 
 

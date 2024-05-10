@@ -142,6 +142,8 @@ class AQLMConfig(QuantizationConfig):
         num_codebooks: int,
         out_group_size: int,
     ) -> None:
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         self.in_group_size = in_group_size
         self.nbits_per_codebook = nbits_per_codebook
         self.num_codebooks = num_codebooks
@@ -325,25 +327,21 @@ class AQLMLinearMethod(LinearMethodBase):
 
         use_gemv = math.prod(
             x.shape[:-1]) <= 32 or output_partition_sizes is None
-        
-        if HAS_QUANTS:
-            output = ops.aqlm_gemm(
-                x,
-                codes,
-                codebooks,
-                scales,
-                output_partition_sizes,
-                bias,
-            ) if use_gemv else dequantize_partioned_gemm(
-                x,
-                codes,
-                codebooks,
-                scales,
-                output_partition_sizes,
-                bias,
-            )
-        else:
-            raise ImportError("The quantization kernels are not installed.")
+        output = ops.aqlm_gemm(
+            x,
+            codes,
+            codebooks,
+            scales,
+            output_partition_sizes,
+            bias,
+        ) if use_gemv else dequantize_partioned_gemm(
+            x,
+            codes,
+            codebooks,
+            scales,
+            output_partition_sizes,
+            bias,
+        )
 
         return output
 

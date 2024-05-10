@@ -25,6 +25,8 @@ class MarlinConfig(QuantizationConfig):
         self,
         group_size: int,
     ) -> None:
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         # Group size for the quantization.
         self.group_size = group_size
         if self.group_size != 128 and self.group_size != -1:
@@ -227,11 +229,8 @@ class MarlinLinearMethod(LinearMethodBase):
         size_k = x_2d.shape[1]
         size_n = scales.shape[1]
 
-        if HAS_QUANTS:
-            output_2d = ops.marlin_gemm(x_2d, qweight, scales, workspace, size_m,
-                                        size_n, size_k)
-        else:
-            raise ImportError("The quantization kernels are not installed.")
+        output_2d = ops.marlin_gemm(x_2d, qweight, scales, workspace, size_m,
+                                    size_n, size_k)
 
         output = output_2d.view(x.shape[:-1] + (output_2d.shape[1], ))
 

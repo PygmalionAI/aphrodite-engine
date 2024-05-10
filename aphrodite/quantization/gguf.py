@@ -90,6 +90,8 @@ class GGUFLinearMethod(LinearMethodBase):
     """
 
     def __init__(self, quant_config: GGUFConfig):
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         self.quant_config = quant_config
 
     def create_weights(self, input_size_per_partition: int,
@@ -131,23 +133,14 @@ class GGUFLinearMethod(LinearMethodBase):
 
         xshape = x.view(-1, x.shape[-1])
         if xshape.shape[0] == 1:
-            if HAS_QUANTS:
-                out = ops.ggml_mul_mat_vec_a8(weight, reshaped_x, weight_type,
-                                            outfeatures)
-            else:
-                raise ImportError("The quantization kernels are not installed.")
-        elif xshape.shape[0] < 8 and weight_type < 16:
-            if HAS_QUANTS:
-                out = ops.ggml_mul_mat_a8(weight, reshaped_x, weight_type,
+            out = ops.ggml_mul_mat_vec_a8(weight, reshaped_x, weight_type,
                                         outfeatures)
-            else:
-                raise ImportError("The quantization kernels are not installed.")
+        elif xshape.shape[0] < 8 and weight_type < 16:
+            out = ops.ggml_mul_mat_a8(weight, reshaped_x, weight_type,
+                                    outfeatures)
         else:
-            if HAS_QUANTS:
-                weight = ops.ggml_dequantize(weight, weight_type, outfeatures,
-                                            infeatures)
-            else:
-                raise ImportError("The quantization kernels are not installed.")
+            weight = ops.ggml_dequantize(weight, weight_type, outfeatures,
+                                        infeatures)
             out = reshaped_x @ weight.T
 
         if bias is not None:
@@ -169,11 +162,8 @@ class GGUFLinearMethod(LinearMethodBase):
         quant = torch.index_select(weight.view(vocab_size, -1),
                                    dim=0,
                                    index=x_flat)
-        if HAS_QUANTS:
-            dequant = ops.ggml_dequantize(quant, weight_type, hidden_size,
-                                        x_flat.shape[0])
-        else:
-            raise ImportError("The quantization kernels are not installed.")
+        dequant = ops.ggml_dequantize(quant, weight_type, hidden_size,
+                                    x_flat.shape[0])
         return dequant.view(*x.shape, hidden_size)
 
     def apply_moe_weights(self, w1: Dict[str,
