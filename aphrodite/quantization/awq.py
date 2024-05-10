@@ -3,7 +3,6 @@ from contextlib import suppress
 
 import torch
 from torch.nn.parameter import Parameter
-from loguru import logger
 
 from aphrodite.modeling.layers.fused_moe import (moe_align_block_size,
                                                  fused_moe, fused_topk)

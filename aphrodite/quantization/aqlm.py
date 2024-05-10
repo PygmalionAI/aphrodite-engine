@@ -9,7 +9,6 @@ import math
 import torch
 from torch.nn.parameter import Parameter
 import torch.nn.functional as F
-from loguru import logger
 
 from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
 from aphrodite.quantization.base_config import (
@@ -19,7 +18,7 @@ HAS_QUANTS = False
 with suppress(ImportError):
     from aphrodite._quant_C import quant_ops as ops
     HAS_QUANTS = True
-    
+
 
 
 def get_int_dtype(nbits: int) -> torch.dtype:
