@@ -3,7 +3,7 @@ psutil
 ray >= 2.9
 sentencepiece
 numpy
-torch == 2.2.0
+torch == 2.3.0
 transformers == 4.39.0 # needed for cohere
 uvicorn
 openai # for fastapi's openai proxy emulation
