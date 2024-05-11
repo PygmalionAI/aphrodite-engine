@@ -28,35 +28,28 @@ import torch
 from torch import nn
 from transformers import LlamaConfig
 
-from aphrodite.modeling.metadata import InputMetadata
-from aphrodite.modeling.layers.activation import SiluAndMul
-from aphrodite.modeling.layers.attention import Attention
-from aphrodite.modeling.layers.layernorm import RMSNorm
-from aphrodite.modeling.layers.linear import (
-    LinearMethodBase,
-    MergedColumnParallelLinear,
-    QKVParallelLinear,
-    RowParallelLinear,
-    ColumnParallelLinear,
-)
-from aphrodite.modeling.layers.rotary_embedding import get_rope
-from aphrodite.modeling.layers.sampler import Sampler, QuantSampler
-from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding,
-    ParallelLMHead,
-    DEFAULT_VOCAB_PADDING_SIZE,
-)
-from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_world_size, )
-from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.modeling.hf_downloader import (
-    default_weight_loader,
-    hf_model_weights_iterator,
-)
-from aphrodite.common.sequence import SamplerOutput
+from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import LoRAConfig
-
-KVCache = Tuple[torch.Tensor, torch.Tensor]
+from aphrodite.common.sequence import SamplerOutput
+from aphrodite.common.utils import is_hip
+from aphrodite.modeling.hf_downloader import (default_weight_loader,
+                                              hf_model_weights_iterator,
+                                              kv_cache_scales_loader)
+from aphrodite.modeling.layers.activation import SiluAndMul
+from aphrodite.modeling.layers.layernorm import RMSNorm
+from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
+                                              LinearMethodBase,
+                                              MergedColumnParallelLinear,
+                                              QKVParallelLinear,
+                                              RowParallelLinear)
+from aphrodite.modeling.layers.logits_processor import LogitsProcessor
+from aphrodite.modeling.layers.rotary_embedding import get_rope
+from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.vocab_parallel_embedding import (
+    DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, VocabParallelEmbedding)
+from aphrodite.distributed import (get_tensor_model_parallel_rank,
+                                   get_tensor_model_parallel_world_size)
+from aphrodite.modeling.sampling_metadata import SamplingMetadata
 
 
 class LlamaMLP(nn.Module):
@@ -152,22 +145,33 @@ class LlamaAttention(nn.Module):
         self.rope_theta = rope_theta
         self.max_position_embeddings = max_position_embeddings
 
+        # This will be overwritten by model initialization if we are using it.
+        # N.B. currently we only support per tensor scalar scaling factors
+        # & only applicable to ROCm (AMD GPU).
+        # The scaling factor convention we are assuming is
+        # quantized_value * scaling_factor ~= true_value
+        # which is consistent with the practice of setting
+        # scaling_factor = tensor_amax / FPtype_max
+        self.kv_scale = 1.0
+
         if (linear_method is not None
                 and not linear_method.quant_config.merge_weight()):
             self.merge_weight = False
-            self.q_proj = ColumnParallelLinear(hidden_size,
-                                               self.q_size,
-                                               bias=bias,
-                                               linear_method=linear_method)
+            self.q_proj = ColumnParallelLinear(
+                hidden_size,
+                self.total_num_heads * self.head_dim,
+                bias=bias,
+                linear_method=linear_method,
+            )
             self.k_proj = ColumnParallelLinear(
                 hidden_size,
-                self.kv_size,
+                self.total_num_kv_heads * self.head_dim,
                 bias=bias,
                 linear_method=linear_method,
             )
             self.v_proj = ColumnParallelLinear(
                 hidden_size,
-                self.kv_size,
+                self.total_num_kv_heads * self.head_dim,
                 bias=bias,
                 linear_method=linear_method,
             )
@@ -211,8 +215,8 @@ class LlamaAttention(nn.Module):
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
-        kv_cache: KVCache,
-        input_metadata: InputMetadata,
+        kv_cache: torch.Tensor,
+        attn_metadata: AttentionMetadata,
         # kv_quant_param: List[float],
     ) -> torch.Tensor:
         if self.merge_weight:
@@ -224,16 +228,8 @@ class LlamaAttention(nn.Module):
             k, _ = self.k_proj(hidden_states)
             v, _ = self.v_proj(hidden_states)
         q, k = self.rotary_emb(positions, q, k)
-        k_cache, v_cache = kv_cache
-        attn_output = self.attn(
-            q,
-            k,
-            v,
-            k_cache,
-            v_cache,
-            input_metadata,
-            # kv_quant_param
-        )
+        attn_output = self.attn(q, k, v, kv_cache, attn_metadata,
+                                self.kv_scale)
         output, _ = self.o_proj(attn_output)
         return output
 
@@ -252,6 +248,10 @@ class LlamaDecoderLayer(nn.Module):
         max_position_embeddings = getattr(config, "max_position_embeddings",
                                           8192)
         sliding_window = getattr(config, "sliding_window", None)
+        # Support abacusai/Smaug-72B-v0.1 with attention_bias
+        # Support internlm/internlm-7b with bias
+        attention_bias = getattr(config, "attention_bias", False) or getattr(
+            config, "bias", False)
         self.self_attn = LlamaAttention(
             hidden_size=self.hidden_size,
             num_heads=config.num_attention_heads,
@@ -261,7 +261,7 @@ class LlamaDecoderLayer(nn.Module):
             rope_scaling=rope_scaling,
             max_position_embeddings=max_position_embeddings,
             linear_method=linear_method,
-            bias=getattr(config, "bias", False),
+            bias=attention_bias,
             sliding_window=sliding_window,
         )
         self.mlp = LlamaMLP(
@@ -283,8 +283,8 @@ class LlamaDecoderLayer(nn.Module):
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
-        kv_cache: KVCache,
-        input_metadata: InputMetadata,
+        kv_cache: torch.Tensor,
+        attn_metadata: AttentionMetadata,
         residual: Optional[torch.Tensor],
         # kv_quant_param: List[float],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -299,7 +299,7 @@ class LlamaDecoderLayer(nn.Module):
             positions=positions,
             hidden_states=hidden_states,
             kv_cache=kv_cache,
-            input_metadata=input_metadata,
+            attn_metadata=attn_metadata,
             # kv_quant_param=kv_quant_param,
         )
 
@@ -337,14 +337,21 @@ class LlamaModel(nn.Module):
         ])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
+    def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
+        return self.embed_tokens(input_ids)
+
     def forward(
         self,
-        input_ids: torch.Tensor,
+        input_ids: Optional[torch.Tensor],
         positions: torch.Tensor,
-        kv_caches: List[KVCache],
-        input_metadata: InputMetadata,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
+        inputs_embeds: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        hidden_states = self.embed_tokens(input_ids)
+        if inputs_embeds is not None:
+            hidden_states = inputs_embeds
+        else:
+            hidden_states = self.get_input_embeddings(input_ids)
         residual = None
         for i in range(len(self.layers)):
             layer = self.layers[i]
@@ -352,10 +359,10 @@ class LlamaModel(nn.Module):
                 positions,
                 hidden_states,
                 kv_caches[i],
-                input_metadata,
+                attn_metadata,
                 residual,
-                # input_metadata.kv_quant_params[i]
-                # if input_metadata.kv_quant_params is not None else None,
+                # attn_metadata.kv_quant_params[i]
+                # if attn_metadata.kv_quant_params is not None else None,
             )
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
@@ -412,33 +419,35 @@ class LlamaForCausalLM(nn.Module):
             # compatibility
             if not lora_config else lora_config.lora_vocab_padding_size,
         )
-        self.sampler = Sampler(self.unpadded_vocab_size, config.vocab_size)
-        self.quant_sampler = QuantSampler(self.unpadded_vocab_size,
-                                          config.vocab_size)
+        logit_scale = getattr(config, "logit_scale", 1.0)
+        self.logits_processor = LogitsProcessor(
+            self.unpadded_vocab_size,
+            min(config.vocab_size, config.tokenizer_vocab_size), logit_scale)
+        self.sampler = Sampler()
 
     def forward(
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        kv_caches: List[KVCache],
-        input_metadata: InputMetadata,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         hidden_states = self.model(input_ids, positions, kv_caches,
-                                   input_metadata)
+                                   attn_metadata)
         return hidden_states
+
+    def compute_logits(self, hidden_states: torch.Tensor,
+                       sampling_metadata: SamplingMetadata) -> torch.Tensor:
+        logits = self.logits_processor(self.lm_head, hidden_states,
+                                       sampling_metadata)
+        return logits
 
     def sample(
         self,
-        hidden_states: torch.Tensor,
+        logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        if (self.linear_method is not None
-                and not self.linear_method.quant_config.merge_weight()):
-            next_tokens = self.quant_sampler(self.lm_head(hidden_states),
-                                             sampling_metadata)
-        else:
-            next_tokens = self.sampler(self.lm_head.weight, hidden_states,
-                                       sampling_metadata)
+        next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
     def load_weights(
@@ -489,3 +498,27 @@ class LlamaForCausalLM(nn.Module):
                 weight_loader = getattr(param, "weight_loader",
                                         default_weight_loader)
                 weight_loader(param, loaded_weight)
+
+    # If this function is called, it should always initialize KV cache scale
+    # factors (or else raise an exception). Thus, handled exceptions should
+    # make sure to leave KV cache scale factors in a known good (dummy) state
+    def load_kv_cache_scales(self, quantization_param_path: str) -> None:
+        tp_size = get_tensor_model_parallel_world_size()
+        tp_rank = get_tensor_model_parallel_rank()
+        for layer_idx, scaling_factor in kv_cache_scales_loader(
+                quantization_param_path, tp_rank, tp_size,
+                self.config.num_hidden_layers,
+                self.config.__class__.model_type):
+            layer_self_attn = self.model.layers[layer_idx].self_attn
+
+            if is_hip():
+                # The scaling factor convention we are assuming is
+                # quantized_value * scaling_factor ~= true_value
+                # which is consistent with the practice of setting
+                # scaling_factor = tensor_amax / FPtype_max
+                scaling_factor *= 2
+            if hasattr(layer_self_attn, "kv_scale"):
+                layer_self_attn.kv_scale = scaling_factor
+            else:
+                raise RuntimeError("Self attention has no KV cache scaling "
+                                   "factor attribute!")

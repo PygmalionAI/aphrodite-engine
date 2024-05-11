@@ -1,16 +1,19 @@
+import os
 from typing import Optional
 
 from transformers import AutoConfig, PretrainedConfig
 from transformers.models.auto.configuration_auto import CONFIG_MAPPING
+from loguru import logger
 
-from aphrodite.transformers_utils.configs import (BaiChuanConfig,
+from aphrodite.transformers_utils.configs import (BaiChuanConfig, DbrxConfig,
                                                   ChatGLMConfig, MPTConfig,
                                                   QWenConfig, RWConfig)
-from aphrodite.common.gguf import GGUFReader
+from aphrodite.quantization.gguf_utils import GGUFReader
 
 _CONFIG_REGISTRY = {
     "baichuan": BaiChuanConfig,
     "chatglm": ChatGLMConfig,
+    "dbrx": DbrxConfig,
     "mpt": MPTConfig,
     "qwen": QWenConfig,
     "RefinedWeb": RWConfig,  # For tiiuae/falcon-40b(-instruct)
@@ -19,7 +22,24 @@ _CONFIG_REGISTRY = {
 
 
 def extract_gguf_config(checkpoint):
-    result = GGUFReader(checkpoint)
+    if os.path.isfile(checkpoint):
+        result = GGUFReader(checkpoint)
+    elif os.path.isdir(checkpoint):
+        try:
+            return AutoConfig.from_pretrained(checkpoint)
+        except Exception:
+            pass
+
+        all_gguf_files = sorted([
+            file for file in os.listdir(checkpoint)
+            if os.path.splitext(file)[-1].lower() == ".gguf"
+        ])
+        # assume the config is always in the first shard
+        result = GGUFReader(os.path.join(checkpoint, all_gguf_files[0]))
+    else:
+        raise RuntimeError(f"Cannot find any model config with `{checkpoint}`")
+
+    logger.info("Extracting config from GGUF...")
     architecture = result.fields['general.architecture']
     architecture = str(bytes(architecture.parts[architecture.data[0]]),
                        encoding='utf-8')
@@ -108,3 +128,19 @@ def get_config(model: str,
                                               revision=revision,
                                               code_revision=code_revision)
     return config
+
+
+def get_hf_text_config(config: PretrainedConfig):
+    """Get the `sub` config relevant to multimodal models.
+    No-op for text models.
+    """
+    if hasattr(config, "text_config"):
+        # The code operates under the assumption that
+        # text_config should have `num_attention_heads`
+        # (among others). Assert here to fail early
+        # if transformer config doesn't align with
+        # the assumption.
+        assert hasattr(config.text_config, "num_attention_heads")
+        return config.text_config
+    else:
+        return config

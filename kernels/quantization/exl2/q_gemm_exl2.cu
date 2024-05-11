@@ -42,7 +42,30 @@ namespace exl2 {
 #define EXL2_BLOCK_KN_SIZE 64
 #define EXL2_BLOCK_M_SIZE_MAX 8
 #define EXL2_MAX_GROUPS_IN_BLOCK (EXL2_BLOCK_KN_SIZE / 32)
-
+#if defined(USE_ROCM)
+__host__ __forceinline__ hipblasStatus_t __compat_hipblasHgemm(hipblasHandle_t    handle,
+                                                               hipblasOperation_t transA,
+                                                               hipblasOperation_t transB,
+                                                               int                m,
+                                                               int                n,
+                                                               int                k,
+                                                               const half*        alpha,
+                                                               const half*        AP,
+                                                               int                lda,
+                                                               const half*        BP,
+                                                               int                ldb,
+                                                               const half*        beta,
+                                                               half*              CP,
+                                                               int                ldc) {
+    return hipblasHgemm(handle, transA, transB, m, n, k,
+                        reinterpret_cast<const hipblasHalf *>(alpha),
+                        reinterpret_cast<const hipblasHalf *>(AP), lda,
+                        reinterpret_cast<const hipblasHalf *>(BP), ldb,
+                        reinterpret_cast<const hipblasHalf *>(beta),
+                        reinterpret_cast<hipblasHalf *>(CP), ldc);
+}
+#define hipblasHgemm __compat_hipblasHgemm
+#endif
 #define DIVIDE(x, size) (((x) + (size) - 1) / (size))
 
 void gemm_half_q_half_cuda_part
@@ -64,7 +87,7 @@ void gemm_half_q_half_cuda_part
         blockDim.z = 1;
         gridDim.x = DIVIDE(size_n, EXL2_BLOCK_KN_SIZE * 4);
         gridDim.y = DIVIDE(size_m, m_count);
-        gridDim.z = DIVIDE(size_k, EXL2_BLOCK_KN_SIZE);
+        gridDim.z = DIVIDE(b->height, EXL2_BLOCK_KN_SIZE);
 
         fp_gemm_half_q_half_kernel kernel = pick_gemm_half_q_half_kernel(m_count);
         const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -79,6 +102,7 @@ void gemm_half_q_half_cuda_part
             size_m,
             size_n,
             size_k,
+            b->height,
             b->groups,
             b->cuda_q_group_map,
             b->cuda_q_perm,
@@ -159,7 +183,10 @@ torch::Tensor exl2_gemm
 
     auto options = torch::TensorOptions().dtype(a.dtype()).device(a.device());
     at::Tensor c = torch::empty({a.size(0), qm->width}, options);
-    at::Tensor temp_dq = torch::empty({a.size(1), qm->width}, options);
+    at::Tensor temp_dq;
+    if (c.size(0) > MAX_Q_GEMM_ROWS) {
+      temp_dq = torch::zeros({a.size(1), qm->width}, options);
+    }
 
     aphrodite::exl2::gemm_half_q_half_cuda
     (
@@ -171,7 +198,7 @@ torch::Tensor exl2_gemm
         c.size(1),  // n
         a.size(1),  // k
         true,
-        (half*) temp_dq.data_ptr()
+        c.size(0) > MAX_Q_GEMM_ROWS? (half*)temp_dq.data_ptr() : NULL
     );
     return c;
 }
@@ -191,7 +218,7 @@ uintptr_t make_q_matrix
     int device = q_weight.device().index();
     int width = q_weight.size(1);
     int groups = q_scale.size(0);
-    int height = q_invperm.size(0);
+    int height = q_perm.size(0);
 
     aphrodite::exl2::QMatrix* m = new aphrodite::exl2::QMatrix
     (

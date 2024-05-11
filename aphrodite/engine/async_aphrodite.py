@@ -14,6 +14,7 @@ from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.engine.ray_tools import initialize_ray_cluster, ray
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
+from aphrodite.common.sequence import MultiModalData
 
 ENGINE_ITERATION_TIMEOUT_S = int(
     os.environ.get("APHRODITE_ENGINE_ITERATION_TIMEOUT_S", "120"))
@@ -214,11 +215,20 @@ class _AsyncAphrodite(AphroditeEngine):
             output = await self.model_executor.execute_model_async(
                 seq_group_metadata_list, scheduler_outputs.blocks_to_swap_in,
                 scheduler_outputs.blocks_to_swap_out,
-                scheduler_outputs.blocks_to_copy)
+                scheduler_outputs.blocks_to_copy,
+                scheduler_outputs.num_lookahead_slots)
         else:
             output = []
 
-        return self._process_model_outputs(output, scheduler_outputs)
+        request_outputs = self._process_model_outputs(
+            output, scheduler_outputs.scheduled_seq_groups,
+            scheduler_outputs.ignored_seq_groups)
+
+        # Log stats.
+        if self.log_stats:
+            self.stat_logger.log(self._get_stats(scheduler_outputs))
+
+        return request_outputs
 
     async def encode_request_async(
         self,
@@ -243,6 +253,7 @@ class _AsyncAphrodite(AphroditeEngine):
         prompt_token_ids: Optional[List[int]] = None,
         arrival_time: Optional[float] = None,
         lora_request: Optional[LoRARequest] = None,
+        multi_modal_data: Optional[MultiModalData] = None,
     ) -> None:
         if lora_request is not None and not self.lora_config:
             raise ValueError(f"Got lora_request {lora_request} but LoRA is "
@@ -255,14 +266,13 @@ class _AsyncAphrodite(AphroditeEngine):
             prompt_token_ids=prompt_token_ids,
             lora_request=lora_request)
 
-        return self.add_request(
-            request_id,
-            prompt=prompt,
-            prompt_token_ids=prompt_token_ids,
-            sampling_params=sampling_params,
-            arrival_time=arrival_time,
-            lora_request=lora_request,
-        )
+        return self.add_request(request_id,
+                                prompt=prompt,
+                                prompt_token_ids=prompt_token_ids,
+                                sampling_params=sampling_params,
+                                arrival_time=arrival_time,
+                                lora_request=lora_request,
+                                multi_modal_data=multi_modal_data)
 
     async def check_health_async(self) -> None:
         self.model_executor.check_health()
@@ -327,22 +337,28 @@ class AsyncAphrodite:
                          start_engine_loop: bool = True) -> "AsyncAphrodite":
         """Creates an async LLM engine from the engine arguments."""
         # Create the engine configs.
-        engine_configs = engine_args.create_engine_configs()
-        parallel_config = engine_configs[2]
-        if parallel_config.worker_use_ray or engine_args.engine_use_ray:
-            initialize_ray_cluster(parallel_config)
+        engine_config = engine_args.create_engine_config()
+
+        if engine_config.device_config.device_type == "neuron":
+            raise NotImplementedError("Neuron is not supported for "
+                                      "async engine yet.")
+        elif engine_config.device_config.device_type == "cpu":
+            from aphrodite.executor.cpu_executor import CPUExecutor
+            executor_class = CPUExecutor
+        elif engine_config.parallel_config.worker_use_ray:
+            initialize_ray_cluster(engine_config.parallel_config)
             from aphrodite.executor.ray_gpu_executor import RayGPUExecutorAsync
             executor_class = RayGPUExecutorAsync
         else:
-            assert parallel_config.world_size == 1, (
+            assert engine_config.parallel_config.world_size == 1, (
                 "Ray is required if parallel_config.world_size > 1.")
             from aphrodite.executor.gpu_executor import GPUExecutorAsync
             executor_class = GPUExecutorAsync
         # Create the async LLM engine.
-        engine = cls(parallel_config.worker_use_ray,
+        engine = cls(engine_config.parallel_config.worker_use_ray,
                      engine_args.engine_use_ray,
-                     *engine_configs,
-                     executor_class,
+                     **engine_config.to_dict(),
+                     executor_class=executor_class,
                      log_requests=not engine_args.disable_log_requests,
                      log_stats=not engine_args.disable_log_stats,
                      max_log_len=engine_args.max_log_len,
@@ -402,8 +418,8 @@ class AsyncAphrodite:
         else:
             # FIXME: This is a bit hacky. Be careful when changing the
             # order of the arguments.
-            cache_config = args[1]
-            parallel_config = args[2]
+            cache_config = kwargs["cache_config"]
+            parallel_config = kwargs["parallel_config"]
             if parallel_config.tensor_parallel_size == 1:
                 num_gpus = cache_config.gpu_memory_utilization
             else:

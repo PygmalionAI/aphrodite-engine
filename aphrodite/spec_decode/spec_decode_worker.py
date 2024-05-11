@@ -1,33 +1,28 @@
-from typing import List, Tuple, Optional, Dict
 from functools import cached_property
+from typing import Dict, List, Optional, Tuple
 
 import torch
+from loguru import logger
 
-from aphrodite.spec_decode.metrics import AsyncMetricsCollector
-from aphrodite.common.sequence import (
-    SamplerOutput,
-    SequenceGroupMetadata,
-    SequenceGroupOutput,
-    SequenceOutput,
-)
-from aphrodite.task_handler.worker import Worker
-from aphrodite.spec_decode.multi_step_worker import MultiStepWorker
+from aphrodite.common.config import SchedulerConfig
+from aphrodite.common.sequence import (Logprob, SamplerOutput,
+                                       SequenceGroupMetadata,
+                                       SequenceGroupOutput, SequenceOutput)
 from aphrodite.modeling.layers.rejection import RejectionSampler
-from aphrodite.common.config import CacheConfig
-from aphrodite.spec_decode.util import (
-    nvtx_range,
-    get_all_seq_ids,
-    split_batch_by_proposal_len,
-)
-from aphrodite.spec_decode.interfaces import (
-    SpeculativeProposals,
-    SpeculativeScores,
-)
 from aphrodite.spec_decode.batch_expansion import BatchExpansionTop1Scorer
-from aphrodite.spec_decode.interfaces import SpeculativeScorer
+from aphrodite.spec_decode.interfaces import (SpeculativeProposals,
+                                              SpeculativeScorer,
+                                              SpeculativeScores)
+from aphrodite.spec_decode.metrics import AsyncMetricsCollector
+from aphrodite.spec_decode.multi_step_worker import MultiStepWorker
+from aphrodite.spec_decode.ngram_worker import NGramWorker
+from aphrodite.spec_decode.util import (get_all_seq_ids, nvtx_range,
+                                        split_batch_by_proposal_len)
+from aphrodite.task_handler.worker_base import (LoraNotSupportedWorkerBase,
+                                                WorkerBase)
 
 
-class SpecDecodeWorker:
+class SpecDecodeWorker(LoraNotSupportedWorkerBase):
     """Worker which implements speculative decoding.
 
     Speculative decoding reduces decoding per-token latency by using a proposal
@@ -51,10 +46,52 @@ class SpecDecodeWorker:
         correctness tests pass.
     """
 
+    @classmethod
+    def create_worker(
+        cls,
+        scorer_worker: WorkerBase,
+        speculative_config: SchedulerConfig,
+    ) -> "SpecDecodeWorker":
+
+        if speculative_config.ngram_prompt_lookup_max > 0:
+            proposer_worker = NGramWorker(
+                model_config=speculative_config.draft_model_config,
+                parallel_config=speculative_config.draft_parallel_config,
+                scheduler_config=scorer_worker.scheduler_config,
+                device_config=scorer_worker.device_config,
+                cache_config=scorer_worker.cache_config,
+                local_rank=0,
+                rank=0,
+                distributed_init_method=scorer_worker.distributed_init_method,
+            )
+            proposer_worker.set_ngram_window_size(
+                speculative_config.ngram_prompt_lookup_min,
+                speculative_config.ngram_prompt_lookup_max)
+        else:
+            proposer_worker = MultiStepWorker(
+                model_config=speculative_config.draft_model_config,
+                parallel_config=speculative_config.draft_parallel_config,
+                scheduler_config=scorer_worker.scheduler_config,
+                device_config=scorer_worker.device_config,
+                cache_config=scorer_worker.cache_config,
+                local_rank=0,
+                rank=0,
+                distributed_init_method=scorer_worker.distributed_init_method,
+                lora_config=scorer_worker.lora_config,
+                vision_language_config=scorer_worker.vision_language_config,
+                is_driver_worker=True,
+            )
+        return SpecDecodeWorker(
+            proposer_worker,
+            scorer_worker,
+            # TODO: disable strict mode for speedup.
+            rejection_sampler=RejectionSampler(strict_mode=True),
+        )
+
     def __init__(
         self,
-        proposer_worker: MultiStepWorker,
-        scorer_worker: Worker,
+        proposer_worker: WorkerBase,
+        scorer_worker: WorkerBase,
         rejection_sampler: RejectionSampler,
         metrics_collector: Optional[AsyncMetricsCollector] = None,
     ):
@@ -76,36 +113,61 @@ class SpecDecodeWorker:
         self.scorer_worker = scorer_worker
         self.rejection_sampler = rejection_sampler
 
-        self._metrics = (AsyncMetricsCollector(rejection_sampler)
-                         if metrics_collector is None else metrics_collector)
+        self._metrics = AsyncMetricsCollector(
+            rejection_sampler
+        ) if metrics_collector is None else metrics_collector
 
         self.probs_dtype = self.rejection_sampler.probs_dtype
         self.token_id_dtype = self.rejection_sampler.token_id_dtype
 
-        self.scorer: SpeculativeScorer = None
+        # Lazy initiazliation.
+        self.scorer: SpeculativeScorer
 
-    def init_model(self) -> None:
-        """Initialize both scorer and proposer models."""
+    def init_device(self) -> None:
+        """Initialize both scorer and proposer models.
+        """
         # The scorer worker model is initialized first in case the proposer
         # model has a smaller TP degree than the target worker.
-        self.scorer_worker.init_model()
-        self.proposer_worker.init_model()
+        self.scorer_worker.init_device()
+        self.proposer_worker.init_device()
+
+        # NOTE: load_model is not part of the WorkerBase interface.
+        self.scorer_worker.load_model()
+        self.proposer_worker.load_model()
 
         self._metrics.init_gpu_tensors(self.rank)
         self.rejection_sampler.init_gpu_tensors(self.rank)
         self.scorer = BatchExpansionTop1Scorer(
             scorer_worker=self.scorer_worker,
             device=self.device,
-            vocab_size=self._vocab_size,
-        )
+            vocab_size=self._vocab_size)
 
-    def profile_num_available_blocks(
-        self,
-        block_size: int,
-        gpu_memory_utilization: float,
-        cpu_swap_space: int,
-        cache_dtype: str,
-    ) -> Tuple[int, int]:
+        self._configure_model_sampler_for_spec_decode()
+
+    def _configure_model_sampler_for_spec_decode(self):
+        """Configure model sampler to emit GPU tensors. This allows spec decode
+        to keep data on device without transferring to CPU and serializing,
+        which significantly reduces overhead of rejection sampling.
+
+        NOTE: This breaks abstraction boundaries pretty badly. The better
+        design is to have the "move to CPU and serialize" sampling decision be
+        done outside of the model/sampler; this way the "last-mile" worker
+        object which interfaces with the scheduler can serialize and incur the
+        performance hit as necessary. This allows us to run the worker several
+        iterations in a row without incurring the "move to CPU and serialize"
+        performance penalty.
+
+        Since this requires a large change to Aphrodite, we defer it to later
+        and temporarily accept this broken abstraction boundary.
+
+        NOTE: This will require a special check if the proposer worker
+        does not have a sampler (e.g. ngram speculation).
+        """
+        (self.scorer_worker.model_runner.model.sampler.include_gpu_probs_tensor
+         ) = True
+        self.proposer_worker.set_include_gpu_probs_tensor()
+
+    def determine_num_available_blocks(self) -> Tuple[int, int]:
         """Determine the number of cache blocks to use.
 
         This is done by profiling the scorer model (which is typically the
@@ -113,30 +175,27 @@ class SpecDecodeWorker:
         scorer cache is divided evenly between the proposer and scorer model KV,
         such that the number of blocks is equal in both KV caches.
         """
-        (
-            num_gpu_blocks,
-            num_cpu_blocks,
-        ) = self.scorer_worker.profile_num_available_blocks(
-            block_size, gpu_memory_utilization, cpu_swap_space, cache_dtype)
+        num_gpu_blocks, num_cpu_blocks = (
+            self.scorer_worker.determine_num_available_blocks())
 
         scorer_cache_block_size_bytes = (
-            self.scorer_worker.get_cache_block_size_bytes(
-                block_size, cache_dtype))
+            self.scorer_worker.get_cache_block_size_bytes())
         proposer_cache_block_size_bytes = (
-            self.proposer_worker.get_cache_block_size_bytes(
-                block_size, cache_dtype))
+            self.proposer_worker.get_cache_block_size_bytes())
 
         new_num_gpu_blocks = split_num_cache_blocks_evenly(
-            scorer_cache_block_size_bytes,
-            proposer_cache_block_size_bytes,
-            num_gpu_blocks,
-        )
+            scorer_cache_block_size_bytes, proposer_cache_block_size_bytes,
+            num_gpu_blocks)
         return new_num_gpu_blocks, num_cpu_blocks
 
-    def init_cache_engine(self, cache_config: CacheConfig):
-        """Initialize the cache engine of the scorer and proposer workers."""
-        self.scorer_worker.init_cache_engine(cache_config)
-        self.proposer_worker.init_cache_engine(cache_config)
+    def initialize_cache(self, num_gpu_blocks: int,
+                         num_cpu_blocks: int) -> None:
+        """Initialize the cache engine of the scorer and proposer workers.
+        """
+        self.scorer_worker.initialize_cache(num_gpu_blocks=num_gpu_blocks,
+                                            num_cpu_blocks=num_cpu_blocks)
+        self.proposer_worker.initialize_cache(num_gpu_blocks=num_gpu_blocks,
+                                              num_cpu_blocks=num_cpu_blocks)
 
     @torch.inference_mode()
     def execute_model(
@@ -145,17 +204,21 @@ class SpecDecodeWorker:
         blocks_to_swap_in: Optional[Dict[int, int]],
         blocks_to_swap_out: Optional[Dict[int, int]],
         blocks_to_copy: Optional[Dict[int, List[int]]],
-        num_spec_tokens: int,
+        num_lookahead_slots: int,
     ) -> List[SamplerOutput]:
-        """Perform speculative decoding on the input batch."""
+        """Perform speculative decoding on the input batch.
+        """
 
         assert seq_group_metadata_list is not None, (
             "speculative decoding "
             "requires non-None seq_group_metadata_list")
 
+        logger.debug(
+            f"spec_decode_worker.execute_model {num_lookahead_slots=}")
+
         # If no spec tokens, call the proposer and scorer workers normally.
         # Used for prefill.
-        if num_spec_tokens == 0 or len(seq_group_metadata_list) == 0:
+        if num_lookahead_slots == 0 or len(seq_group_metadata_list) == 0:
             return self._run_no_spec(
                 seq_group_metadata_list=seq_group_metadata_list,
                 blocks_to_swap_in=blocks_to_swap_in,
@@ -168,7 +231,7 @@ class SpecDecodeWorker:
             blocks_to_swap_in=blocks_to_swap_in,
             blocks_to_swap_out=blocks_to_swap_out,
             blocks_to_copy=blocks_to_copy,
-            k=num_spec_tokens,
+            k=num_lookahead_slots,
         )
 
     @nvtx_range("spec_decode_worker._run_no_spec")
@@ -183,21 +246,24 @@ class SpecDecodeWorker:
         proposer and scorer model so that the KV cache is consistent between the
         two.
         """
+        logger.debug("run proposer worker no spec")
 
         self.proposer_worker.execute_model(
             seq_group_metadata_list=seq_group_metadata_list,
             blocks_to_swap_in=blocks_to_swap_in,
             blocks_to_swap_out=blocks_to_swap_out,
             blocks_to_copy=blocks_to_copy,
-            return_python_output=False,
         )
 
+        logger.debug("run target worker no spec")
         sampler_output = self.scorer_worker.execute_model(
             seq_group_metadata_list=seq_group_metadata_list,
             blocks_to_swap_in=blocks_to_swap_in,
             blocks_to_swap_out=blocks_to_swap_out,
             blocks_to_copy=blocks_to_copy,
         )
+        assert len(sampler_output) == 1
+        sampler_output = sampler_output[0]
 
         # Clear device tensors from sampler output. This reduces communication
         # overhead when the engine runs in a different process than the workers.
@@ -223,15 +289,16 @@ class SpecDecodeWorker:
         sequence.
         """
 
+        logger.debug("get spec proposals")
         # Generate proposals using draft worker.
+        assert blocks_to_swap_in is not None
+        assert blocks_to_swap_out is not None
+        assert blocks_to_copy is not None
         proposals = self.proposer_worker.get_spec_proposals(
-            seq_group_metadata_list,
-            blocks_to_swap_in,
-            blocks_to_swap_out,
-            blocks_to_copy,
-            k,
-        )
+            seq_group_metadata_list, blocks_to_swap_in, blocks_to_swap_out,
+            blocks_to_copy, k)
 
+        logger.debug("score proposals")
         proposal_scores = self.scorer.score_proposals(
             seq_group_metadata_list,
             blocks_to_swap_in,
@@ -241,9 +308,11 @@ class SpecDecodeWorker:
             proposals,
         )
 
+        logger.debug("verify proposals")
         accepted_token_ids = self._verify_tokens(seq_group_metadata_list,
                                                  proposal_scores, proposals, k)
 
+        logger.debug("create output list")
         return self._create_output_sampler_list(seq_group_metadata_list,
                                                 accepted_token_ids, k)
 
@@ -267,24 +336,33 @@ class SpecDecodeWorker:
         _, spec_indices = split_batch_by_proposal_len(
             seq_group_metadata_list,
             proposal_lens_list,
-            select_proposal_len_zero=False,
-        )
+            select_proposal_len_zero=False)
         _, non_spec_indices = split_batch_by_proposal_len(
             seq_group_metadata_list,
             proposal_lens_list,
-            select_proposal_len_zero=True,
-        )
+            select_proposal_len_zero=True)
         original_indices = spec_indices + non_spec_indices
 
-        proposal_probs = proposal_scores.probs[spec_indices, :-1]
-        bonus_token_ids = proposal_scores.token_ids[spec_indices, -1:]
+        # Get probabilities of target model, excluding bonus token.
+        proposal_verifier_probs = proposal_scores.probs[spec_indices, :-1]
+
+        # Get non-speculative sampled tokens from target model.
         non_spec_token_ids = proposal_scores.token_ids[non_spec_indices]
 
+        # Get bonus tokens from target model.
+        bonus_token_ids = proposal_scores.token_ids[spec_indices, -1:]
+
+        # Get probabilities according to proposal method.
+        proposal_probs = proposals.proposal_probs[spec_indices]
+
+        # Get proposed tokens.
+        proposal_token_ids = proposals.proposal_token_ids[spec_indices]
+
         accepted_token_ids = self.rejection_sampler(
-            proposal_probs,
-            bonus_token_ids,
-            proposals.proposal_probs,
-            proposals.proposal_token_ids,
+            target_probs=proposal_verifier_probs,
+            bonus_token_ids=bonus_token_ids,
+            draft_probs=proposal_probs,
+            draft_token_ids=proposal_token_ids,
         )
 
         # Append output tokens from non-speculative sequences to
@@ -331,7 +409,7 @@ class SpecDecodeWorker:
                                 parent_seq_id=seq_id,
                                 output_token=token_id,
                                 # TODO Add verifier logprobs.
-                                logprobs={token_id: 0.0},
+                                logprobs={token_id: Logprob(0.0)},
                                 persistent_data={},
                             )
                         ],
@@ -340,8 +418,8 @@ class SpecDecodeWorker:
             sampler_output_list.append(
                 SamplerOutput(outputs=step_output_token_ids))
 
-        maybe_rejsample_metrics = self._metrics.maybe_collect_rejsample_metrics(
-            k)
+        maybe_rejsample_metrics = (
+            self._metrics.maybe_collect_rejsample_metrics(k))
         if maybe_rejsample_metrics is not None:
             sampler_output_list[
                 0].spec_decode_worker_metrics = maybe_rejsample_metrics
@@ -368,12 +446,20 @@ class SpecDecodeWorker:
     def device(self):
         return self.scorer_worker.device
 
+    def get_cache_block_size_bytes(self):
+        """Return the size of a cache block in bytes.
+        
+        This function is only used to compose workers within a SpecDecodeWorker.
+        We leave composing a SpecDecodeWorker within a SpecDecodeWorker
+        undefined for now, although it could be implemented in the future.
+        See https://arxiv.org/abs/2308.04623.
+        """
+        raise NotImplementedError
 
-def split_num_cache_blocks_evenly(
-    scorer_cache_block_size_bytes: int,
-    proposer_cache_block_size_bytes: int,
-    total_num_gpu_blocks: int,
-) -> int:
+
+def split_num_cache_blocks_evenly(scorer_cache_block_size_bytes: int,
+                                  proposer_cache_block_size_bytes: int,
+                                  total_num_gpu_blocks: int) -> int:
     """Given total_num_gpu_blocks, the number of GPU blocks that could be
     allocate to the target model, this function calculates how many blocks
     should be given to the draft and target model.

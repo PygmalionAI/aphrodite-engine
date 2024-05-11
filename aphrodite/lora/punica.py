@@ -31,6 +31,7 @@ def bgmv(
           @ w_t_all[indices[i], layer_idx, :, :].transpose(-1, -2)
           * scale
         ).squeeze(0)
+
     Args:
       y: Shape: `[B, H2]`. Output vectors. Will be changed in-place.
       x: Shape: `[B, H1]`. Input vectors.
@@ -65,6 +66,7 @@ def add_lora(y: torch.Tensor,
           @ wb_t_all[indices[i], layer_idx, :, :].transpose(-1, -2)
           * scale
         ).squeeze(0)
+
     Args:
       y: Shape: `[B, H2]`. Output vectors. Will be changed in-place.
       x: Shape: `[B, H1]`. Input vectors.
@@ -109,6 +111,7 @@ def add_lora_slice(y: torch.Tensor,
     """
     Same as `add_lora` but you can operate on slices of y.
     Pass whole y, define y_offset and y_slice_size.
+
     Semantics:
       y[i] += (
           x[i].unsqueeze(0)
@@ -116,6 +119,7 @@ def add_lora_slice(y: torch.Tensor,
           @ wb_t_all[indices[i], layer_idx, :, :].transpose(-1, -2)
           * scale
         ).squeeze(0)
+
     Args:
       y: Shape: `[B, H2]`. Output vectors. Will be changed in-place.
       x: Shape: `[B, H1]`. Input vectors.
