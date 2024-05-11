@@ -1,15 +1,15 @@
-from typing import Tuple, Optional
 from functools import cached_property
+from typing import Optional, Tuple
 
 import torch
-import torch.nn as nn
 import torch.jit
+import torch.nn as nn
 
 
 class RejectionSampler(nn.Module):
     """Apply modified rejection sampling as described in "Accelerating Large
-    Language Model Decoding with Speculative Sampling"
-    https://arxiv.org/pdf/2302.01318.pdf.
+        Language Model Decoding with Speculative Sampling"
+        https://arxiv.org/pdf/2302.01318.pdf.
     """
 
     def __init__(self, strict_mode: bool = False):
@@ -144,6 +144,7 @@ class RejectionSampler(nn.Module):
         recovered_probs = self._get_recovered_probs(
             target_probs, draft_probs).reshape(batch_size * k, vocab_size)
 
+        # NOTE: the recovered_probs are overwritten by this method.
         recovered_token_ids = _multinomial(recovered_probs,
                                            num_samples=1).reshape(
                                                batch_size, k)
@@ -194,8 +195,7 @@ class RejectionSampler(nn.Module):
                                   device=target_probs.device)
         capped_ratio = torch.minimum(
             selected_target_probs / selected_draft_probs,
-            torch.full((1, ), 1, device=target_probs.device),
-        )
+            torch.full((1, ), 1, device=target_probs.device))
         accepted = uniform_rand < capped_ratio
 
         return accepted
@@ -291,8 +291,7 @@ class RejectionSampler(nn.Module):
         output_with_bonus_tokens = -torch.ones(
             (batch_size, k + self._num_bonus_tokens),
             dtype=self.token_id_dtype,
-            device=accepted.device,
-        )
+            device=accepted.device)
         output = output_with_bonus_tokens[:, :k]
 
         # Fill in the first k columns of the output tensor using masks and data
@@ -305,6 +304,11 @@ class RejectionSampler(nn.Module):
         # with causal acceptance.
         output_with_bonus_tokens[:, -1] = torch.where(output[:, -1] != -1,
                                                       bonus_token_ids, -1)
+
+        # We disable bonus tokens because it causes corrupt KV cache for
+        # proposal methods that require KV cache. We can fix it by "prefilling"
+        # the bonus token in the proposer.
+        output_with_bonus_tokens[:, -1] = -1
 
         # Fill the recovered token ids.
         output.mul_(~after_false_mask).add_(
@@ -323,11 +327,8 @@ class RejectionSampler(nn.Module):
         draft_probs: torch.Tensor,
         draft_token_ids: torch.Tensor,
     ) -> None:
-        (
-            target_batch_size,
-            num_target_probs,
-            target_vocab_size,
-        ) = target_probs.shape
+        (target_batch_size, num_target_probs,
+         target_vocab_size) = target_probs.shape
         bonus_batch_size, num_bonus_tokens = bonus_token_ids.shape
         draft_batch_size, num_draft_probs, draft_vocab_size = draft_probs.shape
         draft_token_ids_batch_size, num_draft_token_ids = draft_token_ids.shape
@@ -363,12 +364,8 @@ class RejectionSampler(nn.Module):
         draft_token_ids: torch.Tensor,
     ) -> None:
         devices = [
-            t.device for t in [
-                target_probs,
-                bonus_token_ids,
-                draft_probs,
-                draft_token_ids,
-            ]
+            t.device for t in
+            [target_probs, bonus_token_ids, draft_probs, draft_token_ids]
         ]
         assert all([devices[0] == device for device in devices])
 
@@ -397,8 +394,8 @@ def _multinomial(
     if num_samples > 1:
         # This is equivalent to torch.repeat_interleaved (which also
         # forces a GPU<->CPU sync).
-        probs = (probs[:, None, :].expand(probs.shape[0], num_samples,
-                                          probs.shape[1]).contiguous().view(
-                                              -1, probs.shape[1]))
+        probs = probs[:, None, :].expand(probs.shape[0], num_samples,
+                                         probs.shape[1]).contiguous().view(
+                                             -1, probs.shape[1])
     q = torch.empty_like(probs).exponential_(1.0)
     return probs.div_(q).argmax(dim=1).view(-1, num_samples)

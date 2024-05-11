@@ -1,10 +1,10 @@
 import importlib
-from typing import List, Optional, Type
+from typing import Dict, List, Optional, Type
 from loguru import logger
 
 import torch.nn as nn
 
-from aphrodite.common.utils import is_hip, is_neuron
+from aphrodite.common.utils import is_hip
 
 # Architecture -> (module, class).
 _MODELS = {
@@ -15,6 +15,7 @@ _MODELS = {
     "BloomForCausalLM": ("bloom", "BloomForCausalLM"),
     "ChatGLMModel": ("chatglm", "ChatGLMForCausalLM"),
     "ChatGLMForConditionalGeneration": ("chatglm", "ChatGLMForCausalLM"),
+    "DbrxForCausalLM": ("dbrx", "DbrxForCausalLM"),
     "CohereForCausalLM": ("cohere", "CohereForCausalLM"),
     "DeciLMForCausalLM": ("decilm", "DeciLMForCausalLM"),
     "DeepseekForCausalLM": ("deepseek", "DeepseekForCausalLM"),
@@ -29,9 +30,10 @@ _MODELS = {
     "LlamaForCausalLM": ("llama", "LlamaForCausalLM"),
     # For decapoda-research/llama-*
     "LLaMAForCausalLM": ("llama", "LlamaForCausalLM"),
+    "LlavaForConditionalGeneration":
+    ("llava", "LlavaForConditionalGeneration"),
     "MistralForCausalLM": ("llama", "LlamaForCausalLM"),
     "MixtralForCausalLM": ("mixtral", "MixtralForCausalLM"),
-    "QuantMixtralForCausalLM": ("mixtral_quant", "MixtralForCausalLM"),
     "YiForCausalLM": ("llama", "LlamaForCausalLM"),
     # transformers's mpt class has lower case
     "MptForCausalLM": ("mpt", "MPTForCausalLM"),
@@ -41,10 +43,15 @@ _MODELS = {
     "PhiForCausalLM": ("phi", "PhiForCausalLM"),
     "QWenLMHeadModel": ("qwen", "QWenLMHeadModel"),
     "Qwen2ForCausalLM": ("qwen2", "Qwen2ForCausalLM"),
+    "Qwen2MoeForCausalLM": ("qwen2_moe", "Qwen2MoeForCausalLM"),
     "RWForCausalLM": ("falcon", "FalconForCausalLM"),
     "StableLMEpochForCausalLM": ("stablelm", "StablelmForCausalLM"),
     "StableLmForCausalLM": ("stablelm", "StablelmForCausalLM"),
 }
+
+# Architecture -> type.
+# out of tree models
+_OOT_MODELS: Dict[str, Type[nn.Module]] = {}
 
 # Models not supported by ROCm.
 _ROCM_UNSUPPORTED_MODELS = []
@@ -60,16 +67,13 @@ _ROCM_PARTIALLY_SUPPORTED_MODELS = {
     "Sliding window attention is not yet supported in ROCm's flash attention",
 }
 
-_NEURON_SUPPORTED_MODELS = {
-    "LlamaForCausalLM": "neuron.llama",
-    "MistralForCausalLM": "neuron.mistral",
-}
-
 
 class ModelRegistry:
 
     @staticmethod
     def load_model_cls(model_arch: str) -> Optional[Type[nn.Module]]:
+        if model_arch in _OOT_MODELS:
+            return _OOT_MODELS[model_arch]
         if model_arch not in _MODELS:
             return None
         if is_hip():
@@ -81,15 +85,8 @@ class ModelRegistry:
                 logger.warning(
                     f"Model architecture {model_arch} is partially supported "
                     "by ROCm: " + _ROCM_PARTIALLY_SUPPORTED_MODELS[model_arch])
-        elif is_neuron():
-            if model_arch not in _NEURON_SUPPORTED_MODELS:
-                raise ValueError(
-                    f"Model architecture {model_arch} is not supported by "
-                    "AWS Neuron for now.")
 
         module_name, model_cls_name = _MODELS[model_arch]
-        if is_neuron():
-            module_name = _NEURON_SUPPORTED_MODELS[model_arch]
         module = importlib.import_module(
             f"aphrodite.modeling.models.{module_name}")
         return getattr(module, model_cls_name, None)
@@ -97,6 +94,16 @@ class ModelRegistry:
     @staticmethod
     def get_supported_archs() -> List[str]:
         return list(_MODELS.keys())
+
+    @staticmethod
+    def register_model(model_arch: str, model_cls: Type[nn.Module]):
+        if model_arch in _MODELS:
+            logger.warning(
+                f"Model architecture {model_arch} is already registered, "
+                "and will be overwritten by the new model "
+                f"class {model_cls.__name__}.")
+        global _OOT_MODELS
+        _OOT_MODELS[model_arch] = model_cls
 
 
 __all__ = [

@@ -2,9 +2,10 @@
 import copy
 from enum import IntEnum
 from functools import cached_property
-from typing import Callable, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
+from pydantic import conint
 
 _SAMPLING_EPS = 1e-5
 
@@ -106,6 +107,8 @@ class SamplingParams:
         ignore_eos: Whether to ignore the EOS token and continue generating
             tokens after the EOS token is generated.
         max_tokens: Maximum number of tokens to generate per output sequence.
+        min_tokens: Minimum number of tokens to generate per output sequence
+            before EOS or stop tokens are generated.
         logprobs: Number of log probabilities to return per output token.
             Note that the implementation follows the OpenAI API: The return
             result includes the log probabilities on the `logprobs` most likely
@@ -113,6 +116,7 @@ class SamplingParams:
             log probability of the sampled token, so there  may be up to
             `logprobs+1` elements in the response.
         prompt_logprobs: Number of log probabilities to return per prompt token.
+        detokenize: Whether to detokenize the output. Defaults to True.
         custom_token_bans: List of token IDs to ban from generating
         skip_special_tokens: Whether to skip special tokens in the output.
             defaults to true.
@@ -120,6 +124,9 @@ class SamplingParams:
             tokens in the output. Defaults to True.
         logits_processors: List of LogitsProcessors to change the probability
             of token prediction at runtime.
+        truncate_prompt_tokens: If set to an integer k, will use only the last
+            k tokens from the prompt (i.e. left-truncation). Defaults to None
+            (i.e. no truncation).
     """
 
     def __init__(
@@ -155,12 +162,15 @@ class SamplingParams:
         include_stop_str_in_output: bool = False,
         ignore_eos: bool = False,
         max_tokens: Optional[int] = 16,
+        min_tokens: int = 0,
         logprobs: Optional[int] = None,
         prompt_logprobs: Optional[int] = None,
+        detokenize: bool = True,
         custom_token_bans: Optional[List[int]] = None,
         skip_special_tokens: bool = True,
         spaces_between_special_tokens: bool = True,
         logits_processors: Optional[List[LogitsProcessorFunc]] = None,
+        truncate_prompt_tokens: Optional[conint(ge=1)] = None,
     ) -> None:
         self.n = n
         self.best_of = best_of if best_of is not None else n
@@ -197,13 +207,19 @@ class SamplingParams:
         self.stop_token_ids = stop_token_ids or []
         self.ignore_eos = ignore_eos
         self.max_tokens = max_tokens
+        self.min_tokens = min_tokens
         self.logprobs = logprobs
         self.prompt_logprobs = prompt_logprobs
+        # NOTE: This parameter is only exposed at the engine level for now.
+        # It is not exposed in the OpenAI API server, as the OpenAI API does
+        # not support returning only a list of token IDs.
+        self.detokenize = detokenize
         self.custom_token_bans = custom_token_bans or []
         self.skip_special_tokens = skip_special_tokens
         self.spaces_between_special_tokens = spaces_between_special_tokens
         self.logits_processors = logits_processors or []
         self.include_stop_str_in_output = include_stop_str_in_output
+        self.truncate_prompt_tokens = truncate_prompt_tokens
 
         self.default_values = {
             "n": 1,
@@ -236,13 +252,23 @@ class SamplingParams:
             "stop_token_ids": [],
             "ignore_eos": False,
             "max_tokens": 16,
+            "min_tokens": 0,
             "logprobs": None,
             "prompt_logprobs": None,
+            "detokenize": True,
             "custom_token_bans": [],
             "skip_special_tokens": True,
             "spaces_between_special_tokens": True,
-            "include_stop_str_in_output": False
+            "include_stop_str_in_output": False,
+            "truncate_prompt_tokens": None,
         }
+
+        # Number of characters to hold back for stop string evaluation
+        # until sequence is finished.
+        if self.stop and not include_stop_str_in_output:
+            self.output_text_buffer_length = max(len(s) for s in self.stop) - 1
+        else:
+            self.output_text_buffer_length = 0
 
         self._verify_args()
         if self.use_beam_search:
@@ -256,6 +282,8 @@ class SamplingParams:
                 self.min_p = 0.0
                 self.top_a = 0.0
                 self._verify_greedy_sampling()
+        # injected by the engine
+        self.eos_token_id = None
 
     def _verify_args(self) -> None:
         if self.n < 1:
@@ -325,12 +353,29 @@ class SamplingParams:
         if self.max_tokens is not None and self.max_tokens < 1:
             raise ValueError(
                 f"max_tokens must be at least 1, got {self.max_tokens}.")
+        if self.min_tokens < 0:
+            raise ValueError(f"min_tokens must be greater than or equal to 0, "
+                             f"got {self.min_tokens}.")
+        if self.max_tokens is not None and self.min_tokens > self.max_tokens:
+            raise ValueError(
+                f"min_tokens must be less than or equal to "
+                f"max_tokens={self.max_tokens}, got {self.min_tokens}.")
         if self.logprobs is not None and self.logprobs < 0:
             raise ValueError(
                 f"logprobs must be non-negative, got {self.logprobs}.")
         if self.prompt_logprobs is not None and self.prompt_logprobs < 0:
             raise ValueError("prompt_logprobs must be non-negative, got "
                              f"{self.prompt_logprobs}.")
+        if (self.truncate_prompt_tokens is not None
+                and self.truncate_prompt_tokens < 1):
+            raise ValueError(f"truncate_prompt_tokens must be >= 1, "
+                             f"got {self.truncate_prompt_tokens}")
+        if any(not stop_str for stop_str in self.stop):
+            raise ValueError("stop cannot contain an empty string.")
+        if self.stop and not self.detokenize:
+            raise ValueError(
+                "stop strings are only supported when detokenize is True. "
+                "Set detokenize=True to use stop.")
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:
@@ -365,6 +410,18 @@ class SamplingParams:
             raise ValueError("top_p must be 1 when using greedy sampling.")
         if self.top_k != -1:
             raise ValueError("top_k must be -1 when using greedy sampling.")
+
+    def update_from_generation_config(
+            self, generation_config: Dict[str, Any]) -> None:
+        """Update if there are non-default values from generation_config"""
+        # Update eos_token_id for generation
+        if eos_ids := generation_config.get("eos_token_id"):
+            # it can be either int or list of int
+            if isinstance(eos_ids, int):
+                eos_ids = [eos_ids]
+            original_stop_token_ids = set(self.stop_token_ids)
+            original_stop_token_ids.update(eos_ids)
+            self.stop_token_ids = list(original_stop_token_ids)
 
     @cached_property
     def sampling_type(self) -> SamplingType:

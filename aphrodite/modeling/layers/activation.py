@@ -7,10 +7,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from aphrodite._C import ops
-from aphrodite.modeling.layers.quantization import QuantizationConfig
-from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
-from aphrodite.modeling.megatron.utils import divide
+from aphrodite.distributed import (
+    divide,
+    get_tensor_model_parallel_rank,
+    get_tensor_model_parallel_world_size,
+)
+from aphrodite.quantization import QuantizationConfig
 from aphrodite.modeling.utils import set_weight_attrs
 
 

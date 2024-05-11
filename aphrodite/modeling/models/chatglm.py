@@ -2,33 +2,31 @@
 # Adapted from
 # https://github.com/THUDM/ChatGLM2-6B
 """Inference-only ChatGLM model compatible with THUDM weights."""
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import torch
 from torch import nn
 from torch.nn import LayerNorm
 
-from aphrodite.modeling.metadata import InputMetadata
+from aphrodite.attention import Attention, AttentionMetadata
+from aphrodite.common.config import LoRAConfig
 from aphrodite.modeling.layers.activation import SiluAndMul
-from aphrodite.modeling.layers.attention import Attention
 from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               MergedColumnParallelLinear,
                                               QKVParallelLinear,
                                               RowParallelLinear)
+from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding, ParallelLMHead)
-from aphrodite.modeling.megatron.parallel_state import (
-    get_tensor_model_parallel_world_size)
+    ParallelLMHead, VocabParallelEmbedding)
+from aphrodite.distributed import (get_tensor_model_parallel_world_size)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (default_weight_loader,
                                               hf_model_weights_iterator)
 from aphrodite.common.sequence import SamplerOutput
 from aphrodite.transformers_utils.configs import ChatGLMConfig
-
-KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 
 class GLMAttention(nn.Module):
@@ -98,20 +96,18 @@ class GLMAttention(nn.Module):
         self,
         hidden_states: torch.Tensor,
         position_ids: torch.Tensor,
-        kv_cache: KVCache,
-        input_metadata: InputMetadata,
+        kv_cache: torch.Tensor,
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         qkv, _ = self.query_key_value(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         q, k = self.rotary_emb(position_ids, q, k)
-        key_cache, value_cache = kv_cache
         context_layer = self.attn(
             q,
             k,
             v,
-            key_cache,
-            value_cache,
-            input_metadata,
+            kv_cache,
+            attn_metadata,
         )
         attn_output, _ = self.dense(context_layer)
         return attn_output
@@ -199,8 +195,8 @@ class GLMBlock(nn.Module):
         self,
         hidden_states: torch.Tensor,
         position_ids: torch.Tensor,
-        kv_cache: KVCache,
-        input_metadata: InputMetadata,
+        kv_cache: torch.Tensor,
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         # hidden_states: [num_tokens, h]
         # Layer norm at the beginning of the transformer layer.
@@ -210,7 +206,7 @@ class GLMBlock(nn.Module):
             hidden_states=layernorm_output,
             position_ids=position_ids,
             kv_cache=kv_cache,
-            input_metadata=input_metadata,
+            attn_metadata=attn_metadata,
         )
 
         # Residual connection.
@@ -263,8 +259,8 @@ class GLMTransformer(nn.Module):
         self,
         hidden_states: torch.Tensor,
         position_ids: torch.Tensor,
-        kv_caches: List[KVCache],
-        input_metadata: InputMetadata,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         for i in range(self.num_layers):
             layer = self.layers[i]
@@ -272,7 +268,7 @@ class GLMTransformer(nn.Module):
                 hidden_states=hidden_states,
                 position_ids=position_ids,
                 kv_cache=kv_caches[i],
-                input_metadata=input_metadata,
+                attn_metadata=attn_metadata,
             )
         # Final layer norm.
         if self.post_layer_norm:
@@ -307,8 +303,8 @@ class ChatGLMModel(nn.Module):
         self,
         input_ids: torch.Tensor,
         position_ids: torch.Tensor,
-        kv_caches: List[KVCache],
-        input_metadata: InputMetadata,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         inputs_embeds = self.embedding(input_ids)
 
@@ -317,43 +313,63 @@ class ChatGLMModel(nn.Module):
             hidden_states=inputs_embeds,
             position_ids=position_ids,
             kv_caches=kv_caches,
-            input_metadata=input_metadata,
+            attn_metadata=attn_metadata,
         )
         return hidden_states
 
 
 class ChatGLMForCausalLM(nn.Module):
+    packed_modules_mapping = {
+        "query_key_value": ["query_key_value"],
+        "dense_h_to_4h": ["dense_h_to_4h"]
+    }
+    # LoRA specific attributes
+    supported_lora_modules = [
+        "query_key_value",
+        "dense",
+        "dense_h_to_4h",
+        "dense_4h_to_h",
+    ]
+    embedding_modules = {}
+    embedding_padding_modules = []
 
     def __init__(
         self,
         config: ChatGLMConfig,
         linear_method: Optional[LinearMethodBase] = None,
+        lora_config: Optional[LoRAConfig] = None,
     ):
         super().__init__()
         self.config: ChatGLMConfig = config
         self.linear_method = linear_method
         self.transformer = ChatGLMModel(config, linear_method)
-        # self.lm_head_weight = self.transformer.output_layer.weight
-        self.sampler = Sampler(config.padded_vocab_size)
+        self.logits_processor = LogitsProcessor(config.padded_vocab_size,
+                                                config.tokenizer_vocab_size)
+        self.sampler = Sampler()
 
     def forward(
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        kv_caches: List[KVCache],
-        input_metadata: InputMetadata,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         hidden_states = self.transformer(input_ids, positions, kv_caches,
-                                         input_metadata)
+                                         attn_metadata)
         return hidden_states
+
+    def compute_logits(self, hidden_states: torch.Tensor,
+                       sampling_metadata: SamplingMetadata) -> torch.Tensor:
+        logits = self.logits_processor(self.transformer.output_layer,
+                                       hidden_states, sampling_metadata)
+        return logits
 
     def sample(
         self,
-        hidden_states: torch.Tensor,
+        logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(
-            self.transformer.output_layer(hidden_states), sampling_metadata)
+        next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
     def load_weights(self,

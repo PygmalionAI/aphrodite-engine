@@ -1,15 +1,12 @@
-from typing import List, Dict, Optional, Tuple
 import copy
+from typing import Dict, List, Tuple
 
 import torch
 
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
+from aphrodite.spec_decode.interfaces import SpeculativeProposals
+from aphrodite.spec_decode.top1_proposer import Top1Proposer
 from aphrodite.task_handler.worker import Worker
-from aphrodite.spec_decode.interfaces import (
-    SpeculativeProposals,
-    SpeculativeProposer,
-)
-from aphrodite.spec_decode.util import sampler_output_to_torch
 
 
 class MultiStepWorker(Worker):
@@ -27,60 +24,64 @@ class MultiStepWorker(Worker):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self._proposer: Optional[DraftModelTop1Proposer] = None
+        # Lazy initialization list.
+        self._proposer: Top1Proposer
 
-    def init_model(self):
-        super().init_model()
+    def init_device(self):
+        super().init_device()
 
-        self._proposer = DraftModelTop1Proposer(
+        self._proposer = Top1Proposer(
             self,
             self.device,
-            self.max_model_len,
             self.vocab_size,
+            max_proposal_len=self.max_model_len,
         )
 
+    def set_include_gpu_probs_tensor(self):
+        # Need include_gpu_probs_tensor for multi_step_worker
+        self.model_runner.model.sampler.include_gpu_probs_tensor = True
+
     @torch.inference_mode()
-    def execute_model_multi_step(
+    def sampler_output(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
         blocks_to_swap_in: Dict[int, int],
         blocks_to_swap_out: Dict[int, int],
         blocks_to_copy: Dict[int, List[int]],
-        num_steps: int,
-    ) -> List[SamplerOutput]:
-        """Run the model forward pass num_steps times. Returns the list of
+        sample_len: int,
+    ) -> Tuple[List[SamplerOutput], bool]:
+        """Run the model forward pass sample_len times. Returns the list of
         sampler output, one per model forward pass.
         """
-        self._raise_if_unsupported(
-            seq_group_metadata_list,
-            blocks_to_swap_in,
-            blocks_to_swap_out,
-            blocks_to_copy,
-        )
+        self._raise_if_unsupported(seq_group_metadata_list, blocks_to_swap_in,
+                                   blocks_to_swap_out, blocks_to_copy)
 
         # Shallow copy input data so modifications (such as appending tokens)
         # do not cause side-effects.
         copied_seq_group_metadata_list = self._shallow_copy_inputs(
             seq_group_metadata_list)
 
-        # Assert enough KV space for num_steps tokens per sequence.
-        self._assert_enough_kv_space(seq_group_metadata_list, num_steps)
+        # Assert enough KV space for sample_len tokens per sequence.
+        self._assert_enough_kv_space(seq_group_metadata_list, sample_len)
 
-        # Run model num_steps times.
+        # Run model sample_len times.
         model_outputs = []
-        for _ in range(num_steps):
+        for _ in range(sample_len):
             model_output = super().execute_model(
                 seq_group_metadata_list=copied_seq_group_metadata_list,
                 blocks_to_swap_in=blocks_to_swap_in,
                 blocks_to_swap_out=blocks_to_swap_out,
                 blocks_to_copy=blocks_to_copy,
             )
+            assert (len(model_output) == 1
+                    ), "composing multistep workers not supported"
+            model_output = model_output[0]
 
             self._append_new_tokens(model_output,
                                     copied_seq_group_metadata_list)
             model_outputs.append(model_output)
 
-        return model_outputs
+        return model_outputs, True
 
     def get_spec_proposals(
         self,
@@ -103,10 +104,8 @@ class MultiStepWorker(Worker):
         )
 
     def _append_new_tokens(
-        self,
-        model_output: SamplerOutput,
-        seq_group_metadata_list: SequenceGroupMetadata,
-    ) -> None:
+            self, model_output: SamplerOutput,
+            seq_group_metadata_list: SequenceGroupMetadata) -> None:
         """Given model output from a single run, append the tokens to the
         sequences. This is normally done outside of the worker, but it is
         required if the worker is to perform multiple forward passes.
@@ -157,10 +156,8 @@ class MultiStepWorker(Worker):
         return new_seq_group_metadata_list
 
     def _assert_enough_kv_space(
-        self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-        num_steps: int,
-    ) -> None:
+            self, seq_group_metadata_list: List[SequenceGroupMetadata],
+            num_steps: int) -> None:
         """Assert there are enough physical blocks per sequence to store the
         current KV plus additional KV from num_steps tokens.
         """
@@ -174,8 +171,8 @@ class MultiStepWorker(Worker):
             # plus one token per step.
             final_seq_len = seq.get_len() + num_steps
 
-            # We will have final_seq_len - 1 KV because Aphrodite saves KV for a
-            # token in the iteration after the token was generated.
+            # We will have final_seq_len - 1 KV because Aphrodite saves KV for
+            # a token in the iteration after the token was generated.
             required_num_kv_slots = final_seq_len - 1
 
             # The allocated number of kv slots is the number of allocated blocks
@@ -212,181 +209,3 @@ class MultiStepWorker(Worker):
                 for seq_group_metadata in seq_group_metadata_list):
             raise NotImplementedError(
                 "MultiStepWorker does not support beam search.")
-
-
-class DraftModelTop1Proposer(SpeculativeProposer):
-    """Helper class which separates out sequences which would exceed the max
-    model length when speculated upon.
-
-    This allows combinations of models such as JackFram/llama-68m draft with
-    meta-llama/Llama2-13b-chat-hf, as llama-68m has max_position_embeddings of
-    2048 while Llama2-13b has max_position_embeddings of 4096.
-
-    We treat the sequences which exceed the proposal draft model length as
-    "non-spec sequences". Essentially they skip the draft model and go through
-    normal decoding in the target model.
-
-    Currently, only proposal_lens of 0 and k are supported, where k is a global
-    batch proposal length. In the future Aphrodite should support per-sequence
-    proposal lengths.
-    """
-
-    def __init__(
-        self,
-        draft_worker: MultiStepWorker,
-        device: str,
-        max_model_len: int,
-        vocab_size: int,
-    ):
-        self._draft_worker = draft_worker
-        self._device = device
-        self._max_model_len = max_model_len
-        self._vocab_size = vocab_size
-
-    def get_proposals(
-        self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-        blocks_to_swap_in: Dict[int, int],
-        blocks_to_swap_out: Dict[int, int],
-        blocks_to_copy: Dict[int, List[int]],
-        max_proposal_len: int,
-    ) -> SpeculativeProposals:
-        """Get speculative proposals given the input batch.
-
-        Sequences which would exceed the max model length are skipped during
-        speculation.
-        """
-
-        # Split speculative- and non-speculative- sequences.
-        (
-            proposal_lens,
-            nonzero_proposal_len_seqs,
-            nonzero_proposal_len_indices,
-        ) = self._split_by_max_model_len(seq_group_metadata_list,
-                                         max_proposal_len)
-
-        if nonzero_proposal_len_seqs:
-            # Speculate tokens using the draft worker for the speculative
-            # sequences.
-            maybe_sampler_output = self._draft_worker.execute_model_multi_step(
-                seq_group_metadata_list=nonzero_proposal_len_seqs,
-                blocks_to_swap_in=blocks_to_swap_in,
-                blocks_to_swap_out=blocks_to_swap_out,
-                blocks_to_copy=blocks_to_copy,
-                num_steps=max_proposal_len,
-            )
-        else:
-            # If no sequences can be speculated, set sampler output to None.
-            maybe_sampler_output = None
-
-        # Combine speculative- and non-speculative sequences into the same
-        # representation.
-        proposal_tokens, proposal_probs, proposal_lens = self._merge_outputs(
-            batch_size=len(seq_group_metadata_list),
-            max_proposal_len=max_proposal_len,
-            maybe_sampler_output=maybe_sampler_output,
-            proposal_lens=proposal_lens,
-            nonzero_proposal_len_indices=nonzero_proposal_len_indices,
-        )
-
-        proposals = SpeculativeProposals(
-            proposal_token_ids=proposal_tokens,
-            proposal_probs=proposal_probs,
-            proposal_lens=proposal_lens,
-        )
-
-        return proposals
-
-    def _split_by_max_model_len(
-        self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-        max_proposal_len: int,
-    ) -> Tuple[List[int], List[SequenceGroupMetadata], List[int]]:
-        """Determine which sequences would exceed the max model length."""
-
-        proposal_lens: List[int] = []
-        nonzero_proposal_len_seqs: List[SequenceGroupMetadata] = []
-        nonzero_proposal_len_indices: List[int] = []
-        for i, seq_group_metadata in enumerate(seq_group_metadata_list):
-            seq_data = next(iter(seq_group_metadata.seq_data.values()))
-            seq_len = seq_data.get_len()
-
-            # Currently only proposal lens of 0 or the global batch proposal len
-            # are supported.
-            if seq_len + max_proposal_len < self._max_model_len:
-                proposal_lens.append(max_proposal_len)
-                nonzero_proposal_len_seqs.append(seq_group_metadata)
-                nonzero_proposal_len_indices.append(i)
-            else:
-                proposal_lens.append(0)
-
-        return (
-            proposal_lens,
-            nonzero_proposal_len_seqs,
-            nonzero_proposal_len_indices,
-        )
-
-    def _merge_outputs(
-        self,
-        batch_size: int,
-        max_proposal_len: int,
-        maybe_sampler_output: Optional[SamplerOutput],
-        proposal_lens: List[int],
-        nonzero_proposal_len_indices: List[int],
-    ) -> Tuple[torch.Tensor, torch.tensor, torch.Tensor]:
-        """After speculations are produced, merge the speculation results with
-        the skipped sequences.
-        """
-        if maybe_sampler_output is None:
-            # If no speculative tokens, the sampler output will be None.
-            # In this case we return empty tensors.
-            proposal_tokens = torch.zeros(0,
-                                          max_proposal_len,
-                                          dtype=torch.long,
-                                          device=self._device)
-            proposal_probs = torch.zeros(
-                0,
-                max_proposal_len,
-                self._vocab_size,
-                dtype=torch.float32,
-                device=self._device,
-            )
-            proposal_lens = torch.zeros(len(proposal_lens),
-                                        dtype=torch.long,
-                                        device=self._device)
-            return proposal_tokens, proposal_probs, proposal_lens
-
-        sampler_output = maybe_sampler_output
-
-        proposal_tokens, proposal_probs = sampler_output_to_torch(
-            sampler_output)
-
-        # Now, reformat the output GPU tensors such that each sequence has
-        # a proposal. the proposal can be empty, e.g. [-1, -1, -1]
-
-        entire_proposal_tokens = torch.full(
-            size=(batch_size, *proposal_tokens.shape[1:]),
-            fill_value=-1,
-            dtype=torch.long,
-            device=self._device,
-        )
-        entire_proposal_tokens[nonzero_proposal_len_indices] = proposal_tokens
-        entire_proposal_probs = torch.zeros(
-            batch_size,
-            *proposal_probs.shape[1:],
-            dtype=torch.float32,
-            device=self._device,
-        )
-        entire_proposal_probs[nonzero_proposal_len_indices] = proposal_probs
-
-        proposal_tokens, proposal_probs = (
-            entire_proposal_tokens,
-            entire_proposal_probs,
-        )
-
-        proposal_lens = torch.zeros(batch_size,
-                                    dtype=torch.long,
-                                    device=self._device)
-        proposal_lens[nonzero_proposal_len_indices] = max_proposal_len
-
-        return proposal_tokens, proposal_probs, proposal_lens

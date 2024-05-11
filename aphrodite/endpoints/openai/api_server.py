@@ -1,47 +1,47 @@
-import argparse
 import asyncio
-import json
-from contextlib import asynccontextmanager
-import os
 import importlib
 import inspect
-from typing import List, Tuple, AsyncGenerator, Optional
+import json
+import os
+from contextlib import asynccontextmanager
+from http import HTTPStatus
+from typing import AsyncGenerator, List, Optional, Tuple
 
-from prometheus_client import make_asgi_app
 import fastapi
 import uvicorn
-from http import HTTPStatus
-from fastapi import Request, APIRouter, Header
+from fastapi import APIRouter, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import (JSONResponse, StreamingResponse, Response,
-                               HTMLResponse)
+from fastapi.responses import (HTMLResponse, JSONResponse, Response,
+                               StreamingResponse)
 from loguru import logger
+from prometheus_client import make_asgi_app
 
 import aphrodite
-from aphrodite.engine.args_tools import AsyncEngineArgs
-from aphrodite.engine.async_aphrodite import AsyncAphrodite
-from aphrodite.endpoints.openai.protocol import (CompletionRequest,
-                                                 ChatCompletionRequest,
-                                                 ErrorResponse, Prompt,
-                                                 EmbeddingsResponse,
-                                                 EmbeddingsRequest)
+import aphrodite.endpoints.openai.embeddings as OAIembeddings
 from aphrodite.common.logger import UVICORN_LOG_CONFIG
 from aphrodite.common.outputs import RequestOutput
-from aphrodite.common.sampling_params import SamplingParams, _SAMPLING_EPS
+from aphrodite.common.sampling_params import _SAMPLING_EPS, SamplingParams
 from aphrodite.common.utils import random_uuid
+from aphrodite.endpoints.openai.args import make_arg_parser
+from aphrodite.endpoints.openai.protocol import (
+    ChatCompletionRequest, CompletionRequest, EmbeddingsRequest,
+    EmbeddingsResponse, ErrorResponse, KAIGenerationInputSchema, Prompt)
 from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
-from aphrodite.endpoints.openai.serving_completions import (
-    OpenAIServingCompletion)
-from aphrodite.endpoints.openai.protocol import KAIGenerationInputSchema
-from aphrodite.endpoints.openai.serving_engine import LoRA
+from aphrodite.endpoints.openai.serving_completions import \
+    OpenAIServingCompletion
+from aphrodite.engine.args_tools import AsyncEngineArgs
+from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
-import aphrodite.endpoints.openai.embeddings as OAIembeddings
+from aphrodite.endpoints.openai.serving_engine import LoRA
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
+engine: Optional[AsyncAphrodite] = None
+engine_args: Optional[AsyncEngineArgs] = None
 openai_serving_chat: OpenAIServingChat = None
 openai_serving_completion: OpenAIServingCompletion = None
+router = APIRouter()
 kai_api = APIRouter()
 extra_api = APIRouter()
 kobold_lite_ui = ""
@@ -63,149 +63,27 @@ async def lifespan(app: fastapi.FastAPI):
     yield
 
 
-app = fastapi.FastAPI(title="Aphrodite Engine",
-                      summary="Serving language models at scale",
-                      description=("A RESTful API server compatible with "
-                                   "OpenAI and KoboldAI clients. "),
-                      lifespan=lifespan)
-
-
-class LoRAParserAction(argparse.Action):
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        lora_list = []
-        for item in values:
-            name, path = item.split('=')
-            lora_list.append(LoRA(name, path))
-        setattr(namespace, self.dest, lora_list)
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Aphrodite OpenAI-Compatible RESTful API server.")
-    parser.add_argument("--host", type=str, default=None, help="host name")
-    parser.add_argument("--port", type=int, default=2242, help="port number")
-    parser.add_argument("--allow-credentials",
-                        action="store_true",
-                        help="allow credentials")
-    parser.add_argument("--allowed-origins",
-                        type=json.loads,
-                        default=["*"],
-                        help="allowed origins")
-    parser.add_argument("--allowed-methods",
-                        type=json.loads,
-                        default=["*"],
-                        help="allowed methods")
-    parser.add_argument("--allowed-headers",
-                        type=json.loads,
-                        default=["*"],
-                        help="allowed headers")
-    parser.add_argument(
-        "--api-keys",
-        type=str,
-        default=None,
-        help=
-        "If provided, the server will require this key to be presented in the "
-        "header.")
-    parser.add_argument(
-        "--admin-key",
-        type=str,
-        default=None,
-        help=
-        "If provided, the server will require this key to be presented in the "
-        "header for admin operations.")
-    parser.add_argument(
-        "--launch-kobold-api",
-        action="store_true",
-        help=
-        "Launch the Kobold API server in addition to the OpenAI API server.")
-    parser.add_argument("--max-length",
-                        type=int,
-                        default=256,
-                        help="The maximum length of the generated response. "
-                        "For use with Kobold Horde.")
-    parser.add_argument("--served-model-name",
-                        type=str,
-                        default=None,
-                        help="The model name used in the API. If not "
-                        "specified, the model name will be the same as "
-                        "the huggingface name.")
-    parser.add_argument(
-        "--lora-modules",
-        type=str,
-        default=None,
-        nargs='+',
-        action=LoRAParserAction,
-        help=
-        "LoRA module configurations in the format name=path. Multiple modules "
-        "can be specified.")
-    parser.add_argument("--chat-template",
-                        type=str,
-                        default=None,
-                        help="The file path to the chat template, "
-                        "or the template in single-line form "
-                        "for the specified model")
-    parser.add_argument("--response-role",
-                        type=str,
-                        default="assistant",
-                        help="The role name to return if "
-                        "`request.add_generation_prompt=true`.")
-    parser.add_argument("--ssl-keyfile",
-                        type=str,
-                        default=None,
-                        help="The file path to the SSL key file")
-    parser.add_argument("--ssl-certfile",
-                        type=str,
-                        default=None,
-                        help="The file path to the SSL cert file")
-    parser.add_argument(
-        "--root-path",
-        type=str,
-        default=None,
-        help="FastAPI root_path when app is behind a path based routing proxy")
-    parser.add_argument(
-        "--middleware",
-        type=str,
-        action="append",
-        default=[],
-        help="Additional ASGI middleware to apply to the app. "
-        "We accept multiple --middleware arguments. "
-        "The value should be an import path. "
-        "If a function is provided, Aphrodite will add it to the server using "
-        "@app.middleware('http'). "
-        "If a class is provided, Aphrodite will add it to the server using "
-        "app.add_middleware(). ")
-
-    parser = AsyncEngineArgs.add_cli_args(parser)
-    return parser.parse_args()
-
-
 # Add prometheus asgi middleware to route /metrics requests
 metrics_app = make_asgi_app()
-app.mount("/metrics/", metrics_app)
+router.mount("/metrics", metrics_app)
 
 
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(_, exc):
-    err = openai_serving_chat.create_error_response(message=str(exc))
-    return JSONResponse(err.model_dump(), status_code=HTTPStatus.BAD_REQUEST)
-
-
-@app.get("/health")
+@router.get("/health")
 async def health() -> Response:
     """Health check."""
     await openai_serving_chat.engine.check_health()
+    await openai_serving_completion.engine.check_health()
     return Response(status_code=200)
 
 
-@app.get("/v1/models")
+@router.get("/v1/models")
 async def show_available_models(x_api_key: Optional[str] = Header(None)):
     models = await openai_serving_chat.show_available_models()
     return JSONResponse(content=models.model_dump())
 
 
-@app.post("/v1/tokenize")
-@app.post("/v1/token/encode")
+@router.post("/v1/tokenize")
+@router.post("/v1/token/encode")
 async def tokenize(request: Request,
                    prompt: Prompt,
                    x_api_key: Optional[str] = Header(None)):
@@ -213,8 +91,8 @@ async def tokenize(request: Request,
     return JSONResponse(content=tokenized)
 
 
-@app.post("/v1/detokenize")
-@app.post("/v1/token/decode")
+@router.post("/v1/detokenize")
+@router.post("/v1/token/decode")
 async def detokenize(request: Request,
                      token_ids: List[int],
                      x_api_key: Optional[str] = Header(None)):
@@ -222,7 +100,7 @@ async def detokenize(request: Request,
     return JSONResponse(content=detokenized)
 
 
-@app.post("/v1/embeddings", response_model=EmbeddingsResponse)
+@router.post("/v1/embeddings", response_model=EmbeddingsResponse)
 async def handle_embeddings(request: EmbeddingsRequest,
                             x_api_key: Optional[str] = Header(None)):
     input = request.input
@@ -237,13 +115,13 @@ async def handle_embeddings(request: EmbeddingsRequest,
     return JSONResponse(response)
 
 
-@app.get("/version", description="Fetch the Aphrodite Engine version.")
+@router.get("/version", description="Fetch the Aphrodite Engine version.")
 async def show_version(x_api_key: Optional[str] = Header(None)):
     ver = {"version": aphrodite.__version__}
     return JSONResponse(content=ver)
 
 
-@app.get("/v1/samplers")
+@router.get("/v1/samplers")
 async def show_samplers(x_api_key: Optional[str] = Header(None)):
     """Get the available samplers."""
     global sampler_json
@@ -259,7 +137,7 @@ async def show_samplers(x_api_key: Optional[str] = Header(None)):
     return sampler_json
 
 
-@app.post("/v1/lora/load")
+@router.post("/v1/lora/load")
 async def load_lora(lora: LoRA, x_api_key: Optional[str] = Header(None)):
     openai_serving_chat.add_lora(lora)
     openai_serving_completion.add_lora(lora)
@@ -270,14 +148,14 @@ async def load_lora(lora: LoRA, x_api_key: Optional[str] = Header(None)):
     return JSONResponse(content={"result": "success"})
 
 
-@app.delete("/v1/lora/unload")
+@router.delete("/v1/lora/unload")
 async def unload_lora(lora_name: str, x_api_key: Optional[str] = Header(None)):
     openai_serving_chat.remove_lora(lora_name)
     openai_serving_completion.remove_lora(lora_name)
     return JSONResponse(content={"result": "success"})
 
 
-@app.post("/v1/chat/completions")
+@router.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,
                                  raw_request: Request,
                                  x_api_key: Optional[str] = Header(None)):
@@ -293,7 +171,7 @@ async def create_chat_completion(request: ChatCompletionRequest,
         return JSONResponse(content=generator.model_dump())
 
 
-@app.post("/v1/completions")
+@router.post("/v1/completions")
 async def create_completion(request: CompletionRequest,
                             raw_request: Request,
                             x_api_key: Optional[str] = Header(None)):
@@ -520,10 +398,10 @@ async def get_preloaded_story() -> JSONResponse:
 @extra_api.get("/version")
 async def get_extra_version():
     """Impersonate KoboldCpp"""
-    return JSONResponse({"result": "KoboldCpp", "version": "1.60.1"})
+    return JSONResponse({"result": "KoboldCpp", "version": "1.63"})
 
 
-@app.get("/")
+@router.get("/")
 async def get_kobold_lite_ui():
     """Serves a cached copy of the Kobold Lite UI, loading it from disk
     on demand if needed."""
@@ -542,103 +420,123 @@ async def get_kobold_lite_ui():
 
 # ============ KoboldAI API ============ #
 
-if __name__ == "__main__":
-    try:
-        args = parse_args()
 
-        if args.launch_kobold_api:
-            logger.warning(
-                "Launching Kobold API server in addition to OpenAI. "
-                "Keep in mind that the Kobold API routes are NOT "
-                "protected via the API key.")
-            app.include_router(kai_api, prefix="/api/v1")
-            app.include_router(kai_api,
-                               prefix="/api/latest",
-                               include_in_schema=False)
-            app.include_router(extra_api, prefix="/api/extra")
+def build_app(args):
+    app = fastapi.FastAPI(lifespan=lifespan)
+    app.include_router(router)
+    app.root_path = args.root_path
+    if args.launch_kobold_api:
+        logger.warning("Launching Kobold API server in addition to OpenAI. "
+                       "Keep in mind that the Kobold API routes are NOT "
+                       "protected via the API key.")
+        app.include_router(kai_api, prefix="/api/v1")
+        app.include_router(kai_api,
+                           prefix="/api/latest",
+                           include_in_schema=False)
+        app.include_router(extra_api, prefix="/api/extra")
 
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=args.allowed_origins,
-            allow_credentials=args.allow_credentials,
-            allow_methods=args.allowed_methods,
-            allow_headers=args.allowed_headers,
-        )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=args.allowed_origins,
+        allow_credentials=args.allow_credentials,
+        allow_methods=args.allowed_methods,
+        allow_headers=args.allowed_headers,
+    )
 
-        if token := os.environ.get("APHRODITE_API_KEY") or args.api_keys:
-            admin_key = os.environ.get("APHRODITE_ADMIN_KEY") or args.admin_key
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(_, exc):
+        err = openai_serving_completion.create_error_response(message=str(exc))
+        return JSONResponse(err.model_dump(),
+                            status_code=HTTPStatus.BAD_REQUEST)
 
-            if admin_key is None:
-                logger.warning("Admin key not provided. Admin operations will "
-                               "be disabled.")
+    if token := os.environ.get("APHRODITE_API_KEY") or args.api_keys:
+        admin_key = os.environ.get("APHRODITE_ADMIN_KEY") or args.admin_key
 
-            @app.middleware("http")
-            async def authentication(request: Request, call_next):
-                excluded_paths = ["/api"]
-                if any(
-                        request.url.path.startswith(path)
-                        for path in excluded_paths):
-                    return await call_next(request)
-                if not request.url.path.startswith("/v1"):
-                    return await call_next(request)
+        if admin_key is None:
+            logger.warning("Admin key not provided. Admin operations will "
+                           "be disabled.")
 
-                auth_header = request.headers.get("Authorization")
-                api_key_header = request.headers.get("x-api-key")
-
-                if request.url.path.startswith("/v1/lora"):
-                    if admin_key is not None and api_key_header == admin_key:
-                        return await call_next(request)
-                    return JSONResponse(content={"error": "Unauthorized"},
-                                        status_code=401)
-
-                if auth_header != "Bearer " + token and api_key_header != token:
-                    return JSONResponse(content={"error": "Unauthorized"},
-                                        status_code=401)
+        @app.middleware("http")
+        async def authentication(request: Request, call_next):
+            excluded_paths = ["/api"]
+            if any(
+                    request.url.path.startswith(path)
+                    for path in excluded_paths):
+                return await call_next(request)
+            if not request.url.path.startswith("/v1"):
                 return await call_next(request)
 
-        for middleware in args.middleware:
-            module_path, object_name = middleware.rsplit(".", 1)
-            imported = getattr(importlib.import_module(module_path),
-                               object_name)
-            if inspect.isclass(imported):
-                app.add_middleware(imported)
-            elif inspect.iscoroutinefunction(imported):
-                app.middleware("http")(imported)
-            else:
-                raise ValueError(f"Invalid middleware {middleware}. Must be a "
-                                 "function or a class.")
+            # Browsers may send OPTIONS requests to check CORS headers
+            # before sending the actual request. We should allow these
+            # requests to pass through without authentication.
+            # See https://github.com/PygmalionAI/aphrodite-engine/issues/434
+            if request.method == "OPTIONS":
+                return await call_next(request)
 
-        logger.debug(f"args: {args}")
+            auth_header = request.headers.get("Authorization")
+            api_key_header = request.headers.get("x-api-key")
 
-        if args.served_model_name is not None:
-            served_model = args.served_model_name
+            if request.url.path.startswith("/v1/lora"):
+                if admin_key is not None and api_key_header == admin_key:
+                    return await call_next(request)
+                return JSONResponse(content={"error": "Unauthorized"},
+                                    status_code=401)
+
+            if auth_header != "Bearer " + token and api_key_header != token:
+                return JSONResponse(content={"error": "Unauthorized"},
+                                    status_code=401)
+            return await call_next(request)
+
+    for middleware in args.middleware:
+        module_path, object_name = middleware.rsplit(".", 1)
+        imported = getattr(importlib.import_module(module_path), object_name)
+        if inspect.isclass(imported):
+            app.add_middleware(imported)
+        elif inspect.iscoroutinefunction(imported):
+            app.middleware("http")(imported)
         else:
-            served_model = args.model
+            raise ValueError(f"Invalid middleware {middleware}. "
+                             f"Must be a function or a class.")
 
-        engine_args = AsyncEngineArgs.from_cli_args(args)
-        engine = AsyncAphrodite.from_engine_args(engine_args)
-        tokenizer = get_tokenizer(
-            engine_args.tokenizer,
-            tokenizer_mode=engine_args.tokenizer_mode,
-            trust_remote_code=engine_args.trust_remote_code,
-        )
+    return app
 
-        chat_template = args.chat_template
-        if chat_template is None and tokenizer.chat_template is not None:
-            chat_template = tokenizer.chat_template
 
-        openai_serving_chat = OpenAIServingChat(engine, served_model,
-                                                args.response_role,
-                                                args.lora_modules,
-                                                args.chat_template)
-        openai_serving_completion = OpenAIServingCompletion(
-            engine, served_model, args.lora_modules)
-        engine_model_config = asyncio.run(engine.get_model_config())
+def run_server(args):
+    app = build_app(args)
 
-        if args.launch_kobold_api:
-            _set_badwords(tokenizer, engine_model_config.hf_config)
+    logger.debug(f"args: {args}")
 
-        app.root_path = args.root_path
+    global engine, engine_args, openai_serving_chat, openai_serving_completion,\
+        tokenizer, served_model
+    if args.served_model_name is not None:
+        served_model = args.served_model_name
+    else:
+        served_model = args.model
+
+    engine_args = AsyncEngineArgs.from_cli_args(args)
+    engine = AsyncAphrodite.from_engine_args(engine_args)
+    tokenizer = get_tokenizer(
+        engine_args.tokenizer,
+        tokenizer_mode=engine_args.tokenizer_mode,
+        trust_remote_code=engine_args.trust_remote_code,
+        revision=engine_args.revision,
+    )
+
+    chat_template = args.chat_template
+    if chat_template is None and tokenizer.chat_template is not None:
+        chat_template = tokenizer.chat_template
+
+    openai_serving_chat = OpenAIServingChat(engine, served_model,
+                                            args.response_role,
+                                            args.lora_modules,
+                                            args.chat_template)
+    openai_serving_completion = OpenAIServingCompletion(
+        engine, served_model, args.lora_modules)
+    engine_model_config = asyncio.run(engine.get_model_config())
+
+    if args.launch_kobold_api:
+        _set_badwords(tokenizer, engine_model_config.hf_config)
+    try:
         uvicorn.run(app,
                     host=args.host,
                     port=args.port,
@@ -648,7 +546,15 @@ if __name__ == "__main__":
                     ssl_certfile=args.ssl_certfile,
                     log_config=UVICORN_LOG_CONFIG)
     except KeyboardInterrupt:
-        logger.info("API server stopped by user. Exiting gracefully.")
+        logger.info("API server stopped by user. Exiting.")
     except asyncio.exceptions.CancelledError:
-        logger.info("API server stopped due to a cancelled request. "
-                    "Exiting gracefully.")
+        logger.info("API server stopped due to a cancelled request. Exiting.")
+
+
+if __name__ == "__main__":
+    # NOTE:
+    # This section should be in sync with aphrodite/endpoints/cli.py
+    # for CLI entrypoints.
+    parser = make_arg_parser()
+    args = parser.parse_args()
+    run_server(args)

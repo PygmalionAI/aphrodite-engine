@@ -69,6 +69,11 @@ def run_aphrodite(
     disable_custom_all_reduce: bool,
     context_shift: bool,
     enforce_eager: bool,
+    enable_chunked_prefill: bool,
+    max_num_batched_tokens: int,
+    speculative_model: Optional[str] = None,
+    num_speculative_tokens: Optional[int] = None,
+    use_v2_block_manager: bool = False,
 ) -> float:
     llm = LLM(
         model=model,
@@ -82,6 +87,11 @@ def run_aphrodite(
         disable_custom_all_reduce=disable_custom_all_reduce,
         context_shift=context_shift,
         enforce_eager=enforce_eager,
+        enable_chunked_prefill=enable_chunked_prefill,
+        max_num_batched_tokens=max_num_batched_tokens,
+        speculative_model=speculative_model,
+        num_speculative_tokens=num_speculative_tokens,
+        use_v2_block_manager=use_v2_block_manager,
     )
 
     # Add the requests to the engine.
@@ -183,7 +193,8 @@ def main(args: argparse.Namespace):  # pylint: disable=redefined-outer-name
             args.tensor_parallel_size, args.seed, args.n, args.use_beam_search,
             args.trust_remote_code, args.dtype, args.kv_cache_dtype,
             args.disable_custom_all_reduce, args.context_shift,
-            args.enforce_eager)
+            args.enforce_eager, args.enable_chunked_prefill,
+            args.max_num_batched_tokens)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -260,8 +271,27 @@ if __name__ == "__main__":
         action="store_true",
         help="enable context shifting for the Aphrodite backend")
     parser.add_argument("--enforce-eager",
-                        action="store_true",
+                        type=lambda x: (str(x).lower() == 'true'),
+                        default=True,
                         help="enforce eager mode for the Aphrodite backend")
+    parser.add_argument(
+        "--enable-chunked-prefill",
+        action="store_true",
+        help="enable chunked prefill for the Aphrodite backend")
+    parser.add_argument("--max-num-batched-tokens",
+                        type=int,
+                        help="maximum number of batched tokens for the "
+                        "Aphrodite backend")
+    parser.add_argument("--speculative-model",
+                        type=str,
+                        help="speculative model for the Aphrodite backend")
+    parser.add_argument("--num-speculative-tokens",
+                        type=int,
+                        help="number of speculative tokens for the "
+                        "Aphrodite backend")
+    parser.add_argument("--use-v2-block-manager",
+                        action="store_true",
+                        help="use v2 block manager for the Aphrodite backend")
     args = parser.parse_args()
 
     if args.backend == "aphrodite":
