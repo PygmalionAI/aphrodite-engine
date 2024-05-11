@@ -8,7 +8,7 @@ from loguru import logger
 from aphrodite.transformers_utils.configs import (BaiChuanConfig, DbrxConfig,
                                                   ChatGLMConfig, MPTConfig,
                                                   QWenConfig, RWConfig)
-from aphrodite.common.gguf import GGUFReader
+from aphrodite.quantization.gguf_utils import GGUFReader
 
 _CONFIG_REGISTRY = {
     "baichuan": BaiChuanConfig,

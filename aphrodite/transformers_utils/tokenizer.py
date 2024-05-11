@@ -9,7 +9,7 @@ from loguru import logger
 
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.utils import make_async
-from aphrodite.common.gguf import GGUFReader
+from aphrodite.quantization.gguf_utils import GGUFReader
 from aphrodite.transformers_utils.tokenizers import BaichuanTokenizer
 
 

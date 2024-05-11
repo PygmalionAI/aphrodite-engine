@@ -3,16 +3,22 @@
 # https://arxiv.org/pdf/2401.06118.pdf
 
 from typing import Any, Dict, List, Optional
+from contextlib import suppress
 
 import math
 import torch
 from torch.nn.parameter import Parameter
 import torch.nn.functional as F
 
-from aphrodite._C import ops
 from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
-from aphrodite.modeling.layers.quantization.base_config import (
+from aphrodite.quantization.base_config import (
     QuantizationConfig)
+
+HAS_QUANTS = False
+with suppress(ImportError):
+    from aphrodite._quant_C import quant_ops as ops
+    HAS_QUANTS = True
+
 
 
 def get_int_dtype(nbits: int) -> torch.dtype:
@@ -136,6 +142,8 @@ class AQLMConfig(QuantizationConfig):
         num_codebooks: int,
         out_group_size: int,
     ) -> None:
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         self.in_group_size = in_group_size
         self.nbits_per_codebook = nbits_per_codebook
         self.num_codebooks = num_codebooks
@@ -319,7 +327,6 @@ class AQLMLinearMethod(LinearMethodBase):
 
         use_gemv = math.prod(
             x.shape[:-1]) <= 32 or output_partition_sizes is None
-
         output = ops.aqlm_gemm(
             x,
             codes,

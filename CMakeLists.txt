@@ -31,7 +31,7 @@ set(HIP_SUPPORTED_ARCHS "gfx906;gfx908;gfx90a;gfx940;gfx941;gfx942;gfx1030;gfx11
 # requirements.txt files and should be kept consistent.  The ROCm torch
 # versions are derived from Dockerfile.rocm
 #
-set(TORCH_SUPPORTED_VERSION_CUDA "2.2.1")
+set(TORCH_SUPPORTED_VERSION_CUDA "2.3.0")
 set(TORCH_SUPPORTED_VERSION_ROCM_5X "2.0.1")
 set(TORCH_SUPPORTED_VERSION_ROCM_6X "2.1.1")
 
@@ -165,25 +165,12 @@ set(APHRODITE_EXT_SRC
   "kernels/pos_encoding_kernels.cu"
   "kernels/activation_kernels.cu"
   "kernels/layernorm_kernels.cu"
-  "kernels/quantization/squeezellm/quant_cuda_kernel.cu"
-  "kernels/quantization/gptq/q_gemm.cu"
-  "kernels/quantization/exl2/q_matrix.cu"
-  "kernels/quantization/exl2/q_gemm_exl2.cu"  
   "kernels/cuda_utils_kernels.cu"
   "kernels/moe/align_block_size_kernel.cu"
   "kernels/pybind.cpp")
 
 if(APHRODITE_GPU_LANG STREQUAL "CUDA")
   list(APPEND APHRODITE_EXT_SRC
-    "kernels/quantization/gguf/gguf_kernel.cu"
-    "kernels/quantization/awq/gemm_kernels.cu"
-    "kernels/quantization/quip/origin_order.cu"
-    "kernels/quantization/marlin/marlin_cuda_kernel.cu"
-    "kernels/quantization/aqlm/aqlm_cuda_entry.cpp"
-    "kernels/quantization/aqlm/aqlm_cuda_kernel.cu"
-    "kernels/quantization/bitsandbytes/int4_fp16_gemm_kernels.cu"
-    "kernels/quantization/bitsandbytes/format.cu"
-    "kernels/quantization/bitsandbytes/gemm_s4_f16.cu"
     "kernels/all_reduce/custom_all_reduce.cu")
 endif()
 
@@ -192,6 +179,40 @@ define_gpu_extension_target(
   DESTINATION aphrodite
   LANGUAGE ${APHRODITE_GPU_LANG}
   SOURCES ${APHRODITE_EXT_SRC}
+  COMPILE_FLAGS ${APHRODITE_GPU_FLAGS}
+  ARCHITECTURES ${APHRODITE_GPU_ARCHES}
+  WITH_SOABI)
+
+
+#
+# _quant_C extension
+#
+
+set (APHRODITE_QUANT_EXT_SRC
+  "kernels/quantization/gptq/q_gemm.cu"
+  "kernels/quantization/squeezellm/quant_cuda_kernel.cu"
+  "kernels/quantization/exl2/q_matrix.cu"
+  "kernels/quantization/exl2/q_gemm_exl2.cu"
+  "kernels/quantization/quant_ops.cpp")
+
+if(APHRODITE_GPU_LANG STREQUAL "CUDA")
+  list(APPEND APHRODITE_QUANT_EXT_SRC
+    "kernels/quantization/aqlm/aqlm_cuda_entry.cpp"
+    "kernels/quantization/aqlm/aqlm_cuda_kernel.cu"
+    "kernels/quantization/awq/gemm_kernels.cu"
+    "kernels/quantization/bitsandbytes/int4_fp16_gemm_kernels.cu"
+    "kernels/quantization/bitsandbytes/format.cu"
+    "kernels/quantization/bitsandbytes/gemm_s4_f16.cu"
+    "kernels/quantization/gguf/gguf_kernel.cu"
+    "kernels/quantization/marlin/marlin_cuda_kernel.cu"
+    "kernels/quantization/quip/origin_order.cu")
+endif()
+
+define_gpu_extension_target(
+  _quant_C
+  DESTINATION aphrodite
+  LANGUAGE ${APHRODITE_GPU_LANG}
+  SOURCES ${APHRODITE_QUANT_EXT_SRC}
   COMPILE_FLAGS ${APHRODITE_GPU_FLAGS}
   ARCHITECTURES ${APHRODITE_GPU_ARCHES}
   WITH_SOABI)
@@ -344,6 +365,11 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
   # Enable punica if -DAPHRODITE_INSTALL_PUNICA_KERNELS=ON or
   # APHRODITE_INSTALL_PUNICA_KERNELS is set in the environment and
   # there are supported target arches.
+  if (APHRODITE_QUANT_EXT_SRC AND
+      (ENV{APHRODITE_INSTALL_QUANT_KERNELS} OR APHRODITE_INSTALL_QUANT_KERNELS))
+    message(STATUS "Enabling quant extension.")
+    add_dependencies(default _quant_C)
+  endif()
   if (APHRODITE_PUNICA_GPU_ARCHES AND
       (ENV{APHRODITE_INSTALL_PUNICA_KERNELS} OR APHRODITE_INSTALL_PUNICA_KERNELS))
     message(STATUS "Enabling punica extension.")

@@ -2,16 +2,21 @@ import enum
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from fractions import Fraction
+from contextlib import suppress
 
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite._C import ops
 from aphrodite.modeling.layers.fused_moe import (fused_moe, fused_topk,
                                                  moe_align_block_size)
 from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
-from aphrodite.modeling.layers.quantization.base_config import (
+from aphrodite.quantization.base_config import (
     QuantizationConfig, )
+
+HAS_QUANTS = False
+with suppress(ImportError):
+    from aphrodite._quant_C import quant_ops as ops
+    HAS_QUANTS = True
 
 
 class GPTQConfig(QuantizationConfig):
@@ -26,6 +31,8 @@ class GPTQConfig(QuantizationConfig):
         group_size: int,
         desc_act: bool,
     ) -> None:
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         self.weight_bits = weight_bits
         self.group_size = group_size
         self.desc_act = desc_act
@@ -239,6 +246,7 @@ class GPTQLinearMethod(LinearMethodBase):
             weights["exllama_state"] == ExllamaState.READY,
             self.quant_config.weight_bits,
         )
+
         if bias is not None:
             output = output + bias
         return output.reshape(out_shape)
@@ -263,7 +271,7 @@ class GPTQLinearMethod(LinearMethodBase):
                     w["g_idx"] = torch.empty((1, 1), device="meta")
                 w["exllama_state"] = ExllamaState.READY
                 ops.gptq_shuffle(w["qweight"], w["g_idx"],
-                                 self.quant_config.weight_bits)
+                                self.quant_config.weight_bits)
 
         if x.shape[0] >= 128:
             dequant_w1 = ops.dequant_gptq(
@@ -282,6 +290,7 @@ class GPTQLinearMethod(LinearMethodBase):
                 self.quant_config.weight_bits,
                 w2["exllama_state"] == ExllamaState.READY,
             ).permute(0, 2, 1)
+
             return fused_moe(x, dequant_w1, dequant_w2, gating_output, topk,
                              renormalize)
 
