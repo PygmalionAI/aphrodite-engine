@@ -344,10 +344,8 @@ async def count_tokens(request: Request):
     """Tokenize string and return token count"""
 
     request_dict = await request.json()
-    tokenizer_result = await openai_serving_chat.tokenize(
-        request_dict["prompt"])
-    return JSONResponse({"value": len(tokenizer_result)})
-
+    tokenizer_result = await openai_serving_chat.tokenize(Prompt(**request_dict))
+    return JSONResponse({"value": tokenizer_result["value"]})
 
 @kai_api.get("/info/version")
 async def get_version():
