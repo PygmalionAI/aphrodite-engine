@@ -5,7 +5,6 @@ from typing import Dict, List, Tuple, Optional
 
 import torch
 import torch.nn as nn
-import math
 
 from aphrodite.modeling.sampling_metadata import (SamplingMetadata,
                                                   OutputMetadata,
