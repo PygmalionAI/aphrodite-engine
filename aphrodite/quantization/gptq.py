@@ -31,6 +31,8 @@ class GPTQConfig(QuantizationConfig):
         group_size: int,
         desc_act: bool,
     ) -> None:
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         self.weight_bits = weight_bits
         self.group_size = group_size
         self.desc_act = desc_act
