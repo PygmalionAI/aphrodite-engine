@@ -182,8 +182,11 @@ class LoRAModel:
                         module_name].lora_b.pin_memory()
 
         # Filter out LoRALayerWeights instances where lora_a or lora_b is None
-        loras = {k: v for k, v in loras.items(
-        ) if v.lora_a is not None and v.lora_b is not None}
+        loras = {
+            k: v
+            for k, v in loras.items()
+            if v.lora_a is not None and v.lora_b is not None
+        }
 
         for lora in loras.values():
             lora.optimize()

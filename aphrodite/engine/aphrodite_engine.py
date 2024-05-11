@@ -241,8 +241,7 @@ class AphroditeEngine:
             max_input_length=None,
             tokenizer_mode=self.model_config.tokenizer_mode,
             trust_remote_code=self.model_config.trust_remote_code,
-            revision=self.model_config.revision
-        )
+            revision=self.model_config.revision)
         init_kwargs.update(tokenizer_init_kwargs)
         self.tokenizer: BaseTokenizerGroup = get_tokenizer_group(
             self.parallel_config.tokenizer_pool_config, **init_kwargs)
