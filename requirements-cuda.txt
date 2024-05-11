@@ -6,4 +6,4 @@ ray >= 2.9
 pynvml == 11.5.0
 torch == 2.3.0
 xformers == 0.0.26.post1  # Requires torch 2.3.0
-triton >= 2.1.0
+triton >= 2.2.0

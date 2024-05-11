@@ -7,7 +7,7 @@ from aphrodite.modeling.models import ModelRegistry
 from aphrodite.common.outputs import CompletionOutput, RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 
-__version__ = "0.5.2"
+__version__ = "0.5.3.dev0"
 
 __all__ = [
     "LLM",
