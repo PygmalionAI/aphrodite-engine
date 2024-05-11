@@ -13,7 +13,6 @@ from aphrodite.common.sequence import Sequence, SequenceGroup, SequenceStatus
 from aphrodite.common.utils import Device
 
 
-
 class BlockAllocatorBase(ABC):
     """Manages free physical token blocks for a device.
 

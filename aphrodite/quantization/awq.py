@@ -8,13 +8,13 @@ from aphrodite.modeling.layers.fused_moe import (moe_align_block_size,
                                                  fused_moe, fused_topk)
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
-from aphrodite.quantization.base_config import (
-    QuantizationConfig)
+from aphrodite.quantization.base_config import (QuantizationConfig)
 
 HAS_QUANTS = False
 with suppress(ImportError):
     from aphrodite._quant_C import quant_ops as ops
     HAS_QUANTS = True
+
 
 class AWQConfig(QuantizationConfig):
     """Config class for AWQ.
@@ -184,7 +184,7 @@ class AWQLinearMethod(LinearMethodBase):
             out = torch.matmul(reshaped_x, out)
         else:
             out = ops.awq_gemm(reshaped_x, qweight, scales, qzeros,
-                            pack_factor)
+                               pack_factor)
         if bias is not None:
             out = out + bias
         return out.reshape(out_shape)

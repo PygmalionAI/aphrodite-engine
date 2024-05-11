@@ -271,7 +271,7 @@ class GPTQLinearMethod(LinearMethodBase):
                     w["g_idx"] = torch.empty((1, 1), device="meta")
                 w["exllama_state"] = ExllamaState.READY
                 ops.gptq_shuffle(w["qweight"], w["g_idx"],
-                                self.quant_config.weight_bits)
+                                 self.quant_config.weight_bits)
 
         if x.shape[0] >= 128:
             dequant_w1 = ops.dequant_gptq(

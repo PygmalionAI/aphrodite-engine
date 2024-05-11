@@ -21,9 +21,8 @@ _SUPPORTED_WORLD_SIZES = [2, 4, 6, 8]
 
 
 def init_custom_ar() -> None:
-    from aphrodite.distributed import (
-        get_tensor_model_parallel_rank,
-        get_tensor_model_parallel_world_size)
+    from aphrodite.distributed import (get_tensor_model_parallel_rank,
+                                       get_tensor_model_parallel_world_size)
     global _CA_HANDLE
     if _CA_HANDLE is not None:
         return
@@ -160,8 +159,6 @@ def _can_p2p(rank: int, world_size: int) -> bool:
         if not gpu_p2p_access_check(rank, i):
             return False
     return True
-
-
 
 
 class CustomAllreduce:

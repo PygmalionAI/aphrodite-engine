@@ -5,8 +5,7 @@ from contextlib import suppress
 
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
-from aphrodite.quantization.base_config import (
-    QuantizationConfig)
+from aphrodite.quantization.base_config import (QuantizationConfig)
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               QKVParallelLinear,
                                               RowParallelLinear)
@@ -277,7 +276,7 @@ def convert_s4(qw: torch.Tensor,
     _sz = torch.zeros_like(s, dtype=torch.int32)  # half2
     _ws = torch.zeros_like(s)
     ops.autoquant_convert_s4_k_m8(_qw, _sz, _ws, qw, s, qz,
-                                qw.size(-1) * 8, qw.size(0), group_size)
+                                  qw.size(-1) * 8, qw.size(0), group_size)
     return _qw, _sz
 
 

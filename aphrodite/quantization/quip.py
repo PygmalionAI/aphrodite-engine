@@ -6,8 +6,7 @@ from torch.nn.parameter import Parameter
 
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
-from aphrodite.quantization.base_config import (
-    QuantizationConfig)
+from aphrodite.quantization.base_config import (QuantizationConfig)
 from aphrodite.quantization.quip_utils import (
     get_packed_abs_grid,
     get_hadK,
@@ -77,7 +76,7 @@ class QuipConfig(QuantizationConfig):
 
     def support_fused_moe(self) -> bool:
         return False
-    
+
     def rope_style(self) -> Optional[bool]:
         return None
 

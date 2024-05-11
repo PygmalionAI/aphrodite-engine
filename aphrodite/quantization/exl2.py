@@ -5,8 +5,7 @@ import torch
 
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
-from aphrodite.quantization.base_config import (
-    QuantizationConfig)
+from aphrodite.quantization.base_config import (QuantizationConfig)
 
 HAS_QUANTS = False
 with suppress(ImportError):
@@ -73,7 +72,7 @@ class Exl2Config(QuantizationConfig):
 
     def support_fused_moe(self) -> bool:
         return False
-    
+
     def rope_style(self) -> Optional[bool]:
         return None
 
