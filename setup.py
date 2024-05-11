@@ -138,6 +138,9 @@ class cmake_build_ext(build_ext):
             '-DAPHRODITE_PYTHON_EXECUTABLE={}'.format(sys.executable)
         ]
 
+        if _install_quants():
+            cmake_args += ['-DAPHRODITE_INSTALL_QUANT_KERNELS=ON']
+
         if _install_punica():
             cmake_args += ['-DAPHRODITE_INSTALL_PUNICA_KERNELS=ON']
 
@@ -215,6 +218,18 @@ def _is_neuron() -> bool:
 
 def _is_cpu() -> bool:
     return APHRODITE_TARGET_DEVICE == "cpu"
+
+
+def _install_quants() -> bool:
+    install_quants = bool(
+        int(os.getenv("APHRODITE_INSTALL_QUANT_KERNELS", "1")))
+    device_count = torch.cuda.device_count()
+    for i in range(device_count):
+        major, minor = torch.cuda.get_device_capability(i)
+        if major < 6:
+            install_quants = False
+            break
+    return install_quants
 
 
 def _install_punica() -> bool:
@@ -383,6 +398,9 @@ ext_modules = []
 if _is_cuda():
     ext_modules.append(CMakeExtension(name="aphrodite._moe_C"))
 
+    if _install_quants():
+        ext_modules.append(CMakeExtension(name="aphrodite._quant_C"))
+
     if _install_punica():
         ext_modules.append(CMakeExtension(name="aphrodite._punica_C"))
 
@@ -394,9 +412,8 @@ if not _is_neuron():
 
 package_data = {
     "aphrodite": [
-        "endpoints/kobold/klite.embd",
-        "modeling/layers/quantization/hadamard.safetensors", "py.typed",
-        "modeling/layers/fused_moe/configs/*.json"
+        "endpoints/kobold/klite.embd", "quantization/hadamard.safetensors",
+        "py.typed", "modeling/layers/fused_moe/configs/*.json"
     ]
 }
 if os.environ.get("APHRODITE_USE_PRECOMPILED"):

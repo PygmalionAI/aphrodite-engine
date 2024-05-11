@@ -1,13 +1,18 @@
 from typing import Any, Dict, List, Optional
+from contextlib import suppress
 
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite._C import ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
-from aphrodite.modeling.layers.quantization.base_config import (
+from aphrodite.quantization.base_config import (
     QuantizationConfig)
+
+HAS_QUANTS = False
+with suppress(ImportError):
+    from aphrodite._quant_C import quant_ops as ops
+    HAS_QUANTS = True
 
 
 class MarlinConfig(QuantizationConfig):
@@ -20,6 +25,8 @@ class MarlinConfig(QuantizationConfig):
         self,
         group_size: int,
     ) -> None:
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         # Group size for the quantization.
         self.group_size = group_size
         if self.group_size != 128 and self.group_size != -1:

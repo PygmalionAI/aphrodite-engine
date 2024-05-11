@@ -1,15 +1,20 @@
 import torch
 from torch.nn.parameter import Parameter
 from typing import List, Dict, Any, Optional, TypeVar, NamedTuple
+from contextlib import suppress
 
-from aphrodite._C import ops
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
-from aphrodite.modeling.layers.quantization.base_config import (
+from aphrodite.quantization.base_config import (
     QuantizationConfig)
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               QKVParallelLinear,
                                               RowParallelLinear)
+
+HAS_QUANTS = False
+with suppress(ImportError):
+    from aphrodite._quant_C import quant_ops as ops
+    HAS_QUANTS = True
 
 
 class BitsandBytesConfig(QuantizationConfig):
@@ -25,6 +30,8 @@ class BitsandBytesConfig(QuantizationConfig):
             from_float: bool,
             quant_mode: str,  # llm_int8, smoothquant, weight_only
     ) -> None:
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         self.weight_bits = weight_bits
         self.group_size = group_size
         self.zero_point = zero_point
@@ -270,7 +277,7 @@ def convert_s4(qw: torch.Tensor,
     _sz = torch.zeros_like(s, dtype=torch.int32)  # half2
     _ws = torch.zeros_like(s)
     ops.autoquant_convert_s4_k_m8(_qw, _sz, _ws, qw, s, qz,
-                                  qw.size(-1) * 8, qw.size(0), group_size)
+                                qw.size(-1) * 8, qw.size(0), group_size)
     return _qw, _sz
 
 

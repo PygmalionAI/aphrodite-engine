@@ -15,7 +15,7 @@ from aphrodite.modeling.hf_downloader import (
     get_quant_config,
     initialize_dummy_weights,
 )
-from aphrodite.modeling.layers.quantization.bitsandbytes import (
+from aphrodite.quantization.bitsandbytes import (
     BNBLinearMethod,
     replace_quant_params,
 )
