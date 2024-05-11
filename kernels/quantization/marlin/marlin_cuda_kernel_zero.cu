@@ -68,7 +68,7 @@ __device__ inline void cp_async4_pred(void* smem_ptr, const void* glob_ptr, bool
   );
 }
 
-// Asynchronous global->shared copy with a chache hint indicating that the values may be evicted immediately; used for
+// Asynchronous global->shared copy with a cache hint indicating that the values may be evicted immediately; used for
 // quantized weights B, which are only accessed precisely once and should thus not pollute the L2 cache which we need
 // for inputs A and outputs C.
 __device__ inline void cp_async4_stream(void* smem_ptr, const void* glob_ptr) {
@@ -342,7 +342,7 @@ __global__ void Marlin(
       a_sh_rd_trans[i][j] = transform_a(a_sh_rd_delta_o * i + a_sh_rd_delta_i * j + a_sh_rd);
   }
 
-  // Since B-accesses have non-constant stride they have to be computed at runtime; we break dependicies between
+  // Since B-accesses have non-constant stride they have to be computed at runtime; we break dependencies between
   // subsequent accesses with a tile by maintining multiple pointers (we have enough registers), a tiny optimization.
   const int4* B_ptr[b_sh_wr_iters];
   #pragma unroll
@@ -414,7 +414,7 @@ __global__ void Marlin(
   auto fetch_to_registers = [&] (int k, int pipe) {
     // It may seem inefficient that we reload the groups for every sub-tile; however, this does not seem to be a
     // significant bottleneck, while some theoretically better attempts have lead to bad instruction ordering by the
-    // compiler and correspondingly a noticable drop in performance.
+    // compiler and correspondingly a noticeable drop in performance.
     if (group_blocks != -1) {
       int4* sh_s_stage = sh_s + s_sh_stage * ((group_blocks / thread_k_blocks) * (pipe / (group_blocks / thread_k_blocks)));
       int4* sh_z_stage = sh_z + s_sh_stage * ((group_blocks / thread_k_blocks) * (pipe / (group_blocks / thread_k_blocks)));
@@ -500,7 +500,7 @@ __global__ void Marlin(
   };
 
   // Since multiple threadblocks may process parts of the same column slice, we finally have to globally reduce over
-  // the results. As the striped partioning minimizes the number of such reductions and our outputs are usually rather
+  // the results. As the striped partitioning minimizes the number of such reductions and our outputs are usually rather
   // small, we perform this reduction serially in L2 cache.
   auto global_reduce = [&] (bool first = false, bool last = false) {
     // We are very careful here to reduce directly in the output buffer to maximize L2 cache utilization in this step.
@@ -643,7 +643,7 @@ __global__ void Marlin(
     a_gl_rd += a_gl_rd_delta_o * stages;
 
     // Process results and, if necessary, proceed to the next column slice. While this pattern may not be the most
-    // readable, other ways of writing the loop seemed to noticeably worse performance after compliation.
+    // readable, other ways of writing the loop seemed to noticeably worse performance after compilation.
     if (slice_iters == 0) {
       cp_async_wait<0>();
       bool last = slice_idx == slice_count - 1;
@@ -739,7 +739,7 @@ int marlin_cuda(
     cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, dev);
   if (thread_k == -1 || thread_n == -1) {
     if (prob_m <= 16) {
-      // For small batchizes, better partioning is slightly more important than better compute utilization
+      // For small batchizes, better partitioning is slightly more important than better compute utilization
       thread_k = 128;
       thread_n = 128;
     } else {
