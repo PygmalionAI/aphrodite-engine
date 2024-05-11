@@ -25,16 +25,20 @@ The compute necessary for Aphrodite's development is provided by [Arc Compute](h
 
 ## Quickstart
 
+Install the engine:
 ```sh
-pip install aphrodite-engine
-
-python -m aphrodite.endpoints.openai.api_server --model PygmalionAI/pygmalion-2-7b
+$ pip install aphrodite-engine
 ```
 
-> [!CAUTION]
-> If the installation reports CUDA kernel errors, please run `pip install aphrodite-engine=0.4.5` instead.
+Then launch a model:
+
+```sh
+$ aphrodite run meta-llama/Meta-Llama-3-8B-Instruct
+```
 
 This will create a [OpenAI](https://platform.openai.com/docs/api-reference/)-compatible API server that can be accessed at port 2242 of the localhost. You can plug in the API into a UI that supports OpenAI, such as [SillyTavern](https://github.com/SillyTavern/SillyTavern).
+
+Please refer to the [wiki](https://github.com/PygmalionAI/aphrodite-engine/wiki) for the full list of arguments and flags you can pass to the engine.
 
 You can play around with the engine in the demo here:
 
@@ -45,7 +49,7 @@ You can play around with the engine in the demo here:
 Additionally, we provide a Docker image for easy deployment. Here's a basic command to get you started:
 
 ```sh
-sudo docker run -d -e MODEL_NAME="mistralai/Mistral-7B-Instruct-v0.2" -p 2242:7860 --gpus all --ipc host alpindale/aphrodite-engine
+sudo docker run -d -e MODEL_NAME="mistralai/Mistral-7B-Instruct-v0.2" -p 2242:2242 --gpus all --ipc host alpindale/aphrodite-engine
 ```
 
 This will pull the Aphrodite Engine image (~9GiB download), and launch the engine with the Mistral-7B model at port 2242. Check [here](/docker/.env) for the full list of env variables.
@@ -86,31 +90,7 @@ GPU: NVIDIA A40, Mistral 7B. Baseline is the same model loaded with text-generat
 
 ### High Batch Size Performance
 
-> [!NOTE]  
-> The numbers below are the theoretical peak achieved by *only* requesting output tokens at very high batch sizes. At lower batch sizes with much larger prompts, the results will be vastly different.
-Throughput refers to output tokens per second.
-
-This table is outdated, will be replaced soon.
-
-| Model      | Quantization | bits | GPU      | Throughput (T/s) |
-| ---------- | ------------ | ---- | -------- | ---------------- |
-| Mistral 7B | None         | 16   | RTX 4090 | 5489.3           |
-|            | AWQ          | 4    | RTX 4090 | 4078.8           |
-|            | GPTQ         | 4    | RTX 4090 | **7850.4**       |
-|            |              | 8    | RTX 4090 | 7658.0           |
-|            | GGUF         | Q8   | RTX 4090 | 5141.2           |
-|            |              | Q6KM | RTX 4090 | 5791.7           |
-|            |              | Q5KM | RTX 4090 | 5786.2           |
-|            |              | Q4KM | RTX 4090 | 5815.8           |
-|            | SqueezeLLM   | 4    | RTX 4090 | 549.5            |
-| Llama-2 7B | None         | 16   | RTX 4090 | 2576.2           |
-|            | AWQ          | 4    | RTX 4090 | 3551.3           |
-|            | GPTQ         | 4    | RTX 4090 | 2919.1           |
-|            | GGUF         | Q4KM | RTX 4090 | 2726.6           |
-|            |              | Q5KM | RTX 4090 | 2763.4           |
-|            |              | Q6KM | RTX 4090 | 2694.7           |
-|            |              | Q8   | RTX 4090 | 2647.0           |
-|            | SqueezeLLM   | 4    | RTX 4090 | 580.3            |
+Work in Progress.
 
 
 
@@ -118,7 +98,7 @@ This table is outdated, will be replaced soon.
 
 1. By design, Aphrodite takes up 90% of your GPU's VRAM. If you're not serving an LLM at scale, you may want to limit the amount of memory it takes up. You can do this in the API example by launching the server with the `--gpu-memory-utilization 0.6` (0.6 means 60%).
 
-2. You can view the full list of commands by running `python -m aphrodite.endpoints.openai.api_server --help`.
+2. You can view the full list of commands by running `aphrodite run --help`.
 
 3. Context Length extension via the RoPE method is supported for most models. Use the command-line flag `--max-model-len` to specify a desired context length and the engine will adjust the RoPE scaling accordingly.
 
