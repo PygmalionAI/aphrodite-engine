@@ -446,7 +446,7 @@ setup(
     python_requires=">=3.8",
     install_requires=get_requirements(),
     extras_require={"flash-attn": [
-        "flash-attn==2.5.6",
+        "flash-attn==2.5.8",
     ]},
     ext_modules=ext_modules,
     cmdclass={"build_ext": cmake_build_ext} if not _is_neuron() else {},
