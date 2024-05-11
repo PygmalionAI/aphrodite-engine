@@ -113,7 +113,7 @@ class SamplingTensors:
     miro_etas: torch.Tensor
     miro_mus: torch.Tensor
     miro_indices: torch.Tensor
-    miro_seqids: List[int] # state writeback done CPU side
+    miro_seqids: List[int]  # state writeback done CPU side
     dynatemp_mins: torch.Tensor
     dynatemp_maxs: torch.Tensor
     dynatemp_exps: torch.Tensor

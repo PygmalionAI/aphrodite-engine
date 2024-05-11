@@ -348,6 +348,7 @@ async def count_tokens(request: Request):
         request_dict["prompt"])
     return JSONResponse({"value": len(tokenizer_result)})
 
+
 @kai_api.get("/info/version")
 async def get_version():
     """Impersonate KAI"""
