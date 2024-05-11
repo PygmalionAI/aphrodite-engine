@@ -17,7 +17,7 @@ from aphrodite.quantization.quip import QuipConfig
 from aphrodite.quantization.squeezellm import SqueezeLLMConfig
 
 try:
-    from aphrodite._quant_C import quant_ops as ops
+    from aphrodite._quant_C import quant_ops  # noqa: F401
 except ImportError:
     logger.warning("The Quantization Kernels are not installed. "
                    "To use quantization with Aphrodite, make sure "
