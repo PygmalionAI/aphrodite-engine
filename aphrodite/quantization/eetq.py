@@ -86,10 +86,12 @@ class EETQLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: EETQConfig):
         self.quant_config = quant_config
 
-    def create_weights(self, input_size_per_partition: int,
+    def create_weights(self, layer: torch.nn.Module,
+                       input_size_per_partition: int,
                        output_partition_sizes: List[int], input_size: int,
                        output_size: int,
-                       params_dtype: torch.dtype) -> Dict[str, Any]:
+                       params_dtype: torch.dtype,
+                       **extra_weight_attrs):
         output_size_per_partition = sum(output_partition_sizes)
         qweight = Parameter(torch.empty(input_size_per_partition,
                                         output_size_per_partition,
@@ -103,14 +105,17 @@ class EETQLinearMethod(LinearMethodBase):
             "output_dim": 1,
         })
         set_weight_attrs(weight_scales, {"input_dim": 0, "output_dim": 0})
-        return {"qweight": qweight, "weight_scales": weight_scales}
+        layer.register_parameter("qweight", qweight)
+        set_weight_attrs(qweight, extra_weight_attrs)
+        layer.register_parameter("weight_scales", weight_scales)
+        set_weight_attrs(weight_scales, extra_weight_attrs)
 
     def apply_weights(self,
-                      weights: Dict[str, Any],
+                      layer: torch.nn.Module,
                       x: torch.Tensor,
                       bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-        qweight = weights["qweight"].data
-        weight_scales = weights["weight_scales"].data
+        qweight = layer.qweight.data
+        weight_scales = layer.weight_scales.data
 
         if HAS_EETQ:
             output = w8_a16_gemm(x, qweight, weight_scales)

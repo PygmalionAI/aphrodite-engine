@@ -100,12 +100,13 @@ class AWQLinearMethod(LinearMethodBase):
 
     def create_weights(
         self,
+        layer: torch.nn.Module,
         input_size_per_partition: int,
         output_partition_sizes: List[int],
         input_size: int,
         output_size: int,
         params_dtype: torch.dtype,
-    ) -> Dict[str, Any]:
+        **extra_weight_attrs):
         if input_size_per_partition % self.quant_config.group_size != 0:
             raise ValueError(
                 "The input size is not aligned with the quantized "
@@ -160,19 +161,20 @@ class AWQLinearMethod(LinearMethodBase):
             "input_dim": 0,
             "output_dim": 1,
         })
-        return {
-            "qweight": qweight,
-            "qzeros": qzeros,
-            "scales": scales,
-        }
+        layer.register_parameter("qweight", qweight)
+        set_weight_attrs(qweight, extra_weight_attrs)
+        layer.register_parameter("qzeros", qzeros)
+        set_weight_attrs(qzeros, extra_weight_attrs)
+        layer.register_parameter("scales", scales)
+        set_weight_attrs(scales, extra_weight_attrs)
 
     def apply_weights(self,
-                      weights: Dict[str, Any],
+                      layer: torch.nn.Module,
                       x: torch.Tensor,
                       bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-        qweight = weights["qweight"]
-        qzeros = weights["qzeros"]
-        scales = weights["scales"]
+        qweight = layer.qweight
+        scales = layer.scales
+        qzeros = layer.qzeros
         pack_factor = self.quant_config.pack_factor
         out_shape = (x.shape[:-1] + (qweight.shape[-1] * pack_factor, ))
         reshaped_x = x.reshape(-1, x.shape[-1])
@@ -186,7 +188,7 @@ class AWQLinearMethod(LinearMethodBase):
             out = ops.awq_gemm(reshaped_x, qweight, scales, qzeros,
                                pack_factor)
         if bias is not None:
-            out = out + bias
+            out.add_(bias)
         return out.reshape(out_shape)
 
     def apply_moe_weights(self, w1: Dict[str,

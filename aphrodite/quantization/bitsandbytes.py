@@ -115,10 +115,12 @@ class BNBLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: BitsandBytesConfig):
         self.quant_config = quant_config
 
-    def create_weights(self, input_size_per_partition: int,
+    def create_weights(self, layer: torch.nn.Module,
+                       input_size_per_partition: int,
                        output_partition_sizes: List[int], input_size: int,
                        output_size: int,
-                       params_dtype: torch.dtype) -> Dict[str, Any]:
+                       params_dtype: torch.dtype,
+                       **extra_weight_attrs):
         if self.quant_config.quant_mode == "weight_only" and \
                 input_size_per_partition % self.quant_config.group_size != 0:
             raise ValueError(
@@ -176,26 +178,28 @@ class BNBLinearMethod(LinearMethodBase):
                 "input_dim": 0,
                 "output_dim": 1,
             })
-            return {
-                "qweight": qweight,
-                "qzeros": qzeros,
-                "scales": scales,
-            }
+            layer.register_parameter("qweight", qweight)
+            set_weight_attrs(qweight, extra_weight_attrs)
+            layer.register_parameter("qzeros", qzeros)
+            set_weight_attrs(qzeros, extra_weight_attrs)
+            layer.register_parameter("scales", scales)
+            set_weight_attrs(scales, extra_weight_attrs)
         else:
             weight = Parameter(torch.empty(output_size_per_partition,
                                            input_size_per_partition,
                                            dtype=params_dtype),
                                requires_grad=False)
             set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})
-            return {"weight": weight}
+            layer.register_parameter("weight", weight)
+            set_weight_attrs(weight, extra_weight_attrs)
 
     def apply_weights(self,
-                      weights: Dict[str, torch.Tensor],
+                      layer: torch.nn.Module,
                       x: torch.Tensor,
                       bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         if self.quant_config.quant_mode == "weight_only":
-            qweight = weights["qweight"].data
-            scales_zeros = weights["scales_zeros"].data
+            qweight = layer.qweight.data
+            scales_zeros = layer.scales_zeros.data
             pack_factor = self.quant_config.pack_factor
             out_shape = (x.shape[:-1] + (qweight.shape[-1] * pack_factor, ))
             reshaped_x = x.reshape(-1, x.shape[-1])
@@ -204,8 +208,8 @@ class BNBLinearMethod(LinearMethodBase):
                 out = out + bias
             return out.reshape(out_shape)
         else:
-            weight = weights["weight"]
-            state = weights["state"]
+            weight = layer.weights
+            state = layer.state
             if weight.CB is not None:
                 state.CB = weight.CB
                 state.SCB = weight.SCB
