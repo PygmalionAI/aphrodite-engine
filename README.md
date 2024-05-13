@@ -27,7 +27,7 @@ The compute necessary for Aphrodite's development is provided by [Arc Compute](h
 
 Install the engine:
 ```sh
-$ pip install aphrodite-engine
+$ pip install -U aphrodite-engine --extra-index-url https://downloads.pygmalion.chat/whl
 ```
 
 Then launch a model:
