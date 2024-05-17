@@ -340,8 +340,8 @@ class AsyncAphrodite:
         engine_config = engine_args.create_engine_config()
 
         if engine_config.device_config.device_type == "neuron":
-            raise NotImplementedError("Neuron is not supported for "
-                                      "async engine yet.")
+            from aphrodite.executor.neuron_executor import NeuronExecutor
+            executor_class = NeuronExecutor
         elif engine_config.device_config.device_type == "cpu":
             from aphrodite.executor.cpu_executor import CPUExecutor
             executor_class = CPUExecutor
