@@ -81,12 +81,9 @@ class VocabParallelEmbedding(torch.nn.Module):
             linear_method = UnquantizedLinearMethod()
         self.linear_method = linear_method
         self.linear_weights = self.linear_method.create_weights(
-            self.embedding_dim, [self.num_embeddings_per_partition],
-            self.embedding_dim, self.num_embeddings_padded, params_dtype)
-        for name, weight in self.linear_weights.items():
-            if isinstance(weight, torch.nn.parameter.Parameter):
-                self.register_parameter(name, weight)
-                set_weight_attrs(weight, {"weight_loader": self.weight_loader})
+            self, self.embedding_dim, [self.num_embeddings_per_partition],
+            self.embedding_dim, self.num_embeddings_padded, params_dtype,
+            weight_loader=self.weight_loader)
 
     def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
         output_dim = getattr(param, "output_dim", None)
