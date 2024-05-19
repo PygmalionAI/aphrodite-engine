@@ -93,10 +93,16 @@ class GGUFLinearMethod(LinearMethodBase):
             raise ImportError("Could not find the quantization kernels.")
         self.quant_config = quant_config
 
-    def create_weights(self, input_size_per_partition: int,
-                       output_partition_sizes: List[int], input_size: int,
-                       output_size: int,
-                       params_dtype: torch.dtype) -> Dict[str, Any]:
+    def create_weights(
+        self,
+        layer: torch.nn.Module,
+        input_size_per_partition: int,
+        output_partition_sizes: List[int],
+        input_size: int,
+        output_size: int,
+        params_dtype: torch.dtype,
+        **extra_weight_attrs,
+    ):
         # The type of weight is unknown until load state dict
         weight = torch.nn.parameter.UninitializedParameter(requires_grad=False)
         # No need for pack_factor because we don't fuse qkv layers anyway.
@@ -109,22 +115,26 @@ class GGUFLinearMethod(LinearMethodBase):
             requires_grad=False,
         )
         set_weight_attrs(weight_type, {"ignore_warning": True})
-        return {"weight": weight, "weight_type": weight_type}
+
+        layer.register_parameter("weight", weight)
+        set_weight_attrs(weight, extra_weight_attrs)
+        layer.register_parameter("weight_type", weight_type)
+        set_weight_attrs(weight_type, extra_weight_attrs)
 
     def apply_weights(self,
-                      weights: Dict[str, Any],
+                      layer: torch.nn.Module,
                       x: torch.Tensor,
                       bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-        if isinstance(weights["weight_type"], torch.Tensor):
-            weights["weight_type"] = int(weights["weight_type"])
+        if not hasattr(layer, "weight_type_int"):
+            layer.weight_type_int = int(layer.weight_type)
             # Check tensor parallel shape here on first pass
-            block_size = GGML_QUANT_SIZES[weights["weight_type"]][1]
-            if weights["weight"].shape[1] % block_size != 0:
+            block_size = GGML_QUANT_SIZES[layer.weight_type_int][1]
+            if layer.weight.shape[1] % block_size != 0:
                 raise ValueError("Size is not aligned with the quantized "
                                  "weight shape.")
 
-        weight = weights["weight"]
-        weight_type = weights["weight_type"]
+        weight = layer.weight
+        weight_type = layer.weight_type_int
         infeatures = x.shape[-1]
         outfeatures = weight.shape[0]
         out_shape = x.shape[:-1] + (weight.shape[0], )
@@ -143,16 +153,16 @@ class GGUFLinearMethod(LinearMethodBase):
             out = reshaped_x @ weight.T
 
         if bias is not None:
-            out = out + bias
+            out.add_(bias)
         return out.reshape(out_shape)
 
-    def apply_embedding(self, weights: Dict[str, torch.Tensor],
+    def apply_embedding(self, layer: torch.nn.Module,
                         x: torch.Tensor) -> torch.Tensor:
-        if isinstance(weights["weight_type"], torch.Tensor):
-            weights["weight_type"] = int(weights["weight_type"])
-        weight = weights["weight"]
-        weight_type = weights["weight_type"]
-        dim, block_size = GGML_QUANT_SIZES[weights["weight_type"]]
+        if not hasattr(layer, "weight_type_int"):
+            layer.weight_type_int = int(layer.weight_type)
+        weight = layer.weight
+        weight_type = layer.weight_type_int
+        dim, block_size = GGML_QUANT_SIZES[weight_type]
         vocab_size = weight.shape[0]
         hidden_size = weight.shape[1] // block_size * dim
         if weight_type < 2:

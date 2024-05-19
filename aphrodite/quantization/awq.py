@@ -98,15 +98,11 @@ class AWQLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: AWQConfig):
         self.quant_config = quant_config
 
-    def create_weights(
-        self,
-        layer: torch.nn.Module,
-        input_size_per_partition: int,
-        output_partition_sizes: List[int],
-        input_size: int,
-        output_size: int,
-        params_dtype: torch.dtype,
-        **extra_weight_attrs):
+    def create_weights(self, layer: torch.nn.Module,
+                       input_size_per_partition: int,
+                       output_partition_sizes: List[int], input_size: int,
+                       output_size: int, params_dtype: torch.dtype,
+                       **extra_weight_attrs):
         if input_size_per_partition % self.quant_config.group_size != 0:
             raise ValueError(
                 "The input size is not aligned with the quantized "

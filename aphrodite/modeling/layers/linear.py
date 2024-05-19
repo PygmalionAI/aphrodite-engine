@@ -97,8 +97,7 @@ class LinearMethodBase(ABC):
     def create_weights(self, layer: torch.nn.Module,
                        input_size_per_partition: int,
                        output_partition_sizes: List[int], input_size: int,
-                       output_size: int,
-                       params_dtype: torch.dtype,
+                       output_size: int, params_dtype: torch.dtype,
                        **extra_weight_attrs):
         """Create weights for a linear layer."""
         raise NotImplementedError
@@ -112,28 +111,26 @@ class LinearMethodBase(ABC):
         Expects create_weights to have been called before on the layer."""
         raise NotImplementedError
 
-    def create_moe_weights(self, layer: torch.nn.Module, 
-                           num_experts: int,
+    def create_moe_weights(self, layer: torch.nn.Module, num_experts: int,
                            input_size_per_partition: int,
                            output_partition_sizes: List[int], input_size: int,
-                           output_size: int,
-                           params_dtype: torch.dtype,
+                           output_size: int, params_dtype: torch.dtype,
                            **extra_weight_attrs):
         """Creating moe weights"""
-        linear_weights = self.create_weights(layer, input_size_per_partition,
-                                             output_partition_sizes,
-                                             input_size, output_size,
-                                             params_dtype)
+        self.create_weights(layer, input_size_per_partition,
+                            output_partition_sizes, input_size, output_size,
+                            params_dtype, **extra_weight_attrs)
         if num_experts == 1:
-            return linear_weights
-        for name, param in tuple(linear_weights.items()):
-            if isinstance(param, Parameter):
-                repeat_size = (num_experts, ) + (1, ) * param.dim()
-                new_param = Parameter(param.unsqueeze(0).repeat(*repeat_size),
-                                      requires_grad=False)
-                set_weight_attrs(new_param, param.__dict__)
-                linear_weights[name] = new_param
-        return linear_weights
+            return
+        raise AssertionError("Alpin fix this!!!")
+        # for name, param in tuple(linear_weights.items()):
+        #     if isinstance(param, Parameter):
+        #         repeat_size = (num_experts, ) + (1, ) * param.dim()
+        #         new_param = Parameter(param.unsqueeze(0).repeat(*repeat_size),
+        #                               requires_grad=False)
+        #         set_weight_attrs(new_param, param.__dict__)
+        #         linear_weights[name] = new_param
+        # return linear_weights
 
     @abstractmethod
     def apply_moe_weights(self, w1: Dict[str,
@@ -159,8 +156,7 @@ class UnquantizedLinearMethod(LinearMethodBase):
     def create_weights(self, layer: torch.nn.Module,
                        input_size_per_partition: int,
                        output_partition_sizes: List[int], input_size: int,
-                       output_size: int,
-                       params_dtype: torch.dtype,
+                       output_size: int, params_dtype: torch.dtype,
                        **extra_weight_attrs):
         output_size_per_partition = sum(output_partition_sizes)
         weight = Parameter(torch.empty(output_size_per_partition,
@@ -182,9 +178,9 @@ class UnquantizedLinearMethod(LinearMethodBase):
             return F.linear(x, weight)
         return F.linear(x, weight, bias)
 
-    def apply_embedding(self, weights: Dict[str, torch.Tensor],
+    def apply_embedding(self, layer: torch.nn.Module,
                         x: torch.Tensor) -> torch.Tensor:
-        weight = weights["weight"]
+        weight = layer.weight
         return F.embedding(x, weight)
 
     def apply_moe_weights(self, w1: Dict[str,
@@ -300,10 +296,13 @@ class ColumnParallelLinear(torch.nn.Module):
         self.linear_method = linear_method
         self.num_experts = num_experts
         self.linear_method.create_moe_weights(
-            self, num_experts, self.input_size,
-            [x // tp_size for x in output_sizes],
-            self.input_size, self.output_size,
-            self.params_dtype, weight_loader=self.weight_loader)
+            self,
+            num_experts,
+            self.input_size, [x // tp_size for x in output_sizes],
+            self.input_size,
+            self.output_size,
+            self.params_dtype,
+            weight_loader=self.weight_loader)
         if bias:
             self.bias = Parameter(
                 torch.empty(self.output_size_per_partition,
@@ -687,10 +686,14 @@ class RowParallelLinear(torch.nn.Module):
             linear_method = UnquantizedLinearMethod()
         self.linear_method = linear_method
         self.num_experts = num_experts
-        self.linear_method.create_moe_weights(
-            self, num_experts, self.input_size_per_partition,
-            [self.output_size], self.input_size, self.output_size,
-            self.params_dtype, weight_loader=self.weight_loader)
+        self.linear_method.create_moe_weights(self,
+                                              num_experts,
+                                              self.input_size_per_partition,
+                                              [self.output_size],
+                                              self.input_size,
+                                              self.output_size,
+                                              self.params_dtype,
+                                              weight_loader=self.weight_loader)
 
         if not reduce_results and (bias and not skip_bias_add):
             raise ValueError("When not reduce the results, adding bias to the "
@@ -753,7 +756,7 @@ class RowParallelLinear(torch.nn.Module):
         param_data.copy_(loaded_weight)
 
         if self.is_exl2():
-            weights = self.linear_weights
+            weights = self.linear_weights  # TODO: update exl2
             self.uninitialized = [
                 key for key in self.uninitialized if isinstance(
                     weights[key], torch.nn.parameter.UninitializedParameter)

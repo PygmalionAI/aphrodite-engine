@@ -80,10 +80,11 @@ class VocabParallelEmbedding(torch.nn.Module):
         )[idx]:
             linear_method = UnquantizedLinearMethod()
         self.linear_method = linear_method
-        self.linear_weights = self.linear_method.create_weights(
-            self, self.embedding_dim, [self.num_embeddings_per_partition],
-            self.embedding_dim, self.num_embeddings_padded, params_dtype)
-
+        self.linear_method.create_weights(self, self.embedding_dim,
+                                          [self.num_embeddings_per_partition],
+                                          self.embedding_dim,
+                                          self.num_embeddings_padded,
+                                          params_dtype)
 
     def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
         output_dim = getattr(param, "output_dim", None)
@@ -125,7 +126,7 @@ class VocabParallelEmbedding(torch.nn.Module):
             masked_input = input_
             # Get the embeddings.
         output_parallel = self.linear_method.apply_embedding(
-            self.linear_weights, masked_input)
+            self, masked_input)
         # output_parallel = F.embedding(masked_input, self.weight)
         # Mask the output embedding.
         if self.tp_size > 1:
@@ -174,7 +175,7 @@ class ParallelLMHead(VocabParallelEmbedding):
             self.register_parameter("bias", None)
 
     def forward(self, input_):
-        logits = self.linear_method.apply_weights(self.linear_weights, input_)
+        logits = self.linear_method.apply_weights(self, input_)
         if self.bias is not None:
             logits += self.bias
         return logits
@@ -193,8 +194,8 @@ class ParallelTWEHead(torch.nn.Module):
     def __init__(self, embeddings: VocabParallelEmbedding):
         super().__init__()
         self.linear_method = embeddings.linear_method
-        self.linear_weights = embeddings.linear_weights
+        self.layer = embeddings
 
     def forward(self, input_):
-        logits = self.linear_method.apply_weights(self.linear_weights, input_)
+        logits = self.linear_method.apply_weights(self.layer, input_)
         return logits
