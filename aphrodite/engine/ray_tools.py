@@ -4,23 +4,43 @@ from typing import Optional, List, Tuple
 from loguru import logger
 
 from aphrodite.common.config import ParallelConfig
-from aphrodite.common.utils import is_hip, get_ip
-from aphrodite.task_handler.worker_base import WorkerWrapperBase
+from aphrodite.common.utils import is_hip, set_cuda_visible_devices, get_ip
 
 try:
     import ray
 
-    class RayWorkerWrapper(WorkerWrapperBase):
+    class RayWorkerAphrodite:
         """Ray wrapper for aphrodite.task_handler.Worker, allowing Worker to be
         lazliy initialized after Ray sets CUDA_VISIBLE_DEVICES."""
 
-        def __init__(self, *args, **kwargs) -> None:
-            super().__init__(*args, **kwargs)
+        def __init__(self, init_cached_hf_modules=False) -> None:
+            if init_cached_hf_modules:
+                from transformers.dynamic_module_utils import init_hf_modules
+                init_hf_modules()
+            self.worker = None
             # Since the compiled DAG runs a main execution
             # in a different thread that calls cuda.set_device.
             # The flag indicates is set_device is called on
             # that thread.
             self.compiled_dag_cuda_device_set = False
+
+        def init_worker(self, worker_init_fn):
+            self.worker = worker_init_fn()
+
+        def __getattr__(self, name):
+            return getattr(self.worker, name)
+
+        def execute_method(self, method, *args, **kwargs):
+            try:
+                executor = getattr(self, method)
+                return executor(*args, **kwargs)
+            except Exception as e:
+                # exceptions in ray worker may cause deadlock
+                # print the error and inform the user to solve the error
+                msg = (f"Error executing method {method}. "
+                       "This might cause deadlock in distributed execution.")
+                logger.exception(msg)
+                raise e
 
         def get_node_ip(self) -> str:
             return get_ip()
@@ -29,6 +49,9 @@ try:
             node_id = ray.get_runtime_context().get_node_id()
             gpu_ids = ray.get_gpu_ids()
             return node_id, gpu_ids
+
+        def set_cuda_visible_devices(self, device_ids) -> None:
+            set_cuda_visible_devices(device_ids)
 
         def execute_model_compiled_dag_remote(self, ignored):
             """Used only when compiled DAG is enabled."""
@@ -46,7 +69,7 @@ except ImportError as e:
                    "For distributed inference, please install Ray with "
                    "`pip install ray`.")
     ray = None
-    RayWorkerWrapper = None
+    RayWorkerAphrodite = None
 
 
 def initialize_ray_cluster(

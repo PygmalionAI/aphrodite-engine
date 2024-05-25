@@ -1,12 +1,7 @@
-import importlib
-import os
 from abc import ABC, abstractmethod
 from typing import Dict, List
 
-from loguru import logger
-
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
-from aphrodite.common.utils import update_environment_variables
 from aphrodite.lora.request import LoRARequest
 
 
@@ -85,41 +80,3 @@ class LoraNotSupportedWorkerBase(WorkerBase):
 
     def list_loras(self) -> List[int]:
         raise ValueError(f"{type(self)} does not support LoRA")
-
-
-class WorkerWrapperBase:
-
-    def __init__(self,
-                 worker_module_name=None,
-                 worker_class_name=None) -> None:
-        self.worker_module_name = worker_module_name
-        self.worker_class_name = worker_class_name
-        self.worker = None
-
-    def update_environment_variables(self, envs: Dict[str, str]) -> None:
-        """Update environment variables for the worker."""
-        key = "CUDA_VISIBLE_DEVICES"
-        if key in envs and key in os.environ:
-            del os.environ[key]
-
-        update_environment_variables(envs)
-
-    def init_worker(self, *args, **kwargs):
-        mod = importlib.import_module(self.worker_module_name)
-        worker_class = getattr(mod, self.worker_class_name)
-        self.worker = worker_class(*args, **kwargs)
-
-    def execute_method(self, method, *args, **kwargs):
-        try:
-            if hasattr(self, method):
-                executor = getattr(self, method)
-            else:
-                executor = getattr(self.worker, method)
-            return executor(*args, **kwargs)
-        except Exception as e:
-            # exceptions in ray worker may cause deadlock
-            # print the error and inform the user to solve the error
-            msg = (f"Error executing method {method}. "
-                   "This might cause deadlock in distributed execution.")
-            logger.exception(msg)
-            raise e
