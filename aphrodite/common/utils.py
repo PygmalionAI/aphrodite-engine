@@ -252,8 +252,16 @@ def get_open_port() -> int:
             return s.getsockname()[1]
 
 
-def set_cuda_visible_devices(device_ids: List[int]) -> None:
-    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, device_ids))
+# def set_cuda_visible_devices(device_ids: List[int]) -> None:
+#     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, device_ids))
+
+
+def update_environment_variables(envs: Dict[str, str]):
+    for k, v in envs.items():
+        if k in os.environ:
+            logger.warning("Overwriting environment variable "
+                           f"{k}={os.environ[k]} with {v}")
+        os.environ[k] = v
 
 
 def chunk_list(lst, chunk_size):
@@ -486,3 +494,8 @@ def merge_dicts(dict1: Dict[Any, List[Any]],
         merged_dict[key].extend(value)
 
     return dict(merged_dict)
+
+
+def init_cached_hf_modules():
+    from transformers.dynamic_module_utils import init_hf_modules
+    init_hf_modules()
