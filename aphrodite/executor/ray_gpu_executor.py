@@ -139,6 +139,9 @@ class RayGPUExecutor(ExecutorBase):
                 ",".join(map(str, node_gpus[node_id])),
             }])
 
+        self._run_workers("update_environment_variables",
+                          all_args=all_args_to_update_environment_variables)
+
         distributed_init_method = get_distributed_init_method(
             driver_ip, get_open_port())
 
