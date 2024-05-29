@@ -147,4 +147,8 @@ def get_model(model_config: ModelConfig, device_config: DeviceConfig,
                         2,
                     ),
                 ))
+        for _, module in model.named_modules():
+            linear_method = getattr(module, "linear_method", None)
+            if linear_method is not None:
+                linear_method.process_weights_after_loading(module)
     return model.eval()

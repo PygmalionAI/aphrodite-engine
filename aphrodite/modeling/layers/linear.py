@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 import torch
 import torch.nn.functional as F
 from loguru import logger
+from torch import nn
 from torch.nn.parameter import Parameter
 
 from aphrodite.distributed import (
@@ -138,6 +139,11 @@ class LinearMethodBase(ABC):
                           topk: int, renormalize: bool) -> torch.Tensor:
         """Apply the weights to the input tensor."""
         raise NotImplementedError
+    
+
+    def process_weights_after_loading(self, layer: nn.Module) -> None:
+        """Process the weights after loading."""
+        pass
 
 
 class UnquantizedLinearMethod(LinearMethodBase):
