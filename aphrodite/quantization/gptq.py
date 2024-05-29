@@ -12,6 +12,7 @@ from aphrodite.modeling.layers.fused_moe import (fused_moe, fused_topk,
 from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
 from aphrodite.quantization.base_config import (
     QuantizationConfig, )
+from aphrodite._C import ops as _C_ops
 
 HAS_QUANTS = False
 with suppress(ImportError):
@@ -321,7 +322,7 @@ class GPTQLinearMethod(LinearMethodBase):
             dtype=x.dtype,
             device=x.device,
         )
-        ops.silu_and_mul(out, gate_up)
+        _C_ops.silu_and_mul(out, gate_up)
 
         out = ops.group_gptq_gemm(
             out,

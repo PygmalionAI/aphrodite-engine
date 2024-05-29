@@ -9,6 +9,7 @@ from aphrodite.modeling.layers.fused_moe import (moe_align_block_size,
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.quantization.base_config import (QuantizationConfig)
+from aphrodite._C import ops as _C_ops
 
 HAS_QUANTS = False
 with suppress(ImportError):
@@ -222,7 +223,7 @@ class AWQLinearMethod(LinearMethodBase):
         out = torch.empty((gate_up.shape[:-1] + (gate_up.shape[-1] // 2, )),
                           dtype=x.dtype,
                           device=x.device)
-        ops.silu_and_mul(out, gate_up)
+        _C_ops.silu_and_mul(out, gate_up)
 
         out = ops.awq_group_gemm(out, w2["qweight"], w2["scales"],
                                  w2["qzeros"], topk_weights, sorted_token_ids,
