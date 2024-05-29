@@ -3,6 +3,7 @@ import fnmatch
 import glob
 import json
 import os
+import re
 from collections import defaultdict
 from typing import Any, Iterable, Iterator, List, Optional, Tuple
 
@@ -237,6 +238,8 @@ def convert_gguf_to_state_dict(checkpoint, config):
     # hack: ggufs have a different name than transformers
     if model_type == "cohere":
         model_type = "command-r"
+    elif model_type == "mistral" or model_type == "mixtral":
+        model_type = "llama"
     arch = None
     for key, value in MODEL_ARCH_NAMES.items():
         if value == model_type:
@@ -252,8 +255,22 @@ def convert_gguf_to_state_dict(checkpoint, config):
 
     gguf_to_hf_name_map = {}
     keys_to_remove = []
+    prog = re.compile(
+        r"model.layers.([^\.]*).block_sparse_moe.experts.([^\.]*).([^\.]*)")
     for hf_name in state_dict:
         name, suffix = hf_name.rsplit(".", 1)
+        if match := prog.fullmatch(name):  # mixtral
+            bid, xid, wid = match.groups()
+            if wid == "w1":
+                wname = "ffn_gate"
+            elif wid == "w2":
+                wname = "ffn_down"
+            elif wid == "w3":
+                wname = "ffn_up"
+            gguf_name = f"blk.{bid}.{wname}.{xid}"
+            gguf_to_hf_name_map[f"{gguf_name}.{suffix}"] = hf_name
+            continue
+
         gguf_name = name_map.get_name(name)
         if gguf_name:
             gguf_to_hf_name_map[f"{gguf_name}.{suffix}"] = hf_name
