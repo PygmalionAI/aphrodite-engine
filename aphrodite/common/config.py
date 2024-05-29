@@ -12,6 +12,7 @@ from transformers import PretrainedConfig
 from aphrodite.transformers_utils.config import get_config, get_hf_text_config
 from aphrodite.common.utils import (get_cpu_memory, is_cpu, is_hip, is_neuron,
                                     get_nvcc_cuda_version)
+from aphrodite.quantization import QUANTIZATION_METHODS
 
 if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
@@ -184,10 +185,7 @@ class ModelConfig:
         self.tokenizer_mode = tokenizer_mode
 
     def _verify_quantization(self) -> None:
-        supported_quantization = [
-            "aqlm", "awq", "bnb", "eetq", "exl2", "gguf", "gptq", "quip",
-            "squeezellm", "marlin"
-        ]
+        supported_quantization = [*QUANTIZATION_METHODS]
         rocm_not_supported_quantization = ["aqlm", "awq", "bnb", "quip"]
         if self.quantization is not None:
             self.quantization = self.quantization.lower()

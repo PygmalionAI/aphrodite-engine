@@ -9,6 +9,7 @@ from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
                                      SpeculativeConfig, TokenizerPoolConfig,
                                      VisionLanguageConfig)
 from aphrodite.common.utils import str_to_int_tuple
+from aphrodite.quantization import QUANTIZATION_METHODS
 
 
 @dataclass
@@ -323,19 +324,7 @@ class EngineArgs:
             "--quantization",
             "-q",
             type=str,
-            choices=[
-                "aqlm",
-                "awq",
-                "bnb",
-                "eetq",
-                "exl2",
-                "gguf",
-                "gptq",
-                "quip",
-                "squeezellm",
-                "marlin",
-                None,
-            ],
+            choices=[*QUANTIZATION_METHODS, None],
             default=EngineArgs.quantization,
             help="Method used to quantize the weights. If "
             "None, we first check the `quantization_config` "

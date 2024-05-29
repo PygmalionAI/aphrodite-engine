@@ -24,7 +24,7 @@ except ImportError:
                    "you've exported the `APHRODITE_INSTALL_QUANT_KERNELS=1`"
                    "environment variable during the compilation process.")
 
-_QUANTIZATION_CONFIG_REGISTRY = {
+QUANTIZATION_METHODS = {
     "aqlm": AQLMConfig,
     "awq": AWQConfig,
     "bnb": BitsandBytesConfig,
@@ -39,9 +39,9 @@ _QUANTIZATION_CONFIG_REGISTRY = {
 
 
 def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
-    if quantization not in _QUANTIZATION_CONFIG_REGISTRY:
+    if quantization not in QUANTIZATION_METHODS:
         raise ValueError(f"Invalid quantization method: {quantization}")
-    return _QUANTIZATION_CONFIG_REGISTRY[quantization]
+    return QUANTIZATION_METHODS[quantization]
 
 
 __all__ = [
