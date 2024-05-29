@@ -133,10 +133,13 @@ class OpenAIServing:
 
                 if num_output_top_logprobs:
                     logprobs.top_logprobs.append({
-                        p.decoded_token: p.logprob
+                        # Convert float("-inf") to the
+                        # JSON-serializable float that OpenAI uses
+                        p.decoded_token: max(p.logprob, -9999.0)
                         for i, p in step_top_logprobs.items()
                     } if step_top_logprobs else None)
 
+            # TODO: Check if this is still needed
             if logprobs.top_logprobs:
                 logprobs.top_logprobs = [{
                     k: v if v > -1000 else -1000
