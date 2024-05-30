@@ -37,6 +37,18 @@ class FP8Config(QuantizationConfig):
 
     def get_scaled_act_names(self) -> List[str]:
         return []
+    
+    def merge_weight(self) -> bool:
+        return True
+
+    def rope_style(self) -> Optional[bool]:
+        return None
+
+    def quant_vocab(self) -> List[bool]:
+        return [False, False]
+
+    def support_fused_moe(self) -> bool:
+        return True
 
 
 class Fp8LinearMethod(LinearMethodBase):
@@ -108,6 +120,13 @@ class Fp8LinearMethod(LinearMethodBase):
             bias=bias,
         )
         return output
+    
+    def apply_moe_weights(self, w1: Dict[str,
+                                         torch.Tensor], w2: Dict[str,
+                                                                 torch.Tensor],
+                          x: torch.Tensor, gating_output: torch.Tensor,
+                          topk: int, renormalize: bool) -> torch.Tensor:
+        raise NotImplementedError
 
 
 def per_tensor_quantize(tensor: torch.Tensor) -> tuple[torch.Tensor, float]:
