@@ -32,7 +32,7 @@ ENV CUDA_HOME=/usr/local/cuda
 
 ENV HF_HOME=/tmp
 ENV NUMBA_CACHE_DIR=$HF_HOME/numba_cache
-ENV TORCH_CUDA_ARCH_LIST="6.1 7.0 7.5 8.0 8.6 8.9 9.0+PTX"
+ENV TORCH_CUDA_ARCH_LIST="6.0 6.1 7.0 7.5 8.0 8.6 8.9 9.0+PTX"
 RUN python3 -m pip install --no-cache-dir -e .
 
 # Workaround to properly install flash-attn. For reference
@@ -44,7 +44,7 @@ ENTRYPOINT ["/app/aphrodite-engine/docker/entrypoint.sh"]
 
 EXPOSE 7860
 
-# Service UID needs write access to $HOME to create temporary folders, see #458 
+# Service UID needs write access to $HOME to create temporary folders, see #458
 RUN chown 1000:1000 ${HOME}
 
 USER 1000:0
