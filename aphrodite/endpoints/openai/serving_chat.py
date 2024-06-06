@@ -55,6 +55,19 @@ class OpenAIServingChat(OpenAIServing):
         if error_check_ret is not None:
             return error_check_ret
 
+        # Deal with list in messages.content
+        # Just replace the content list with the very first text message
+        for message in request.messages:
+            if message.role == "user" and isinstance(message["content"], list):
+                message["content"] = next(
+                    (
+                        content["text"]
+                        for content in message["content"]
+                        if content["type"] == "text"
+                    ),
+                    ""
+                )
+
         try:
             prompt = self.tokenizer.apply_chat_template(
                 conversation=request.messages,
