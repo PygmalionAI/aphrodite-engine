@@ -8,7 +8,10 @@ from loguru import logger
 from aphrodite.transformers_utils.configs import (BaiChuanConfig, DbrxConfig,
                                                   ChatGLMConfig, MPTConfig,
                                                   QWenConfig, RWConfig)
-from aphrodite.quantization.gguf_utils import GGUFReader
+from aphrodite.common.utils import is_neuron
+
+if not is_neuron():
+    from aphrodite.quantization.gguf_utils import GGUFReader
 
 _CONFIG_REGISTRY = {
     "baichuan": BaiChuanConfig,

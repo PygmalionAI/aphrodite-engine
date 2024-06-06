@@ -8,10 +8,11 @@ from transformers.convert_slow_tokenizer import import_protobuf
 from loguru import logger
 
 from aphrodite.lora.request import LoRARequest
-from aphrodite.common.utils import make_async
-from aphrodite.quantization.gguf_utils import GGUFReader
+from aphrodite.common.utils import make_async, is_neuron
 from aphrodite.transformers_utils.tokenizers import BaichuanTokenizer
 
+if not is_neuron():
+    from aphrodite.quantization.gguf_utils import GGUFReader
 
 def convert_gguf_to_tokenizer(checkpoint):
     if os.path.isfile(checkpoint):

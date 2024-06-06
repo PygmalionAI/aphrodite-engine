@@ -49,6 +49,7 @@ from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.hf_downloader import (default_weight_loader,
                                               hf_model_weights_iterator)
 from aphrodite.common.sequence import SamplerOutput
+from aphrodite.quantization.gguf import GGUFLinearMethod
 
 
 class MixtralMLP(nn.Module):
@@ -119,10 +120,12 @@ class MixtralMoE(nn.Module):
         if self.linear_method is None:
             self.linear_method = UnquantizedLinearMethod()
 
-        self.gate = ReplicatedLinear(self.hidden_size,
-                                     self.num_total_experts,
-                                     bias=False,
-                                     linear_method=None)
+        self.gate = ReplicatedLinear(
+            self.hidden_size,
+            self.num_total_experts,
+            bias=False,
+            linear_method=linear_method
+            if isinstance(linear_method, GGUFLinearMethod) else None)
 
         if not isinstance(
                 self.linear_method, UnquantizedLinearMethod
