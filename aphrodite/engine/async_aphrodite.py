@@ -13,7 +13,7 @@ from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import MultiModalData
 from aphrodite.engine.args_tools import AsyncEngineArgs
-from aphrodite.engine.llm_engine import AphroditeEngine
+from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.engine.ray_utils import initialize_ray_cluster, ray
 from aphrodite.lora.request import LoRARequest
 
