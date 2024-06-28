@@ -18,9 +18,9 @@ from tqdm.auto import tqdm
 from loguru import logger
 
 from aphrodite.common.config import LoadConfig, ModelConfig
-from aphrodite.modeling.layers.quantization import (QuantizationConfig,
+from aphrodite.quantization import (QuantizationConfig,
                                                      get_quantization_config)
-from aphrodite.modeling.layers.quantization.schema import QuantParamSchema
+from aphrodite.quantization.schema import QuantParamSchema
 
 
 # use system-level temp directory for file locks, so that multiple users
