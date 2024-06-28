@@ -5,7 +5,7 @@ import torch
 import triton
 import triton.language as tl
 
-from aphrodite_modeling.layers.ops.rand import seeded_uniform
+from aphrodite.modeling.layers.ops.rand import seeded_uniform
 
 _EPS = 1e-6
 
