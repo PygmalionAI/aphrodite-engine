@@ -198,8 +198,7 @@ set (APHRODITE_QUANT_EXT_SRC
 
 if(APHRODITE_GPU_LANG STREQUAL "CUDA")
   list(APPEND APHRODITE_QUANT_EXT_SRC
-    "kernels/quantization/aqlm/aqlm_cuda_entry.cpp"
-    "kernels/quantization/aqlm/aqlm_cuda_kernel.cu"
+    "kernels/quantization/aqlm/aqlm_kernels.cu"
     "kernels/quantization/awq/gemm_kernels.cu"
     "kernels/quantization/bitsandbytes/int4_fp16_gemm_kernels.cu"
     "kernels/quantization/bitsandbytes/format.cu"
