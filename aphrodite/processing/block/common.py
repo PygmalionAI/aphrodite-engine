@@ -9,9 +9,11 @@ RefCount = int
 
 class RefCounter:
     """A class for managing reference counts for a set of block indices.
+
     The RefCounter class maintains a dictionary that maps block indices to their
     corresponding reference counts. It provides methods to increment, decrement,
     and retrieve the reference count for a given block index.
+
     Args:
         all_block_indices (Iterable[BlockId]): An iterable of block indices
             to initialize the reference counter with.
@@ -54,9 +56,11 @@ class RefCounter:
 
 class ReadOnlyRefCounter:
     """A read-only view of the RefCounter class.
+
     The ReadOnlyRefCounter class provides a read-only interface to access the
     reference counts maintained by a RefCounter instance. It does not allow
     modifications to the reference counts.
+
     Args:
         refcounter (RefCounter): The RefCounter instance to create a read-only
             view for.
@@ -77,10 +81,12 @@ class ReadOnlyRefCounter:
 
 class CopyOnWriteTracker:
     """A class for tracking and managing copy-on-write operations for blocks.
+
     The CopyOnWriteTracker class maintains a mapping of source block indices to
         their corresponding copy-on-write destination block indices. It works in
         conjunction with a RefCounter and a BlockAllocator to handle reference
         counting and block allocation.
+
     Args:
         refcounter (RefCounter): The reference counter used to track block
             reference counts.
@@ -93,20 +99,23 @@ class CopyOnWriteTracker:
         refcounter: RefCounter,
         allocator: BlockAllocator,
     ):
-        self._copy_on_writes = defaultdict(list)
+        self._copy_on_writes: Dict[BlockId, List[BlockId]] = defaultdict(list)
         self._refcounter = refcounter
         self._allocator = allocator
 
     def cow_block_if_not_appendable(self, block: Block) -> Optional[BlockId]:
         """Performs a copy-on-write operation on the given block if it is not
         appendable.
+
         This method checks the reference count of the given block. If the
         reference count is greater than 1, indicating that the block is shared,
         a copy-on-write operation is performed. The original block is freed,
         and a new block is allocated with the same content. The new block index
         is returned.
+
         Args:
             block (Block): The block to check for copy-on-write.
+
         Returns:
             Optional[BlockId]: The block index of the new block if a copy-on
                 -write operation was performed, or the original block index if
@@ -129,6 +138,8 @@ class CopyOnWriteTracker:
                 prev_block=block.prev_block).block_id
 
             # Track src/dst copy.
+            assert src_block_id is not None
+            assert block_id is not None
             self._copy_on_writes[src_block_id].append(block_id)
 
         return block_id
@@ -136,9 +147,11 @@ class CopyOnWriteTracker:
     def clear_cows(self) -> Dict[BlockId, List[BlockId]]:
         """Clears the copy-on-write tracking information and returns the current
         state.
+
         This method returns a dictionary mapping source block indices to lists
         of destination block indices for the current copy-on-write operations.
         It then clears the internal tracking information.
+
         Returns:
             Dict[BlockId, List[BlockId]]: A dictionary mapping source
                 block indices to lists of destination block indices for the
@@ -151,11 +164,14 @@ class CopyOnWriteTracker:
 
 def get_all_blocks_recursively(last_block: Block) -> List[Block]:
     """Retrieves all the blocks in a sequence starting from the last block.
+
     This function recursively traverses the sequence of blocks in reverse order,
     starting from the given last block, and returns a list of all the blocks in
     the sequence.
+
     Args:
         last_block (Block): The last block in the sequence.
+
     Returns:
         List[Block]: A list of all the blocks in the sequence, in the order they
             appear.
@@ -166,6 +182,6 @@ def get_all_blocks_recursively(last_block: Block) -> List[Block]:
             recurse(block.prev_block, lst)
         lst.append(block)
 
-    all_blocks = []
+    all_blocks: List[Block] = []
     recurse(last_block, all_blocks)
     return all_blocks

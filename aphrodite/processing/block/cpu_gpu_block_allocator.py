@@ -1,24 +1,21 @@
 from typing import Dict, List, Optional
 
-from aphrodite.processing.block.interfaces import (
-    Block,
-    BlockAllocator,
-    DeviceAwareBlockAllocator,
-)
-from aphrodite.processing.block.naive_block import (
-    NaiveBlock,
-    NaiveBlockAllocator,
-)
-from aphrodite.processing.block.prefix_caching_block import (
-    PrefixCachingBlockAllocator, )
 from aphrodite.common.utils import Device
+from aphrodite.processing.block.interfaces import (Block, BlockAllocator,
+                                                   DeviceAwareBlockAllocator)
+from aphrodite.processing.block.naive_block import (NaiveBlock,
+                                                    NaiveBlockAllocator)
+from aphrodite.processing.block.prefix_caching_block import \
+    PrefixCachingBlockAllocator
 
 
 class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
     """A block allocator that can allocate blocks on both CPU and GPU memory.
+
     This class implements the `DeviceAwareBlockAllocator` interface and provides
     functionality for allocating and managing blocks of memory on both CPU and
     GPU devices.
+
     The `CpuGpuBlockAllocator` maintains separate memory pools for CPU and GPU
     blocks, and allows for allocation, deallocation, forking, and swapping of
     blocks across these memory pools.
@@ -33,10 +30,12 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
     ) -> DeviceAwareBlockAllocator:
         """Creates a CpuGpuBlockAllocator instance with the specified
         configuration.
+
         This static method creates and returns a CpuGpuBlockAllocator instance
         based on the provided parameters. It initializes the CPU and GPU block
         allocators with the specified number of blocks, block size, and
         allocator type.
+
         Args:
             allocator_type (str): The type of block allocator to use for CPU
                 and GPU blocks. Currently supported values are "naive" and
@@ -46,9 +45,11 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
             num_cpu_blocks (int): The number of blocks to allocate for CPU
                 memory.
             block_size (int): The size of each block in number of tokens.
+
         Returns:
             DeviceAwareBlockAllocator: A CpuGpuBlockAllocator instance with the
                 specified configuration.
+
         Notes:
             - The block IDs are assigned contiguously, with GPU block IDs coming
                 before CPU block IDs.
@@ -114,10 +115,12 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
     def allocate_mutable(self, prev_block: Optional[Block],
                          device: Device) -> Block:
         """Allocates a new mutable block on the specified device.
+
         Args:
             prev_block (Optional[Block]): The previous block to in the sequence.
                 Used for prefix hashing.
             device (Device): The device on which to allocate the new block.
+
         Returns:
             Block: The newly allocated mutable block.
         """
@@ -127,12 +130,14 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
                            token_ids: List[int], device: Device) -> Block:
         """Allocates a new immutable block with the provided token IDs on the
         specified device.
+
         Args:
             prev_block (Optional[Block]): The previous block in the sequence.
                 Used for prefix hashing.
             token_ids (List[int]): The list of token IDs to be stored in the new
                 block.
             device (Device): The device on which to allocate the new block.
+
         Returns:
             Block: The newly allocated immutable block containing the provided
                 token IDs.
@@ -142,6 +147,7 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
 
     def free(self, block: Block) -> None:
         """Frees the memory occupied by the given block.
+
         Args:
             block (Block): The block to be freed.
         """
@@ -151,8 +157,10 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
     def fork(self, last_block: Block) -> List[Block]:
         """Creates a new sequence of blocks that shares the same underlying
             memory as the original sequence.
+
         Args:
             last_block (Block): The last block in the original sequence.
+
         Returns:
             List[Block]: A new list of blocks that shares the same memory as the
                 original sequence.
@@ -162,9 +170,11 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
 
     def get_num_free_blocks(self, device: Device) -> int:
         """Returns the number of free blocks available on the specified device.
+
         Args:
             device (Device): The device for which to query the number of free
                 blocks.
+
         Returns:
             int: The number of free blocks available on the specified device.
         """
@@ -173,6 +183,7 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
     def clear_copy_on_writes(self) -> Dict[int, List[int]]:
         """Clears the copy-on-write (CoW) state and returns the mapping of
             source to destination block IDs.
+
         Returns:
             Dict[int, List[int]]: A dictionary mapping source block IDs to lists
                 of destination block IDs.

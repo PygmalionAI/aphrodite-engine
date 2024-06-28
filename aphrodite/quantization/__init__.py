@@ -47,4 +47,5 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
 __all__ = [
     "QuantizationConfig",
     "get_quantization_config",
+    "QUANTIZATION_METHODS",
 ]

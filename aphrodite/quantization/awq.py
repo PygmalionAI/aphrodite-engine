@@ -1,15 +1,12 @@
-from typing import Any, Dict, List, Optional
 from contextlib import suppress
+from typing import Any, Dict, List, Optional
 
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite.modeling.layers.fused_moe import (moe_align_block_size,
-                                                 fused_moe, fused_topk)
-from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              set_weight_attrs)
-from aphrodite.quantization.base_config import (QuantizationConfig)
-from aphrodite._C import ops as _C_ops
+from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
+from aphrodite.modeling.layers.quantization.base_config import \
+    QuantizationConfig
 
 HAS_QUANTS = False
 with suppress(ImportError):
@@ -29,8 +26,6 @@ class AWQConfig(QuantizationConfig):
         group_size: int,
         zero_point: bool,
     ) -> None:
-        if not HAS_QUANTS:
-            raise ImportError("Could not find the quantization kernels.")
         self.weight_bits = weight_bits
         self.group_size = group_size
         self.zero_point = zero_point
@@ -76,18 +71,6 @@ class AWQConfig(QuantizationConfig):
     def get_scaled_act_names(self) -> List[str]:
         return ["gelu", "gelu_fast", "gelu_new", "gelu_pytorch_tanh"]
 
-    def merge_weight(self) -> bool:
-        return True
-
-    def rope_style(self) -> Optional[bool]:
-        return None
-
-    def quant_vocab(self) -> List[bool]:
-        return [False, False]
-
-    def support_fused_moe(self) -> bool:
-        return True
-
 
 class AWQLinearMethod(LinearMethodBase):
     """Linear method for AWQ.
@@ -99,19 +82,17 @@ class AWQLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: AWQConfig):
         self.quant_config = quant_config
 
-    def create_weights(
-        self,
-        input_size_per_partition: int,
-        output_partition_sizes: List[int],
-        input_size: int,
-        output_size: int,
-        params_dtype: torch.dtype,
-    ) -> Dict[str, Any]:
+    def create_weights(self, layer: torch.nn.Module,
+                       input_size_per_partition: int,
+                       output_partition_sizes: List[int], input_size: int,
+                       output_size: int, params_dtype: torch.dtype,
+                       **extra_weight_attrs):
         if input_size_per_partition % self.quant_config.group_size != 0:
             raise ValueError(
                 "The input size is not aligned with the quantized "
                 "weight shape. This can be caused by too large "
                 "tensor parallel size.")
+
         output_size_per_partition = sum(output_partition_sizes)
         if output_size_per_partition % self.quant_config.pack_factor != 0:
             raise ValueError(
@@ -161,22 +142,25 @@ class AWQLinearMethod(LinearMethodBase):
             "input_dim": 0,
             "output_dim": 1,
         })
-        return {
-            "qweight": qweight,
-            "qzeros": qzeros,
-            "scales": scales,
-        }
+
+        layer.register_parameter("qweight", qweight)
+        set_weight_attrs(qweight, extra_weight_attrs)
+        layer.register_parameter("qzeros", qzeros)
+        set_weight_attrs(qzeros, extra_weight_attrs)
+        layer.register_parameter("scales", scales)
+        set_weight_attrs(scales, extra_weight_attrs)
 
     def apply_weights(self,
-                      weights: Dict[str, Any],
+                      layer: torch.nn.Module,
                       x: torch.Tensor,
                       bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-        qweight = weights["qweight"]
-        qzeros = weights["qzeros"]
-        scales = weights["scales"]
+        qweight = layer.qweight
+        scales = layer.scales
+        qzeros = layer.qzeros
         pack_factor = self.quant_config.pack_factor
         out_shape = (x.shape[:-1] + (qweight.shape[-1] * pack_factor, ))
         reshaped_x = x.reshape(-1, x.shape[-1])
+
         # num_tokens >= threshold
         FP16_MATMUL_HEURISTIC_CONDITION = x.shape[:-1].numel() >= 256
 
@@ -187,47 +171,5 @@ class AWQLinearMethod(LinearMethodBase):
             out = ops.awq_gemm(reshaped_x, qweight, scales, qzeros,
                                pack_factor)
         if bias is not None:
-            out = out + bias
+            out.add_(bias)
         return out.reshape(out_shape)
-
-    def apply_moe_weights(self, w1: Dict[str,
-                                         torch.Tensor], w2: Dict[str,
-                                                                 torch.Tensor],
-                          x: torch.Tensor, gating_output: torch.Tensor,
-                          topk: int, renormalize: bool) -> torch.Tensor:
-        FP16_MATMUL_HEURISTIC_CONDITION = x.shape[:-1].numel() >= 1024
-        if FP16_MATMUL_HEURISTIC_CONDITION:
-            dequant_w1 = ops.awq_dequantize(w1["qweight"], w1["scales"],
-                                            w1["qzeros"], 0, 0,
-                                            0).permute(0, 2, 1)
-            dequant_w2 = ops.awq_dequantize(w2["qweight"], w2["scales"],
-                                            w2["qzeros"], 0, 0,
-                                            0).permute(0, 2, 1)
-            return fused_moe(x, dequant_w1, dequant_w2, gating_output, topk,
-                             renormalize)
-
-        topk_weights, topk_ids = fused_topk(gating_output, topk, renormalize)
-        (sorted_token_ids, expert_ids,
-         num_tokens_post_padded) = moe_align_block_size(
-             topk_ids, 16, w1["qweight"].shape[0])
-
-        x = x.view(x.shape[0], 1, *x.shape[1:])
-        pack_factor = self.quant_config.pack_factor
-
-        gate_up = ops.awq_group_gemm(x, w1["qweight"], w1["scales"],
-                                     w1["qzeros"], topk_weights,
-                                     sorted_token_ids, expert_ids,
-                                     num_tokens_post_padded, False,
-                                     pack_factor)
-
-        out = torch.empty((gate_up.shape[:-1] + (gate_up.shape[-1] // 2, )),
-                          dtype=x.dtype,
-                          device=x.device)
-        _C_ops.silu_and_mul(out, gate_up)
-
-        out = ops.awq_group_gemm(out, w2["qweight"], w2["scales"],
-                                 w2["qzeros"], topk_weights, sorted_token_ids,
-                                 expert_ids, num_tokens_post_padded, True,
-                                 pack_factor)
-
-        return torch.sum(out, dim=1)

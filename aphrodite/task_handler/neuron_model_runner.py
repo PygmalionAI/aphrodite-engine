@@ -2,16 +2,17 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 from loguru import logger
+from torch import nn
 
-from aphrodite.common.config import (DeviceConfig, ModelConfig, ParallelConfig,
-                                     SchedulerConfig)
-from aphrodite.modeling import SamplingMetadata
-from aphrodite.modeling.neuron_loader import get_neuron_model
-from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import (SamplerOutput, SequenceData,
                                        SequenceGroupMetadata)
 from aphrodite.common.utils import (async_tensor_h2d, is_pin_memory_available,
                                     make_tensor_with_pad, maybe_expand_dim)
+from aphrodite.config import (DeviceConfig, ModelConfig, ParallelConfig,
+                              SchedulerConfig)
+from aphrodite.modeling import SamplingMetadata
+from aphrodite.modeling.model_loader.neuron import get_neuron_model
+from aphrodite.sampling_params import SamplingParams, SamplingType
 
 
 class NeuronModelRunner:
@@ -33,8 +34,10 @@ class NeuronModelRunner:
         self.device_config = (device_config
                               if device_config is not None else DeviceConfig())
         self.device = self.device_config.device
-        self.model = None
         self.pin_memory = is_pin_memory_available()
+
+        # Lazy initialization.
+        self.model: nn.Module  # initialize after load_model.
 
     def load_model(self) -> None:
         self.model = get_neuron_model(self.model_config,
@@ -146,7 +149,11 @@ class NeuronModelRunner:
         selected_token_indices: List[int] = []
         generators: List[torch.Generator] = []
         selected_token_start_idx = 0
-        categorized_sample_indices = {t: [] for t in SamplingType}
+        categorized_sample_indices: Dict[SamplingType,
+                                         List[Tuple[int, int]]] = {
+                                             t: []
+                                             for t in SamplingType
+                                         }
         categorized_sample_indices_start_idx = 0
         categorized_sampled_token_indices_start_idx = 0
 
@@ -164,10 +171,9 @@ class NeuronModelRunner:
                     categorized_sample_indices_start_idx += prompt_len - 1
 
                 categorized_sample_indices[
-                    sampling_params.sampling_type].append([
-                        categorized_sample_indices_start_idx,
-                        categorized_sampled_token_indices_start_idx
-                    ])
+                    sampling_params.sampling_type].append(
+                        (categorized_sample_indices_start_idx,
+                         categorized_sampled_token_indices_start_idx))
                 categorized_sample_indices_start_idx += 1
                 categorized_sampled_token_indices_start_idx += 1
 
@@ -236,7 +242,7 @@ class NeuronModelRunner:
 
     def prepare_input_tensors(
         self,
-        seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
+        seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, SamplingMetadata]:
         # NOTE: We assume that all sequences in the group are all prompts or
         # all decodes.
@@ -258,7 +264,7 @@ class NeuronModelRunner:
     @torch.inference_mode()
     def execute_model(
         self,
-        seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
+        seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Optional[SamplerOutput]:
         (input_tokens, input_positions, input_block_ids, sampling_metadata
          ) = self.prepare_input_tensors(seq_group_metadata_list)

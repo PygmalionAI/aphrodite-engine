@@ -32,14 +32,11 @@ class LogitsProcessor(nn.Module):
         # Whether the input is logits (default is hidden states).
         self.logits_as_input = logits_as_input
         # original vocabulary size (without LoRA).
-        if org_vocab_size is not None:
-            self.org_vocab_size = min(org_vocab_size, vocab_size)
-        else:
-            self.org_vocab_size = vocab_size
+        self.org_vocab_size = org_vocab_size or vocab_size
 
     def forward(
         self,
-        lm_head: nn.Module,
+        embedding: torch.Tensor,
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
         embedding_bias: Optional[torch.Tensor] = None,
@@ -49,8 +46,9 @@ class LogitsProcessor(nn.Module):
         else:
             hidden_states = _prune_hidden_states(hidden_states,
                                                  sampling_metadata)
+
             # Get the logits for the next tokens.
-            logits = self._get_logits(hidden_states, lm_head, embedding_bias)
+            logits = self._get_logits(hidden_states, embedding, embedding_bias)
 
         if logits is not None:
             logits *= self.scale
@@ -60,10 +58,10 @@ class LogitsProcessor(nn.Module):
 
         return logits
 
-    def _get_logits(self, hidden_states: torch.Tensor, lm_head: nn.Module,
+    def _get_logits(self, hidden_states: torch.Tensor, embedding: torch.Tensor,
                     embedding_bias: Optional[torch.Tensor]) -> torch.Tensor:
         # Get the logits for the next tokens.
-        logits = lm_head(hidden_states)
+        logits = torch.matmul(hidden_states, embedding.t())
         if embedding_bias is not None:
             logits += embedding_bias
         logits = tensor_model_parallel_gather(logits)
@@ -96,6 +94,7 @@ def _apply_logits_processors(
                 and sampling_params.prompt_logprobs is not None):
             assert len(seq_ids) == 1
             logits_row_idx += sampling_metadata.prompt_lens[i] - 1
+
         if logits_processors:
             found_logits_processors = True
             for seq_id in seq_ids:
@@ -108,6 +107,6 @@ def _apply_logits_processors(
         else:
             logits_row_idx += len(seq_ids)
     if found_logits_processors:
-        # Ensure that no rows in logits were unexpectedly skipped.
+        # verifies that no rows in logits were missed unexpectedly
         assert logits_row_idx == logits.shape[0]
     return logits

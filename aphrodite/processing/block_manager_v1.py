@@ -2,15 +2,17 @@
 from abc import ABC, abstractmethod
 from itertools import count, takewhile
 from os.path import commonprefix
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
+from typing import Sequence as GenericSequence
+from typing import Set
 
 from loguru import logger
 
 from aphrodite.common.block import BlockTable, PhysicalTokenBlock
-from aphrodite.processing.evictor import EvictionPolicy, Evictor, make_evictor
-from aphrodite.processing.interfaces import AllocStatus, BlockSpaceManager
 from aphrodite.common.sequence import Sequence, SequenceGroup, SequenceStatus
 from aphrodite.common.utils import Device
+from aphrodite.processing.evictor import EvictionPolicy, Evictor, make_evictor
+from aphrodite.processing.interfaces import AllocStatus, BlockSpaceManager
 
 
 class BlockAllocatorBase(ABC):
@@ -213,7 +215,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
 
         if enable_caching and sliding_window is not None:
             raise NotImplementedError(
-                "Sliding window is not allowed with Context Shift enabled!")
+                "Sliding window is not allowed with prefix caching enabled!")
 
         self.block_sliding_window = None
         if sliding_window is not None:
@@ -229,11 +231,11 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         self.watermark_blocks = int(watermark * num_gpu_blocks)
 
         if self.enable_caching:
-            logger.info("Context Shift is enabled.")
-            self.gpu_allocator = CachedBlockAllocator(Device.GPU, block_size,
-                                                      num_gpu_blocks)
-            self.cpu_allocator = CachedBlockAllocator(Device.CPU, block_size,
-                                                      num_cpu_blocks)
+            logger.info("Automatic prefix caching is enabled.")
+            self.gpu_allocator: BlockAllocatorBase = CachedBlockAllocator(
+                Device.GPU, block_size, num_gpu_blocks)
+            self.cpu_allocator: BlockAllocatorBase = CachedBlockAllocator(
+                Device.CPU, block_size, num_cpu_blocks)
         else:
             self.gpu_allocator = UncachedBlockAllocator(
                 Device.GPU, block_size, num_gpu_blocks)
@@ -587,7 +589,8 @@ class BlockSpaceManagerV1(BlockSpaceManager):
             for b in takewhile(lambda b: b.computed, block_table[:-1])
         ]
 
-    def get_common_computed_block_ids(self, seqs: List[Sequence]) -> List[int]:
+    def get_common_computed_block_ids(
+            self, seqs: List[Sequence]) -> GenericSequence[int]:
         """Return the block ids that are common for a given sequence group.
 
         Used in prefill (can skip prefill of some blocks).

@@ -1,11 +1,11 @@
 import math
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import torch
 import triton
 import triton.language as tl
 
-from aphrodite.modeling.layers.ops.rand import seeded_uniform
+from aphrodite_modeling.layers.ops.rand import seeded_uniform
 
 _EPS = 1e-6
 
@@ -15,6 +15,7 @@ MAX_TRITON_N_COLS = 131072
 
 def get_num_triton_sampler_splits(n_cols: int) -> int:
     """Get the number of splits to use for Triton sampling.
+
     Triton has a limit on the number of columns it can handle, so we need to
     split the tensor and call the kernel multiple times if it's too large.
     """
@@ -28,8 +29,8 @@ def _multi_split_sample(
     sampled_tokens_size: Tuple[int, int],
     sampled_logprobs_size: Tuple[int, int],
     sample_indices: torch.Tensor,
+    logprobs: torch.Tensor,
     *,
-    logprobs: Optional[torch.Tensor] = None,
     modify_greedy_probs: bool = False,
     save_logprobs: bool = False,
 ):
@@ -118,7 +119,9 @@ def sample(
     _save_modified_probs: bool = False,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
     """Sample tokens from probs. with per-sequence seeds.
+
     Can sample from a subset of sequences through sample_indices.
+
     Args:
         probs: Probabilities to sample from.
             shape = [batch_size, vocab_size]
@@ -143,6 +146,7 @@ def sample(
             (because we want to use the unmodified probs to pick the best
             split in case of multi-split sampling).
             This is exposed only for testing.
+
     Returns:
         sampled_tokens: shape = [n, max_best_of]
         sampled_logprobs: shape = [n, max_best_of] if save_logprobs else None
@@ -163,6 +167,7 @@ def sample(
         sampled_logprobs_size = (0, 0)
         logprobs = probs
 
+    assert logprobs is not None
     if _save_modified_probs:
         sampled_modified_probs_size = sampled_tokens_size
     else:
@@ -234,6 +239,7 @@ def _sample(probs: torch.Tensor,
             save_logprobs: bool = True,
             save_modified_probs: bool = False) -> torch.Tensor:
     """Sample tokens from probs.
+
     Args:
         probs [batch_size, vocab_size]: probs to sample from.
         logprobs [batch_size, vocab_size]: logprobs (used when

@@ -1,22 +1,19 @@
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Tuple
 
 from loguru import logger
 
-from aphrodite.lora.request import LoRARequest
-from aphrodite.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
-from aphrodite.common.utils import (
-    get_ip,
-    get_open_port,
-    get_distributed_init_method,
-    make_async,
-)
+from aphrodite.common.utils import (get_distributed_init_method, get_ip,
+                                    get_open_port, make_async)
+from aphrodite.executor.executor_base import ExecutorAsyncBase, ExecutorBase
+from aphrodite.lora.request import LoRARequest
 
 
 class GPUExecutor(ExecutorBase):
 
     def _init_executor(self) -> None:
         """Initialize the worker and load the model.
+
         If speculative decoding is enabled, we instead create the speculative
         worker.
         """
@@ -30,8 +27,8 @@ class GPUExecutor(ExecutorBase):
         # before CUDA_VISIBLE_DEVICES is set in the Worker
         from aphrodite.task_handler.worker import Worker
 
-        assert (self.parallel_config.world_size == 1
-                ), "GPUExecutor only supports single GPU."
+        assert self.parallel_config.world_size == 1, (
+            "GPUExecutor only supports single GPU.")
 
         distributed_init_method = get_distributed_init_method(
             get_ip(), get_open_port())
@@ -41,6 +38,7 @@ class GPUExecutor(ExecutorBase):
             scheduler_config=self.scheduler_config,
             device_config=self.device_config,
             cache_config=self.cache_config,
+            load_config=self.load_config,
             local_rank=0,
             rank=0,
             distributed_init_method=distributed_init_method,
@@ -56,6 +54,7 @@ class GPUExecutor(ExecutorBase):
         """
         assert self.speculative_config is not None
 
+        from aphrodite.spec_decode.multi_step_worker import MultiStepWorker
         from aphrodite.spec_decode.spec_decode_worker import SpecDecodeWorker
         from aphrodite.task_handler.worker import Worker
 
@@ -68,6 +67,7 @@ class GPUExecutor(ExecutorBase):
             scheduler_config=self.scheduler_config,
             device_config=self.device_config,
             cache_config=self.cache_config,
+            load_config=self.load_config,
             local_rank=0,
             rank=0,
             distributed_init_method=distributed_init_method,
@@ -76,10 +76,24 @@ class GPUExecutor(ExecutorBase):
             is_driver_worker=True,
         )
 
-        spec_decode_worker = SpecDecodeWorker.create_worker(
-            scorer_worker=target_worker,
-            speculative_config=self.speculative_config,
+        draft_worker = MultiStepWorker(
+            model_config=self.speculative_config.draft_model_config,
+            parallel_config=self.speculative_config.draft_parallel_config,
+            scheduler_config=self.scheduler_config,
+            device_config=self.device_config,
+            cache_config=self.cache_config,
+            # TODO allow draft-model specific load config.
+            load_config=self.load_config,
+            local_rank=0,
+            rank=0,
+            distributed_init_method=distributed_init_method,
+            lora_config=self.lora_config,
+            vision_language_config=self.vision_language_config,
+            is_driver_worker=True,
         )
+
+        spec_decode_worker = SpecDecodeWorker.from_workers(
+            proposer_worker=draft_worker, scorer_worker=target_worker)
 
         assert self.parallel_config.world_size == 1, (
             "GPUExecutor only supports single GPU.")
@@ -89,7 +103,7 @@ class GPUExecutor(ExecutorBase):
         # Load model handled in spec decode worker.
         self.driver_worker.init_device()
 
-    def determine_num_available_blocks(self) -> tuple[int, int]:
+    def determine_num_available_blocks(self) -> Tuple[int, int]:
         """Determine the number of available KV blocks by invoking the
         underlying worker.
         """
@@ -159,6 +173,5 @@ class GPUExecutorAsync(GPUExecutor, ExecutorAsyncBase):
             blocks_to_swap_in=blocks_to_swap_in,
             blocks_to_swap_out=blocks_to_swap_out,
             blocks_to_copy=blocks_to_copy,
-            num_lookahead_slots=num_lookahead_slots,
-        )
+            num_lookahead_slots=num_lookahead_slots)
         return output

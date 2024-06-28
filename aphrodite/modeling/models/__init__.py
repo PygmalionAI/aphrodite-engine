@@ -1,8 +1,8 @@
 import importlib
 from typing import Dict, List, Optional, Type
-from loguru import logger
 
 import torch.nn as nn
+from loguru import logger
 
 from aphrodite.common.utils import is_hip
 
@@ -15,8 +15,8 @@ _MODELS = {
     "BloomForCausalLM": ("bloom", "BloomForCausalLM"),
     "ChatGLMModel": ("chatglm", "ChatGLMForCausalLM"),
     "ChatGLMForConditionalGeneration": ("chatglm", "ChatGLMForCausalLM"),
+    "CohereForCausalLM": ("commandr", "CohereForCausalLM"),
     "DbrxForCausalLM": ("dbrx", "DbrxForCausalLM"),
-    "CohereForCausalLM": ("cohere", "CohereForCausalLM"),
     "DeciLMForCausalLM": ("decilm", "DeciLMForCausalLM"),
     "DeepseekForCausalLM": ("deepseek", "DeepseekForCausalLM"),
     "FalconForCausalLM": ("falcon", "FalconForCausalLM"),
@@ -27,19 +27,22 @@ _MODELS = {
     "GPTNeoXForCausalLM": ("gpt_neox", "GPTNeoXForCausalLM"),
     "InternLMForCausalLM": ("llama", "LlamaForCausalLM"),
     "InternLM2ForCausalLM": ("internlm2", "InternLM2ForCausalLM"),
+    "JAISLMHeadModel": ("jais", "JAISLMHeadModel"),
     "LlamaForCausalLM": ("llama", "LlamaForCausalLM"),
-    # For decapoda-research/llama-*
-    "LLaMAForCausalLM": ("llama", "LlamaForCausalLM"),
     "LlavaForConditionalGeneration":
     ("llava", "LlavaForConditionalGeneration"),
+    # For decapoda-research/llama-*
+    "LLaMAForCausalLM": ("llama", "LlamaForCausalLM"),
     "MistralForCausalLM": ("llama", "LlamaForCausalLM"),
     "MixtralForCausalLM": ("mixtral", "MixtralForCausalLM"),
-    "YiForCausalLM": ("llama", "LlamaForCausalLM"),
+    "QuantMixtralForCausalLM": ("mixtral_quant", "MixtralForCausalLM"),
     # transformers's mpt class has lower case
     "MptForCausalLM": ("mpt", "MPTForCausalLM"),
     "MPTForCausalLM": ("mpt", "MPTForCausalLM"),
+    "MiniCPMForCausalLM": ("minicpm", "MiniCPMForCausalLM"),
     "OLMoForCausalLM": ("olmo", "OLMoForCausalLM"),
     "OPTForCausalLM": ("opt", "OPTForCausalLM"),
+    "OrionForCausalLM": ("orion", "OrionForCausalLM"),
     "PhiForCausalLM": ("phi", "PhiForCausalLM"),
     "QWenLMHeadModel": ("qwen", "QWenLMHeadModel"),
     "Qwen2ForCausalLM": ("qwen2", "Qwen2ForCausalLM"),
@@ -47,6 +50,8 @@ _MODELS = {
     "RWForCausalLM": ("falcon", "FalconForCausalLM"),
     "StableLMEpochForCausalLM": ("stablelm", "StablelmForCausalLM"),
     "StableLmForCausalLM": ("stablelm", "StablelmForCausalLM"),
+    "Starcoder2ForCausalLM": ("starcoder2", "Starcoder2ForCausalLM"),
+    "XverseForCausalLM": ("xverse", "XverseForCausalLM"),
 }
 
 # Architecture -> type.

@@ -4,22 +4,16 @@ from typing import Dict, List, Optional, Tuple, Type
 
 import torch
 from xformers import ops as xops
-from xformers.ops.fmha.attn_bias import (
-    AttentionBias,
-    BlockDiagonalCausalMask,
-    LowerTriangularMaskWithTensorBias,
-)
+from xformers.ops.fmha.attn_bias import (AttentionBias,
+                                         BlockDiagonalCausalMask,
+                                         LowerTriangularMaskWithTensorBias)
 
-from aphrodite.attention.backends.abstract import (
-    AttentionBackend,
-    AttentionImpl,
-    AttentionMetadata,
-    AttentionMetadataPerStage,
-)
-from aphrodite.attention.ops.paged_attn import (
-    PagedAttention,
-    PagedAttentionMetadata,
-)
+from aphrodite.attention.backends.abstract import (AttentionBackend,
+                                                   AttentionImpl,
+                                                   AttentionMetadata,
+                                                   AttentionMetadataPerStage)
+from aphrodite.attention.ops.paged_attn import (PagedAttention,
+                                                PagedAttentionMetadata)
 
 
 class XFormersBackend(AttentionBackend):
@@ -250,7 +244,6 @@ class XFormersImpl(AttentionImpl):
                     prefill_meta.context_lens,
                     prefill_meta.max_subquery_len,
                     self.alibi_slopes,
-                    self.sliding_window,
                 )
                 assert output[:num_prefill_tokens].shape == out.shape
                 output[:num_prefill_tokens] = out
@@ -293,6 +286,7 @@ class XFormersImpl(AttentionImpl):
             value: shape = [num_prefill_tokens, num_kv_heads, head_size]
             attn_metadata: Metadata for attention.
         """
+        assert attn_metadata.prompt_lens is not None
         original_query = query
         if self.num_kv_heads != self.num_heads:
             # GQA/MQA requires the shape [B, M, G, H, K].

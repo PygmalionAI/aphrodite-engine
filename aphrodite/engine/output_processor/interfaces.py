@@ -1,11 +1,12 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Iterable, List
+from typing import Callable, List
 
 from transformers import PreTrainedTokenizer
 
 from aphrodite.common.config import SchedulerConfig
 from aphrodite.common.sequence import (Sequence, SequenceGroup,
                                        SequenceGroupOutput)
+from aphrodite.common.utils import Counter
 from aphrodite.engine.output_processor.stop_checker import StopChecker
 from aphrodite.processing.scheduler import Scheduler
 from aphrodite.transformers_utils.detokenizer import Detokenizer
@@ -15,6 +16,7 @@ class SequenceGroupOutputProcessor(ABC):
     """Interface for logic that processes new token ids in sequence groups,
     managing detokenization, stop checking, and freeing/forking sequences with
     the scheduler.
+
     This is highly coupled with the LLMEngine and should be seen as an extension
     of it. The logic is separated to simplify the LLMEngine class and allow
     separate implementations for single-step decoding (which supports beam
@@ -27,11 +29,12 @@ class SequenceGroupOutputProcessor(ABC):
         scheduler_config: SchedulerConfig,
         detokenizer: Detokenizer,
         scheduler: Scheduler,
-        seq_counter: Iterable[int],
+        seq_counter: Counter,
         get_tokenizer_for_seq: Callable[[Sequence], PreTrainedTokenizer],
         stop_checker: "StopChecker",
     ):
         """Create an output processor.
+
         This returns a single-step output processor if num_lookahead_slots is
         zero, else returns a multi-step output processor.
         """

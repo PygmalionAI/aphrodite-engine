@@ -1,23 +1,22 @@
-# Copyright (c) 2024 Neural Magic, All Rights Reserved.
-# AQLM quantization technique, as described in the paper:
-# https://arxiv.org/pdf/2401.06118.pdf
-
-from typing import Any, Dict, List, Optional
-from contextlib import suppress
+# Supports AQLM compression, see https://github.com/Vahe1994/AQLM
+# and https://arxiv.org/pdf/2401.06118.pdf
 
 import math
+from contextlib import suppress
+from typing import Any, Dict, List, Optional
+
 import torch
-from torch.nn.parameter import Parameter
 import torch.nn.functional as F
+from torch.nn.parameter import Parameter
 
 from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
-from aphrodite.quantization.base_config import (QuantizationConfig)
+from aphrodite.modeling.layers.quantization.base_config import \
+    QuantizationConfig
 
 HAS_QUANTS = False
 with suppress(ImportError):
     from aphrodite._quant_C import quant_ops as ops
     HAS_QUANTS = True
-
 
 def get_int_dtype(nbits: int) -> torch.dtype:
     if nbits <= 8:
@@ -41,19 +40,19 @@ def dequantize_weight(codes: torch.Tensor,
                       scales: Optional[torch.Tensor] = None) -> torch.Tensor:
     """
     Decode float weights from quantization codes. Differentiable.
-    :param codes: tensor of integer quantization codes, shape [*dims,
-        num_out_groups, num_in_groups, num_codebooks]
-    :param codebooks: tensor of vectors for each quantization code,
+    :param codes: tensor of integer quantization codes, shape 
+        [*dims, num_out_groups, num_in_groups, num_codebooks]
+    :param codebooks: tensor of vectors for each quantization code, 
         [num_codebooks, codebook_size, out_group_size, in_group_size]
-    :param scales: weight will be multiplied by this factor, must be
-        broadcastble with [*dims, out_groups, num_in_groups, out_group_size,
-        in_group_size]
-    :return: reconstructed weight tensor of shape [*dims,
-        num_in_groups*group_size]
+    :param scales: weight will be multiplied by this factor, must be 
+        broadcastble with 
+        [*dims, out_groups, num_in_groups, out_group_size, in_group_size]
+    :return: reconstructed weight tensor of shape 
+        [*dims, num_in_groups*group_size]
     """
     num_out_groups, num_in_groups, num_codebooks = codes.shape[-3:]
-    (num_codebooks, codebook_size, out_group_size,
-     in_group_size) = codebooks.shape
+    num_codebooks, codebook_size, out_group_size, in_group_size = \
+        codebooks.shape
     out_features = num_out_groups * out_group_size
     in_features = num_in_groups * in_group_size
     codebook_offsets = torch.arange(
@@ -63,8 +62,8 @@ def dequantize_weight(codes: torch.Tensor,
         codes.flatten(0, -2) + codebook_offsets,
         codebooks.flatten(0, 1).flatten(-2, -1),
         mode="sum"
-    )  # [prod(dims) * num_out_groups * num_in_groups, out_group_size *
-    # in_group_size]
+    )  # [prod(dims) * num_out_groups * num_in_groups, out_group_size
+    # * in_group_size]
 
     reconstructed_weight_groupwise = reconstructed_weight_flat.view(
         list(codes.shape[:-3]) +
@@ -92,7 +91,8 @@ def dequantize_gemm(
     return F.linear(input, dequantized_weight, bias)
 
 
-def dequantize_partioned_gemm(
+# Generic dequantization, slow but flexible.
+def generic_dequantize_gemm(
     input: torch.Tensor,  #  [..., in_features]
     codes: torch.IntTensor,  #  [num_out_groups, num_in_groups, num_codebooks]
     codebooks: torch.
@@ -128,8 +128,38 @@ def dequantize_partioned_gemm(
     return output
 
 
+# Optimized dequnantize/decompression kernels, supports 1x16 and 2x8
+# at 6 and 9 times faster than the generic version above, respectively.
+def optimized_dequantize_gemm(
+    input: torch.Tensor,  #  [..., in_features]
+    codes: torch.IntTensor,  #  [num_out_groups, num_in_groups, num_codebooks]
+    codebooks: torch.
+    Tensor,  #  [num_codebooks, codebook_size, out_group_size, in_group_size]
+    scales: torch.Tensor,  #  [num_out_groups, 1, 1, 1]
+    output_partition_sizes: torch.IntTensor,
+    bias: Optional[torch.Tensor],
+) -> torch.Tensor:
+    weights = ops.aqlm_dequant(codes, codebooks, output_partition_sizes)
+
+    if bias is None:
+        # scaling the output is fastest, so we do that when possible.
+        output = F.linear(input, weights, bias)
+        orig_shape = output.shape
+        flattened_output = output.view(-1, output.size(-1))
+        f_scales = scales.view(-1, scales.shape[0])
+        b_scales = f_scales.expand(flattened_output.shape[0], -1)
+        flattened_output *= b_scales
+        return output.view(orig_shape)
+    else:
+        b_scales = scales.view(scales.shape[:-3] + (-1, )).expand(
+            -1, weights.shape[1])
+        weights *= b_scales
+        return F.linear(input, weights, bias)
+
+
 class AQLMConfig(QuantizationConfig):
     """Config class for AQLM.
+
     Reference: https://github.com/Vahe1994/AQLM
     """
 
@@ -140,15 +170,13 @@ class AQLMConfig(QuantizationConfig):
         num_codebooks: int,
         out_group_size: int,
     ) -> None:
-        if not HAS_QUANTS:
-            raise ImportError("Could not find the quantization kernels.")
         self.in_group_size = in_group_size
         self.nbits_per_codebook = nbits_per_codebook
         self.num_codebooks = num_codebooks
         self.out_group_size = out_group_size
 
         # out_group_size > 1 is untested, and probably won't work as-is.
-        assert self.out_group_size == 1
+        assert (self.out_group_size == 1)
         self.pack_factor = (self.in_group_size * self.out_group_size)
 
     def __repr__(self) -> str:
@@ -188,21 +216,10 @@ class AQLMConfig(QuantizationConfig):
     def get_scaled_act_names(self) -> List[str]:
         return []
 
-    def merge_weight(self) -> bool:
-        return True
-
-    def rope_style(self) -> Optional[bool]:
-        return None
-
-    def quant_vocab(self) -> List[bool]:
-        return [False, False]
-
-    def support_fused_moe(self) -> bool:
-        return False
-
 
 class AQLMLinearMethod(LinearMethodBase):
     """Linear method for AQLM.
+
     Args:
         quant_config: The AQLM quantization config.
     """
@@ -210,14 +227,11 @@ class AQLMLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: AQLMConfig):
         self.quant_config = quant_config
 
-    def create_weights(
-        self,
-        input_size_per_partition: int,
-        output_partition_sizes: List[int],
-        input_size: int,
-        output_size: int,
-        params_dtype: torch.dtype,
-    ) -> Dict[str, Any]:
+    def create_weights(self, layer: torch.nn.Module,
+                       input_size_per_partition: int,
+                       output_partition_sizes: List[int], input_size: int,
+                       output_size: int, params_dtype: torch.dtype,
+                       **extra_weight_attrs):
         del output_size  # Unused.
         del input_size  # Unused.
 
@@ -238,12 +252,10 @@ class AQLMLinearMethod(LinearMethodBase):
 
         codes = Parameter(
             torch.empty(
-                # There could actually be two pack factors, one along input
-                # and one along output,
-                # but we don't currently support out_group_size,
-                # and only the one along output needs to be marked with
-                # "packed_dim".
-                # in order for QKVLinear to work.
+                # There could actually be two pack factors, one along input and
+                # one along output, but we don't currently support
+                # out_group_size, and only the one along output needs to be
+                # marked with "packed_dim" in order for QKVLinear to work.
                 output_size_per_partition,
                 input_size_per_partition // self.quant_config.pack_factor,
                 self.quant_config.num_codebooks,
@@ -305,34 +317,56 @@ class AQLMLinearMethod(LinearMethodBase):
             },
         )
 
-        return {
-            "codes": codes,
-            "codebooks": codebooks,
-            "scales": scales,
-        }
+        layer.register_parameter("codes", codes)
+        set_weight_attrs(codes, extra_weight_attrs)
+        layer.register_parameter("codebooks", codebooks)
+        set_weight_attrs(codebooks, extra_weight_attrs)
+        layer.register_parameter("scales", scales)
+        set_weight_attrs(scales, extra_weight_attrs)
 
     def apply_weights(
         self,
-        weights: Dict[str, Any],
+        layer: torch.nn.Module,
         x: torch.Tensor,
         bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        codebooks = weights["codebooks"]
-        codes = weights["codes"]
-        scales = weights["scales"]
+        codebooks = layer.codebooks
+        codes = layer.codes
+        scales = layer.scales
         output_partition_sizes = getattr(codebooks, "output_partition_sizes",
                                          None)
 
-        use_gemv = math.prod(
-            x.shape[:-1]) <= 32 or output_partition_sizes is None
-        output = ops.aqlm_gemm(
-            x,
-            codes,
-            codebooks,
-            scales,
-            output_partition_sizes,
-            bias,
-        ) if use_gemv else dequantize_partioned_gemm(
+        nbooks = codes.shape[2]
+        ingroups = codebooks.shape[3]
+        outgroups = codebooks.shape[2]
+        bits = codebooks.shape[1]
+
+        # We support these formats with dedicated gemm and decompression
+        # kernels.
+        if ingroups == 8 and outgroups == 1 and (
+            (bits == 256 and nbooks == 2) or (bits == 65536 and nbooks == 1)):
+
+            # thresholds determined by timings on an A6000, one GPU
+            use_gemv = math.prod(x.shape[:-1]) <= 6
+
+            return ops.aqlm_gemm(
+                x,
+                codes,
+                codebooks,
+                scales,
+                output_partition_sizes,
+                bias,
+            ) if use_gemv else optimized_dequantize_gemm(
+                x,
+                codes,
+                codebooks,
+                scales,
+                output_partition_sizes,
+                bias,
+            )
+
+        # fall back all unoptimized formats
+        return generic_dequantize_gemm(
             x,
             codes,
             codebooks,
@@ -340,12 +374,3 @@ class AQLMLinearMethod(LinearMethodBase):
             output_partition_sizes,
             bias,
         )
-
-        return output
-
-    def apply_moe_weights(self, w1: Dict[str,
-                                         torch.Tensor], w2: Dict[str,
-                                                                 torch.Tensor],
-                          x: torch.Tensor, gating_output: torch.Tensor,
-                          topk: int, renormalize: bool) -> torch.Tensor:
-        raise NotImplementedError

@@ -3,15 +3,11 @@ from itertools import takewhile
 from os.path import commonprefix
 from typing import Dict, Iterable, List, Optional
 
-from aphrodite.processing.block.common import (
-    CopyOnWriteTracker,
-    get_all_blocks_recursively,
-)
+from aphrodite.processing.block.common import (CopyOnWriteTracker,
+                                               get_all_blocks_recursively)
 from aphrodite.processing.block.interfaces import Block, BlockAllocator
-from aphrodite.processing.block.naive_block import (
-    NaiveBlock,
-    NaiveBlockAllocator,
-)
+from aphrodite.processing.block.naive_block import (NaiveBlock,
+                                                    NaiveBlockAllocator)
 
 PrefixHash = int
 BlockId = int
@@ -19,9 +15,11 @@ BlockId = int
 
 class PrefixCachingBlockAllocator(BlockAllocator):
     """A block allocator that implements prefix caching.
+
     The PrefixCachingBlockAllocator maintains a cache of blocks based on their
     content hash. It reuses blocks with the same content hash to avoid redundant
     memory allocation. The allocator also supports copy-on-write operations.
+
     Args:
         num_blocks (int): The total number of blocks to manage.
         block_size (int): The size of each block in tokens.
@@ -91,9 +89,11 @@ class PrefixCachingBlockAllocator(BlockAllocator):
                            token_ids: List[int]) -> Block:
         """Allocates an immutable block with the given token IDs, reusing cached
         blocks if possible.
+
         Args:
             prev_block (Optional[Block]): The previous block in the sequence.
             token_ids (List[int]): The token IDs to be stored in the block.
+
         Returns:
             Block: The allocated immutable block.
         """
@@ -124,8 +124,10 @@ class PrefixCachingBlockAllocator(BlockAllocator):
     def allocate_mutable(self, prev_block: Block) -> Block:
         """Allocates a mutable block. If there are no free blocks, this will
         evict unused cached blocks.
+
         Args:
             prev_block (Block): The previous block in the sequence.
+
         Returns:
             Block: The allocated mutable block.
         """
@@ -171,6 +173,7 @@ class PrefixCachingBlockAllocator(BlockAllocator):
     def free(self, block: Block) -> None:
         """Decrement the refcount of the block. If the decremented refcount is
         zero, store the block in the freelist.
+
         If the block has a content hash (meaning it is immutable), then we will
         keep the block around in case future allocations require it.
         """
@@ -198,8 +201,10 @@ class PrefixCachingBlockAllocator(BlockAllocator):
     def fork(self, last_block: Block) -> List[Block]:
         """Creates a new sequence of blocks that shares the same underlying
         memory as the original sequence.
+
         Args:
             last_block (Block): The last block in the original sequence.
+
         Returns:
             List[Block]: The new sequence of blocks that shares the same memory
                 as the original sequence.
@@ -239,11 +244,14 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         """Once a mutable block is full, it can be promoted to an immutable
         block. This means that its content can be referenced by future blocks
         having the same prefix.
+
         Note that if we already have a cached block with the same content, we
         will replace the newly-promoted block's mapping with the existing cached
         block.
+
         Args:
             block (PrefixCachingBlock): The mutable block to be promoted.
+
         Returns:
             BlockId: Either the original block index, or the block index of
                 the previously cached block matching the same content.
@@ -266,8 +274,10 @@ class PrefixCachingBlockAllocator(BlockAllocator):
     def cow_block_if_not_appendable(self, block: Block) -> Optional[BlockId]:
         """Performs a copy-on-write operation on the given block if it is not
         appendable.
+
         Args:
             block (Block): The block to check for copy-on-write.
+
         Returns:
             Optional[BlockId]: The block index of the new block if a copy-on
                 -write operation was performed, or the original block index if
@@ -277,6 +287,7 @@ class PrefixCachingBlockAllocator(BlockAllocator):
 
     def clear_copy_on_writes(self) -> Dict[BlockId, List[BlockId]]:
         """Returns the copy-on-write source->destination mapping and clears it.
+
         Returns:
             Dict[BlockId, List[BlockId]]: A dictionary mapping source
                 block indices to lists of destination block indices.
@@ -291,6 +302,7 @@ class PrefixCachingBlockAllocator(BlockAllocator):
     def get_common_computed_block_ids(
             self, seq_block_ids: List[List[int]]) -> List[int]:
         """Return the block ids that are common for a given sequence group.
+
         Used in prefill (can skip prefill of some blocks).
         """
 
@@ -309,10 +321,12 @@ class PrefixCachingBlockAllocator(BlockAllocator):
 
 class PrefixCachingBlock(Block):
     """A block implementation that supports prefix caching.
+
     The PrefixCachingBlock class represents a block of token IDs with prefix
     caching capabilities. It wraps a NaiveBlock internally and provides
     additional functionality for content hashing and promoting immutable blocks
     with the prefix caching allocator.
+
     Args:
         prev_block (Optional[PrefixCachingBlock]): The previous block in the
             sequence.
@@ -351,7 +365,9 @@ class PrefixCachingBlock(Block):
     def append_token_ids(self, token_ids: List[int]) -> None:
         """Appends the given token IDs to the block and registers the block as
         immutable if the block becomes full.
+
         Internally, the naive block handles CoW.
+
         Args:
             token_ids (List[int]): The token IDs to be appended to the block.
         """
@@ -399,6 +415,7 @@ class PrefixCachingBlock(Block):
     def content_hash(self) -> Optional[int]:
         """Return the content-based hash of the current block, or None if it is
         not yet defined.
+
         For the content-based hash to be defined, the current block must be
         full.
         """
@@ -427,15 +444,14 @@ class PrefixCachingBlock(Block):
         return self._cached_content_hash
 
     @staticmethod
-    def hash_block_tokens(
-        is_first_block: bool,
-        prev_block_hash: Optional[int],
-        cur_block_token_ids: List[int],
-    ) -> int:
+    def hash_block_tokens(is_first_block: bool, prev_block_hash: Optional[int],
+                          cur_block_token_ids: List[int]) -> int:
         """Computes a hash value corresponding to the contents of a block and
         the contents of the preceding block(s). The hash value is used for
         prefix caching.
+
         NOTE: Content-based hashing does not yet support LoRA.
+
         Parameters:
         - is_first_block (bool): A flag indicating if the block is the first in
             the sequence.
@@ -443,6 +459,7 @@ class PrefixCachingBlock(Block):
             if this is the first block.
         - cur_block_token_ids (List[int]): A list of token ids in the current
             block. The current block is assumed to be full.
+
         Returns:
         - int: The computed hash value for the block.
         """
