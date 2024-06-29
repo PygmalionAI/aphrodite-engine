@@ -515,6 +515,14 @@ class EngineArgs:
             help="The maximum sequence length supported by the "
             "draft model. Sequences over this length will skip "
             "speculation.")
+        parser.add_argument("--model-loader-extra-config",
+                            type=str,
+                            default=EngineArgs.model_loader_extra_config,
+                            help="Extra config for model loader. "
+                            "This will be passed to the model loader "
+                            "corresponding to the chosen load_format. "
+                            "This should be a JSON string that will be "
+                            "parsed into a dictionary.")
 
         return parser
 
