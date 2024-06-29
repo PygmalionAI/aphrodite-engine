@@ -14,7 +14,7 @@ from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import MultiModalData
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
-from aphrodite.engine.ray_utils import initialize_ray_cluster, ray
+from aphrodite.engine.ray_tools import initialize_ray_cluster, ray
 from aphrodite.lora.request import LoRARequest
 
 ENGINE_ITERATION_TIMEOUT_S = int(
