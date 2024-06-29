@@ -325,7 +325,7 @@ class EngineArgs:
         parser.add_argument(
             "--max-logprobs",
             type=int,
-            default=EngineArgs.max_log_probs,
+            default=EngineArgs.max_logprobs,
             help="maximum number of log probabilities to "
             "return.",
         )
