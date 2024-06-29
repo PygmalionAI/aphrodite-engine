@@ -98,15 +98,14 @@ class AphroditeEngine:
             f"Model = {model_config.model!r}\n"
             f"Speculative Config = {speculative_config!r}\n"
             f"DataType = {model_config.dtype}\n"
-            f"Model Load Format = {model_config.load_format}\n"
+            f"Model Load Format = {load_config.load_format}\n"
             f"Number of GPUs = {parallel_config.tensor_parallel_size}\n"
             f"Disable Custom All-Reduce = "
             f"{parallel_config.disable_custom_all_reduce}\n"
             f"Quantization Format = {model_config.quantization}\n"
             f"Context Length = {model_config.max_model_len}\n"
             f"Enforce Eager Mode = {model_config.enforce_eager}\n"
-            f"KV Cache Data Type = {cache_config.cache_dtype}\n"
-            f"KV Cache Params Path = {model_config.quantization_param_path}\n"
+            f"KV Cache DataType = {cache_config.cache_dtype}\n"
             f"Device = {device_config.device}\n"
             f"Guided Decoding Backend = {decoding_config!r}\n")
         # TODO: Print more configs in debug mode.
