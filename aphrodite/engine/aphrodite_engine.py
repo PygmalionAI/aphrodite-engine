@@ -15,7 +15,7 @@ from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (MultiModalData, SamplerOutput, Sequence,
                                        SequenceGroup, SequenceStage)
 from aphrodite.common.utils import Counter
-from aphrodite.engine.arg_utils import EngineArgs
+from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.metrics import StatLogger, Stats
 from aphrodite.engine.output_processor.interfaces import \
     SequenceGroupOutputProcessor
