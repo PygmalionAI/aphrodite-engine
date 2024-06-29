@@ -6,7 +6,7 @@ from typing import Type
 import torch
 from loguru import logger
 from aphrodite.attention.backends.abstract import AttentionBackend
-from aphrodite.utils import is_cpu, is_hip
+from aphrodite.common.utils import is_cpu, is_hip
 
 APHRODITE_ATTENTION_BACKEND = "APHRODITE_ATTENTION_BACKEND"
 

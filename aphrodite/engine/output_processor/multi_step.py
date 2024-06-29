@@ -6,12 +6,12 @@ from aphrodite.engine.output_processor.interfaces import \
     SequenceGroupOutputProcessor
 from aphrodite.engine.output_processor.stop_checker import StopChecker
 from aphrodite.processing.scheduler import Scheduler
-from aphrodite.sampling_params import SamplingParams
-from aphrodite.sequence import (Logprob, Sequence, SequenceGroup,
+from aphrodite.common.sampling_params import SamplingParams
+from aphrodite.common.sequence import (Logprob, Sequence, SequenceGroup,
                                 SequenceGroupOutput, SequenceOutput,
                                 SequenceStatus)
 from aphrodite.transformers_utils.detokenizer import Detokenizer
-from aphrodite.utils import Counter
+from aphrodite.common.utils import Counter
 
 
 class MultiStepOutputProcessor(SequenceGroupOutputProcessor):

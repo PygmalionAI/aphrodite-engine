@@ -8,7 +8,7 @@ import torch.distributed
 from loguru import logger
 
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
-from aphrodite.config import (CacheConfig, DeviceConfig, LoadConfig,
+from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                               LoRAConfig, ModelConfig, ParallelConfig,
                               SchedulerConfig, VisionLanguageConfig)
 from aphrodite.distributed import (broadcast_tensor_dict,
