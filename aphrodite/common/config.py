@@ -11,7 +11,7 @@ from transformers import PretrainedConfig
 
 from aphrodite.common.utils import (get_cpu_memory, get_nvcc_cuda_version,
                                     is_cpu, is_hip, is_neuron)
-from aphrodite.modeling.layers.quantization import QUANTIZATION_METHODS
+from aphrodite.quantization import QUANTIZATION_METHODS
 from aphrodite.transformers_utils.config import get_config, get_hf_text_config
 
 if TYPE_CHECKING:
