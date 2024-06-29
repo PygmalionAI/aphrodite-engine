@@ -110,7 +110,7 @@ class RayGPUExecutor(ExecutorBase):
                 # as the resource holder for the driver process.
                 self.driver_dummy_worker = worker
                 self.driver_worker = RayWorkerWrapper(
-                    worker_module_name="aphrodite.worker.worker",
+                    worker_module_name="aphrodite.task_handler.worker",
                     worker_class_name="Worker",
                     trust_remote_code=self.model_config.trust_remote_code,
                 )
