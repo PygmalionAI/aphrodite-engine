@@ -65,17 +65,6 @@ class BitsandBytesConfig(QuantizationConfig):
         # The BitsandBytes kernel only supports Ampere or newer GPUs.
         return 75
 
-    def merge_weight(self) -> bool:
-        return True
-
-    def rope_style(self) -> Optional[bool]:
-        return None
-
-    def quant_vocab(self) -> List[bool]:
-        return [False, False]
-
-    def support_fused_moe(self) -> bool:
-        return False
 
     @staticmethod
     def get_config_filenames() -> List[str]:
@@ -115,24 +104,19 @@ class BNBLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: BitsandBytesConfig):
         self.quant_config = quant_config
 
-    def create_weights(
-        self,
-        layer: torch.nn.Module,
-        input_size_per_partition: int,
-        output_partition_sizes: List[int],
-        input_size: int,
-        output_size: int,
-        params_dtype: torch.dtype,
-        **extra_weight_attrs,
-    ):
-        output_size_per_partition = sum(output_partition_sizes)
-
+    def create_weights(self, layer: torch.nn.Module,
+                       input_size_per_partition: int,
+                       output_partition_sizes: List[int], input_size: int,
+                       output_size: int,
+                       params_dtype: torch.dtype,
+                       **extra_weight_attrs):
         if self.quant_config.quant_mode == "weight_only" and \
                 input_size_per_partition % self.quant_config.group_size != 0:
             raise ValueError(
                 "The input size is not aligned with the quantized "
                 "weight shape. This can be caused by too large "
                 "tensor parallel size.")
+        output_size_per_partition = sum(output_partition_sizes)
         if self.quant_config.quant_mode == "weight_only" and \
                 output_size_per_partition % self.quant_config.pack_factor != 0:
             raise ValueError(
@@ -184,13 +168,11 @@ class BNBLinearMethod(LinearMethodBase):
                 "output_dim": 1,
             })
             layer.register_parameter("qweight", qweight)
-            layer.register_parameter("qzeros", qzeros)
-            layer.register_parameter("scales", scales)
-
             set_weight_attrs(qweight, extra_weight_attrs)
+            layer.register_parameter("qzeros", qzeros)
             set_weight_attrs(qzeros, extra_weight_attrs)
+            layer.register_parameter("scales", scales)
             set_weight_attrs(scales, extra_weight_attrs)
-
         else:
             weight = Parameter(torch.empty(output_size_per_partition,
                                            input_size_per_partition,
@@ -205,8 +187,8 @@ class BNBLinearMethod(LinearMethodBase):
                       x: torch.Tensor,
                       bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         if self.quant_config.quant_mode == "weight_only":
-            qweight = layer.qweight
-            scales_zeros = layer.scales_zeros
+            qweight = layer.qweight.data
+            scales_zeros = layer.scales_zeros.data
             pack_factor = self.quant_config.pack_factor
             out_shape = (x.shape[:-1] + (qweight.shape[-1] * pack_factor, ))
             reshaped_x = x.reshape(-1, x.shape[-1])
@@ -232,6 +214,7 @@ class BNBLinearMethod(LinearMethodBase):
                 del state.CB
                 weight.data = state.CxB
             return out
+
 
 T = TypeVar("T", bound="torch.nn.Module")
 
@@ -380,11 +363,11 @@ def replace_quant_params(model,
                 (ColumnParallelLinear, QKVParallelLinear, RowParallelLinear)) \
                 and name not in modules_to_not_convert:
             if quant_config.from_float:
-                # module.linear_weights.pop("weight")
-                # param = module._parameters["weight"]
+                module.linear_weights.pop("weight")
+                param = module._parameters["weight"]
                 if quant_config.quant_mode in ("llm_int8", "smoothquant"):
                     import bitsandbytes as bnb
-                    new_value = bnb.nn.Int8Params(module.weight.data,
+                    new_value = bnb.nn.Int8Params(param.data,
                                                   requires_grad=False,
                                                   has_fp16_weights=False)
                     state = bnb.MatmulLtState()
@@ -395,11 +378,9 @@ def replace_quant_params(model,
                     state.has_fp16_weights = False
                     state.memory_efficient_backward = False
                     state.use_pool = True
-                    # module._parameters["weight"] = new_value
-                    # module.linear_weights["weight"] = new_value
-                    # module.linear_weights["state"] = state
-                    module.weight = new_value
-                    module.state = state
+                    module._parameters["weight"] = new_value
+                    module.linear_weights["weight"] = new_value
+                    module.linear_weights["state"] = state
                     set_weight_attrs(
                         new_value, {
                             "input_dim": 0,
@@ -407,69 +388,73 @@ def replace_quant_params(model,
                             "packed_dim": 1,
                             "pack_factor": quant_config.pack_factor,
                         })
+                    del param
                     torch.cuda.empty_cache()
 
                 elif quant_config.quant_mode == "weight_only":
-                    data_fp = module.weight.cuda()
+                    data_fp = param.cuda()
                     _qweight, _scales, _qzeros = quantize_tensor(
                         data_fp, n_bits=4, group_size=128)
                     qweight, scales_zeros = convert_s4(_qweight, _qzeros,
                                                        _scales)
                     torch.cuda.synchronize()
-                    # param_qweight = Parameter(qweight, requires_grad=False)
-                    # param_scales_zeros = Parameter(scales_zeros,
-                    #                                requires_grad=False)
-                    # module.register_parameter("qweight", param_qweight)
-                    # module.register_parameter("scales_zeros",
-                    #                           param_scales_zeros)
-                    module.qweight = Parameter(qweight, requires_grad=False)
-                    module.scales_zeros = Parameter(scales_zeros,
-                                                    requires_grad=False)
+                    param_qweight = Parameter(qweight, requires_grad=False)
+                    param_scales_zeros = Parameter(scales_zeros,
+                                                   requires_grad=False)
+                    module.register_parameter("qweight", param_qweight)
+                    module.register_parameter("scales_zeros",
+                                              param_scales_zeros)
                     set_weight_attrs(
-                        module.qweight, {
+                        param_qweight, {
                             "input_dim": 0,
                             "output_dim": 1,
                             "packed_dim": 1,
                             "pack_factor": quant_config.pack_factor,
                         })
-                    set_weight_attrs(module.scales_zeros, {
+                    set_weight_attrs(param_scales_zeros, {
                         "input_dim": 0,
                         "output_dim": 1,
                     })
-                    # module.linear_weights["qweight"] = param_qweight
-                    # module.linear_weights["scales_zeros"] = param_scales_zeros
-                    # del _qzeros
-                    # del _scales
-                    # del param
-                    # delattr(module, "weight")
-                    del module.weight
+                    module.linear_weights["qweight"] = param_qweight
+                    module.linear_weights["scales_zeros"] = param_scales_zeros
+                    del _qzeros
+                    del _scales
+                    del param
+                    delattr(module, "weight")
                     torch.cuda.empty_cache()
 
             else:  # load packed int4 weight
-                # module.linear_weights.pop("qweight")
-                # module.linear_weights.pop("qzeros")
-                # module.linear_weights.pop("scales")
-                # _qweight = module._parameters["qweight"]
-                # _qzeros = module._parameters["qzeros"]
-                # _scales = module._parameters["scales"]
-                qweight, scales_zeros = convert_s4(module.qweight.data,
-                                                   module.qzeros.data,
-                                                   module.scales.data)
-                module.qweight = Parameter(qweight, requires_grad=False)
-                module.scales_zeros = Parameter(scales_zeros,
-                                                requires_grad=False)
-                del module.qzeros
-                del module.scales
+                module.linear_weights.pop("qweight")
+                module.linear_weights.pop("qzeros")
+                module.linear_weights.pop("scales")
+                _qweight = module._parameters["qweight"]
+                _qzeros = module._parameters["qzeros"]
+                _scales = module._parameters["scales"]
+                qweight, scales_zeros = convert_s4(_qweight.data, _qzeros.data,
+                                                   _scales.data)
+                param_qweight = Parameter(qweight, requires_grad=False)
+                param_scales_zeros = Parameter(scales_zeros,
+                                               requires_grad=False)
+                del _qweight
+                del _qzeros
+                del _scales
+                delattr(module, "qweight")
+                delattr(module, "qzeros")
+                delattr(module, "scales")
+                module.register_parameter("qweight", param_qweight)
+                module.register_parameter("scales_zeros", param_scales_zeros)
                 set_weight_attrs(
-                    module.qweight, {
+                    param_qweight, {
                         "input_dim": 0,
                         "output_dim": 1,
                         "packed_dim": 1,
                         "pack_factor": quant_config.pack_factor,
                     })
-                set_weight_attrs(module.scales_zeros, {
+                set_weight_attrs(param_scales_zeros, {
                     "input_dim": 0,
                     "output_dim": 1,
                 })
+                module.linear_weights["qweight"] = param_qweight
+                module.linear_weights["scales_zeros"] = param_scales_zeros
                 torch.cuda.synchronize()
                 torch.cuda.empty_cache()
