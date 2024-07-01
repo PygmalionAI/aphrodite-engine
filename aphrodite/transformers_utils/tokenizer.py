@@ -56,7 +56,7 @@ def get_tokenizer(
     *args,
     tokenizer_mode: str = "auto",
     trust_remote_code: bool = False,
-    tokenizer_revision: Optional[str] = None,
+    revision: Optional[str] = None,
     download_dir: Optional[str] = None,
     **kwargs,
 ) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
@@ -72,7 +72,7 @@ def get_tokenizer(
             tokenizer_path = snapshot_download(
                 model_id=tokenizer_name,
                 cache_dir=download_dir,
-                revision=tokenizer_revision,
+                revision=revision,
                 # Ignore weights - we only need the tokenizer.
                 ignore_file_pattern=["*.pt", "*.safetensors", "*.bin"])
             tokenizer_name = tokenizer_path
@@ -88,7 +88,7 @@ def get_tokenizer(
             tokenizer_name,
             *args,
             trust_remote_code=trust_remote_code,
-            tokenizer_revision=tokenizer_revision,
+            revision=revision,
             **kwargs)
     except ValueError as e:
         # If the error pertains to the tokenizer class not existing or not
@@ -112,7 +112,7 @@ def get_tokenizer(
                 tokenizer_name,
                 *args,
                 trust_remote_code=trust_remote_code,
-                tokenizer_revision=tokenizer_revision,
+                revision=revision,
                 **kwargs)
         else:
             raise e
