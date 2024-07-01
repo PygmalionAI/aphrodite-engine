@@ -63,9 +63,6 @@ async def lifespan(app: fastapi.FastAPI):
     yield
 
 
-# Add prometheus asgi middleware to route /metrics requests
-metrics_app = make_asgi_app()
-router.mount("/metrics", metrics_app)
 
 
 @router.get("/health")
@@ -426,6 +423,9 @@ async def get_kobold_lite_ui():
 def build_app(args):
     app = fastapi.FastAPI(lifespan=lifespan)
     app.include_router(router)
+    # Add prometheus asgi middleware to route /metrics requests
+    metrics_app = make_asgi_app()
+    app.mount("/metrics", metrics_app)
     app.root_path = args.root_path
     if args.launch_kobold_api:
         logger.warning("Launching Kobold API server in addition to OpenAI. "
