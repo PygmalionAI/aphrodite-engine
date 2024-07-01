@@ -1,10 +1,13 @@
 import asyncio
+import datetime
 import enum
 import gc
 import glob
 import os
 import socket
 import subprocess
+import tempfile
+import threading
 import uuid
 import warnings
 from collections import defaultdict
@@ -18,6 +21,8 @@ import psutil
 import torch
 from loguru import logger
 from packaging.version import Version, parse
+
+from aphrodite.common.logger import enable_trace_function_call
 
 T = TypeVar("T")
 
@@ -604,3 +609,15 @@ def find_nccl_library():
             raise ValueError("NCCL only supports CUDA and ROCm backends.")
         logger.info(f"Found nccl from library {so_file}")
     return so_file
+
+
+def enable_trace_function_call_for_thread() -> None:
+    if int(os.getenv("APHRODITE_TRACE_FUNCTION", "0")):
+        tmp_dir = tempfile.gettempdir()
+        filename = (f"APHRODITE_TRACE_FUNCTION_for_process_{os.getpid()}"
+                    f"_thread_{threading.get_ident()}_"
+                    f"at_{datetime.datetime.now()}.log").replace(" ", "_")
+        log_path = os.path.join(tmp_dir, "aphrodite",
+                                get_aphrodite_instance_id(), filename)
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        enable_trace_function_call(log_path)
