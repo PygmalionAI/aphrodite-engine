@@ -10,6 +10,7 @@ from aphrodite.common.utils import make_async
 from aphrodite.lora.request import LoRARequest
 from aphrodite.transformers_utils.tokenizers import BaichuanTokenizer
 
+
 def get_cached_tokenizer(
     tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast]
 ) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
