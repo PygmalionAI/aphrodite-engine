@@ -247,15 +247,11 @@ class NCCLCommunicator:
         # now the `device` object is a `torch.device` object
         assert isinstance(device, torch.device)
         self.device = device
-        current_device = torch.cuda.current_device()
-        try:
-            torch.cuda.set_device(self.device)
+        with torch.cuda.device(device):
             NCCL_CHECK(
                 _c_ncclCommInitRank(ctypes.byref(self.comm), self.world_size,
                                     self.unique_id, self.rank))
             self.stream = torch.cuda.Stream()
-        finally:
-            torch.cuda.set_device(current_device)
 
     def all_reduce(self,
                    tensor: torch.Tensor,
