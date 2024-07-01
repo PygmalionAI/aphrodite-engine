@@ -22,7 +22,7 @@ from aphrodite.engine.output_processor.interfaces import \
 from aphrodite.engine.output_processor.stop_checker import StopChecker
 from aphrodite.engine.output_processor.util import \
     create_output_by_sequence_group
-from aphrodite.engine.ray_tools import initialize_ray_cluster
+from aphrodite.executor.ray_utils import initialize_ray_cluster
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.lora.request import LoRARequest
 from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs

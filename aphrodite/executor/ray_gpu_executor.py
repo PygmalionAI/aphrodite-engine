@@ -11,7 +11,7 @@ from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 from aphrodite.common.utils import (get_aphrodite_instance_id,
                                     get_distributed_init_method, get_ip,
                                     get_open_port, make_async)
-from aphrodite.engine.ray_tools import RayWorkerWrapper, ray
+from aphrodite.executor.ray_utils import RayWorkerWrapper, ray
 from aphrodite.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from aphrodite.lora.request import LoRARequest
 

@@ -5,7 +5,7 @@ from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import (
     BaseTokenizerGroup)
 from aphrodite.transformers_utils.tokenizer_group.tokenizer_group import (
     TokenizerGroup)
-from aphrodite.engine.ray_tools import ray
+from aphrodite.executor.ray_utils import ray
 
 if ray:
     from aphrodite.transformers_utils.tokenizer_group.ray_tokenizer_group import (  # noqa: E501
