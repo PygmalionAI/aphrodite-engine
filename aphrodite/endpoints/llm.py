@@ -120,7 +120,7 @@ class LLM:
     def generate(
         self,
         prompts: Optional[Union[str, List[str]]] = None,
-        sampling_params: Optional[SamplingParams] = None,
+        sampling_params: Optional[Union[SamplingParams, List[SamplingParams]]] = None,
         prompt_token_ids: Optional[List[List[int]]] = None,
         use_tqdm: bool = True,
         lora_request: Optional[LoRARequest] = None,
@@ -136,6 +136,9 @@ class LLM:
             prompts: A list of prompts to generate completions for.
             sampling_params: The sampling parameters for text generation. If
                 None, we use the default sampling parameters.
+                When it's a single value, it's applied to every prompt.
+                When it's a list, the list must have the same length as
+                the prompts and it's paired one-to-one with the prompts.
             prompt_token_ids: A list of token IDs for the prompts. If None, we
                 use the tokenizer to convert the prompts to token IDs.
             use_tqdm: Whether to use tqdm to display the progress bar.
@@ -157,9 +160,20 @@ class LLM:
             raise ValueError(
                 "The lengths of prompts and prompt_token_ids must "
                 "be the same.")
+
+        if prompts is not None:
+            num_requests = len(prompts)
+        else:
+            assert prompt_token_ids is not None
+            num_requests = len(prompt_token_ids)
+
         if sampling_params is None:
             # Use default sampling params.
             sampling_params = SamplingParams()
+        elif isinstance(sampling_params, list) and len(sampling_params
+                                                       ) != num_requests:
+            raise ValueError("The lengths of prompts and sampling_params must "
+                             "be the same.")
 
         if multi_modal_data:
             multi_modal_data.data = multi_modal_data.data.to(torch.float16)
@@ -173,7 +187,8 @@ class LLM:
                 i]
             self._add_request(
                 prompt,
-                sampling_params,
+                sampling_params[i] if isinstance(sampling_params,
+                                                 list) else sampling_params,
                 token_ids,
                 lora_request=lora_request,
                 # Get ith image while maintaining the batch dim.
