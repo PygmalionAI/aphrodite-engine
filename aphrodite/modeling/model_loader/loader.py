@@ -245,17 +245,17 @@ class DefaultModelLoader(BaseModelLoader):
                 if hasattr(module, "process_weights_after_loading"):
                     module.process_weights_after_loading()
         
-        if isinstance(linear_method, BNBLinearMethod):
-            replace_quant_params(
-                model,
-                quant_config=linear_method.quant_config,
-                modules_to_not_convert="lm_head",
-            )
-            torch.cuda.synchronize()
-            if linear_method.quant_config.from_float:
-                model = model.cuda()
-            gc.collect()
-            torch.cuda.empty_cache()
+            if isinstance(linear_method, BNBLinearMethod):
+                replace_quant_params(
+                    model,
+                    quant_config=linear_method.quant_config,
+                    modules_to_not_convert="lm_head",
+                )
+                torch.cuda.synchronize()
+                if linear_method.quant_config.from_float:
+                    model = model.cuda()
+                gc.collect()
+                torch.cuda.empty_cache()
 
         return model.eval()
 
