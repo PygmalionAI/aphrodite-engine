@@ -2,9 +2,9 @@ import pytest
 
 from aphrodite import LLM, SamplingParams
 
+
 def test_multiple_sampling_params():
-    llm = LLM(model='gpt2',
-              max_num_batched_tokens=1024)
+    llm = LLM(model='gpt2', max_num_batched_tokens=1024)
     prompts = [
         "Once upon a time",
         "In a galaxy far far away",
@@ -28,4 +28,3 @@ def test_multiple_sampling_params():
 
         outputs = llm.generate(prompts, sampling_params=None)
         assert len(prompts) == len(outputs)
-        

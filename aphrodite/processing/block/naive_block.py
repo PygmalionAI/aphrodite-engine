@@ -1,7 +1,7 @@
 from typing import Dict, Iterable, List, Optional, Set
 
 from aphrodite.processing.block.common import (CopyOnWriteTracker, RefCounter,
-                                    get_all_blocks_recursively)
+                                               get_all_blocks_recursively)
 from aphrodite.processing.block.interfaces import Block, BlockAllocator
 
 BlockId = int

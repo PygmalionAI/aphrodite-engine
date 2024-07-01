@@ -42,8 +42,7 @@ from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               ReplicatedLinear,
                                               RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
-from aphrodite.quantization.fp8 import (Fp8LinearMethod,
-                                                        per_tensor_quantize)
+from aphrodite.quantization.fp8 import (Fp8LinearMethod, per_tensor_quantize)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (

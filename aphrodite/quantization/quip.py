@@ -100,47 +100,59 @@ class QuipLinearMethod(LinearMethodBase):
             output_size, self.quant_config.use_rand)
 
         if had_left is not None:
-            layer.register_parameter("had_left", Parameter(
-            had_left.to(dtype=params_dtype, device="cuda"),
-            requires_grad=False,
-        ))
+            layer.register_parameter(
+                "had_left",
+                Parameter(
+                    had_left.to(dtype=params_dtype, device="cuda"),
+                    requires_grad=False,
+                ))
             set_weight_attrs(layer.had_left, extra_weight_attrs)
         if had_right is not None:
-            layer.register_parameter("had_right", Parameter(
-            had_right.to(dtype=params_dtype, device="cuda"),
-            requires_grad=False,
-        ))
+            layer.register_parameter(
+                "had_right",
+                Parameter(
+                    had_right.to(dtype=params_dtype, device="cuda"),
+                    requires_grad=False,
+                ))
             set_weight_attrs(layer.had_right, extra_weight_attrs)
-        layer.register_parameter("Qidxs", Parameter(
-        torch.empty(q_out_features,
-                    q_in_features // self.pack,
-                    device="cuda",
-                    dtype=self.idx_dtype),
-        requires_grad=False,
-        ))
+        layer.register_parameter(
+            "Qidxs",
+            Parameter(
+                torch.empty(q_out_features,
+                            q_in_features // self.pack,
+                            device="cuda",
+                            dtype=self.idx_dtype),
+                requires_grad=False,
+            ))
         set_weight_attrs(layer.Qidxs, extra_weight_attrs)
-        layer.register_parameter("Wscale", Parameter(
-        torch.ones((), dtype=torch.float, device="cuda"),
-        requires_grad=False,
-        ))
+        layer.register_parameter(
+            "Wscale",
+            Parameter(
+                torch.ones((), dtype=torch.float, device="cuda"),
+                requires_grad=False,
+            ))
         set_weight_attrs(layer.Wscale, extra_weight_attrs)
-        layer.register_parameter("SU", Parameter(
-        torch.ones(
-            input_size,
-            device="cuda",
-            dtype=params_dtype,
-        ),
-        requires_grad=False,
-        ))
+        layer.register_parameter(
+            "SU",
+            Parameter(
+                torch.ones(
+                    input_size,
+                    device="cuda",
+                    dtype=params_dtype,
+                ),
+                requires_grad=False,
+            ))
         set_weight_attrs(layer.SU, extra_weight_attrs)
-        layer.register_parameter("SV", Parameter(
-        torch.ones(
-            output_size,
-            device="cuda",
-            dtype=params_dtype,
-        ),
-        requires_grad=False,
-        ))
+        layer.register_parameter(
+            "SV",
+            Parameter(
+                torch.ones(
+                    output_size,
+                    device="cuda",
+                    dtype=params_dtype,
+                ),
+                requires_grad=False,
+            ))
         set_weight_attrs(layer.SV, extra_weight_attrs)
 
     def apply_weights(self,
@@ -160,16 +172,13 @@ class QuipLinearMethod(LinearMethodBase):
 
         if "SU" in layer:
             reshaped_x = reshaped_x * layer.SU
-        reshaped_x = matmul_hadUt_cuda(reshaped_x,
-                                       layer.get("had_left",
-                                                 None), layer.K_left,
-                                       layer.q_in_features,
+        reshaped_x = matmul_hadUt_cuda(reshaped_x, layer.get("had_left", None),
+                                       layer.K_left, layer.q_in_features,
                                        layer.Wscale)
 
         m, n = layer.Qidxs.shape
         if reshaped_x.size(0) < 32:
-            out = ops.quip_gemv(reshaped_x, layer.Qidxs,
-                                self.grid_packed_abs)
+            out = ops.quip_gemv(reshaped_x, layer.Qidxs, self.grid_packed_abs)
         else:
             W_decompressed = torch.empty(m,
                                          n * 8,
@@ -180,7 +189,7 @@ class QuipLinearMethod(LinearMethodBase):
             out = reshaped_x @ W_decompressed.T
 
         out = matmul_hadU_cuda(out, layer.get("had_right",
-                                                None), layer.K_right,
+                                              None), layer.K_right,
                                layer.q_out_features)[..., :out_dim]
         if "SV" in layer:
             out = out * layer.SV

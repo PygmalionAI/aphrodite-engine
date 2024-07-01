@@ -96,8 +96,7 @@ class GGUFLinearMethod(LinearMethodBase):
     def create_weights(self, layer: torch.nn.Module,
                        input_size_per_partition: int,
                        output_partition_sizes: List[int], input_size: int,
-                       output_size: int,
-                       params_dtype: torch.dtype,
+                       output_size: int, params_dtype: torch.dtype,
                        **extra_weight_attrs):
         # The type of weight is unknown until load state dict
         weight = torch.nn.parameter.UninitializedParameter(requires_grad=False)

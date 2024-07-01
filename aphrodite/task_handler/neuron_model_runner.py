@@ -9,7 +9,7 @@ from aphrodite.common.sequence import (SamplerOutput, SequenceData,
 from aphrodite.common.utils import (async_tensor_h2d, is_pin_memory_available,
                                     make_tensor_with_pad, maybe_expand_dim)
 from aphrodite.common.config import (DeviceConfig, ModelConfig, ParallelConfig,
-                              SchedulerConfig)
+                                     SchedulerConfig)
 from aphrodite.modeling import SamplingMetadata
 from aphrodite.modeling.model_loader.neuron import get_neuron_model
 from aphrodite.common.sampling_params import SamplingParams, SamplingType

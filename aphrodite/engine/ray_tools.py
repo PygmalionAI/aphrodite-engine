@@ -7,7 +7,6 @@ from aphrodite.common.config import ParallelConfig
 from aphrodite.common.utils import get_ip, is_hip
 from aphrodite.task_handler.worker_base import WorkerWrapperBase
 
-
 try:
     import ray
 

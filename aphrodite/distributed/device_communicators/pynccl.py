@@ -20,7 +20,6 @@
 # variable in the code.
 
 import ctypes
-import datetime
 import logging
 import os
 from typing import Optional, Union
@@ -71,10 +70,12 @@ _c_ncclGetErrorString = nccl.ncclGetErrorString
 _c_ncclGetErrorString.restype = ctypes.c_char_p
 _c_ncclGetErrorString.argtypes = [ncclResult_t]
 
+
 def NCCL_CHECK(result: ncclResult_t) -> None:
     if result != 0:
         error_str = _c_ncclGetErrorString(result).decode("utf-8")
         raise RuntimeError(f"NCCL error: {error_str}")
+
 
 # equivalent to c declaration:
 # ncclResult_t  ncclGetVersion(int *version);
@@ -122,6 +123,8 @@ _c_ncclCommInitRank.argtypes = [
     ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, NcclUniqueId, ctypes.c_int
 ]
 ncclDataType_t = ctypes.c_int
+
+
 class ncclDataTypeEnum:
     ncclInt8 = 0
     ncclChar = 0
@@ -139,6 +142,7 @@ class ncclDataTypeEnum:
     ncclDouble = 8
     ncclBfloat16 = 9
     ncclNumTypes = 10
+
     @classmethod
     def from_torch(cls, dtype: torch.dtype) -> int:
         if dtype == torch.int8:
@@ -158,7 +162,11 @@ class ncclDataTypeEnum:
         if dtype == torch.bfloat16:
             return cls.ncclBfloat16
         raise ValueError(f"Unsupported dtype: {dtype}")
+
+
 ncclRedOp_t = ctypes.c_int
+
+
 class ncclRedOpTypeEnum:
     ncclSum = 0
     ncclProd = 1
@@ -166,6 +174,7 @@ class ncclRedOpTypeEnum:
     ncclMin = 3
     ncclAvg = 4
     ncclNumOps = 5
+
     @classmethod
     def from_torch(cls, op: ReduceOp) -> int:
         if op == ReduceOp.SUM:
@@ -179,6 +188,8 @@ class ncclRedOpTypeEnum:
         if op == ReduceOp.AVG:
             return cls.ncclAvg
         raise ValueError(f"Unsupported op: {op}")
+
+
 # equivalent to c declaration:
 # ncclResult_t  ncclAllReduce(
 #   const void* sendbuff, void* recvbuff, size_t count,
@@ -239,9 +250,9 @@ class NCCLCommunicator:
         current_device = torch.cuda.current_device()
         try:
             torch.cuda.set_device(self.device)
-            NCCL_CHECK(_c_ncclCommInitRank(ctypes.byref(self.comm),
-                                           self.world_size, self.unique_id,
-                                           self.rank))
+            NCCL_CHECK(
+                _c_ncclCommInitRank(ctypes.byref(self.comm), self.world_size,
+                                    self.unique_id, self.rank))
             self.stream = torch.cuda.Stream()
         finally:
             torch.cuda.set_device(current_device)
@@ -269,8 +280,7 @@ class NCCLCommunicator:
                              tensor.numel(),
                              ncclDataTypeEnum.from_torch(tensor.dtype),
                              ncclRedOpTypeEnum.from_torch(op), self.comm,
-                             ctypes.c_void_p(stream.cuda_stream))
-        )
+                             ctypes.c_void_p(stream.cuda_stream)))
 
     def __del__(self):
         # `dist` module might have been already destroyed

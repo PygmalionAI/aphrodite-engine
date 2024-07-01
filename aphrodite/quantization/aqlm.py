@@ -18,6 +18,7 @@ with suppress(ImportError):
     from aphrodite._quant_C import quant_ops as ops
     HAS_QUANTS = True
 
+
 def get_int_dtype(nbits: int) -> torch.dtype:
     if nbits <= 8:
         return torch.int8

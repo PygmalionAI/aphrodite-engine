@@ -18,7 +18,8 @@ from rich.progress import (BarColumn, MofNCompleteColumn, Progress,
 RICH_CONSOLE = Console()
 LOG_LEVEL = os.getenv("APHRODITE_LOG_LEVEL", "INFO").upper()
 
-APHRODITE_CONFIGURE_LOGGING = int(os.getenv("APHRODITE_CONFIGURE_LOGGING", "1"))
+APHRODITE_CONFIGURE_LOGGING = int(os.getenv("APHRODITE_CONFIGURE_LOGGING",
+                                            "1"))
 
 
 def unwrap(wrapped, default=None):

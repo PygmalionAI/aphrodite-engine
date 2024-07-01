@@ -216,9 +216,10 @@ class CPUWorker(LoraNotSupportedWorkerBase):
         """Raise errors if the num_cpu_blocks is invalid.
         """
         if num_cpu_blocks <= 0:
-            raise ValueError("No available memory for the cache blocks. "
-                             "Try increasing `APHRODITE_CPU_KVCACHE_SPACE` when "
-                             "initializing the engine.")
+            raise ValueError(
+                "No available memory for the cache blocks. "
+                "Try increasing `APHRODITE_CPU_KVCACHE_SPACE` when "
+                "initializing the engine.")
 
         max_seq_len = self.cache_config.block_size * num_cpu_blocks
         if self.model_config.max_model_len > max_seq_len:
@@ -226,8 +227,8 @@ class CPUWorker(LoraNotSupportedWorkerBase):
                 f"The model's max seq len ({self.model_config.max_model_len}) "
                 "is larger than the maximum number of tokens that can be "
                 f"stored in KV cache ({max_seq_len}). Try increasing "
-                "`APHRODITE_CPU_KVCACHE_SPACE` or decreasing `max_model_len` when "
-                "initializing the engine.")
+                "`APHRODITE_CPU_KVCACHE_SPACE` or decreasing `max_model_len` "
+                "when initializing the engine.")
 
     def _init_cache_engine(self) -> None:
         self.cache_engine = CPUCacheEngine(self.cache_config,

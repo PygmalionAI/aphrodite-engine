@@ -77,8 +77,7 @@ class EETQLinearMethod(LinearMethodBase):
     def create_weights(self, layer: torch.nn.Module,
                        input_size_per_partition: int,
                        output_partition_sizes: List[int], input_size: int,
-                       output_size: int,
-                       params_dtype: torch.dtype,
+                       output_size: int, params_dtype: torch.dtype,
                        **extra_weight_attrs):
         output_size_per_partition = sum(output_partition_sizes)
         qweight = Parameter(torch.empty(input_size_per_partition,

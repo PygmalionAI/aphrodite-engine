@@ -9,8 +9,8 @@ from loguru import logger
 
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
-                              LoRAConfig, ModelConfig, ParallelConfig,
-                              SchedulerConfig, VisionLanguageConfig)
+                                     LoRAConfig, ModelConfig, ParallelConfig,
+                                     SchedulerConfig, VisionLanguageConfig)
 from aphrodite.distributed import (broadcast_tensor_dict,
                                    ensure_model_parallel_initialized,
                                    init_distributed_environment)

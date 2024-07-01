@@ -35,7 +35,6 @@ __all__ = [
 ]
 
 
-
 @dataclass
 class TensorizerConfig:
     tensorizer_uri: Union[io.BufferedIOBase, io.RawIOBase, typing.BinaryIO,
@@ -72,16 +71,16 @@ class TensorizerConfig:
                 and self.tensorizer_uri is not None):
             raise ValueError(
                 "Loading to multiple GPUs is not currently supported with "
-                "aphrodite-serialized models. Please set tensor_parallel_size=1."
-                " or use a non-aphrodite-serialized model, such as a "
-                "serialized Hugging Face `PretrainedModel`.")
+                "aphrodite-serialized models. Please set "
+                "tensor_parallel_size=1. or use a non-aphrodite-serialized "
+                "model, such as a serialized Hugging Face `PretrainedModel`.")
 
     def verify_with_model_config(self, model_config: "ModelConfig") -> None:
         if (model_config.quantization is not None
                 and self.tensorizer_uri is not None):
             logger.warning(
-                "Loading a model using Tensorizer with quantization on aphrodite"
-                " is unstable and may lead to errors.")
+                "Loading a model using Tensorizer with quantization on "
+                "aphrodite is unstable and may lead to errors.")
 
 
 def load_with_tensorizer(tensorizer_config: TensorizerConfig,
@@ -90,7 +89,8 @@ def load_with_tensorizer(tensorizer_config: TensorizerConfig,
     return tensorizer.deserialize()
 
 
-def is_aphrodite_serialized_tensorizer(tensorizer_config: TensorizerConfig) -> bool:
+def is_aphrodite_serialized_tensorizer(
+        tensorizer_config: TensorizerConfig) -> bool:
     if tensorizer_config is None:
         return False
     return tensorizer_config.aphrodite_tensorized
@@ -222,7 +222,8 @@ class TensorizerArgs:
         group.add_argument(
             "--aphrodite-tensorized",
             action="store_true",
-            help="If enabled, indicates that the serialized model is a aphrodite "
+            help=
+            "If enabled, indicates that the serialized model is a aphrodite "
             "model. This is used to determine the behavior of the "
             "TensorDeserializer when loading tensors from a "
             "serialized model.")
@@ -254,7 +255,8 @@ class TensorizerAgent:
         if tensorizer_load_fail is not None:
             raise ImportError(
                 "Tensorizer is not installed. Please install tensorizer "
-                "to use this feature with `pip install aphrodite-engine[tensorizer]`."
+                "to use this feature with "
+                "`pip install aphrodite-engine[tensorizer]`."
             ) from tensorizer_load_fail
 
         self.tensorizer_config = tensorizer_config

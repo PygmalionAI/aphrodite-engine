@@ -19,9 +19,8 @@ from loguru import logger
 
 from aphrodite.common.config import LoadConfig, ModelConfig
 from aphrodite.quantization import (QuantizationConfig,
-                                                     get_quantization_config)
+                                    get_quantization_config)
 from aphrodite.quantization.schema import QuantParamSchema
-
 
 # use system-level temp directory for file locks, so that multiple users
 # can share the same lock without error.

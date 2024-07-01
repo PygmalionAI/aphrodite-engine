@@ -36,7 +36,6 @@ _VISION_MODEL_CLASSES = [
 ]
 
 
-
 def _get_linear_method(
         model_config: ModelConfig,
         load_config: LoadConfig) -> Optional["LinearMethodBase"]:
@@ -244,7 +243,7 @@ class DefaultModelLoader(BaseModelLoader):
                     linear_method.process_weights_after_loading(module)
                 if hasattr(module, "process_weights_after_loading"):
                     module.process_weights_after_loading()
-        
+
             if isinstance(linear_method, BNBLinearMethod):
                 replace_quant_params(
                     model,

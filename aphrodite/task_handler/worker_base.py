@@ -16,8 +16,8 @@ from aphrodite.lora.request import LoRARequest
 
 
 class WorkerBase(ABC):
-    """Worker interface that allows Aphrodite to cleanly separate implementations
-    for different hardware.
+    """Worker interface that allows Aphrodite to cleanly separate
+    implementations for different hardware.
     """
 
     @abstractmethod

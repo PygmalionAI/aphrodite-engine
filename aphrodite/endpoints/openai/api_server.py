@@ -63,8 +63,6 @@ async def lifespan(app: fastapi.FastAPI):
     yield
 
 
-
-
 @router.get("/health")
 async def health() -> Response:
     """Health check."""

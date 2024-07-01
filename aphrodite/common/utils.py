@@ -593,10 +593,8 @@ def find_nccl_library():
 
     # manually load the nccl library
     if so_file:
-        logger.info(
-            "Found nccl from environment variable "
-            f"APHRODITE_NCCL_SO_PATH={so_file}"
-        )
+        logger.info("Found nccl from environment variable "
+                    f"APHRODITE_NCCL_SO_PATH={so_file}")
     else:
         if torch.version.cuda is not None:
             so_file = aphrodite_nccl_path or find_library("libnccl.so.2")

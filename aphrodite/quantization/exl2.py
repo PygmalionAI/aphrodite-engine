@@ -92,8 +92,7 @@ class Exl2LinearMethod(LinearMethodBase):
     def create_weights(self, layer: torch.nn.Module,
                        input_size_per_partition: int,
                        output_partition_sizes: List[int], input_size: int,
-                       output_size: int,
-                       params_dtype: torch.dtype,
+                       output_size: int, params_dtype: torch.dtype,
                        **extra_weight_attr):
         # The shape of weight is unknown until load state dict
         # q_groups, q_invperm, q_scale, q_scale_max, q_weight, q_groups
@@ -130,8 +129,8 @@ class Exl2LinearMethod(LinearMethodBase):
             if not hasattr(layer, 'q_perm'):
                 layer.q_perm = torch.argsort(layer.q_invperm).to(torch.short)
             if not hasattr(layer, 'q_group_map'):
-                layer.q_group_map = make_group_map(
-                    layer.q_groups, layer.q_weight.shape[0])
+                layer.q_group_map = make_group_map(layer.q_groups,
+                                                   layer.q_weight.shape[0])
             layer.q_matrix = ops.exl2_make_q_matrix(
                 layer.q_weight,
                 layer.q_perm,

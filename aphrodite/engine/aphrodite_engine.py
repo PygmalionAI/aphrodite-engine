@@ -148,7 +148,6 @@ class AphroditeEngine:
 
         self._initialize_kv_caches()
 
-
         if self.tokenizer:
             # Ping the tokenizer to ensure liveness if it runs in a
             # different process.

@@ -59,14 +59,9 @@ class OpenAIServingChat(OpenAIServing):
         # Just replace the content list with the very first text message
         for message in request.messages:
             if message.role == "user" and isinstance(message["content"], list):
-                message["content"] = next(
-                    (
-                        content["text"]
-                        for content in message["content"]
-                        if content["type"] == "text"
-                    ),
-                    ""
-                )
+                message["content"] = next((content["text"]
+                                           for content in message["content"]
+                                           if content["type"] == "text"), "")
 
         try:
             prompt = self.tokenizer.apply_chat_template(

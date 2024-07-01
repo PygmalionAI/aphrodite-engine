@@ -1,6 +1,5 @@
 from typing import Dict, List, Set, Tuple
 
-
 from aphrodite.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from aphrodite.lora.request import LoRARequest
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata

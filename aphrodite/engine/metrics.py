@@ -7,10 +7,8 @@ from prometheus_client import (REGISTRY, Counter, Gauge, Histogram, Info,
                                disable_created_metrics)
 from loguru import logger
 
-
 if TYPE_CHECKING:
     from aphrodite.spec_decode.metrics import SpecDecodeWorkerMetrics
-
 
 disable_created_metrics()
 

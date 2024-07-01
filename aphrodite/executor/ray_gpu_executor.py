@@ -21,7 +21,6 @@ if ray is not None:
 if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
 
-
 # If the env var is set, it uses the Ray's compiled DAG API
 # which optimizes the control plane overhead.
 # Run Aphrodite with APHRODITE_USE_RAY_COMPILED_DAG=1 to enable it.

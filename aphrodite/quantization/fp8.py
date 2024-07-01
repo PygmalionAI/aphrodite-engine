@@ -24,7 +24,6 @@ class FP8Config(QuantizationConfig):
     def get_min_capability(cls) -> int:
         return 89
 
-
     @classmethod
     def get_config_filenames(cls) -> List[str]:
         return []

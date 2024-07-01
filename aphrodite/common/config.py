@@ -19,10 +19,9 @@ if TYPE_CHECKING:
 
     from aphrodite.modeling.model_loader.loader import BaseModelLoader
 
-
 # If true, will load models from ModelScope instead of Hugging Face Hub.
 APHRODITE_USE_MODELSCOPE = os.environ.get("APHRODITE_USE_MODELSCOPE",
-                                     "False").lower() == "true"
+                                          "False").lower() == "true"
 
 _GB = 1 << 30
 

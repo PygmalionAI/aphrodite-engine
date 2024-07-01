@@ -65,7 +65,6 @@ class BitsandBytesConfig(QuantizationConfig):
         # The BitsandBytes kernel only supports Ampere or newer GPUs.
         return 75
 
-
     @staticmethod
     def get_config_filenames() -> List[str]:
         return [
@@ -107,8 +106,7 @@ class BNBLinearMethod(LinearMethodBase):
     def create_weights(self, layer: torch.nn.Module,
                        input_size_per_partition: int,
                        output_partition_sizes: List[int], input_size: int,
-                       output_size: int,
-                       params_dtype: torch.dtype,
+                       output_size: int, params_dtype: torch.dtype,
                        **extra_weight_attrs):
         if self.quant_config.quant_mode == "weight_only" and \
                 input_size_per_partition % self.quant_config.group_size != 0:

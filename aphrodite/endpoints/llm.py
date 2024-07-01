@@ -120,7 +120,8 @@ class LLM:
     def generate(
         self,
         prompts: Optional[Union[str, List[str]]] = None,
-        sampling_params: Optional[Union[SamplingParams, List[SamplingParams]]] = None,
+        sampling_params: Optional[Union[SamplingParams,
+                                        List[SamplingParams]]] = None,
         prompt_token_ids: Optional[List[List[int]]] = None,
         use_tqdm: bool = True,
         lora_request: Optional[LoRARequest] = None,
@@ -170,8 +171,8 @@ class LLM:
         if sampling_params is None:
             # Use default sampling params.
             sampling_params = SamplingParams()
-        elif isinstance(sampling_params, list) and len(sampling_params
-                                                       ) != num_requests:
+        elif isinstance(sampling_params,
+                        list) and len(sampling_params) != num_requests:
             raise ValueError("The lengths of prompts and sampling_params must "
                              "be the same.")
 
@@ -187,8 +188,8 @@ class LLM:
                 i]
             self._add_request(
                 prompt,
-                sampling_params[i] if isinstance(sampling_params,
-                                                 list) else sampling_params,
+                sampling_params[i]
+                if isinstance(sampling_params, list) else sampling_params,
                 token_ids,
                 lora_request=lora_request,
                 # Get ith image while maintaining the batch dim.

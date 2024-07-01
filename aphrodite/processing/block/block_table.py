@@ -1,7 +1,8 @@
 from typing import List, Optional
 
-from aphrodite.processing.block.interfaces import Block, DeviceAwareBlockAllocator
 from aphrodite.common.utils import Device, cdiv, chunk_list
+from aphrodite.processing.block.interfaces import (Block,
+                                                   DeviceAwareBlockAllocator)
 
 
 class BlockTable:

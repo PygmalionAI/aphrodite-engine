@@ -156,7 +156,8 @@ class ROCmFlashAttentionImpl(AttentionImpl):
         self.use_naive_attn = False
         # NOTE: Allow for switching between Triton and CK. Defaulting to triton.
         self.use_triton_flash_attn = (os.environ.get(
-            "APHRODITE_USE_TRITON_FLASH_ATTN", "True").lower() in ("true", "1"))
+            "APHRODITE_USE_TRITON_FLASH_ATTN", "True").lower()
+                                      in ("true", "1"))
         if self.use_triton_flash_attn:
             from aphrodite.attention.ops.triton_flash_attention import \
                 triton_attention  # noqa: F401
