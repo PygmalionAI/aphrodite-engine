@@ -22,6 +22,7 @@ class StopChecker:
     def maybe_stop_sequence(self, seq: Sequence, new_char_count: int,
                             sampling_params: SamplingParams) -> None:
         """Stop the finished sequences.
+
        new_char_count is the number of chars added to the
            sequence's output text for the newly generated token
         """
@@ -72,6 +73,7 @@ class StopChecker:
                             sampling_params: SamplingParams) -> Optional[str]:
         """Check if any stop strings are matched and truncate sequence
         output text accordingly.
+
         Returns the stop string if matched or else None.
         """
         if not new_char_count:

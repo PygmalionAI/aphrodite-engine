@@ -16,37 +16,30 @@
 # limitations under the License.
 """Inference-only Gemma model compatible with HuggingFace weights."""
 from functools import lru_cache
-from typing import List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 import torch
+from loguru import logger
 from torch import nn
 from transformers import GemmaConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
+from aphrodite.common.config import LoRAConfig
+from aphrodite.common.sequence import SamplerOutput
+from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.modeling.layers.activation import GeluAndMul
 from aphrodite.modeling.layers.layernorm import RMSNorm
-from aphrodite.modeling.layers.linear import (
-    LinearMethodBase,
-    MergedColumnParallelLinear,
-    QKVParallelLinear,
-    RowParallelLinear,
-    ColumnParallelLinear,
-)
-from aphrodite.modeling.layers.rotary_embedding import get_rope
+from aphrodite.modeling.layers.linear import (LinearMethodBase,
+                                              MergedColumnParallelLinear,
+                                              QKVParallelLinear,
+                                              RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
+from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
-from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding,
-    ParallelLMHead,
-)
-from aphrodite.distributed import (
-    get_tensor_model_parallel_world_size, )
+from aphrodite.modeling.layers.vocab_parallel_embedding import \
+    VocabParallelEmbedding
+from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.modeling.hf_downloader import (
-    default_weight_loader,
-    hf_model_weights_iterator,
-)
-from aphrodite.common.sequence import SamplerOutput
 
 
 @lru_cache(maxsize=None)
@@ -56,8 +49,16 @@ def _get_gemma_act_fn(
 ) -> nn.Module:
     if hidden_activation is None:
         if hidden_act is not None:
-            hidden_activation = hidden_act
-        return GeluAndMul(approximate="none")
+            logger.warning(
+                "Gemma's activation function was incorrectly set to exact GeLU "
+                "in the config JSON file when it was initially released. "
+                "Changing the activation function to approximate GeLU "
+                "(`gelu_pytorch_tanh`). If you want to use the legacy "
+                f"`{hidden_act}`, edit the config JSON to set "
+                f"`hidden_activation={hidden_act}` instead of `hidden_act`. "
+                "See https://github.com/huggingface/transformers/pull/29402 "
+                "for more details.")
+        return GeluAndMul(approximate="tanh")
     elif hidden_activation == "gelu_pytorch_tanh":
         return GeluAndMul(approximate="tanh")
     elif hidden_activation == "gelu":
@@ -78,44 +79,18 @@ class GemmaMLP(nn.Module):
         linear_method: Optional[LinearMethodBase] = None,
     ) -> None:
         super().__init__()
-        if (linear_method is not None
-                and not linear_method.quant_config.merge_weight()):
-            self.merge_weight = False
-            self.gate_proj = ColumnParallelLinear(
-                hidden_size,
-                intermediate_size,
-                bias=False,
-                linear_method=linear_method,
-            )
-            self.up_proj = ColumnParallelLinear(
-                hidden_size,
-                intermediate_size,
-                bias=False,
-                linear_method=linear_method,
-            )
-        else:
-            self.merge_weight = True
-            self.gate_up_proj = MergedColumnParallelLinear(
-                hidden_size,
-                [intermediate_size] * 2,
-                bias=False,
-                linear_method=linear_method,
-            )
-        self.down_proj = RowParallelLinear(
-            intermediate_size,
-            hidden_size,
+        self.gate_up_proj = MergedColumnParallelLinear(
+            hidden_size, [intermediate_size] * 2,
             bias=False,
-            linear_method=linear_method,
-        )
+            linear_method=linear_method)
+        self.down_proj = RowParallelLinear(intermediate_size,
+                                           hidden_size,
+                                           bias=False,
+                                           linear_method=linear_method)
         self.act_fn = _get_gemma_act_fn(hidden_act, hidden_activation)
 
     def forward(self, x):
-        if self.merge_weight:
-            gate_up, _ = self.gate_up_proj(x)
-        else:
-            up, _ = self.up_proj(x)
-            gate, _ = self.gate_proj(x)
-            gate_up = torch.cat([gate, up], dim=-1)
+        gate_up, _ = self.gate_up_proj(x)
         x = self.act_fn(gate_up)
         x, _ = self.down_proj(x)
         return x
@@ -123,16 +98,14 @@ class GemmaMLP(nn.Module):
 
 class GemmaAttention(nn.Module):
 
-    def __init__(
-        self,
-        hidden_size: int,
-        num_heads: int,
-        num_kv_heads: int,
-        head_dim: int,
-        max_position_embeddings: int = 8192,
-        rope_theta: float = 10000,
-        linear_method: Optional[LinearMethodBase] = None,
-    ) -> None:
+    def __init__(self,
+                 hidden_size: int,
+                 num_heads: int,
+                 num_kv_heads: int,
+                 head_dim: int,
+                 max_position_embeddings: int = 8192,
+                 rope_theta: float = 10000,
+                 linear_method: Optional[LinearMethodBase] = None) -> None:
         super().__init__()
         self.hidden_size = hidden_size
         tp_size = get_tensor_model_parallel_world_size()
@@ -155,59 +128,32 @@ class GemmaAttention(nn.Module):
         self.scaling = self.head_dim**-0.5
         self.rope_theta = rope_theta
 
-        if (linear_method is not None
-                and not linear_method.quant_config.merge_weight()):
-            self.merge_weight = False
-            self.q_proj = ColumnParallelLinear(
-                hidden_size,
-                self.total_num_heads * self.head_dim,
-                bias=False,
-                linear_method=linear_method,
-            )
-            self.k_proj = ColumnParallelLinear(
-                hidden_size,
-                self.total_num_kv_heads * self.head_dim,
-                bias=False,
-                linear_method=linear_method,
-            )
-            self.v_proj = ColumnParallelLinear(
-                hidden_size,
-                self.total_num_kv_heads * self.head_dim,
-                bias=False,
-                linear_method=linear_method,
-            )
-        else:
-            self.merge_weight = True
-            self.qkv_proj = QKVParallelLinear(
-                hidden_size,
-                self.head_dim,
-                self.total_num_heads,
-                self.total_num_kv_heads,
-                bias=False,
-                linear_method=linear_method,
-            )
+        self.qkv_proj = QKVParallelLinear(
+            hidden_size,
+            self.head_dim,
+            self.total_num_heads,
+            self.total_num_kv_heads,
+            bias=False,
+            linear_method=linear_method,
+        )
         self.o_proj = RowParallelLinear(
             self.total_num_heads * self.head_dim,
             hidden_size,
             bias=False,
             linear_method=linear_method,
         )
-        is_neox_style = (True if linear_method is None
-                         or linear_method.quant_config.rope_style() is None
-                         else linear_method.quant_config.rope_style())
+
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.head_dim,
             max_position=max_position_embeddings,
             base=self.rope_theta,
-            is_neox_style=is_neox_style,
+            is_neox_style=True,
         )
-        self.attn = Attention(
-            self.num_heads,
-            self.head_dim,
-            self.scaling,
-            num_kv_heads=self.num_kv_heads,
-        )
+        self.attn = Attention(self.num_heads,
+                              self.head_dim,
+                              self.scaling,
+                              num_kv_heads=self.num_kv_heads)
 
     def forward(
         self,
@@ -216,14 +162,8 @@ class GemmaAttention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        if self.merge_weight:
-            qkv, _ = self.qkv_proj(hidden_states)
-            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size],
-                                dim=-1)
-        else:
-            q, _ = self.q_proj(hidden_states)
-            k, _ = self.k_proj(hidden_states)
-            v, _ = self.v_proj(hidden_states)
+        qkv, _ = self.qkv_proj(hidden_states)
+        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         output, _ = self.o_proj(attn_output)
@@ -299,9 +239,10 @@ class GemmaModel(nn.Module):
         super().__init__()
         self.config = config
 
-        self.embed_tokens = VocabParallelEmbedding(config.vocab_size,
-                                                   config.hidden_size,
-                                                   linear_method=linear_method)
+        self.embed_tokens = VocabParallelEmbedding(
+            config.vocab_size,
+            config.hidden_size,
+        )
         self.layers = nn.ModuleList([
             GemmaDecoderLayer(config, linear_method)
             for _ in range(config.num_hidden_layers)
@@ -340,21 +281,41 @@ class GemmaModel(nn.Module):
 
 
 class GemmaForCausalLM(nn.Module):
+    packed_modules_mapping = {
+        "qkv_proj": [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+        ],
+        "gate_up_proj": [
+            "gate_proj",
+            "up_proj",
+        ],
+    }
+
+    # LoRA specific attributes
+    supported_lora_modules = [
+        "qkv_proj",
+        "o_proj",
+        "gate_up_proj",
+        "down_proj",
+    ]
+    # Gemma does not apply LoRA to the embedding layer.
+    embedding_modules = {}
+    embedding_padding_modules = []
 
     def __init__(
         self,
         config: GemmaConfig,
         linear_method: Optional[LinearMethodBase] = None,
+        lora_config: Optional[LoRAConfig] = None,
     ) -> None:
+        del lora_config  # Unused.
         super().__init__()
         self.config = config
         self.linear_method = linear_method
         self.model = GemmaModel(config, linear_method)
-        self.lm_head = ParallelLMHead(config.vocab_size,
-                                      config.hidden_size,
-                                      linear_method=linear_method)
-        self.logits_processor = LogitsProcessor(config.vocab_size,
-                                                config.tokenizer_vocab_size)
+        self.logits_processor = LogitsProcessor(config.vocab_size)
         self.sampler = Sampler()
 
     @torch.no_grad()
@@ -371,8 +332,8 @@ class GemmaForCausalLM(nn.Module):
 
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
-        logits = self.logits_processor(self.lm_head, hidden_states,
-                                       sampling_metadata)
+        logits = self.logits_processor(self.model.embed_tokens.weight,
+                                       hidden_states, sampling_metadata)
         return logits
 
     def sample(
@@ -383,13 +344,7 @@ class GemmaForCausalLM(nn.Module):
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
-    def load_weights(
-        self,
-        model_name_or_path: str,
-        cache_dir: Optional[str] = None,
-        load_format: str = "auto",
-        revision: Optional[str] = None,
-    ):
+    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
             ("qkv_proj", "q_proj", "q"),
@@ -398,29 +353,13 @@ class GemmaForCausalLM(nn.Module):
             ("gate_up_proj", "gate_proj", 0),
             ("gate_up_proj", "up_proj", 1),
         ]
-        if (self.linear_method is not None
-                and not self.linear_method.quant_config.merge_weight()):
-            stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         loaded_params = set()
-        for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision,
-                self.config):
-            if "rotary_emb.inv_freq" in name:
-                continue
-            if "embed_tokens" in name:
-                # Copy word embedding to lm_head
-                head_name = name.replace("model.embed_tokens", "lm_head")
-                if head_name in params_dict:
-                    loaded_params.add(head_name)
-                    lm_head_param = params_dict[head_name]
-                    weight_loader = getattr(lm_head_param, "weight_loader",
-                                            default_weight_loader)
-                    weight_loader(lm_head_param, loaded_weight)
-            for param_name, weight_name, shard_id in stacked_params_mapping:
-                if weight_name not in name:
+        for name, loaded_weight in weights:
+            for (param_name, shard_name, shard_id) in stacked_params_mapping:
+                if shard_name not in name:
                     continue
-                name = name.replace(weight_name, param_name)
+                name = name.replace(shard_name, param_name)
                 # Skip loading extra bias for GPTQ models.
                 if name.endswith(".bias") and name not in params_dict:
                     continue
@@ -429,10 +368,12 @@ class GemmaForCausalLM(nn.Module):
                 weight_loader(param, loaded_weight, shard_id)
                 break
             else:
+                # lm_head is not used in Aphrodite as it is tied with
+                # embed_token. To prevent errors, skip loading lm_head.weight.
                 if "lm_head.weight" in name:
                     continue
-                # Skip loading extra layer for lora models.
-                if "lm_head" in name and name not in params_dict:
+                # Skip loading extra bias for GPTQ models.
+                if name.endswith(".bias") and name not in params_dict:
                     continue
                 # GemmaRMSNorm is different from Llama's in that it multiplies
                 # (1 + weight) to the output, instead of just weight.

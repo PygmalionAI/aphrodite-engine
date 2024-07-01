@@ -1,14 +1,13 @@
-from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional, TypeVar, Callable
 import random
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional, Tuple, TypeVar
 
 import torch
 
-from aphrodite.modeling.layers.ops.sample import (get_num_triton_sampler_splits
-                                                  )
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import SequenceData
 from aphrodite.common.utils import is_pin_memory_available
+from aphrodite.modeling.layers.ops.sample import get_num_triton_sampler_splits
 
 _SEED_0_REPLACEMENT = 3403598558  # chosen by fair roll of a die
 

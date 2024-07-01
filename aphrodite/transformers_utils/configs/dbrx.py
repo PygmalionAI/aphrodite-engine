@@ -6,20 +6,22 @@
 """Dbrx configuration."""
 
 from typing import Any, Optional
-from loguru import logger
 
+from loguru import logger
 from transformers.configuration_utils import PretrainedConfig
 
-
-DBRX_PRETRAINED_CONFIG_ARCHIVE_MAP = {}
+DBRX_PRETRAINED_CONFIG_ARCHIVE_MAP = {} # type: ignore
 
 
 class DbrxAttentionConfig(PretrainedConfig):
     """Configuration class for Dbrx Attention.
+
     [`DbrxAttention`] class. It is used to instantiate attention layers
     according to the specified arguments, defining the layers architecture.
+
     Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
     documentation from [`PretrainedConfig`] for more information.
+
     Args:
         attn_pdrop (`float`, *optional*, defaults to 0.0):
             The dropout probability for the attention layers.
@@ -77,10 +79,13 @@ class DbrxAttentionConfig(PretrainedConfig):
 
 class DbrxFFNConfig(PretrainedConfig):
     """Configuration class for Dbrx FFN.
+
     [`DbrxFFN`] class. It is used to instantiate feedforward layers according to
     the specified arguments, defining the layers architecture.
+
     Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
     documentation from [`PretrainedConfig`] for more information.
+
     Args:
         ffn_act_fn (dict, optional): A dict specifying activation function for the FFN.
             The dict should have a key 'name' with the value being the name of
@@ -153,10 +158,14 @@ class DbrxFFNConfig(PretrainedConfig):
 
 class DbrxConfig(PretrainedConfig):
     """Configuration class for Dbrx.
+
     [`DbrxModel`]. It is used to instantiate a Dbrx model according to the
     specified arguments, defining the model architecture.
+
     Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
     documentation from [`PretrainedConfig`] for more information.
+
+
     Args:
         d_model (`int`, *optional*, defaults to 6144):
             Dimensionality of the embeddings and hidden states.
@@ -186,13 +195,18 @@ class DbrxConfig(PretrainedConfig):
             allow the model to output the auxiliary loss. See [here]() for more details
         router_aux_loss_coef (`float`, *optional*, defaults to 0.001):
             The aux loss factor for the total loss.
+
+
     Example:
     ```python
     >>> from transformers import DbrxConfig, DbrxModel
+
     >>> # Initializing a Dbrx configuration
     >>> configuration = DbrxConfig()
+
     >>> # Initializing a model (with random weights) from the configuration
     >>> model = DbrxModel(configuration)
+
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```

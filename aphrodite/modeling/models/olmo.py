@@ -37,47 +37,29 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """Inference-only OLMo model compatible with HuggingFace weights."""
-
-from typing import List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 import torch
-import torch.nn.functional as F
+# this model must need this dependency
+from hf_olmo import OLMoConfig
 from torch import nn
 
 from aphrodite.attention import Attention, AttentionMetadata
-from aphrodite.modeling.layers.linear import (
-    ColumnParallelLinear,
-    LinearMethodBase,
-    QKVParallelLinear,
-    RowParallelLinear,
-)
-from aphrodite.modeling.layers.rotary_embedding import get_rope
-from aphrodite.modeling.layers.logits_processor import LogitsProcessor
-from aphrodite.modeling.layers.sampler import Sampler
-from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding,
-    ParallelLMHead,
-)
-from aphrodite.distributed import (
-    get_tensor_model_parallel_world_size, )
-from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.modeling.hf_downloader import (
-    default_weight_loader,
-    hf_model_weights_iterator,
-)
 from aphrodite.common.sequence import SamplerOutput
-from aphrodite.transformers_utils.configs.olmo import OLMoConfig
-
-
-class SwiGLU(nn.Module):
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x, gate = x.chunk(2, dim=-1)
-        return F.silu(gate) * x
-
-    @property
-    def output_multiplier(self) -> float:
-        return 0.5
+from aphrodite.distributed import get_tensor_model_parallel_world_size
+from aphrodite.modeling.layers.activation import SiluAndMul
+from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
+                                              LinearMethodBase,
+                                              MergedColumnParallelLinear,
+                                              QKVParallelLinear,
+                                              RowParallelLinear)
+from aphrodite.modeling.layers.logits_processor import LogitsProcessor
+from aphrodite.modeling.layers.rotary_embedding import get_rope
+from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.vocab_parallel_embedding import \
+    VocabParallelEmbedding
+from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
+from aphrodite.modeling.sampling_metadata import SamplingMetadata
 
 
 class OlmoAttention(nn.Module):
@@ -181,17 +163,16 @@ class OlmoMLP(nn.Module):
                                     bias=False)
 
         # Feed-forward input projection.
-        self.ff_proj = ColumnParallelLinear(
+        self.ff_proj = MergedColumnParallelLinear(
             config.d_model,
-            self.hidden_size,
+            [self.hidden_size // 2] * 2,
             bias=config.include_bias,
             linear_method=linear_method,
         )
 
         # Activation function.
-        # self.act = SiluAndMul()
-        # self.act.output_multiplier = 0.5
-        self.act = SwiGLU()
+        self.act = SiluAndMul()
+        self.act.output_multiplier = 0.5
         assert (self.act.output_multiplier * self.hidden_size) % 1 == 0
 
         # Feed-forward output projection.
@@ -220,16 +201,14 @@ class OlmoMLP(nn.Module):
 
 class OlmoBlock(nn.Module):
     """
-    This is a typical transformer block where the output is computed as
-    ``MLP(LN(x + Attention(LN(x))))``
+    This is a typical transformer block where the output is
+    computed as ``MLP(LN(x + Attention(LN(x))))``
     (plus another skip connection).
     """
 
-    def __init__(
-        self,
-        config: OLMoConfig,
-        linear_method: Optional[LinearMethodBase] = None,
-    ):
+    def __init__(self,
+                 config: OLMoConfig,
+                 linear_method: Optional[LinearMethodBase] = None):
         super().__init__()
         # Attention block.
         self.attn = OlmoAttention(config, linear_method)
@@ -256,11 +235,9 @@ class OlmoBlock(nn.Module):
 
 class OlmoModel(nn.Module):
 
-    def __init__(
-        self,
-        config: OLMoConfig,
-        linear_method: Optional[LinearMethodBase] = None,
-    ):
+    def __init__(self,
+                 config: OLMoConfig,
+                 linear_method: Optional[LinearMethodBase] = None):
         super().__init__()
         self.config = config
 
@@ -269,17 +246,10 @@ class OlmoModel(nn.Module):
                 wte=VocabParallelEmbedding(
                     config.embedding_size or config.vocab_size,
                     config.d_model,
-                    linear_method=linear_method,
                 ),
                 ln_f=nn.LayerNorm(config.d_model,
                                   elementwise_affine=False,
                                   bias=False),
-                ff_out=ParallelLMHead(
-                    config.embedding_size or config.vocab_size,
-                    config.d_model,
-                    bias=config.include_bias,
-                    linear_method=linear_method,
-                ),
             ))
 
         blocks = [
@@ -289,6 +259,17 @@ class OlmoModel(nn.Module):
             raise NotImplementedError("Block group size > 1 not supported yet")
         else:
             self.transformer.update({"blocks": nn.ModuleList(blocks)})
+
+        if not config.weight_tying:
+            self.transformer.update({
+                "ff_out":
+                ColumnParallelLinear(
+                    config.d_model,
+                    config.embedding_size or config.vocab_size,
+                    bias=config.include_bias,
+                    linear_method=linear_method,
+                )
+            })
 
     def forward(
         self,
@@ -325,17 +306,17 @@ class OLMoForCausalLM(nn.Module):
     Extremely barebones HF model wrapper.
     """
 
-    def __init__(
-        self,
-        config: OLMoConfig,
-        linear_method: Optional[LinearMethodBase] = None,
-    ):
+    def __init__(self,
+                 config: OLMoConfig,
+                 linear_method: Optional[LinearMethodBase] = None):
         super().__init__()
         self.config = config
         self.linear_method = linear_method
         self.model = OlmoModel(config, linear_method)
-        self.logits_processor = LogitsProcessor(config.vocab_size,
-                                                config.tokenizer_vocab_size)
+        self.lm_head_weight = (self.model.transformer.wte.weight
+                               if config.weight_tying else
+                               self.model.transformer.ff_out.weight)
+        self.logits_processor = LogitsProcessor(config.vocab_size)
         self.sampler = Sampler()
 
     def forward(
@@ -355,8 +336,8 @@ class OLMoForCausalLM(nn.Module):
 
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
-        logits = self.logits_processor(self.model.transformer.ff_out,
-                                       hidden_states, sampling_metadata)
+        logits = self.logits_processor(self.lm_head_weight, hidden_states,
+                                       sampling_metadata)
         return logits
 
     def sample(
@@ -367,31 +348,19 @@ class OLMoForCausalLM(nn.Module):
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
-    def load_weights(
-        self,
-        model_name_or_path: str,
-        cache_dir: Optional[str] = None,
-        load_format: str = "auto",
-        revision: Optional[str] = None,
-    ):
+    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         params_dict = dict(self.named_parameters(remove_duplicate=False))
-        for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision):
-            if "wte" in name and self.config.weight_tying:
-                # Copy word embedding to lm_head
-                head_name = name.replace("model.transformer.wte",
-                                         "model.transformer.ff_out")
-                if head_name in params_dict:
-                    lm_head_param = params_dict[head_name]
-                    weight_loader = getattr(lm_head_param, "weight_loader",
-                                            default_weight_loader)
-                    weight_loader(lm_head_param, loaded_weight)
+        for name, loaded_weight in weights:
             # attention
             if ".att" in name:
                 name = name.replace(".att", ".attn.att")
             # mlp
-            if ".ff" in name and "transformer.ff_out" not in name:
-                name = name.replace(".ff", ".mlp.ff")
+            if ".ff_proj" in name:
+                name = name.replace(".ff_proj", ".mlp.ff_proj")
+                # Reverse the weight for the MergeColumnParallelLinear
+                loaded_weight = torch.concat(loaded_weight.chunk(2)[::-1])
+            if ".ff_out" in name and "transformer.ff_out" not in name:
+                name = name.replace(".ff_out", ".mlp.ff_out")
             # there is no bias in olmo
             param = params_dict[name]
             weight_loader = getattr(param, "weight_loader",

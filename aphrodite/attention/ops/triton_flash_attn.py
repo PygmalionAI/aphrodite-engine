@@ -2,16 +2,22 @@
 """
 Fused Attention
 ===============
+
 This is a Triton implementation of the Flash Attention v2 algorithm from Tri Dao
 (https://tridao.me/publications/flash2/flash2.pdf)
 Credits: OpenAI kernel team, AMD ML Frameworks Triton team
+
 Features supported:
+
 1) Fwd with causal masking
 2) Any sequence lengths without padding (currently fwd kernel only)
 3) Support for different sequence lengths for q and k
 4) Nested tensor API currently does not support dropout or bias.
+
 Not currently supported:
+
 1) Non power of two head dims
+
 """
 
 import torch
@@ -413,6 +419,7 @@ def attn_fwd(
         off_h_k = off_h_q % hk
     else:
         off_h_k = off_h_q
+
     n_extra_tokens = 0
     if seqlen_k < BLOCK_N:
         n_extra_tokens = BLOCK_N - seqlen_k

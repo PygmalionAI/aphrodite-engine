@@ -1,17 +1,12 @@
 from typing import Any, Dict, List, Optional
-from contextlib import suppress
 
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              set_weight_attrs)
-from aphrodite.quantization.base_config import (QuantizationConfig)
-
-HAS_QUANTS = False
-with suppress(ImportError):
-    from aphrodite._quant_C import quant_ops as ops
-    HAS_QUANTS = True
+from aphrodite._quant_C import quant_ops as ops
+from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
+from aphrodite.quantization.base_config import \
+    QuantizationConfig
 
 
 class MarlinConfig(QuantizationConfig):
@@ -24,8 +19,6 @@ class MarlinConfig(QuantizationConfig):
         self,
         group_size: int,
     ) -> None:
-        if not HAS_QUANTS:
-            raise ImportError("Could not find the quantization kernels.")
         # Group size for the quantization.
         self.group_size = group_size
         if self.group_size != 128 and self.group_size != -1:
@@ -84,18 +77,6 @@ class MarlinConfig(QuantizationConfig):
     def get_scaled_act_names(self) -> List[str]:
         return []
 
-    def merge_weight(self) -> bool:
-        return True
-
-    def quant_vocab(self) -> List[bool]:
-        return [False, False]
-
-    def support_fused_moe(self) -> bool:
-        return False
-
-    def rope_style(self) -> Optional[bool]:
-        return None
-
 
 class MarlinLinearMethod(LinearMethodBase):
     """Linear method for Marlin.
@@ -109,20 +90,22 @@ class MarlinLinearMethod(LinearMethodBase):
 
     def create_weights(
         self,
+        layer: torch.nn.Module,
         input_size_per_partition: int,
         output_partition_sizes: List[int],
         input_size: int,
         output_size: int,
         params_dtype: torch.dtype,
-    ) -> Dict[str, Any]:
+        **extra_weight_attrs,
+    ):
         del output_size  # Unused.
 
         if params_dtype != torch.float16:
             raise ValueError(
                 f"The params dtype must be float16, but got {params_dtype}")
 
-        output_size_per_partition = sum(output_partition_sizes)
         # Validate output_size_per_partition
+        output_size_per_partition = sum(output_partition_sizes)
         if output_size_per_partition % self.quant_config.min_n_threads != 0:
             raise ValueError(
                 f"Weight output_size_per_partition = "
@@ -206,21 +189,22 @@ class MarlinLinearMethod(LinearMethodBase):
                                           dtype=torch.int),
                               requires_grad=False)
 
-        return {
-            "B": qweight,
-            "s": scales,
-            "workspace": workspace,
-        }
+        layer.register_parameter("B", qweight)
+        set_weight_attrs(qweight, extra_weight_attrs)
+        layer.register_parameter("s", scales)
+        set_weight_attrs(scales, extra_weight_attrs)
+        layer.register_parameter("workspace", workspace)
+        set_weight_attrs(workspace, extra_weight_attrs)
 
     def apply_weights(
         self,
-        weights: Dict[str, Any],
+        layer: torch.nn.Module,
         x: torch.Tensor,
         bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        qweight = weights["B"]
-        scales = weights["s"]
-        workspace = weights["workspace"]
+        qweight = layer.B
+        scales = layer.s
+        workspace = layer.workspace
 
         x_2d = x.view(-1, x.shape[-1])
 
@@ -237,10 +221,3 @@ class MarlinLinearMethod(LinearMethodBase):
             output.add_(bias)  # In-place add
 
         return output
-
-    def apply_moe_weights(self, w1: Dict[str,
-                                         torch.Tensor], w2: Dict[str,
-                                                                 torch.Tensor],
-                          x: torch.Tensor, gating_output: torch.Tensor,
-                          topk: int, renormalize: bool) -> torch.Tensor:
-        raise NotImplementedError

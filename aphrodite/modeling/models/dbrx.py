@@ -1,10 +1,14 @@
 # coding=utf-8
-from typing import List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
 
 from aphrodite.attention import Attention, AttentionMetadata
+from aphrodite.common.sequence import SamplerOutput
+from aphrodite.distributed import (get_tensor_model_parallel_rank,
+                                   get_tensor_model_parallel_world_size,
+                                   tensor_model_parallel_all_reduce)
 from aphrodite.modeling.layers.fused_moe import fused_moe
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
                                               QKVParallelLinear,
@@ -15,14 +19,9 @@ from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, VocabParallelEmbedding)
-from aphrodite.distributed import (get_tensor_model_parallel_rank,
-                                   get_tensor_model_parallel_world_size,
-                                   tensor_model_parallel_all_reduce)
+from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.utils import set_weight_attrs
-from aphrodite.modeling.hf_downloader import (default_weight_loader,
-                                              hf_model_weights_iterator)
-from aphrodite.common.sequence import SamplerOutput
 from aphrodite.transformers_utils.configs.dbrx import DbrxConfig
 
 
@@ -192,15 +191,12 @@ class DbrxAttention(nn.Module):
             bias=False,
             linear_method=linear_method,
         )
-        is_neox_style = (True if linear_method is None
-                         or linear_method.quant_config.rope_style() is None
-                         else linear_method.quant_config.rope_style())
         self.rotary_emb = get_rope(
             self.head_dim,
             rotary_dim=self.head_dim,
             max_position=self.max_position,
             base=int(self.rope_theta),
-            is_neox_style=is_neox_style,
+            is_neox_style=True,
         )
 
         tp_world_size = get_tensor_model_parallel_world_size()
@@ -314,9 +310,10 @@ class DbrxModel(nn.Module):
         linear_method: Optional[LinearMethodBase] = None,
     ):
         super().__init__()
-        self.wte = VocabParallelEmbedding(config.vocab_size,
-                                          config.d_model,
-                                          linear_method=linear_method)
+        self.wte = VocabParallelEmbedding(
+            config.vocab_size,
+            config.d_model,
+        )
         self.blocks = nn.ModuleList(
             [DbrxBlock(config, linear_method) for _ in range(config.n_layers)])
         self.norm_f = nn.LayerNorm(config.d_model, eps=1e-5)
@@ -358,14 +355,14 @@ class DbrxForCausalLM(nn.Module):
         self.linear_method = linear_method
         self.unpadded_vocab_size = config.vocab_size
         self.transformer = DbrxModel(config, linear_method)
-        self.lm_head = ParallelLMHead(config.vocab_size,
-                                      config.d_model,
-                                      org_num_embeddings=config.vocab_size,
-                                      padding_size=DEFAULT_VOCAB_PADDING_SIZE,
-                                      linear_method=linear_method)
-        self.logits_processor = LogitsProcessor(
-            self.unpadded_vocab_size,
-            min(config.vocab_size, config.tokenizer_vocab_size))
+        self.lm_head = ParallelLMHead(
+            config.vocab_size,
+            config.d_model,
+            org_num_embeddings=config.vocab_size,
+            padding_size=DEFAULT_VOCAB_PADDING_SIZE,
+        )
+        self.logits_processor = LogitsProcessor(self.unpadded_vocab_size,
+                                                config.vocab_size)
         self.sampler = Sampler()
 
     def forward(
@@ -381,7 +378,7 @@ class DbrxForCausalLM(nn.Module):
 
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
-        logits = self.logits_processor(self.lm_head, hidden_states,
+        logits = self.logits_processor(self.lm_head.weight, hidden_states,
                                        sampling_metadata)
         return logits
 
@@ -393,21 +390,13 @@ class DbrxForCausalLM(nn.Module):
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
-    def load_weights(
-        self,
-        model_name_or_path: str,
-        cache_dir: Optional[str] = None,
-        load_format: str = "auto",
-        revision: Optional[str] = None,
-    ):
+    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         expert_params_mapping = [(
             "ws" if weight_name in ["w1", "v1"] else "w2s",
             f"experts.mlp.{weight_name}",
         ) for weight_name in ["w1", "v1", "w2"]]
         params_dict = dict(self.named_parameters(remove_duplicate=False))
-        for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision,
-                self.config):
+        for name, loaded_weight in weights:
             for param_name, weight_name in expert_params_mapping:
                 if weight_name not in name:
                     continue

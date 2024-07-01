@@ -1,15 +1,12 @@
 from typing import Optional, Sequence
 
 import torch
+import torch.nn.functional as F
 from torch.nn.parameter import Parameter
 
-from aphrodite.distributed import (
-    divide,
-    get_tensor_model_parallel_rank,
-    get_tensor_model_parallel_world_size,
-    tensor_model_parallel_all_reduce,
-)
-from aphrodite.modeling.layers.linear import UnquantizedLinearMethod
+from aphrodite.distributed import (divide, get_tensor_model_parallel_rank,
+                                   get_tensor_model_parallel_world_size,
+                                   tensor_model_parallel_all_reduce)
 from aphrodite.modeling.utils import set_weight_attrs
 
 DEFAULT_VOCAB_PADDING_SIZE = 64
@@ -53,10 +50,8 @@ class VocabParallelEmbedding(torch.nn.Module):
                  num_embeddings: int,
                  embedding_dim: int,
                  params_dtype: Optional[torch.dtype] = None,
-                 linear_method=None,
                  org_num_embeddings: Optional[int] = None,
-                 padding_size: int = DEFAULT_VOCAB_PADDING_SIZE,
-                 is_input_emb: bool = True):
+                 padding_size: int = DEFAULT_VOCAB_PADDING_SIZE):
         super().__init__()
 
         # Keep the input dimensions.
@@ -75,46 +70,21 @@ class VocabParallelEmbedding(torch.nn.Module):
                 self.tp_size))
         self.num_embeddings_per_partition = (self.vocab_end_index -
                                              self.vocab_start_index)
-        idx = 0 if is_input_emb else 1
-        if linear_method is None or not linear_method.quant_config.quant_vocab(
-        )[idx]:
-            linear_method = UnquantizedLinearMethod()
-        self.linear_method = linear_method
-        self.linear_weights = self.linear_method.create_weights(
-            self.embedding_dim, [self.num_embeddings_per_partition],
-            self.embedding_dim, self.num_embeddings_padded, params_dtype)
-        for name, weight in self.linear_weights.items():
-            if isinstance(weight, torch.nn.parameter.Parameter):
-                self.register_parameter(name, weight)
-                set_weight_attrs(weight, {"weight_loader": self.weight_loader})
+        self.weight = Parameter(
+            torch.empty(self.num_embeddings_per_partition,
+                        self.embedding_dim,
+                        dtype=params_dtype))
+        set_weight_attrs(self.weight, {
+            "parallel_dim": 0,
+            "weight_loader": self.weight_loader
+        })
 
     def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
-        output_dim = getattr(param, "output_dim", None)
-        packed_dim = getattr(param, "packed_dim", None)
-        if output_dim is not None:
-            shard_offset = self.vocab_start_index
-            shard_size = min(self.vocab_end_index,
-                             self.org_vocab_size) - shard_offset
-            if packed_dim == output_dim:
-                shard_size = shard_size // param.pack_factor
-                shard_offset = shard_offset // param.pack_factor
-            loaded_weight = loaded_weight.narrow(output_dim, shard_offset,
-                                                 shard_size)
-        if isinstance(param, torch.nn.parameter.UninitializedParameter):
-            vocab_shape = list(loaded_weight.shape)
-            if output_dim is not None:
-                if packed_dim == output_dim:
-                    vocab_shape[output_dim] = (
-                        self.num_embeddings_per_partition // param.pack_factor)
-                else:
-                    vocab_shape[output_dim] = self.num_embeddings_per_partition
-            param.materialize(vocab_shape, dtype=loaded_weight.dtype)
-        if output_dim is not None:
-            param.data.narrow(
-                output_dim, 0,
-                loaded_weight.shape[output_dim]).copy_(loaded_weight)
-        else:
-            param.data.copy_(loaded_weight)
+        parallel_dim = param.parallel_dim
+        assert loaded_weight.shape[parallel_dim] == self.org_vocab_size
+        loaded_weight = loaded_weight[self.vocab_start_index:self.
+                                      vocab_end_index]
+        param[:loaded_weight.shape[0]].data.copy_(loaded_weight)
 
     def forward(self, input_):
         if self.tp_size > 1:
@@ -127,9 +97,7 @@ class VocabParallelEmbedding(torch.nn.Module):
         else:
             masked_input = input_
             # Get the embeddings.
-        output_parallel = self.linear_method.apply_embedding(
-            self.linear_weights, masked_input)
-        # output_parallel = F.embedding(masked_input, self.weight)
+        output_parallel = F.embedding(masked_input, self.weight)
         # Mask the output embedding.
         if self.tp_size > 1:
             output_parallel[input_mask, :] = 0.0
@@ -159,18 +127,16 @@ class ParallelLMHead(VocabParallelEmbedding):
                  embedding_dim: int,
                  bias: bool = False,
                  params_dtype: Optional[torch.dtype] = None,
-                 linear_method=None,
                  org_num_embeddings: Optional[int] = None,
                  padding_size: int = DEFAULT_VOCAB_PADDING_SIZE):
         super().__init__(num_embeddings, embedding_dim, params_dtype,
-                         linear_method, org_num_embeddings, padding_size,
-                         False)
+                         org_num_embeddings, padding_size)
         if bias:
             self.bias = Parameter(
                 torch.empty(self.num_embeddings_per_partition,
                             dtype=params_dtype))
             set_weight_attrs(self.bias, {
-                "output_dim": 0,
+                "parallel_dim": 0,
                 "weight_loader": self.weight_loader
             })
         else:

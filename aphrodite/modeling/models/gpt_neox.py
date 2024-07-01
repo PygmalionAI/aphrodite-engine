@@ -17,36 +17,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only GPT-NeoX model compatible with HuggingFace weights."""
-
-from typing import List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 import torch
 from torch import nn
 from transformers import GPTNeoXConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
+from aphrodite.common.sequence import SamplerOutput
+from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.modeling.layers.activation import get_act_fn
-from aphrodite.modeling.layers.linear import (
-    ColumnParallelLinear,
-    LinearMethodBase,
-    QKVParallelLinear,
-    RowParallelLinear,
-)
-from aphrodite.modeling.layers.rotary_embedding import get_rope
+from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
+                                              LinearMethodBase,
+                                              QKVParallelLinear,
+                                              RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
+from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding,
-    ParallelLMHead,
-)
-from aphrodite.distributed import (
-    get_tensor_model_parallel_world_size, )
+    ParallelLMHead, VocabParallelEmbedding)
+from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.modeling.hf_downloader import (
-    default_weight_loader,
-    hf_model_weights_iterator,
-)
-from aphrodite.common.sequence import SamplerOutput
 
 
 class GPTNeoXAttention(nn.Module):
@@ -87,15 +78,11 @@ class GPTNeoXAttention(nn.Module):
         rope_theta = getattr(config, "rope_theta", 10000)
         max_position_embeddings = getattr(config, "max_position_embeddings",
                                           8192)
-        is_neox_style = (True if linear_method is None
-                         or linear_method.quant_config.rope_style() is None
-                         else linear_method.quant_config.rope_style())
         self.rotary_emb = get_rope(
             self.head_size,
             rotary_dim=rotary_dim,
             max_position=max_position_embeddings,
             base=rope_theta,
-            is_neox_style=is_neox_style,
         )
         self.attn = Attention(self.num_heads, self.head_size, scaling)
 
@@ -201,9 +188,10 @@ class GPTNeoXModel(nn.Module):
         super().__init__()
         self.config = config
 
-        self.embed_in = VocabParallelEmbedding(config.vocab_size,
-                                               config.hidden_size,
-                                               linear_method=linear_method)
+        self.embed_in = VocabParallelEmbedding(
+            config.vocab_size,
+            config.hidden_size,
+        )
         self.layers = nn.ModuleList([
             GPTNeoXLayer(config, linear_method)
             for _ in range(config.num_hidden_layers)
@@ -242,11 +230,11 @@ class GPTNeoXForCausalLM(nn.Module):
         self.config = config
         self.linear_method = linear_method
         self.gpt_neox = GPTNeoXModel(config, linear_method)
-        self.embed_out = ParallelLMHead(config.vocab_size,
-                                        config.hidden_size,
-                                        linear_method=linear_method)
-        self.logits_processor = LogitsProcessor(config.vocab_size,
-                                                config.tokenizer_vocab_size)
+        self.embed_out = ParallelLMHead(
+            config.vocab_size,
+            config.hidden_size,
+        )
+        self.logits_processor = LogitsProcessor(config.vocab_size)
         self.sampler = Sampler()
 
     def forward(
@@ -262,7 +250,7 @@ class GPTNeoXForCausalLM(nn.Module):
 
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
-        logits = self.logits_processor(self.embed_out, hidden_states,
+        logits = self.logits_processor(self.embed_out.weight, hidden_states,
                                        sampling_metadata)
         return logits
 
@@ -274,17 +262,9 @@ class GPTNeoXForCausalLM(nn.Module):
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
-    def load_weights(
-        self,
-        model_name_or_path: str,
-        cache_dir: Optional[str] = None,
-        load_format: str = "auto",
-        revision: Optional[str] = None,
-    ):
+    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         params_dict = dict(self.named_parameters())
-        for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision,
-                self.config):
+        for name, loaded_weight in weights:
             if ("attention.bias" in name or "attention.masked_bias" in name
                     or "rotary_emb.inv_freq" in name):
                 continue

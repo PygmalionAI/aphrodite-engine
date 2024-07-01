@@ -1,12 +1,14 @@
 import enum
+import os
 from functools import lru_cache
 from typing import Type
 
 import torch
 from loguru import logger
-
 from aphrodite.attention.backends.abstract import AttentionBackend
 from aphrodite.common.utils import is_cpu, is_hip
+
+APHRODITE_ATTENTION_BACKEND = "APHRODITE_ATTENTION_BACKEND"
 
 
 class _Backend(enum.Enum):
@@ -21,20 +23,22 @@ def get_attn_backend(dtype: torch.dtype) -> Type[AttentionBackend]:
     backend = _which_attn_to_use(dtype)
     if backend == _Backend.FLASH_ATTN:
         logger.info("Using FlashAttention backend.")
-        from aphrodite.attention.backends.flash_attn import FlashAttentionBackend  # noqa: E501
+        from aphrodite.attention.backends.flash_attn import \
+            FlashAttentionBackend  # noqa: F401
         return FlashAttentionBackend
     elif backend == _Backend.XFORMERS:
         logger.info("Using XFormers backend.")
-        from aphrodite.attention.backends.xformers import XFormersBackend  # noqa: F501
+        from aphrodite.attention.backends.xformers import \
+            XFormersBackend  # noqa: F401
         return XFormersBackend
     elif backend == _Backend.ROCM_FLASH:
-        logger.info("Using ROCm FlashAttention backend.")
-        from aphrodite.attention.backends.rocm_flash_attn import (  # noqa: F401
-            ROCmFlashAttentionBackend)
+        logger.info("Using ROCmFlashAttention backend.")
+        from aphrodite.attention.backends.rocm_flash_attn import \
+            ROCmFlashAttentionBackend  # noqa: F401
         return ROCmFlashAttentionBackend
     elif backend == _Backend.TORCH_SDPA:
         logger.info("Using Torch SDPA backend.")
-        from aphrodite.attention.backends.sdpa import TorchSDPABackend
+        from aphrodite.attention.backends.torch_sdpa import TorchSDPABackend
         return TorchSDPABackend
     else:
         raise ValueError("Invalid attention backend.")
@@ -71,4 +75,10 @@ def _which_attn_to_use(dtype: torch.dtype) -> _Backend:
             "Cannot use FlashAttention backend because the flash_attn package "
             "is not found. Please install it for better performance.")
         return _Backend.XFORMERS
+
+    backend_by_env_var = os.getenv(APHRODITE_ATTENTION_BACKEND)
+    if backend_by_env_var is not None:
+        return _Backend[backend_by_env_var]
+
+    # Default case.
     return _Backend.FLASH_ATTN

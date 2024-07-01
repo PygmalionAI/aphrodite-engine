@@ -62,17 +62,3 @@ class QuantizationConfig(ABC):
         For now, this is only used by AWQ.
         """
         raise NotImplementedError
-
-    @abstractmethod
-    def merge_weight(self) -> bool:
-        """whether fuse qkv and up/gate."""
-        raise NotImplementedError
-
-    @abstractmethod
-    def quant_vocab(self) -> List[bool]:
-        return (False, False)
-
-    @abstractmethod
-    def support_fused_moe(self) -> bool:
-        """Whether fused moe kernel is implemented"""
-        raise NotImplementedError

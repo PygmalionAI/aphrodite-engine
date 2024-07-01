@@ -2,7 +2,7 @@
 # Adapted from
 # https://github.com/THUDM/ChatGLM2-6B
 """Inference-only ChatGLM model compatible with THUDM weights."""
-from typing import List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 import torch
 from torch import nn
@@ -10,6 +10,8 @@ from torch.nn import LayerNorm
 
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import LoRAConfig
+from aphrodite.common.sequence import SamplerOutput
+from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (LinearMethodBase,
@@ -21,11 +23,8 @@ from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
-from aphrodite.distributed import (get_tensor_model_parallel_world_size)
+from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.modeling.hf_downloader import (default_weight_loader,
-                                              hf_model_weights_iterator)
-from aphrodite.common.sequence import SamplerOutput
 from aphrodite.transformers_utils.configs import ChatGLMConfig
 
 
@@ -287,8 +286,7 @@ class ChatGLMModel(nn.Module):
         super().__init__()
 
         self.embedding = VocabParallelEmbedding(config.padded_vocab_size,
-                                                config.hidden_size,
-                                                linear_method=linear_method)
+                                                config.hidden_size)
 
         self.num_layers = config.num_layers
         self.multi_query_group_num = config.multi_query_group_num
@@ -296,8 +294,7 @@ class ChatGLMModel(nn.Module):
         self.encoder = GLMTransformer(config, linear_method)
 
         self.output_layer = ParallelLMHead(config.padded_vocab_size,
-                                           config.hidden_size,
-                                           linear_method=linear_method)
+                                           config.hidden_size)
 
     def forward(
         self,
@@ -343,8 +340,8 @@ class ChatGLMForCausalLM(nn.Module):
         self.config: ChatGLMConfig = config
         self.linear_method = linear_method
         self.transformer = ChatGLMModel(config, linear_method)
-        self.logits_processor = LogitsProcessor(config.padded_vocab_size,
-                                                config.tokenizer_vocab_size)
+        self.lm_head_weight = self.transformer.output_layer.weight
+        self.logits_processor = LogitsProcessor(config.padded_vocab_size)
         self.sampler = Sampler()
 
     def forward(
@@ -360,8 +357,8 @@ class ChatGLMForCausalLM(nn.Module):
 
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
-        logits = self.logits_processor(self.transformer.output_layer,
-                                       hidden_states, sampling_metadata)
+        logits = self.logits_processor(self.lm_head_weight, hidden_states,
+                                       sampling_metadata)
         return logits
 
     def sample(
@@ -372,15 +369,9 @@ class ChatGLMForCausalLM(nn.Module):
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
-    def load_weights(self,
-                     model_name_or_path: str,
-                     cache_dir: Optional[str] = None,
-                     load_format: str = "auto",
-                     revision: Optional[str] = None):
+    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         params_dict = dict(self.named_parameters(remove_duplicate=False))
-        for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision,
-                self.config):
+        for name, loaded_weight in weights:
             if "rotary_pos_emb.inv_freq" in name:
                 continue
             if "word_embeddings" in name:

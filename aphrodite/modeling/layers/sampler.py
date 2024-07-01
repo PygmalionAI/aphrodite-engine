@@ -64,12 +64,6 @@ class Sampler(nn.Module):
                                       sampling_tensors.freq_penalties,
                                       sampling_tensors.rep_penalties)
 
-        if sampling_tensors.do_temperatures or sampling_tensors.do_dynatemps:
-            logits = _apply_temperature(logits, sampling_tensors.temperatures,
-                                        sampling_tensors.dynatemp_mins,
-                                        sampling_tensors.dynatemp_maxs,
-                                        sampling_tensors.dynatemp_exps)
-
         if (sampling_tensors.do_top_ks or sampling_tensors.do_top_ps
                 or sampling_tensors.do_top_as or sampling_tensors.do_min_ps):
             logits = _apply_alphabet_soup(logits, sampling_tensors.top_ps,
@@ -92,6 +86,12 @@ class Sampler(nn.Module):
                 logits, sampling_tensors.smoothing_indices,
                 sampling_tensors.smoothing_factors,
                 sampling_tensors.smoothing_curves)
+
+        if sampling_tensors.do_temperatures or sampling_tensors.do_dynatemps:
+            logits = _apply_temperature(logits, sampling_tensors.temperatures,
+                                        sampling_tensors.dynatemp_mins,
+                                        sampling_tensors.dynatemp_maxs,
+                                        sampling_tensors.dynatemp_exps)
 
         banned_tokens = _get_custom_token_bans(sampling_metadata)
         assert len(banned_tokens) == logits.shape[0]

@@ -2,7 +2,7 @@
 # Adapted from
 # https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/models/bloom/modeling_bloom.py
 # Copyright 2023 The PygmalionAI team.
-# Copyright 2023 The CacheFlow team.
+# Copyright 2023 The vLLM team.
 # Copyright 2022 HuggingFace Inc. team and BigScience workshop.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,13 +18,16 @@
 # limitations under the License.
 """Inference-only BLOOM model compatible with HuggingFace weights."""
 import math
-from typing import List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 import torch
 from torch import nn
 from transformers import BloomConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
+from aphrodite.common.sequence import SamplerOutput
+from aphrodite.distributed import (get_tensor_model_parallel_rank,
+                                   get_tensor_model_parallel_world_size)
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               LinearMethodBase,
@@ -32,14 +35,10 @@ from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.sampler import Sampler
-from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding, ParallelLMHead)
-from aphrodite.distributed import (get_tensor_model_parallel_rank,
-                                   get_tensor_model_parallel_world_size)
+from aphrodite.modeling.layers.vocab_parallel_embedding import \
+    VocabParallelEmbedding
+from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.modeling.hf_downloader import (default_weight_loader,
-                                              hf_model_weights_iterator)
-from aphrodite.common.sequence import SamplerOutput
 
 
 def _get_alibi_slopes(total_num_heads: int) -> torch.Tensor:
@@ -223,7 +222,9 @@ class BloomModel(nn.Module):
 
         # Embedding + LN Embedding
         self.word_embeddings = VocabParallelEmbedding(
-            config.vocab_size, self.embed_dim, linear_method=linear_method)
+            config.vocab_size,
+            self.embed_dim,
+        )
         self.word_embeddings_layernorm = nn.LayerNorm(
             self.embed_dim, eps=config.layer_norm_epsilon)
 
@@ -269,11 +270,7 @@ class BloomForCausalLM(nn.Module):
         self.linear_method = linear_method
         self.transformer = BloomModel(config, linear_method)
         self.lm_head_weight = self.transformer.word_embeddings.weight
-        self.lm_head = ParallelLMHead(config.vocab_size,
-                                      config.hidden_size,
-                                      linear_method=linear_method)
-        self.logits_processor = LogitsProcessor(config.vocab_size,
-                                                config.tokenizer_vocab_size)
+        self.logits_processor = LogitsProcessor(config.vocab_size)
         self.sampler = Sampler()
 
     def forward(
@@ -289,7 +286,7 @@ class BloomForCausalLM(nn.Module):
 
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
-        logits = self.logits_processor(self.lm_head, hidden_states,
+        logits = self.logits_processor(self.lm_head_weight, hidden_states,
                                        sampling_metadata)
         return logits
 
@@ -301,30 +298,14 @@ class BloomForCausalLM(nn.Module):
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
-    def load_weights(self,
-                     model_name_or_path: str,
-                     cache_dir: Optional[str] = None,
-                     load_format: str = "auto",
-                     revision: Optional[str] = None):
+    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         params_dict = dict(self.named_parameters(remove_duplicate=False))
-        for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision,
-                self.config):
-            if "lm_head" in name and name not in params_dict:
+        for name, loaded_weight in weights:
+            if name == "lm_head.weight":
                 continue
             if not name.startswith("transformer."):
                 name = "transformer." + name
             param = params_dict[name]
-
-            if "word_embeddings" in name:
-                # Copy word embedding to lm_head
-                head_name = name.replace("transformer.word_embeddings",
-                                         "lm_head")
-                if head_name in params_dict:
-                    lm_head_param = params_dict[head_name]
-                    weight_loader = getattr(lm_head_param, "weight_loader",
-                                            default_weight_loader)
-                    weight_loader(lm_head_param, loaded_weight)
 
             if "query_key_value" in name:
                 # NOTE: BLOOM's fused QKV's output_dim has the shape of

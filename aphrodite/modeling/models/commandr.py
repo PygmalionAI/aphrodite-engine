@@ -20,7 +20,7 @@
 
 # This file is based on the LLama model definition file in transformers
 """PyTorch Cohere model."""
-from typing import List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 import torch
 import torch.utils.checkpoint
@@ -29,33 +29,22 @@ from torch.nn.parameter import Parameter
 from transformers import CohereConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
+from aphrodite.common.sequence import SamplerOutput
+from aphrodite.distributed import (get_tensor_model_parallel_rank,
+                                   get_tensor_model_parallel_world_size)
 from aphrodite.modeling.layers.activation import SiluAndMul
-from aphrodite.modeling.layers.linear import (
-    ColumnParallelLinear,
-    LinearMethodBase,
-    MergedColumnParallelLinear,
-    QKVParallelLinear,
-    RowParallelLinear,
-)
+from aphrodite.modeling.layers.linear import (LinearMethodBase,
+                                              MergedColumnParallelLinear,
+                                              QKVParallelLinear,
+                                              RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
-from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    ParallelLMHead,
-    ParallelTWEHead,
-    VocabParallelEmbedding,
-)
-from aphrodite.distributed import (
-    get_tensor_model_parallel_rank,
-    get_tensor_model_parallel_world_size,
-)
+from aphrodite.modeling.layers.vocab_parallel_embedding import \
+    VocabParallelEmbedding
+from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.utils import set_weight_attrs
-from aphrodite.modeling.hf_downloader import (
-    default_weight_loader,
-    hf_model_weights_iterator,
-)
-from aphrodite.common.sequence import SamplerOutput
 
 
 @torch.compile
@@ -72,9 +61,9 @@ def layer_norm_func(hidden_states, weight, variance_epsilon):
 
 class LayerNorm(nn.Module):
 
-    def __init__(self, hidden_size, eps=1e-5, bias=False):
+    def __init__(self, param_shape=None, eps=1e-5):
         super().__init__()
-        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.weight = nn.Parameter(torch.ones(param_shape))
         self.variance_epsilon = eps
         set_weight_attrs(self.weight, {"weight_loader": self.weight_loader})
 
@@ -108,29 +97,12 @@ class CohereMLP(nn.Module):
         self.config = config
         self.hidden_size = config.hidden_size
         self.intermediate_size = config.intermediate_size
-        if (linear_method is not None
-                and not linear_method.quant_config.merge_weight()):
-            self.merge_weight = False
-            self.gate_proj = ColumnParallelLinear(
-                self.hidden_size,
-                self.intermediate_size,
-                bias=False,
-                linear_method=linear_method,
-            )
-            self.up_proj = ColumnParallelLinear(
-                self.hidden_size,
-                self.intermediate_size,
-                bias=False,
-                linear_method=linear_method,
-            )
-        else:
-            self.merge_weight = True
-            self.gate_up_proj = MergedColumnParallelLinear(
-                self.hidden_size,
-                [self.intermediate_size] * 2,
-                bias=False,
-                linear_method=linear_method,
-            )
+        self.gate_up_proj = MergedColumnParallelLinear(
+            self.hidden_size,
+            [self.intermediate_size] * 2,
+            bias=False,
+            linear_method=linear_method,
+        )
         self.down_proj = RowParallelLinear(
             self.intermediate_size,
             self.hidden_size,
@@ -140,12 +112,7 @@ class CohereMLP(nn.Module):
         self.act_fn = SiluAndMul()
 
     def forward(self, x):
-        if self.merge_weight:
-            gate_up, _ = self.gate_up_proj(x)
-        else:
-            up, _ = self.up_proj(x)
-            gate, _ = self.gate_proj(x)
-            gate_up = torch.cat([gate, up], dim=-1)
+        gate_up, _ = self.gate_up_proj(x)
         x = self.act_fn(gate_up)
         x, _ = self.down_proj(x)
         return x
@@ -185,37 +152,14 @@ class CohereAttention(nn.Module):
         self.rope_theta = config.rope_theta
         self.rope_scaling = getattr(config, "rope_scaling", None)
         self.use_qk_norm = getattr(config, "use_qk_norm", False)
-        if (linear_method is not None
-                and not linear_method.quant_config.merge_weight()):
-            self.merge_weight = False
-            self.q_proj = ColumnParallelLinear(
-                self.hidden_size,
-                self.total_num_heads * self.head_dim,
-                bias=False,
-                linear_method=linear_method,
-            )
-            self.k_proj = ColumnParallelLinear(
-                self.hidden_size,
-                self.total_num_kv_heads * self.head_dim,
-                bias=False,
-                linear_method=linear_method,
-            )
-            self.v_proj = ColumnParallelLinear(
-                self.hidden_size,
-                self.total_num_kv_heads * self.head_dim,
-                bias=False,
-                linear_method=linear_method,
-            )
-        else:
-            self.merge_weight = True
-            self.qkv_proj = QKVParallelLinear(
-                self.hidden_size,
-                self.head_dim,
-                self.total_num_heads,
-                self.total_num_kv_heads,
-                bias=False,
-                linear_method=linear_method,
-            )
+        self.qkv_proj = QKVParallelLinear(
+            self.hidden_size,
+            self.head_dim,
+            self.total_num_heads,
+            self.total_num_kv_heads,
+            bias=False,
+            linear_method=linear_method,
+        )
         self.o_proj = RowParallelLinear(
             self.total_num_heads * self.head_dim,
             self.hidden_size,
@@ -237,10 +181,10 @@ class CohereAttention(nn.Module):
             num_kv_heads=self.num_kv_heads,
         )
         if self.use_qk_norm:
-            self.q_norm = LayerNorm(hidden_size=(self.num_heads,
+            self.q_norm = LayerNorm(param_shape=(self.num_heads,
                                                  self.head_dim),
                                     eps=config.layer_norm_eps)
-            self.k_norm = LayerNorm(hidden_size=(self.num_kv_heads,
+            self.k_norm = LayerNorm(param_shape=(self.num_kv_heads,
                                                  self.head_dim),
                                     eps=config.layer_norm_eps)
 
@@ -260,14 +204,8 @@ class CohereAttention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        if self.merge_weight:
-            qkv, _ = self.qkv_proj(hidden_states)
-            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size],
-                                dim=-1)
-        else:
-            q, _ = self.q_proj(hidden_states)
-            k, _ = self.k_proj(hidden_states)
-            v, _ = self.v_proj(hidden_states)
+        qkv, _ = self.qkv_proj(hidden_states)
+        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         if self.use_qk_norm:
             q, k = self._apply_qk_norm(q, k)
         q, k = self.rotary_emb(positions, q, k)
@@ -278,18 +216,16 @@ class CohereAttention(nn.Module):
 
 class CohereDecoderLayer(nn.Module):
 
-    def __init__(
-        self,
-        config: CohereConfig,
-        linear_method: Optional[LinearMethodBase] = None,
-    ):
+    def __init__(self,
+                 config: CohereConfig,
+                 linear_method: Optional[LinearMethodBase] = None):
         super().__init__()
         self.hidden_size = config.hidden_size
 
         self.self_attn = CohereAttention(config, linear_method=linear_method)
 
         self.mlp = CohereMLP(config, linear_method=linear_method)
-        self.input_layernorm = LayerNorm(config.hidden_size,
+        self.input_layernorm = LayerNorm(param_shape=(config.hidden_size),
                                          eps=config.layer_norm_eps)
 
     def forward(
@@ -327,13 +263,13 @@ class CohereModel(nn.Module):
         self.config = config
         self.vocab_size = config.vocab_size
         self.embed_tokens = VocabParallelEmbedding(config.vocab_size,
-                                                   config.hidden_size,
-                                                   linear_method=linear_method)
+                                                   config.hidden_size)
         self.layers = nn.ModuleList([
             CohereDecoderLayer(config, linear_method=linear_method)
             for _ in range(config.num_hidden_layers)
         ])
-        self.norm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.norm = LayerNorm(param_shape=(config.hidden_size),
+                              eps=config.layer_norm_eps)
 
     def forward(
         self,
@@ -367,16 +303,9 @@ class CohereForCausalLM(nn.Module):
         super().__init__()
         self.config = config
         self.linear_method = linear_method
-        self.model = CohereModel(config, linear_method)
-        if self.config.tie_word_embeddings:
-            self.lm_head = ParallelTWEHead(self.model.embed_tokens)
-        else:
-            self.lm_head = ParallelLMHead(config.vocab_size,
-                                          config.hidden_size,
-                                          linear_method=linear_method)
         self.logits_processor = LogitsProcessor(config.vocab_size,
-                                                config.tokenizer_vocab_size,
                                                 scale=config.logit_scale)
+        self.model = CohereModel(config, linear_method)
         self.sampler = Sampler()
 
     @torch.no_grad()
@@ -393,8 +322,8 @@ class CohereForCausalLM(nn.Module):
 
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
-        logits = self.logits_processor(self.lm_head, hidden_states,
-                                       sampling_metadata)
+        logits = self.logits_processor(self.model.embed_tokens.weight,
+                                       hidden_states, sampling_metadata)
         return logits
 
     def sample(
@@ -405,13 +334,7 @@ class CohereForCausalLM(nn.Module):
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
-    def load_weights(
-        self,
-        model_name_or_path: str,
-        cache_dir: Optional[str] = None,
-        load_format: str = "auto",
-        revision: Optional[str] = None,
-    ):
+    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
             ("qkv_proj", "q_proj", "q"),
@@ -420,14 +343,9 @@ class CohereForCausalLM(nn.Module):
             ("gate_up_proj", "gate_proj", 0),
             ("gate_up_proj", "up_proj", 1),
         ]
-        if (self.linear_method is not None
-                and not self.linear_method.quant_config.merge_weight()):
-            stacked_params_mapping = []
         params_dict = dict(self.named_parameters())
         loaded_params = set()
-        for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision,
-                self.config):
+        for name, loaded_weight in weights:
             for param_name, shard_name, shard_id in stacked_params_mapping:
                 if shard_name not in name:
                     continue
@@ -440,9 +358,9 @@ class CohereForCausalLM(nn.Module):
                 weight_loader(param, loaded_weight, shard_id)
                 break
             else:
-                # lm_head is not used as it is tied with embed_token.
-                # To prevent errors, skip loading lm_head.
-                if self.config.tie_word_embeddings and "lm_head" in name:
+                # lm_head is not used in Aphrodite as it is tied with
+                # embed_token. To prevent errors, skip loading lm_head.weight.
+                if "lm_head.weight" in name:
                     continue
                 # Skip loading extra bias for GPTQ models.
                 if name.endswith(".bias") and name not in params_dict:
