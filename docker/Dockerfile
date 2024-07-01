@@ -13,7 +13,7 @@ ARG MAX_JOBS
 # Setting TORCH_CUDA_ARCH_LIST specifies the CUDA architectures to compile for. 
 # a list of possible values can be found at:
 # https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#gpu-feature-list
-ARG TORCH_CUDA_ARCH_LIST="6.1 7.0 7.5 8.0 8.6 8.7 8.9 9.0+PTX"
+ARG TORCH_CUDA_ARCH_LIST="6.0 6.1 7.0 7.5 8.0 8.6 8.7 8.9 9.0+PTX"
 
 ARG FLASH_ATTN_VERSION="2.5.8"
 
