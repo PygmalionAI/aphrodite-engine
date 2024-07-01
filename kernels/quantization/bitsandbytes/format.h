@@ -57,4 +57,4 @@ void fuse_w1_w3_s4_k_m8(uint32_t* dst, const uint32_t* src, int m, int k, cudaSt
 void dequantize_s4(uint4* dst, const uint32_t* src, size_t count, cudaStream_t st = {});
 
 }  // namespace autoquant
-}  // namespace vllm
+}  // namespace aphrodite

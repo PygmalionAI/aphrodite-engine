@@ -1,15 +1,18 @@
 import asyncio
 import enum
 import gc
+import glob
 import os
 import socket
 import subprocess
 import uuid
-from collections import OrderedDict, defaultdict
+import warnings
+from collections import defaultdict
 from functools import lru_cache, partial
 from platform import uname
 from typing import (Any, AsyncIterator, Awaitable, Callable, Dict, Generic,
-                    Hashable, List, Optional, Tuple, TypeVar, Union)
+                    Hashable, List, Optional, OrderedDict, Tuple, TypeVar,
+                    Union)
 
 import psutil
 import torch
@@ -48,7 +51,7 @@ class Counter:
 class LRUCache(Generic[T]):
 
     def __init__(self, capacity: int):
-        self.cache = OrderedDict[Hashable, T]()
+        self.cache: OrderedDict[Hashable, T] = OrderedDict()
         self.capacity = capacity
 
     def __contains__(self, key: Hashable) -> bool:
@@ -57,7 +60,7 @@ class LRUCache(Generic[T]):
     def __len__(self) -> int:
         return len(self.cache)
 
-    def __getitem__(self, key: Hashable) -> T:
+    def __getitem__(self, key: Hashable) -> Optional[T]:
         return self.get(key)
 
     def __setitem__(self, key: Hashable, value: T) -> None:
@@ -73,7 +76,7 @@ class LRUCache(Generic[T]):
             key: Hashable,
             default_value: Optional[T] = None) -> Optional[T]:
         if key in self.cache:
-            value = self.cache[key]
+            value: Optional[T] = self.cache[key]
             self.cache.move_to_end(key)
         else:
             value = default_value
@@ -84,7 +87,7 @@ class LRUCache(Generic[T]):
         self.cache.move_to_end(key)
         self._remove_old_if_needed()
 
-    def _on_remove(self, key: Hashable, value: T):
+    def _on_remove(self, key: Hashable, value: Optional[T]):
         pass
 
     def remove_oldest(self):
@@ -97,9 +100,11 @@ class LRUCache(Generic[T]):
         while len(self.cache) > self.capacity:
             self.remove_oldest()
 
-    def pop(self, key: Hashable, default_value: Optional[Any] = None) -> T:
+    def pop(self,
+            key: Hashable,
+            default_value: Optional[T] = None) -> Optional[T]:
         run_on_remove = key in self.cache
-        value = self.cache.pop(key, default_value)
+        value: Optional[T] = self.cache.pop(key, default_value)
         if run_on_remove:
             self._on_remove(key, value)
         return value
@@ -157,6 +162,18 @@ def random_uuid() -> str:
 
 
 @lru_cache(maxsize=None)
+def get_aphrodite_instance_id():
+    """
+    If the environment variable APHRODITE_INSTANCE_ID is set, return it.
+    Otherwise, return a random UUID.
+    Instance id represents an instance of the Aphrodite. All processes in the
+    same instance should have the same instance id.
+    """
+    return os.environ.get("APHRODITE_INSTANCE_ID",
+                          f"aphrodite-instance-{random_uuid()}")
+
+
+@lru_cache(maxsize=None)
 def in_wsl() -> bool:
     # Reference: https://github.com/microsoft/WSL/issues/4071
     return "microsoft" in " ".join(uname()).lower()
@@ -181,6 +198,7 @@ def make_async(func: Callable[..., T]) -> Callable[..., Awaitable[T]]:
 def merge_async_iterators(
         *iterators: AsyncIterator[T]) -> AsyncIterator[Tuple[int, T]]:
     """Merge multiple asynchronous iterators into a single iterator.
+
     This method handle the case where some iterators finish before others.
     When it yields, it yields a tuple (i, item) where i is the index of the
     iterator that yields the item.
@@ -203,34 +221,46 @@ def merge_async_iterators(
     ]
 
     async def consumer():
-        try:
-            while not all(finished) or not queue.empty():
-                item = await queue.get()
-                if isinstance(item, Exception):
-                    raise item
-                yield item
-        except (Exception, asyncio.CancelledError) as e:
-            for task in _tasks:
-                # NOTE: Pass the error msg in cancel()
-                # when only Python 3.9+ is supported.
-                task.cancel()
-            raise e
+        while not all(finished) or not queue.empty():
+            item = await queue.get()
+            if isinstance(item, Exception):
+                raise item
+            yield item
         await asyncio.gather(*_tasks)
 
     return consumer()
 
 
 def get_ip() -> str:
+    host_ip = os.environ.get("HOST_IP")
+    if host_ip:
+        return host_ip
+
+    # IP is not set, try to get it from the network interface
+
     # try ipv4
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("8.8.8.8", 80))  # Doesn't need to be reachable
         return s.getsockname()[0]
-    except OSError:
-        # try ipv6
+    except Exception:
+        pass
+
+    # try ipv6
+    try:
         s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-        s.connect(("dns.google", 80))
+        # Google's public DNS server, see
+        # https://developers.google.com/speed/public-dns/docs/using#addresses
+        s.connect(("2001:4860:4860::8888", 80))  # Doesn't need to be reachable
         return s.getsockname()[0]
+    except Exception:
+        pass
+
+    warnings.warn(
+        "Failed to get the IP address, using 0.0.0.0 by default."
+        "The value can be set by the environment variable HOST_IP.",
+        stacklevel=2)
+    return "0.0.0.0"
 
 
 def get_distributed_init_method(ip: str, port: int) -> str:
@@ -252,8 +282,12 @@ def get_open_port() -> int:
             return s.getsockname()[1]
 
 
-def set_cuda_visible_devices(device_ids: List[int]) -> None:
-    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, device_ids))
+def update_environment_variables(envs: Dict[str, str]):
+    for k, v in envs.items():
+        if k in os.environ and os.environ[k] != v:
+            logger.warning(f"Overwriting environment variable {k} "
+                           f"from '{os.environ[k]}' to '{v}'")
+        os.environ[k] = v
 
 
 def chunk_list(lst, chunk_size):
@@ -272,9 +306,8 @@ def get_nvcc_cuda_version() -> Optional[Version]:
     if not cuda_home:
         cuda_home = '/usr/local/cuda'
         if os.path.isfile(cuda_home + '/bin/nvcc'):
-            logger.info(
-                f'CUDA_HOME is not found in the environment. Using {cuda_home} '
-                'as CUDA_HOME.')
+            logger.info(f'CUDA_HOME is not found in the environment. '
+                        f'Using {cuda_home} as CUDA_HOME.')
         else:
             logger.warning(
                 f'Not found nvcc in {cuda_home}. Skip cuda version check!')
@@ -293,7 +326,7 @@ def _generate_random_fp8(
     high: float,
 ) -> None:
     # NOTE: Due to NaN and Inf representation for fp8 data type,
-    # we may get Inf or NaN if we directly use torch.randint
+    # it may occur Inf or NaN if we directly use torch.randint
     # to generate random data for fp8 data.
     # For example, s.11111.00 in fp8e5m2 format represents Inf.
     #     | E4M3        | E5M2
@@ -315,7 +348,7 @@ def create_kv_caches_with_random(
     head_size: int,
     cache_dtype: Optional[Union[str, torch.dtype]],
     model_dtype: Optional[Union[str, torch.dtype]] = None,
-    seed: Optional[int] = 0,
+    seed: int = 0,
     device: Optional[str] = "cuda",
 ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
     torch.random.manual_seed(seed)
@@ -421,7 +454,7 @@ class CudaMemoryProfiler:
         gc.collect()
 
 
-def str_to_int_tuple(s: str) -> Tuple[int]:
+def str_to_int_tuple(s: str) -> Tuple[int, ...]:
     """Convert a string to a tuple of integers."""
     try:
         return tuple(map(int, s.split(",")))
@@ -444,6 +477,7 @@ def make_tensor_with_pad(
     device: Optional[Union[str, torch.device]],
 ) -> torch.Tensor:
     """Make a padded tensor of a 2D inputs.
+
     The padding is applied to the end of each inner list until it reaches
     `max_len`.
     """
@@ -486,3 +520,89 @@ def merge_dicts(dict1: Dict[Any, List[Any]],
         merged_dict[key].extend(value)
 
     return dict(merged_dict)
+
+
+def init_cached_hf_modules():
+    """
+    Lazy initialization of the Hugging Face modules.
+    """
+    from transformers.dynamic_module_utils import init_hf_modules
+    init_hf_modules()
+
+
+def nccl_integrity_check(filepath):
+    """
+    when the library is corrupted, we cannot catch
+    the exception in python. it will crash the process.
+    instead, we use the exit code of `ldd` to check
+    if the library is corrupted. if not, we will return
+    the version of the library.
+    """
+    exit_code = os.system(f"ldd {filepath} 2>&1 > /dev/null")
+    if exit_code != 0:
+        raise RuntimeError(f"Failed to load NCCL library from {filepath} .")
+    import ctypes
+
+    nccl = ctypes.CDLL(filepath)
+    version = ctypes.c_int()
+    nccl.ncclGetVersion.restype = ctypes.c_int
+    nccl.ncclGetVersion.argtypes = [ctypes.POINTER(ctypes.c_int)]
+    result = nccl.ncclGetVersion(ctypes.byref(version))
+    assert result == 0
+    return version.value
+
+
+@lru_cache(maxsize=None)
+def find_library(lib_name: str) -> str:
+    """
+    Find the library file in the system.
+    `lib_name` is full filename, with both prefix and suffix.
+    This function resolves `lib_name` to the full path of the library.
+    """
+    # Adapted from https://github.com/openai/triton/blob/main/third_party/nvidia/backend/driver.py#L19 # noqa
+    # According to https://en.wikipedia.org/wiki/Filesystem_Hierarchy_Standard
+    # `/sbin/ldconfig` should exist in all Linux systems.
+    # `/sbin/ldconfig` searches the library in the system
+    libs = subprocess.check_output(["/sbin/ldconfig", "-p"]).decode()
+    # each line looks like the following:
+    # libcuda.so.1 (libc6,x86-64) => /lib/x86_64-linux-gnu/libcuda.so.1
+    locs = [line.split()[-1] for line in libs.splitlines() if lib_name in line]
+    # `LD_LIBRARY_PATH` searches the library in the user-defined paths
+    env_ld_library_path = os.getenv("LD_LIBRARY_PATH")
+    if not locs and env_ld_library_path:
+        locs = [
+            os.path.join(dir, lib_name)
+            for dir in env_ld_library_path.split(":")
+            if os.path.exists(os.path.join(dir, lib_name))
+        ]
+    if not locs:
+        raise ValueError(f"Cannot find {lib_name} in the system.")
+    return locs[0]
+
+
+def find_nccl_library():
+    so_file = os.environ.get("APHRODITE_NCCL_SO_PATH", "")
+
+    aphrodite_nccl_path = None
+    if torch.version.cuda is not None:
+        cuda_major = torch.version.cuda.split(".")[0]
+        path = os.path.expanduser(
+            f"~/.config/aphrodite/nccl/cu{cuda_major}/libnccl.so.*")
+        files = glob.glob(path)
+        aphrodite_nccl_path = files[0] if files else None
+
+    # manually load the nccl library
+    if so_file:
+        logger.info(
+            "Found nccl from environment variable "
+            f"APHRODITE_NCCL_SO_PATH={so_file}"
+        )
+    else:
+        if torch.version.cuda is not None:
+            so_file = aphrodite_nccl_path or find_library("libnccl.so.2")
+        elif torch.version.hip is not None:
+            so_file = find_library("librccl.so.1")
+        else:
+            raise ValueError("NCCL only supports CUDA and ROCm backends.")
+        logger.info(f"Found nccl from library {so_file}")
+    return so_file

@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from typing import Optional
 
 from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
-                                     EngineConfig, LoRAConfig, ModelConfig,
-                                     ParallelConfig, SchedulerConfig,
-                                     SpeculativeConfig, TokenizerPoolConfig,
-                                     VisionLanguageConfig)
+                                     EngineConfig, LoadConfig, LoRAConfig,
+                                     ModelConfig, ParallelConfig,
+                                     SchedulerConfig, SpeculativeConfig,
+                                     TokenizerPoolConfig, VisionLanguageConfig)
 from aphrodite.common.utils import str_to_int_tuple
 from aphrodite.quantization import QUANTIZATION_METHODS
 
@@ -18,6 +18,7 @@ class EngineArgs:
 
     model: str
     tokenizer: Optional[str] = None
+    skip_tokenizer_init: bool = False
     tokenizer_mode: str = "auto"
     trust_remote_code: bool = False
     download_dir: Optional[str] = None
@@ -32,13 +33,13 @@ class EngineArgs:
     tensor_parallel_size: int = 1
     max_parallel_loading_workers: Optional[int] = None
     block_size: int = 16
-    context_shift: bool = False
+    enable_prefix_caching: bool = False
     use_v2_block_manager: bool = False
     swap_space: int = 4  # GiB
     gpu_memory_utilization: float = 0.90
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: int = 256
-    max_log_probs: int = 10  # OpenAI default is 5, setting to 10 because ST
+    max_logprobs: int = 10  # OpenAI default is 5, setting to 10 because ST
     disable_log_stats: bool = False
     revision: Optional[str] = None
     code_revision: Optional[str] = None
@@ -63,6 +64,7 @@ class EngineArgs:
     ray_workers_use_nsight: bool = False
     num_gpu_blocks_override: Optional[int] = None
     num_lookahead_slots: int = 0
+    model_loader_extra_config: Optional[dict] = None
     # Related to Vision-language models such as llava
     image_input_type: Optional[str] = None
     image_token_id: Optional[int] = None
@@ -75,8 +77,6 @@ class EngineArgs:
     speculative_model: Optional[str] = None
     num_speculative_tokens: Optional[int] = None
     speculative_max_model_len: Optional[int] = None
-    ngram_prompt_lookup_max: Optional[int] = None
-    ngram_prompt_lookup_min: Optional[int] = None
 
     def __post_init__(self):
         if self.tokenizer is None:
@@ -103,6 +103,10 @@ class EngineArgs:
             default=EngineArgs.tokenizer,
             help="name or path of the huggingface tokenizer to use",
         )
+        parser.add_argument(
+            "--skip-tokenizer-init",
+            action="store_true",
+            help="Skip initialization of tokenizer and detokenizer")
         parser.add_argument(
             "--revision",
             type=str,
@@ -150,33 +154,40 @@ class EngineArgs:
             "huggingface",
         )
         parser.add_argument(
-            "--load-format",
+            '--load-format',
             type=str,
             default=EngineArgs.load_format,
-            choices=["auto", "pt", "safetensors", "npcache", "dummy"],
-            help="The format of the model weights to load. "
-            '"auto" will try to load the weights in the safetensors format '
-            "and fall back to the pytorch bin format if safetensors format "
-            "is not available. "
-            '"pt" will load the weights in the pytorch bin format. '
-            '"safetensors" will load the weights in the safetensors format. '
-            '"npcache" will load the weights in pytorch format and store '
-            "a numpy cache to speed up the loading. "
-            '"dummy" will initialize the weights with random values, '
-            "which is mainly for profiling.",
-        )
+            choices=[
+                'auto', 'pt', 'safetensors', 'npcache', 'dummy', 'tensorizer'
+            ],
+            help='The format of the model weights to load.\n\n'
+            '* "auto" will try to load the weights in the safetensors format '
+            'and fall back to the pytorch bin format if safetensors format '
+            'is not available.\n'
+            '* "pt" will load the weights in the pytorch bin format.\n'
+            '* "safetensors" will load the weights in the safetensors format.\n'
+            '* "npcache" will load the weights in pytorch format and store '
+            'a numpy cache to speed up the loading.\n'
+            '* "dummy" will initialize the weights with random values, '
+            'which is mainly for profiling.\n'
+            '* "tensorizer" will load the weights using tensorizer from '
+            'CoreWeave which assumes tensorizer_uri is set to the location of '
+            'the serialized weights.')
         parser.add_argument(
-            "--dtype",
+            '--dtype',
             type=str,
             default=EngineArgs.dtype,
             choices=[
-                "auto", "half", "float16", "bfloat16", "float", "float32"
+                'auto', 'half', 'float16', 'bfloat16', 'float', 'float32'
             ],
-            help="data type for model weights and activations. "
-            'The "auto" option will use FP16 precision '
-            "for FP32 and FP16 models, and BF16 precision "
-            "for BF16 models.",
-        )
+            help='Data type for model weights and activations.\n\n'
+            '* "auto" will use FP16 precision for FP32 and FP16 models, and '
+            'BF16 precision for BF16 models.\n'
+            '* "half" for FP16. Recommended for AWQ quantization.\n'
+            '* "float16" is the same as "half".\n'
+            '* "bfloat16" for a balance between precision and range.\n'
+            '* "float" is shorthand for FP32 precision.\n'
+            '* "float32" for FP32 precision.')
         parser.add_argument(
             '--kv-cache-dtype',
             type=str,
@@ -210,7 +221,11 @@ class EngineArgs:
             default='outlines',
             choices=['outlines', 'lm-format-enforcer'],
             help='Which engine will be used for guided decoding'
-            ' (JSON schema / regex etc)')
+            ' (JSON schema / regex etc) by default. Currently support '
+            'https://github.com/outlines-dev/outlines and '
+            'https://github.com/noamgat/lm-format-enforcer.'
+            ' Can be overridden per request via guided_decoding_backend'
+            ' parameter.')
         # Parallel arguments
         parser.add_argument(
             "--worker-use-ray",
@@ -223,15 +238,14 @@ class EngineArgs:
             "-pp",
             type=int,
             default=EngineArgs.pipeline_parallel_size,
-            help="number of pipeline stages",
-        )
+            help="number of pipeline stages. Currently not supported.")
         parser.add_argument(
             "--tensor-parallel-size",
             "-tp",
             type=int,
             default=EngineArgs.tensor_parallel_size,
-            help="number of tensor parallel replicas",
-        )
+            help="number of tensor parallel replicas, i.e. the number of GPUs "
+            "to use.")
         parser.add_argument(
             "--max-parallel-loading-workers",
             type=int,
@@ -254,6 +268,7 @@ class EngineArgs:
             help="token block size",
         )
         parser.add_argument(
+            "--enable-prefix-caching",
             "--context-shift",
             action="store_true",
             help="Enable context shifting.",
@@ -308,9 +323,9 @@ class EngineArgs:
             help="maximum number of sequences per iteration",
         )
         parser.add_argument(
-            "--max-log-probs",
+            "--max-logprobs",
             type=int,
-            default=EngineArgs.max_log_probs,
+            default=EngineArgs.max_logprobs,
             help="maximum number of log probabilities to "
             "return.",
         )
@@ -500,19 +515,15 @@ class EngineArgs:
             help="The maximum sequence length supported by the "
             "draft model. Sequences over this length will skip "
             "speculation.")
-        parser.add_argument(
-            "--ngram-prompt-lookup-max",
-            type=int,
-            default=None,
-            help='Max size of window for ngram prompt lookup in speculative '
-            'decoding.')
+        parser.add_argument("--model-loader-extra-config",
+                            type=str,
+                            default=EngineArgs.model_loader_extra_config,
+                            help="Extra config for model loader. "
+                            "This will be passed to the model loader "
+                            "corresponding to the chosen load_format. "
+                            "This should be a JSON string that will be "
+                            "parsed into a dictionary.")
 
-        parser.add_argument(
-            '--ngram-prompt-lookup-min',
-            type=int,
-            default=None,
-            help='Min size of window for ngram prompt lookup in speculative '
-            'decoding.')
         return parser
 
     @classmethod
@@ -530,8 +541,6 @@ class EngineArgs:
             self.tokenizer,
             self.tokenizer_mode,
             self.trust_remote_code,
-            self.download_dir,
-            self.load_format,
             self.dtype,
             self.seed,
             self.revision,
@@ -545,8 +554,10 @@ class EngineArgs:
             self.quantization_param_path,
             self.enforce_eager,
             self.max_context_len_to_capture,
-            self.max_log_probs,
+            self.max_logprobs,
+            self.skip_tokenizer_init,
         )
+
         cache_config = CacheConfig(
             self.block_size,
             self.gpu_memory_utilization,
@@ -555,8 +566,9 @@ class EngineArgs:
             # self.kv_quant_params_path,
             self.num_gpu_blocks_override,
             model_config.get_sliding_window(),
-            self.context_shift,
+            self.enable_prefix_caching,
         )
+
         parallel_config = ParallelConfig(
             self.pipeline_parallel_size,
             self.tensor_parallel_size,
@@ -570,6 +582,7 @@ class EngineArgs:
             ),
             self.ray_workers_use_nsight,
         )
+
         speculative_config = SpeculativeConfig.maybe_create_spec_config(
             target_model_config=model_config,
             target_parallel_config=parallel_config,
@@ -579,9 +592,8 @@ class EngineArgs:
             speculative_max_model_len=self.speculative_max_model_len,
             enable_chunked_prefill=self.enable_chunked_prefill,
             use_v2_block_manager=self.use_v2_block_manager,
-            ngram_prompt_lookup_max=self.ngram_prompt_lookup_max,
-            ngram_prompt_lookup_min=self.ngram_prompt_lookup_min,
         )
+
         scheduler_config = SchedulerConfig(
             self.max_num_batched_tokens,
             self.max_num_seqs,
@@ -593,14 +605,21 @@ class EngineArgs:
             delay_factor=self.scheduler_delay_factor,
             enable_chunked_prefill=self.enable_chunked_prefill,
         )
-        lora_config = (LoRAConfig(
+
+        lora_config = LoRAConfig(
             max_lora_rank=self.max_lora_rank,
             max_loras=self.max_loras,
             lora_extra_vocab_size=self.lora_extra_vocab_size,
             lora_dtype=self.lora_dtype,
-            max_cpu_loras=self.max_cpu_loras
-            if self.max_cpu_loras and self.max_cpu_loras > 0 else None,
-        ) if self.enable_lora else None)
+            max_cpu_loras=self.max_cpu_loras if self.max_cpu_loras
+            and self.max_cpu_loras > 0 else None) if self.enable_lora else None
+        
+        load_config = LoadConfig(
+            load_format=self.load_format,
+            download_dir=self.download_dir,
+            model_loader_extra_config=self.model_loader_extra_config,
+        )
+
         if self.image_input_type:
             if (not self.image_token_id or not self.image_input_shape
                     or not self.image_feature_size):
@@ -619,6 +638,7 @@ class EngineArgs:
 
         decoding_config = DecodingConfig(
             guided_decoding_backend=self.guided_decoding_backend)
+
         return EngineConfig(model_config=model_config,
                             cache_config=cache_config,
                             parallel_config=parallel_config,
@@ -627,6 +647,7 @@ class EngineArgs:
                             lora_config=lora_config,
                             vision_language_config=vision_language_config,
                             speculative_config=speculative_config,
+                            load_config=load_config,
                             decoding_config=decoding_config)
 
 

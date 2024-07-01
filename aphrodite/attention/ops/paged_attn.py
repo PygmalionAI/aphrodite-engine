@@ -3,8 +3,8 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 
-from aphrodite._C import cache_ops
 from aphrodite._C import ops
+from aphrodite._C import cache_ops
 from aphrodite.attention.ops.prefix_prefill import context_attention_fwd
 
 # Should be the same as PARTITION_SIZE in `paged_attention_v2_launcher`.
@@ -173,7 +173,6 @@ class PagedAttention:
         context_lens: torch.Tensor,
         max_subquery_len: int,
         alibi_slopes: Optional[torch.Tensor],
-        sliding_window: Optional[int],
     ) -> torch.Tensor:
         output = torch.empty_like(query)
         context_attention_fwd(
@@ -190,7 +189,6 @@ class PagedAttention:
             context_lens,
             max_subquery_len,
             alibi_slopes,
-            sliding_window,
         )
         return output
 

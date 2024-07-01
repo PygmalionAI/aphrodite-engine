@@ -138,6 +138,11 @@ torch::Tensor marlin_gemm(
     int64_t size_n,
     int64_t size_k);
 
+void scaled_fp8_quant(
+  torch::Tensor& out,
+  torch::Tensor& input,
+  torch::Tensor& scale);
+
 // QuIP#
 at::Tensor e8p_mm_origorder(
     const at::Tensor& A,

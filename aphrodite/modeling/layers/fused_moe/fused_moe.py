@@ -19,6 +19,8 @@ def fused_moe_kernel(
     a_ptr,
     b_ptr,
     c_ptr,
+    a_scale_ptr,
+    b_scale_ptr,
     topk_weights_ptr,
     sorted_token_ids_ptr,
     expert_ids_ptr,
@@ -47,6 +49,7 @@ def fused_moe_kernel(
     MUL_ROUTED_WEIGHT: tl.constexpr,
     top_k: tl.constexpr,
     compute_type: tl.constexpr,
+    use_fp8: tl.constexpr,
 ):
     """
     Implements the fused computation for a Mixture of Experts (MOE) using
@@ -109,6 +112,10 @@ def fused_moe_kernel(
     b_ptrs = b_ptr + off_experts * stride_be + (offs_k[:, None] * stride_bk +
                                                 offs_bn[None, :] * stride_bn)
 
+    if use_fp8:
+        a_scale = tl.load(a_scale_ptr)
+        b_scale = tl.load(b_scale_ptr + off_experts)
+
     # -----------------------------------------------------------
     # Iterate to compute a block of the C matrix.
     # We accumulate into a `[BLOCK_SIZE_M, BLOCK_SIZE_N]` block
@@ -127,7 +134,10 @@ def fused_moe_kernel(
                     mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
                     other=0.0)
         # We accumulate along the K dimension.
-        accumulator += tl.dot(a, b)
+        if use_fp8:
+            accumulator = tl.dot(a, b, acc=accumulator)
+        else:
+            accumulator += tl.dot(a, b)
         # Advance the ptrs to the next K block.
         a_ptrs += BLOCK_SIZE_K * stride_ak
         b_ptrs += BLOCK_SIZE_K * stride_bk
@@ -138,7 +148,10 @@ def fused_moe_kernel(
                              other=0)
         accumulator = accumulator * moe_weight[:, None]
 
-    accumulator = accumulator.to(compute_type)
+    if use_fp8:
+        accumulator = (accumulator * a_scale * b_scale).to(compute_type)
+    else:
+        accumulator = accumulator.to(compute_type)
     # -----------------------------------------------------------
     # Write back the block of the output
     offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
@@ -205,14 +218,23 @@ def moe_align_block_size(
 
 
 def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
-                            topk_weights: torch.Tensor, topk_ids: torch.Tensor,
+                            B_scale: torch.Tensor, topk_weights: torch.Tensor,
+                            topk_ids: torch.Tensor,
                             sorted_token_ids: torch.Tensor,
                             expert_ids: torch.Tensor,
                             num_tokens_post_padded: torch.Tensor,
                             mul_routed_weight: bool, top_k: int,
-                            config: Dict[str, Any]) -> None:
+                            config: Dict[str, Any], compute_type: tl.dtype,
+                            use_fp8: bool) -> None:
     assert topk_weights.stride(1) == 1
     assert sorted_token_ids.stride(0) == 1
+
+    if not use_fp8:
+        A_scale = None
+        assert B_scale is None
+    else:
+        A, A_scale = ops.scaled_fp8_quant(A)
+        assert B_scale is not None
 
     grid = lambda META: (triton.cdiv(sorted_token_ids.shape[0], META[
         'BLOCK_SIZE_M']) * triton.cdiv(B.shape[1], META['BLOCK_SIZE_N']), )
@@ -221,6 +243,8 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
         A,
         B,
         C,
+        A_scale,
+        B_scale,
         topk_weights,
         sorted_token_ids,
         expert_ids,
@@ -238,65 +262,21 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
         C.stride(2),
         MUL_ROUTED_WEIGHT=mul_routed_weight,
         top_k=top_k,
-        compute_type=tl.bfloat16 if A.dtype == torch.bfloat16 else tl.float16,
+        compute_type=compute_type,
+        use_fp8=use_fp8,
         **config,
     )
 
 
-def fused_topk(
-    gating_output: torch.Tensor,
-    topk: int,
-    renormalize: bool,
-):
-    """Compute top-k indice and weights from gating logits
-
-    Args:
-        gating_output (torch.Tensor): The output of the gating operation
-          (before softmax).
-        topk (int): The number of top-k experts to select.
-        renormalize (bool): If True, renormalize the top-k weights to sum to 1.
-    """
-    M = gating_output.shape[0]
-    if is_hip():
-        # The MoE kernels are not yet supported on ROCm.
-        routing_weights = torch.softmax(gating_output,
-                                        dim=-1,
-                                        dtype=torch.float32)
-        topk_weights, topk_ids = torch.topk(routing_weights, topk, dim=-1)
-    else:
-        import aphrodite._moe_C as moe_kernels
-
-        topk_weights = torch.empty(M,
-                                   topk,
-                                   dtype=torch.float32,
-                                   device=gating_output.device)
-        topk_ids = torch.empty(M,
-                               topk,
-                               dtype=torch.int32,
-                               device=gating_output.device)
-        token_expert_indicies = torch.empty(M,
-                                            topk,
-                                            dtype=torch.int32,
-                                            device=gating_output.device)
-        moe_kernels.topk_softmax(
-            topk_weights,
-            topk_ids,
-            token_expert_indicies,
-            gating_output.float(),  # TODO(woosuk): Optimize this.
-        )
-        del token_expert_indicies  # Not used. Will be used in the future.
-    if renormalize:
-        topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
-    return topk_weights, topk_ids
-
-
-def get_config_file_name(E: int, N: int) -> str:
+def get_config_file_name(E: int, N: int, dtype: Optional[str]) -> str:
     device_name = torch.cuda.get_device_name().replace(" ", "_")
-    return f"E={E},N={N},device_name={device_name}.json"
+    dtype_selector = "" if not dtype else f",dtype={dtype}"
+    return f"E={E},N={N},device_name={device_name}{dtype_selector}.json"
 
 
 @functools.lru_cache
-def get_moe_configs(E: int, N: int) -> Optional[Dict[int, Any]]:
+def get_moe_configs(E: int, N: int,
+                    dtype: Optional[str]) -> Optional[Dict[int, Any]]:
     """
     Return optimized configurations for the fused MoE kernel.
 
@@ -308,7 +288,7 @@ def get_moe_configs(E: int, N: int) -> Optional[Dict[int, Any]]:
 
     # First look up if an optimized configuration is available in the configs
     # directory
-    json_file_name = get_config_file_name(E, N)
+    json_file_name = get_config_file_name(E, N, dtype)
 
     config_file_path = os.path.join(
         os.path.dirname(os.path.realpath(__file__)), "configs", json_file_name)
@@ -331,8 +311,11 @@ def fused_moe(
     gating_output: torch.Tensor,
     topk: int,
     renormalize: bool,
-    inplace: bool = True,
+    inplace: bool = False,
     override_config: Optional[Dict[str, Any]] = None,
+    use_fp8: bool = False,
+    w1_scale: Optional[torch.Tensor] = None,
+    w2_scale: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     This function computes a Mixture of Experts (MoE) layer using two sets of
@@ -350,6 +333,12 @@ def fused_moe(
         Defaults to False.
     - override_config (Optional[Dict[str, Any]]): Optional override
         for the kernel configuration.
+    - use_fp8 (bool): If True, use fp8 arithmetic to compute the inner
+        products for w1 and w2. Defaults to False.
+    - w1_scale (Optional[torch.Tensor]): Optional scale to be used for
+        w1.
+    - w2_scale (Optional[torch.Tensor]): Optional scale to be used for
+        w2.
 
     Returns:
     - torch.Tensor: The output tensor after applying the MoE layer.
@@ -360,19 +349,51 @@ def fused_moe(
     assert hidden_states.shape[1] == w1.shape[2], "Hidden size mismatch"
     assert gating_output.shape[1] == w1.shape[0], "Number of experts mismatch"
     assert hidden_states.is_contiguous(), "Hidden_states must be contiguous"
+    assert w1.is_contiguous(), "Expert weights1 must be contiguous"
+    assert w2.is_contiguous(), "Expert weights2 must be contiguous"
     assert hidden_states.dtype in [
         torch.float32, torch.float16, torch.bfloat16
     ]
     M, _ = hidden_states.shape
     E, N, _ = w1.shape
 
-    topk_weights, topk_ids = fused_topk(gating_output, topk, renormalize)
+    if is_hip():
+        # The MoE kernels are not yet supported on ROCm.
+        routing_weights = torch.softmax(gating_output,
+                                        dim=-1,
+                                        dtype=torch.float32)
+        topk_weights, topk_ids = torch.topk(routing_weights, topk, dim=-1)
+    else:
+        import aphrodite._moe_C as moe_kernels
+
+        topk_weights = torch.empty(M,
+                                   topk,
+                                   dtype=torch.float32,
+                                   device=hidden_states.device)
+        topk_ids = torch.empty(M,
+                               topk,
+                               dtype=torch.int32,
+                               device=hidden_states.device)
+        token_expert_indicies = torch.empty(M,
+                                            topk,
+                                            dtype=torch.int32,
+                                            device=hidden_states.device)
+        moe_kernels.topk_softmax(
+            topk_weights,
+            topk_ids,
+            token_expert_indicies,
+            gating_output.float(),  # TODO(woosuk): Optimize this.
+        )
+        del token_expert_indicies  # Not used. Will be used in the future.
+    if renormalize:
+        topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
 
     if override_config:
         config = override_config
     else:
         # First try to load optimal config from the file
-        configs = get_moe_configs(E, w2.shape[2])
+        configs = get_moe_configs(E, w2.shape[2],
+                                  "float8" if use_fp8 else None)
 
         if configs:
             # If an optimal configuration map has been found, look up the
@@ -408,17 +429,37 @@ def fused_moe(
     sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
         topk_ids, config['BLOCK_SIZE_M'], E)
 
-    invoke_fused_moe_kernel(hidden_states, w1, intermediate_cache1,
-                            topk_weights, topk_ids, sorted_token_ids,
-                            expert_ids, num_tokens_post_padded, False,
-                            topk_ids.shape[1], config)
+    invoke_fused_moe_kernel(hidden_states,
+                            w1,
+                            intermediate_cache1,
+                            w1_scale,
+                            topk_weights,
+                            topk_ids,
+                            sorted_token_ids,
+                            expert_ids,
+                            num_tokens_post_padded,
+                            False,
+                            topk_ids.shape[1],
+                            config,
+                            compute_type=tl.float16,
+                            use_fp8=use_fp8)
 
     ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
 
-    invoke_fused_moe_kernel(intermediate_cache2, w2, intermediate_cache3,
-                            topk_weights, topk_ids, sorted_token_ids,
-                            expert_ids, num_tokens_post_padded, True, 1,
-                            config)
+    invoke_fused_moe_kernel(intermediate_cache2,
+                            w2,
+                            intermediate_cache3,
+                            w2_scale,
+                            topk_weights,
+                            topk_ids,
+                            sorted_token_ids,
+                            expert_ids,
+                            num_tokens_post_padded,
+                            True,
+                            1,
+                            config,
+                            compute_type=tl.float16,
+                            use_fp8=use_fp8)
 
     if inplace:
         return torch.sum(intermediate_cache3.view(*intermediate_cache3.shape),
