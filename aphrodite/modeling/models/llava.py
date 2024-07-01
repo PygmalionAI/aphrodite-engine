@@ -1,23 +1,22 @@
-from typing import List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 import torch
 from torch import nn
-# TODO: We should port CLIPVisionModel's code over to not depend on
+# TODO(xwjiang): We should port CLIPVisionModel's code over to not depend on
 # transformers' impl.
 from transformers import CLIPVisionModel, LlavaConfig
 
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import VisionLanguageConfig
+from aphrodite.common.sequence import SamplerOutput
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.linear import LinearMethodBase
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
+from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.models.llama import LlamaModel
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.modeling.hf_downloader import (default_weight_loader,
-                                              hf_model_weights_iterator)
-from aphrodite.common.sequence import SamplerOutput
 
 _KEYS_TO_MODIFY_MAPPING = {
     "language_model.lm_head": "lm_head",
@@ -25,7 +24,7 @@ _KEYS_TO_MODIFY_MAPPING = {
 }
 
 
-# TODO: Run benchmark and decide if TP.
+# TODO(xwjiang): Run benchmark and decide if TP.
 class LlavaMultiModalProjector(nn.Module):
 
     def __init__(self, vision_hidden_size: int, text_hidden_size: int,
@@ -92,9 +91,8 @@ class LlavaForConditionalGeneration(nn.Module):
             config.text_config.hidden_size,
             org_num_embeddings=self.language_model.org_vocab_size)
         logit_scale = getattr(config, "logit_scale", 1.0)
-        self.logits_processor = LogitsProcessor(
-            self.unpadded_vocab_size,
-            min(config.vocab_size, config.tokenizer_vocab_size), logit_scale)
+        self.logits_processor = LogitsProcessor(self.unpadded_vocab_size,
+                                                config.vocab_size, logit_scale)
         self.sampler = Sampler()
 
     def forward(
@@ -106,6 +104,7 @@ class LlavaForConditionalGeneration(nn.Module):
         image_input: Optional[torch.Tensor] = None
     ) -> SamplerOutput:  # noqa: E501
         """Run forward pass for Llava 1.5.
+
         One key thing to understand is the `input_ids` already accounts for the
         positions of the to-be-inserted image embeddings.
         Concretely, consider a text prompt:
@@ -120,8 +119,10 @@ class LlavaForConditionalGeneration(nn.Module):
         9047, 13566, 29901].
         There will be 576 `32000` in the `input_ids`.
         (32000 is the token id for `<image>`.)
+
         This way, the `positions` and `attn_metadata` are consistent
         with the `input_ids`.
+
         The model takes two types of image inputs: 
         PIXEL_VALUES and IMAGE_FEATURES.
         The following shows how each maps to huggingface implementation.
@@ -130,6 +131,7 @@ class LlavaForConditionalGeneration(nn.Module):
         IMAGE_FEATURES:
         - https://github.com/huggingface/transformers/blob/07bdbeb/src/transformers/models/llava/modeling_llava.py#L430
         before going through the multi modal projector.
+
         Args:
             input_ids: Flattened (concatenated) input_ids corresponding to a
                 batch.
@@ -145,11 +147,11 @@ class LlavaForConditionalGeneration(nn.Module):
                     f"plus "
                     f"{self.vision_language_config.image_input_shape[1:]}."
                     f" You supplied {image_input.shape}. "
-                    f"If you are using Aphrodite's endpoint, make sure your "
+                    f"If you are using vLLM's entrypoint, make sure your "
                     f"supplied image input is consistent with "
                     f"image_input_shape in engine args.")
             if self.vision_tower is not None:
-                # TODO: Maybe port minimal CLIPVisionModel over.
+                # TODO(xwjiang): Maybe port minimal CLIPVisionModel over.
                 image_outputs = self.vision_tower(image_input,
                                                   output_hidden_states=True)
                 image_features = image_outputs.hidden_states[
@@ -183,7 +185,7 @@ class LlavaForConditionalGeneration(nn.Module):
 
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
-        logits = self.logits_processor(self.lm_head, hidden_states,
+        logits = self.logits_processor(self.lm_head.weight, hidden_states,
                                        sampling_metadata)
         return logits
 
@@ -195,11 +197,7 @@ class LlavaForConditionalGeneration(nn.Module):
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
-    def load_weights(self,
-                     model_name_or_path: str,
-                     cache_dir: Optional[str] = None,
-                     load_format: str = "auto",
-                     revision: Optional[str] = None):
+    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         # only doing this for language model part for now.
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
@@ -210,8 +208,7 @@ class LlavaForConditionalGeneration(nn.Module):
             ("gate_up_proj", "up_proj", 1),
         ]
         params_dict = dict(self.named_parameters())
-        for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision):
+        for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
                 continue
             for key_to_modify, new_key in _KEYS_TO_MODIFY_MAPPING.items():

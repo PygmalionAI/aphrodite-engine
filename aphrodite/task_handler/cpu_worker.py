@@ -1,25 +1,18 @@
 """A CPU worker class."""
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.distributed
 
 from aphrodite.attention import get_attn_backend
-from aphrodite.common.config import (
-    CacheConfig,
-    DeviceConfig,
-    LoRAConfig,
-    ModelConfig,
-    ParallelConfig,
-    SchedulerConfig,
-)
+from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
+                                     LoRAConfig, ModelConfig, ParallelConfig,
+                                     SchedulerConfig, VisionLanguageConfig)
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 from aphrodite.common.utils import STR_DTYPE_TO_TORCH_DTYPE
-from aphrodite.distributed import (
-    broadcast_tensor_dict,
-    ensure_model_parallel_initialized,
-    init_distributed_environment,
-)
+from aphrodite.distributed import (broadcast_tensor_dict,
+                                   ensure_model_parallel_initialized,
+                                   init_distributed_environment)
 from aphrodite.modeling import set_random_seed
 from aphrodite.task_handler.cpu_model_runner import CPUModelRunner
 from aphrodite.task_handler.worker_base import LoraNotSupportedWorkerBase
@@ -27,6 +20,7 @@ from aphrodite.task_handler.worker_base import LoraNotSupportedWorkerBase
 
 class CPUCacheEngine:
     """Manages the KV cache for CPU backend.
+
     This class is responsible for initializing and managing CPU KV
     caches. It also provides methods for performing KV cache operations, such
     as copying.
@@ -107,6 +101,7 @@ class CPUCacheEngine:
 
 class CPUWorker(LoraNotSupportedWorkerBase):
     """A worker class that executes (a partition of) the model on a CPU socket.
+
     Each worker is associated with a single CPU socket. The worker is 
     responsible for maintaining the KV cache and executing the model on the 
     CPU. In case of distributed inference, each worker is assigned a partition
@@ -120,10 +115,12 @@ class CPUWorker(LoraNotSupportedWorkerBase):
         scheduler_config: SchedulerConfig,
         device_config: DeviceConfig,
         cache_config: CacheConfig,
+        load_config: LoadConfig,
         local_rank: int,
         rank: int,
         distributed_init_method: str,
         lora_config: Optional[LoRAConfig] = None,
+        vision_language_config: Optional[VisionLanguageConfig] = None,
         kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
     ) -> None:
@@ -132,25 +129,34 @@ class CPUWorker(LoraNotSupportedWorkerBase):
         self.scheduler_config = scheduler_config
         self.device_config = device_config
         self.cache_config = cache_config
+        self.load_config = load_config
         self.local_rank = local_rank
         self.rank = rank
         self.distributed_init_method = distributed_init_method
         self.lora_config = lora_config
+        self.vision_language_config = vision_language_config
         self.is_driver_worker = is_driver_worker
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
 
-        self.model_runner = CPUModelRunner(model_config,
-                                           parallel_config,
-                                           scheduler_config,
-                                           device_config,
-                                           lora_config=self.lora_config,
-                                           kv_cache_dtype=kv_cache_dtype,
-                                           is_driver_worker=is_driver_worker)
+        if self.model_config.trust_remote_code:
+            # note: lazy import to avoid importing torch before initializing
+            from aphrodite.common.utils import init_cached_hf_modules
+            init_cached_hf_modules()
+        self.model_runner = CPUModelRunner(
+            model_config,
+            parallel_config,
+            scheduler_config,
+            device_config,
+            load_config=self.load_config,
+            lora_config=self.lora_config,
+            vision_language_config=self.vision_language_config,
+            kv_cache_dtype=kv_cache_dtype,
+            is_driver_worker=is_driver_worker)
         # Uninitialized cache engine. Will be initialized by
-        # initialize_cache
-        self.cache_engine = None
-        self.cpu_cache = None
+        # initialize_cache.
+        self.cache_engine: CPUCacheEngine
+        self.cpu_cache: List[torch.Tensor]
 
     def init_device(self) -> None:
         self.init_distributed_environment()
@@ -160,10 +166,12 @@ class CPUWorker(LoraNotSupportedWorkerBase):
     def load_model(self):
         self.model_runner.load_model()
 
-    def determine_num_available_blocks(self) -> tuple[int, int]:
+    def determine_num_available_blocks(self) -> Tuple[int, int]:
         """Determine the number of blocks available for the KV cache.
+
         This determines how many KV blocks can fit into the configured CPU
         KV cache space.
+
         Note that since Aphrodite assumes a block resides on GPU if it can be
         modified, we return num_gpu_blocks=num_cpu_blocks and num_cpu_blocks=0.
         This allows us to reuse the scheduler of Aphrodite without generalizing
@@ -186,6 +194,7 @@ class CPUWorker(LoraNotSupportedWorkerBase):
                          num_cpu_blocks: int) -> None:
         """Initialize the KV cache. Currently, swappable CPU memory is not
         supported.
+
         Since this worker does not support GPUs, we use the num_gpu_blocks to
         determine how many non-swappable CPU blocks to allocate.
         """
@@ -207,10 +216,9 @@ class CPUWorker(LoraNotSupportedWorkerBase):
         """Raise errors if the num_cpu_blocks is invalid.
         """
         if num_cpu_blocks <= 0:
-            raise ValueError(
-                "No available memory for the cache blocks. "
-                "Try increasing `APHRODITE_CPU_KVCACHE_SPACE` when"
-                " initializing the engine.")
+            raise ValueError("No available memory for the cache blocks. "
+                             "Try increasing `APHRODITE_CPU_KVCACHE_SPACE` when "
+                             "initializing the engine.")
 
         max_seq_len = self.cache_config.block_size * num_cpu_blocks
         if self.model_config.max_model_len > max_seq_len:
@@ -218,8 +226,8 @@ class CPUWorker(LoraNotSupportedWorkerBase):
                 f"The model's max seq len ({self.model_config.max_model_len}) "
                 "is larger than the maximum number of tokens that can be "
                 f"stored in KV cache ({max_seq_len}). Try increasing "
-                "`APHRODITE_CPU_KVCACHE_SPACE` or decreasing `max_model_len` "
-                "when initializing the engine.")
+                "`APHRODITE_CPU_KVCACHE_SPACE` or decreasing `max_model_len` when "
+                "initializing the engine.")
 
     def _init_cache_engine(self) -> None:
         self.cache_engine = CPUCacheEngine(self.cache_config,
@@ -249,17 +257,16 @@ class CPUWorker(LoraNotSupportedWorkerBase):
         blocks_to_swap_in: Optional[Dict[int, int]] = None,
         blocks_to_swap_out: Optional[Dict[int, int]] = None,
         blocks_to_copy: Optional[Dict[int, List[int]]] = None,
-        num_lookahead_slots: Optional[int] = None,
     ) -> List[SamplerOutput]:
         if self.is_driver_worker:
             assert seq_group_metadata_list is not None
-            num_seq_groups = len(seq_group_metadata_list)
+            num_seq_groups: int = len(seq_group_metadata_list)
             assert blocks_to_swap_in is not None
             assert blocks_to_swap_out is not None
             assert blocks_to_copy is not None
             assert len(blocks_to_swap_in) == 0
             assert len(blocks_to_swap_out) == 0
-            data = {
+            data: Dict[str, Any] = {
                 "num_seq_groups": num_seq_groups,
                 "blocks_to_copy": blocks_to_copy,
             }
@@ -269,6 +276,7 @@ class CPUWorker(LoraNotSupportedWorkerBase):
             num_seq_groups = data["num_seq_groups"]
             blocks_to_copy = data["blocks_to_copy"]
 
+        assert blocks_to_copy is not None
         self.cache_copy(blocks_to_copy)
 
         # If there is no input, we don't need to execute the model.
@@ -277,6 +285,7 @@ class CPUWorker(LoraNotSupportedWorkerBase):
 
         output = self.model_runner.execute_model(seq_group_metadata_list,
                                                  self.cpu_cache)
+
         # CPU worker only supports single-step execution.
         return [output]
 
@@ -286,7 +295,6 @@ class CPUWorker(LoraNotSupportedWorkerBase):
         parallel_config = self.parallel_config
         rank = self.rank
         distributed_init_method = self.distributed_init_method
-
         init_distributed_environment(
             world_size=parallel_config.world_size,
             rank=rank,

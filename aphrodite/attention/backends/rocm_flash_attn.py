@@ -6,16 +6,12 @@ from typing import Dict, List, Optional, Tuple, Type
 import torch
 from loguru import logger
 
-from aphrodite.attention.backends.abstract import (
-    AttentionBackend,
-    AttentionImpl,
-    AttentionMetadata,
-    AttentionMetadataPerStage,
-)
-from aphrodite.attention.ops.paged_attn import (
-    PagedAttention,
-    PagedAttentionMetadata,
-)
+from aphrodite.attention.backends.abstract import (AttentionBackend,
+                                                   AttentionImpl,
+                                                   AttentionMetadata,
+                                                   AttentionMetadataPerStage)
+from aphrodite.attention.ops.paged_attn import (PagedAttention,
+                                                PagedAttentionMetadata)
 
 
 class ROCmFlashAttentionBackend(AttentionBackend):
@@ -58,6 +54,7 @@ class ROCmFlashAttentionBackend(AttentionBackend):
 class ROCmFlashAttentionMetadata(AttentionMetadataPerStage,
                                  PagedAttentionMetadata):
     """Metadata for FlashAttentionBackend.
+
     NOTE: Any python object stored here is not updated when it is
     cuda-graph replayed. If you have values that need to be changed
     dynamically, it should be stored in tensor. The tensor has to be
@@ -107,18 +104,23 @@ class ROCmFlashAttentionImpl(AttentionImpl):
     If the input tensors contain prompt tokens, the layout is as follows:
     |<--------------- num_prompt_tokens -------------->|
     |<--prompt_0-->|<--prompt_1-->|...|<--prompt_N-1-->|
+
     Otherwise, the layout is as follows:
     |<------------------ num_generation_tokens (M) ----------------->|
     |<--generation_0-->|..........|<--generation_M-1-->|<--padding-->|
+
     Generation tokens can contain padding when cuda-graph is used.
     Currently, prompt tokens don't contain any padding.
+
     The prompts might have different lengths, while the generation tokens
     always have length 1.
 
     If chunked prefill is enabled, prefill tokens and decode tokens can be
     batched together in a flattened 1D query.
+
     |<----- num_prefill_tokens ---->|<------- num_decode_tokens ----------->|	
     |<-prompt_0->|...|<-prompt_N-1->|<-generation_0->|...|<-generation_M-1->|
+
     Currently, cuda graph is disabled for chunked prefill, meaning there's no
     padding between prefill and decode tokens.
     """
@@ -151,26 +153,30 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                 f"Head size {head_size} is not supported by PagedAttention. "
                 f"Supported head sizes are: {suppored_head_sizes}.")
 
-        self.use_naive_attn = torch.cuda.get_device_capability()[0] != 9
+        self.use_naive_attn = False
         # NOTE: Allow for switching between Triton and CK. Defaulting to triton.
         self.use_triton_flash_attn = (os.environ.get(
-            "APHRODITE_USE_TRITON_FLASH_ATTN", "True").lower()
-                                      in ("true", "1"))
-        if self.use_naive_attn:
-            # AMD Radeon 7900 series (gfx1100) currently does not support
-            # xFormers nor FlashAttention. As a temporary workaround, we use
-            # naive PyTorch implementation of attention.
-            self.attn_fuc = _naive_attention
-            logger.debug("Using naive attention in ROCmBackend")
-        elif self.use_triton_flash_attn:
-            from aphrodite.attention.ops.triton_flash_attn import (  # noqa: F401
-                triton_attention, )
+            "APHRODITE_USE_TRITON_FLASH_ATTN", "True").lower() in ("true", "1"))
+        if self.use_triton_flash_attn:
+            from aphrodite.attention.ops.triton_flash_attention import \
+                triton_attention  # noqa: F401
             self.attn_func = triton_attention
             logger.debug("Using Triton FA in ROCmBackend")
         else:
-            from flash_attn import flash_attn_varlen_func  # noqa: F401
-            self.attn_func = flash_attn_varlen_func
-            logger.debug("Using CK FA in ROCmBackend")
+            # if not using triton, navi3x not use flash-attn either
+            if torch.cuda.get_device_capability()[0] == 11:
+                self.use_naive_attn = True
+            else:
+                try:
+                    from flash_attn import flash_attn_varlen_func  # noqa: F401
+                    self.attn_func = flash_attn_varlen_func
+                    logger.debug("Using CK FA in ROCmBackend")
+                except ModuleNotFoundError:
+                    self.use_naive_attn = True
+
+            if self.use_naive_attn:
+                self.attn_func = _naive_attention
+                logger.debug("Using naive attention in ROCmBackend")
 
     def repeat_kv(self, x: torch.Tensor, n_rep: int) -> torch.Tensor:
         """torch.repeat_interleave(x, dim=1, repeats=n_rep)"""
@@ -190,6 +196,7 @@ class ROCmFlashAttentionImpl(AttentionImpl):
         kv_scale: float = 1.0,
     ) -> torch.Tensor:
         """Forward pass with FlashAttention and PagedAttention.
+
         Args:
             query: shape = [num_tokens, num_heads * head_size]
             key: shape = [num_tokens, num_kv_heads * head_size]
@@ -240,17 +247,18 @@ class ROCmFlashAttentionImpl(AttentionImpl):
 
         if prefill_meta := attn_metadata.prefill_metadata:
             # Prompt run.
+            assert prefill_meta.prompt_lens is not None
             if kv_cache is None or prefill_meta.block_tables.numel() == 0:
                 # triton attention
                 # When block_tables are not filled, it means q and k are the
                 # prompt, and they have the same length.
-                if self.use_naive_attn or self.use_triton_flash_attn:
+                if self.use_triton_flash_attn or self.use_naive_attn:
                     if self.num_kv_heads != self.num_heads:
                         # Interleave for MQA workaround.
                         key = self.repeat_kv(key, self.num_queries_per_kv)
                         value = self.repeat_kv(value, self.num_queries_per_kv)
                     if self.use_naive_attn:
-                        out = self.attn_fuc(
+                        out = self.attn_func(
                             query,
                             key,
                             value,
@@ -319,6 +327,7 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                 self.alibi_slopes,
                 kv_scale,
             )
+
         # Reshape the output tensor.
         return output.view(num_tokens, hidden_size)
 
@@ -330,7 +339,6 @@ def _naive_attention(
     prompt_lens: List[int],
     scale: float,
 ) -> torch.Tensor:
-    num_tokens = query.shape[0]  # noqa: F841
     output = torch.empty_like(query)
     start = 0
     for _, prompt_len in enumerate(prompt_lens):
@@ -345,10 +353,6 @@ def _naive_attention(
         output[start:end].copy_(out)
         start += prompt_len
 
-    # Using view got RuntimeError: view size is not compatible
-    # with input tensor's size and stride (at least one
-    # dimension spans across two contiguous subspaces).
-    # Use reshape instead.
     return output
 
 
@@ -365,7 +369,6 @@ def _naive_masked_attention(
                                       device=query.device),
                            diagonal=1)
     attn_mask = attn_mask * torch.finfo(query.dtype).min
-
     attn_weights = scale * torch.einsum("qhd,khd->hqk", query, key).float()
     attn_weights = attn_weights + attn_mask.float()
     attn_weights = torch.softmax(attn_weights, dim=-1).to(value.dtype)

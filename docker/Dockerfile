@@ -52,6 +52,7 @@ ENV NUMBA_CACHE_DIR=$HF_HOME/numba_cache
 ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 RUN python3 -m pip install --no-cache-dir -e ${APP_HOME}
 
+
 # Workaround to properly install flash-attn. This needs to be executed after installing aphrodite-engine 
 # build dependencies. For reference see: https://github.com/Dao-AILab/flash-attention/issues/453
 RUN python3 -m pip install "flash-attn>=${FLASH_ATTN_VERSION}" --no-build-isolation --no-cache-dir

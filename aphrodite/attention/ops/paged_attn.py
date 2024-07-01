@@ -3,8 +3,8 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 
-from aphrodite._C import cache_ops
 from aphrodite._C import ops
+from aphrodite._C import cache_ops
 from aphrodite.attention.ops.prefix_prefill import context_attention_fwd
 
 # Should be the same as PARTITION_SIZE in `paged_attention_v2_launcher`.

@@ -1,16 +1,17 @@
-from typing import Callable, Iterable, List
+from typing import Callable, List
 
 from transformers import PreTrainedTokenizer
 
-from aphrodite.processing.scheduler import Scheduler
-from aphrodite.engine.output_processor.interfaces import (
-    SequenceGroupOutputProcessor)
+from aphrodite.engine.output_processor.interfaces import \
+    SequenceGroupOutputProcessor
 from aphrodite.engine.output_processor.stop_checker import StopChecker
+from aphrodite.processing.scheduler import Scheduler
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (Logprob, Sequence, SequenceGroup,
-                                       SequenceGroupOutput, SequenceOutput,
-                                       SequenceStatus)
+                                SequenceGroupOutput, SequenceOutput,
+                                SequenceStatus)
 from aphrodite.transformers_utils.detokenizer import Detokenizer
+from aphrodite.common.utils import Counter
 
 
 class MultiStepOutputProcessor(SequenceGroupOutputProcessor):
@@ -21,6 +22,7 @@ class MultiStepOutputProcessor(SequenceGroupOutputProcessor):
     This is currently mutually exclusive with advanced sampling techniques like
     beam search, which motivates the separation of this logic from the single
     step output processor.
+
     This class is responsible for things such as correctly appending all new
     token ids to their sequence, detokenizing new token ids, truncating new
     output tokens after an eos token, and correctly handling the case where the
@@ -31,7 +33,7 @@ class MultiStepOutputProcessor(SequenceGroupOutputProcessor):
         self,
         detokenizer: Detokenizer,
         scheduler: Scheduler,
-        seq_counter: Iterable[int],
+        seq_counter: Counter,
         get_tokenizer_for_seq: Callable[[Sequence], PreTrainedTokenizer],
         stop_checker: StopChecker,
     ):
@@ -44,8 +46,10 @@ class MultiStepOutputProcessor(SequenceGroupOutputProcessor):
     def process_outputs(self, sequence_group: SequenceGroup,
                         outputs: List[SequenceGroupOutput]) -> None:
         """Append new tokens in the outputs to sequences in the sequence group.
+
         This only supports sequence groups of size 1. It supports greater than
         one new token per sequence.
+
         This applies logic like stop condition checking and detokenization,
         including freeing finished sequences. It also handles cases where there
         are tokens emitted after the EOS token.

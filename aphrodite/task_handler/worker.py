@@ -1,31 +1,22 @@
 """A GPU worker class."""
 import gc
 import os
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import torch
 import torch.distributed
 from loguru import logger
 
-from aphrodite.common.config import (
-    CacheConfig,
-    DeviceConfig,
-    LoRAConfig,
-    ModelConfig,
-    ParallelConfig,
-    SchedulerConfig,
-    VisionLanguageConfig,
-)
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
-from aphrodite.common.utils import in_wsl
-from aphrodite.distributed import (
-    broadcast_tensor_dict,
-    ensure_model_parallel_initialized,
-    init_distributed_environment,
-)
+from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
+                              LoRAConfig, ModelConfig, ParallelConfig,
+                              SchedulerConfig, VisionLanguageConfig)
+from aphrodite.distributed import (broadcast_tensor_dict,
+                                   ensure_model_parallel_initialized,
+                                   init_distributed_environment)
 from aphrodite.distributed.device_communicators import pynccl_utils
-from aphrodite.distributed.device_communicators.custom_all_reduce import (
-    init_custom_ar, )
+from aphrodite.distributed.device_communicators.custom_all_reduce import \
+    init_custom_ar
 from aphrodite.lora.request import LoRARequest
 from aphrodite.modeling import set_random_seed
 from aphrodite.task_handler.cache_engine import CacheEngine
@@ -48,6 +39,7 @@ class Worker(WorkerBase):
         scheduler_config: SchedulerConfig,
         device_config: DeviceConfig,
         cache_config: CacheConfig,
+        load_config: LoadConfig,
         local_rank: int,
         rank: int,
         distributed_init_method: str,
@@ -64,10 +56,15 @@ class Worker(WorkerBase):
         self.rank = rank
         self.distributed_init_method = distributed_init_method
         self.lora_config = lora_config
+        self.load_config = load_config
         self.is_driver_worker = is_driver_worker
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
 
+        if self.model_config.trust_remote_code:
+            # note: lazy import to avoid importing torch before initializing
+            from aphrodite.common.utils import init_cached_hf_modules
+            init_cached_hf_modules()
         self.vision_language_config = vision_language_config
         if self.vision_language_config:
             assert not self.lora_config, (
@@ -78,15 +75,16 @@ class Worker(WorkerBase):
             parallel_config,
             scheduler_config,
             device_config,
+            load_config=load_config,
             lora_config=self.lora_config,
             kv_cache_dtype=self.cache_config.cache_dtype,
             is_driver_worker=is_driver_worker,
-            # kv_quant_params_path=kv_quant_params_path,
-            vision_language_config=vision_language_config)
+            vision_language_config=vision_language_config,
+        )
         # Uninitialized cache engine. Will be initialized by
-        # initialize_cache
-        self.cache_engine = None
-        self.gpu_cache = None
+        # initialize_cache.
+        self.cache_engine: CacheEngine
+        self.gpu_cache: List[torch.Tensor]
 
     def init_device(self) -> None:
         if self.device_config.device.type == "cuda":
@@ -100,11 +98,6 @@ class Worker(WorkerBase):
 
             # This env var set by Ray causes exceptions with graph building.
             os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
-
-            # Patch for torch.cuda.is_available() unexpected error in WSL;
-            # always call torch.cuda.device_count() before initialising device
-            if in_wsl():
-                torch.cuda.device_count()
             self.device = torch.device(f"cuda:{self.local_rank}")
             torch.cuda.set_device(self.device)
 
@@ -118,7 +111,7 @@ class Worker(WorkerBase):
         init_worker_distributed_environment(self.parallel_config, self.rank,
                                             self.distributed_init_method,
                                             self.local_rank)
-        # Set random seed
+        # Set random seed.
         set_random_seed(self.model_config.seed)
 
     def load_model(self):
@@ -128,9 +121,11 @@ class Worker(WorkerBase):
     def determine_num_available_blocks(self) -> Tuple[int, int]:
         """Profiles the peak memory usage of the model to determine how many
         KV blocks may be allocated without OOMs.
+
         The engine will first conduct a profiling of the existing memory usage.
         Then, it calculate the maximum possible number of GPU and CPU blocks
         that can be allocated with the remaining free memory.
+
         .. tip::
             You may limit the usage of GPU memory
             by adjusting the `gpu_memory_utilization` parameter.
@@ -171,6 +166,7 @@ class Worker(WorkerBase):
     def initialize_cache(self, num_gpu_blocks: int,
                          num_cpu_blocks: int) -> None:
         """Allocate GPU and CPU KV cache with the specified number of blocks.
+
         This also warms up the model, which may record CUDA graphs.
         """
         raise_if_cache_size_invalid(num_gpu_blocks,
@@ -204,7 +200,7 @@ class Worker(WorkerBase):
         blocks_to_copy: Dict[int, List[int]],
     ) -> None:
         # Issue cache operations.
-        # TODO: Profile the overhead of swapping operations and optimize
+        # TODO: Profile swapping overhead and optimize if needed.
         if blocks_to_swap_in:
             self.cache_engine.swap_in(blocks_to_swap_in)
         if blocks_to_swap_out:
@@ -221,13 +217,14 @@ class Worker(WorkerBase):
         blocks_to_copy: Optional[Dict[int, List[int]]] = None,
         num_lookahead_slots: int = 0,
     ) -> List[SamplerOutput]:
+
         if self.is_driver_worker:
             assert seq_group_metadata_list is not None
             num_seq_groups = len(seq_group_metadata_list)
             assert blocks_to_swap_in is not None
             assert blocks_to_swap_out is not None
             assert blocks_to_copy is not None
-            data = {
+            data: Dict[str, Any] = {
                 "num_seq_groups": num_seq_groups,
                 "blocks_to_swap_in": blocks_to_swap_in,
                 "blocks_to_swap_out": blocks_to_swap_out,
@@ -241,6 +238,9 @@ class Worker(WorkerBase):
             blocks_to_swap_out = data["blocks_to_swap_out"]
             blocks_to_copy = data["blocks_to_copy"]
 
+        assert blocks_to_swap_in is not None
+        assert blocks_to_swap_out is not None
+        assert blocks_to_copy is not None
         self.cache_swap(blocks_to_swap_in, blocks_to_swap_out, blocks_to_copy)
 
         # If there is no input, we don't need to execute the model.
@@ -249,6 +249,7 @@ class Worker(WorkerBase):
 
         output = self.model_runner.execute_model(seq_group_metadata_list,
                                                  self.gpu_cache)
+
         # Worker only supports single-step execution. Wrap the output in a list
         # to conform to interface.
         return [output]

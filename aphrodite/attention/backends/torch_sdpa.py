@@ -6,16 +6,12 @@ from typing import Dict, List, Optional, Tuple, Type
 import torch
 from torch.nn.functional import scaled_dot_product_attention
 
-from aphrodite.attention.backends.abstract import (
-    AttentionBackend,
-    AttentionImpl,
-    AttentionMetadata,
-    AttentionMetadataPerStage,
-)
-from aphrodite.attention.ops.paged_attn import (
-    PagedAttention,
-    PagedAttentionMetadata,
-)
+from aphrodite.attention.backends.abstract import (AttentionBackend,
+                                                   AttentionImpl,
+                                                   AttentionMetadata,
+                                                   AttentionMetadataPerStage)
+from aphrodite.attention.ops.paged_attn import (PagedAttention,
+                                                PagedAttentionMetadata)
 
 
 class TorchSDPABackend(AttentionBackend):
@@ -111,7 +107,7 @@ class TorchSDPABackendImpl(AttentionImpl):
         key: torch.Tensor,
         value: torch.Tensor,
         kv_cache: Optional[torch.Tensor],
-        attn_metadata: TorchSDPAMetadata,
+        attn_metadata: TorchSDPAMetadata,  # type: ignore
         kv_scale: float,
     ) -> torch.Tensor:
         """Forward pass with torch SDPA and PagedAttention.
@@ -141,6 +137,7 @@ class TorchSDPABackendImpl(AttentionImpl):
                                                 kv_scale)
 
         if attn_metadata.is_prompt:
+            assert attn_metadata.prompt_lens is not None
             if (kv_cache is None or attn_metadata.block_tables.numel() == 0):
                 if self.num_kv_heads != self.num_heads:
                     key = key.repeat_interleave(self.num_queries_per_kv, dim=1)
@@ -214,7 +211,7 @@ def _make_alibi_bias(
     attn_biases = []
     for prompt_len in prompt_lens:
         bias = torch.arange(prompt_len, dtype=dtype)
-        # NOTE: HF uses
+        # NOTE(zhuohan): HF uses
         #     `bias = bias[None, :].repeat(prompt_len, 1)`
         # here. We find that both biases give the same results, but
         # the bias below more accurately follows the original ALiBi

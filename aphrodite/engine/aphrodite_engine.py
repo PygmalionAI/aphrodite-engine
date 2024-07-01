@@ -6,9 +6,9 @@ from transformers import GenerationConfig, PreTrainedTokenizer
 
 import aphrodite
 from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
-                                     LoRAConfig, ModelConfig, ParallelConfig,
-                                     SchedulerConfig, SpeculativeConfig,
-                                     VisionLanguageConfig)
+                                     LoadConfig, LoRAConfig, ModelConfig,
+                                     ParallelConfig, SchedulerConfig,
+                                     SpeculativeConfig, VisionLanguageConfig)
 from aphrodite.common.logger import setup_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
@@ -84,6 +84,7 @@ class AphroditeEngine:
         parallel_config: ParallelConfig,
         scheduler_config: SchedulerConfig,
         device_config: DeviceConfig,
+        load_config: LoadConfig,
         lora_config: Optional[LoRAConfig],
         vision_language_config: Optional[VisionLanguageConfig],
         speculative_config: Optional[SpeculativeConfig],
@@ -97,15 +98,14 @@ class AphroditeEngine:
             f"Model = {model_config.model!r}\n"
             f"Speculative Config = {speculative_config!r}\n"
             f"DataType = {model_config.dtype}\n"
-            f"Model Load Format = {model_config.load_format}\n"
+            f"Model Load Format = {load_config.load_format}\n"
             f"Number of GPUs = {parallel_config.tensor_parallel_size}\n"
             f"Disable Custom All-Reduce = "
             f"{parallel_config.disable_custom_all_reduce}\n"
             f"Quantization Format = {model_config.quantization}\n"
             f"Context Length = {model_config.max_model_len}\n"
             f"Enforce Eager Mode = {model_config.enforce_eager}\n"
-            f"KV Cache Data Type = {cache_config.cache_dtype}\n"
-            f"KV Cache Params Path = {model_config.quantization_param_path}\n"
+            f"KV Cache DataType = {cache_config.cache_dtype}\n"
             f"Device = {device_config.device}\n"
             f"Guided Decoding Backend = {decoding_config!r}\n")
         # TODO: Print more configs in debug mode.
@@ -118,12 +118,18 @@ class AphroditeEngine:
         self.scheduler_config = scheduler_config
         self.device_config = device_config
         self.speculative_config = speculative_config
+        self.load_config = load_config
         self.decoding_config = decoding_config or DecodingConfig()
         self.log_stats = log_stats
-        self._verify_args()
 
-        self._init_tokenizer()
-        self.detokenizer = Detokenizer(self.tokenizer)
+        if not self.model_config.skip_tokenizer_init:
+            self.tokenizer: BaseTokenizerGroup
+            self._init_tokenizer()
+            self.detokenizer = Detokenizer(self.tokenizer)
+        else:
+            self.detokenizer = None
+            self.tokenizer = None
+
         self.seq_counter = Counter()
         self.generation_config_fields = _load_generation_config_dict(
             model_config)
@@ -137,13 +143,16 @@ class AphroditeEngine:
             lora_config=lora_config,
             vision_language_config=vision_language_config,
             speculative_config=speculative_config,
+            load_config=load_config,
         )
 
         self._initialize_kv_caches()
 
-        # Ping the tokenizer to ensure it is loaded if
-        # it runs on a separate process.
-        self.tokenizer.ping()
+
+        if self.tokenizer:
+            # Ping the tokenizer to ensure liveness if it runs in a
+            # different process.
+            self.tokenizer.ping()
 
         # Create the scheduler.
         # NOTE: the cache_config here have been updated with the numbers of
@@ -154,8 +163,7 @@ class AphroditeEngine:
         if self.log_stats:
             self.stat_logger = StatLogger(
                 local_interval=_LOCAL_LOGGING_INTERVAL_SEC,
-                labels=dict(model_name=model_config.model),
-            )
+                labels=dict(model_name=model_config.model))
             self.stat_logger.info("cache_config", self.cache_config)
 
         # Create sequence output processor, e.g. for beam search or
@@ -175,6 +183,7 @@ class AphroditeEngine:
 
     def _initialize_kv_caches(self) -> None:
         """Initialize the KV cache in the worker(s).
+
         The workers will determine the number of blocks in both the GPU cache
         and the swap CPU cache.
         """
@@ -193,7 +202,10 @@ class AphroditeEngine:
         self.model_executor.initialize_cache(num_gpu_blocks, num_cpu_blocks)
 
     @classmethod
-    def from_engine_args(cls, engine_args: EngineArgs) -> "AphroditeEngine":
+    def from_engine_args(
+        cls,
+        engine_args: EngineArgs,
+    ) -> "AphroditeEngine":
         """Creates an LLM engine from the engine arguments."""
         # Create the engine configs.
         engine_config = engine_args.create_engine_config()
@@ -216,9 +228,11 @@ class AphroditeEngine:
             executor_class = GPUExecutor
 
         # Create the LLM engine.
-        engine = cls(**engine_config.to_dict(),
-                     executor_class=executor_class,
-                     log_stats=not engine_args.disable_log_stats)
+        engine = cls(
+            **engine_config.to_dict(),
+            executor_class=executor_class,
+            log_stats=not engine_args.disable_log_stats,
+        )
         return engine
 
     def __reduce__(self):
@@ -241,18 +255,10 @@ class AphroditeEngine:
             max_input_length=None,
             tokenizer_mode=self.model_config.tokenizer_mode,
             trust_remote_code=self.model_config.trust_remote_code,
-            revision=self.model_config.revision)
+            revision=self.model_config.tokenizer_revision)
         init_kwargs.update(tokenizer_init_kwargs)
-        self.tokenizer: BaseTokenizerGroup = get_tokenizer_group(
+        self.tokenizer = get_tokenizer_group(
             self.parallel_config.tokenizer_pool_config, **init_kwargs)
-
-        if len(self.get_tokenizer()) != self.model_config.get_vocab_size():
-            logger.warning(
-                f"The tokenizer's vocabulary size {len(self.get_tokenizer())}"
-                f" does not match the model's vocabulary size "
-                f"{self.model_config.get_vocab_size()}.")
-        self.model_config.hf_config.tokenizer_vocab_size = len(
-            self.get_tokenizer())
 
     def _verify_args(self) -> None:
         self.model_config.verify_with_parallel_config(self.parallel_config)
@@ -264,7 +270,7 @@ class AphroditeEngine:
 
     def encode_request(
         self,
-        request_id: str,
+        request_id: str,  # pylint: disable=unused-argument
         prompt: Optional[str],
         prompt_token_ids: Optional[List[int]] = None,
         lora_request: Optional[LoRARequest] = None,
@@ -301,7 +307,7 @@ class AphroditeEngine:
                 use the tokenizer to convert the prompts to token IDs.
             arrival_time: The arrival time of the request. If None, we use
                 the current monotonic time.
-            multi_modal_data: The multimodal data for the request.
+            multi_modal_data: Multi modal data per request.
 
         Details:
             - Set arrival_time to the current time if it is None.
@@ -330,41 +336,38 @@ class AphroditeEngine:
         if lora_request is not None and not self.lora_config:
             raise ValueError(f"Got lora_request {lora_request} but LoRA is "
                              "not enabled!")
-        max_log_probs = self.get_model_config().max_log_probs
+        max_logprobs = self.get_model_config().max_logprobs
         if (sampling_params.logprobs
-                and sampling_params.logprobs > max_log_probs) or (
+                and sampling_params.logprobs > max_logprobs) or (
                     sampling_params.prompt_logprobs
-                    and sampling_params.prompt_logprobs > max_log_probs):
+                    and sampling_params.prompt_logprobs > max_logprobs):
             raise ValueError(f"Cannot request more than "
-                             f"{max_log_probs} logprobs. "
-                             "Please increase the max_log_probs.")
+                             f"{max_logprobs} logprobs.")
         if arrival_time is None:
-            arrival_time = time.monotonic()
+            arrival_time = time.time()
         prompt_token_ids = self.encode_request(
             request_id=request_id,
             prompt=prompt,
             prompt_token_ids=prompt_token_ids,
-            lora_request=lora_request,
-        )
+            lora_request=lora_request)
 
         # Create the sequences.
         block_size = self.cache_config.block_size
         seq_id = next(self.seq_counter)
-        eos_token_id = self.tokenizer.get_lora_tokenizer(
-            lora_request).eos_token_id
-        seq = Sequence(
-            seq_id,
-            prompt,
-            prompt_token_ids,
-            block_size,
-            eos_token_id,
-            lora_request,
-        )
+        eos_token_id = None
+        if self.tokenizer:
+            eos_token_id = self.tokenizer.get_lora_tokenizer(
+                lora_request).eos_token_id
+        else:
+            logger.warning("Use None for EOS token id because tokenizer is "
+                           "not initialized")
+        seq = Sequence(seq_id, prompt, prompt_token_ids, block_size,
+                       eos_token_id, lora_request)
 
         # Defensive copy of SamplingParams, which are used by the sampler,
         # this doesn't deep-copy LogitsProcessor objects
         sampling_params = sampling_params.clone()
-        # Inject the eos token id into the sampling_params to support min_tokens
+        # inject the eos token id into the sampling_params to support min_tokens
         # processing
         sampling_params.eos_token_id = seq.eos_token_id
         sampling_params.update_from_generation_config(
@@ -413,20 +416,24 @@ class AphroditeEngine:
             scheduled_seq_groups: List[SequenceGroup],
             ignored_seq_groups: List[SequenceGroup]) -> List[RequestOutput]:
         """Apply the model output to the sequences in the scheduled seq groups.
-        
+
         Returns RequestOutputs that can be returned to the client.
         """
+
         now = time.time()
+
         # Organize outputs by [sequence group][step] instead of
         # [step][sequence group].
         output_by_sequence_group = create_output_by_sequence_group(
             sampler_outputs=output, num_seq_groups=len(scheduled_seq_groups))
+
         # Update the scheduled sequence groups with the model outputs.
         for scheduled_seq_group, outputs in zip(scheduled_seq_groups,
                                                 output_by_sequence_group):
             seq_group = scheduled_seq_group.seq_group
             seq_group.update_num_computed_tokens(
                 scheduled_seq_group.token_chunk_size)
+
             # If all sequences in the sequence group are in DECODE, then we can
             # process the output tokens. Otherwise, they are (chunked) prefill
             # samples and should not be processed.
@@ -447,7 +454,6 @@ class AphroditeEngine:
         for seq_group in ignored_seq_groups:
             request_output = RequestOutput.from_seq_group(seq_group)
             request_outputs.append(request_output)
-
         return request_outputs
 
     def step(self) -> List[RequestOutput]:
@@ -534,13 +540,14 @@ class AphroditeEngine:
             scheduler_outputs: Optional[SchedulerOutputs],
             model_output: Optional[List[SamplerOutput]] = None) -> Stats:
         """Get Stats to be Logged to Prometheus.
+
         Args:
             scheduler_outputs: Optional, used to populate metrics related to
                 the scheduled batch,
             model_output: Optional, used to emit speculative decoding metrics
                 which are created by the workers.
         """
-        now = time.monotonic()
+        now = time.time()
 
         # KV Cache Usage in %.
         num_total_gpu = self.cache_config.num_gpu_blocks
@@ -548,10 +555,10 @@ class AphroditeEngine:
         gpu_cache_usage = 1.0 - (num_free_gpu / num_total_gpu)
 
         num_total_cpu = self.cache_config.num_cpu_blocks
-        cpu_cache_usage = 0.0
+        cpu_cache_usage = 0.
         if num_total_cpu > 0:
-            num_free_cpu = (
-                self.scheduler.block_manager.get_num_free_cpu_blocks())
+            num_free_cpu = self.scheduler.block_manager.get_num_free_cpu_blocks(
+            )
             cpu_cache_usage = 1.0 - (num_free_cpu / num_total_cpu)
 
         # Scheduler State

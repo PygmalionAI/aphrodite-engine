@@ -1,18 +1,17 @@
 from typing import List, Optional
 
-from aphrodite.processing.block.interfaces import (
-    Block,
-    DeviceAwareBlockAllocator,
-)
+from aphrodite.processing.block.interfaces import Block, DeviceAwareBlockAllocator
 from aphrodite.common.utils import Device, cdiv, chunk_list
 
 
 class BlockTable:
     """A class to manage blocks for a specific sequence.
+
     The BlockTable maps a sequence of tokens to a list of blocks, where each
-    block represents a contiguous memory allocation for a portion of the
+    block represents a contiguous memory allocation for a portion of the 
     sequence. The blocks are managed by a DeviceAwareBlockAllocator, which is
     responsible for allocating and freeing memory for the blocks.
+
     Args:
         block_size (int): The maximum number of tokens that can be stored in a
             single block.
@@ -21,6 +20,7 @@ class BlockTable:
         _blocks (Optional[List[Block]], optional): An optional list of existing
             blocks to initialize the BlockTable with. If not provided, an empty
             BlockTable is created.
+
     Attributes:
         _block_size (int): The maximum number of tokens that can be stored in a
             single block.
@@ -50,12 +50,15 @@ class BlockTable:
     def get_num_required_blocks(token_ids: List[int], block_size: int) -> int:
         """Calculates the minimum number of blocks required to store a given
         sequence of token IDs.
+
         This assumes worst-case scenario, where every block requires a new
         allocation (e.g. ignoring prefix caching).
+
         Args:
             token_ids (List[int]): The sequence of token IDs to be stored.
             block_size (int): The maximum number of tokens that can be stored in
                 a single block.
+
         Returns:
             int: The minimum number of blocks required to store the given
                 sequence of token IDs.
@@ -66,8 +69,10 @@ class BlockTable:
                  token_ids: List[int],
                  device: Device = Device.GPU) -> None:
         """Allocates memory blocks for storing the given sequence of token IDs.
+
         This method allocates the required number of blocks to store the given
         sequence of token IDs.
+
         Args:
             token_ids (List[int]): The sequence of token IDs to be stored.
             device (Device, optional): The device on which the blocks should be
@@ -85,17 +90,21 @@ class BlockTable:
                          num_lookahead_slots: int = 0) -> None:
         """Appends a sequence of token IDs to the existing blocks in the
         BlockTable.
+
         This method appends the given sequence of token IDs to the existing
         blocks in the BlockTable. If there is not enough space in the existing
         blocks, new blocks are allocated using the `ensure_num_empty_slots`
         method to accommodate the additional tokens.
+
         The token IDs are divided into chunks of size `block_size` (except for
         the first chunk, which may be smaller), and each chunk is appended to a
         separate block.
+
         Args:
             token_ids (List[int]): The sequence of token IDs to be appended.
         """
         assert self._is_allocated
+        assert self._blocks is not None
 
         self.ensure_num_empty_slots(num_empty_slots=len(token_ids) +
                                     num_lookahead_slots)
@@ -111,10 +120,12 @@ class BlockTable:
     def ensure_num_empty_slots(self, num_empty_slots: int) -> None:
         """Ensures that the BlockTable has at least the specified number of
         empty slots available.
+
         This method checks if the BlockTable has enough empty slots (i.e.,
         available space) to accommodate the requested number of tokens. If not,
         it allocates additional blocks on the GPU to ensure that the required
         number of empty slots is available.
+
         Args:
             num_empty_slots (int): The minimum number of empty slots required.
         """
@@ -137,10 +148,12 @@ class BlockTable:
     def fork(self) -> "BlockTable":
         """Creates a new BlockTable instance with a copy of the blocks from the
         current instance.
+
         This method creates a new BlockTable instance with the same block size,
         block allocator, and a copy of the blocks from the current instance. The
         new BlockTable has its own independent set of blocks, but shares the
         same underlying memory allocation with the original BlockTable.
+
         Returns:
             BlockTable: A new BlockTable instance with a copy of the blocks from
                 the current instance.
@@ -155,6 +168,7 @@ class BlockTable:
 
     def free(self) -> None:
         """Frees the memory occupied by the blocks in the BlockTable.
+
         This method iterates over all the blocks in the `_blocks` list and calls
         the `free` method of the `_allocator` object to release the memory
         occupied by each block. After freeing all the blocks, the `_blocks` list
@@ -169,10 +183,12 @@ class BlockTable:
     def physical_block_ids(self) -> List[int]:
         """Returns a list of physical block indices for the blocks in the
         BlockTable.
+
         This property returns a list of integers, where each integer represents
         the physical block index of a corresponding block in the `_blocks` list.
         The physical block index is a unique identifier for the memory location
         occupied by the block.
+
         Returns:
             List[int]: A list of physical block indices for the blocks in the
                 BlockTable.
@@ -182,11 +198,14 @@ class BlockTable:
 
     def get_unseen_token_ids(self, sequence_token_ids: List[int]) -> List[int]:
         """Get the number of "unseen" tokens in the sequence.
+
         Unseen tokens are tokens in the sequence corresponding to this block
         table, but are not yet appended to this block table.
+
         Args:
             sequence_token_ids (List[int]): The list of token ids in the
                 sequence.
+
         Returns:
             List[int]: The postfix of sequence_token_ids that has not yet been
                 appended to the block table.
@@ -239,6 +258,7 @@ class BlockTable:
     def num_full_slots(self) -> int:
         """Returns the total number of tokens currently stored in the
         BlockTable.
+
         Returns:
             int: The total number of tokens currently stored in the BlockTable.
         """
@@ -248,6 +268,7 @@ class BlockTable:
             self, token_ids: List[int], num_lookahead_slots: int) -> int:
         """Determine how many blocks will be "touched" by appending the token
         ids.
+
         This is required for the scheduler to determine whether a sequence can
         continue generation, or if it must be preempted.
         """

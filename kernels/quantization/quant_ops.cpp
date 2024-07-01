@@ -31,4 +31,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   quant_ops.def("squeezellm_gemm", &squeezellm_gemm, "Quantized GEMM for SqueezeLLM");
   quant_ops.def("exl2_make_q_matrix",&make_q_matrix, "preprocess for exl2");
   quant_ops.def("exl2_gemm", &exl2_gemm, "exl2 gemm");
+  quant_ops.def("scaled_fp8_quant", &scaled_fp8_quant, "Compute FP8 quantized tensor and scaling factor");
 }

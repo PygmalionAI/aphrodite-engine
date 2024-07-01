@@ -2569,7 +2569,7 @@ void gptq_shuffle
 
     aphrodite::gptq::shuffle_exllama_weight(
         (uint32_t*) q_weight.data_ptr(),
-        q_perm.device().is_meta() ? NULL : (int*) q_perm.data_ptr(),
+        q_perm.device().is_meta() || q_perm.numel() == 0 ? NULL : (int*) q_perm.data_ptr(),
         size_k,
         size_n,
         num_experts,

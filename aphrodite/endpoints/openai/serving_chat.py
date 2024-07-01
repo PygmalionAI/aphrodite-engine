@@ -28,12 +28,12 @@ class OpenAIServingChat(OpenAIServing):
 
     def __init__(self,
                  engine: AsyncAphrodite,
-                 served_model: str,
+                 served_model_names: List[str],
                  response_role: str,
                  lora_modules: Optional[List[LoRA]] = None,
                  chat_template=None):
         super().__init__(engine=engine,
-                         served_model=served_model,
+                         served_model_names=served_model_names,
                          lora_modules=lora_modules)
         self.response_role = response_role
         self._load_chat_template(chat_template)
@@ -54,6 +54,19 @@ class OpenAIServingChat(OpenAIServing):
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
             return error_check_ret
+
+        # Deal with list in messages.content
+        # Just replace the content list with the very first text message
+        for message in request.messages:
+            if message.role == "user" and isinstance(message["content"], list):
+                message["content"] = next(
+                    (
+                        content["text"]
+                        for content in message["content"]
+                        if content["type"] == "text"
+                    ),
+                    ""
+                )
 
         try:
             prompt = self.tokenizer.apply_chat_template(
@@ -109,7 +122,7 @@ class OpenAIServingChat(OpenAIServing):
             result_generator: AsyncIterator[RequestOutput], request_id: str
     ) -> Union[ErrorResponse, AsyncGenerator[str, None]]:
 
-        model_name = request.model
+        model_name = self.served_model_names[0]
         created_time = int(time.time())
         chunk_object_type = "chat.completion.chunk"
         first_iteration = True
@@ -251,7 +264,7 @@ class OpenAIServingChat(OpenAIServing):
             result_generator: AsyncIterator[RequestOutput],
             request_id: str) -> Union[ErrorResponse, ChatCompletionResponse]:
 
-        model_name = request.model
+        model_name = self.served_model_names[0]
         created_time = int(time.time())
         final_res: RequestOutput = None
 

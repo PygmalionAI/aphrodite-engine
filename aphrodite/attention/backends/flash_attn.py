@@ -1,4 +1,5 @@
 """Attention layer with Flash and PagedAttention.
+
 NOTE: At the moment, this file includes a lot of duplicated code from
 XFormers backend. The duplicated code will be removed once we use flash-attn or
 flashinfer for all the attention operations.
@@ -9,16 +10,12 @@ from typing import Dict, List, Optional, Tuple, Type
 import torch
 from flash_attn import flash_attn_varlen_func
 
-from aphrodite.attention.backends.abstract import (
-    AttentionBackend,
-    AttentionImpl,
-    AttentionMetadata,
-    AttentionMetadataPerStage,
-)
-from aphrodite.attention.ops.paged_attn import (
-    PagedAttention,
-    PagedAttentionMetadata,
-)
+from aphrodite.attention.backends.abstract import (AttentionBackend,
+                                                   AttentionImpl,
+                                                   AttentionMetadata,
+                                                   AttentionMetadataPerStage)
+from aphrodite.attention.ops.paged_attn import (PagedAttention,
+                                                PagedAttentionMetadata)
 
 
 class FlashAttentionBackend(AttentionBackend):
@@ -61,6 +58,7 @@ class FlashAttentionBackend(AttentionBackend):
 class FlashAttentionMetadata(AttentionMetadataPerStage,
                              PagedAttentionMetadata):
     """Metadata for FlashAttentionBackend.
+
     NOTE: Any python object stored here is not updated when it is
     cuda-graph replayed. If you have values that need to be changed
     dynamically, it should be stored in tensor. The tensor has to be
@@ -110,17 +108,23 @@ class FlashAttentionImpl(AttentionImpl):
     If the input tensors contain prompt tokens, the layout is as follows:
     |<--------------- num_prefill_tokens ----------------->|	
     |<--prefill_0-->|<--prefill_1-->|...|<--prefill_N-1--->|
+
     Otherwise, the layout is as follows:	
     |<----------------- num_decode_tokens ------------------>|	
     |<--decode_0-->|..........|<--decode_M-1-->|<--padding-->|
+
     Generation tokens can contain padding when cuda-graph is used.
     Currently, prompt tokens don't contain any padding.
+
     The prompts might have different lengths, while the generation tokens
     always have length 1.
+
     If chunked prefill is enabled, prefill tokens and decode tokens can be
     batched together in a flattened 1D query.
+
     |<----- num_prefill_tokens ---->|<------- num_decode_tokens --------->|
     |<-prefill_0->|...|<-prefill_N-1->|<--decode_0-->|...|<--decode_M-1-->|
+
     Currently, cuda graph is disabled for chunked prefill, meaning there's no
     padding between prefill and decode tokens.
     """
@@ -163,6 +167,7 @@ class FlashAttentionImpl(AttentionImpl):
         kv_scale: float,
     ) -> torch.Tensor:
         """Forward pass with FlashAttention and PagedAttention.
+
         Args:
             query: shape = [num_tokens, num_heads * head_size]
             key: shape = [num_tokens, num_kv_heads * head_size]

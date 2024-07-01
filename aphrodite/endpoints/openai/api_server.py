@@ -63,9 +63,6 @@ async def lifespan(app: fastapi.FastAPI):
     yield
 
 
-# Add prometheus asgi middleware to route /metrics requests
-metrics_app = make_asgi_app()
-router.mount("/metrics", metrics_app)
 
 
 @router.get("/health")
@@ -357,7 +354,7 @@ async def get_version():
 
 @kai_api.get("/model")
 async def get_model():
-    return JSONResponse({"result": f"aphrodite/{served_model}"})
+    return JSONResponse({"result": f"aphrodite/{served_model_names[0]}"})
 
 
 @kai_api.get("/config/soft_prompts_list")
@@ -426,6 +423,9 @@ async def get_kobold_lite_ui():
 def build_app(args):
     app = fastapi.FastAPI(lifespan=lifespan)
     app.include_router(router)
+    # Add prometheus asgi middleware to route /metrics requests
+    metrics_app = make_asgi_app()
+    app.mount("/metrics", metrics_app)
     app.root_path = args.root_path
     if args.launch_kobold_api:
         logger.warning("Launching Kobold API server in addition to OpenAI. "
@@ -509,11 +509,11 @@ def run_server(args):
     logger.debug(f"args: {args}")
 
     global engine, engine_args, openai_serving_chat, openai_serving_completion,\
-        tokenizer, served_model
+        tokenizer, served_model_names
     if args.served_model_name is not None:
-        served_model = args.served_model_name
+        served_model_names = args.served_model_name
     else:
-        served_model = args.model
+        served_model_names = [args.model]
 
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = AsyncAphrodite.from_engine_args(engine_args)
@@ -528,12 +528,12 @@ def run_server(args):
     if chat_template is None and tokenizer.chat_template is not None:
         chat_template = tokenizer.chat_template
 
-    openai_serving_chat = OpenAIServingChat(engine, served_model,
+    openai_serving_chat = OpenAIServingChat(engine, served_model_names,
                                             args.response_role,
                                             args.lora_modules,
                                             args.chat_template)
     openai_serving_completion = OpenAIServingCompletion(
-        engine, served_model, args.lora_modules)
+        engine, served_model_names, args.lora_modules)
     engine_model_config = asyncio.run(engine.get_model_config())
 
     if args.launch_kobold_api:

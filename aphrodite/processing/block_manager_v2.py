@@ -1,12 +1,13 @@
 """A block manager that manages token blocks."""
 from typing import Dict, List, Optional
+from typing import Sequence as GenericSequence
 
-from aphrodite.processing.block.block_table import BlockTable
-from aphrodite.processing.block.cpu_gpu_block_allocator import (
-    CpuGpuBlockAllocator)
-from aphrodite.processing.interfaces import AllocStatus, BlockSpaceManager
 from aphrodite.common.sequence import Sequence, SequenceGroup, SequenceStatus
 from aphrodite.common.utils import Device
+from aphrodite.processing.block.block_table import BlockTable
+from aphrodite.processing.block.cpu_gpu_block_allocator import \
+    CpuGpuBlockAllocator
+from aphrodite.processing.interfaces import AllocStatus, BlockSpaceManager
 
 SeqId = int
 
@@ -201,7 +202,8 @@ class BlockSpaceManagerV2(BlockSpaceManager):
         # as computed.
         self.block_allocator.mark_blocks_as_computed()
 
-    def get_common_computed_block_ids(self, seqs: List[Sequence]) -> List[int]:
+    def get_common_computed_block_ids(
+            self, seqs: List[Sequence]) -> GenericSequence[int]:
         """Determine which blocks for which we skip prefill.
 
         With prefix caching we can skip prefill for previously-generated blocks.
