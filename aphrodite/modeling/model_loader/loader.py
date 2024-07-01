@@ -3,6 +3,8 @@ import copy
 import glob
 import os
 from abc import ABC, abstractmethod
+import gc
+from contextlib import nullcontext
 from typing import (TYPE_CHECKING, Any, Dict, Generator, List, Optional, Tuple,
                     Type)
 
@@ -23,6 +25,8 @@ from aphrodite.modeling.model_loader.weight_utils import (
     get_quant_config, initialize_dummy_weights, np_cache_weights_iterator,
     pt_weights_iterator, safetensors_weights_iterator)
 from aphrodite.modeling.models.llava import LlavaForConditionalGeneration
+from aphrodite.quantization.bitsandbytes import (BNBLinearMethod,
+                                                 replace_quant_params)
 
 if TYPE_CHECKING:
     from aphrodite.modeling.layers.linear import LinearMethodBase
@@ -218,7 +222,13 @@ class DefaultModelLoader(BaseModelLoader):
                    parallel_config: ParallelConfig,
                    scheduler_config: SchedulerConfig) -> nn.Module:
         with set_default_torch_dtype(model_config.dtype):
-            with torch.device(device_config.device):
+            linear_method = _get_linear_method(model_config, self.load_config)
+
+            context = torch.device(device_config.device) if not (
+                isinstance(linear_method, BNBLinearMethod)
+                and linear_method.quant_config.from_float) else nullcontext()
+
+            with context:
                 model = _initialize_model(model_config, self.load_config,
                                           lora_config, vision_language_config)
             model.load_weights(
@@ -234,6 +244,19 @@ class DefaultModelLoader(BaseModelLoader):
                     linear_method.process_weights_after_loading(module)
                 if hasattr(module, "process_weights_after_loading"):
                     module.process_weights_after_loading()
+        
+        if isinstance(linear_method, BNBLinearMethod):
+            replace_quant_params(
+                model,
+                quant_config=linear_method.quant_config,
+                modules_to_not_convert="lm_head",
+            )
+            torch.cuda.synchronize()
+            if linear_method.quant_config.from_float:
+                model = model.cuda()
+            gc.collect()
+            torch.cuda.empty_cache()
+
         return model.eval()
 
 
