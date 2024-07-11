@@ -1,6 +1,6 @@
 # Copyright 2024- the Outlines developers
 # This file is adapted from
-# https://github.com/outlines-dev/outlines/blob/main/outlines/serve/aphrodite.py
+# https://github.com/outlines-dev/outlines/blob/main/outlines/serve/vllm.py
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
