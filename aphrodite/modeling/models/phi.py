@@ -1,7 +1,6 @@
 # coding=utf-8
 # Adapted from
 # https://huggingface.co/microsoft/phi-1_5/blob/main/modeling_phi.py
-# Copyright 2023 The PygmalionAI team.
 # Copyright 2023 The vLLM team.
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT license.
@@ -47,7 +46,6 @@ from aphrodite.common.sequence import SamplerOutput
 from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
-                                              LinearMethodBase,
                                               QKVParallelLinear,
                                               RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
@@ -57,13 +55,14 @@ from aphrodite.modeling.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
+from aphrodite.quantization.base_config import QuantizationConfig
 
 
 class PhiAttention(nn.Module):
 
     def __init__(self,
                  config: PretrainedConfig,
-                 linear_method: Optional[LinearMethodBase] = None):
+                 quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
         self.total_num_heads = config.num_attention_heads
         self.hidden_size = config.hidden_size
@@ -81,12 +80,12 @@ class PhiAttention(nn.Module):
             self.head_size,
             self.total_num_heads,
             bias=True,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
         self.dense = RowParallelLinear(
             self.hidden_size,
             self.hidden_size,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
 
         scaling = self.head_size**-0.5
@@ -126,7 +125,7 @@ class PhiMLP(nn.Module):
 
     def __init__(self,
                  config: PretrainedConfig,
-                 linear_method: Optional[LinearMethodBase] = None):
+                 quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
 
         n_inner = getattr(config, "n_inner", None)
@@ -135,14 +134,14 @@ class PhiMLP(nn.Module):
         self.fc1 = ColumnParallelLinear(
             config.hidden_size,
             n_inner,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
         self.fc2 = RowParallelLinear(
             n_inner,
             config.hidden_size,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
-        quant_config = getattr(linear_method, "quant_config", None)
+        quant_config = getattr(quant_config, "quant_config", None)
         self.act = get_act_fn(config.hidden_act, quant_config, n_inner)
 
     def forward(self, hidden_states):
@@ -156,12 +155,12 @@ class PhiLayer(nn.Module):
 
     def __init__(self,
                  config: PretrainedConfig,
-                 linear_method: Optional[LinearMethodBase] = None):
+                 quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
         self.input_layernorm = nn.LayerNorm(config.hidden_size,
                                             eps=config.layer_norm_eps)
-        self.self_attn = PhiAttention(config, linear_method)
-        self.mlp = PhiMLP(config, linear_method)
+        self.self_attn = PhiAttention(config, quant_config)
+        self.mlp = PhiMLP(config, quant_config)
 
     def forward(
         self,
@@ -187,14 +186,14 @@ class PhiModel(nn.Module):
 
     def __init__(self,
                  config: PretrainedConfig,
-                 linear_method: Optional[LinearMethodBase] = None):
+                 quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
         self.config = config
-        self.linear_method = linear_method
+        self.quant_config = quant_config
         self.embed_tokens = VocabParallelEmbedding(config.vocab_size,
                                                    config.hidden_size)
         self.layers = nn.ModuleList([
-            PhiLayer(config, linear_method)
+            PhiLayer(config, quant_config)
             for _ in range(config.num_hidden_layers)
         ])
         self.final_layernorm = nn.LayerNorm(config.hidden_size,
@@ -226,12 +225,12 @@ class PhiForCausalLM(nn.Module):
 
     def __init__(self,
                  config: PretrainedConfig,
-                 linear_method: Optional[LinearMethodBase] = None):
+                 quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
         self.config = config
-        self.linear_method = linear_method
+        self.quant_config = quant_config
 
-        self.model = PhiModel(config, linear_method)
+        self.model = PhiModel(config, quant_config)
 
         self.lm_head = ParallelLMHead(config.vocab_size,
                                       config.hidden_size,

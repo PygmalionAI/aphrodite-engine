@@ -4,9 +4,9 @@ from typing import Any, Dict, List, Optional
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
-from aphrodite.quantization.base_config import \
-    QuantizationConfig
+from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
+from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.quantization.base_config import QuantizationConfig
 
 HAS_QUANTS = False
 with suppress(ImportError):
@@ -65,8 +65,11 @@ class AWQConfig(QuantizationConfig):
         zero_point = cls.get_from_keys(config, ["zero_point"])
         return cls(weight_bits, group_size, zero_point)
 
-    def get_linear_method(self) -> "AWQLinearMethod":
-        return AWQLinearMethod(self)
+    def get_quant_method(
+            self, layer: torch.nn.Module) -> Optional["AWQLinearMethod"]:
+        if isinstance(layer, LinearBase):
+            return AWQLinearMethod(self)
+        return None
 
     def get_scaled_act_names(self) -> List[str]:
         return ["gelu", "gelu_fast", "gelu_new", "gelu_pytorch_tanh"]
@@ -150,10 +153,10 @@ class AWQLinearMethod(LinearMethodBase):
         layer.register_parameter("scales", scales)
         set_weight_attrs(scales, extra_weight_attrs)
 
-    def apply_weights(self,
-                      layer: torch.nn.Module,
-                      x: torch.Tensor,
-                      bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def apply(self,
+              layer: torch.nn.Module,
+              x: torch.Tensor,
+              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         qweight = layer.qweight
         scales = layer.scales
         qzeros = layer.qzeros

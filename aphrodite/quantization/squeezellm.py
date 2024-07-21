@@ -5,9 +5,10 @@ from torch.nn.parameter import Parameter
 
 from aphrodite._quant_C import quant_ops as ops
 from aphrodite.common.utils import is_hip
-from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
-from aphrodite.quantization.base_config import \
-    QuantizationConfig
+from aphrodite.modeling.layers.linear import LinearBase
+from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.quantization.base_config import (QuantizationConfig,
+                                                QuantizeMethodBase)
 
 
 class SqueezeLLMConfig(QuantizationConfig):
@@ -50,14 +51,18 @@ class SqueezeLLMConfig(QuantizationConfig):
         weight_bits = cls.get_from_keys(config, ["wbits"])
         return cls(weight_bits)
 
-    def get_linear_method(self) -> "SqueezeLLMLinearMethod":
-        return SqueezeLLMLinearMethod(self)
+    def get_quant_method(
+            self,
+            layer: torch.nn.Module) -> Optional["SqueezeLLMLinearMethod"]:
+        if isinstance(layer, LinearBase):
+            return SqueezeLLMLinearMethod(self)
+        return
 
     def get_scaled_act_names(self) -> List[str]:
         return []
 
 
-class SqueezeLLMLinearMethod(LinearMethodBase):
+class SqueezeLLMLinearMethod(QuantizeMethodBase):
     """Linear method for SqueezeLLM.
 
     Args:
@@ -111,10 +116,10 @@ class SqueezeLLMLinearMethod(LinearMethodBase):
         layer.register_parameter("lookup_table", lookup_table)
         set_weight_attrs(lookup_table, extra_weight_attrs)
 
-    def apply_weights(self,
-                      layer: torch.nn.Module,
-                      x: torch.Tensor,
-                      bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def apply(self,
+              layer: torch.nn.Module,
+              x: torch.Tensor,
+              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         qweight = layer.qweight
         lookup_table = layer.lookup_table
         out_shape = x.shape[:-1] + (qweight.shape[-1], )

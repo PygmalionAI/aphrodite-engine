@@ -4,11 +4,12 @@ from typing import Any, Dict, List, Optional
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
+from aphrodite.modeling.layers.linear import LinearMethodBase, LinearBase
 from aphrodite.quantization.base_config import QuantizationConfig
 from aphrodite.quantization.quip_utils import (get_hadK, get_packed_abs_grid,
                                                matmul_hadU_cuda,
                                                matmul_hadUt_cuda)
+from aphrodite.modeling.utils import set_weight_attrs
 
 HAS_QUANTS = False
 with suppress(ImportError):
@@ -58,8 +59,11 @@ class QuipConfig(QuantizationConfig):
         use_rand = cls.get_from_keys(config, ["use_rand"])
         return cls(codebook, use_rand)
 
-    def get_linear_method(self) -> "QuipLinearMethod":
-        return QuipLinearMethod(self)
+    def get_quant_method(
+            self, layer: torch.nn.Module) -> Optional["QuipLinearMethod"]:
+        if isinstance(layer, LinearBase):
+            return QuipLinearMethod(self)
+        return None
 
     def get_scaled_act_names(self) -> List[str]:
         return []
@@ -155,10 +159,10 @@ class QuipLinearMethod(LinearMethodBase):
             ))
         set_weight_attrs(layer.SV, extra_weight_attrs)
 
-    def apply_weights(self,
-                      layer: torch.nn.Module,
-                      x: torch.Tensor,
-                      bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def apply(self,
+              layer: torch.nn.Module,
+              x: torch.Tensor,
+              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         # First run
         if isinstance(layer.Wscale, torch.Tensor):
             layer.Wscale = layer.Wscale.item()

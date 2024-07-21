@@ -12,7 +12,6 @@ from aphrodite.distributed import (get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size)
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
-                                              LinearMethodBase,
                                               QKVParallelLinear,
                                               RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
@@ -21,6 +20,7 @@ from aphrodite.modeling.layers.vocab_parallel_embedding import \
     VocabParallelEmbedding
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
+from aphrodite.quantization.base_config import QuantizationConfig
 from aphrodite.transformers_utils.configs.mpt import MPTConfig
 
 
@@ -42,7 +42,7 @@ class MPTAttention(nn.Module):
     def __init__(
         self,
         config: MPTConfig,
-        linear_method: Optional[LinearMethodBase] = None,
+        quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         self.d_model = config.d_model
@@ -65,7 +65,7 @@ class MPTAttention(nn.Module):
             self.total_num_heads,
             self.total_num_kv_heads,
             bias=not config.no_bias,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
         if self.qk_ln:
             self.q_ln = nn.LayerNorm(self.d_model)
@@ -74,7 +74,7 @@ class MPTAttention(nn.Module):
             self.d_model,
             self.d_model,
             bias=not config.no_bias,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
 
         tp_world_size = get_tensor_model_parallel_world_size()
@@ -133,7 +133,7 @@ class MPTMLP(nn.Module):
     def __init__(
         self,
         config: MPTConfig,
-        linear_method: Optional[LinearMethodBase] = None,
+        quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         hidden_size = config.d_model
@@ -143,15 +143,15 @@ class MPTMLP(nn.Module):
             hidden_size,
             intermediate_size,
             bias=not config.no_bias,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
-        quant_config = getattr(linear_method, "quant_config", None)
+        quant_config = getattr(quant_config, "quant_config", None)
         self.act = get_act_fn("gelu", quant_config, intermediate_size)
         self.down_proj = RowParallelLinear(
             intermediate_size,
             hidden_size,
             bias=not config.no_bias,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -166,14 +166,14 @@ class MPTBlock(nn.Module):
     def __init__(
         self,
         config: MPTConfig,
-        linear_method: Optional[LinearMethodBase] = None,
+        quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         hidden_size = config.d_model
         self.norm_1 = nn.LayerNorm(hidden_size)
-        self.attn = MPTAttention(config, linear_method)
+        self.attn = MPTAttention(config, quant_config)
         self.norm_2 = nn.LayerNorm(hidden_size)
-        self.ffn = MPTMLP(config, linear_method)
+        self.ffn = MPTMLP(config, quant_config)
 
     def forward(
         self,
@@ -201,7 +201,7 @@ class MPTModel(nn.Module):
     def __init__(
         self,
         config: MPTConfig,
-        linear_method: Optional[LinearMethodBase] = None,
+        quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         assert config.embedding_fraction == 1.0
@@ -212,7 +212,7 @@ class MPTModel(nn.Module):
             config.d_model,
         )
         self.blocks = nn.ModuleList(
-            [MPTBlock(config, linear_method) for _ in range(config.n_layers)])
+            [MPTBlock(config, quant_config) for _ in range(config.n_layers)])
         self.norm_f = nn.LayerNorm(config.d_model)
         if config.no_bias:
             for module in self.modules():
@@ -246,14 +246,14 @@ class MPTForCausalLM(nn.Module):
     def __init__(
         self,
         config: MPTConfig,
-        linear_method: Optional[LinearMethodBase] = None,
+        quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         self.config = config
         assert config.tie_word_embeddings
-        self.linear_method = linear_method
+        self.quant_config = quant_config
 
-        self.transformer = MPTModel(config, linear_method)
+        self.transformer = MPTModel(config, quant_config)
         self.lm_head_weight = self.transformer.wte.weight
         self.logits_processor = LogitsProcessor(config.vocab_size)
         self.sampler = Sampler()

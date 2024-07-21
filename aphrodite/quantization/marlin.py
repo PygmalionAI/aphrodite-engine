@@ -4,9 +4,9 @@ import torch
 from torch.nn.parameter import Parameter
 
 from aphrodite._quant_C import quant_ops as ops
-from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
-from aphrodite.quantization.base_config import \
-    QuantizationConfig
+from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
+from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.quantization.base_config import QuantizationConfig
 
 
 class MarlinConfig(QuantizationConfig):
@@ -71,8 +71,11 @@ class MarlinConfig(QuantizationConfig):
         group_size = cls.get_from_keys(config, ["group_size"])
         return cls(group_size)
 
-    def get_linear_method(self) -> "MarlinLinearMethod":
-        return MarlinLinearMethod(self)
+    def get_quant_method(
+            self, layer: torch.nn.Module) -> Optional["MarlinLinearMethod"]:
+        if isinstance(layer, LinearBase):
+            return MarlinLinearMethod(self)
+        return None
 
     def get_scaled_act_names(self) -> List[str]:
         return []
@@ -196,7 +199,7 @@ class MarlinLinearMethod(LinearMethodBase):
         layer.register_parameter("workspace", workspace)
         set_weight_attrs(workspace, extra_weight_attrs)
 
-    def apply_weights(
+    def apply(
         self,
         layer: torch.nn.Module,
         x: torch.Tensor,

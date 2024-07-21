@@ -1,14 +1,15 @@
+from contextlib import suppress
+from typing import Any, Dict, List, NamedTuple, Optional, TypeVar
+
 import torch
 from torch.nn.parameter import Parameter
-from typing import List, Dict, Any, Optional, TypeVar, NamedTuple
-from contextlib import suppress
 
-from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              set_weight_attrs)
-from aphrodite.quantization.base_config import (QuantizationConfig)
-from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
+from aphrodite.modeling.layers.linear import (ColumnParallelLinear, LinearBase,
+                                              LinearMethodBase,
                                               QKVParallelLinear,
                                               RowParallelLinear)
+from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.quantization.base_config import QuantizationConfig
 
 HAS_QUANTS = False
 with suppress(ImportError):
@@ -87,8 +88,11 @@ class BitsandBytesConfig(QuantizationConfig):
             quant_mode = "weight_only"
         return cls(weight_bits, group_size, zero_point, from_float, quant_mode)
 
-    def get_linear_method(self) -> "BNBLinearMethod":
-        return BNBLinearMethod(self)
+    def get_quant_method(
+            self, layer: torch.nn.Module) -> Optional["BNBLinearMethod"]:
+        if isinstance(layer, LinearBase):
+            return BNBLinearMethod(self)
+        return None
 
     def get_scaled_act_names(self) -> List[str]:
         return ["gelu", "gelu_fast", "gelu_new", "gelu_pytorch_tanh"]
@@ -180,10 +184,10 @@ class BNBLinearMethod(LinearMethodBase):
             layer.register_parameter("weight", weight)
             set_weight_attrs(weight, extra_weight_attrs)
 
-    def apply_weights(self,
-                      layer: torch.nn.Module,
-                      x: torch.Tensor,
-                      bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def apply(self,
+              layer: torch.nn.Module,
+              x: torch.Tensor,
+              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         if self.quant_config.quant_mode == "weight_only":
             qweight = layer.qweight
             scales_zeros = layer.scales_zeros

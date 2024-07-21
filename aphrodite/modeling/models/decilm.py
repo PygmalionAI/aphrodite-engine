@@ -2,7 +2,6 @@
 # Adapted from
 # https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/models/llama/modeling_llama.py
 # Copyright 2023 DeciAI Research Team. All rights reserved.
-# Copyright 2023 The PygmalionAI team.
 # Copyright 2023 The vLLM team.
 # Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
 #
@@ -30,9 +29,9 @@ import torch
 from transformers import PretrainedConfig
 
 from aphrodite.common.config import LoRAConfig
-from aphrodite.modeling.layers.linear import LinearMethodBase
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.models.llama import LlamaForCausalLM
+from aphrodite.quantization.base_config import QuantizationConfig
 
 
 class DeciLMForCausalLM(LlamaForCausalLM):
@@ -56,13 +55,13 @@ class DeciLMForCausalLM(LlamaForCausalLM):
     def __init__(
         self,
         config: Optional[PretrainedConfig] = None,
-        linear_method: Optional[LinearMethodBase] = None,
+        quant_config: Optional[QuantizationConfig] = None,
         lora_config: Optional[LoRAConfig] = None,
     ) -> None:
         config.num_key_value_heads = max(config.num_key_value_heads_per_layer)
         delattr(config, "num_key_value_heads_per_layer")
         super().__init__(config=config,
-                         linear_method=linear_method,
+                         quant_config=quant_config,
                          lora_config=lora_config)
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
