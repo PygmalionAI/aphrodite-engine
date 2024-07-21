@@ -13,6 +13,10 @@ torch::Tensor aqlm_gemm(
   const std::optional<torch::Tensor>& bias
 );
 
+torch::Tensor aqlm_dequant(const torch::Tensor& codes,
+                           const torch::Tensor& codebooks,
+                           const torch::Tensor& codebook_partition_sizes);
+
 // AWQ
 torch::Tensor awq_gemm(
   torch::Tensor _in_feats,

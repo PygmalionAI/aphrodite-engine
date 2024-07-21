@@ -8,6 +8,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 #ifndef USE_ROCM
   // AQLM
   quant_ops.def("aqlm_gemm", &aqlm_gemm, "Quantized GEMM for AQLM");
+  quant_ops.def("aqlm_dequant", &aqlm_dequant, "Dequantization for AQLM");
   // AWQ
   quant_ops.def("awq_gemm", &awq_gemm, "Quantized GEMM for AWQ");
   quant_ops.def("awq_dequantize", &awq_dequantize, "Dequantization for AWQ");
