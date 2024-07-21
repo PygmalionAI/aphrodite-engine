@@ -142,7 +142,12 @@ torch::Tensor marlin_gemm(
     int64_t size_n,
     int64_t size_k);
 
-void scaled_fp8_quant(
+void static_scaled_fp8_quant(
+  torch::Tensor& out,
+  torch::Tensor& input,
+  torch::Tensor& scale);
+
+void dynamic_scaled_fp8_quant(
   torch::Tensor& out,
   torch::Tensor& input,
   torch::Tensor& scale);
