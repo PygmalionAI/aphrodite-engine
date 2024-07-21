@@ -27,13 +27,13 @@ The compute necessary for Aphrodite's development is provided by [Arc Compute](h
 
 Install the engine:
 ```sh
-$ pip install -U aphrodite-engine --extra-index-url https://downloads.pygmalion.chat/whl
+pip install -U aphrodite-engine --extra-index-url https://downloads.pygmalion.chat/whl
 ```
 
 Then launch a model:
 
 ```sh
-$ aphrodite run meta-llama/Meta-Llama-3-8B-Instruct
+aphrodite run meta-llama/Meta-Llama-3-8B-Instruct
 ```
 
 This will create a [OpenAI](https://platform.openai.com/docs/api-reference/)-compatible API server that can be accessed at port 2242 of the localhost. You can plug in the API into a UI that supports OpenAI, such as [SillyTavern](https://github.com/SillyTavern/SillyTavern).
