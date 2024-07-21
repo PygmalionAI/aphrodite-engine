@@ -1,7 +1,6 @@
 # coding=utf-8
 # Adapted from
 # https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/models/gpt_neox/modeling_gpt_neox.py
-# Copyright 2023 The PygmalionAI team.
 # Copyright 2023 The vLLM team.
 # Copyright 2022 EleutherAI The HuggingFace Inc. team. All rights reserved.
 #
@@ -28,7 +27,6 @@ from aphrodite.common.sequence import SamplerOutput
 from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
-                                              LinearMethodBase,
                                               QKVParallelLinear,
                                               RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
@@ -38,6 +36,7 @@ from aphrodite.modeling.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
+from aphrodite.quantization.base_config import QuantizationConfig
 
 
 class GPTNeoXAttention(nn.Module):
@@ -45,7 +44,7 @@ class GPTNeoXAttention(nn.Module):
     def __init__(
         self,
         config: GPTNeoXConfig,
-        linear_method: Optional[LinearMethodBase] = None,
+        quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         self.total_num_heads = config.num_attention_heads
@@ -64,13 +63,13 @@ class GPTNeoXAttention(nn.Module):
             self.head_size,
             self.total_num_heads,
             bias=self.bias,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
         self.dense = RowParallelLinear(
             config.hidden_size,
             config.hidden_size,
             bias=self.bias,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
         scaling = self.head_size**-0.5
         rotary_dim = int(self.head_size * config.rotary_pct)
@@ -106,20 +105,20 @@ class GPTNeoXMLP(nn.Module):
     def __init__(
         self,
         config: GPTNeoXConfig,
-        linear_method: Optional[LinearMethodBase] = None,
+        quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         self.dense_h_to_4h = ColumnParallelLinear(
             config.hidden_size,
             config.intermediate_size,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
         self.dense_4h_to_h = RowParallelLinear(
             config.intermediate_size,
             config.hidden_size,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
-        quant_config = getattr(linear_method, "quant_config", None)
+        quant_config = getattr(quant_config, "quant_config", None)
         self.act = get_act_fn(config.hidden_act, quant_config,
                               config.intermediate_size)
 
@@ -135,7 +134,7 @@ class GPTNeoXLayer(nn.Module):
     def __init__(
         self,
         config: GPTNeoXConfig,
-        linear_method: Optional[LinearMethodBase] = None,
+        quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         self.use_parallel_residual = config.use_parallel_residual
@@ -143,8 +142,8 @@ class GPTNeoXLayer(nn.Module):
                                             eps=config.layer_norm_eps)
         self.post_attention_layernorm = nn.LayerNorm(config.hidden_size,
                                                      eps=config.layer_norm_eps)
-        self.attention = GPTNeoXAttention(config, linear_method)
-        self.mlp = GPTNeoXMLP(config, linear_method)
+        self.attention = GPTNeoXAttention(config, quant_config)
+        self.mlp = GPTNeoXMLP(config, quant_config)
 
     def forward(
         self,
@@ -183,7 +182,7 @@ class GPTNeoXModel(nn.Module):
     def __init__(
         self,
         config: GPTNeoXConfig,
-        linear_method: Optional[LinearMethodBase] = None,
+        quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         self.config = config
@@ -193,7 +192,7 @@ class GPTNeoXModel(nn.Module):
             config.hidden_size,
         )
         self.layers = nn.ModuleList([
-            GPTNeoXLayer(config, linear_method)
+            GPTNeoXLayer(config, quant_config)
             for _ in range(config.num_hidden_layers)
         ])
         self.final_layer_norm = nn.LayerNorm(config.hidden_size,
@@ -224,12 +223,12 @@ class GPTNeoXForCausalLM(nn.Module):
     def __init__(
         self,
         config,
-        linear_method: Optional[LinearMethodBase] = None,
+        quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         self.config = config
-        self.linear_method = linear_method
-        self.gpt_neox = GPTNeoXModel(config, linear_method)
+        self.quant_config = quant_config
+        self.gpt_neox = GPTNeoXModel(config, quant_config)
         self.embed_out = ParallelLMHead(
             config.vocab_size,
             config.hidden_size,

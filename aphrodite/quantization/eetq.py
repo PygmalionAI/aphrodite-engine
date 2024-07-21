@@ -1,12 +1,12 @@
-from typing import Any, Dict, List, Optional
 from contextlib import suppress
+from typing import Any, Dict, List, Optional
 
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
-from aphrodite.quantization.base_config import \
-    QuantizationConfig
+from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
+from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.quantization.base_config import QuantizationConfig
 
 HAS_EETQ = False
 with suppress(ImportError):
@@ -58,8 +58,11 @@ class EETQConfig(QuantizationConfig):
         zero_point = cls.get_from_keys(config, ["zero_point"])
         return cls(weight_bits, zero_point)
 
-    def get_linear_method(self) -> "EETQLinearMethod":
-        return EETQLinearMethod(self)
+    def get_quant_method(
+            self, layer: torch.nn.Module) -> Optional["EETQLinearMethod"]:
+        if isinstance(layer, LinearBase):
+            return EETQLinearMethod(self)
+        return None
 
     def get_scaled_act_names(self) -> List[str]:
         return []
@@ -97,11 +100,11 @@ class EETQLinearMethod(LinearMethodBase):
         layer.register_parameter("weight_scales", weight_scales)
         set_weight_attrs(weight_scales, extra_weight_attrs)
 
-    def apply_weights(self,
-                      layer: torch.nn.Module,
-                      x: torch.Tensor,
-                      bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-        qweight = layer.qweightdata
+    def apply(self,
+              layer: torch.nn.Module,
+              x: torch.Tensor,
+              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+        qweight = layer.qweight.data
         weight_scales = layer.weight_scales.data
 
         if HAS_EETQ:

@@ -1,12 +1,12 @@
-from typing import Any, Dict, List, Optional
 from contextlib import suppress
+from typing import Any, Dict, List, Optional
 
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              set_weight_attrs)
-from aphrodite.quantization.base_config import (QuantizationConfig)
+from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
+from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.quantization.base_config import QuantizationConfig
 
 HAS_QUANTS = False
 with suppress(ImportError):
@@ -62,8 +62,11 @@ class GGUFConfig(QuantizationConfig):
     def from_config(cls, config: Dict[str, Any]) -> "GGUFConfig":
         return cls()
 
-    def get_linear_method(self) -> "GGUFLinearMethod":
-        return GGUFLinearMethod(self)
+    def get_quant_method(
+            self, layer: torch.nn.Module) -> Optional["GGUFLinearMethod"]:
+        if isinstance(layer, LinearBase):
+            return GGUFLinearMethod(self)
+        return None
 
     def get_scaled_act_names(self) -> List[str]:
         return []
@@ -114,10 +117,10 @@ class GGUFLinearMethod(LinearMethodBase):
         set_weight_attrs(weight_type, {"ignore_warning": True})
         layer.register_parameter("weight_type", weight_type)
 
-    def apply_weights(self,
-                      layer: torch.nn.Module,
-                      x: torch.Tensor,
-                      bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def apply(self,
+              layer: torch.nn.Module,
+              x: torch.Tensor,
+              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         if isinstance(layer.weight_type, torch.Tensor):
             layer.weight_type = int(layer.weight_type)
             # Check tensor parallel shape here on first pass

@@ -1,11 +1,11 @@
-from typing import Any, Dict, List, Optional
 from contextlib import suppress
+from typing import Any, Dict, List, Optional
 
 import torch
 
-from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              set_weight_attrs)
-from aphrodite.quantization.base_config import (QuantizationConfig)
+from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
+from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.quantization.base_config import QuantizationConfig
 
 HAS_QUANTS = False
 with suppress(ImportError):
@@ -58,8 +58,11 @@ class Exl2Config(QuantizationConfig):
     def from_config(cls, config: Dict[str, Any]) -> "Exl2Config":
         return cls()
 
-    def get_linear_method(self) -> "Exl2LinearMethod":
-        return Exl2LinearMethod(self)
+    def get_quant_method(
+            self, layer: torch.nn.Module) -> Optional["Exl2LinearMethod"]:
+        if isinstance(layer, LinearBase):
+            return Exl2LinearMethod(self)
+        return None
 
     def get_scaled_act_names(self) -> List[str]:
         return []
@@ -116,10 +119,10 @@ class Exl2LinearMethod(LinearMethodBase):
             set_weight_attrs(fake_weight, {"ignore_warning": True})
             layer.register_parameter(name, fake_weight)
 
-    def apply_weights(self,
-                      layer: torch.nn.Module,
-                      x: torch.Tensor,
-                      bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def apply(self,
+              layer: torch.nn.Module,
+              x: torch.Tensor,
+              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         out_shape = x.shape[:-1] + (layer.q_weight.shape[-1], )
         reshaped_x = x.reshape(-1, x.shape[-1])
 

@@ -10,13 +10,13 @@ from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import VisionLanguageConfig
 from aphrodite.common.sequence import SamplerOutput
 from aphrodite.modeling.layers.activation import get_act_fn
-from aphrodite.modeling.layers.linear import LinearMethodBase
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.models.llama import LlamaModel
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
+from aphrodite.quantization.base_config import QuantizationConfig
 
 _KEYS_TO_MODIFY_MAPPING = {
     "language_model.lm_head": "lm_head",
@@ -61,7 +61,7 @@ class LlavaForConditionalGeneration(nn.Module):
     def __init__(self,
                  config: "LlavaConfig",
                  vision_language_config: VisionLanguageConfig,
-                 linear_method: Optional["LinearMethodBase"] = None) -> None:
+                 quant_config: Optional["QuantizationConfig"] = None) -> None:
         super().__init__()
         self.config = config
 
@@ -83,8 +83,8 @@ class LlavaForConditionalGeneration(nn.Module):
             text_hidden_size=config.text_config.hidden_size,
             projector_hidden_act=config.projector_hidden_act)
 
-        self.linear_method = linear_method
-        self.language_model = LlamaModel(config.text_config, linear_method)
+        self.quant_config = quant_config
+        self.language_model = LlamaModel(config.text_config, quant_config)
         self.unpadded_vocab_size = config.text_config.vocab_size
         self.lm_head = ParallelLMHead(
             self.unpadded_vocab_size,

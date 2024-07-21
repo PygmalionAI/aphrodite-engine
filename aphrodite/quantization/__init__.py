@@ -4,12 +4,11 @@ from loguru import logger
 
 from aphrodite.quantization.aqlm import AQLMConfig
 from aphrodite.quantization.awq import AWQConfig
-from aphrodite.quantization.base_config import \
-    QuantizationConfig
-from aphrodite.quantization.bitsandbytes import \
-    BitsandBytesConfig
+from aphrodite.quantization.base_config import QuantizationConfig
+from aphrodite.quantization.bitsandbytes import BitsandBytesConfig
 from aphrodite.quantization.eetq import EETQConfig
 from aphrodite.quantization.exl2 import Exl2Config
+from aphrodite.quantization.fp8 import Fp8Config
 from aphrodite.quantization.gguf import GGUFConfig
 from aphrodite.quantization.gptq import GPTQConfig
 from aphrodite.quantization.marlin import MarlinConfig
@@ -30,6 +29,7 @@ QUANTIZATION_METHODS = {
     "bnb": BitsandBytesConfig,
     "eetq": EETQConfig,
     "exl2": Exl2Config,
+    "fp8": Fp8Config,
     "gguf": GGUFConfig,
     "gptq": GPTQConfig,
     "quip": QuipConfig,

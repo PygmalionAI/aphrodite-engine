@@ -1,7 +1,6 @@
 # coding=utf-8
 # Adapted from
 # https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/models/llama/modeling_llama.py
-# Copyright 2023 The PygmalionAI team.
 # Copyright 2023 The vLLM team.
 # Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
 #
@@ -28,6 +27,7 @@ import torch
 from torch import nn
 from transformers import MixtralConfig
 
+from aphrodite._C import ops
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import LoRAConfig
 from aphrodite.common.sequence import SamplerOutput
@@ -37,12 +37,10 @@ from aphrodite.distributed import (get_tensor_model_parallel_rank,
                                    tensor_model_parallel_all_reduce)
 from aphrodite.modeling.layers.fused_moe import fused_moe
 from aphrodite.modeling.layers.layernorm import RMSNorm
-from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              QKVParallelLinear,
+from aphrodite.modeling.layers.linear import (QKVParallelLinear,
                                               ReplicatedLinear,
                                               RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
-from aphrodite.quantization.fp8 import (Fp8LinearMethod, per_tensor_quantize)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
@@ -50,6 +48,8 @@ from aphrodite.modeling.layers.vocab_parallel_embedding import (
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.quantization.base_config import QuantizationConfig
+from aphrodite.quantization.fp8 import Fp8Config
 
 
 class MixtralMoE(nn.Module):
@@ -69,7 +69,7 @@ class MixtralMoE(nn.Module):
         intermediate_size: int,
         params_dtype: Optional[torch.dtype] = None,
         tp_size: Optional[int] = None,
-        linear_method: Optional[LinearMethodBase] = None,
+        quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         self.tp_size = tp_size or get_tensor_model_parallel_world_size()
@@ -79,7 +79,7 @@ class MixtralMoE(nn.Module):
         self.intermediate_size = intermediate_size // self.tp_size
         # FIXME(pcmoritz): Make this more general to support different
         # quantization schemes
-        self.use_fp8 = isinstance(linear_method, Fp8LinearMethod)
+        self.use_fp8 = isinstance(quant_config, Fp8Config)
 
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
@@ -89,7 +89,7 @@ class MixtralMoE(nn.Module):
                                      self.num_total_experts,
                                      bias=False,
                                      params_dtype=self.params_dtype,
-                                     linear_method=None)
+                                     quant_config=None)
 
         self.ws = nn.Parameter(
             torch.empty(self.num_total_experts,
@@ -140,10 +140,10 @@ class MixtralMoE(nn.Module):
             ws = torch.empty_like(self.ws.data, dtype=torch.float8_e4m3fn)
             w2s = torch.empty_like(self.w2s.data, dtype=torch.float8_e4m3fn)
             for expert in range(self.num_total_experts):
-                ws[expert, :, :], self.ws_scale[expert] = per_tensor_quantize(
+                ws[expert, :, :], self.ws_scale[expert] = ops.scaled_fp8_quant(
                     self.ws.data[expert, :, :])
                 w2s[expert, :, :], self.w2s_scale[
-                    expert] = per_tensor_quantize(self.w2s.data[expert, :, :])
+                    expert] = ops.scaled_fp8_quant(self.w2s.data[expert, :, :])
             self.ws = nn.Parameter(ws, requires_grad=False)
             self.w2s = nn.Parameter(w2s, requires_grad=False)
 
@@ -178,7 +178,7 @@ class MixtralAttention(nn.Module):
                  num_kv_heads: int,
                  max_position: int = 4096 * 32,
                  rope_theta: float = 10000,
-                 linear_method: Optional[LinearMethodBase] = None,
+                 quant_config: Optional[QuantizationConfig] = None,
                  sliding_window: Optional[int] = None) -> None:
         super().__init__()
         self.hidden_size = hidden_size
@@ -203,12 +203,12 @@ class MixtralAttention(nn.Module):
         self.rope_theta = rope_theta
         self.sliding_window = sliding_window
 
-        if isinstance(linear_method, Fp8LinearMethod):
+        if isinstance(quant_config, Fp8Config):
             print_warning_once(
                 "For Mixtral FP8 quantization, we currently do not quantize "
                 "the attention layers until their FP8 performance is improved."
             )
-            linear_method = None
+            quant_config = None
 
         self.qkv_proj = QKVParallelLinear(
             hidden_size,
@@ -216,13 +216,13 @@ class MixtralAttention(nn.Module):
             self.total_num_heads,
             self.total_num_kv_heads,
             bias=False,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
         self.o_proj = RowParallelLinear(
             self.total_num_heads * self.head_dim,
             hidden_size,
             bias=False,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
         self.rotary_emb = get_rope(
             self.head_dim,
@@ -259,7 +259,7 @@ class MixtralDecoderLayer(nn.Module):
     def __init__(
         self,
         config: MixtralConfig,
-        linear_method: Optional[LinearMethodBase] = None,
+        quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
         super().__init__()
         self.hidden_size = config.hidden_size
@@ -272,13 +272,13 @@ class MixtralDecoderLayer(nn.Module):
             num_kv_heads=config.num_key_value_heads,
             rope_theta=rope_theta,
             sliding_window=config.sliding_window,
-            linear_method=linear_method)
+            quant_config=quant_config)
         self.block_sparse_moe = MixtralMoE(
             num_experts=config.num_local_experts,
             top_k=config.num_experts_per_tok,
             hidden_size=config.hidden_size,
             intermediate_size=config.intermediate_size,
-            linear_method=linear_method)
+            quant_config=quant_config)
         self.input_layernorm = RMSNorm(config.hidden_size,
                                        eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(config.hidden_size,
@@ -318,7 +318,7 @@ class MixtralModel(nn.Module):
     def __init__(
         self,
         config: MixtralConfig,
-        linear_method: Optional[LinearMethodBase] = None,
+        quant_config: Optional[QuantizationConfig] = None,
         lora_config: Optional[LoRAConfig] = None,
     ) -> None:
         super().__init__()
@@ -334,7 +334,7 @@ class MixtralModel(nn.Module):
             org_num_embeddings=config.vocab_size,
         )
         self.layers = nn.ModuleList([
-            MixtralDecoderLayer(config, linear_method=linear_method)
+            MixtralDecoderLayer(config, quant_config=quant_config)
             for _ in range(config.num_hidden_layers)
         ])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -384,14 +384,13 @@ class MixtralForCausalLM(nn.Module):
     def __init__(
         self,
         config: MixtralConfig,
-        linear_method: Optional[LinearMethodBase] = None,
+        quant_config: Optional[QuantizationConfig] = None,
         lora_config: Optional[LoRAConfig] = None,
     ) -> None:
         super().__init__()
         self.config = config
-        self.linear_method = linear_method
         self.model = MixtralModel(config,
-                                  linear_method,
+                                  quant_config,
                                   lora_config=lora_config)
         self.unpadded_vocab_size = config.vocab_size
         if lora_config:

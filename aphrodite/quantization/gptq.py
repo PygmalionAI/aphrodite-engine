@@ -7,9 +7,9 @@ import torch
 from torch.nn.parameter import Parameter
 
 from aphrodite._quant_C import quant_ops as ops
-from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
-from aphrodite.quantization.base_config import \
-    QuantizationConfig
+from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
+from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.quantization.base_config import QuantizationConfig
 
 
 class GPTQConfig(QuantizationConfig):
@@ -62,8 +62,11 @@ class GPTQConfig(QuantizationConfig):
         desc_act = cls.get_from_keys(config, ["desc_act"])
         return cls(weight_bits, group_size, desc_act)
 
-    def get_linear_method(self) -> "GPTQLinearMethod":
-        return GPTQLinearMethod(self)
+    def get_quant_method(
+            self, layer: torch.nn.Module) -> Optional["GPTQLinearMethod"]:
+        if isinstance(layer, LinearBase):
+            return GPTQLinearMethod(self)
+        return None
 
     def get_scaled_act_names(self) -> List[str]:
         return []
@@ -193,10 +196,10 @@ class GPTQLinearMethod(LinearMethodBase):
 
         layer.exllama_state = exllama_state
 
-    def apply_weights(self,
-                      layer: torch.nn.Module,
-                      x: torch.Tensor,
-                      bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def apply(self,
+              layer: torch.nn.Module,
+              x: torch.Tensor,
+              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         qweight = layer.qweight
         out_shape = x.shape[:-1] + (qweight.shape[-1], )
         reshaped_x = x.reshape(-1, x.shape[-1])
