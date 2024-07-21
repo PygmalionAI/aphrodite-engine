@@ -1,24 +1,24 @@
 from typing import Callable, List
 
+from loguru import logger
 from transformers import PreTrainedTokenizer
 
-from aphrodite.engine.output_processor.interfaces import \
-    SequenceGroupOutputProcessor
-from aphrodite.engine.output_processor.stop_checker import StopChecker
-from aphrodite.processing.scheduler import Scheduler
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (Logprob, Sequence, SequenceGroup,
                                        SequenceGroupOutput, SequenceOutput,
                                        SequenceStatus)
-from aphrodite.transformers_utils.detokenizer import Detokenizer
 from aphrodite.common.utils import Counter
+from aphrodite.engine.output_processor.interfaces import \
+    SequenceGroupOutputProcessor
+from aphrodite.engine.output_processor.stop_checker import StopChecker
+from aphrodite.processing.scheduler import Scheduler
+from aphrodite.transformers_utils.detokenizer import Detokenizer
 
 
 class MultiStepOutputProcessor(SequenceGroupOutputProcessor):
     """SequenceGroupOutputProcessor which handles logic related to
     detokenization and stopping conditions. It specializes to "multi-step
-    decoding", where Aphrodite's worker may generate multiple tokens per
-    invocation.
+    decoding", where vLLM's worker may generate multiple tokens per invocation.
     This is currently mutually exclusive with advanced sampling techniques like
     beam search, which motivates the separation of this logic from the single
     step output processor.
@@ -42,6 +42,15 @@ class MultiStepOutputProcessor(SequenceGroupOutputProcessor):
         self.seq_counter = seq_counter
         self.get_tokenizer_for_seq = get_tokenizer_for_seq
         self.stop_checker = stop_checker
+
+    def process_prompt_logprob(self, seq_group: SequenceGroup,
+                               outputs: List[SequenceGroupOutput]) -> None:
+        # TODO: Prompt logprob currently not implemented in multi step
+        # workers.
+        logger.warning(
+            "Prompt logprob is not supported by multi step workers. "
+            "(e.g., speculative decode uses multi step workers).")
+        pass
 
     def process_outputs(self, sequence_group: SequenceGroup,
                         outputs: List[SequenceGroupOutput]) -> None:
