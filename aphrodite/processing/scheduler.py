@@ -616,8 +616,9 @@ class Scheduler:
 
             if num_new_tokens > self.prompt_limit:
                 logger.warning(
-                    f"Input prompt ({num_new_tokens} tokens) is too long"
-                    f" and exceeds limit of {self.prompt_limit}")
+                    "Input prompt (%d tokens) is too long"
+                    " and exceeds limit of %d", num_new_tokens,
+                    self.prompt_limit)
                 for seq in waiting_seqs:
                     seq.status = SequenceStatus.FINISHED_IGNORED
                 ignored_seq_groups.append(seq_group)
@@ -630,8 +631,9 @@ class Scheduler:
                 break
             elif can_allocate == AllocStatus.NEVER:
                 logger.warning(
-                    f"Input prompt ({num_new_tokens} tokens) is too long"
-                    f" and exceeds the capacity of block_manager")
+                    "Input prompt (%d tokens) is too long"
+                    " and exceeds the capacity of block_manager",
+                    num_new_tokens)
                 for seq in waiting_seqs:
                     seq.status = SequenceStatus.FINISHED_IGNORED
                 ignored_seq_groups.append(seq_group)
@@ -901,19 +903,30 @@ class Scheduler:
             seq_data: Dict[int, SequenceData] = {}
             # seq_id -> physical block numbers
             block_tables: Dict[int, List[int]] = {}
-            # seq_id -> persistent data
-            persistent_data: Dict[int, dict] = {}
 
             for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
                 seq_id = seq.seq_id
                 seq_data[seq_id] = seq.data
                 block_tables[seq_id] = self.block_manager.get_block_table(seq)
-                persistent_data[seq_id] = seq.persistent_data
                 self.block_manager.access_all_blocks_in_seq(seq, now)
 
             common_computed_block_nums = (
                 self.block_manager.get_common_computed_block_ids(
                     seq_group.get_seqs(status=SequenceStatus.RUNNING)))
+
+            do_sample = True
+            if seq_group.is_prefill():
+                seqs = seq_group.get_seqs()
+                # Prefill has only 1 sequence.
+                assert len(seqs) == 1
+                # In the next iteration, all prompt tokens are not computed.
+                # It means the prefill is chunked, and we don't need sampling.
+                # NOTE: We use get_len instead of get_prompt_len because when
+                # a sequence is preempted, prefill includes previous generated
+                # output tokens.
+                if (token_chunk_size + seqs[0].data.get_num_computed_tokens() <
+                        seqs[0].data.get_len()):
+                    do_sample = False
 
             # It assumes the scheduled_seq_groups is ordered by
             # prefill < decoding.
@@ -924,9 +937,9 @@ class Scheduler:
                 seq_data=seq_data,
                 sampling_params=seq_group.sampling_params,
                 block_tables=block_tables,
+                do_sample=do_sample,
                 token_chunk_size=token_chunk_size,
                 lora_request=seq_group.lora_request,
-                persistent_data=persistent_data,
                 computed_block_nums=common_computed_block_nums,
                 state=seq_group.state,
                 # `multi_modal_data` will only be present for the 1st comm

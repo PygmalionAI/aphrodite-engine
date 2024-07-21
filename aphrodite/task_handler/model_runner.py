@@ -13,12 +13,12 @@ from aphrodite.attention import (AttentionMetadata, AttentionMetadataPerStage,
 from aphrodite.common.config import (DeviceConfig, LoadConfig, LoRAConfig,
                                      ModelConfig, ParallelConfig,
                                      SchedulerConfig, VisionLanguageConfig)
-from aphrodite.common.sampling_params import SamplingParams, SamplingType
+from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (MultiModalData, SamplerOutput,
                                        SequenceData, SequenceGroupMetadata)
-from aphrodite.common.utils import (CudaMemoryProfiler, async_tensor_h2d,
-                                    is_hip, is_pin_memory_available,
-                                    make_tensor_with_pad, maybe_expand_dim)
+from aphrodite.common.utils import (CudaMemoryProfiler, is_hip,
+                                    is_pin_memory_available,
+                                    make_tensor_with_pad)
 from aphrodite.distributed import (broadcast_tensor_dict,
                                    get_tensor_model_parallel_world_size,
                                    with_pynccl_for_all_reduce)
@@ -29,7 +29,6 @@ from aphrodite.lora.request import LoRARequest
 from aphrodite.lora.worker_manager import LRUCacheWorkerLoRAManager
 from aphrodite.modeling import SamplingMetadata
 from aphrodite.modeling.model_loader import get_model
-from aphrodite.modeling.sampling_metadata import PersistentMetadata
 
 _PAD_SLOT_ID = -1
 LORA_WARMUP_RANK = 8
@@ -201,18 +200,19 @@ class ModelRunner:
                     self.model.load_kv_cache_scales(
                         self.model_config.quantization_param_path)
                 else:
-                    raise RuntimeError("Using FP8 KV cache and scaling "
-                                       "factors provided but model "
-                                       f"{self.model.__class__} does not "
-                                       "support loading scaling factors.")
+                    raise RuntimeError(
+                        "Using FP8 KV cache and scaling factors provided but "
+                        "model %s does not support loading scaling factors.",
+                        self.model.__class__)
             else:
-                logger.warn("Using FP8 KV cache but no scaling factors "
-                            "provided. Defaulting to scaling factors of 1.0. "
-                            "This may lead to less accurate results!")
+                logger.warning(
+                    "Using FP8 KV cache but no scaling factors "
+                    "provided. Defaulting to scaling factors of 1.0. "
+                    "This may lead to less accurate results!")
         elif self.model_config.quantization_param_path is not None:
-            logger.warn("KV cache scaling factors provided, "
-                        "but the KV cache data type is not FP8. "
-                        "KV cache scaling factors will not be used.")
+            logger.warning("KV cache scaling factors provided, "
+                           "but the KV cache data type is not FP8. "
+                           "KV cache scaling factors will not be used.")
 
     def set_block_size(self, block_size: int) -> None:
         self.block_size = block_size
@@ -551,113 +551,6 @@ class ModelRunner:
             slot_mapping=slot_mapping,
         )
 
-    def _prepare_sample(
-        self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-        prompt_lens: List[int],
-        subquery_lens: Optional[List[int]],
-    ) -> SamplingMetadata:
-        seq_groups: List[Tuple[List[int], SamplingParams]] = []
-        selected_token_indices: List[int] = []
-        generators: List[torch.Generator] = []
-        selected_token_start_idx = 0
-        categorized_sample_indices: Dict[SamplingType,
-                                         List[Tuple[int, int]]] = {
-                                             t: []
-                                             for t in SamplingType
-                                         }
-        categorized_sample_indices_start_idx = 0
-        categorized_sampled_token_indices_start_idx = 0
-
-        for i, seq_group_metadata in enumerate(seq_group_metadata_list):
-            seq_ids = list(seq_group_metadata.seq_data.keys())
-            sampling_params = seq_group_metadata.sampling_params
-            seq_groups.append((seq_ids, sampling_params))
-
-            if seq_group_metadata.is_prompt:
-                assert len(seq_ids) == 1
-                assert subquery_lens is not None
-                subquery_len = subquery_lens[i]
-                if sampling_params.prompt_logprobs is not None:
-                    # NOTE: prompt token positions do not need sample, skip
-                    categorized_sample_indices_start_idx += subquery_len - 1
-
-                categorized_sample_indices[
-                    sampling_params.sampling_type].append(
-                        (categorized_sample_indices_start_idx,
-                         categorized_sampled_token_indices_start_idx))
-                categorized_sample_indices_start_idx += 1
-                categorized_sampled_token_indices_start_idx += 1
-
-                if sampling_params.prompt_logprobs is not None:
-                    selected_token_indices.extend(
-                        range(selected_token_start_idx,
-                              selected_token_start_idx + subquery_len - 1))
-                selected_token_indices.append(selected_token_start_idx +
-                                              subquery_len - 1)
-                selected_token_start_idx += subquery_len
-
-                if sampling_params.seed is not None:
-                    seq_group_metadata.state.generator = torch.Generator(
-                        device=self.device).manual_seed(sampling_params.seed)
-            else:
-                num_seqs = len(seq_ids)
-                selected_token_indices.extend(
-                    range(selected_token_start_idx,
-                          selected_token_start_idx + num_seqs))
-                selected_token_start_idx += num_seqs
-
-                categorized_sample_indices[
-                    sampling_params.sampling_type].extend(
-                        list(
-                            zip(
-                                range(
-                                    categorized_sample_indices_start_idx,
-                                    categorized_sample_indices_start_idx +
-                                    num_seqs),
-                                range(
-                                    categorized_sampled_token_indices_start_idx,
-                                    categorized_sampled_token_indices_start_idx
-                                    + num_seqs))))
-                categorized_sample_indices_start_idx += num_seqs
-                categorized_sampled_token_indices_start_idx += num_seqs
-
-            if sampling_params.seed is not None:
-                generators.append(seq_group_metadata.state.generator)
-
-        selected_token_indices = async_tensor_h2d(selected_token_indices,
-                                                  dtype=torch.long,
-                                                  target_device=self.device,
-                                                  pin_memory=self.pin_memory)
-
-        categorized_sample_indices = {
-            t: maybe_expand_dim(
-                async_tensor_h2d(seq_ids,
-                                 dtype=torch.int,
-                                 target_device=self.device,
-                                 pin_memory=self.pin_memory), 2, 2)
-            for t, seq_ids in categorized_sample_indices.items()
-        }
-
-        seq_data: Dict[int, SequenceData] = {}
-        for seq_group_metadata in seq_group_metadata_list:
-            seq_data.update(seq_group_metadata.seq_data)
-
-        seq_persistence_data: Dict[int, dict] = {}
-        for grp in seq_group_metadata_list:
-            seq_persistence_data.update(grp.persistent_data)
-
-        sampling_metadata = SamplingMetadata(
-            seq_groups=seq_groups,
-            seq_data=seq_data,
-            prompt_lens=prompt_lens,
-            selected_token_indices=selected_token_indices,
-            categorized_sample_indices=categorized_sample_indices,
-            generators=generators,
-            persistent_metadata=PersistentMetadata(seq_persistence_data),
-        )
-        return sampling_metadata
-
     def prepare_input_tensors(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
@@ -694,9 +587,9 @@ class ModelRunner:
                 decode_lora_requests,
                 decode_slot_mapping,
             ) = self._prepare_decode(decode_reqs)
-            sampling_metadata = self._prepare_sample(seq_group_metadata_list,
-                                                     prompt_lens,
-                                                     subquery_lens)
+            sampling_metadata = SamplingMetadata.prepare(
+                seq_group_metadata_list, prompt_lens, subquery_lens,
+                self.device, self.pin_memory)
 
             if not self.scheduler_config.chunked_prefill_enabled:
                 assert (len(prefill_reqs) and len(decode_reqs)) == 0
@@ -797,12 +690,9 @@ class ModelRunner:
                     **metadata_dict)
             sampling_metadata = SamplingMetadata(
                 seq_groups=None,
-                seq_data=None,
-                prompt_lens=None,
                 selected_token_indices=selected_token_indices,
                 categorized_sample_indices=None,
-                generators=None,
-                perform_sampling=False,
+                num_prompts=0,
             )
 
             # if it is a mixed batch, decode attn_metadata is broadcasted
@@ -861,7 +751,7 @@ class ModelRunner:
         logits = self.model.compute_logits(hidden_states, sampling_metadata)
 
         # Only perform sampling in the driver worker.
-        if not sampling_metadata.perform_sampling:
+        if not self.is_driver_worker:
             return None
 
         # Sample the next token.
@@ -869,6 +759,7 @@ class ModelRunner:
             logits=logits,
             sampling_metadata=sampling_metadata,
         )
+
         return output
 
     @torch.inference_mode()
@@ -925,7 +816,6 @@ class ModelRunner:
                 seq_data={group_id: seq_data},
                 sampling_params=sampling_params,
                 block_tables=None,
-                persistent_data={},
                 lora_request=dummy_lora_requests_per_seq[group_id]
                 if dummy_lora_requests_per_seq else None,
                 multi_modal_data=fake_multi_modal_input,
@@ -939,10 +829,10 @@ class ModelRunner:
         torch.cuda.synchronize()
         return
 
-    def remove_all_loras(self) -> bool:
+    def remove_all_loras(self):
         if not self.lora_manager:
             raise RuntimeError("LoRA is not enabled.")
-        return self.lora_manager.remove_all_loras()
+        self.lora_manager.remove_all_loras()
 
     def set_active_loras(self, lora_requests: Set[LoRARequest],
                          lora_mapping: LoRAMapping) -> None:
@@ -972,7 +862,7 @@ class ModelRunner:
         Note that CUDA graph's performance gain is negligible if number
         of batched tokens are larger than 200. And since CUDA graph
         requires fixed sized tensors, supporting large/variable batch
-        size requires high GPU memory overhead. Thus, Aphrodite only captures
+        size requires high GPU memory overhead. Thus, vLLM only captures
         decoding requests. Mixed batch (chunked prefill + decoding) or
         prefill requests are not captured.
 
@@ -1065,15 +955,15 @@ class ModelRunner:
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
         # This usually takes < 10 seconds.
-        logger.info(f"Graph capturing finished in {elapsed_time:.0f} secs.")
+        logger.info("Graph capturing finished in %.0f secs.", elapsed_time)
 
     def __del__(self) -> None:
         # Delete the CUDA graphs before deleting the pynccl communicator.
-        # NOTE: This is necessary because otherwise deadlocks can
+        # NOTE(woosuk): This is necessary because otherwise deadlocks can
         # happen.
         # FIXME: This is a bit hacky. Find a more robust solution.
         # TODO: when we get enough user feedback that pynccl is
-        # more stable than cupy, we can remove this
+        # more stable than cupy, we can remove this, e.g. in v0.4.1.
         self.graph_runners.clear()
         self.pynccl_backend = None
 

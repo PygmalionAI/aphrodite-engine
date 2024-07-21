@@ -2,7 +2,7 @@
 import copy
 import enum
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Union, TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, List, Optional, Union
 
 from aphrodite.common.block import LogicalTokenBlock
 from aphrodite.common.sampling_params import SamplingParams
@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 @dataclass
 class Logprob:
     """Infos for supporting OpenAI compatible logprobs and token ranks.
+
     Attributes:
         logprob: The logprob of chosen token
         rank: The vocab rank of chosen token (>=1)
@@ -26,13 +27,15 @@ class Logprob:
     decoded_token: Optional[str] = None
 
 
+# {token_id -> logprob} per each sequence group. None if the corresponding
+# sequence group doesn't require prompt logprob.
 PromptLogprobs = List[Optional[Dict[int, Logprob]]]
+# {token_id -> logprob} for each sequence group.
 SampleLogprobs = List[Dict[int, Logprob]]
 
 
 class SequenceStatus(enum.Enum):
     """Status of a sequence."""
-
     WAITING = enum.auto()
     RUNNING = enum.auto()
     SWAPPED = enum.auto()
@@ -77,14 +80,13 @@ class SequenceStage(enum.Enum):
 class RequestMetrics:
     """Metrics associated with a request.
 
-    Args:
+    Attributes:
         arrival_time: The time when the request arrived.
         first_scheduled_time: The time when the request was first scheduled.
         first_token_time: The time when the first token was generated.
         time_in_queue: The time the request spent in the queue.
         finished_time: The time when the request was finished.
     """
-
     arrival_time: float
     last_token_time: float
     first_scheduled_time: Optional[float]
@@ -160,7 +162,7 @@ class SequenceData:
         self._stage = SequenceStage.PREFILL
 
     def get_num_uncomputed_tokens(self) -> int:
-        """Return the number of prefil tokens that are not computed."""
+        """Return the number of prefill tokens that are not computed."""
         # we use `get_len()` which includes prompt_len + output_len instead
         # of prompt_len here. This is because during recompute we need to
         # prefill for both prompt and output.
@@ -171,10 +173,10 @@ class SequenceData:
             return self.prompt_token_ids[-1]
         return self.output_token_ids[-1]
 
-    def get_prompt_token_ids(self) -> int:
+    def get_prompt_token_ids(self) -> List[int]:
         return self.prompt_token_ids
 
-    def get_output_token_ids(self) -> int:
+    def get_output_token_ids(self) -> List[int]:
         return self.output_token_ids
 
     @property
@@ -215,7 +217,7 @@ class Sequence:
         self.eos_token_id = eos_token_id
         self.lora_request = lora_request
 
-        self.data = SequenceData(prompt_token_ids)
+        self.data: SequenceData = SequenceData(prompt_token_ids)
         self.output_logprobs: SampleLogprobs = []
         self.output_text = ""
 
@@ -230,7 +232,6 @@ class Sequence:
         self.read_offset = 0
         # Input + output tokens
         self.tokens: Optional[List[str]] = None
-        self.persistent_data = {}
 
     @property
     def lora_int_id(self) -> int:
@@ -243,6 +244,8 @@ class Sequence:
             self.output_text)
 
     def hash_of_block(self, logical_idx: int) -> int:
+        # TODO This can produce incorrect hash when block size > prompt size
+
         # Compute the number of tokens in the sequence
         # TODO: The current hashing function is O(L^2). We should optimize
         # this in the future.
@@ -314,12 +317,10 @@ class Sequence:
     def get_cumulative_logprob(self) -> float:
         return self.data.cumulative_logprob
 
-    def get_beam_search_score(
-        self,
-        length_penalty: float = 1.0,
-        seq_len: Optional[int] = None,
-        eos_token_id: Optional[int] = None,
-    ) -> float:
+    def get_beam_search_score(self,
+                              length_penalty: float = 1.0,
+                              seq_len: Optional[int] = None,
+                              eos_token_id: Optional[int] = None) -> float:
         """Calculate the beam search score with length penalty.
 
         Adapted from
@@ -345,12 +346,10 @@ class Sequence:
 
     def get_num_new_tokens(self) -> int:
         """Get the number of new tokens to be computed.
-        Args:
-            remainig_token_budget: The remaining token budgets.
+
         Returns:
-            The new number of tokens to be computed. I.e., 1 for decode, prompt
-            size for prefill. If there's not enough remainig_token_budget, it
-            can return the chunked number of new tokens.
+            The new number of tokens to be computed. I.e., 1 for decode, or
+            the remaining prompt size for prefill.
         """
         if self.data.stage == SequenceStage.DECODE:
             return 1
@@ -370,7 +369,7 @@ class SequenceGroupState:
     """Mutable state tied to a specific sequence group"""
 
     # torch.Generator used in seeded sampling
-    generator: Optional = None
+    generator: Optional = None  # type: ignore
 
 
 class MultiModalData:
@@ -401,7 +400,7 @@ class SequenceGroup:
         sampling_params: The sampling parameters used to generate the outputs.
         arrival_time: The arrival time of the request.
         lora_request: LoRA request.
-        multi_modal_requst: Multi modal data for the request.
+        multi_modal_data: Multi modal data associated with the request.
     """
 
     def __init__(
@@ -416,13 +415,11 @@ class SequenceGroup:
         self.request_id = request_id
         self.seqs_dict = {seq.seq_id: seq for seq in seqs}
         self.sampling_params = sampling_params
-        self.metrics = RequestMetrics(
-            arrival_time=arrival_time,
-            last_token_time=arrival_time,
-            first_scheduled_time=None,
-            first_token_time=None,
-            time_in_queue=None,
-        )
+        self.metrics = RequestMetrics(arrival_time=arrival_time,
+                                      last_token_time=arrival_time,
+                                      first_scheduled_time=None,
+                                      first_token_time=None,
+                                      time_in_queue=None)
         self.lora_request = lora_request
         self.prompt_logprobs: Optional[PromptLogprobs] = None
         self.state = SequenceGroupState()
@@ -456,8 +453,8 @@ class SequenceGroup:
             self.metrics.first_token_time = time
 
     def maybe_set_first_scheduled_time(self, time: float) -> None:
-        """Sets the first scheduled time and time in queue for Request level
-        timings."""
+        """Sets the first scheduled time and time in queue for Request
+        level timings."""
         if self.metrics.first_scheduled_time is None:
             self.metrics.first_scheduled_time = time
             self.metrics.time_in_queue = time - self.metrics.arrival_time
@@ -487,9 +484,9 @@ class SequenceGroup:
         self,
         status: Optional[SequenceStatus] = None,
     ) -> List[Sequence]:
-        return (list(self.seqs_dict.values()) if status is None else [
+        return list(self.seqs_dict.values()) if status is None else [
             seq for seq in self.seqs_dict.values() if seq.status == status
-        ])
+        ]
 
     def get_unfinished_seqs(self) -> List[Sequence]:
         return [
@@ -564,12 +561,14 @@ class SequenceGroupMetadata:
         sampling_params: The sampling parameters used to generate the outputs.
         block_tables: The block tables. (Seq id -> list of physical block
             numbers)
+        do_sample: True if sampling is required. Sampling is not required when
+            e.g., prefill is chunked, and the current iteration only computes
+            query tokens for prefill, we don't need sampling.
         token_chunk_size: The number of tokens to be processed (per sequence).
             None if chunking is not required.
         state: Internal state tied to this sequence group.
         lora_request: LoRA request.
-        multi_modal_data: Multi modal data for the request.
-        persistent_data: The persistent data of the sequence group.
+        multi_modal_data: Multi modal data.
     """
 
     def __init__(
@@ -579,7 +578,7 @@ class SequenceGroupMetadata:
         seq_data: Dict[int, SequenceData],
         sampling_params: SamplingParams,
         block_tables: Dict[int, List[int]],
-        persistent_data: Dict[int, dict],
+        do_sample: bool = True,
         token_chunk_size: Optional[int] = None,
         lora_request: Optional[LoRARequest] = None,
         computed_block_nums: Optional[List[int]] = None,
@@ -591,12 +590,12 @@ class SequenceGroupMetadata:
         self.seq_data = seq_data
         self.sampling_params = sampling_params
         self.block_tables = block_tables
-        self.persistent_data = persistent_data
         self.lora_request = lora_request
         self.computed_block_nums = computed_block_nums
-        self.state = SequenceGroupState() if state is None else state
         self.multi_modal_data = multi_modal_data
+        self.state = SequenceGroupState() if state is None else state
         self._token_chunk_size = token_chunk_size
+        self.do_sample = do_sample
 
         if self._token_chunk_size is None:
             if is_prompt:
@@ -609,7 +608,7 @@ class SequenceGroupMetadata:
         return self.lora_request.lora_int_id if self.lora_request else 0
 
     @property
-    def token_chunk_size(self) -> int:
+    def token_chunk_size(self) -> Optional[int]:
         """Return the number of tokens to be processed (chunk size)."""
         return self._token_chunk_size
 
@@ -623,7 +622,6 @@ class SequenceOutput:
         output_token: The output token ID.
         logprobs: The logprobs of the output token.
             (Token id -> logP(x_i+1 | x_0, ..., x_i))
-        persistent_data: The persistent data of the sequence.
     """
 
     def __init__(
@@ -631,18 +629,15 @@ class SequenceOutput:
         parent_seq_id: int,
         output_token: int,
         logprobs: Dict[int, Logprob],
-        persistent_data: dict,
     ) -> None:
         self.parent_seq_id = parent_seq_id
         self.output_token = output_token
         self.logprobs = logprobs
-        self.persistent_data = persistent_data
 
     def __repr__(self) -> str:
         return (f"SequenceOutput(parent_seq_id={self.parent_seq_id}, "
                 f"output_token={self.output_token}, "
-                f"logprobs={self.logprobs}, "
-                f"persistent_data={self.persistent_data})")
+                f"logprobs={self.logprobs})")
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SequenceOutput):
@@ -662,6 +657,7 @@ class SequenceGroupOutput:
         prompt_logprobs: Optional[PromptLogprobs],
     ) -> None:
         self.samples = samples
+        # Prompt logprob for each prompt query token.
         self.prompt_logprobs = prompt_logprobs
 
     def __repr__(self) -> str:
@@ -705,8 +701,8 @@ class SamplerOutput:
         return len(self.outputs)
 
     def __eq__(self, other: object):
-        return (isinstance(other, self.__class__)
-                and self.outputs == other.outputs)
+        return isinstance(other,
+                          self.__class__) and self.outputs == other.outputs
 
     def __repr__(self) -> str:
         """Show the shape of a tensor instead of its values to reduce noise.
