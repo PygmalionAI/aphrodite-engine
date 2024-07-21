@@ -19,6 +19,12 @@ with suppress(ImportError):
 class Fp8Config(QuantizationConfig):
     """Config class for FP8."""
 
+    def __init__(
+        self,
+        activation_scheme: str = "dynamic",
+    ) -> None:
+        self.activation_scheme = activation_scheme
+
     @classmethod
     def get_name(cls) -> str:
         return "fp8"
@@ -37,7 +43,8 @@ class Fp8Config(QuantizationConfig):
 
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "Fp8Config":
-        return cls()
+        activation_scheme = cls.get_from_keys(config, ["activation_scheme"])
+        return cls(activation_scheme)
 
     def get_quant_method(
             self, layer: torch.nn.Module) -> Optional["QuantizeMethodBase"]:
