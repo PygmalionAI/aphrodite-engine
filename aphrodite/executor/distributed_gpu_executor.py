@@ -9,7 +9,6 @@ from aphrodite.lora.request import LoRARequest
 from aphrodite.common.sequence import SamplerOutput
 
 
-
 class DistributedGPUExecutor(GPUExecutor):
     """Abstract superclass of multi-GPU executor implementations."""
 
