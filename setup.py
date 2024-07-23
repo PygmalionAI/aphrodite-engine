@@ -419,6 +419,7 @@ package_data = {
     ]
 }
 if os.environ.get("APHRODITE_USE_PRECOMPILED"):
+    ext_modules = []
     package_data["aphrodite"].append("*.so")
 
 setup(
