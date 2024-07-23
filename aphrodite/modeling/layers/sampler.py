@@ -106,8 +106,8 @@ class Sampler(nn.Module):
                 logits, sampling_tensors.smoothing_factors,
                 sampling_tensors.smoothing_curves)
 
-        banned_tokens = _get_custom_token_bans(sampling_metadata)
-        logits = _apply_token_bans(logits, banned_tokens)
+        # banned_tokens = _get_custom_token_bans(sampling_metadata)
+        # logits = _apply_token_bans(logits, banned_tokens)
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
