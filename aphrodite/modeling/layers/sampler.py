@@ -403,25 +403,33 @@ def _apply_temperature(
     dynatemp_exps: torch.Tensor,
 ) -> torch.Tensor:
     dynatemp_mask = torch.logical_or(dynatemp_mins > 0, dynatemp_maxs > 0)
-    dynatemp_mins = dynatemp_mins[dynatemp_mask]
-    dynatemp_maxs = dynatemp_maxs[dynatemp_mask]
-    dynatemp_exps = dynatemp_exps[dynatemp_mask]
-    dynatemp_mins = dynatemp_mins.clamp_(min=0)
+    
+    # Check if dynatemp_mask is not empty
+    if dynatemp_mask.any():
+        dynatemp_mins = dynatemp_mins[dynatemp_mask]
+        dynatemp_maxs = dynatemp_maxs[dynatemp_mask]
+        dynatemp_exps = dynatemp_exps[dynatemp_mask]
+        dynatemp_mins = dynatemp_mins.clamp_(min=0)
 
-    dynatemp_logits = logits[dynatemp_mask]
-    dynatemp_shifted_logits = torch.log_softmax(dynatemp_logits, dim=-1)
-    dynatemp_probs = dynatemp_shifted_logits.exp()
-    dynatemp_entropies = -(dynatemp_probs *
-                           dynatemp_shifted_logits).nansum(dim=-1)
-    dynatemp_max_entropies = torch.log_(
-        (dynatemp_logits > float("-inf")).sum(dim=-1).float())
-    normalized_entropies = dynatemp_entropies.div_(dynatemp_max_entropies)
-    dyn_temp = (dynatemp_mins + (dynatemp_maxs - dynatemp_mins) *
-                normalized_entropies.pow_(dynatemp_exps))
+        dynatemp_logits = logits[dynatemp_mask]
+        dynatemp_shifted_logits = torch.log_softmax(dynatemp_logits, dim=-1)
+        dynatemp_probs = dynatemp_shifted_logits.exp()
+        dynatemp_entropies = -(dynatemp_probs *
+                               dynatemp_shifted_logits).nansum(dim=-1)
+        dynatemp_max_entropies = torch.log_(
+            (dynatemp_logits > float("-inf")).sum(dim=-1).float())
+        normalized_entropies = dynatemp_entropies.div_(dynatemp_max_entropies)
+        dyn_temp = (dynatemp_mins + (dynatemp_maxs - dynatemp_mins) *
+                    normalized_entropies.pow_(dynatemp_exps))
 
-    temperatures[dynatemp_mask] = dyn_temp
+        temperatures[dynatemp_mask] = dyn_temp
+
     temperatures[temperatures == 0.0] = 1.0
-    logits.div_(temperatures.unsqueeze_(dim=1))
+
+    while temperatures.dim() < logits.dim():
+        temperatures = temperatures.unsqueeze(-1)
+    
+    logits = logits.div(temperatures)
     return logits
 
 
