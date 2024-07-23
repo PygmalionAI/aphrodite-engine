@@ -47,6 +47,16 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
     """
 
     @classmethod
+    def from_workers(cls, proposer_worker: MultiStepWorker,
+                     scorer_worker: WorkerBase) -> "SpecDecodeWorker":
+        return SpecDecodeWorker(
+            proposer_worker,
+            scorer_worker,
+            # TODO: disable strict mode for speedup.
+            rejection_sampler=RejectionSampler(strict_mode=True),
+        )
+
+    @classmethod
     def create_worker(
         cls,
         scorer_worker: WorkerBase,
