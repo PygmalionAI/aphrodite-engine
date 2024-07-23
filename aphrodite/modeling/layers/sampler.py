@@ -17,14 +17,18 @@ from aphrodite.modeling.sampling_metadata import (SamplingMetadata,
 
 class Sampler(nn.Module):
     """Samples the next tokens from the model's outputs.
+
     This layer does the following:
     1. Discard the hidden states that are not used for sampling (i.e., all
         tokens except the final one in each prompt).
     2. Compute the logits for the next tokens.
-    3. Apply all the different sampler functions in the specified order.
-    4. Sample the next tokens.
+    3. Apply presence, frequency and repetition penalties.
+    4. Apply temperature scaling.
+    5. Apply top-p and top-k truncation.
+    6. Sample the next tokens.
     Here, each sequence group within the batch can have different sampling
     parameters (e.g., sampling method, temperature, top-p, top-k, etc.).
+
     The structure of the logits tensor is coupled with the seq_groups in
     sampling_metadata. Typically, each sequence in each seq_group has one row in
     logits for the next token to be sampled; however, for a seq_group with a
@@ -52,17 +56,16 @@ class Sampler(nn.Module):
         """
         assert logits is not None
         _, vocab_size = logits.shape
-        # Apply min_tokens penalty which sets stop tokens to -inf if min_tokens
-        # have not been generated yet
+
         logits = _apply_min_tokens_penalty(logits, sampling_metadata)
 
         # Prepare sampling tensors with pinned memory to avoid blocking.
-        (sampling_tensors, do_temperatures, do_penalties, do_topks, do_topps,
-         do_topas, do_minps, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
-         do_typical_ps,
-         do_quadratic) = (SamplingTensors.from_sampling_metadata(
-             sampling_metadata, vocab_size, logits.device, logits.dtype))
+        (sampling_tensors, do_penalties, do_top_p_top_k, do_top_as, do_min_p,
+         do_tfss, do_eta_cutoffs, do_epsilon_cutoffs, do_typical_ps,
+         do_quadratic) = SamplingTensors.from_sampling_metadata(
+             sampling_metadata, vocab_size, logits.device, logits.dtype)
 
+        # Apply presence and frequency penalties.
         if do_penalties:
             logits = _apply_penalties(logits, sampling_tensors.prompt_tokens,
                                       sampling_tensors.output_tokens,
@@ -70,18 +73,30 @@ class Sampler(nn.Module):
                                       sampling_tensors.frequency_penalties,
                                       sampling_tensors.repetition_penalties)
 
-        if (do_topks or do_topps or do_topas or do_minps):
-            logits = _apply_alphabet_soup(logits, sampling_tensors.top_ps,
-                                          sampling_tensors.top_ks,
-                                          sampling_tensors.top_as,
-                                          sampling_tensors.min_ps)
+        # Apply temperature scaling.
+        # Use in-place division to avoid creating a new tensor.
+        logits.div_(sampling_tensors.temperatures.unsqueeze_(dim=1))
+
+        if do_top_p_top_k:
+            logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
+                                        sampling_tensors.top_ks)
+
+        if do_top_as:
+            logits = _apply_top_a(logits, sampling_tensors.top_as)
+
+        if do_min_p:
+            logits = _apply_min_p(logits, sampling_tensors.min_ps)
+
         if do_tfss:
             logits = _apply_tfs(logits, sampling_tensors.tfss)
+
         if do_eta_cutoffs:
             logits = _apply_eta_cutoff(logits, sampling_tensors.eta_cutoffs)
+
         if do_epsilon_cutoffs:
             logits = _apply_epsilon_cutoff(logits,
                                            sampling_tensors.epsilon_cutoffs)
+
         if do_typical_ps:
             logits = _apply_typical_sampling(logits,
                                              sampling_tensors.typical_ps)
@@ -91,15 +106,7 @@ class Sampler(nn.Module):
                 logits, sampling_tensors.smoothing_factors,
                 sampling_tensors.smoothing_curves)
 
-        if do_temperatures:
-            logits = _apply_temperature(logits, sampling_tensors.temperatures,
-                                        # sampling_tensors.dynatemp_mins,
-                                        # sampling_tensors.dynatemp_maxs,
-                                        # sampling_tensors.dynatemp_exps
-                                        )
-
         banned_tokens = _get_custom_token_bans(sampling_metadata)
-        # assert len(banned_tokens) == logits.shape[0]
         logits = _apply_token_bans(logits, banned_tokens)
 
         # We use float32 for probabilities and log probabilities.
@@ -117,12 +124,14 @@ class Sampler(nn.Module):
             include_gpu_probs_tensor=self.include_gpu_probs_tensor,
             modify_greedy_probs=self._should_modify_greedy_probs_inplace,
         )
+
         if self.include_gpu_probs_tensor:
             assert maybe_sampled_tokens_tensor is not None
             sampled_tokens_tensor = maybe_sampled_tokens_tensor
             on_device_tensors = (probs, sampled_tokens_tensor)
         else:
             on_device_tensors = None
+
         # Get the logprobs query results.
         prompt_logprobs, sample_logprobs = _get_logprobs(
             logprobs, sampling_metadata, sample_results)
@@ -137,8 +146,10 @@ class Sampler(nn.Module):
         """Whether or not the sampler should modify the probability distribution
         of greedily-sampled tokens such that multinomial sampling would sample
         the greedily-sampled token.
+
         In other words, if True then we set the probability of the greedily-
         sampled token to 1.
+
         This is used by speculative decoding, which requires that the sampling
         method be encoded into the probability distribution.
         """
@@ -258,38 +269,27 @@ def _apply_min_tokens_penalty(
     return logits
 
 
-def _apply_alphabet_soup(
+def _apply_top_k_top_p(
     logits: torch.Tensor,
     p: torch.Tensor,
     k: torch.Tensor,
-    a: torch.Tensor,
-    m: torch.Tensor,
 ) -> torch.Tensor:
-    logits_sort, logits_idx = logits.sort(dim=-1, descending=True)
-
-    # Apply top-p, min-p and top-a.
-    probs_sort = logits_sort.softmax(dim=-1)
-    probs_sum = probs_sort.cumsum(dim=-1).sub_(probs_sort)
-    min_p_thresholds = probs_sort[:, 0] * m
-    top_a_thresholds = torch.pow(probs_sort[:, 0], 2) * a
-    threshold = torch.maximum(min_p_thresholds, top_a_thresholds)
-    mask = (probs_sort < threshold.unsqueeze(1)
-            )  # Cull logits below the top-a threshold
-    mask.logical_or_(
-        probs_sum >
-        p.unsqueeze(dim=1))  # Cull logits above the top-p summation threshold
-    mask[:, 0] = False  # Guarantee at least one token is pickable
-    logits_sort[mask] = -float("inf")
+    logits_sort, logits_idx = logits.sort(dim=-1, descending=False)
 
     # Apply top-k.
-    # Create a mask for the top-k elements.
-    top_k_mask = torch.arange(logits_idx.shape[-1], device=logits_idx.device)
-    top_k_mask = top_k_mask.expand(logits_idx.shape[0], -1)
-    top_k_mask = top_k_mask >= k.unsqueeze_(dim=1)
+    top_k_mask = logits_sort.size(1) - k.to(torch.long)
+    # Get all the top_k values.
+    top_k_mask = logits_sort.gather(1, top_k_mask.unsqueeze(dim=1))
+    top_k_mask = logits_sort < top_k_mask
+    logits_sort.masked_fill_(top_k_mask, -float("inf"))
 
-    # Final mask.
-    mask = (mask | top_k_mask)
-    logits_sort.masked_fill_(mask, -float("inf"))
+    # Apply top-p.
+    probs_sort = logits_sort.softmax(dim=-1)
+    probs_sum = probs_sort.cumsum(dim=-1)
+    top_p_mask = probs_sum <= 1 - p.unsqueeze(dim=1)
+    # at least one
+    top_p_mask[:, -1] = False
+    logits_sort.masked_fill_(top_p_mask, -float("inf"))
 
     # Re-sort the probabilities.
     src = torch.arange(logits_idx.shape[-1],
@@ -298,6 +298,36 @@ def _apply_alphabet_soup(
                                                            index=logits_idx,
                                                            src=src)
     logits = torch.gather(logits_sort, dim=-1, index=logits_idx_inv)
+    return logits
+
+
+def _apply_min_p(
+    logits: torch.Tensor,
+    min_p: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Adapted from
+    https://github.com/oobabooga/text-generation-webui/blob/3146124ec01f02c8fb1650a6517cf1b60b537aaf/modules/sampler_hijack.py#L16C17-L16C17
+    """
+    probs = torch.softmax(logits, dim=-1)
+    top_probs, _ = probs.max(dim=-1, keepdim=True)
+    scaled_min_p = min_p.unsqueeze_(dim=1) * top_probs
+    tokens_to_remove = probs < scaled_min_p
+    logits = logits.masked_fill_(tokens_to_remove, -float("inf"))
+
+    return logits
+
+
+def _apply_top_a(
+    logits: torch.Tensor,
+    top_a: torch.Tensor,
+) -> torch.Tensor:
+    probs = torch.softmax(logits, dim=-1)
+    top_probs, _ = probs.max(dim=-1, keepdim=True)
+    threshold = torch.pow(top_probs, 2) * top_a.unsqueeze_(dim=1)
+    tokens_to_remove = probs < threshold
+    logits = logits.masked_fill_(tokens_to_remove, -float("inf"))
+
     return logits
 
 
@@ -390,37 +420,6 @@ def _apply_typical_sampling(
 
     typ_mask = typ_mask_sorted.scatter(1, indices, typ_mask_sorted)
     logits[typ_mask] = -float("inf")
-    return logits
-
-
-# pulls double duty for temperature and dynatemp
-def _apply_temperature(
-    logits: torch.Tensor,
-    temperatures: torch.Tensor,
-    # dynatemp_mins: torch.Tensor,
-    # dynatemp_maxs: torch.Tensor,
-    # dynatemp_exps: torch.Tensor,
-) -> torch.Tensor:
-    # dynatemp_mask = torch.logical_or(dynatemp_mins > 0, dynatemp_maxs > 0)
-    # dynatemp_mins = dynatemp_mins[dynatemp_mask]
-    # dynatemp_maxs = dynatemp_maxs[dynatemp_mask]
-    # dynatemp_exps = dynatemp_exps[dynatemp_mask]
-    # dynatemp_mins = dynatemp_mins.clamp_(min=0)
-
-    # dynatemp_logits = logits[dynatemp_mask]
-    # dynatemp_shifted_logits = torch.log_softmax(dynatemp_logits, dim=-1)
-    # dynatemp_probs = dynatemp_shifted_logits.exp()
-    # dynatemp_entropies = -(dynatemp_probs *
-    #                        dynatemp_shifted_logits).nansum(dim=-1)
-    # dynatemp_max_entropies = torch.log_(
-    #     (dynatemp_logits > float("-inf")).sum(dim=-1).float())
-    # normalized_entropies = dynatemp_entropies.div_(dynatemp_max_entropies)
-    # dyn_temp = (dynatemp_mins + (dynatemp_maxs - dynatemp_mins) *
-    #             normalized_entropies.pow_(dynatemp_exps))
-
-    # temperatures[dynatemp_mask] = dyn_temp
-    # temperatures[temperatures == 0.0] = 1.0
-    logits.div_(temperatures.unsqueeze_(dim=1))
     return logits
 
 
