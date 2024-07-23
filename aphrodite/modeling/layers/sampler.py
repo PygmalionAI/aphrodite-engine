@@ -17,14 +17,18 @@ from aphrodite.modeling.sampling_metadata import (SamplingMetadata,
 
 class Sampler(nn.Module):
     """Samples the next tokens from the model's outputs.
+
     This layer does the following:
     1. Discard the hidden states that are not used for sampling (i.e., all
         tokens except the final one in each prompt).
     2. Compute the logits for the next tokens.
-    3. Apply all the different sampler functions in the specified order.
-    4. Sample the next tokens.
+    3. Apply presence, frequency and repetition penalties.
+    4. Apply temperature scaling.
+    5. Apply top-p and top-k truncation.
+    6. Sample the next tokens.
     Here, each sequence group within the batch can have different sampling
     parameters (e.g., sampling method, temperature, top-p, top-k, etc.).
+
     The structure of the logits tensor is coupled with the seq_groups in
     sampling_metadata. Typically, each sequence in each seq_group has one row in
     logits for the next token to be sampled; however, for a seq_group with a
@@ -52,17 +56,15 @@ class Sampler(nn.Module):
         """
         assert logits is not None
         _, vocab_size = logits.shape
-        # Apply min_tokens penalty which sets stop tokens to -inf if min_tokens
-        # have not been generated yet
+
         logits = _apply_min_tokens_penalty(logits, sampling_metadata)
 
         # Prepare sampling tensors with pinned memory to avoid blocking.
-        (sampling_tensors, do_temperatures, do_penalties, do_topks, do_topps,
-         do_topas, do_minps, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
-         do_typical_ps,
-         do_quadratic) = (SamplingTensors.from_sampling_metadata(
-             sampling_metadata, vocab_size, logits.device, logits.dtype))
+        (sampling_tensors, do_penalties, do_top_p_top_k,
+         do_min_p) = SamplingTensors.from_sampling_metadata(
+             sampling_metadata, vocab_size, logits.device, logits.dtype)
 
+        # Apply presence and frequency penalties.
         if do_penalties:
             logits = _apply_penalties(logits, sampling_tensors.prompt_tokens,
                                       sampling_tensors.output_tokens,
@@ -70,37 +72,16 @@ class Sampler(nn.Module):
                                       sampling_tensors.frequency_penalties,
                                       sampling_tensors.repetition_penalties)
 
-        if (do_topks or do_topps or do_topas or do_minps):
-            logits = _apply_alphabet_soup(logits, sampling_tensors.top_ps,
-                                          sampling_tensors.top_ks,
-                                          sampling_tensors.top_as,
-                                          sampling_tensors.min_ps)
-        if do_tfss:
-            logits = _apply_tfs(logits, sampling_tensors.tfss)
-        if do_eta_cutoffs:
-            logits = _apply_eta_cutoff(logits, sampling_tensors.eta_cutoffs)
-        if do_epsilon_cutoffs:
-            logits = _apply_epsilon_cutoff(logits,
-                                           sampling_tensors.epsilon_cutoffs)
-        if do_typical_ps:
-            logits = _apply_typical_sampling(logits,
-                                             sampling_tensors.typical_ps)
+        # Apply temperature scaling.
+        # Use in-place division to avoid creating a new tensor.
+        logits.div_(sampling_tensors.temperatures.unsqueeze_(dim=1))
 
-        if do_quadratic:
-            logits = _apply_quadratic_sampling(
-                logits, sampling_tensors.smoothing_factors,
-                sampling_tensors.smoothing_curves)
+        if do_top_p_top_k:
+            logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
+                                        sampling_tensors.top_ks)
 
-        if do_temperatures:
-            logits = _apply_temperature(logits, sampling_tensors.temperatures,
-                                        # sampling_tensors.dynatemp_mins,
-                                        # sampling_tensors.dynatemp_maxs,
-                                        # sampling_tensors.dynatemp_exps
-                                        )
-
-        banned_tokens = _get_custom_token_bans(sampling_metadata)
-        # assert len(banned_tokens) == logits.shape[0]
-        logits = _apply_token_bans(logits, banned_tokens)
+        if do_min_p:
+            logits = _apply_min_p(logits, sampling_tensors.min_ps)
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
@@ -117,12 +98,14 @@ class Sampler(nn.Module):
             include_gpu_probs_tensor=self.include_gpu_probs_tensor,
             modify_greedy_probs=self._should_modify_greedy_probs_inplace,
         )
+
         if self.include_gpu_probs_tensor:
             assert maybe_sampled_tokens_tensor is not None
             sampled_tokens_tensor = maybe_sampled_tokens_tensor
             on_device_tensors = (probs, sampled_tokens_tensor)
         else:
             on_device_tensors = None
+
         # Get the logprobs query results.
         prompt_logprobs, sample_logprobs = _get_logprobs(
             logprobs, sampling_metadata, sample_results)
@@ -137,8 +120,10 @@ class Sampler(nn.Module):
         """Whether or not the sampler should modify the probability distribution
         of greedily-sampled tokens such that multinomial sampling would sample
         the greedily-sampled token.
+
         In other words, if True then we set the probability of the greedily-
         sampled token to 1.
+
         This is used by speculative decoding, which requires that the sampling
         method be encoded into the probability distribution.
         """
@@ -255,6 +240,55 @@ def _apply_min_tokens_penalty(
 
     # verifies that no rows in logits were missed unexpectedly
     assert logits_applied == logits.shape[0]
+    return logits
+
+
+def _apply_top_k_top_p(
+    logits: torch.Tensor,
+    p: torch.Tensor,
+    k: torch.Tensor,
+) -> torch.Tensor:
+    logits_sort, logits_idx = logits.sort(dim=-1, descending=False)
+
+    # Apply top-k.
+    top_k_mask = logits_sort.size(1) - k.to(torch.long)
+    # Get all the top_k values.
+    top_k_mask = logits_sort.gather(1, top_k_mask.unsqueeze(dim=1))
+    top_k_mask = logits_sort < top_k_mask
+    logits_sort.masked_fill_(top_k_mask, -float("inf"))
+
+    # Apply top-p.
+    probs_sort = logits_sort.softmax(dim=-1)
+    probs_sum = probs_sort.cumsum(dim=-1)
+    top_p_mask = probs_sum <= 1 - p.unsqueeze(dim=1)
+    # at least one
+    top_p_mask[:, -1] = False
+    logits_sort.masked_fill_(top_p_mask, -float("inf"))
+
+    # Re-sort the probabilities.
+    src = torch.arange(logits_idx.shape[-1],
+                       device=logits_idx.device).expand_as(logits_idx)
+    logits_idx_inv = torch.empty_like(logits_idx).scatter_(dim=-1,
+                                                           index=logits_idx,
+                                                           src=src)
+    logits = torch.gather(logits_sort, dim=-1, index=logits_idx_inv)
+    return logits
+
+
+def _apply_min_p(
+    logits: torch.Tensor,
+    min_p: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Adapted from
+    https://github.com/oobabooga/text-generation-webui/blob/3146124ec01f02c8fb1650a6517cf1b60b537aaf/modules/sampler_hijack.py#L16C17-L16C17
+    """
+    probs = torch.softmax(logits, dim=-1)
+    top_probs, _ = probs.max(dim=-1, keepdim=True)
+    scaled_min_p = min_p.unsqueeze_(dim=1) * top_probs
+    tokens_to_remove = probs < scaled_min_p
+    logits = logits.masked_fill_(tokens_to_remove, -float("inf"))
+
     return logits
 
 
