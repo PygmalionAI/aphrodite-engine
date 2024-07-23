@@ -447,7 +447,7 @@ def fused_moe(
                             False,
                             topk_ids.shape[1],
                             config,
-                            compute_type=compute_dtype,
+                            compute_type=compute_type,
                             use_fp8=use_fp8)
 
     ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
@@ -465,7 +465,7 @@ def fused_moe(
                             True,
                             1,
                             config,
-                            compute_type=compute_dtype,
+                            compute_type=compute_type,
                             use_fp8=use_fp8)
 
     if inplace:
