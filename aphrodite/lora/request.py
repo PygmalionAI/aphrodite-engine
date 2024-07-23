@@ -12,7 +12,7 @@ class LoRARequest:
     accessing unauthorized LoRA adapters.
 
     lora_int_id must be globally unique for a given adapter.
-    This is currently not enforced in Aphrodite.
+    This is currently not enforced in vLLM.
     """
 
     lora_name: str
