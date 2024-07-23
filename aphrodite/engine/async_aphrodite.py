@@ -8,7 +8,7 @@ from typing import (Any, AsyncIterator, Callable, Dict, Iterable, List,
 from loguru import logger
 from transformers import PreTrainedTokenizer
 
-from aphrodite.common.config import ModelConfig
+from aphrodite.common.config import DecodingConfig, ModelConfig
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import MultiModalData
@@ -697,6 +697,14 @@ class AsyncAphrodite:
             return await self.engine.get_model_config.remote()  # type: ignore
         else:
             return self.engine.get_model_config()
+
+    async def get_decoding_config(self) -> DecodingConfig:
+        """Get the decoding configuration of the Aphrodite engine."""
+        if self.engine_use_ray:
+            return await self.engine.get_decoding_config.remote(  # type: ignore
+            )
+        else:
+            return self.engine.get_decoding_config()
 
     async def do_log_stats(self) -> None:
         if self.engine_use_ray:
