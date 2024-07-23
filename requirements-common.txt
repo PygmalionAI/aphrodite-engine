@@ -13,6 +13,7 @@ fastapi
 colorlog
 einops # for phi
 prometheus_client # for prometheus metrics
+prometheus-fastapi-instrumentator >= 7.0.0
 triton >= 2.2.0
 lark == 1.1.8 # for grammars
 scipy # for quip
