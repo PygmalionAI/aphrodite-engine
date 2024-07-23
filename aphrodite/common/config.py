@@ -11,8 +11,11 @@ from transformers import PretrainedConfig
 
 from aphrodite.common.utils import (get_cpu_memory, get_nvcc_cuda_version,
                                     is_cpu, is_hip, is_neuron)
-from aphrodite.quantization import QUANTIZATION_METHODS
+from aphrodite.quantization import (QUANTIZATION_METHODS,
+                                    get_quantization_config)
 from aphrodite.transformers_utils.config import get_config, get_hf_text_config
+
+GPTQMarlinConfig = get_quantization_config("gptq_marlin")
 
 if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
@@ -154,13 +157,34 @@ class ModelConfig:
             is_format_marlin = (quant_cfg.get("checkpoint_format") == "marlin"
                                 or quant_cfg.get("is_marlin_format", False))
 
-            # Use marlin if the GPTQ model is serialized in marlin format.
-            if quant_method == "gptq" and is_format_marlin:
-                logger.info("The model is serialized in Marlin format. "
+            # Check which LinearMethod the GPTQ model should use.
+            if quant_method == "gptq":
+                # If serialized in Marlin format, use MarlinLinearMethod.
+                # TODO: migrate under GPTQMarlinLinearMethod.
+                if is_format_marlin:
+                    logger.info("The model is serialized in Marlin format. "
+                                "Using Marlin kernel.")
+                    quant_method = "marlin"
+                    if self.quantization == "gptq":
+                        self.quantization = quant_method
+
+                # If convertible to Marlin format, use GPTQMarlinLinearMethod
+                # unless the user explicitly specified GPTQLinearMethod.
+                elif GPTQMarlinConfig.is_marlin_compatible(quant_cfg):
+                    if self.quantization == "gptq":
+                        logger.warning(
+                            "The model is convertible to Marlin format, but "
+                            "you specified quantization=gptq. Use "
+                            "quantization=marlin for faster inference.")
+                    else:
+                        logger.info(
+                            "The model is convertible to Marlin format. "
                             "Using Marlin kernel.")
-                quant_method = "marlin"
-                if self.quantization == "gptq":
-                    self.quantization = quant_method
+                        quant_method = "gptq_marlin"
+                        if self.quantization == "marlin":
+                            self.quantization = quant_method
+
+            # Verify quantization configurations.
 
             if self.quantization is None:
                 self.quantization = quant_method
@@ -239,7 +263,7 @@ class ModelConfig:
                 raise ValueError(
                     f"{self.quantization} quantization is currently not "
                     "supported in ROCm.")
-            if self.quantization != "marlin":
+            if (self.quantization not in ["marlin", "gptq_marlin"]):
                 logger.warning(
                     f"{self.quantization} quantization is not fully "
                     "optimized yet. The speed can be slower than "

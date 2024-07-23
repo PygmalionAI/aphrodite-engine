@@ -11,6 +11,7 @@ from aphrodite.quantization.exl2 import Exl2Config
 from aphrodite.quantization.fp8 import Fp8Config
 from aphrodite.quantization.gguf import GGUFConfig
 from aphrodite.quantization.gptq import GPTQConfig
+from aphrodite.quantization.gptq_marlin import GPTQMarlinConfig
 from aphrodite.quantization.marlin import MarlinConfig
 from aphrodite.quantization.quip import QuipConfig
 from aphrodite.quantization.squeezellm import SqueezeLLMConfig
@@ -32,6 +33,7 @@ QUANTIZATION_METHODS = {
     "fp8": Fp8Config,
     "gguf": GGUFConfig,
     "gptq": GPTQConfig,
+    "gptq_marlin": GPTQMarlinConfig,
     "quip": QuipConfig,
     "squeezellm": SqueezeLLMConfig,
     "marlin": MarlinConfig,
