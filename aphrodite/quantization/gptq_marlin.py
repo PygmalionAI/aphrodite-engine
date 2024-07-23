@@ -25,6 +25,7 @@ GPTQ_MARLIN_SUPPORTED_NUM_BITS = [4]
 GPTQ_MARLIN_SUPPORTED_GROUP_SIZES = [-1, 32, 64, 128]
 GPTQ_MARLIN_SUPPORTED_SYM = [True]
 
+
 # Precompute permutations for Marlin weight and scale shuffling
 #
 # Marlin works on [16,64] tiles. The goal of the permutations
