@@ -30,6 +30,21 @@ Install the engine:
 pip install -U aphrodite-engine --extra-index-url https://downloads.pygmalion.chat/whl
 ```
 
+***
+> [!IMPORTANT]  
+> If you need the latest features, such as **Llama 3.1** support, you will need to build the release candidate branch.
+
+Install directly:
+```sh
+pip install -U aphrodite-engine@git+https://github.com/PygmalionAI/aphrodite-engine.git@rc_054
+```
+
+Or clone and build (recommended):
+```sh
+git clone -b rc_054 https://github.com/PygmalionAI/aphrodite-engine.git && cd aphrodite-engine
+pip install -e .
+```
+***
 Then launch a model:
 
 ```sh
