@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from contextlib import nullcontext
 from typing import (Any, Dict, Generator, List, Optional, Tuple, Type)
 
+import huggingface_hub
 import torch
 from torch import nn
 
@@ -134,7 +135,9 @@ class DefaultModelLoader(BaseModelLoader):
                 model_path = snapshot_download(
                     model_id=model,
                     cache_dir=self.load_config.download_dir,
-                    revision=revision)
+                    local_files_only=huggingface_hub.constants.HF_HUB_OFFLINE,
+                    revision=revision,
+                )
             else:
                 model_path = model
             return model_path
