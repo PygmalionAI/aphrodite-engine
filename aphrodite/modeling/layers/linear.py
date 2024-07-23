@@ -236,6 +236,9 @@ class ColumnParallelLinear(LinearBase):
             self.register_parameter("bias", None)
 
     def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
+        # Special case for Fp8 scales.
+        fp8_scales_shard_indexer = getattr(param, "fp8_scales_shard_indexer",
+                                           None)
         tp_rank = get_tensor_model_parallel_rank()
         output_dim = getattr(param, "output_dim", None)
         param_data = param.data
@@ -244,6 +247,11 @@ class ColumnParallelLinear(LinearBase):
             start_idx = tp_rank * shard_size
             loaded_weight = loaded_weight.narrow(output_dim, start_idx,
                                                  shard_size)
+        # Special case for Fp8 scales.
+        elif fp8_scales_shard_indexer is not None:
+            param_data, loaded_weight = fp8_scales_shard_indexer(param_data,
+                                                                 loaded_weight,
+                                                                 shard_id=0)
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
 
@@ -306,7 +314,11 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
 
         param_data = param.data
         output_dim = getattr(param, "output_dim", None)
+        # Special case for AQLM codebooks.
         is_metadata = getattr(param, "is_metadata", False)
+        # Special case for Fp8 scales.
+        fp8_scales_shard_indexer = getattr(param, "fp8_scales_shard_indexer",
+                                           None)
         if loaded_shard_id is None:
             # Loaded weight is already packed.
             if output_dim is None:
@@ -364,6 +376,10 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
             shard_size = loaded_weight.shape[0]
             shard_offset = loaded_shard_id * shard_size
             param_data = param_data.narrow(0, shard_offset, shard_size)
+        # Special case for Fp8 scales.
+        elif fp8_scales_shard_indexer is not None:
+            param_data, loaded_weight = fp8_scales_shard_indexer(
+                param_data, loaded_weight, loaded_shard_id)
         else:
             ignore_warning = getattr(param, "ignore_warning", False)
             if not ignore_warning:
@@ -445,6 +461,9 @@ class QKVParallelLinear(ColumnParallelLinear):
         param_data = param.data
         output_dim = getattr(param, "output_dim", None)
         is_metadata = getattr(param, "is_metadata", False)
+        # Special case for Fp8 scales.
+        fp8_scales_shard_indexer = getattr(param, "fp8_scales_shard_indexer",
+                                           None)
 
         if loaded_shard_id is None:
             # Loaded weight is already packed.
@@ -518,6 +537,10 @@ class QKVParallelLinear(ColumnParallelLinear):
             shard_index = ["q", "k", "v"].index(loaded_shard_id)
             param_data = param_data.narrow(0, shard_index * shard_size,
                                            shard_size)
+        # Special case for Fp8 scales.
+        elif fp8_scales_shard_indexer is not None:
+            param_data, loaded_weight = fp8_scales_shard_indexer(
+                param_data, loaded_weight, loaded_shard_id)
         else:
             ignore_warning = getattr(param, "ignore_warning", False)
             if not ignore_warning:
@@ -598,6 +621,9 @@ class RowParallelLinear(LinearBase):
             self.register_parameter("bias", None)
 
     def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
+        # Special case for Fp8 scales.
+        fp8_scales_shard_indexer = getattr(param, "fp8_scales_shard_indexer",
+                                           None)
         tp_rank = get_tensor_model_parallel_rank()
         input_dim = getattr(param, "input_dim", None)
         param_data = param.data
@@ -606,6 +632,11 @@ class RowParallelLinear(LinearBase):
             start_idx = tp_rank * shard_size
             loaded_weight = loaded_weight.narrow(input_dim, start_idx,
                                                  shard_size)
+        # Special case for Fp8 scales.
+        elif fp8_scales_shard_indexer is not None:
+            param_data, loaded_weight = fp8_scales_shard_indexer(param_data,
+                                                                 loaded_weight,
+                                                                 shard_id=0)
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
 
