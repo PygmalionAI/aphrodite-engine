@@ -3,6 +3,7 @@ import importlib
 import inspect
 import json
 import os
+import re
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 from typing import AsyncGenerator, List, Optional, Tuple
@@ -16,6 +17,7 @@ from fastapi.responses import (HTMLResponse, JSONResponse, Response,
                                StreamingResponse)
 from loguru import logger
 from prometheus_client import make_asgi_app
+from starlette.routing import Mount
 
 import aphrodite
 import aphrodite.endpoints.openai.embeddings as OAIembeddings
@@ -422,8 +424,9 @@ def build_app(args):
     app = fastapi.FastAPI(lifespan=lifespan)
     app.include_router(router)
     # Add prometheus asgi middleware to route /metrics requests
-    metrics_app = make_asgi_app()
-    app.mount("/metrics", metrics_app)
+    route = Mount("/metrics", make_asgi_app())
+    route.path_regex = re.compile('^/metrics(?P<path>.*)$')
+    app.routes.append(route)
     app.root_path = args.root_path
     if args.launch_kobold_api:
         logger.warning("Launching Kobold API server in addition to OpenAI. "

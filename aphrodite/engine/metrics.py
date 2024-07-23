@@ -116,7 +116,7 @@ class Metrics:
             buckets=[1, 2, 5, 10, 20],
         )
         self.counter_request_success = Counter(
-            name="aphrodite:request_success",
+            name="aphrodite:request_success_total",
             documentation="Count of successfully processed requests.",
             labelnames=labelnames + [Metrics.labelname_finish_reason])
 
