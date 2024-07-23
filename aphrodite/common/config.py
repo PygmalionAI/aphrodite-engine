@@ -119,6 +119,13 @@ class ModelConfig:
         self.dtype = _get_and_verify_dtype(self.hf_text_config, dtype)
         self.max_model_len = _get_and_verify_max_len(self.hf_text_config,
                                                      max_model_len)
+
+        if (getattr(self.hf_config, "max_position_embeddings", 0) == 131072
+                and getattr(self.hf_config, "rope_scaling", None) is None):
+            self.hf_config.update({"rope_scaling": {
+                "type": "extended",
+            }})
+
         if not self.skip_tokenizer_init:
             self._verify_tokenizer_mode()
         self._verify_quantization()
@@ -1128,8 +1135,9 @@ def _get_and_verify_max_len(
         derived_max_model_len = default_max_len
 
     rope_scaling = getattr(hf_config, "rope_scaling", None)
-    if rope_scaling is not None and rope_scaling["type"] != "longrope" and \
-            rope_scaling["type"] != "su":
+    if rope_scaling is not None and rope_scaling["type"] not in {
+            "su", "longrope", "extended"
+    }:
         assert "factor" in rope_scaling
         scaling_factor = rope_scaling["factor"]
         if rope_scaling["type"] == "yarn":
