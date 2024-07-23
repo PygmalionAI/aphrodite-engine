@@ -205,6 +205,8 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     "kernels/quantization/bitsandbytes/gemm_s4_f16.cu"
     "kernels/quantization/gguf/gguf_kernel.cu"
     "kernels/quantization/marlin/marlin_cuda_kernel.cu"
+    "kernels/quantization/gptq_marlin/gptq_marlin.cu"
+    "kernels/quantization/gptq_marlin/gptq_marlin_repack.cu"
     "kernels/quantization/quip/origin_order.cu")
 endif()
 
