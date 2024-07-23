@@ -403,7 +403,7 @@ def _apply_temperature(
     dynatemp_exps: torch.Tensor,
 ) -> torch.Tensor:
     dynatemp_mask = torch.logical_or(dynatemp_mins > 0, dynatemp_maxs > 0)
-    
+
     # Check if dynatemp_mask is not empty
     if dynatemp_mask.any():
         dynatemp_mins = dynatemp_mins[dynatemp_mask]
@@ -428,7 +428,7 @@ def _apply_temperature(
 
     while temperatures.dim() < logits.dim():
         temperatures = temperatures.unsqueeze(-1)
-    
+
     logits = logits.div(temperatures)
     return logits
 
