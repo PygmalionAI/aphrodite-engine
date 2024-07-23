@@ -26,7 +26,8 @@ from aphrodite.engine.output_processor.util import \
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.executor.ray_utils import initialize_ray_cluster
 from aphrodite.lora.request import LoRARequest
-from aphrodite.processing.scheduler import Scheduler, SchedulerOutputs
+from aphrodite.processing.scheduler import (ScheduledSequenceGroup, Scheduler,
+                                            SchedulerOutputs)
 from aphrodite.transformers_utils.detokenizer import Detokenizer
 from aphrodite.transformers_utils.tokenizer_group import (BaseTokenizerGroup,
                                                           get_tokenizer_group)
@@ -426,7 +427,7 @@ class AphroditeEngine:
     def _process_model_outputs(
         self,
         output: List[SamplerOutput],
-        scheduled_seq_groups: List[SequenceGroup],
+        scheduled_seq_groups: List[ScheduledSequenceGroup],
         ignored_seq_groups: List[SequenceGroup],
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> List[RequestOutput]:
