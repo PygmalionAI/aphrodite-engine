@@ -5,6 +5,7 @@ from typing import Dict, List, Literal, Optional, Union
 
 from pydantic import (AliasChoices, BaseModel, Field, conint, model_validator,
                       root_validator)
+import torch
 
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.utils import random_uuid
@@ -73,7 +74,9 @@ class ChatCompletionRequest(BaseModel):
     n: Optional[int] = 1
     max_tokens: Optional[int] = None
     min_tokens: Optional[int] = 0
-    seed: Optional[int] = None
+    seed: Optional[int] = Field(None,
+                                ge=torch.iinfo(torch.long).min,
+                                le=torch.iinfo(torch.long).max)
     stop: Optional[Union[str, List[str]]] = Field(default_factory=list)
     include_stop_str_in_output: Optional[bool] = False
     stream: Optional[bool] = False
@@ -210,7 +213,9 @@ class CompletionRequest(BaseModel):
     logprobs: Optional[int] = None
     echo: Optional[bool] = False
     stop: Optional[Union[str, List[str]]] = Field(default_factory=list)
-    seed: Optional[int] = None
+    seed: Optional[int] = Field(None,
+                                ge=torch.iinfo(torch.long).min,
+                                le=torch.iinfo(torch.long).max)
     include_stop_str_in_output: Optional[bool] = False
     presence_penalty: Optional[float] = 0.0
     frequency_penalty: Optional[float] = 0.0

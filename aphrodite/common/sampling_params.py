@@ -195,7 +195,10 @@ class SamplingParams:
         self.dynatemp_exponent = dynatemp_exponent
         self.smoothing_factor = smoothing_factor
         self.smoothing_curve = smoothing_curve
-        self.seed = seed
+        if seed == -1:
+            self.seed = None
+        else:
+            self.seed = seed
         self.use_beam_search = use_beam_search
         self.length_penalty = length_penalty
         self.early_stopping = early_stopping
