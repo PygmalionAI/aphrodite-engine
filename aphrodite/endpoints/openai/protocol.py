@@ -117,6 +117,11 @@ class ChatCompletionRequest(BaseModel):
             "If specified, will override the default guided decoding backend "
             "of the server for this specific request. If set, must be either "
             "'outlines' / 'lm-format-enforcer'"))
+    guided_whitespace_pattern: Optional[str] = Field(
+        default=None,
+        description=(
+            "If specified, will override the default whitespace pattern "
+            "for guided json decoding."))
 
     def to_sampling_params(self, vocab_size: int) -> SamplingParams:
         if self.logprobs and not self.top_logprobs:
@@ -252,6 +257,11 @@ class CompletionRequest(BaseModel):
             "If specified, will override the default guided decoding backend "
             "of the server for this specific request. If set, must be one of "
             "'outlines' / 'lm-format-enforcer'"))
+    guided_whitespace_pattern: Optional[str] = Field(
+        default=None,
+        description=(
+            "If specified, will override the default whitespace pattern "
+            "for guided json decoding."))
 
     def to_sampling_params(self, vocab_size: int) -> SamplingParams:
         echo_without_generation = self.echo and self.max_tokens == 0
