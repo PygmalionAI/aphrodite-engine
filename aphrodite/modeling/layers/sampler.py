@@ -60,8 +60,9 @@ class Sampler(nn.Module):
         logits = _apply_min_tokens_penalty(logits, sampling_metadata)
 
         # Prepare sampling tensors with pinned memory to avoid blocking.
-        (sampling_tensors, do_penalties, do_top_p_top_k,
-         do_min_p) = SamplingTensors.from_sampling_metadata(
+        (sampling_tensors, do_penalties, do_top_p_top_k, do_top_as, do_min_p,
+         do_tfss, do_eta_cutoffs, do_epsilon_cutoffs, do_typical_ps,
+         do_quadratic) = SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype)
 
         # Apply presence and frequency penalties.
@@ -80,8 +81,33 @@ class Sampler(nn.Module):
             logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
                                         sampling_tensors.top_ks)
 
+        if do_top_as:
+            logits = _apply_top_a(logits, sampling_tensors.top_as)
+
         if do_min_p:
             logits = _apply_min_p(logits, sampling_tensors.min_ps)
+
+        if do_tfss:
+            logits = _apply_tfs(logits, sampling_tensors.tfss)
+
+        if do_eta_cutoffs:
+            logits = _apply_eta_cutoff(logits, sampling_tensors.eta_cutoffs)
+
+        if do_epsilon_cutoffs:
+            logits = _apply_epsilon_cutoff(logits,
+                                           sampling_tensors.epsilon_cutoffs)
+
+        if do_typical_ps:
+            logits = _apply_typical_sampling(logits,
+                                             sampling_tensors.typical_ps)
+
+        if do_quadratic:
+            logits = _apply_quadratic_sampling(
+                logits, sampling_tensors.smoothing_factors,
+                sampling_tensors.smoothing_curves)
+
+        banned_tokens = _get_custom_token_bans(sampling_metadata)
+        logits = _apply_token_bans(logits, banned_tokens)
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
@@ -292,46 +318,16 @@ def _apply_min_p(
     return logits
 
 
-def _apply_alphabet_soup(
+def _apply_top_a(
     logits: torch.Tensor,
-    p: torch.Tensor,
-    k: torch.Tensor,
-    a: torch.Tensor,
-    m: torch.Tensor,
+    top_a: torch.Tensor,
 ) -> torch.Tensor:
-    logits_sort, logits_idx = logits.sort(dim=-1, descending=True)
+    probs = torch.softmax(logits, dim=-1)
+    top_probs, _ = probs.max(dim=-1, keepdim=True)
+    threshold = torch.pow(top_probs, 2) * top_a.unsqueeze_(dim=1)
+    tokens_to_remove = probs < threshold
+    logits = logits.masked_fill_(tokens_to_remove, -float("inf"))
 
-    # Apply top-p, min-p and top-a.
-    probs_sort = logits_sort.softmax(dim=-1)
-    probs_sum = probs_sort.cumsum(dim=-1).sub_(probs_sort)
-    min_p_thresholds = probs_sort[:, 0] * m
-    top_a_thresholds = torch.pow(probs_sort[:, 0], 2) * a
-    threshold = torch.maximum(min_p_thresholds, top_a_thresholds)
-    mask = (probs_sort < threshold.unsqueeze(1)
-            )  # Cull logits below the top-a threshold
-    mask.logical_or_(
-        probs_sum >
-        p.unsqueeze(dim=1))  # Cull logits above the top-p summation threshold
-    mask[:, 0] = False  # Guarantee at least one token is pickable
-    logits_sort[mask] = -float("inf")
-
-    # Apply top-k.
-    # Create a mask for the top-k elements.
-    top_k_mask = torch.arange(logits_idx.shape[-1], device=logits_idx.device)
-    top_k_mask = top_k_mask.expand(logits_idx.shape[0], -1)
-    top_k_mask = top_k_mask >= k.unsqueeze_(dim=1)
-
-    # Final mask.
-    mask = (mask | top_k_mask)
-    logits_sort.masked_fill_(mask, -float("inf"))
-
-    # Re-sort the probabilities.
-    src = torch.arange(logits_idx.shape[-1],
-                       device=logits_idx.device).expand_as(logits_idx)
-    logits_idx_inv = torch.empty_like(logits_idx).scatter_(dim=-1,
-                                                           index=logits_idx,
-                                                           src=src)
-    logits = torch.gather(logits_sort, dim=-1, index=logits_idx_inv)
     return logits
 
 
@@ -424,37 +420,6 @@ def _apply_typical_sampling(
 
     typ_mask = typ_mask_sorted.scatter(1, indices, typ_mask_sorted)
     logits[typ_mask] = -float("inf")
-    return logits
-
-
-# pulls double duty for temperature and dynatemp
-def _apply_temperature(
-    logits: torch.Tensor,
-    temperatures: torch.Tensor,
-    # dynatemp_mins: torch.Tensor,
-    # dynatemp_maxs: torch.Tensor,
-    # dynatemp_exps: torch.Tensor,
-) -> torch.Tensor:
-    # dynatemp_mask = torch.logical_or(dynatemp_mins > 0, dynatemp_maxs > 0)
-    # dynatemp_mins = dynatemp_mins[dynatemp_mask]
-    # dynatemp_maxs = dynatemp_maxs[dynatemp_mask]
-    # dynatemp_exps = dynatemp_exps[dynatemp_mask]
-    # dynatemp_mins = dynatemp_mins.clamp_(min=0)
-
-    # dynatemp_logits = logits[dynatemp_mask]
-    # dynatemp_shifted_logits = torch.log_softmax(dynatemp_logits, dim=-1)
-    # dynatemp_probs = dynatemp_shifted_logits.exp()
-    # dynatemp_entropies = -(dynatemp_probs *
-    #                        dynatemp_shifted_logits).nansum(dim=-1)
-    # dynatemp_max_entropies = torch.log_(
-    #     (dynatemp_logits > float("-inf")).sum(dim=-1).float())
-    # normalized_entropies = dynatemp_entropies.div_(dynatemp_max_entropies)
-    # dyn_temp = (dynatemp_mins + (dynatemp_maxs - dynatemp_mins) *
-    #             normalized_entropies.pow_(dynatemp_exps))
-
-    # temperatures[dynatemp_mask] = dyn_temp
-    # temperatures[temperatures == 0.0] = 1.0
-    logits.div_(temperatures.unsqueeze_(dim=1))
     return logits
 
 

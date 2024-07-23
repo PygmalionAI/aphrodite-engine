@@ -284,10 +284,17 @@ class SamplingTensors:
     temperatures: torch.Tensor
     top_ps: torch.Tensor
     top_ks: torch.Tensor
+    top_as: torch.Tensor
     min_ps: torch.Tensor
     presence_penalties: torch.Tensor
     frequency_penalties: torch.Tensor
     repetition_penalties: torch.Tensor
+    tfss: torch.Tensor
+    eta_cutoffs: torch.Tensor
+    epsilon_cutoffs: torch.Tensor
+    typical_ps: torch.Tensor
+    smoothing_factors: torch.Tensor
+    smoothing_curves: torch.Tensor
     sampling_seeds: torch.Tensor
     sample_indices: torch.Tensor
     extra_seeds: Optional[torch.Tensor]
@@ -304,7 +311,8 @@ class SamplingTensors:
         *,
         extra_seeds_to_generate: int = 0,
         extra_entropy: Optional[Tuple[int, ...]] = None
-    ) -> Tuple["SamplingTensors", bool, bool, bool]:
+    ) -> Tuple["SamplingTensors", bool, bool, bool, bool, bool, bool, bool,
+               bool, bool]:
         """
         extra_seeds_to_generate: extra seeds to generate using the
             user-defined seed for each sequence.
@@ -315,16 +323,29 @@ class SamplingTensors:
         top_ks: List[int] = []
         temperatures: List[float] = []
         top_ps: List[float] = []
+        top_as: List[float] = []
         min_ps: List[float] = []
         presence_penalties: List[float] = []
         frequency_penalties: List[float] = []
         repetition_penalties: List[float] = []
+        tfss: List[float] = []
+        eta_cutoffs: List[float] = []
+        epsilon_cutoffs: List[float] = []
+        typical_ps: List[float] = []
+        smoothing_factors: List[float] = []
+        smoothing_curves: List[float] = []
         sampling_seeds: List[int] = []
         sample_indices: List[int] = []
         prompt_best_of: List[int] = []
         do_penalties = False
         do_top_p_top_k = False
+        do_top_as = False
         do_min_p = False
+        do_tfss = False
+        do_eta_cutoffs = False
+        do_epsilon_cutoffs = False
+        do_typical_ps = False
+        do_quadratic = False
 
         # We need one base seed per Triton slice.
         seeds_to_generate = (extra_seeds_to_generate +
@@ -339,7 +360,14 @@ class SamplingTensors:
             f = sampling_params.frequency_penalty
             r = sampling_params.repetition_penalty
             top_p = sampling_params.top_p
+            top_a = sampling_params.top_a
             min_p = sampling_params.min_p
+            tfs = sampling_params.tfs
+            eta_cutoff = sampling_params.eta_cutoff
+            epsilon_cutoff = sampling_params.epsilon_cutoff
+            typical_p = sampling_params.typical_p
+            smoothing_factor = sampling_params.smoothing_factor
+            smoothing_curve = sampling_params.smoothing_curve
             seed = sampling_params.seed
 
             is_greedy = sampling_params.sampling_type == SamplingType.GREEDY
@@ -355,12 +383,25 @@ class SamplingTensors:
             if not do_top_p_top_k and (top_p < 1.0 - _SAMPLING_EPS
                                        or top_k != vocab_size):
                 do_top_p_top_k = True
+            if do_top_as is False and top_a > 0.0:
+                do_top_as = True
             if not do_min_p and min_p > _SAMPLING_EPS:
                 do_min_p = True
             if not do_penalties and (abs(p) >= _SAMPLING_EPS
                                      or abs(f) >= _SAMPLING_EPS
                                      or abs(r - 1.0) >= _SAMPLING_EPS):
                 do_penalties = True
+            if do_tfss is False and tfs < 1.0 - _SAMPLING_EPS:
+                do_tfss = True
+            if do_eta_cutoffs is False and eta_cutoff > _SAMPLING_EPS:
+                do_eta_cutoffs = True
+            if do_epsilon_cutoffs is False and epsilon_cutoff > _SAMPLING_EPS:
+                do_epsilon_cutoffs = True
+            if do_typical_ps is False and typical_p < 1.0 - _SAMPLING_EPS:
+                do_typical_ps = True
+            if do_quadratic is False and (smoothing_factor > _SAMPLING_EPS
+                                          or smoothing_curve > 1.0):
+                do_quadratic = True
 
             is_prompt = seq_group.is_prompt
             if (seq_group.is_prompt
@@ -373,10 +414,17 @@ class SamplingTensors:
                 temperatures += [temperature] * prefill_len
                 top_ps += [top_p] * prefill_len
                 top_ks += [top_k] * prefill_len
+                top_as += [top_a] * prefill_len
                 min_ps += [min_p] * prefill_len
                 presence_penalties += [0] * prefill_len
                 frequency_penalties += [0] * prefill_len
                 repetition_penalties += [1] * prefill_len
+                tfss += [1] * prefill_len
+                eta_cutoffs += [0] * prefill_len
+                epsilon_cutoffs += [0] * prefill_len
+                typical_ps += [1] * prefill_len
+                smoothing_factors += [smoothing_factor] * prefill_len
+                smoothing_curves += [smoothing_curve] * prefill_len
                 prompt_tokens.extend([] for _ in range(prefill_len))
                 output_tokens.extend([] for _ in range(prefill_len))
 
@@ -390,10 +438,17 @@ class SamplingTensors:
                 temperatures += [temperature] * len(seq_ids)
                 top_ps += [top_p] * len(seq_ids)
                 top_ks += [top_k] * len(seq_ids)
+                top_as += [top_a] * len(seq_ids)
                 min_ps += [min_p] * len(seq_ids)
                 presence_penalties += [p] * len(seq_ids)
                 frequency_penalties += [f] * len(seq_ids)
                 repetition_penalties += [r] * len(seq_ids)
+                tfss += [tfs] * len(seq_ids)
+                eta_cutoffs += [eta_cutoff] * len(seq_ids)
+                epsilon_cutoffs += [epsilon_cutoff] * len(seq_ids)
+                typical_ps += [typical_p] * len(seq_ids)
+                smoothing_factors += [smoothing_factor] * len(seq_ids)
+                smoothing_curves += [smoothing_curve] * len(seq_ids)
 
             if is_prompt:
                 prompt_best_of.append(sampling_params.best_of)
@@ -414,20 +469,25 @@ class SamplingTensors:
             sample_indices.extend(seq_group.sample_indices)
 
         sampling_tensors = SamplingTensors.from_lists(
-            temperatures, top_ps, top_ks, min_ps, presence_penalties,
-            frequency_penalties, repetition_penalties, sampling_seeds,
-            sample_indices, prompt_tokens, output_tokens, vocab_size,
-            extra_seeds_to_generate, device, dtype)
-        return (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p)
+            temperatures, top_ps, top_ks, top_as, min_ps, presence_penalties,
+            frequency_penalties, repetition_penalties, tfss, eta_cutoffs,
+            epsilon_cutoffs, typical_ps, smoothing_factors, smoothing_curves,
+            sampling_seeds, sample_indices, prompt_tokens, output_tokens,
+            vocab_size, extra_seeds_to_generate, device, dtype)
+        return (sampling_tensors, do_penalties, do_top_p_top_k, do_top_as,
+                do_min_p, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
+                do_typical_ps, do_quadratic)
 
     @classmethod
     def from_lists(cls, temperatures: List[float], top_ps: List[float],
-                   top_ks: List[int], min_ps: List[float],
+                   top_ks: List[int], top_as: List[float], min_ps: List[float],
                    presence_penalties: List[float],
                    frequency_penalties: List[float],
-                   repetition_penalties: List[float],
-                   sampling_seeds: List[int], sample_indices: List[int],
-                   prompt_tokens: List[List[int]],
+                   repetition_penalties: List[float], tfss: List[float],
+                   eta_cutoffs: List[float], epsilon_cutoffs: List[float],
+                   typical_ps: List[float], smoothing_factors: List[float],
+                   smoothing_curves: List[float], sampling_seeds: List[int],
+                   sample_indices: List[int], prompt_tokens: List[List[int]],
                    output_tokens: List[List[int]], vocab_size: int,
                    extra_seeds_to_generate: int, device: torch.device,
                    dtype: torch.dtype) -> "SamplingTensors":
@@ -459,6 +519,10 @@ class SamplingTensors:
             dtype=dtype,
             pin_memory=pin_memory,
         )
+        top_as_t = torch.tensor(top_as,
+                                device="cpu",
+                                dtype=dtype,
+                                pin_memory=pin_memory)
         min_ps_t = torch.tensor(
             min_ps,
             device="cpu",
@@ -489,6 +553,30 @@ class SamplingTensors:
             dtype=torch.int,
             pin_memory=pin_memory,
         )
+        tfss_t = torch.tensor(tfss,
+                              device="cpu",
+                              dtype=dtype,
+                              pin_memory=pin_memory)
+        eta_cutoffs_t = torch.tensor(eta_cutoffs,
+                                     device="cpu",
+                                     dtype=dtype,
+                                     pin_memory=pin_memory)
+        epsilon_cutoffs_t = torch.tensor(epsilon_cutoffs,
+                                         device="cpu",
+                                         dtype=dtype,
+                                         pin_memory=pin_memory)
+        typical_ps_t = torch.tensor(typical_ps,
+                                    device="cpu",
+                                    dtype=dtype,
+                                    pin_memory=pin_memory)
+        smoothing_factors_t = torch.tensor(smoothing_factors,
+                                           device="cpu",
+                                           dtype=dtype,
+                                           pin_memory=pin_memory)
+        smoothing_curves_t = torch.tensor(smoothing_curves,
+                                          device="cpu",
+                                          dtype=dtype,
+                                          pin_memory=pin_memory)
         sample_indices_t = torch.tensor(
             sample_indices,
             device="cpu",
@@ -533,6 +621,7 @@ class SamplingTensors:
             temperatures=temperatures_t.to(device=device, non_blocking=True),
             top_ps=top_ps_t.to(device=device, non_blocking=True),
             top_ks=top_ks_t.to(device=device, non_blocking=True),
+            top_as=top_as_t.to(device=device, non_blocking=True),
             min_ps=min_ps_t.to(device=device, non_blocking=True),
             presence_penalties=presence_penalties_t.to(device=device,
                                                        non_blocking=True),
@@ -540,6 +629,15 @@ class SamplingTensors:
                                                          non_blocking=True),
             repetition_penalties=repetition_penalties_t.to(device=device,
                                                            non_blocking=True),
+            tfss=tfss_t.to(device=device, non_blocking=True),
+            eta_cutoffs=eta_cutoffs_t.to(device=device, non_blocking=True),
+            epsilon_cutoffs=epsilon_cutoffs_t.to(device=device,
+                                                 non_blocking=True),
+            smoothing_factors=smoothing_factors_t.to(device=device,
+                                                     non_blocking=True),
+            smoothing_curves=smoothing_curves_t.to(device=device,
+                                                   non_blocking=True),
+            typical_ps=typical_ps_t.to(device=device, non_blocking=True),
             prompt_tokens=prompt_tensor.to(device=device, non_blocking=True),
             output_tokens=output_tensor.to(device=device, non_blocking=True),
             sampling_seeds=sampling_seeds_gpu,
