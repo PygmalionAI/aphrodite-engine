@@ -283,8 +283,14 @@ def _apply_alphabet_soup(
     logits_sort[mask] = -float("inf")
 
     # Apply top-k.
-    for i, topk in enumerate(k):
-        logits_sort[i, topk:] = -float("inf")
+    # Create a mask for the top-k elements.
+    top_k_mask = torch.arange(logits_idx.shape[-1], device=logits_idx.device)
+    top_k_mask = top_k_mask.expand(logits_idx.shape[0], -1)
+    top_k_mask = top_k_mask >= k.unsqueeze_(dim=1)
+
+    # Final mask.
+    mask = (mask | top_k_mask)
+    logits_sort.masked_fill_(mask, -float("inf"))
 
     # Re-sort the probabilities.
     src = torch.arange(logits_idx.shape[-1],
