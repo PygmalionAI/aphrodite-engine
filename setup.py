@@ -445,7 +445,7 @@ setup(
         "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",  # noqa: E501
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
-    packages=find_packages(exclude=("kernels", "examples", "tests")),
+    packages=find_packages(exclude=("kernels", "examples", "tests*")),
     python_requires=">=3.8",
     install_requires=get_requirements(),
     extras_require={
