@@ -1,6 +1,7 @@
 import enum
 from abc import ABC, abstractmethod
 from typing import Dict, List
+from typing import Sequence as GenericSequence
 
 from aphrodite.common.sequence import Sequence, SequenceGroup
 
@@ -26,11 +27,13 @@ class BlockSpaceManager(ABC):
         version = version.lower()
 
         if version == "v1":
-            from aphrodite.processing.block_manager_v1 import BlockSpaceManagerV1  # noqa: E501
+            from aphrodite.processing.block_manager_v1 import \
+                BlockSpaceManagerV1
             return BlockSpaceManagerV1
 
         if version == "v2":
-            from aphrodite.processing.block_manager_v2 import BlockSpaceManagerV2  # noqa: E501
+            from aphrodite.processing.block_manager_v2 import \
+                BlockSpaceManagerV2
             return BlockSpaceManagerV2
 
         raise ValueError(f"Unknown version {version=}")
@@ -62,7 +65,7 @@ class BlockSpaceManager(ABC):
 
     @abstractmethod
     def can_swap_in(self, seq_group: SequenceGroup,
-                    num_lookahead_slots: int) -> bool:
+                    num_lookahead_slots: int) -> AllocStatus:
         pass
 
     @abstractmethod
@@ -103,7 +106,8 @@ class BlockSpaceManager(ABC):
         pass
 
     @abstractmethod
-    def get_common_computed_block_ids(self, seqs: List[Sequence]) -> List[int]:
+    def get_common_computed_block_ids(
+            self, seqs: List[Sequence]) -> GenericSequence[int]:
         pass
 
     @abstractmethod

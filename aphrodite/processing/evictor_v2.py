@@ -32,13 +32,18 @@ class Evictor(ABC):
 
     @abstractmethod
     def add(self, block_id: int, content_hash: int, num_hashed_tokens: int,
-            last_accessed: int):
+            last_accessed: float):
         """Adds block to the evictor, making it a candidate for eviction"""
         pass
 
     @abstractmethod
-    def update(self, block_id: int, last_accessed: int):
+    def update(self, block_id: int, last_accessed: float):
         """Update corresponding block's access time in metadata"""
+        pass
+
+    @abstractmethod
+    def remove(self, block_id: int):
+        """Remove a given block id from the cache."""
         pass
 
     @abstractproperty
@@ -49,12 +54,13 @@ class Evictor(ABC):
 class BlockMetaData():
     """Data structure for storing key data describe cached block, so that
     evitor could use to make its decision which one to choose for eviction
+
     Here we use physical block id as the dict key, as there maybe several
     blocks with the same content hash, but their physical id is unique.
     """
 
     def __init__(self, content_hash: int, num_hashed_tokens: int,
-                 last_accessed: int):
+                 last_accessed: float):
         self.content_hash = content_hash
         self.num_hashed_tokens = num_hashed_tokens
         self.last_accessed = last_accessed
@@ -95,12 +101,12 @@ class LRUEvictor(Evictor):
         return evicted_block_id, evicted_block.content_hash
 
     def add(self, block_id: int, content_hash: int, num_hashed_tokens: int,
-            last_accessed: int):
+            last_accessed: float):
         self.free_table[block_id] = BlockMetaData(content_hash,
                                                   num_hashed_tokens,
                                                   last_accessed)
 
-    def update(self, block_id: int, last_accessed: int):
+    def update(self, block_id: int, last_accessed: float):
         self.free_table[block_id].last_accessed = last_accessed
 
     def remove(self, block_id: int):
