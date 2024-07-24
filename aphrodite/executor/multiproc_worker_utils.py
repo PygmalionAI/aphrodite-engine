@@ -13,7 +13,6 @@ from typing import (Any, Callable, Dict, Generic, List, Optional, TextIO,
                     TypeVar, Union)
 from loguru import logger
 
-
 T = TypeVar('T')
 
 _TERMINATE = "TERMINATE"  # sentinel
