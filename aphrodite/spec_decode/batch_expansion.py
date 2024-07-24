@@ -306,7 +306,6 @@ class BatchExpansionTop1Scorer(SpeculativeScorer):
                 target_seq_id: seq_group_metadata.block_tables[seq_id],
             },
             lora_request=None,
-            persistent_data={},
         )
 
     def _split_scoring_output(

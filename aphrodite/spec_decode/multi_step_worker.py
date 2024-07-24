@@ -51,7 +51,10 @@ class MultiStepWorker(Worker):
         sample_len: int,
     ) -> Tuple[List[SamplerOutput], bool]:
         """Run the model forward pass sample_len times. Returns the list of
-        sampler output, one per model forward pass.
+        sampler output, one per model forward pass, along with indicator of
+        whether torch tensor in sampler output need to be transposed in latter
+        sampler_output_to_torch logic.
+        For multi step worker, this indicator shall be True.
         """
         self._raise_if_unsupported(seq_group_metadata_list, blocks_to_swap_in,
                                    blocks_to_swap_out, blocks_to_copy)

@@ -1,6 +1,5 @@
 from typing import Callable, List
 
-from loguru import logger
 from transformers import PreTrainedTokenizer
 
 from aphrodite.common.sampling_params import SamplingParams
@@ -13,6 +12,7 @@ from aphrodite.engine.output_processor.interfaces import \
 from aphrodite.engine.output_processor.stop_checker import StopChecker
 from aphrodite.processing.scheduler import Scheduler
 from aphrodite.transformers_utils.detokenizer import Detokenizer
+from aphrodite.common.logger import log_once
 
 
 class MultiStepOutputProcessor(SequenceGroupOutputProcessor):
@@ -47,8 +47,9 @@ class MultiStepOutputProcessor(SequenceGroupOutputProcessor):
                                outputs: List[SequenceGroupOutput]) -> None:
         # TODO: Prompt logprob currently not implemented in multi step
         # workers.
-        logger.warning(
-            "Prompt logprob is not supported by multi step workers. "
+        log_once(
+            level="WARNING",
+            message="Prompt logprob is not supported by multi step workers. "
             "(e.g., speculative decode uses multi step workers).")
         pass
 

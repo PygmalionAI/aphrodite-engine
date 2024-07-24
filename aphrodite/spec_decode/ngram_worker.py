@@ -78,6 +78,8 @@ class NGramWorker(LoraNotSupportedWorkerBase):
     ) -> Tuple[Optional[List[SamplerOutput]], bool]:
         """NGram match algo to pick proposal candidate. Returns the list of
         sampler output, one per SequenceGroupMetadata.
+        For ngram worker, we already done needed transposed internal, so the
+        indicator pass to sampler_output_to_torch shall be False.
         """
         self._raise_if_unsupported(
             seq_group_metadata_list,
@@ -115,6 +117,7 @@ class NGramWorker(LoraNotSupportedWorkerBase):
                     res_len = len(res)
                     # pad 0 towards output as sample_len tokens required
                     res += [0] * (sample_len - res_len)
+
                     break
             else:
                 # if no candidate found, fill with 0
