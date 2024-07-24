@@ -49,7 +49,8 @@ class EngineArgs:
     load_in_8bit: bool = False
     load_in_smooth: bool = False
     enforce_eager: bool = True
-    max_context_len_to_capture: int = 8192
+    max_context_len_to_capture: Optional[int] = None
+    max_seq_len_to_capture: int = 8192
     disable_custom_all_reduce: bool = False
     tokenizer_pool_size: int = 0
     tokenizer_pool_type: str = "ray"
@@ -378,14 +379,20 @@ class EngineArgs:
             "will use eager mode and CUDA graph in hybrid "
             "for maximal performance and flexibility.",
         )
-        parser.add_argument(
-            "--max-context-len-to-capture",
-            type=int,
-            default=EngineArgs.max_context_len_to_capture,
-            help="maximum context length covered by CUDA "
-            "graphs. When a sequence has context length "
-            "larger than this, we fall back to eager mode.",
-        )
+        parser.add_argument('--max-context-len-to-capture',
+                            type=int,
+                            default=EngineArgs.max_context_len_to_capture,
+                            help='Maximum context length covered by CUDA '
+                            'graphs. When a sequence has context length '
+                            'larger than this, we fall back to eager mode. '
+                            '(DEPRECATED. Use --max-seq_len-to-capture instead'
+                            ')')
+        parser.add_argument('--max-seq_len-to-capture',
+                            type=int,
+                            default=EngineArgs.max_seq_len_to_capture,
+                            help='Maximum sequence length covered by CUDA '
+                            'graphs. When a sequence has context length '
+                            'larger than this, we fall back to eager mode.')
         parser.add_argument(
             "--disable-custom-all-reduce",
             action="store_true",
@@ -576,6 +583,7 @@ class EngineArgs:
             self.quantization_param_path,
             self.enforce_eager,
             self.max_context_len_to_capture,
+            self.max_seq_len_to_capture,
             self.max_logprobs,
             self.skip_tokenizer_init,
         )
