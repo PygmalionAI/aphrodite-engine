@@ -325,6 +325,7 @@ class ModelRunner:
 
             # Compute the slot mapping.
             block_table = seq_group_metadata.block_tables[seq_id]
+
             # Mask the [0, start_idx) tokens of the prompt with _PAD_SLOT_ID,
             # where start_idx is max(0, seq_len - sliding_window).
             # For example, if the prompt len is 10, sliding window is 8, and
@@ -1023,7 +1024,7 @@ class ModelRunner:
 
     def __del__(self) -> None:
         # Delete the CUDA graphs before deleting the pynccl communicator.
-        # NOTE(woosuk): This is necessary because otherwise deadlocks can
+        # NOTE: This is necessary because otherwise deadlocks can
         # happen.
         # FIXME: This is a bit hacky. Find a more robust solution.
         # TODO: when we get enough user feedback that pynccl is
@@ -1120,6 +1121,7 @@ class CUDAGraphRunner:
             attn_metadata.decode_metadata.seq_lens_tensor, non_blocking=True)
         self.input_buffers["block_tables"].copy_(
             attn_metadata.decode_metadata.block_tables, non_blocking=True)
+        # Run the graph.
         self.graph.replay()
 
         # Return the output tensor.

@@ -355,10 +355,6 @@ def _generate_random_fp8(
 def get_kv_cache_torch_dtype(
         cache_dtype: Optional[Union[str, torch.dtype]],
         model_dtype: Optional[Union[str, torch.dtype]] = None) -> torch.dtype:
-    torch.random.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-
     if isinstance(cache_dtype, str):
         if cache_dtype == "auto":
             if isinstance(model_dtype, str):
