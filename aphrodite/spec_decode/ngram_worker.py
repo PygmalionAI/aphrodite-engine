@@ -10,6 +10,7 @@ from aphrodite.task_handler.worker_base import LoraNotSupportedWorkerBase
 
 class NGramWorker(LoraNotSupportedWorkerBase):
     """NGramWorker provides a light drafter without need for model.
+
     Current NGramWorker only implement prompt lookup decoding,
     and in future we may also do RAG type drafter and other scenerios
     which don't rely on LLM model to give proposals.
@@ -78,6 +79,7 @@ class NGramWorker(LoraNotSupportedWorkerBase):
     ) -> Tuple[Optional[List[SamplerOutput]], bool]:
         """NGram match algo to pick proposal candidate. Returns the list of
         sampler output, one per SequenceGroupMetadata.
+
         For ngram worker, we already done needed transposed internal, so the
         indicator pass to sampler_output_to_torch shall be False.
         """
@@ -138,11 +140,17 @@ class NGramWorker(LoraNotSupportedWorkerBase):
             device=self.device,
         )
         token_probs.scatter_(2, indices, 1)
+        token_logprobs = torch.zeros(
+            (len(seq_group_metadata_list), sample_len, self.vocab_size),
+            dtype=torch.float32,
+            device=self.device,
+        )
         for i in range(len(seq_group_metadata_list)):
             outputs.append(
                 SamplerOutput(
                     outputs=None,
                     sampled_token_probs=token_probs[i],
+                    logprobs=token_logprobs,
                     sampled_token_ids=token_ids[i],
                 ))
         return outputs, False
