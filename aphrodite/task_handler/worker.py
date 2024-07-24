@@ -13,6 +13,7 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      SchedulerConfig, VisionLanguageConfig)
 from aphrodite.distributed import (broadcast_tensor_dict,
                                    ensure_model_parallel_initialized,
+                                   get_tensor_model_parallel_cpu_group,
                                    init_distributed_environment)
 from aphrodite.distributed.device_communicators import pynccl_utils
 from aphrodite.distributed.device_communicators.custom_all_reduce import \
@@ -289,6 +290,9 @@ def init_worker_distributed_environment(
     init_distributed_environment(parallel_config.world_size, rank,
                                  distributed_init_method, local_rank)
 
+    ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
+                                      parallel_config.pipeline_parallel_size)
+
     if pynccl_utils.is_initialized():
         pynccl_world_size = pynccl_utils.get_world_size()
         if pynccl_world_size != parallel_config.world_size:
@@ -299,10 +303,9 @@ def init_worker_distributed_environment(
     elif parallel_config.world_size > 1:
         # NOTE: We don't initialize pynccl process group when world size
         # is 1.
-        pynccl_utils.init_process_group()
-
-    ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
-                                      parallel_config.pipeline_parallel_size)
+        # NOTE: By default, pynccl is initialized for tp group.
+        pynccl_utils.init_process_group(
+            group=get_tensor_model_parallel_cpu_group())
 
     # Initialize a custom fast all-reduce implementation.
     if not parallel_config.disable_custom_all_reduce:
