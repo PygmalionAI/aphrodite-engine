@@ -6,7 +6,7 @@ import os
 import re
 from contextlib import asynccontextmanager
 from http import HTTPStatus
-from typing import AsyncGenerator, List, Optional, Tuple
+from typing import Any, AsyncGenerator, List, Optional, Set, Tuple
 
 import fastapi
 import uvicorn
@@ -32,10 +32,10 @@ from aphrodite.endpoints.openai.protocol import (
 from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
 from aphrodite.endpoints.openai.serving_completions import \
     OpenAIServingCompletion
+from aphrodite.endpoints.openai.serving_engine import LoRA
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
-from aphrodite.endpoints.openai.serving_engine import LoRA
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
@@ -50,6 +50,8 @@ kobold_lite_ui = ""
 sampler_json = ""
 gen_cache: dict = {}
 
+_running_tasks: Set[asyncio.Task[Any]] = set()
+
 
 @asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):
@@ -60,7 +62,9 @@ async def lifespan(app: fastapi.FastAPI):
             await engine.do_log_stats()
 
     if not engine_args.disable_log_stats:
-        asyncio.create_task(_force_log())
+        task = asyncio.create_task(_force_log())
+        _running_tasks.add(task)
+        task.add_done_callback(_running_tasks.remove)
 
     yield
 
