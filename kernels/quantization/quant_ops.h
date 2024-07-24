@@ -149,6 +149,7 @@ torch::Tensor gptq_marlin_gemm(
   torch::Tensor &g_idx,
   torch::Tensor &perm,
   torch::Tensor &workspace,
+  int64_t num_bits,
   int64_t size_m,
   int64_t size_n,
   int64_t size_k,
@@ -158,7 +159,8 @@ torch::Tensor gptq_marlin_repack(
   torch::Tensor &b_q_weight,
   torch::Tensor &perm,
   int64_t size_k,
-  int64_t size_n);
+  int64_t size_n,
+  int64_t num_bits);
 
 // QuIP#
 at::Tensor e8p_mm_origorder(
