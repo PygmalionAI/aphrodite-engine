@@ -11,7 +11,8 @@ from loguru import logger
 from aphrodite.common.block import BlockTable, PhysicalTokenBlock
 from aphrodite.common.sequence import Sequence, SequenceGroup, SequenceStatus
 from aphrodite.common.utils import Device
-from aphrodite.processing.evictor import EvictionPolicy, Evictor, make_evictor
+from aphrodite.processing.evictor_v1 import (EvictionPolicy, Evictor,
+                                             make_evictor)
 from aphrodite.processing.interfaces import AllocStatus, BlockSpaceManager
 
 

@@ -76,6 +76,10 @@ class BlockAllocator(ABC):
         pass
 
     @abstractmethod
+    def mark_blocks_as_accessed(self) -> None:
+        pass
+
+    @abstractmethod
     def mark_blocks_as_computed(self) -> None:
         pass
 
