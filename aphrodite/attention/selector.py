@@ -16,6 +16,7 @@ class _Backend(enum.Enum):
     XFORMERS = enum.auto()
     ROCM_FLASH = enum.auto()
     TORCH_SDPA = enum.auto()
+    FLASHINFER = enum.auto()
 
 
 @lru_cache(maxsize=None)
@@ -40,6 +41,11 @@ def get_attn_backend(dtype: torch.dtype) -> Type[AttentionBackend]:
         logger.info("Using Torch SDPA backend.")
         from aphrodite.attention.backends.torch_sdpa import TorchSDPABackend
         return TorchSDPABackend
+    elif backend == _Backend.FLASHINFER:
+        logger.info("Using Flashinfer backend.")
+        logger.warning("Eager mode is enforced for the Flashinfer backend. ")
+        from aphrodite.attention.backends.flashinfer import FlashInferBackend
+        return FlashInferBackend
     else:
         raise ValueError("Invalid attention backend.")
 
