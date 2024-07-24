@@ -11,11 +11,12 @@ from transformers import PreTrainedTokenizer
 from aphrodite.common.config import DecodingConfig, ModelConfig
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.common.sequence import MultiModalData
-from aphrodite.engine.args_tools import AsyncEngineArgs
+from aphrodite.common.sequence import MultiModalData, SamplerOutput
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
+from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.executor.ray_utils import initialize_ray_cluster, ray
 from aphrodite.lora.request import LoRARequest
+from aphrodite.processing.scheduler import SchedulerOutputs
 
 ENGINE_ITERATION_TIMEOUT_S = int(
     os.environ.get("APHRODITE_ENGINE_ITERATION_TIMEOUT_S", "60"))
@@ -225,8 +226,7 @@ class _AsyncAphrodite(AphroditeEngine):
             scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)
 
         # Log stats.
-        if self.log_stats:
-            self.stat_logger.log(self._get_stats(scheduler_outputs))
+        self.do_log_stats(scheduler_outputs, output)
 
         return request_outputs
 
@@ -706,9 +706,13 @@ class AsyncAphrodite:
         else:
             return self.engine.get_decoding_config()
 
-    async def do_log_stats(self) -> None:
+    async def do_log_stats(
+            self,
+            scheduler_outputs: Optional[SchedulerOutputs] = None,
+            model_output: Optional[List[SamplerOutput]] = None) -> None:
         if self.engine_use_ray:
-            await self.engine.do_log_stats.remote()  # type: ignore
+            await self.engine.do_log_stats.remote(  # type: ignore
+                scheduler_outputs, model_output)
         else:
             self.engine.do_log_stats()
 
