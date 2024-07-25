@@ -25,3 +25,4 @@ sentence-transformers # for embeddings
 tiktoken == 0.6.0 # for DBRX tokenizer
 outlines >= 0.0.27
 lm-format-enforcer >= 0.10.1
+uvloop

@@ -4,6 +4,7 @@ import inspect
 import json
 import os
 import re
+import uvloop
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 from typing import Any, AsyncGenerator, List, Optional, Set, Tuple
@@ -519,6 +520,9 @@ def run_server(args):
         served_model_names = args.served_model_name
     else:
         served_model_names = [args.model]
+
+    if args.uvloop:
+        uvloop.install()
 
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = AsyncAphrodite.from_engine_args(engine_args)
