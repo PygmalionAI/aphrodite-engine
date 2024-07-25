@@ -20,7 +20,6 @@ from typing import (Any, AsyncIterator, Awaitable, Callable, Dict, Generic,
 import psutil
 import torch
 from loguru import logger
-from packaging.version import Version, parse
 
 from aphrodite.common.logger import enable_trace_function_call
 
@@ -310,26 +309,6 @@ def chunk_list(lst, chunk_size):
 def cdiv(a: int, b: int) -> int:
     """Ceiling division."""
     return -(a // -b)
-
-
-@lru_cache(maxsize=None)
-def get_nvcc_cuda_version() -> Optional[Version]:
-    cuda_home = os.environ.get('CUDA_HOME')
-    if not cuda_home:
-        cuda_home = '/usr/local/cuda'
-        if os.path.isfile(cuda_home + '/bin/nvcc'):
-            logger.info(f'CUDA_HOME is not found in the environment. '
-                        f'Using {cuda_home} as CUDA_HOME.')
-        else:
-            logger.warning(
-                f'Not found nvcc in {cuda_home}. Skip cuda version check!')
-            return None
-    nvcc_output = subprocess.check_output([cuda_home + "/bin/nvcc", "-V"],
-                                          universal_newlines=True)
-    output = nvcc_output.split()
-    release_idx = output.index("release") + 1
-    nvcc_cuda_version = parse(output[release_idx].split(",")[0])
-    return nvcc_cuda_version
 
 
 def _generate_random_fp8(
