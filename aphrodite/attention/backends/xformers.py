@@ -1,6 +1,6 @@
 """Attention layer with xFormers and PagedAttention."""
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Type
+from typing import List, Optional, Tuple, Type
 
 import torch
 from xformers import ops as xops
@@ -44,7 +44,7 @@ class XFormersBackend(AttentionBackend):
     def swap_blocks(
         src_kv_cache: torch.Tensor,
         dst_kv_cache: torch.Tensor,
-        src_to_dst: Dict[int, int],
+        src_to_dst: torch.Tensor,
     ) -> None:
         PagedAttention.swap_blocks(src_kv_cache, dst_kv_cache, src_to_dst)
 
