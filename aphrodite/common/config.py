@@ -59,6 +59,8 @@ class ModelConfig:
         load_in_8bit: Whether to load the FP16 model in 8bit format. Slower
             than load_in_smooth in terms of throughput.
         load_in_smooth: Whether to load the FP16 model in smoothquant format.
+        deepspeed_fp_bits: Number of bits to use for DeepSpeed FP quantization.
+            Supported number of bits are: 4, 6, 8, 12.
         quantization_param_path: Path to JSON file containing scaling factors.
             Used to load KV cache scaling factors into the model when KV cache
             type is FP8_E4M3 on ROCm (AMD GPU). In the future these will also
@@ -93,6 +95,7 @@ class ModelConfig:
         load_in_4bit: bool = False,
         load_in_8bit: bool = False,
         load_in_smooth: bool = False,
+        deepspeed_fp_bits: Optional[int] = None,
         quantization_param_path: Optional[str] = None,
         enforce_eager: bool = True,
         max_context_len_to_capture: Optional[int] = None,
@@ -112,6 +115,7 @@ class ModelConfig:
         self.load_in_4bit = load_in_4bit
         self.load_in_8bit = load_in_8bit
         self.load_in_smooth = load_in_smooth
+        self.deepspeed_fp_bits = deepspeed_fp_bits
         self.quantization_param_path = quantization_param_path
         self.enforce_eager = enforce_eager
         self.max_context_len_to_capture = max_context_len_to_capture
@@ -260,6 +264,14 @@ class ModelConfig:
             }
             self.enforce_eager = True
 
+        if self.quantization == "deepspeedfp":
+            gs = 32 if self.deepspeed_fp_bits == 4 else 128
+            self.hf_config.quantization_config = {
+                "bits": self.deepspeed_fp_bits,
+                "group_size": int(os.environ.get("DEEPSPEED_GROUP_SIZE", gs)),
+                "quant_method": "deepspeedfp"
+            }
+
         if self.quantization is not None:
             if self.quantization not in supported_quantization:
                 raise ValueError(
@@ -275,6 +287,11 @@ class ModelConfig:
                     f"{self.quantization} quantization is not fully "
                     "optimized yet. The speed can be slower than "
                     "non-quantized models.")
+            if self.quantization == "deepspeedfp" and self.deepspeed_fp_bits \
+                is None:
+                raise ValueError(
+                    "deepspeed_fp_bits must be specified when using "
+                    "deepspeedfp quantization.")
 
     def _verify_cuda_graph(self) -> None:
         if self.max_seq_len_to_capture is None:

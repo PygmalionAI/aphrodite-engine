@@ -5,8 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
-from aphrodite.quantization.base_config import (
-    QuantizationConfig)
+from aphrodite.quantization.base_config import (QuantizationConfig)
 from aphrodite.modeling.utils import set_weight_attrs
 
 
@@ -27,9 +26,10 @@ class DeepSpeedFPConfig(QuantizationConfig):
         self.group_size = group_size
         self.valid_types = [torch.bfloat16, torch.float16]
 
-        if self.weight_bits not in (6, 8):
+        if self.weight_bits not in (4, 6, 8, 12):
             raise ValueError(
-                "Currently, only 6-bit or 8-bit weight quantization are "
+                "Currently, only 4-bit, 6-bit, 8-bit, and 12-bit weight"
+                " quantization are "
                 f"supported for DeepSpeed FP quantizaiton, but got "
                 f"{self.weight_bits} bits.")
 

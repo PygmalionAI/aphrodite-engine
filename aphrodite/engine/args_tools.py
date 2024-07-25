@@ -48,6 +48,7 @@ class EngineArgs:
     load_in_4bit: bool = False
     load_in_8bit: bool = False
     load_in_smooth: bool = False
+    deepspeed_fp_bits: Optional[int] = None
     enforce_eager: bool = True
     max_context_len_to_capture: Optional[int] = None
     max_seq_len_to_capture: int = 8192
@@ -373,6 +374,12 @@ class EngineArgs:
             "8bit format. Throughput at 0.7x of FP16. ",
         )
         parser.add_argument(
+            "--deepspeed-fp-bits",
+            type=int,
+            default=None,
+            help="Number of floating bits to use for the deepseed "
+            "quantization. Supported bits are: 4, 6, 8, 12. ")
+        parser.add_argument(
             "--enforce-eager",
             type=lambda x: (str(x).lower() == 'true'),
             default=EngineArgs.enforce_eager,
@@ -587,6 +594,7 @@ class EngineArgs:
             self.load_in_4bit,
             self.load_in_8bit,
             self.load_in_smooth,
+            self.deepspeed_fp_bits,
             self.quantization_param_path,
             self.enforce_eager,
             self.max_context_len_to_capture,
