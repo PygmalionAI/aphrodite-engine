@@ -79,6 +79,7 @@ class EngineArgs:
     speculative_model: Optional[str] = None
     num_speculative_tokens: Optional[int] = None
     speculative_max_model_len: Optional[int] = None
+    speculative_disable_by_batch_size: Optional[int] = None
     ngram_prompt_lookup_max: Optional[int] = None
     ngram_prompt_lookup_min: Optional[int] = None
 
@@ -379,20 +380,20 @@ class EngineArgs:
             "will use eager mode and CUDA graph in hybrid "
             "for maximal performance and flexibility.",
         )
-        parser.add_argument('--max-context-len-to-capture',
+        parser.add_argument("--max-context-len-to-capture",
                             type=int,
                             default=EngineArgs.max_context_len_to_capture,
-                            help='Maximum context length covered by CUDA '
-                            'graphs. When a sequence has context length '
-                            'larger than this, we fall back to eager mode. '
-                            '(DEPRECATED. Use --max-seq_len-to-capture instead'
-                            ')')
-        parser.add_argument('--max-seq_len-to-capture',
+                            help="Maximum context length covered by CUDA "
+                            "graphs. When a sequence has context length "
+                            "larger than this, we fall back to eager mode. "
+                            "(DEPRECATED. Use --max-seq_len-to-capture instead"
+                            ")")
+        parser.add_argument("--max-seq_len-to-capture",
                             type=int,
                             default=EngineArgs.max_seq_len_to_capture,
-                            help='Maximum sequence length covered by CUDA '
-                            'graphs. When a sequence has context length '
-                            'larger than this, we fall back to eager mode.')
+                            help="Maximum sequence length covered by CUDA "
+                            "graphs. When a sequence has context length "
+                            "larger than this, we fall back to eager mode.")
         parser.add_argument(
             "--disable-custom-all-reduce",
             action="store_true",
@@ -533,6 +534,12 @@ class EngineArgs:
             "draft model. Sequences over this length will skip "
             "speculation.")
         parser.add_argument(
+            "--speculative-disable-by-batch-size",
+            type=int,
+            default=EngineArgs.speculative_disable_by_batch_size,
+            help="Disable speculative decoding for new incoming requests "
+            "if the number of enqueue requests is larger than this value.")
+        parser.add_argument(
             "--ngram-prompt-lookup-max",
             type=int,
             default=EngineArgs.ngram_prompt_lookup_max,
@@ -619,6 +626,8 @@ class EngineArgs:
             target_dtype=self.dtype,
             speculative_model=self.speculative_model,
             num_speculative_tokens=self.num_speculative_tokens,
+            speculative_disable_by_batch_size=self.
+            speculative_disable_by_batch_size,
             speculative_max_model_len=self.speculative_max_model_len,
             enable_chunked_prefill=self.enable_chunked_prefill,
             use_v2_block_manager=self.use_v2_block_manager,

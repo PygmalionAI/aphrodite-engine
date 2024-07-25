@@ -1,5 +1,5 @@
 from functools import cached_property
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from loguru import logger
@@ -50,7 +50,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
     def create_worker(
         cls,
         scorer_worker: WorkerBase,
-        draft_worker_kwargs,
+        draft_worker_kwargs: Dict[str, Any],
+        disable_by_batch_size: Optional[int],
     ) -> "SpecDecodeWorker":
 
         ngram_prompt_lookup_max = (
@@ -58,7 +59,9 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         ngram_prompt_lookup_min = (
             draft_worker_kwargs.pop("ngram_prompt_lookup_min"))
 
+        disable_bonus_tokens = True
         if ngram_prompt_lookup_max > 0:
+            disable_bonus_tokens = False
             proposer_worker = NGramWorker(**draft_worker_kwargs)
             proposer_worker.set_ngram_window_size(ngram_prompt_lookup_min,
                                                   ngram_prompt_lookup_max)
@@ -71,9 +74,9 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         return SpecDecodeWorker(
             proposer_worker,
             scorer_worker,
-            # TODO: disable strict mode for speedup.
-            rejection_sampler=RejectionSampler(strict_mode=True),
-        )
+            disable_by_batch_size=disable_by_batch_size,
+            rejection_sampler=RejectionSampler(
+                disable_bonus_tokens=disable_bonus_tokens, ))
 
     def __init__(
         self,
@@ -81,6 +84,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         scorer_worker: WorkerBase,
         rejection_sampler: RejectionSampler,
         metrics_collector: Optional[AsyncMetricsCollector] = None,
+        disable_by_batch_size: Optional[int] = None,
     ):
         """
         Create a SpecDecodeWorker.
@@ -89,15 +93,18 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             proposer_worker: A worker that can produce speculative tokens for
                 sequences.
             scorer_worker: A worker that produces probabilities of speculative
-                tokens according to some base model. Typically a vanilla
-                Aphrodite Worker.
+                tokens according to some base model. Typically a vanilla vLLM
+                Worker.
             rejection_sampler: A Torch module used to perform modified rejection
                 sampling for speculative decoding.
+            disable_by_batch_size: If the batch size is larger than this,
+                disable speculative decoding for new incoming requests.
             metrics_collector: Helper class for collecting metrics; can be set
                 for testing purposes.
         """
         self.proposer_worker = proposer_worker
         self.scorer_worker = scorer_worker
+        self.disable_by_batch_size = disable_by_batch_size or float("inf")
         self.rejection_sampler = rejection_sampler
 
         self._metrics = AsyncMetricsCollector(
@@ -118,7 +125,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         self.scorer_worker.init_device()
         self.proposer_worker.init_device()
 
-        # NOTE: load_model is not part of the WorkerBase interface.
+        # NOTE(cade): load_model is not part of the WorkerBase interface.
         self.scorer_worker.load_model()
         self.proposer_worker.load_model()
 
@@ -195,27 +202,41 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             "speculative decoding "
             "requires non-None seq_group_metadata_list")
 
+        # When the batch size is too large, disable speculative decoding
+        # to stop trading off throughput for latency.
+        disable_all = (execute_model_req.running_queue_size >=
+                       self.disable_by_batch_size)
+        if disable_all:
+            for seq_group_metadata in execute_model_req.seq_group_metadata_list:
+                # Once num_speculative_tokens is set to 0, the spec decode
+                # of this request will be disabled forever.
+                # TODO: We currently store spec decoding specific
+                # state in the global data structure, but we should maintain
+                # this state within spec decode worker.
+                seq_group_metadata.num_speculative_tokens = 0
+
         # If no spec tokens, call the proposer and scorer workers normally.
-        # Used for prefill.
+        # This happens for prefill, or when the spec decode is disabled
+        # for this batch.
         if execute_model_req.num_lookahead_slots == 0 or len(
                 execute_model_req.seq_group_metadata_list) == 0:
-            return self._run_no_spec(execute_model_req)
+            return self._run_no_spec(execute_model_req,
+                                     skip_proposer=disable_all)
 
         return self._run_speculative_decoding_step(execute_model_req)
 
     @nvtx_range("spec_decode_worker._run_no_spec")
-    def _run_no_spec(
-            self,
-            execute_model_req: ExecuteModelRequest) -> List[SamplerOutput]:
-        """Run a prefill step, without any speculation. The input is sent to the
-        proposer and scorer model so that the KV cache is consistent between the
-        two.
+    def _run_no_spec(self, execute_model_req: ExecuteModelRequest,
+                     skip_proposer: bool) -> List[SamplerOutput]:
+        """Run a prefill step, without any speculation. The input is sent to
+        the proposer and scorer model so that the KV cache is consistent
+        between the two. When skip_proposer is True, the proposer model is
+        not called, meaning that the kv-cache in proposer for requests is not
+        updated, so they cannot enable spec decode in the rest decoding.
         """
-        #logger.info("run proposer worker no spec")
+        if not skip_proposer:
+            self.proposer_worker.execute_model(execute_model_req)
 
-        self.proposer_worker.execute_model(execute_model_req)
-
-        #logger.info("run target worker no spec")
         sampler_output = self.scorer_worker.execute_model(execute_model_req)
         assert len(sampler_output) == 1
         sampler_output = sampler_output[0]
@@ -232,28 +253,26 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             self,
             execute_model_req: ExecuteModelRequest) -> List[SamplerOutput]:
         """Execute a single step of speculative decoding.
+
         This invokes the proposer worker to get k speculative tokens for each
         sequence, then scores each speculative token using the scoring worker.
+
         Returns a list of SamplerOutput, each containing a single token per
         sequence.
         """
 
-        #logger.info("get spec proposals")
         # Generate proposals using draft worker.
         proposals = self.proposer_worker.get_spec_proposals(execute_model_req)
 
-        #logger.info("score proposals")
         proposal_scores = self.scorer.score_proposals(
             execute_model_req,
             proposals,
         )
 
-        #logger.info("verify proposals")
         accepted_token_ids, target_logprobs = self._verify_tokens(
             execute_model_req.seq_group_metadata_list, proposal_scores,
             proposals, execute_model_req.num_lookahead_slots)
 
-        #logger.info("create output list")
         return self._create_output_sampler_list(
             execute_model_req.seq_group_metadata_list,
             accepted_token_ids,
@@ -276,10 +295,10 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         """
         proposal_lens_list = proposals.proposal_lens.tolist()
 
-        # Aphrodite currently only supports proposal lens equal to zero or the
-        # batch proposal len. This adds some complexity (splitting the batch
-        # into spec and non spec sequences) and should be removed in the
-        # future. It can be done by supporting per-sequence proposal lens.
+        # vLLM currently only supports proposal lens equal to zero or the batch
+        # proposal len. This adds some complexity (splitting the batch into spec
+        # and non spec sequences) and should be removed in the future. It can be
+        # done by supporting per-sequence proposal lens.
         _, spec_indices = split_batch_by_proposal_len(
             seq_group_metadata_list,
             proposal_lens_list,
