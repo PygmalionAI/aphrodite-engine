@@ -45,7 +45,11 @@ def init_custom_ar() -> None:
             "Cannot test GPU P2P because not all GPUs are visible to the "
             "current process. This might be the case if 'CUDA_VISIBLE_DEVICES'"
             " is set.")
-        return False
+        return
+
+    # we only use a subset of GPUs here
+    # so we only need to check the nvlink connectivity of these GPUs
+    num_dev = world_size
     # test nvlink first, this will filter out most of the cases
     # where custom allreduce is not supported
     full_nvlink = _is_full_nvlink(rank, world_size)
