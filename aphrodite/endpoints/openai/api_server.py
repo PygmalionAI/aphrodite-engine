@@ -6,7 +6,7 @@ import os
 import re
 from contextlib import asynccontextmanager
 from http import HTTPStatus
-from typing import Any, AsyncGenerator, List, Optional, Set, Tuple
+from typing import AsyncGenerator, List, Optional, Set, Tuple
 
 import fastapi
 import uvicorn
@@ -50,7 +50,7 @@ kobold_lite_ui = ""
 sampler_json = ""
 gen_cache: dict = {}
 
-_running_tasks: Set[asyncio.Task[Any]] = set()
+_running_tasks: Set[asyncio.Task] = set()
 
 
 @asynccontextmanager

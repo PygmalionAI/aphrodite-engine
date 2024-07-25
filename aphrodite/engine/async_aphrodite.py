@@ -2,8 +2,8 @@ import asyncio
 import os
 import time
 from functools import partial
-from typing import (Any, AsyncIterator, Callable, Dict, Iterable, List,
-                    Optional, Set, Tuple, Type, Union)
+from typing import (AsyncIterator, Callable, Dict, Iterable, List, Optional,
+                    Set, Tuple, Type, Union)
 
 from loguru import logger
 from transformers import PreTrainedTokenizer
@@ -332,7 +332,7 @@ class AsyncAphrodite:
         # We need to keep a reference to unshielded
         # task as well to prevent it from being garbage
         # collected
-        self._background_loop_unshielded: Optional[asyncio.Task[Any]] = None
+        self._background_loop_unshielded: Optional[asyncio.Task] = None
         self.start_engine_loop = start_engine_loop
         self._errored_with: Optional[BaseException] = None
 
