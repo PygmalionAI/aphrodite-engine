@@ -10,7 +10,6 @@ from loguru import logger
 
 from aphrodite.attention import (AttentionMetadata, AttentionMetadataPerStage,
                                  get_attn_backend)
-from aphrodite.attention.backends.flashinfer import FlashInferBackend
 from aphrodite.common.config import (DeviceConfig, LoadConfig, LoRAConfig,
                                      ModelConfig, ParallelConfig,
                                      SchedulerConfig, VisionLanguageConfig)
@@ -401,7 +400,7 @@ class ModelRunner:
                      dtype=seq_start_loc.dtype,
                      out=seq_start_loc[1:])
 
-        if self.attn_backend is FlashInferBackend:
+        if self.attn_backend.get_name() == "flashinfer":
             attn_metadata = self.attn_backend.make_metadata(
                 is_prompt=True,
                 use_cuda_graph=False,
@@ -562,7 +561,7 @@ class ModelRunner:
                 device=self.device,
             )
 
-        if self.attn_backend is FlashInferBackend:
+        if self.attn_backend.get_name() == "flashinfer":
             if not hasattr(self, "flashinfer_workspace_buffer"):
                 # Allocate 16MB workspace buffer
                 # Follow the example of flashinfer: https://docs.flashinfer.ai/api/python/decode.html

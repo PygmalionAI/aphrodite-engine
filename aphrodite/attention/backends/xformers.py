@@ -19,6 +19,10 @@ from aphrodite.attention.ops.paged_attn import (PagedAttention,
 class XFormersBackend(AttentionBackend):
 
     @staticmethod
+    def get_name() -> str:
+        return "xformers"
+
+    @staticmethod
     def get_impl_cls() -> Type["XFormersImpl"]:
         return XFormersImpl
 

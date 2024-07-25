@@ -21,6 +21,10 @@ from aphrodite.attention.ops.paged_attn import (PagedAttention,
 class FlashAttentionBackend(AttentionBackend):
 
     @staticmethod
+    def get_name() -> str:
+        return "flash-attn"
+
+    @staticmethod
     def get_impl_cls() -> Type["FlashAttentionImpl"]:
         return FlashAttentionImpl
 
