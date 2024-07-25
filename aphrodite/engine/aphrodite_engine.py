@@ -12,9 +12,9 @@ from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
 from aphrodite.common.logger import setup_logger
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.common.sequence import (MultiModalData, SamplerOutput, Sequence,
-                                       SequenceGroup, SequenceGroupMetadata,
-                                       SequenceStatus)
+from aphrodite.common.sequence import (ExecuteModelRequest, MultiModalData,
+                                       SamplerOutput, Sequence, SequenceGroup,
+                                       SequenceGroupMetadata, SequenceStatus)
 from aphrodite.common.utils import Counter
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.metrics import StatLogger, Stats
@@ -524,12 +524,16 @@ class AphroditeEngine:
         seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
 
         if not scheduler_outputs.is_empty():
-            output = self.model_executor.execute_model(
+            execute_model_req = ExecuteModelRequest(
                 seq_group_metadata_list=seq_group_metadata_list,
                 blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,
                 blocks_to_swap_out=scheduler_outputs.blocks_to_swap_out,
                 blocks_to_copy=scheduler_outputs.blocks_to_copy,
-                num_lookahead_slots=scheduler_outputs.num_lookahead_slots)
+                num_lookahead_slots=scheduler_outputs.num_lookahead_slots,
+                running_queue_size=scheduler_outputs.running_queue_size,
+            )
+            output = self.model_executor.execute_model(
+                execute_model_req=execute_model_req)
         else:
             output = []
 

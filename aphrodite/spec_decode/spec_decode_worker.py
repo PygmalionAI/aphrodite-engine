@@ -1,9 +1,10 @@
 from functools import cached_property
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import torch
 
-from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
+from aphrodite.common.sequence import (ExecuteModelRequest, SamplerOutput,
+                                       SequenceGroupMetadata)
 from aphrodite.modeling.layers.rejection import RejectionSampler
 from aphrodite.spec_decode.batch_expansion import BatchExpansionTop1Scorer
 from aphrodite.spec_decode.interfaces import (SpeculativeProposals,
@@ -184,64 +185,37 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
     @torch.inference_mode()
     def execute_model(
-        self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-        blocks_to_swap_in: Optional[Dict[int, int]],
-        blocks_to_swap_out: Optional[Dict[int, int]],
-        blocks_to_copy: Optional[Dict[int, List[int]]],
-        num_lookahead_slots: int,
-    ) -> List[SamplerOutput]:
+            self,
+            execute_model_req: ExecuteModelRequest) -> List[SamplerOutput]:
         """Perform speculative decoding on the input batch.
         """
 
-        assert seq_group_metadata_list is not None, (
+        assert execute_model_req.seq_group_metadata_list is not None, (
             "speculative decoding "
             "requires non-None seq_group_metadata_list")
 
         # If no spec tokens, call the proposer and scorer workers normally.
         # Used for prefill.
-        if num_lookahead_slots == 0 or len(seq_group_metadata_list) == 0:
-            return self._run_no_spec(
-                seq_group_metadata_list=seq_group_metadata_list,
-                blocks_to_swap_in=blocks_to_swap_in,
-                blocks_to_swap_out=blocks_to_swap_out,
-                blocks_to_copy=blocks_to_copy,
-            )
+        if execute_model_req.num_lookahead_slots == 0 or len(
+                execute_model_req.seq_group_metadata_list) == 0:
+            return self._run_no_spec(execute_model_req)
 
-        return self._run_speculative_decoding_step(
-            seq_group_metadata_list=seq_group_metadata_list,
-            blocks_to_swap_in=blocks_to_swap_in,
-            blocks_to_swap_out=blocks_to_swap_out,
-            blocks_to_copy=blocks_to_copy,
-            k=num_lookahead_slots,
-        )
+        return self._run_speculative_decoding_step(execute_model_req)
 
     @nvtx_range("spec_decode_worker._run_no_spec")
     def _run_no_spec(
-        self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-        blocks_to_swap_in: Optional[Dict[int, int]],
-        blocks_to_swap_out: Optional[Dict[int, int]],
-        blocks_to_copy: Optional[Dict[int, List[int]]],
-    ) -> List[SamplerOutput]:
+            self,
+            execute_model_req: ExecuteModelRequest) -> List[SamplerOutput]:
         """Run a prefill step, without any speculation. The input is sent to the
         proposer and scorer model so that the KV cache is consistent between the
         two.
         """
+        #logger.info("run proposer worker no spec")
 
-        self.proposer_worker.execute_model(
-            seq_group_metadata_list=seq_group_metadata_list,
-            blocks_to_swap_in=blocks_to_swap_in,
-            blocks_to_swap_out=blocks_to_swap_out,
-            blocks_to_copy=blocks_to_copy,
-        )
+        self.proposer_worker.execute_model(execute_model_req)
 
-        sampler_output = self.scorer_worker.execute_model(
-            seq_group_metadata_list=seq_group_metadata_list,
-            blocks_to_swap_in=blocks_to_swap_in,
-            blocks_to_swap_out=blocks_to_swap_out,
-            blocks_to_copy=blocks_to_copy,
-        )
+        #logger.info("run target worker no spec")
+        sampler_output = self.scorer_worker.execute_model(execute_model_req)
         assert len(sampler_output) == 1
         sampler_output = sampler_output[0]
 
@@ -254,47 +228,36 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
     @nvtx_range("spec_decode_worker._run_speculative_decoding_step")
     def _run_speculative_decoding_step(
-        self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-        blocks_to_swap_in: Optional[Dict[int, int]],
-        blocks_to_swap_out: Optional[Dict[int, int]],
-        blocks_to_copy: Optional[Dict[int, List[int]]],
-        k: int,
-    ) -> List[SamplerOutput]:
+            self,
+            execute_model_req: ExecuteModelRequest) -> List[SamplerOutput]:
         """Execute a single step of speculative decoding.
-
         This invokes the proposer worker to get k speculative tokens for each
         sequence, then scores each speculative token using the scoring worker.
-
         Returns a list of SamplerOutput, each containing a single token per
         sequence.
         """
 
+        #logger.info("get spec proposals")
         # Generate proposals using draft worker.
-        assert blocks_to_swap_in is not None
-        assert blocks_to_swap_out is not None
-        assert blocks_to_copy is not None
-        proposals = self.proposer_worker.get_spec_proposals(
-            seq_group_metadata_list, blocks_to_swap_in, blocks_to_swap_out,
-            blocks_to_copy, k)
+        proposals = self.proposer_worker.get_spec_proposals(execute_model_req)
 
+        #logger.info("score proposals")
         proposal_scores = self.scorer.score_proposals(
-            seq_group_metadata_list,
-            blocks_to_swap_in,
-            blocks_to_swap_out,
-            blocks_to_copy,
-            k,
+            execute_model_req,
             proposals,
         )
 
+        #logger.info("verify proposals")
         accepted_token_ids, target_logprobs = self._verify_tokens(
-            seq_group_metadata_list, proposal_scores, proposals, k)
+            execute_model_req.seq_group_metadata_list, proposal_scores,
+            proposals, execute_model_req.num_lookahead_slots)
 
+        #logger.info("create output list")
         return self._create_output_sampler_list(
-            seq_group_metadata_list,
+            execute_model_req.seq_group_metadata_list,
             accepted_token_ids,
             target_logprobs=target_logprobs,
-            k=k)
+            k=execute_model_req.num_lookahead_slots)
 
     @nvtx_range("spec_decode_worker._verify_tokens")
     def _verify_tokens(

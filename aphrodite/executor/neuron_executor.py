@@ -1,9 +1,9 @@
-from typing import Dict, List, Set, Tuple
+from typing import List, Set, Tuple
 
+from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
+from aphrodite.common.utils import make_async
 from aphrodite.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from aphrodite.lora.request import LoRARequest
-from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
-from aphrodite.common.utils import make_async
 
 
 class NeuronExecutor(ExecutorBase):
@@ -42,20 +42,18 @@ class NeuronExecutor(ExecutorBase):
         """
         self.driver_worker.initialize_cache(num_gpu_blocks, num_cpu_blocks)
 
-    def execute_model(self,
-                      seq_group_metadata_list: List[SequenceGroupMetadata],
-                      blocks_to_swap_in: Dict[int, int],
-                      blocks_to_swap_out: Dict[int, int],
-                      blocks_to_copy: Dict[int, List[int]],
-                      num_lookahead_slots: int) -> List[SamplerOutput]:
-        assert (blocks_to_swap_in == {} and blocks_to_swap_out == {}
-                and blocks_to_copy == {}), (
+    def execute_model(
+            self,
+            execute_model_req: ExecuteModelRequest) -> List[SamplerOutput]:
+        assert (execute_model_req.blocks_to_swap_in == {}
+                and execute_model_req.blocks_to_swap_out == {}
+                and execute_model_req.blocks_to_copy == {}), (
                     "Cache operations are not supported for Neuron backend.")
-        assert num_lookahead_slots == 0, (
+        assert execute_model_req.num_lookahead_slots == 0, (
             "lookahead not supported for Neuron backend.")
 
         output = self.driver_worker.execute_model(
-            seq_group_metadata_list=seq_group_metadata_list)
+            execute_model_req.seq_group_metadata_list)
         return output
 
     def add_lora(self, lora_request: LoRARequest) -> bool:
@@ -77,14 +75,11 @@ class NeuronExecutorAsync(NeuronExecutor, ExecutorAsyncBase):
 
     async def execute_model_async(
         self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-        blocks_to_swap_in: Dict[int, int],
-        blocks_to_swap_out: Dict[int, int],
-        blocks_to_copy: Dict[int, List[int]],
-        num_lookahead_slots: int,
+        execute_model_req: ExecuteModelRequest,
     ) -> List[SamplerOutput]:
-        output = await make_async(self.driver_worker.execute_model)(
-            seq_group_metadata_list=seq_group_metadata_list, )
+        output = await make_async(
+            self.driver_worker.execute_model
+        )(seq_group_metadata_list=execute_model_req.seq_group_metadata_list, )
         return output
 
     async def check_health_async(self) -> None:

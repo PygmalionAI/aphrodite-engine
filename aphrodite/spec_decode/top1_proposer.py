@@ -1,8 +1,9 @@
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import torch
 
-from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
+from aphrodite.common.sequence import (ExecuteModelRequest, SamplerOutput,
+                                       SequenceGroupMetadata)
 from aphrodite.spec_decode.interfaces import (SpeculativeProposals,
                                               SpeculativeProposer)
 from aphrodite.spec_decode.util import sampler_output_to_torch
@@ -40,17 +41,14 @@ class Top1Proposer(SpeculativeProposer):
 
     def get_proposals(
         self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-        blocks_to_swap_in: Dict[int, int],
-        blocks_to_swap_out: Dict[int, int],
-        blocks_to_copy: Dict[int, List[int]],
-        proposal_len: int,
+        execute_model_req: ExecuteModelRequest,
     ) -> SpeculativeProposals:
         """Get speculative proposals given the input batch.
-
         Sequences which would exceed the max model length are skipped during
         speculation.
         """
+        proposal_len = execute_model_req.num_lookahead_slots
+        seq_group_metadata_list = execute_model_req.seq_group_metadata_list
 
         # Split speculative- and non-speculative- sequences.
         (
@@ -58,7 +56,6 @@ class Top1Proposer(SpeculativeProposer):
             nonzero_proposal_len_seqs,
             nonzero_proposal_len_indices,
         ) = self._split_by_max_model_len(seq_group_metadata_list, proposal_len)
-
         if nonzero_proposal_len_seqs:
             # Speculate tokens using the draft worker for the speculative
             # sequences.
@@ -66,11 +63,12 @@ class Top1Proposer(SpeculativeProposer):
             # token_ids is like [batch] format in proposal_len size list,
             # while if it is false, the format would be [proposal_len]
             # in batch size list
-            maybe_sampler_output, transposed = self._worker.sampler_output(
+            nonzero_execute_model_req = ExecuteModelRequest(
                 seq_group_metadata_list=nonzero_proposal_len_seqs,
-                blocks_to_swap_in=blocks_to_swap_in,
-                blocks_to_swap_out=blocks_to_swap_out,
-                blocks_to_copy=blocks_to_copy,
+                num_lookahead_slots=proposal_len,
+            )
+            maybe_sampler_output, transposed = self._worker.sampler_output(
+                execute_model_req=nonzero_execute_model_req,
                 sample_len=proposal_len,
             )
         else:
