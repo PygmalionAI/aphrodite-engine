@@ -409,13 +409,6 @@ ext_modules = []
 
 if _is_cuda():
     ext_modules.append(CMakeExtension(name="aphrodite._moe_C"))
-
-    if _install_quants():
-        ext_modules.append(CMakeExtension(name="aphrodite._quant_C"))
-
-    if _install_punica():
-        ext_modules.append(CMakeExtension(name="aphrodite._punica_C"))
-
     if _install_hadamard():
         ext_modules.append(CMakeExtension(name="aphrodite._hadamard_C"))
 
@@ -423,6 +416,8 @@ if not _is_neuron():
     ext_modules.append(CMakeExtension(name="aphrodite._C"))
     if _install_quants():
         ext_modules.append(CMakeExtension(name="aphrodite._quant_C"))
+    if _install_punica():
+        ext_modules.append(CMakeExtension(name="aphrodite._punica_C"))
 
 package_data = {
     "aphrodite": [
