@@ -721,6 +721,5 @@ class AsyncEngineArgs(EngineArgs):
             action="store_true",
             default=EngineArgs.ngram_prompt_lookup_min,
             help="Use the Uvloop asyncio event loop to possibly increase "
-            "performance"
-        )
+            "performance")
         return parser
