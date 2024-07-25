@@ -1,6 +1,7 @@
 """A block manager that manages token blocks."""
 from typing import Dict, List, Optional
 from typing import Sequence as GenericSequence
+from typing import Tuple
 
 from aphrodite.common.sequence import Sequence, SequenceGroup, SequenceStatus
 from aphrodite.common.utils import Device
@@ -163,7 +164,7 @@ class BlockSpaceManagerV2(BlockSpaceManager):
         self,
         seq: Sequence,
         num_lookahead_slots: int,
-    ) -> Dict[int, List[int]]:
+    ) -> List[Tuple[int, int]]:
 
         block_table = self.block_tables[seq.seq_id]
 

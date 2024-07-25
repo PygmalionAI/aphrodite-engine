@@ -2,6 +2,7 @@ import enum
 from abc import ABC, abstractmethod
 from typing import Dict, List
 from typing import Sequence as GenericSequence
+from typing import Tuple
 
 from aphrodite.common.sequence import Sequence, SequenceGroup
 
@@ -56,7 +57,7 @@ class BlockSpaceManager(ABC):
         self,
         seq: Sequence,
         num_lookahead_slots: int,
-    ) -> Dict[int, List[int]]:
+    ) -> List[Tuple[int, int]]:
         pass
 
     @abstractmethod
