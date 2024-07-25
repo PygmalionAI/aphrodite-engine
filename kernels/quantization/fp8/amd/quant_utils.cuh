@@ -5,12 +5,17 @@
 #include <hip/hip_bf16.h>
 #include <hip/hip_bfloat16.h>
 
+#include "../../../attention/dtype_fp8.cuh"
 #include "../../../attention/dtype_float32.cuh"
 #include "../../../attention/dtype_bfloat16.cuh"
 
 namespace aphrodite
 {
-namespace fp8_e4m3 {
+#ifdef USE_ROCM
+
+namespace fp8 {
+#ifdef ENABLE_FP8
+
 template <typename Tout, typename Tin>
 __inline__ __device__ Tout vec_conversion(const Tin& x)
 {
@@ -304,10 +309,12 @@ __inline__ __device__ bf16_8_t vec_conversion<bf16_8_t, Float8_>(const Float8_& 
 
 
 /* Scaled and vectorized conversions, for data exchange between high and low precision domains
+
    Convention of the scale in API, e.g: FP8_data = Quantization( High_Precision_data / scale )
    s.t.
      Quantize(HP / scale) => FP8
      Dequant(FP8) * scale =>  HP
+
  */
 
 // fp8 -> half
@@ -510,6 +517,58 @@ __inline__ __device__ float4 scaled_vec_conversion<float4, uint32_t>(const uint3
     float4 res = make_float4(tmp.x.x, tmp.x.y, tmp.y.x, tmp.y.y);
     return res;
 }
+#endif // ENABLE_FP8
 
+template <typename Tout, typename Tin, Fp8KVCacheDataType kv_dt>
+__inline__ __device__ Tout convert(const Tin &x) {
+#ifdef ENABLE_FP8
+  if constexpr (kv_dt == Fp8KVCacheDataType::kFp8E4M3) {
+    return vec_conversion<Tout, Tin>(x);
+  }
+#endif
+  assert(false);
 }
+
+template <typename Tout, typename Tin, Fp8KVCacheDataType kv_dt>
+__inline__ __device__ Tout scaled_convert(const Tin &x, const float scale) {
+#ifdef ENABLE_FP8
+  if constexpr (kv_dt == Fp8KVCacheDataType::kFp8E4M3) {
+    return scaled_vec_conversion<Tout, Tin>(x, scale);
+  }
+#endif
+  assert(false);
+}
+
+// The following macro is used to dispatch the conversion function based on the
+// data type of the key and value cache. The FN is a macro that calls a function
+// with template<typename scalar_t, typename cache_t, Fp8KVCacheDataType kv_dt>.
+#define DISPATCH_BY_KV_CACHE_DTYPE(SRC_DTYPE, KV_DTYPE, FN)                    \
+  if (KV_DTYPE == "auto") {                                                    \
+    if (SRC_DTYPE == at::ScalarType::Float) {                                  \
+      FN(float, float, aphrodite::Fp8KVCacheDataType::kAuto);                  \
+    } else if (SRC_DTYPE == at::ScalarType::Half) {                            \
+      FN(uint16_t, uint16_t, aphrodite::Fp8KVCacheDataType::kAuto);            \
+    } else if (SRC_DTYPE == at::ScalarType::BFloat16) {                        \
+      FN(__nv_bfloat16, __nv_bfloat16, aphrodite::Fp8KVCacheDataType::kAuto);  \
+    } else {                                                                   \
+      TORCH_CHECK(false, "Unsupported input type of kv cache: ", SRC_DTYPE);   \
+    }                                                                          \
+  } else {                                                                     \
+    if (KV_DTYPE == "fp8" || KV_DTYPE == "fp8_e4m3") {                         \
+      if (SRC_DTYPE == at::ScalarType::Float) {                                \
+        FN(float, uint8_t, aphrodite::Fp8KVCacheDataType::kFp8E4M3);           \
+      } else if (SRC_DTYPE == at::ScalarType::Half) {                          \
+        FN(uint16_t, uint8_t, aphrodite::Fp8KVCacheDataType::kFp8E4M3);        \
+      } else if (SRC_DTYPE == at::ScalarType::BFloat16) {                      \
+        FN(__nv_bfloat16, uint8_t, aphrodite::Fp8KVCacheDataType::kFp8E4M3);   \
+      } else {                                                                 \
+        TORCH_CHECK(false, "Unsupported input type of kv cache: ", SRC_DTYPE); \
+      }                                                                        \
+    } else {                                                                   \
+      TORCH_CHECK(false, "Unsupported data type of kv cache: ", KV_DTYPE);     \
+    }                                                                          \
+  }
+
+} // fp8
+#endif // USE_ROCM
 } // namespace aphrodite

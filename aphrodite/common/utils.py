@@ -327,7 +327,7 @@ def _generate_random_fp8(
     from aphrodite._C import cache_ops
     tensor_tmp = torch.empty_like(tensor, dtype=torch.float16)
     tensor_tmp.uniform_(low, high)
-    cache_ops.convert_fp8(tensor_tmp, tensor)
+    cache_ops.convert_fp8(tensor, tensor_tmp)
     del tensor_tmp
 
 

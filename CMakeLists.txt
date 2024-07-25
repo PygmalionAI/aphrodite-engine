@@ -193,7 +193,7 @@ set (APHRODITE_QUANT_EXT_SRC
   "kernels/quantization/squeezellm/quant_cuda_kernel.cu"
   "kernels/quantization/exl2/q_matrix.cu"
   "kernels/quantization/exl2/q_gemm_exl2.cu"
-  "kernels/quantization/fp8/fp8_cuda_kernels.cu"
+  "kernels/quantization/fp8/common.cu"
   "kernels/quantization/quant_ops.cpp")
 
 if(APHRODITE_GPU_LANG STREQUAL "CUDA")
@@ -325,7 +325,6 @@ list(APPEND APHRODITE_HADAMARD_GPU_FLAGS
   "--expt-relaxed-constexpr"
   "--expt-extended-lambda"
   "--use_fast_math"
-  "--ptxas-options=-v"
   "-lineinfo")
 
 #
