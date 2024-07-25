@@ -6,6 +6,7 @@ from aphrodite.quantization.aqlm import AQLMConfig
 from aphrodite.quantization.awq import AWQConfig
 from aphrodite.quantization.base_config import QuantizationConfig
 from aphrodite.quantization.bitsandbytes import BitsandBytesConfig
+from aphrodite.quantization.deepspeedfp import DeepSpeedFPConfig
 from aphrodite.quantization.eetq import EETQConfig
 from aphrodite.quantization.exl2 import Exl2Config
 from aphrodite.quantization.fp8 import Fp8Config
@@ -28,6 +29,7 @@ QUANTIZATION_METHODS = {
     "aqlm": AQLMConfig,
     "awq": AWQConfig,
     "bnb": BitsandBytesConfig,
+    "deepspeedfp": DeepSpeedFPConfig,
     "eetq": EETQConfig,
     "exl2": Exl2Config,
     "fp8": Fp8Config,
