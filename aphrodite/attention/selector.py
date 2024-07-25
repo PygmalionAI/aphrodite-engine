@@ -75,11 +75,12 @@ def _which_attn_to_use(dtype: torch.dtype) -> _Backend:
         return _Backend.XFORMERS
 
     try:
-        import flash_attn  # noqa: F401
+        import vllm_flash_attn  # noqa: F401
     except ImportError:
         logger.info(
-            "Cannot use FlashAttention backend because the flash_attn package "
-            "is not found. Please install it for better performance.")
+            "Cannot use FlashAttention-2 backend because the vllm_flash_attn "
+            "package is not found. `pip install vllm-flash-attn` for better "
+            "performance.")
         return _Backend.XFORMERS
 
     backend_by_env_var = os.getenv(APHRODITE_ATTENTION_BACKEND)
