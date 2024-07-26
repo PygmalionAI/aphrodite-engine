@@ -4,6 +4,7 @@ import inspect
 import json
 import os
 import re
+import socket
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 from typing import AsyncGenerator, List, Optional, Set, Tuple
@@ -69,6 +70,20 @@ async def lifespan(app: fastapi.FastAPI):
         task.add_done_callback(_running_tasks.remove)
 
     yield
+
+
+def find_available_port(starting_port):
+    port = starting_port
+    while True:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("", port))
+                return port
+        except OSError:
+            logger.warning(f"Port {port} is already in use. Trying next port.")
+            port += 1
+            if port > 65535:
+                port = 2242
 
 
 @router.get("/health")
@@ -548,10 +563,12 @@ def run_server(args):
 
     if args.launch_kobold_api:
         _set_badwords(tokenizer, engine_model_config.hf_config)
+
+    available_port = find_available_port(args.port)
     try:
         uvicorn.run(app,
                     host=args.host,
-                    port=args.port,
+                    port=available_port,
                     log_level="info",
                     timeout_keep_alive=TIMEOUT_KEEP_ALIVE,
                     ssl_keyfile=args.ssl_keyfile,
