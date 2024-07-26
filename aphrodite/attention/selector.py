@@ -103,7 +103,7 @@ def _which_attn_to_use(
 
     backend_by_env_var = os.getenv(APHRODITE_ATTENTION_BACKEND)
     if backend_by_env_var is not None:
-        return _Backend[backend_by_env_var]
+        return _Backend[backend_by_env_var.upper()]
 
     # Default case.
     return _Backend.FLASH_ATTN
