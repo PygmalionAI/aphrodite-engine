@@ -54,10 +54,6 @@ class CacheEngine:
         )
 
         # Initialize the cache.
-        # Get attention backend.
-        self.attn_backend = get_attn_backend(model_config.dtype)
-
-        # Initialize the cache.
         self.gpu_cache = self._allocate_kv_cache(self.num_gpu_blocks, "cuda")
         self.cpu_cache = self._allocate_kv_cache(self.num_cpu_blocks, "cpu")
 

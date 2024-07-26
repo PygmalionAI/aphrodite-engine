@@ -687,7 +687,7 @@ class AsyncAphrodite:
         Details:
             - If the engine is not running, start the background loop,
               which iteratively invokes
-              :meth:`~vllm.engine.async_llm_engine.AsyncLLMEngine.engine_step`
+              :meth:`~aphrodite.engine.async_aphrodite.AsyncAphrodite.engine_step`
               to process the waiting requests.
             - Add the request to the engine's `RequestTracker`.
               On the next background loop, this request will be sent to
