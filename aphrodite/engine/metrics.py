@@ -58,6 +58,10 @@ class Metrics:
             labelnames=labelnames)
 
         # Iteration stats
+        self.counter_num_preemption = Counter(
+            name="aphrodite:num_preemptions_total",
+            documentation="Cumulative number of preemption from the engine.",
+            labelnames=labelnames)
         self.counter_prompt_tokens = Counter(
             name="aphrodite:prompt_tokens_total",
             documentation="Number of prefill tokens processed.",
@@ -178,6 +182,7 @@ class Stats:
     num_generation_tokens_iter: int
     time_to_first_tokens_iter: List[float]
     time_per_output_tokens_iter: List[float]
+    num_preemption_iter: int
 
     # Request stats (should have _requests suffix)
     #   Latency
@@ -241,6 +246,8 @@ class StatLogger:
                         stats.cpu_cache_usage_sys)
 
         # Iteration level data
+        self._log_counter(self.metrics.counter_num_preemption,
+                          stats.num_preemption_iter)
         self._log_counter(self.metrics.counter_prompt_tokens,
                           stats.num_prompt_tokens_iter)
         self._log_counter(self.metrics.counter_generation_tokens,
