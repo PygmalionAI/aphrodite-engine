@@ -4,13 +4,13 @@ import inspect
 import json
 import os
 import re
-import uvloop
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 from typing import AsyncGenerator, List, Optional, Set, Tuple
 
 import fastapi
 import uvicorn
+import uvloop
 from fastapi import APIRouter, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,18 +21,18 @@ from prometheus_client import make_asgi_app
 from starlette.routing import Mount
 
 import aphrodite
-import aphrodite.endpoints.openai.embeddings as OAIembeddings
 from aphrodite.common.logger import UVICORN_LOG_CONFIG
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import _SAMPLING_EPS, SamplingParams
 from aphrodite.common.utils import random_uuid
 from aphrodite.endpoints.openai.args import make_arg_parser
 from aphrodite.endpoints.openai.protocol import (
-    ChatCompletionRequest, CompletionRequest, EmbeddingsRequest,
-    EmbeddingsResponse, ErrorResponse, KAIGenerationInputSchema, Prompt)
+    ChatCompletionRequest, CompletionRequest, EmbeddingRequest, ErrorResponse,
+    KAIGenerationInputSchema, Prompt)
 from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
 from aphrodite.endpoints.openai.serving_completions import \
     OpenAIServingCompletion
+from aphrodite.endpoints.openai.serving_embedding import OpenAIServingEmbedding
 from aphrodite.endpoints.openai.serving_engine import LoRA
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
@@ -44,6 +44,7 @@ engine: Optional[AsyncAphrodite] = None
 engine_args: Optional[AsyncEngineArgs] = None
 openai_serving_chat: OpenAIServingChat = None
 openai_serving_completion: OpenAIServingCompletion = None
+openai_serving_embedding: OpenAIServingEmbedding = None
 router = APIRouter()
 kai_api = APIRouter()
 extra_api = APIRouter()
@@ -102,19 +103,17 @@ async def detokenize(request: Request,
     return JSONResponse(content=detokenized)
 
 
-@router.post("/v1/embeddings", response_model=EmbeddingsResponse)
-async def handle_embeddings(request: EmbeddingsRequest,
+@router.post("/v1/embeddings")
+async def create_embeddings(request: EmbeddingRequest,
+                            raw_request: Request,
                             x_api_key: Optional[str] = Header(None)):
-    input = request.input
-    if not input:
-        raise JSONResponse(
-            status_code=400,
-            content={"error": "Missing required argument input"})
-
-    model = request.model if request.model else None
-    response = await OAIembeddings.embeddings(input, request.encoding_format,
-                                              model)
-    return JSONResponse(response)
+    generator = await openai_serving_embedding.create_embedding(
+        request, raw_request)
+    if isinstance(generator, ErrorResponse):
+        return JSONResponse(content=generator.model_dump(),
+                            status_code=generator.code)
+    else:
+        return JSONResponse(content=generator.model_dump())
 
 
 @router.get("/version", description="Fetch the Aphrodite Engine version.")
@@ -515,7 +514,7 @@ def run_server(args):
     logger.debug(f"args: {args}")
 
     global engine, engine_args, openai_serving_chat, openai_serving_completion,\
-        tokenizer, served_model_names
+        tokenizer, served_model_names, openai_serving_embedding
     if args.served_model_name is not None:
         served_model_names = args.served_model_name
     else:
@@ -543,6 +542,8 @@ def run_server(args):
                                             args.chat_template)
     openai_serving_completion = OpenAIServingCompletion(
         engine, served_model_names, args.lora_modules)
+    openai_serving_embedding = OpenAIServingEmbedding(engine,
+                                                      served_model_names)
     engine_model_config = asyncio.run(engine.get_model_config())
 
     if args.launch_kobold_api:

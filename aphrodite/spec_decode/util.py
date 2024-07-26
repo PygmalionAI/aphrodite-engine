@@ -4,8 +4,8 @@ from typing import Dict, List, Tuple
 
 import torch
 
-from aphrodite.common.sequence import (Logprob, SamplerOutput,
-                                       SequenceGroupMetadata,
+from aphrodite.common.sequence import (CompletionSequenceGroupOutput, Logprob,
+                                       SamplerOutput, SequenceGroupMetadata,
                                        SequenceGroupOutput, SequenceOutput)
 
 SeqId = int
@@ -95,7 +95,7 @@ def create_sequence_group_output(
         for topk_logprob_index, _ in enumerate(topk_token_ids)
     })
 
-    return SequenceGroupOutput(
+    return CompletionSequenceGroupOutput(
         samples=[
             SequenceOutput(parent_seq_id=seq_id,
                            output_token=token_id,

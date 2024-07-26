@@ -6,9 +6,9 @@ import torch
 import torch.nn as nn
 
 from aphrodite.common.sampling_params import SamplingType
-from aphrodite.common.sequence import (Logprob, PromptLogprobs, SampleLogprobs,
-                                       SamplerOutput, SequenceGroupOutput,
-                                       SequenceOutput)
+from aphrodite.common.sequence import (CompletionSequenceGroupOutput, Logprob,
+                                       PromptLogprobs, SampleLogprobs,
+                                       SamplerOutput, SequenceOutput)
 from aphrodite.modeling.layers.ops.sample import sample as sample_triton
 from aphrodite.modeling.sampling_metadata import (SamplingMetadata,
                                                   SamplingTensors,
@@ -1183,7 +1183,7 @@ def _build_sampler_output(
             seq_outputs.append(
                 SequenceOutput(seq_ids[parent_id], next_token_id, logprobs))
         sampler_output.append(
-            SequenceGroupOutput(seq_outputs, group_prompt_logprobs))
+            CompletionSequenceGroupOutput(seq_outputs, group_prompt_logprobs))
     # If not specified, store None values in SamplerOutput.
     if on_device_tensors is not None:
         (sampled_token_probs, logprobs_tensor,

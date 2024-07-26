@@ -1,7 +1,7 @@
 """A GPU worker class."""
 import gc
 import os
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.distributed
@@ -10,7 +10,8 @@ from loguru import logger
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig, VisionLanguageConfig)
-from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
+from aphrodite.common.sequence import (ExecuteModelRequest, PoolerOutput,
+                                       SamplerOutput)
 from aphrodite.distributed import (broadcast_tensor_dict,
                                    ensure_model_parallel_initialized,
                                    init_distributed_environment)
@@ -19,6 +20,7 @@ from aphrodite.distributed.device_communicators.custom_all_reduce import \
 from aphrodite.lora.request import LoRARequest
 from aphrodite.modeling import set_random_seed
 from aphrodite.task_handler.cache_engine import CacheEngine
+from aphrodite.task_handler.embedding_model_runner import EmbeddingModelRunner
 from aphrodite.task_handler.model_runner import ModelRunner
 from aphrodite.task_handler.worker_base import WorkerBase
 
@@ -69,7 +71,9 @@ class Worker(WorkerBase):
             assert not self.lora_config, (
                 "To be tested: vision language model with LoRA settings.")
 
-        self.model_runner = ModelRunner(
+        ModelRunnerClass = (EmbeddingModelRunner if
+                            self.model_config.embedding_mode else ModelRunner)
+        self.model_runner = ModelRunnerClass(
             model_config,
             parallel_config,
             scheduler_config,
@@ -84,7 +88,8 @@ class Worker(WorkerBase):
         # Uninitialized cache engine. Will be initialized by
         # initialize_cache.
         self.cache_engine: CacheEngine
-        self.gpu_cache: List[torch.Tensor]
+        # Initialize gpu_cache as embedding models don't initialize kv_caches
+        self.gpu_cache: Optional[List[torch.tensor]] = None
 
     def init_device(self) -> None:
         if self.device_config.device.type == "cuda":
@@ -210,7 +215,7 @@ class Worker(WorkerBase):
     def execute_model(
         self,
         execute_model_req: Optional[ExecuteModelRequest] = None
-    ) -> List[SamplerOutput]:
+    ) -> List[Union[SamplerOutput, PoolerOutput]]:
 
         if execute_model_req is None:
             seq_group_metadata_list = None

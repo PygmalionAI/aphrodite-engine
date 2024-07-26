@@ -7,7 +7,7 @@ from loguru import logger
 from aphrodite.common.utils import is_hip
 
 # Architecture -> (module, class).
-_MODELS = {
+_GENERATION_MODELS = {
     "AquilaModel": ("llama", "LlamaForCausalLM"),
     "AquilaForCausalLM": ("llama", "LlamaForCausalLM"),  # AquilaChat2
     "BaiChuanForCausalLM": ("baichuan", "BaiChuanForCausalLM"),  # baichuan-7b
@@ -55,6 +55,12 @@ _MODELS = {
     "ArcticForCausalLM": ("arctic", "ArcticForCausalLM"),
     "XverseForCausalLM": ("xverse", "XverseForCausalLM"),
 }
+
+_EMBEDDING_MODELS = {
+    "MistralModel": ("llama_embedding", "LlamaEmbeddingModel"),
+}
+
+_MODELS = {**_GENERATION_MODELS, **_EMBEDDING_MODELS}
 
 # Architecture -> type.
 # out of tree models
@@ -111,6 +117,10 @@ class ModelRegistry:
                 model_cls.__name__)
         global _OOT_MODELS
         _OOT_MODELS[model_arch] = model_cls
+
+    @staticmethod
+    def is_embedding_model(model_arch: str) -> bool:
+        return model_arch in _EMBEDDING_MODELS
 
 
 __all__ = [

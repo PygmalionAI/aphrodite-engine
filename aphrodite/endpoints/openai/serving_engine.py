@@ -9,15 +9,8 @@ from pydantic import conint
 
 from aphrodite.common.sequence import Logprob
 from aphrodite.endpoints.openai.protocol import (
-    ChatCompletionRequest,
-    CompletionRequest,
-    ErrorResponse,
-    LogProbs,
-    ModelCard,
-    ModelList,
-    ModelPermission,
-    Prompt,
-)
+    ChatCompletionRequest, CompletionRequest, EmbeddingRequest, ErrorResponse,
+    LogProbs, ModelCard, ModelList, ModelPermission, Prompt)
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.lora.request import LoRARequest
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
@@ -217,7 +210,8 @@ class OpenAIServing:
 
     def _validate_prompt_and_tokenize(
         self,
-        request: Union[ChatCompletionRequest, CompletionRequest],
+        request: Union[ChatCompletionRequest, CompletionRequest,
+                       EmbeddingRequest],
         prompt: Optional[str] = None,
         prompt_ids: Optional[List[int]] = None,
         truncate_prompt_tokens: Optional[conint(ge=1)] = None
@@ -242,6 +236,16 @@ class OpenAIServing:
         input_text = prompt if prompt is not None else self.tokenizer.decode(
             prompt_ids)
         token_num = len(input_ids)
+
+        # Note: EmbeddingRequest doesn't have max_tokens
+        if isinstance(request, EmbeddingRequest):
+            if token_num > self.max_model_len:
+                raise ValueError(
+                    f"This model's maximum context length is "
+                    f"{self.max_model_len} tokens. However, you requested "
+                    f"{token_num} tokens in the input for embedding "
+                    f"generation. Please reduce the length of the input.", )
+            return input_ids, input_text
 
         if request.max_tokens is None:
             request.max_tokens = self.max_model_len - token_num
