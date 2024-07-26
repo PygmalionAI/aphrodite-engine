@@ -99,6 +99,7 @@ class AphroditeEngine:
         log_stats: bool,
     ) -> None:
         logger.info(
+            "-" * 76 + "\n"
             f"Initializing the Aphrodite Engine (v{aphrodite.__version__}) "
             "with the following config:\n"
             f"Model = {model_config.model!r}\n"
@@ -111,9 +112,11 @@ class AphroditeEngine:
             f"Quantization Format = {model_config.quantization}\n"
             f"Context Length = {model_config.max_model_len}\n"
             f"Enforce Eager Mode = {model_config.enforce_eager}\n"
+            f"Prefix Caching = {cache_config.enable_prefix_caching}\n"
             f"KV Cache DataType = {cache_config.cache_dtype}\n"
             f"Device = {device_config.device}\n"
             f"Guided Decoding Backend = {decoding_config!r}\n")
+        logger.info("-" * 76)
         # TODO: Print more configs in debug mode.
 
         self.model_config = model_config
