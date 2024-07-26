@@ -108,7 +108,7 @@ def run_aphrodite(
         llm._add_request(  # pylint: disable=protected-access
             prompt=prompt,
             prompt_token_ids=None,
-            sampling_params=sampling_params,
+            params=sampling_params,
         )
 
     start = time.perf_counter()

@@ -51,7 +51,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description='Benchmark the performance of hashing function in'
         'automatic prefix caching.')
-    parser.add_argument('--model', type=str,
+    parser.add_argument('--model',
+                        type=str,
                         default='NousResearch/Meta-Llama-3-8B')
     parser.add_argument('--tensor-parallel-size', '-tp', type=int, default=1)
     parser.add_argument('--output-len', type=int, default=10)

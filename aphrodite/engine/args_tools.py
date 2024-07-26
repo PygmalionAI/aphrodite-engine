@@ -28,7 +28,8 @@ class EngineArgs:
     quantization_param_path: Optional[str] = None
     seed: int = 0
     max_model_len: Optional[int] = None
-    worker_use_ray: bool = False
+    worker_use_ray: Optional[bool] = False
+    distributed_executor_backend: Optional[str] = None
     pipeline_parallel_size: int = 1
     tensor_parallel_size: int = 1
     max_parallel_loading_workers: Optional[int] = None
@@ -234,11 +235,16 @@ class EngineArgs:
             ' parameter.')
         # Parallel arguments
         parser.add_argument(
-            "--worker-use-ray",
-            action="store_true",
-            help="use Ray for distributed serving, will be "
-            "automatically set when using more than 1 GPU",
-        )
+            '--distributed-executor-backend',
+            choices=['ray', 'mp'],
+            default=EngineArgs.distributed_executor_backend,
+            help='Backend to use for distributed serving. When more than 1 GPU '
+            'is used, will be automatically set to "ray" if installed '
+            'or "mp" (multiprocessing) otherwise.')
+        parser.add_argument(
+            '--worker-use-ray',
+            action='store_true',
+            help='Deprecated, use --distributed-executor-backend=ray.')
         parser.add_argument(
             "--pipeline-parallel-size",
             "-pp",

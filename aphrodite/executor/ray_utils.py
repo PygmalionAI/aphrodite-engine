@@ -42,9 +42,6 @@ try:
             return output
 
 except ImportError as e:
-    logger.warning(f"Failed to import Ray with {e!r}. "
-                   "For distributed inference, please install Ray with "
-                   "`pip install ray`.")
     ray = None  # type: ignore
     RayWorkerWrapper = None  # type: ignore
 
@@ -66,8 +63,9 @@ def initialize_ray_cluster(
     """
     if ray is None:
         raise ImportError(
-            "Ray is not installed. Please install Ray to use distributed "
-            "serving.")
+            "Ray is not installed. Please install Ray to use multi-node "
+            "serving. You can install Ray by running "
+            "`pip install aphrodite-engine[\"ray\"]`.")
 
     # Connect to a ray cluster.
     if is_hip():
