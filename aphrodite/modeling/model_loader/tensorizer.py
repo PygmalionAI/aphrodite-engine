@@ -5,6 +5,7 @@ import os
 import time
 import typing
 from dataclasses import dataclass
+from functools import partial
 from typing import Generator, Optional, Tuple, Type, Union
 
 import torch
@@ -13,6 +14,7 @@ from torch import nn
 from transformers import PretrainedConfig
 
 from aphrodite.common.config import ModelConfig, ParallelConfig
+from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.modeling.layers.vocab_parallel_embedding import \
     VocabParallelEmbedding
 from aphrodite.quantization.base_config import QuantizationConfig
@@ -25,6 +27,11 @@ try:
     from tensorizer.stream_io import open_stream
     from tensorizer.utils import (convert_bytes, get_mem_usage,
                                   no_init_or_tensor)
+
+    _read_stream, _write_stream = (partial(
+        open_stream,
+        mode=mode,
+    ) for mode in ("rb", "wb+"))
 except ImportError as e:
     tensorizer_error_msg = e
 
@@ -39,7 +46,7 @@ __all__ = [
 class TensorizerConfig:
     tensorizer_uri: Union[io.BufferedIOBase, io.RawIOBase, typing.BinaryIO,
                           str, bytes, os.PathLike, int]
-    aphrodite_tensorized: bool
+    aphrodite_tensorized: Optional[bool] = False
     verify_hash: Optional[bool] = False
     num_readers: Optional[int] = None
     encryption_keyfile: Optional[str] = None
@@ -89,18 +96,11 @@ def load_with_tensorizer(tensorizer_config: TensorizerConfig,
     return tensorizer.deserialize()
 
 
-def is_aphrodite_serialized_tensorizer(
-        tensorizer_config: TensorizerConfig) -> bool:
-    if tensorizer_config is None:
-        return False
-    return tensorizer_config.aphrodite_tensorized
-
-
 @dataclass
 class TensorizerArgs:
     tensorizer_uri: Union[io.BufferedIOBase, io.RawIOBase, typing.BinaryIO,
                           str, bytes, os.PathLike, int]
-    aphrodite_tensorized: bool
+    aphrodite_tensorized: Optional[bool] = False
     verify_hash: Optional[bool] = False
     num_readers: Optional[int] = None
     encryption_keyfile: Optional[str] = None
@@ -118,7 +118,9 @@ class TensorizerArgs:
           aphrodite model. This is used to determine the behavior of the 
           TensorDeserializer when loading tensors from a serialized model.
           It is far faster to deserialize a aphrodite model as it utilizes
-          tensorizer's optimized GPU loading.
+          ttensorizer's optimized GPU loading. Note that this is now
+          deprecated, as serialized Aphrodite models are now automatically
+          inferred as Aphrodite models.
       verify_hash: If True, the hashes of each tensor will be verified against 
           the hashes stored in the metadata. A `HashMismatchError` will be 
           raised if any of the hashes do not match.
@@ -177,7 +179,14 @@ class TensorizerArgs:
             'tensorizer options',
             description=('Options for configuring the behavior of the'
                          ' tensorizer deserializer when '
-                         '--load-format=tensorizer'))
+                         'load_format=tensorizer is specified when '
+                         'initializing an AphroditeEngine, either via the CLI '
+                         'when running the Aphrodite OpenAI inference server '
+                         'with a JSON string passed to '
+                         '--model-loader-extra-config or as arguments given '
+                         'to TensorizerConfig when passed to '
+                         'model_loader_extra_config in the constructor '
+                         'for AphroditeEngine.'))
 
         group.add_argument(
             "--tensorizer-uri",
@@ -222,14 +231,6 @@ class TensorizerArgs:
             help="The endpoint for the S3 bucket. Can also be set via the "
             "S3_ENDPOINT_URL environment variable.",
         )
-        group.add_argument(
-            "--aphrodite-tensorized",
-            action="store_true",
-            help=
-            "If enabled, indicates that the serialized model is a aphrodite "
-            "model. This is used to determine the behavior of the "
-            "TensorDeserializer when loading tensors from a "
-            "serialized model.")
 
         return parser
 
@@ -322,10 +323,9 @@ class TensorizerAgent:
         """
         before_mem = get_mem_usage()
         start = time.perf_counter()
-        with open_stream(
-                self.tensorizer_args.tensorizer_uri,
-                mode="rb",
-                **self.tensorizer_args.stream_params,
+        with _read_stream(
+                self.tensorizer_config.tensorizer_uri,
+                **self.tensorizer_args.stream_params
         ) as stream, TensorDeserializer(
                 stream,
                 dtype=self.tensorizer_config.dtype,
@@ -345,6 +345,7 @@ class TensorizerAgent:
 
         self._check_tensors_on_meta_device()
         self._resize_lora_embeddings()
+        del self.model.aphrodite_tensorized_marker
         return self.model.eval()
 
 
@@ -366,3 +367,62 @@ def tensorizer_weights_iterator(
         for name, param in state.items():
             yield name, param
     del state
+
+
+def is_aphrodite_tensorized(tensorizer_config: "TensorizerConfig") -> bool:
+    """
+    Infer if the model is a Aphrodite model by checking the weights for
+    a Aphrodite tensorized marker.
+    Args:
+        tensorizer_config: The TensorizerConfig object containing the
+            tensorizer_uri to the serialized model.
+    Returns:
+        bool: True if the model is a Aphrodite model, False otherwise.
+    """
+    tensorizer_args = tensorizer_config._construct_tensorizer_args()
+    deserializer = TensorDeserializer(open_stream(
+        tensorizer_args.tensorizer_uri, **tensorizer_args.stream_params),
+                                      **tensorizer_args.deserializer_params,
+                                      lazy_load=True)
+    if tensorizer_config.aphrodite_tensorized:
+        logger.warning(
+            "Please note that newly serialized Aphrodite models are "
+            "automatically inferred as Aphrodite models, so setting "
+            "aphrodite_tensorized=True is only necessary for models serialized "
+            "prior to this change.")
+        return True
+    if (".aphrodite_tensorized_marker" in deserializer):
+        return True
+    return False
+
+
+def get_pretensorized_aphrodite_model(engine: "AphroditeEngine") -> nn.Module:
+    model = (engine.model_executor.driver_worker.model_runner.model)
+    model.register_parameter(
+        "aphrodite_tensorized_marker",
+        nn.Parameter(torch.tensor((1, ), device="meta"), requires_grad=False))
+    return model
+
+
+def serialize_aphrodite_model(engine: "AphroditeEngine",
+                         tensorizer_config : TensorizerConfig,
+                         encryption_key_path: Optional[str] = None) \
+        -> nn.Module:
+
+    model = get_pretensorized_aphrodite_model(engine)
+    tensorizer_args = tensorizer_config._construct_tensorizer_args()
+    encryption_params = None
+    if encryption_key_path is not None:
+        encryption_params = EncryptionParams.random()
+        with _write_stream(encryption_key_path,
+                           **tensorizer_args.stream_params) as stream:
+            stream.write(encryption_params.key)
+
+    with _write_stream(tensorizer_args.tensorizer_uri,
+                       **tensorizer_args.stream_params) as stream:
+        serializer = TensorSerializer(stream, encryption=encryption_params)
+        serializer.write_module(model)
+        serializer.close()
+    logger.info("Successfully serialized model to "
+                f"{str(tensorizer_args.tensorizer_uri)}")
+    return model

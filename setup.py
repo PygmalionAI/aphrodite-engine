@@ -457,7 +457,7 @@ setup(
     install_requires=get_requirements(),
     extras_require={
         "flash-attn": ["flash-attn==2.5.8"],
-        "tensorizer": ["tensorizer==2.9.0"],
+        "tensorizer": ["tensorizer>=2.9.0"],
     },
     ext_modules=ext_modules,
     cmdclass={"build_ext": cmake_build_ext} if not _is_neuron() else {},
