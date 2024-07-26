@@ -1,19 +1,17 @@
 # ruff: noqa: SIM117
 import copy
-import gc
 import glob
 import os
 from abc import ABC, abstractmethod
-from contextlib import nullcontext
-from typing import (Any, Dict, Generator, List, Optional, Tuple, Type)
+from typing import Any, Dict, Generator, List, Optional, Tuple, Type
 
 import huggingface_hub
 import torch
 from torch import nn
 
-from aphrodite.common.config import (APHRODITE_USE_MODELSCOPE, DeviceConfig,
-                                     LoadConfig, LoadFormat, LoRAConfig,
-                                     ModelConfig, ParallelConfig,
+from aphrodite.common.config import (APHRODITE_USE_MODELSCOPE, CacheConfig,
+                                     DeviceConfig, LoadConfig, LoadFormat,
+                                     LoRAConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig, VisionLanguageConfig)
 from aphrodite.modeling.model_loader.tensorizer import (
     TensorizerConfig, is_aphrodite_serialized_tensorizer, load_with_tensorizer,
@@ -26,8 +24,6 @@ from aphrodite.modeling.model_loader.weight_utils import (
     pt_weights_iterator, safetensors_weights_iterator)
 from aphrodite.modeling.models.llava import LlavaForConditionalGeneration
 from aphrodite.quantization.base_config import QuantizationConfig
-from aphrodite.quantization.bitsandbytes import (BNBLinearMethod,
-                                                 replace_quant_params)
 
 _VISION_MODEL_CLASSES = [
     LlavaForConditionalGeneration,
@@ -78,15 +74,16 @@ def _get_model_initialization_kwargs(
     return extra_kwargs
 
 
-def _initialize_model(
-        model_config: ModelConfig, load_config: LoadConfig,
-        lora_config: Optional[LoRAConfig],
-        vision_language_config: Optional[VisionLanguageConfig]) -> nn.Module:
+def _initialize_model(model_config: ModelConfig, load_config: LoadConfig,
+                      lora_config: Optional[LoRAConfig],
+                      vision_language_config: Optional[VisionLanguageConfig],
+                      cache_config: CacheConfig) -> nn.Module:
     """Initialize a model with the given configurations."""
     model_class = get_model_architecture(model_config)[0]
     quant_config = _get_quantization_config(model_config, load_config)
 
     return model_class(config=model_config.hf_config,
+                       cache_config=cache_config,
                        quant_config=quant_config,
                        **_get_model_initialization_kwargs(
                            model_class, lora_config, vision_language_config))
@@ -104,7 +101,8 @@ class BaseModelLoader(ABC):
                    lora_config: Optional[LoRAConfig],
                    vision_language_config: Optional[VisionLanguageConfig],
                    parallel_config: ParallelConfig,
-                   scheduler_config: SchedulerConfig) -> nn.Module:
+                   scheduler_config: SchedulerConfig,
+                   cache_config: CacheConfig) -> nn.Module:
         """Load a model with the given configurations."""
         ...
 
@@ -218,18 +216,13 @@ class DefaultModelLoader(BaseModelLoader):
                    lora_config: Optional[LoRAConfig],
                    vision_language_config: Optional[VisionLanguageConfig],
                    parallel_config: ParallelConfig,
-                   scheduler_config: SchedulerConfig) -> nn.Module:
+                   scheduler_config: SchedulerConfig,
+                   cache_config: CacheConfig) -> nn.Module:
         with set_default_torch_dtype(model_config.dtype):
-            linear_method = _get_quantization_config(model_config,
-                                                     self.load_config)
-
-            context = torch.device(device_config.device) if not (
-                isinstance(linear_method, BNBLinearMethod)
-                and linear_method.quant_config.from_float) else nullcontext()
-
-            with context:
+            with torch.device(device_config.device):
                 model = _initialize_model(model_config, self.load_config,
-                                          lora_config, vision_language_config)
+                                          lora_config, vision_language_config,
+                                          cache_config)
             model.load_weights(
                 self._get_weights_iterator(model_config.model,
                                            model_config.revision,
@@ -245,18 +238,6 @@ class DefaultModelLoader(BaseModelLoader):
                 # to use quant_method.
                 if hasattr(module, "process_weights_after_loading"):
                     module.process_weights_after_loading()
-
-            if isinstance(linear_method, BNBLinearMethod):
-                replace_quant_params(
-                    model,
-                    quant_config=linear_method.quant_config,
-                    modules_to_not_convert="lm_head",
-                )
-                torch.cuda.synchronize()
-                if linear_method.quant_config.from_float:
-                    model = model.cuda()
-                gc.collect()
-                torch.cuda.empty_cache()
 
         return model.eval()
 
@@ -275,12 +256,14 @@ class DummyModelLoader(BaseModelLoader):
                    lora_config: Optional[LoRAConfig],
                    vision_language_config: Optional[VisionLanguageConfig],
                    parallel_config: ParallelConfig,
-                   scheduler_config: SchedulerConfig) -> nn.Module:
+                   scheduler_config: SchedulerConfig,
+                   cache_config: CacheConfig) -> nn.Module:
         with set_default_torch_dtype(model_config.dtype):
             with torch.device(device_config.device):
                 model = _initialize_model(model_config, self.load_config,
-                                          lora_config, vision_language_config)
-            # NOTE(woosuk): For accurate performance evaluation, we assign
+                                          lora_config, vision_language_config,
+                                          cache_config)
+            # NOTE: For accurate performance evaluation, we assign
             # random values to the weights.
             initialize_dummy_weights(model)
         return model.eval()
@@ -308,9 +291,12 @@ class TensorizerLoader(BaseModelLoader):
         return tensorizer_weights_iterator(tensorizer_args)
 
     def _load_model_unserialized(
-            self, model_config: ModelConfig, device_config: DeviceConfig,
-            lora_config: Optional[LoRAConfig],
-            vision_language_config: Optional[VisionLanguageConfig]
+        self,
+        model_config: ModelConfig,
+        device_config: DeviceConfig,
+        lora_config: Optional[LoRAConfig],
+        vision_language_config: Optional[VisionLanguageConfig],
+        cache_config: CacheConfig,
     ) -> nn.Module:
         """Load an unserialized model with tensorizer.
 
@@ -321,20 +307,23 @@ class TensorizerLoader(BaseModelLoader):
         with set_default_torch_dtype(model_config.dtype):
             with torch.device(device_config.device):
                 model = _initialize_model(model_config, self.load_config,
-                                          lora_config, vision_language_config)
+                                          lora_config, vision_language_config,
+                                          cache_config)
 
             model.load_weights(self._get_weights_iterator())
         return model.eval()
 
     def _load_model_serialized(
-            self, model_config: ModelConfig, device_config: DeviceConfig,
-            lora_config: Optional[LoRAConfig],
-            vision_language_config: Optional[VisionLanguageConfig]
+        self,
+        model_config: ModelConfig,
+        device_config: DeviceConfig,
+        lora_config: Optional[LoRAConfig],
+        vision_language_config: Optional[VisionLanguageConfig],
+        cache_config: CacheConfig,
     ) -> nn.Module:
         """Load a serialized model with tensorizer.
-
-        See the examples/tensorize_aphrodite_model.py example "
-        script for serializing Aphrodite models."""
+        See the examples/tensorize_vllm_model.py example "
+        script for serializing vLLM models."""
         with set_default_torch_dtype(model_config.dtype):
             with torch.device(device_config.device):
                 model_class = get_model_architecture(model_config)[0]
@@ -343,6 +332,7 @@ class TensorizerLoader(BaseModelLoader):
                 extra_kwargs = _get_model_initialization_kwargs(
                     model_class, lora_config, vision_language_config)
                 extra_kwargs["quant_config"] = quant_config
+                extra_kwargs["cache_config"] = cache_config
 
                 tensorizer_config = copy.copy(self.tensorizer_config)
                 tensorizer_config.model_class = model_class
@@ -357,16 +347,19 @@ class TensorizerLoader(BaseModelLoader):
                    lora_config: Optional[LoRAConfig],
                    vision_language_config: Optional[VisionLanguageConfig],
                    parallel_config: ParallelConfig,
-                   scheduler_config: SchedulerConfig) -> nn.Module:
+                   scheduler_config: SchedulerConfig,
+                   cache_config: CacheConfig) -> nn.Module:
         self._verify_config(model_config, parallel_config)
 
         if is_aphrodite_serialized_tensorizer(self.tensorizer_config):
             return self._load_model_serialized(model_config, device_config,
                                                lora_config,
-                                               vision_language_config)
+                                               vision_language_config,
+                                               cache_config)
         return self._load_model_unserialized(model_config, device_config,
                                              lora_config,
-                                             vision_language_config)
+                                             vision_language_config,
+                                             cache_config)
 
 
 def get_model_loader(load_config: LoadConfig) -> BaseModelLoader:

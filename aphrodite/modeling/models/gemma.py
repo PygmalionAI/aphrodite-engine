@@ -23,7 +23,7 @@ from torch import nn
 from transformers import GemmaConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
-from aphrodite.common.config import LoRAConfig
+from aphrodite.common.config import CacheConfig, LoRAConfig
 from aphrodite.common.sequence import SamplerOutput
 from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.modeling.layers.activation import GeluAndMul
@@ -104,6 +104,7 @@ class GemmaAttention(nn.Module):
                  head_dim: int,
                  max_position_embeddings: int = 8192,
                  rope_theta: float = 10000,
+                 cache_config: Optional[CacheConfig] = None,
                  quant_config: Optional[QuantizationConfig] = None) -> None:
         super().__init__()
         self.hidden_size = hidden_size
@@ -152,7 +153,8 @@ class GemmaAttention(nn.Module):
         self.attn = Attention(self.num_heads,
                               self.head_dim,
                               self.scaling,
-                              num_kv_heads=self.num_kv_heads)
+                              num_kv_heads=self.num_kv_heads,
+                              cache_config=cache_config)
 
     def forward(
         self,
@@ -174,6 +176,7 @@ class GemmaDecoderLayer(nn.Module):
     def __init__(
         self,
         config: GemmaConfig,
+        cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
         super().__init__()
@@ -185,6 +188,7 @@ class GemmaDecoderLayer(nn.Module):
             head_dim=config.head_dim,
             max_position_embeddings=config.max_position_embeddings,
             rope_theta=config.rope_theta,
+            cache_config=cache_config,
             quant_config=quant_config,
         )
         self.mlp = GemmaMLP(
@@ -233,6 +237,7 @@ class GemmaModel(nn.Module):
     def __init__(
         self,
         config: GemmaConfig,
+        cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
         super().__init__()
@@ -243,7 +248,7 @@ class GemmaModel(nn.Module):
             config.hidden_size,
         )
         self.layers = nn.ModuleList([
-            GemmaDecoderLayer(config, quant_config)
+            GemmaDecoderLayer(config, cache_config, quant_config)
             for _ in range(config.num_hidden_layers)
         ])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -306,6 +311,7 @@ class GemmaForCausalLM(nn.Module):
     def __init__(
         self,
         config: GemmaConfig,
+        cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         lora_config: Optional[LoRAConfig] = None,
     ) -> None:
@@ -313,7 +319,7 @@ class GemmaForCausalLM(nn.Module):
         super().__init__()
         self.config = config
         self.quant_config = quant_config
-        self.model = GemmaModel(config, quant_config)
+        self.model = GemmaModel(config, cache_config, quant_config)
         self.logits_processor = LogitsProcessor(config.vocab_size)
         self.sampler = Sampler()
 

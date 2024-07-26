@@ -13,8 +13,10 @@ from aphrodite.modeling.pooling_metadata import PoolingMetadata
 
 class LlamaEmbeddingModel(nn.Module):
     """A model that uses Llama with additional embedding functionalities.
+
    This class encapsulates the LlamaModel and provides an interface for
    embedding operations and customized pooling functions.
+
    Attributes:
        model: An instance of LlamaModel used for forward operations.
        _pooler: An instance of Pooler used for pooling operations.

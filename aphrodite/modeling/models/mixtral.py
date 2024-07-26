@@ -1,7 +1,6 @@
 # coding=utf-8
 # Adapted from
 # https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/models/llama/modeling_llama.py
-# Copyright 2023 The PygmalionAI team.
 # Copyright 2023 The vLLM team.
 # Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
 #
@@ -29,7 +28,7 @@ from torch import nn
 from transformers import MixtralConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
-from aphrodite.common.config import LoRAConfig
+from aphrodite.common.config import CacheConfig, LoRAConfig
 from aphrodite.common.sequence import SamplerOutput
 from aphrodite.common.utils import print_warning_once
 from aphrodite.distributed import (get_tensor_model_parallel_rank,
@@ -79,7 +78,7 @@ class MixtralMoE(nn.Module):
         self.intermediate_size = intermediate_size // self.tp_size
         self.quant_config = quant_config
 
-        # FIXME: Make this more general to support different
+        # FIXME(pcmoritz): Make this more general to support different
         # quantization schemes
         self.use_fp8 = isinstance(quant_config, Fp8Config)
 
@@ -251,6 +250,7 @@ class MixtralAttention(nn.Module):
                  num_kv_heads: int,
                  max_position: int = 4096 * 32,
                  rope_theta: float = 10000,
+                 cache_config: Optional[CacheConfig] = None,
                  quant_config: Optional[QuantizationConfig] = None,
                  sliding_window: Optional[int] = None) -> None:
         super().__init__()
@@ -312,6 +312,7 @@ class MixtralAttention(nn.Module):
             self.scaling,
             num_kv_heads=self.num_kv_heads,
             sliding_window=self.sliding_window,
+            cache_config=cache_config,
         )
 
     def forward(
@@ -334,6 +335,7 @@ class MixtralDecoderLayer(nn.Module):
     def __init__(
         self,
         config: MixtralConfig,
+        cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
         super().__init__()
@@ -347,6 +349,7 @@ class MixtralDecoderLayer(nn.Module):
             num_kv_heads=config.num_key_value_heads,
             rope_theta=rope_theta,
             sliding_window=config.sliding_window,
+            cache_config=cache_config,
             quant_config=quant_config)
         self.block_sparse_moe = MixtralMoE(
             num_experts=config.num_local_experts,
@@ -393,6 +396,7 @@ class MixtralModel(nn.Module):
     def __init__(
         self,
         config: MixtralConfig,
+        cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         lora_config: Optional[LoRAConfig] = None,
     ) -> None:
@@ -409,7 +413,9 @@ class MixtralModel(nn.Module):
             org_num_embeddings=config.vocab_size,
         )
         self.layers = nn.ModuleList([
-            MixtralDecoderLayer(config, quant_config=quant_config)
+            MixtralDecoderLayer(config,
+                                cache_config,
+                                quant_config=quant_config)
             for _ in range(config.num_hidden_layers)
         ])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -459,12 +465,14 @@ class MixtralForCausalLM(nn.Module):
     def __init__(
         self,
         config: MixtralConfig,
+        cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         lora_config: Optional[LoRAConfig] = None,
     ) -> None:
         super().__init__()
         self.config = config
         self.model = MixtralModel(config,
+                                  cache_config,
                                   quant_config,
                                   lora_config=lora_config)
         self.unpadded_vocab_size = config.vocab_size

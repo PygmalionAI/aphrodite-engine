@@ -28,7 +28,7 @@ import torch
 from torch import nn
 
 from aphrodite.attention import Attention, AttentionMetadata
-from aphrodite.common.config import LoRAConfig
+from aphrodite.common.config import CacheConfig, LoRAConfig
 from aphrodite.common.sequence import SamplerOutput
 from aphrodite.distributed import (get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size,
@@ -180,6 +180,7 @@ class MiniCPMAttention(nn.Module):
         rope_theta: float = 10000,
         rope_scaling: Optional[Dict[str, Any]] = None,
         max_position_embeddings: int = 8192,
+        cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
         super().__init__()
@@ -233,7 +234,8 @@ class MiniCPMAttention(nn.Module):
         self.attn = Attention(self.num_heads,
                               self.head_dim,
                               self.scaling,
-                              num_kv_heads=self.num_kv_heads)
+                              num_kv_heads=self.num_kv_heads,
+                              cache_config=cache_config)
 
     def forward(
         self,
@@ -258,6 +260,7 @@ class MiniCPMDecoderLayer(nn.Module):
     def __init__(
         self,
         config,
+        cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
         super().__init__()
@@ -274,6 +277,7 @@ class MiniCPMDecoderLayer(nn.Module):
             rope_theta=rope_theta,
             rope_scaling=rope_scaling,
             max_position_embeddings=max_position_embeddings,
+            cache_config=cache_config,
             quant_config=quant_config,
         )
         self.num_experts = getattr(self.config, "num_experts", 0)
@@ -329,6 +333,7 @@ class MiniCPMModel(nn.Module):
     def __init__(
         self,
         config,
+        cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         lora_config: Optional[LoRAConfig] = None,
     ) -> None:
@@ -345,7 +350,7 @@ class MiniCPMModel(nn.Module):
             org_num_embeddings=config.vocab_size,
         )
         self.layers = nn.ModuleList([
-            MiniCPMDecoderLayer(config, quant_config)
+            MiniCPMDecoderLayer(config, cache_config, quant_config)
             for _ in range(config.num_hidden_layers)
         ])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -412,6 +417,7 @@ class MiniCPMForCausalLM(nn.Module):
     def __init__(
         self,
         config,
+        cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         lora_config: Optional[LoRAConfig] = None,
     ) -> None:
@@ -420,6 +426,7 @@ class MiniCPMForCausalLM(nn.Module):
         self.num_experts = getattr(self.config, "num_experts", 0)
         self.quant_config = quant_config
         self.model = MiniCPMModel(config,
+                                  cache_config,
                                   quant_config,
                                   lora_config=lora_config)
         unpadded_vocab_size = config.vocab_size
