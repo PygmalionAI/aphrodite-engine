@@ -20,8 +20,7 @@ from aphrodite.common.utils import (CudaMemoryProfiler,
                                     is_pin_memory_available,
                                     make_tensor_with_pad)
 from aphrodite.distributed import broadcast_tensor_dict
-from aphrodite.distributed.communication_op import graph_capture_mode
-from aphrodite.distributed.device_communicators import custom_all_reduce
+from aphrodite.distributed.communication_op import graph_capture, graph_mode
 from aphrodite.distributed.parallel_state import \
     get_tensor_model_parallel_world_size
 from aphrodite.lora.layers import LoRAMapping
@@ -950,13 +949,7 @@ class ModelRunner:
             bs for bs in _BATCH_SIZES_TO_CAPTURE if bs <= graph_batch_size
         ]
 
-        # NOTE: There are 3 backends for all-reduce: custom all-reduce
-        # kernel, pynccl, and PyTorch NCCL. When using CUDA graph, we use
-        # either custom all-reduce kernel or pynccl. When not using CUDA
-        # graph, we use either custom all-reduce kernel or PyTorch NCCL.
-        # We always prioritize using custom all-reduce kernel but fall back
-        # to PyTorch or pynccl if it is disabled or not supported.
-        with custom_all_reduce.capture():
+        with graph_capture():
             # NOTE: Capturing the largest batch size first may help reduce the
             # memory usage of CUDA graph.
             for batch_size in reversed(batch_size_capture_list):
@@ -1048,7 +1041,7 @@ class CUDAGraphRunner:
         # Run the model once without capturing the graph.
         # This is to make sure that the captured graph does not include the
         # kernel launches for initial benchmarking (e.g., Triton autotune).
-        with graph_capture_mode():
+        with graph_mode():
             self.model(
                 input_ids,
                 positions,
@@ -1063,7 +1056,7 @@ class CUDAGraphRunner:
         # https://stackoverflow.com/questions/31039022/python-multi-line-with-statement
         self._graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(self._graph, pool=memory_pool):  # noqa: SIM117
-            with graph_capture_mode():
+            with graph_mode():
                 hidden_states = self.model(
                     input_ids,
                     positions,

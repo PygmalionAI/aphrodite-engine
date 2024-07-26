@@ -14,9 +14,8 @@ from aphrodite.common.sequence import (ExecuteModelRequest, PoolerOutput,
                                        SamplerOutput)
 from aphrodite.distributed import (broadcast_tensor_dict,
                                    ensure_model_parallel_initialized,
-                                   init_distributed_environment)
-from aphrodite.distributed.device_communicators.custom_all_reduce import \
-    init_custom_ar
+                                   init_distributed_environment,
+                                   set_custom_all_reduce)
 from aphrodite.lora.request import LoRARequest
 from aphrodite.modeling import set_random_seed
 from aphrodite.task_handler.cache_engine import CacheEngine
@@ -304,15 +303,12 @@ def init_worker_distributed_environment(
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""
+    set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
     init_distributed_environment(parallel_config.world_size, rank,
                                  distributed_init_method, local_rank)
 
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
-
-    # Initialize a custom fast all-reduce implementation.
-    if not parallel_config.disable_custom_all_reduce:
-        init_custom_ar()
 
 
 def _check_if_gpu_supports_dtype(torch_dtype: torch.dtype):
