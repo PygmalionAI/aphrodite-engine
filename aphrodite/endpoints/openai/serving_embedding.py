@@ -5,8 +5,9 @@ from fastapi import Request
 
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.endpoints.openai.protocol import (EmbeddingRequest,
-                                              EmbeddingResponse,
-                                              EmbeddingResponseData, UsageInfo)
+                                                 EmbeddingResponse,
+                                                 EmbeddingResponseData,
+                                                 UsageInfo)
 from aphrodite.endpoints.openai.serving_completions import parse_prompt_format
 from aphrodite.endpoints.openai.serving_engine import OpenAIServing, LoRA
 from aphrodite.common.outputs import EmbeddingRequestOutput
@@ -49,7 +50,8 @@ def request_output_to_embedding_response(
 
 class OpenAIServingEmbedding(OpenAIServing):
 
-    def __init__(self, engine: AsyncAphrodite,
+    def __init__(self,
+                 engine: AsyncAphrodite,
                  served_model_names: List[str],
                  lora_modules: Optional[List[LoRA]] = None):
         super().__init__(engine=engine,
