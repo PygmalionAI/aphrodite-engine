@@ -326,10 +326,12 @@ class AphroditeEngine:
         Details:
             - Set arrival_time to the current time if it is None.
             - Set prompt_token_ids to the encoded prompt if it is None.
-            - Create `best_of` number of :class:`~aphrodite.Sequence` objects.
-            - Create a :class:`~aphrodite.SequenceGroup` object
-              from the list of :class:`~aphrodite.Sequence`.
-            - Add the :class:`~aphrodite.SequenceGroup` object to the scheduler.
+            - Create `best_of` number of :class:`~aphrodite.common.sequence`
+                objects.
+            - Create a :class:`~aphrodite.common.sequenceGroup` object
+              from the list of :class:`~aphrodite.common.sequence`.
+            - Add the :class:`~aphrodite.common.sequenceGroup` object to the
+                scheduler.
 
         Example:
             >>> # initialize engine

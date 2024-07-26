@@ -2,8 +2,8 @@ import importlib
 from typing import Dict, List, Optional, Type
 
 import torch.nn as nn
-from loguru import logger
 
+from loguru import logger
 from aphrodite.common.utils import is_hip
 
 # Architecture -> (module, class).
@@ -101,7 +101,7 @@ class ModelRegistry:
 
         module_name, model_cls_name = _MODELS[model_arch]
         module = importlib.import_module(
-            f"aphrodite.modeling.models.{module_name}")
+            f"vllm.model_executor.models.{module_name}")
         return getattr(module, model_cls_name, None)
 
     @staticmethod

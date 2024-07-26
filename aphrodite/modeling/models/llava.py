@@ -7,7 +7,7 @@ from torch import nn
 from transformers import CLIPVisionModel, LlavaConfig
 
 from aphrodite.attention import AttentionMetadata
-from aphrodite.common.config import VisionLanguageConfig
+from aphrodite.common.config import CacheConfig, VisionLanguageConfig
 from aphrodite.common.sequence import SamplerOutput
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
@@ -61,6 +61,7 @@ class LlavaForConditionalGeneration(nn.Module):
     def __init__(self,
                  config: "LlavaConfig",
                  vision_language_config: VisionLanguageConfig,
+                 cache_config: Optional[CacheConfig] = None,
                  quant_config: Optional["QuantizationConfig"] = None) -> None:
         super().__init__()
         self.config = config
@@ -84,7 +85,8 @@ class LlavaForConditionalGeneration(nn.Module):
             projector_hidden_act=config.projector_hidden_act)
 
         self.quant_config = quant_config
-        self.language_model = LlamaModel(config.text_config, quant_config)
+        self.language_model = LlamaModel(config.text_config, cache_config,
+                                         quant_config)
         self.unpadded_vocab_size = config.text_config.vocab_size
         self.lm_head = ParallelLMHead(
             self.unpadded_vocab_size,

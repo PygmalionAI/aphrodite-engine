@@ -29,6 +29,7 @@ from torch.nn.parameter import Parameter
 from transformers import CohereConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
+from aphrodite.common.config import CacheConfig
 from aphrodite.common.sequence import SamplerOutput
 from aphrodite.distributed import (get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size)
@@ -123,6 +124,7 @@ class CohereAttention(nn.Module):
     def __init__(
         self,
         config: CohereConfig,
+        cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
@@ -179,6 +181,7 @@ class CohereAttention(nn.Module):
             self.head_dim,
             self.scaling,
             num_kv_heads=self.num_kv_heads,
+            cache_config=cache_config,
         )
         if self.use_qk_norm:
             self.q_norm = LayerNorm(param_shape=(self.num_heads,
@@ -218,11 +221,14 @@ class CohereDecoderLayer(nn.Module):
 
     def __init__(self,
                  config: CohereConfig,
+                 cache_config: Optional[CacheConfig] = None,
                  quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
         self.hidden_size = config.hidden_size
 
-        self.self_attn = CohereAttention(config, quant_config=quant_config)
+        self.self_attn = CohereAttention(config,
+                                         cache_config,
+                                         quant_config=quant_config)
 
         self.mlp = CohereMLP(config, quant_config=quant_config)
         self.input_layernorm = LayerNorm(param_shape=(config.hidden_size),
@@ -257,6 +263,7 @@ class CohereModel(nn.Module):
     def __init__(
         self,
         config: CohereConfig,
+        cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
@@ -265,7 +272,7 @@ class CohereModel(nn.Module):
         self.embed_tokens = VocabParallelEmbedding(config.vocab_size,
                                                    config.hidden_size)
         self.layers = nn.ModuleList([
-            CohereDecoderLayer(config, quant_config=quant_config)
+            CohereDecoderLayer(config, cache_config, quant_config=quant_config)
             for _ in range(config.num_hidden_layers)
         ])
         self.norm = LayerNorm(param_shape=(config.hidden_size),
@@ -298,6 +305,7 @@ class CohereForCausalLM(nn.Module):
     def __init__(
         self,
         config: CohereConfig,
+        cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
         super().__init__()
@@ -305,7 +313,7 @@ class CohereForCausalLM(nn.Module):
         self.quant_config = quant_config
         self.logits_processor = LogitsProcessor(config.vocab_size,
                                                 scale=config.logit_scale)
-        self.model = CohereModel(config, quant_config)
+        self.model = CohereModel(config, cache_config, quant_config)
         self.sampler = Sampler()
 
     @torch.no_grad()

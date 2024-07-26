@@ -23,6 +23,7 @@ from torch import nn
 from transformers import GPTJConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
+from aphrodite.common.config import CacheConfig
 from aphrodite.common.sequence import SamplerOutput
 from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.modeling.layers.activation import get_act_fn
@@ -44,6 +45,7 @@ class GPTJAttention(nn.Module):
     def __init__(
         self,
         config: GPTJConfig,
+        cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
@@ -82,7 +84,10 @@ class GPTJAttention(nn.Module):
             base=rope_theta,
             is_neox_style=False,
         )
-        self.attn = Attention(self.num_heads, self.head_size, scaling)
+        self.attn = Attention(self.num_heads,
+                              self.head_size,
+                              scaling,
+                              cache_config=cache_config)
 
     def forward(
         self,
@@ -134,13 +139,14 @@ class GPTJBlock(nn.Module):
     def __init__(
         self,
         config: GPTJConfig,
+        cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         inner_dim = (4 * config.n_embd
                      if config.n_inner is None else config.n_inner)
         self.ln_1 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
-        self.attn = GPTJAttention(config, quant_config)
+        self.attn = GPTJAttention(config, cache_config, quant_config)
         self.mlp = GPTJMLP(inner_dim, config, quant_config)
 
     def forward(
@@ -168,6 +174,7 @@ class GPTJModel(nn.Module):
     def __init__(
         self,
         config: GPTJConfig,
+        cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
@@ -177,8 +184,10 @@ class GPTJModel(nn.Module):
             config.vocab_size,
             self.embed_dim,
         )
-        self.h = nn.ModuleList(
-            [GPTJBlock(config, quant_config) for _ in range(config.n_layer)])
+        self.h = nn.ModuleList([
+            GPTJBlock(config, cache_config, quant_config)
+            for _ in range(config.n_layer)
+        ])
         self.ln_f = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
 
     def forward(
@@ -206,13 +215,14 @@ class GPTJForCausalLM(nn.Module):
     def __init__(
         self,
         config: GPTJConfig,
+        cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         self.config = config
         self.quant_config = quant_config
         assert not config.tie_word_embeddings
-        self.transformer = GPTJModel(config, quant_config)
+        self.transformer = GPTJModel(config, cache_config, quant_config)
         self.lm_head = ParallelLMHead(
             config.vocab_size,
             config.n_embd,

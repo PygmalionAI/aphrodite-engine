@@ -42,6 +42,7 @@ from torch import nn
 from transformers import PretrainedConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
+from aphrodite.common.config import CacheConfig
 from aphrodite.common.sequence import SamplerOutput
 from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.modeling.layers.activation import get_act_fn
@@ -62,6 +63,7 @@ class PhiAttention(nn.Module):
 
     def __init__(self,
                  config: PretrainedConfig,
+                 cache_config: Optional[CacheConfig] = None,
                  quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
         self.total_num_heads = config.num_attention_heads
@@ -104,7 +106,10 @@ class PhiAttention(nn.Module):
             max_position=max_position_embeddings,
             base=rope_theta,
         )
-        self.attn = Attention(self.num_heads, self.head_size, scaling)
+        self.attn = Attention(self.num_heads,
+                              self.head_size,
+                              scaling,
+                              cache_config=cache_config)
 
     def forward(
         self,
@@ -154,11 +159,12 @@ class PhiLayer(nn.Module):
 
     def __init__(self,
                  config: PretrainedConfig,
+                 cache_config: Optional[CacheConfig] = None,
                  quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
         self.input_layernorm = nn.LayerNorm(config.hidden_size,
                                             eps=config.layer_norm_eps)
-        self.self_attn = PhiAttention(config, quant_config)
+        self.self_attn = PhiAttention(config, cache_config, quant_config)
         self.mlp = PhiMLP(config, quant_config)
 
     def forward(
@@ -185,6 +191,7 @@ class PhiModel(nn.Module):
 
     def __init__(self,
                  config: PretrainedConfig,
+                 cache_config: Optional[CacheConfig] = None,
                  quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
         self.config = config
@@ -192,7 +199,7 @@ class PhiModel(nn.Module):
         self.embed_tokens = VocabParallelEmbedding(config.vocab_size,
                                                    config.hidden_size)
         self.layers = nn.ModuleList([
-            PhiLayer(config, quant_config)
+            PhiLayer(config, cache_config, quant_config)
             for _ in range(config.num_hidden_layers)
         ])
         self.final_layernorm = nn.LayerNorm(config.hidden_size,
@@ -224,12 +231,13 @@ class PhiForCausalLM(nn.Module):
 
     def __init__(self,
                  config: PretrainedConfig,
+                 cache_config: Optional[CacheConfig] = None,
                  quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
         self.config = config
         self.quant_config = quant_config
 
-        self.model = PhiModel(config, quant_config)
+        self.model = PhiModel(config, cache_config, quant_config)
 
         self.lm_head = ParallelLMHead(config.vocab_size,
                                       config.hidden_size,
