@@ -1,7 +1,7 @@
 import enum
 import os
 from functools import lru_cache
-from typing import Type
+from typing import Optional, Type
 
 import torch
 from loguru import logger
@@ -20,8 +20,18 @@ class _Backend(enum.Enum):
 
 
 @lru_cache(maxsize=None)
-def get_attn_backend(dtype: torch.dtype) -> Type[AttentionBackend]:
-    backend = _which_attn_to_use(dtype)
+def get_attn_backend(
+    num_heads: int,
+    head_size: int,
+    num_kv_heads: int,
+    sliding_window: Optional[int],
+    dtype: torch.dtype,
+    kv_cache_dtype: Optional[str],
+    block_size: int,
+) -> Type[AttentionBackend]:
+    backend = _which_attn_to_use(num_heads, head_size, num_kv_heads,
+                                 sliding_window, dtype, kv_cache_dtype,
+                                 block_size)
     if backend == _Backend.FLASH_ATTN:
         logger.info("Using FlashAttention backend.")
         from aphrodite.attention.backends.flash_attn import \
@@ -50,7 +60,15 @@ def get_attn_backend(dtype: torch.dtype) -> Type[AttentionBackend]:
         raise ValueError("Invalid attention backend.")
 
 
-def _which_attn_to_use(dtype: torch.dtype) -> _Backend:
+def _which_attn_to_use(
+    num_heads: int,
+    head_size: int,
+    num_kv_heads: int,
+    sliding_window: Optional[int],
+    dtype: torch.dtype,
+    kv_cache_dtype: Optional[str],
+    block_size: int,
+) -> _Backend:
     """Returns which flash attention backend to use."""
     if is_cpu():
         return _Backend.TORCH_SDPA
