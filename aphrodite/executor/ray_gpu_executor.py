@@ -101,7 +101,7 @@ class RayGPUExecutor(DistributedGPUExecutor):
                 **ray_remote_kwargs,
             )(RayWorkerWrapper).remote(
                 worker_module_name=worker_module_name,
-                worker_class_name="worker_class_name",
+                worker_class_name=worker_class_name,
                 trust_remote_code=self.model_config.trust_remote_code,
             )
 
