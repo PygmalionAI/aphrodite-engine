@@ -1,5 +1,6 @@
 """Attention layer ROCm GPUs."""
 from dataclasses import dataclass
+import os
 from typing import List, Optional, Tuple, Type
 
 import torch
