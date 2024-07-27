@@ -6,11 +6,10 @@ import torch
 from flashinfer import BatchDecodeWithPagedKVCacheWrapper
 from vllm_flash_attn import flash_attn_varlen_func
 
-from aphrodite._C import cache_ops
+from aphrodite._C import cache_ops as ops
 from aphrodite.attention.backends.abstract import (AttentionBackend,
                                                    AttentionImpl,
-                                                   AttentionMetadata,
-                                                   AttentionMetadataPerStage)
+                                                   AttentionMetadata)
 
 
 class FlashInferBackend(AttentionBackend):
@@ -57,9 +56,10 @@ class FlashInferBackend(AttentionBackend):
 
 
 @dataclass
-class FlashInferMetadata(AttentionMetadataPerStage):
-
-    is_prompt: bool
+class FlashInferMetadata(AttentionMetadata):
+    # Maximum sequence length among prefill batch. 0 if there are decoding
+    # requests only.
+    max_prefill_seq_len: int
 
     use_cuda_graph: bool = False
 
@@ -68,7 +68,6 @@ class FlashInferMetadata(AttentionMetadataPerStage):
     # Metadata for the prefill stage since we still
     # use flash attention for prefill.
     seq_start_loc: Optional[torch.Tensor] = None
-    max_seq_len: Optional[int] = None
     block_tables: Optional[torch.Tensor] = None
 
     # Metadata for the decode stage
@@ -96,7 +95,7 @@ class FlashInferMetadata(AttentionMetadataPerStage):
     num_kv_heads: Optional[int] = None
     # The dimension of the attention heads
     head_dim: Optional[int] = None
-    # Block size of aphrodite
+    # Block size of vllm
     page_size: Optional[int] = None
     # The data type of the paged kv cache
     data_type: torch.dtype = None
@@ -114,7 +113,8 @@ class FlashInferMetadata(AttentionMetadataPerStage):
         # When using flashinfer, we are also creating the FlashInferMetadata,
         # which will also call post_init by default, here we want to skip the
         # post_init if it's the prefill phase.
-        if not self.is_prompt:
+        if self.num_prefills == 0:
+            assert self.num_decode_tokens > 0
             self.decode_wrapper = flashinfer.BatchDecodeWithPagedKVCacheWrapper(
                 self.workspace_buffer, "NHD")
             self.decode_wrapper.begin_forward(
@@ -138,6 +138,24 @@ class FlashInferMetadata(AttentionMetadataPerStage):
         # broadcasted with nccl when TP is enabled.
         skip_fields.add('decode_wrapper')
         return super().asdict_zerocopy(skip_fields)
+
+    @property
+    def prefill_metadata(self) -> Optional["FlashInferMetadata"]:
+        # Currently chunked prefill is not supported
+        if self.num_decode_tokens == 0:
+            assert self.num_prefills > 0
+            return self
+
+        return None
+
+    @property
+    def decode_metadata(self) -> Optional["FlashInferMetadata"]:
+        # Currently chunked prefill is not supported
+        if self.num_prefills > 0:
+            assert self.num_decode_tokens == 0
+            return None
+
+        return self
 
 
 class FlashInferImpl(AttentionImpl):
@@ -173,7 +191,7 @@ class FlashInferImpl(AttentionImpl):
         key: torch.Tensor,
         value: torch.Tensor,
         kv_cache: Optional[torch.Tensor],
-        attn_metadata: AttentionMetadata[FlashInferMetadata],
+        attn_metadata: FlashInferMetadata,
         kv_scale: float = 1.0,
     ) -> torch.Tensor:
         assert kv_scale == 1.0
@@ -191,7 +209,7 @@ class FlashInferImpl(AttentionImpl):
 
         if kv_cache is not None:
             # Use the same reshape and cache kernel as flash attention.
-            cache_ops.reshape_and_cache_flash(
+            ops.reshape_and_cache_flash(
                 key,
                 value,
                 kv_cache[:, 0],
@@ -209,8 +227,8 @@ class FlashInferImpl(AttentionImpl):
                     v=value,
                     cu_seqlens_q=prefill_meta.seq_start_loc,
                     cu_seqlens_k=prefill_meta.seq_start_loc,
-                    max_seqlen_q=prefill_meta.max_seq_len,
-                    max_seqlen_k=prefill_meta.max_seq_len,
+                    max_seqlen_q=prefill_meta.max_prefill_seq_len,
+                    max_seqlen_k=prefill_meta.max_prefill_seq_len,
                     softmax_scale=self.scale,
                     causal=True,
                     window_size=self.sliding_window,
