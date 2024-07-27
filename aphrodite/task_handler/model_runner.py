@@ -18,7 +18,7 @@ from aphrodite.common.utils import (CudaMemoryProfiler,
                                     is_pin_memory_available,
                                     make_tensor_with_pad)
 from aphrodite.distributed import broadcast_tensor_dict
-from aphrodite.distributed.communication_op import graph_capture, graph_mode
+from aphrodite.distributed.communication_op import graph_capture
 from aphrodite.distributed.parallel_state import \
     get_tensor_model_parallel_world_size
 from aphrodite.lora.layers import LoRAMapping
@@ -871,7 +871,7 @@ class ModelRunner:
             bs for bs in _BATCH_SIZES_TO_CAPTURE if bs <= graph_batch_size
         ]
 
-        with graph_capture():
+        with graph_capture() as graph_capture_context:
             # NOTE: Capturing the largest batch size first may help reduce the
             # memory usage of CUDA graph.
             for batch_size in reversed(batch_size_capture_list):
@@ -907,6 +907,7 @@ class ModelRunner:
                     kv_caches,
                     attn_metadata,
                     memory_pool=self.graph_memory_pool,
+                    stream=graph_capture_context.stream,
                 )
                 self.graph_memory_pool = graph_runner.graph.pool()
                 self.graph_runners[batch_size] = graph_runner
@@ -914,7 +915,7 @@ class ModelRunner:
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
         # This usually takes < 10 seconds.
-        logger.info("Graph capturing finished in %.0f secs.", elapsed_time)
+        logger.info(f"Graph capturing finished in {elapsed_time} secs.")
 
     def __del__(self) -> None:
         # Delete the CUDA graphs before deleting the pynccl communicator.
@@ -951,36 +952,33 @@ class CUDAGraphRunner:
         positions: torch.Tensor,
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
-        memory_pool,
+        memory_pool: Optional[Tuple[int, int]],
+        stream: torch.cuda.Stream,
         **kwargs,
     ) -> None:
         assert self._graph is None
         # Run the model once without capturing the graph.
         # This is to make sure that the captured graph does not include the
         # kernel launches for initial benchmarking (e.g., Triton autotune).
-        with graph_mode():
-            self.model(
+        self.model(
+            input_ids,
+            positions,
+            kv_caches,
+            attn_metadata,
+            **kwargs,
+        )
+        torch.cuda.synchronize()
+
+        # Capture the graph.
+        self._graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(self._graph, pool=memory_pool, stream=stream):
+            hidden_states = self.model(
                 input_ids,
                 positions,
                 kv_caches,
                 attn_metadata,
                 **kwargs,
             )
-        torch.cuda.synchronize()
-
-        # Capture the graph.
-        # NOTE: Python 3.8 does not support multi-line with statements.
-        # https://stackoverflow.com/questions/31039022/python-multi-line-with-statement
-        self._graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(self._graph, pool=memory_pool):  # noqa: SIM117
-            with graph_mode():
-                hidden_states = self.model(
-                    input_ids,
-                    positions,
-                    kv_caches,
-                    attn_metadata,
-                    **kwargs,
-                )
         torch.cuda.synchronize()
 
         # Save the input and output buffers.
