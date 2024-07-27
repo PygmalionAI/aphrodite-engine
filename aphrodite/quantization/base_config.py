@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch
 from torch import nn
@@ -62,6 +62,17 @@ class QuantizationConfig(ABC):
     def from_config(cls, config: Dict[str, Any]) -> "QuantizationConfig":
         """Create a config class from the model's quantization config."""
         raise NotImplementedError
+
+    @classmethod
+    def override_quantization_method(cls, hf_quant_cfg,
+                                     user_quant) -> Optional[str]:
+        """
+           Detects if this quantization method can support a given checkpoint
+           format by overriding the user specified quantization method -- 
+           this method should only be overwritten by subclasses in exceptional 
+           circumstances
+        """
+        return None
 
     @staticmethod
     def get_from_keys(config: Dict[str, Any], keys: List[str]) -> Any:

@@ -4,6 +4,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 import torch
+from loguru import logger
 from torch.nn.parameter import Parameter
 
 from aphrodite.modeling.layers.linear import (LinearBase, LinearMethodBase,
@@ -120,6 +121,26 @@ class GPTQMarlinConfig(QuantizationConfig):
         desc_act = cls.get_from_keys(config, ["desc_act"])
         is_sym = cls.get_from_keys(config, ["sym"])
         return cls(weight_bits, group_size, desc_act, is_sym)
+
+    @classmethod
+    def override_quantization_method(cls, hf_quant_cfg,
+                                     user_quant) -> Optional[str]:
+        can_convert = cls.is_marlin_compatible(hf_quant_cfg)
+
+        is_valid_user_quant = (user_quant is None or user_quant == "marlin")
+
+        if can_convert and is_valid_user_quant:
+            msg = ("The model is convertible to {} during runtime."
+                   " Using {} kernel.".format(cls.get_name(), cls.get_name()))
+            logger.info(msg)
+            return cls.get_name()
+
+        if can_convert and user_quant == "gptq":
+            logger.info("Detected that the model can run with gptq_marlin"
+                        ", however you specified quantization=gptq explicitly,"
+                        " so forcing gptq. Use quantization=gptq_marlin for"
+                        " faster inference")
+        return None
 
     def get_quant_method(
             self,
