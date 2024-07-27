@@ -632,7 +632,7 @@ class EngineArgs:
                 self.tokenizer_pool_extra_config,
             ),
             self.ray_workers_use_nsight,
-        )
+            distributed_executor_backend=self.distributed_executor_backend)
 
         speculative_config = SpeculativeConfig.maybe_create_spec_config(
             target_model_config=model_config,
