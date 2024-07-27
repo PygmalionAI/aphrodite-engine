@@ -229,6 +229,8 @@ class AQLMLinearMethod(LinearMethodBase):
     """
 
     def __init__(self, quant_config: AQLMConfig):
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         self.quant_config = quant_config
 
     def create_weights(self, layer: torch.nn.Module,

@@ -13,6 +13,7 @@ from aphrodite.quantization.fp8 import Fp8Config
 from aphrodite.quantization.gguf import GGUFConfig
 from aphrodite.quantization.gptq import GPTQConfig
 from aphrodite.quantization.gptq_marlin import GPTQMarlinConfig
+from aphrodite.quantization.gptq_marlin_24 import GPTQMarlin24Config
 from aphrodite.quantization.marlin import MarlinConfig
 from aphrodite.quantization.quip import QuipConfig
 from aphrodite.quantization.squeezellm import SqueezeLLMConfig
@@ -34,11 +35,14 @@ QUANTIZATION_METHODS = {
     "exl2": Exl2Config,
     "fp8": Fp8Config,
     "gguf": GGUFConfig,
-    "gptq": GPTQConfig,
+    # The order of gptq methods is important for config.py iteration over
+    # override_quantization_method(..)
+    "marlin": MarlinConfig,
+    "gptq_marlin_24": GPTQMarlin24Config,
     "gptq_marlin": GPTQMarlinConfig,
+    "gptq": GPTQConfig,
     "quip": QuipConfig,
     "squeezellm": SqueezeLLMConfig,
-    "marlin": MarlinConfig,
 }
 
 

@@ -77,6 +77,8 @@ class QuipLinearMethod(LinearMethodBase):
     """
 
     def __init__(self, quant_config: QuipConfig):
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         self.quant_config = quant_config
         self.grid_packed_abs = get_packed_abs_grid().to(device="cuda")
         self.pack = 8

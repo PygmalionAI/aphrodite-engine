@@ -1,4 +1,5 @@
 import enum
+from contextlib import suppress
 from enum import Enum
 from fractions import Fraction
 from typing import Any, Dict, List, Optional
@@ -6,10 +7,14 @@ from typing import Any, Dict, List, Optional
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite._quant_C import quant_ops as ops
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import QuantizationConfig
+
+HAS_QUANTS = False
+with suppress(ImportError):
+    from aphrodite._quant_C import quant_ops as ops
+    HAS_QUANTS = True
 
 
 class GPTQConfig(QuantizationConfig):
@@ -87,6 +92,8 @@ class GPTQLinearMethod(LinearMethodBase):
     """
 
     def __init__(self, quant_config: GPTQConfig):
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         self.quant_config = quant_config
 
     def create_weights(
