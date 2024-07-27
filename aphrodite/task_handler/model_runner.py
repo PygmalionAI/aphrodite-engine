@@ -155,6 +155,8 @@ class ModelRunner:
 
     def load_model(self) -> None:
         with CudaMemoryProfiler() as m:
+            # measure the time it takes to load the model
+            start_time = time.time()
             self.model = get_model(
                 model_config=self.model_config,
                 device_config=self.device_config,
@@ -168,8 +170,10 @@ class ModelRunner:
 
         self.model_memory_usage = m.consumed_memory
         tp = get_tensor_model_parallel_world_size()
+        end_time = time.time()
+        total_time = end_time - start_time
         logger.info(
-            "Model weights loaded. Memory usage: "
+            f"Model weights loaded in {total_time:.2f} seconds.\nMemory usage: "
             f"{self.model_memory_usage / float(2**30):.2f} GiB x {tp} = "
             f"{self.model_memory_usage * tp / float(2**30):.2f} GiB")
 
@@ -209,6 +213,20 @@ class ModelRunner:
             logger.warning("KV cache scaling factors provided, "
                            "but the KV cache data type is not FP8. "
                            "KV cache scaling factors will not be used.")
+
+    def save_sharded_state(
+        self,
+        path: str,
+        pattern: Optional[str] = None,
+        max_size: Optional[int] = None,
+    ) -> None:
+        from aphrodite.modeling.model_loader.loader import ShardedStateLoader
+        ShardedStateLoader.save_model(
+            self.model,
+            path,
+            pattern=pattern,
+            max_size=max_size,
+        )
 
     def get_max_block_per_batch(self) -> int:
         block_size = self.block_size
