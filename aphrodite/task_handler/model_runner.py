@@ -167,10 +167,10 @@ class ModelRunner:
                 scheduler_config=self.scheduler_config,
                 cache_config=self.cache_config,
             )
+            end_time = time.time()
 
         self.model_memory_usage = m.consumed_memory
         tp = get_tensor_model_parallel_world_size()
-        end_time = time.time()
         total_time = end_time - start_time
         logger.info(
             f"Model weights loaded in {total_time:.2f} seconds.\nMemory usage: "
