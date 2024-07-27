@@ -28,8 +28,6 @@ USE_RAY_COMPILED_DAG = bool(os.getenv("APHRODITE_USE_RAY_COMPILED_DAG", 0))
 class RayGPUExecutor(DistributedGPUExecutor):
 
     def _init_executor(self) -> None:
-        assert (not self.speculative_config
-                ), "Speculative decoding not yet supported for RayGPU backend."
 
         assert self.parallel_config.distributed_executor_backend == "ray"
         placement_group = self.parallel_config.placement_group
@@ -90,14 +88,20 @@ class RayGPUExecutor(DistributedGPUExecutor):
                 placement_group_capture_child_tasks=True,
                 placement_group_bundle_index=bundle_id,
             )
+            if self.speculative_config is not None:
+                worker_module_name = "aphrodite.spec_decode.spec_decode_worker"
+                worker_class_name = "create_spec_worker"
+            else:
+                worker_module_name = "aphrodite.task_handler.worker"
+                worker_class_name = "Worker"
             worker = ray.remote(
                 num_cpus=0,
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
                 **ray_remote_kwargs,
             )(RayWorkerWrapper).remote(
-                worker_module_name="aphrodite.task_handler.worker",
-                worker_class_name="Worker",
+                worker_module_name=worker_module_name,
+                worker_class_name="worker_class_name",
                 trust_remote_code=self.model_config.trust_remote_code,
             )
 
@@ -107,8 +111,8 @@ class RayGPUExecutor(DistributedGPUExecutor):
                 # as the resource holder for the driver process.
                 self.driver_dummy_worker = worker
                 self.driver_worker = RayWorkerWrapper(
-                    worker_module_name="aphrodite.task_handler.worker",
-                    worker_class_name="Worker",
+                    worker_module_name=worker_module_name,
+                    worker_class_name=worker_class_name,
                     trust_remote_code=self.model_config.trust_remote_code,
                 )
             else:

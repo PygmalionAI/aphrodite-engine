@@ -9,7 +9,8 @@ from loguru import logger
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,
-                                     SchedulerConfig, VisionLanguageConfig)
+                                     SchedulerConfig, SpeculativeConfig,
+                                     VisionLanguageConfig)
 from aphrodite.common.sequence import (ExecuteModelRequest, PoolerOutput,
                                        SamplerOutput)
 from aphrodite.distributed import (broadcast_tensor_dict,
@@ -45,6 +46,7 @@ class Worker(WorkerBase):
         distributed_init_method: str,
         lora_config: Optional[LoRAConfig] = None,
         vision_language_config: Optional[VisionLanguageConfig] = None,
+        speculative_config: Optional[SpeculativeConfig] = None,
         is_driver_worker: bool = False,
     ) -> None:
         self.model_config = model_config
