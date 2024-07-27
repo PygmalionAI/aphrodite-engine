@@ -114,8 +114,8 @@ class WorkerMonitor(threading.Thread):
                 if process.sentinel in dead_sentinels:
                     process.join(JOIN_TIMEOUT_S)
                 if process.exitcode is not None and process.exitcode != 0:
-                    logger.error("Worker %s pid %s died, exit code: %s",
-                                 process.name, process.pid, process.exitcode)
+                    logger.error(f"Worker {process.name} pid {process.pid} "
+                                 f"died, exit code: {process.exitcode}")
             # Cleanup any remaining workers
             logger.info("Killing local Aphrodite worker processes")
             for worker in self.workers:
@@ -220,9 +220,8 @@ def _run_worker_process(
                 output = executor(*args, **kwargs)
             except BaseException as e:
                 tb = traceback.format_exc()
-                logger.error(
-                    "Exception in worker %s while processing method %s: %s, %s",
-                    process_name, method, e, tb)
+                logger.error(f"Exception in worker {process_name} while "
+                             f"processing method {method}: {e}, {tb}")
                 exception = e
             result_queue.put(
                 Result(task_id=task_id, value=output, exception=exception))

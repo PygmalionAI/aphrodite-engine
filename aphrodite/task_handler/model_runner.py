@@ -200,10 +200,10 @@ class ModelRunner:
                     self.model.load_kv_cache_scales(
                         self.model_config.quantization_param_path)
                 else:
-                    raise RuntimeError(
-                        "Using FP8 KV cache and scaling factors provided but "
-                        "model %s does not support loading scaling factors.",
-                        self.model.__class__)
+                    raise RuntimeError("Using FP8 KV cache and scaling factors"
+                                       " provided but model "
+                                       f"{self.model.__class__} does not "
+                                       "support loading scaling factors.")
             else:
                 logger.warning(
                     "Using FP8 KV cache but no scaling factors "

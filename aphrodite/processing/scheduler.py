@@ -532,10 +532,9 @@ class Scheduler:
             if alloc_status == AllocStatus.LATER:
                 break
             elif alloc_status == AllocStatus.NEVER:
-                logger.warning(
-                    "Failing the request %s because there's not enough kv "
-                    "cache blocks to run the entire sequence.",
-                    seq_group.request_id)
+                logger.warning(f"Failing the request {seq_group.request_id} "
+                               "because there's not enough kv cache blocks to "
+                               "run the entire sequence.")
                 for seq in seq_group.get_seqs():
                     seq.status = SequenceStatus.FINISHED_IGNORED
                 infeasible_seq_groups.append(seq_group)
