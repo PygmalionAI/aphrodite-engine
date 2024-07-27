@@ -54,10 +54,10 @@ class GPUExecutor(ExecutorBase):
                        distributed_init_method: Optional[str] = None):
 
         if self.speculative_config is None:
-            worker_module_name = "vllm.worker.worker"
+            worker_module_name = "aphrodite.task_handler.worker"
             worker_class_name = "Worker"
         else:
-            worker_module_name = "vllm.spec_decode.spec_decode_worker"
+            worker_module_name = "aphrodite.spec_decode.spec_decode_worker"
             worker_class_name = "create_spec_worker"
 
         wrapper = WorkerWrapperBase(
