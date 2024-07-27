@@ -6,15 +6,13 @@ from torch.nn.parameter import Parameter
 from loguru import logger
 
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
-from aphrodite.quantization.base_config import (
-    QuantizationConfig)
+from aphrodite.quantization.base_config import (QuantizationConfig)
 from aphrodite.modeling.utils import set_weight_attrs
 
 HAS_QUANTS = False
 with suppress(ImportError):
     from aphrodite._quant_C import quant_ops as ops
     HAS_QUANTS = True
-
 
 
 class GPTQMarlin24Config(QuantizationConfig):
