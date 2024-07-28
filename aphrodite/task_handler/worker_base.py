@@ -1,7 +1,7 @@
 import importlib
 import os
 from abc import ABC, abstractmethod
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from loguru import logger
 
@@ -47,8 +47,9 @@ class WorkerBase(ABC):
 
     @abstractmethod
     def execute_model(
-            self,
-            execute_model_req: ExecuteModelRequest) -> List[SamplerOutput]:
+        self,
+        execute_model_req: Optional[ExecuteModelRequest] = None
+    ) -> List[SamplerOutput]:
         """Executes at least one model step on the given sequences, unless no
         sequences are provided."""
         raise NotImplementedError
