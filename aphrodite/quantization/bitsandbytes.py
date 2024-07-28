@@ -1,14 +1,15 @@
+from contextlib import suppress
+from typing import Any, Dict, List, NamedTuple, Optional, TypeVar
+
 import torch
 from torch.nn.parameter import Parameter
-from typing import List, Dict, Any, Optional, TypeVar, NamedTuple
-from contextlib import suppress
 
-from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              set_weight_attrs)
-from aphrodite.quantization.base_config import (QuantizationConfig)
-from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
+from aphrodite.modeling.layers.linear import (ColumnParallelLinear, LinearBase,
+                                              LinearMethodBase,
                                               QKVParallelLinear,
                                               RowParallelLinear)
+from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.quantization.base_config import QuantizationConfig
 
 HAS_QUANTS = False
 with suppress(ImportError):
@@ -65,18 +66,6 @@ class BitsandBytesConfig(QuantizationConfig):
         # The BitsandBytes kernel only supports Ampere or newer GPUs.
         return 75
 
-    def merge_weight(self) -> bool:
-        return True
-
-    def rope_style(self) -> Optional[bool]:
-        return None
-
-    def quant_vocab(self) -> List[bool]:
-        return [False, False]
-
-    def support_fused_moe(self) -> bool:
-        return False
-
     @staticmethod
     def get_config_filenames() -> List[str]:
         return [
@@ -99,8 +88,11 @@ class BitsandBytesConfig(QuantizationConfig):
             quant_mode = "weight_only"
         return cls(weight_bits, group_size, zero_point, from_float, quant_mode)
 
-    def get_linear_method(self) -> "BNBLinearMethod":
-        return BNBLinearMethod(self)
+    def get_quant_method(
+            self, layer: torch.nn.Module) -> Optional["BNBLinearMethod"]:
+        if isinstance(layer, LinearBase):
+            return BNBLinearMethod(self)
+        return None
 
     def get_scaled_act_names(self) -> List[str]:
         return ["gelu", "gelu_fast", "gelu_new", "gelu_pytorch_tanh"]
@@ -113,12 +105,15 @@ class BNBLinearMethod(LinearMethodBase):
     """
 
     def __init__(self, quant_config: BitsandBytesConfig):
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         self.quant_config = quant_config
 
-    def create_weights(self, input_size_per_partition: int,
+    def create_weights(self, layer: torch.nn.Module,
+                       input_size_per_partition: int,
                        output_partition_sizes: List[int], input_size: int,
-                       output_size: int,
-                       params_dtype: torch.dtype) -> Dict[str, Any]:
+                       output_size: int, params_dtype: torch.dtype,
+                       **extra_weight_attrs):
         if self.quant_config.quant_mode == "weight_only" and \
                 input_size_per_partition % self.quant_config.group_size != 0:
             raise ValueError(
@@ -176,26 +171,28 @@ class BNBLinearMethod(LinearMethodBase):
                 "input_dim": 0,
                 "output_dim": 1,
             })
-            return {
-                "qweight": qweight,
-                "qzeros": qzeros,
-                "scales": scales,
-            }
+            layer.register_parameter("qweight", qweight)
+            set_weight_attrs(qweight, extra_weight_attrs)
+            layer.register_parameter("qzeros", qzeros)
+            set_weight_attrs(qzeros, extra_weight_attrs)
+            layer.register_parameter("scales", scales)
+            set_weight_attrs(scales, extra_weight_attrs)
         else:
             weight = Parameter(torch.empty(output_size_per_partition,
                                            input_size_per_partition,
                                            dtype=params_dtype),
                                requires_grad=False)
             set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})
-            return {"weight": weight}
+            layer.register_parameter("weight", weight)
+            set_weight_attrs(weight, extra_weight_attrs)
 
-    def apply_weights(self,
-                      weights: Dict[str, torch.Tensor],
-                      x: torch.Tensor,
-                      bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def apply(self,
+              layer: torch.nn.Module,
+              x: torch.Tensor,
+              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         if self.quant_config.quant_mode == "weight_only":
-            qweight = weights["qweight"].data
-            scales_zeros = weights["scales_zeros"].data
+            qweight = layer.qweight
+            scales_zeros = layer.scales_zeros
             pack_factor = self.quant_config.pack_factor
             out_shape = (x.shape[:-1] + (qweight.shape[-1] * pack_factor, ))
             reshaped_x = x.reshape(-1, x.shape[-1])
@@ -204,8 +201,8 @@ class BNBLinearMethod(LinearMethodBase):
                 out = out + bias
             return out.reshape(out_shape)
         else:
-            weight = weights["weight"]
-            state = weights["state"]
+            weight = layer.weight
+            state = layer.state
             if weight.CB is not None:
                 state.CB = weight.CB
                 state.SCB = weight.SCB
@@ -221,13 +218,6 @@ class BNBLinearMethod(LinearMethodBase):
                 del state.CB
                 weight.data = state.CxB
             return out
-
-    def apply_moe_weights(self, w1: Dict[str,
-                                         torch.Tensor], w2: Dict[str,
-                                                                 torch.Tensor],
-                          x: torch.Tensor, gating_output: torch.Tensor,
-                          topk: int, renormalize: bool) -> torch.Tensor:
-        raise NotImplementedError
 
 
 T = TypeVar("T", bound="torch.nn.Module")

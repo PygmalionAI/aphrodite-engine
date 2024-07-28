@@ -3,12 +3,15 @@ import importlib
 import inspect
 import json
 import os
+import re
+import socket
 from contextlib import asynccontextmanager
 from http import HTTPStatus
-from typing import AsyncGenerator, List, Optional, Tuple
+from typing import AsyncGenerator, List, Optional, Set, Tuple
 
 import fastapi
 import uvicorn
+import uvloop
 from fastapi import APIRouter, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,24 +19,25 @@ from fastapi.responses import (HTMLResponse, JSONResponse, Response,
                                StreamingResponse)
 from loguru import logger
 from prometheus_client import make_asgi_app
+from starlette.routing import Mount
 
 import aphrodite
-import aphrodite.endpoints.openai.embeddings as OAIembeddings
 from aphrodite.common.logger import UVICORN_LOG_CONFIG
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import _SAMPLING_EPS, SamplingParams
 from aphrodite.common.utils import random_uuid
 from aphrodite.endpoints.openai.args import make_arg_parser
 from aphrodite.endpoints.openai.protocol import (
-    ChatCompletionRequest, CompletionRequest, EmbeddingsRequest,
-    EmbeddingsResponse, ErrorResponse, KAIGenerationInputSchema, Prompt)
+    ChatCompletionRequest, CompletionRequest, EmbeddingRequest, ErrorResponse,
+    KAIGenerationInputSchema, Prompt)
 from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
 from aphrodite.endpoints.openai.serving_completions import \
     OpenAIServingCompletion
+from aphrodite.endpoints.openai.serving_embedding import OpenAIServingEmbedding
+from aphrodite.endpoints.openai.serving_engine import LoRA
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
-from aphrodite.endpoints.openai.serving_engine import LoRA
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
@@ -41,12 +45,15 @@ engine: Optional[AsyncAphrodite] = None
 engine_args: Optional[AsyncEngineArgs] = None
 openai_serving_chat: OpenAIServingChat = None
 openai_serving_completion: OpenAIServingCompletion = None
+openai_serving_embedding: OpenAIServingEmbedding = None
 router = APIRouter()
 kai_api = APIRouter()
 extra_api = APIRouter()
 kobold_lite_ui = ""
 sampler_json = ""
 gen_cache: dict = {}
+
+_running_tasks: Set[asyncio.Task] = set()
 
 
 @asynccontextmanager
@@ -58,14 +65,25 @@ async def lifespan(app: fastapi.FastAPI):
             await engine.do_log_stats()
 
     if not engine_args.disable_log_stats:
-        asyncio.create_task(_force_log())
+        task = asyncio.create_task(_force_log())
+        _running_tasks.add(task)
+        task.add_done_callback(_running_tasks.remove)
 
     yield
 
 
-# Add prometheus asgi middleware to route /metrics requests
-metrics_app = make_asgi_app()
-router.mount("/metrics", metrics_app)
+def find_available_port(starting_port):
+    port = starting_port
+    while True:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("", port))
+                return port
+        except OSError:
+            logger.warning(f"Port {port} is already in use. Trying next port.")
+            port += 1
+            if port > 65535:
+                port = 2242
 
 
 @router.get("/health")
@@ -100,19 +118,17 @@ async def detokenize(request: Request,
     return JSONResponse(content=detokenized)
 
 
-@router.post("/v1/embeddings", response_model=EmbeddingsResponse)
-async def handle_embeddings(request: EmbeddingsRequest,
+@router.post("/v1/embeddings")
+async def create_embeddings(request: EmbeddingRequest,
+                            raw_request: Request,
                             x_api_key: Optional[str] = Header(None)):
-    input = request.input
-    if not input:
-        raise JSONResponse(
-            status_code=400,
-            content={"error": "Missing required argument input"})
-
-    model = request.model if request.model else None
-    response = await OAIembeddings.embeddings(input, request.encoding_format,
-                                              model)
-    return JSONResponse(response)
+    generator = await openai_serving_embedding.create_embedding(
+        request, raw_request)
+    if isinstance(generator, ErrorResponse):
+        return JSONResponse(content=generator.model_dump(),
+                            status_code=generator.code)
+    else:
+        return JSONResponse(content=generator.model_dump())
 
 
 @router.get("/version", description="Fetch the Aphrodite Engine version.")
@@ -357,7 +373,7 @@ async def get_version():
 
 @kai_api.get("/model")
 async def get_model():
-    return JSONResponse({"result": f"aphrodite/{served_model}"})
+    return JSONResponse({"result": f"aphrodite/{served_model_names[0]}"})
 
 
 @kai_api.get("/config/soft_prompts_list")
@@ -426,6 +442,10 @@ async def get_kobold_lite_ui():
 def build_app(args):
     app = fastapi.FastAPI(lifespan=lifespan)
     app.include_router(router)
+    # Add prometheus asgi middleware to route /metrics requests
+    route = Mount("/metrics", make_asgi_app())
+    route.path_regex = re.compile('^/metrics(?P<path>.*)$')
+    app.routes.append(route)
     app.root_path = args.root_path
     if args.launch_kobold_api:
         logger.warning("Launching Kobold API server in addition to OpenAI. "
@@ -509,11 +529,14 @@ def run_server(args):
     logger.debug(f"args: {args}")
 
     global engine, engine_args, openai_serving_chat, openai_serving_completion,\
-        tokenizer, served_model
+        tokenizer, served_model_names, openai_serving_embedding
     if args.served_model_name is not None:
-        served_model = args.served_model_name
+        served_model_names = args.served_model_name
     else:
-        served_model = args.model
+        served_model_names = [args.model]
+
+    if args.uvloop:
+        uvloop.install()
 
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = AsyncAphrodite.from_engine_args(engine_args)
@@ -528,20 +551,24 @@ def run_server(args):
     if chat_template is None and tokenizer.chat_template is not None:
         chat_template = tokenizer.chat_template
 
-    openai_serving_chat = OpenAIServingChat(engine, served_model,
+    openai_serving_chat = OpenAIServingChat(engine, served_model_names,
                                             args.response_role,
                                             args.lora_modules,
                                             args.chat_template)
     openai_serving_completion = OpenAIServingCompletion(
-        engine, served_model, args.lora_modules)
+        engine, served_model_names, args.lora_modules)
+    openai_serving_embedding = OpenAIServingEmbedding(engine,
+                                                      served_model_names)
     engine_model_config = asyncio.run(engine.get_model_config())
 
     if args.launch_kobold_api:
         _set_badwords(tokenizer, engine_model_config.hf_config)
+
+    available_port = find_available_port(args.port)
     try:
         uvicorn.run(app,
                     host=args.host,
-                    port=args.port,
+                    port=available_port,
                     log_level="info",
                     timeout_keep_alive=TIMEOUT_KEEP_ALIVE,
                     ssl_keyfile=args.ssl_keyfile,

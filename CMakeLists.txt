@@ -193,19 +193,44 @@ set (APHRODITE_QUANT_EXT_SRC
   "kernels/quantization/squeezellm/quant_cuda_kernel.cu"
   "kernels/quantization/exl2/q_matrix.cu"
   "kernels/quantization/exl2/q_gemm_exl2.cu"
+  "kernels/quantization/fp8/common.cu"
   "kernels/quantization/quant_ops.cpp")
 
 if(APHRODITE_GPU_LANG STREQUAL "CUDA")
+include(FetchContent)
+  SET(CUTLASS_ENABLE_HEADERS_ONLY=ON)
+  FetchContent_Declare(
+        cutlass 
+        GIT_REPOSITORY https://github.com/nvidia/cutlass.git
+        # CUTLASS 3.5.0
+        GIT_TAG 7d49e6c7e2f8896c47f586706e67e1fb215529dc
+  )
+  FetchContent_MakeAvailable(cutlass)
   list(APPEND APHRODITE_QUANT_EXT_SRC
-    "kernels/quantization/aqlm/aqlm_cuda_entry.cpp"
-    "kernels/quantization/aqlm/aqlm_cuda_kernel.cu"
+    "kernels/quantization/aqlm/gemm_kernels.cu"
     "kernels/quantization/awq/gemm_kernels.cu"
     "kernels/quantization/bitsandbytes/int4_fp16_gemm_kernels.cu"
     "kernels/quantization/bitsandbytes/format.cu"
     "kernels/quantization/bitsandbytes/gemm_s4_f16.cu"
     "kernels/quantization/gguf/gguf_kernel.cu"
-    "kernels/quantization/marlin/marlin_cuda_kernel.cu"
-    "kernels/quantization/quip/origin_order.cu")
+    "kernels/quantization/marlin/dense/marlin_cuda_kernel.cu"
+    "kernels/quantization/marlin/sparse/marlin_24_cuda_kernel.cu"
+    "kernels/quantization/gptq_marlin/gptq_marlin.cu"
+    "kernels/quantization/gptq_marlin/gptq_marlin_repack.cu"
+    "kernels/quantization/quip/origin_order.cu"
+    "kernels/quantization/cutlass_w8a8/scaled_mm_dq_entry.cu"
+    "kernels/quantization/cutlass_w8a8/scaled_mm_dq_c2x.cu"
+    "kernels/quantization/cutlass_w8a8/scaled_mm_dq_c3x.cu")
+
+    #
+    # The CUTLASS kernels for Hopper require sm90a to be enabled.
+    # This is done via the below gencode option, BUT that creates kernels for both sm90 and sm90a.
+    # That adds an extra 17MB to compiled binary, so instead we selectively enable it.
+    set_source_files_properties(
+        "csrc/quantization/cutlass_w8a8/scaled_mm_dq_c3x.cu"
+        PROPERTIES
+        COMPILE_FLAGS
+        "-gencode arch=compute_90a,code=sm_90a")
 endif()
 
 define_gpu_extension_target(
@@ -215,6 +240,7 @@ define_gpu_extension_target(
   SOURCES ${APHRODITE_QUANT_EXT_SRC}
   COMPILE_FLAGS ${APHRODITE_GPU_FLAGS}
   ARCHITECTURES ${APHRODITE_GPU_ARCHES}
+  INCLUDE_DIRECTORIES ${CUTLASS_INCLUDE_DIR};${CUTLASS_TOOLS_UTIL_INCLUDE_DIR}
   WITH_SOABI)
 
 #
@@ -257,7 +283,8 @@ set(APHRODITE_PUNICA_EXT_SRC
   "kernels/punica/bgmv/bgmv_fp32_fp16_fp16.cu"
   "kernels/punica/bgmv/bgmv_fp32_fp32_bf16.cu"
   "kernels/punica/bgmv/bgmv_fp32_fp32_fp16.cu"
-  "kernels/punica/punica_ops.cc")
+  "kernels/punica/punica_ops.cu"
+  "kernels/punica/punica_pybind.cpp")
 
 #
 # Copy GPU compilation flags+update for punica
@@ -280,6 +307,9 @@ if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
       list(APPEND APHRODITE_PUNICA_GPU_ARCHES ${ARCH})
     endif()
   endforeach()
+  message(STATUS "Punica target arches: ${APHRODITE_PUNICA_GPU_ARCHES}")
+elseif(${APHRODITE_GPU_LANG} STREQUAL "HIP")
+  set(APHRODITE_PUNICA_GPU_ARCHES ${APHRODITE_GPU_ARCHES})
   message(STATUS "Punica target arches: ${APHRODITE_PUNICA_GPU_ARCHES}")
 endif()
 
@@ -319,7 +349,6 @@ list(APPEND APHRODITE_HADAMARD_GPU_FLAGS
   "--expt-relaxed-constexpr"
   "--expt-extended-lambda"
   "--use_fast_math"
-  "--ptxas-options=-v"
   "-lineinfo")
 
 #
@@ -368,12 +397,6 @@ add_custom_target(default)
 if(APHRODITE_GPU_LANG STREQUAL "CUDA" OR APHRODITE_GPU_LANG STREQUAL "HIP")
   message(STATUS "Enabling C extension.")
   add_dependencies(default _C)
-endif()
-
-if(APHRODITE_GPU_LANG STREQUAL "CUDA")
-  message(STATUS "Enabling moe extension.")
-  add_dependencies(default _moe_C)
-
   # Enable punica if -DAPHRODITE_INSTALL_PUNICA_KERNELS=ON or
   # APHRODITE_INSTALL_PUNICA_KERNELS is set in the environment and
   # there are supported target arches.
@@ -392,4 +415,9 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     message(STATUS "Enabling hadamard extension.")
     add_dependencies(default _hadamard_C)
   endif()
+endif()
+
+if(APHRODITE_GPU_LANG STREQUAL "CUDA")
+  message(STATUS "Enabling moe extension.")
+  add_dependencies(default _moe_C)
 endif()

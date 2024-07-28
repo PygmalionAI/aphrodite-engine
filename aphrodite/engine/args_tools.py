@@ -1,14 +1,16 @@
 import argparse
 import dataclasses
 from dataclasses import dataclass
-from typing import Optional
+import json
+from typing import Optional, Tuple
 
 from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
-                                     EngineConfig, LoRAConfig, ModelConfig,
-                                     ParallelConfig, SchedulerConfig,
-                                     SpeculativeConfig, TokenizerPoolConfig,
-                                     VisionLanguageConfig)
+                                     EngineConfig, LoadConfig, LoRAConfig,
+                                     ModelConfig, ParallelConfig,
+                                     SchedulerConfig, SpeculativeConfig,
+                                     TokenizerPoolConfig, VisionLanguageConfig)
 from aphrodite.common.utils import str_to_int_tuple
+from aphrodite.quantization import QUANTIZATION_METHODS
 
 
 @dataclass
@@ -17,6 +19,7 @@ class EngineArgs:
 
     model: str
     tokenizer: Optional[str] = None
+    skip_tokenizer_init: bool = False
     tokenizer_mode: str = "auto"
     trust_remote_code: bool = False
     download_dir: Optional[str] = None
@@ -26,28 +29,32 @@ class EngineArgs:
     quantization_param_path: Optional[str] = None
     seed: int = 0
     max_model_len: Optional[int] = None
-    worker_use_ray: bool = False
+    worker_use_ray: Optional[bool] = False
+    distributed_executor_backend: Optional[str] = "mp"
     pipeline_parallel_size: int = 1
     tensor_parallel_size: int = 1
     max_parallel_loading_workers: Optional[int] = None
     block_size: int = 16
-    context_shift: bool = False
+    enable_prefix_caching: bool = False
     use_v2_block_manager: bool = False
     swap_space: int = 4  # GiB
     gpu_memory_utilization: float = 0.90
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: int = 256
-    max_log_probs: int = 10  # OpenAI default is 5, setting to 10 because ST
+    max_logprobs: int = 10  # OpenAI default is 5, setting to 10 because ST
     disable_log_stats: bool = False
     revision: Optional[str] = None
     code_revision: Optional[str] = None
+    rope_scaling: Optional[dict] = None
     tokenizer_revision: Optional[str] = None
     quantization: Optional[str] = None
     load_in_4bit: bool = False
     load_in_8bit: bool = False
     load_in_smooth: bool = False
+    deepspeed_fp_bits: Optional[int] = None
     enforce_eager: bool = True
-    max_context_len_to_capture: int = 8192
+    max_context_len_to_capture: Optional[int] = None
+    max_seq_len_to_capture: int = 8192
     disable_custom_all_reduce: bool = False
     tokenizer_pool_size: int = 0
     tokenizer_pool_type: str = "ray"
@@ -55,13 +62,16 @@ class EngineArgs:
     enable_lora: bool = False
     max_loras: int = 1
     max_lora_rank: int = 16
+    fully_sharded_loras: bool = False
     lora_extra_vocab_size: int = 256
+    long_lora_scaling_factors: Optional[Tuple[float]] = None
     lora_dtype = "auto"
     max_cpu_loras: Optional[int] = None
     device: str = "auto"
     ray_workers_use_nsight: bool = False
     num_gpu_blocks_override: Optional[int] = None
     num_lookahead_slots: int = 0
+    model_loader_extra_config: Optional[dict] = None
     # Related to Vision-language models such as llava
     image_input_type: Optional[str] = None
     image_token_id: Optional[int] = None
@@ -74,6 +84,7 @@ class EngineArgs:
     speculative_model: Optional[str] = None
     num_speculative_tokens: Optional[int] = None
     speculative_max_model_len: Optional[int] = None
+    speculative_disable_by_batch_size: Optional[int] = None
     ngram_prompt_lookup_max: Optional[int] = None
     ngram_prompt_lookup_min: Optional[int] = None
 
@@ -102,6 +113,10 @@ class EngineArgs:
             default=EngineArgs.tokenizer,
             help="name or path of the huggingface tokenizer to use",
         )
+        parser.add_argument(
+            "--skip-tokenizer-init",
+            action="store_true",
+            help="Skip initialization of tokenizer and detokenizer")
         parser.add_argument(
             "--revision",
             type=str,
@@ -149,42 +164,54 @@ class EngineArgs:
             "huggingface",
         )
         parser.add_argument(
-            "--load-format",
+            '--load-format',
             type=str,
             default=EngineArgs.load_format,
-            choices=["auto", "pt", "safetensors", "npcache", "dummy"],
-            help="The format of the model weights to load. "
-            '"auto" will try to load the weights in the safetensors format '
-            "and fall back to the pytorch bin format if safetensors format "
-            "is not available. "
-            '"pt" will load the weights in the pytorch bin format. '
-            '"safetensors" will load the weights in the safetensors format. '
-            '"npcache" will load the weights in pytorch format and store '
-            "a numpy cache to speed up the loading. "
-            '"dummy" will initialize the weights with random values, '
-            "which is mainly for profiling.",
-        )
+            choices=[
+                'auto',
+                'pt',
+                'safetensors',
+                'npcache',
+                'dummy',
+                'tensorizer',
+                'sharded_state',
+            ],
+            help='The format of the model weights to load.\n\n'
+            '* "auto" will try to load the weights in the safetensors format '
+            'and fall back to the pytorch bin format if safetensors format '
+            'is not available.\n'
+            '* "pt" will load the weights in the pytorch bin format.\n'
+            '* "safetensors" will load the weights in the safetensors format.\n'
+            '* "npcache" will load the weights in pytorch format and store '
+            'a numpy cache to speed up the loading.\n'
+            '* "dummy" will initialize the weights with random values, '
+            'which is mainly for profiling.\n'
+            '* "tensorizer" will load the weights using tensorizer from '
+            'CoreWeave. See the Tensorize Aphrodite Model script in the '
+            'Examples section for more information.\n')
         parser.add_argument(
-            "--dtype",
+            '--dtype',
             type=str,
             default=EngineArgs.dtype,
             choices=[
-                "auto", "half", "float16", "bfloat16", "float", "float32"
+                'auto', 'half', 'float16', 'bfloat16', 'float', 'float32'
             ],
-            help="data type for model weights and activations. "
-            'The "auto" option will use FP16 precision '
-            "for FP32 and FP16 models, and BF16 precision "
-            "for BF16 models.",
-        )
+            help='Data type for model weights and activations.\n\n'
+            '* "auto" will use FP16 precision for FP32 and FP16 models, and '
+            'BF16 precision for BF16 models.\n'
+            '* "half" for FP16. Recommended for AWQ quantization.\n'
+            '* "float16" is the same as "half".\n'
+            '* "bfloat16" for a balance between precision and range.\n'
+            '* "float" is shorthand for FP32 precision.\n'
+            '* "float32" for FP32 precision.')
         parser.add_argument(
             '--kv-cache-dtype',
             type=str,
-            choices=['auto', 'fp8'],
+            choices=['auto', 'fp8', 'fp8_e5m2', 'fp8_e4m3'],
             default=EngineArgs.kv_cache_dtype,
             help='Data type for kv cache storage. If "auto", will use model '
-            'data type. FP8_E5M2 (without scaling) is only supported on cuda '
-            'version greater than 11.8. On ROCm (AMD GPU), FP8_E4M3 is instead '
-            'supported for common inference criteria. ')
+            'data type. CUDA 11.8+ supports fp8 (=fp8_e4m3) and fp8_e5m2. '
+            'ROCm (AMD GPU) supports fp8 (=fp8_e4m3)')
         parser.add_argument(
             '--quantization-param-path',
             type=str,
@@ -209,28 +236,36 @@ class EngineArgs:
             default='outlines',
             choices=['outlines', 'lm-format-enforcer'],
             help='Which engine will be used for guided decoding'
-            ' (JSON schema / regex etc)')
+            ' (JSON schema / regex etc) by default. Currently support '
+            'https://github.com/outlines-dev/outlines and '
+            'https://github.com/noamgat/lm-format-enforcer.'
+            ' Can be overridden per request via guided_decoding_backend'
+            ' parameter.')
         # Parallel arguments
         parser.add_argument(
-            "--worker-use-ray",
-            action="store_true",
-            help="use Ray for distributed serving, will be "
-            "automatically set when using more than 1 GPU",
-        )
+            '--distributed-executor-backend',
+            choices=['ray', 'mp'],
+            default=EngineArgs.distributed_executor_backend,
+            help='Backend to use for distributed serving. When more than 1 GPU '
+            'is used, will be automatically set to "ray" if installed '
+            'or "mp" (multiprocessing) otherwise.')
+        parser.add_argument(
+            '--worker-use-ray',
+            action='store_true',
+            help='Deprecated, use --distributed-executor-backend=ray.')
         parser.add_argument(
             "--pipeline-parallel-size",
             "-pp",
             type=int,
             default=EngineArgs.pipeline_parallel_size,
-            help="number of pipeline stages",
-        )
+            help="number of pipeline stages. Currently not supported.")
         parser.add_argument(
             "--tensor-parallel-size",
             "-tp",
             type=int,
             default=EngineArgs.tensor_parallel_size,
-            help="number of tensor parallel replicas",
-        )
+            help="number of tensor parallel replicas, i.e. the number of GPUs "
+            "to use.")
         parser.add_argument(
             "--max-parallel-loading-workers",
             type=int,
@@ -253,6 +288,7 @@ class EngineArgs:
             help="token block size",
         )
         parser.add_argument(
+            "--enable-prefix-caching",
             "--context-shift",
             action="store_true",
             help="Enable context shifting.",
@@ -307,9 +343,9 @@ class EngineArgs:
             help="maximum number of sequences per iteration",
         )
         parser.add_argument(
-            "--max-log-probs",
+            "--max-logprobs",
             type=int,
-            default=EngineArgs.max_log_probs,
+            default=EngineArgs.max_logprobs,
             help="maximum number of log probabilities to "
             "return.",
         )
@@ -323,19 +359,7 @@ class EngineArgs:
             "--quantization",
             "-q",
             type=str,
-            choices=[
-                "aqlm",
-                "awq",
-                "bnb",
-                "eetq",
-                "exl2",
-                "gguf",
-                "gptq",
-                "quip",
-                "squeezellm",
-                "marlin",
-                None,
-            ],
+            choices=[*QUANTIZATION_METHODS, None],
             default=EngineArgs.quantization,
             help="Method used to quantize the weights. If "
             "None, we first check the `quantization_config` "
@@ -364,6 +388,17 @@ class EngineArgs:
             "8bit format. Throughput at 0.7x of FP16. ",
         )
         parser.add_argument(
+            "--deepspeed-fp-bits",
+            type=int,
+            default=None,
+            help="Number of floating bits to use for the deepseed "
+            "quantization. Supported bits are: 4, 6, 8, 12. ")
+        parser.add_argument('--rope-scaling',
+                            default=None,
+                            type=json.loads,
+                            help='RoPE scaling configuration in JSON format. '
+                            'For example, {"type":"dynamic","factor":2.0}')
+        parser.add_argument(
             "--enforce-eager",
             type=lambda x: (str(x).lower() == 'true'),
             default=EngineArgs.enforce_eager,
@@ -371,14 +406,20 @@ class EngineArgs:
             "will use eager mode and CUDA graph in hybrid "
             "for maximal performance and flexibility.",
         )
-        parser.add_argument(
-            "--max-context-len-to-capture",
-            type=int,
-            default=EngineArgs.max_context_len_to_capture,
-            help="maximum context length covered by CUDA "
-            "graphs. When a sequence has context length "
-            "larger than this, we fall back to eager mode.",
-        )
+        parser.add_argument("--max-context-len-to-capture",
+                            type=int,
+                            default=EngineArgs.max_context_len_to_capture,
+                            help="Maximum context length covered by CUDA "
+                            "graphs. When a sequence has context length "
+                            "larger than this, we fall back to eager mode. "
+                            "(DEPRECATED. Use --max-seq_len-to-capture instead"
+                            ")")
+        parser.add_argument("--max-seq_len-to-capture",
+                            type=int,
+                            default=EngineArgs.max_seq_len_to_capture,
+                            help="Maximum sequence length covered by CUDA "
+                            "graphs. When a sequence has context length "
+                            "larger than this, we fall back to eager mode.")
         parser.add_argument(
             "--disable-custom-all-reduce",
             action="store_true",
@@ -439,6 +480,17 @@ class EngineArgs:
                   "base model dtype."),
         )
         parser.add_argument(
+            "--long-lora-scaling-factors",
+            type=str,
+            default=EngineArgs.long_lora_scaling_factors,
+            help=("Specify multiple scaling factors (which can "
+                  "be different from base model scaling factor "
+                  "- see eg. Long LoRA) to allow for multiple "
+                  "LoRA adapters trained with those scaling "
+                  "factors to be used at the same time. If not "
+                  "specified, only adapters trained with the "
+                  "base model scaling factor are allowed."))
+        parser.add_argument(
             "--max-cpu-loras",
             type=int,
             default=EngineArgs.max_cpu_loras,
@@ -446,6 +498,13 @@ class EngineArgs:
                   "Must be >= than max_num_seqs. "
                   "Defaults to max_num_seqs."),
         )
+        parser.add_argument(
+            "--fully-sharded-loras",
+            action='store_true',
+            help=("By default, only half of the LoRA computation is sharded "
+                  "with tensor parallelism. Enabling this will use the fully "
+                  "sharded layers. At high sequence length, max rank or "
+                  "tensor parallel size, this is likely faster."))
         parser.add_argument(
             "--device",
             type=str,
@@ -512,18 +571,32 @@ class EngineArgs:
             "draft model. Sequences over this length will skip "
             "speculation.")
         parser.add_argument(
+            "--speculative-disable-by-batch-size",
+            type=int,
+            default=EngineArgs.speculative_disable_by_batch_size,
+            help="Disable speculative decoding for new incoming requests "
+            "if the number of enqueue requests is larger than this value.")
+        parser.add_argument(
             "--ngram-prompt-lookup-max",
             type=int,
-            default=None,
-            help='Max size of window for ngram prompt lookup in speculative '
-            'decoding.')
-
+            default=EngineArgs.ngram_prompt_lookup_max,
+            help="Max size of window for ngram prompt lookup in speculative "
+            "decoding.")
         parser.add_argument(
-            '--ngram-prompt-lookup-min',
+            "--ngram-prompt-lookup-min",
             type=int,
-            default=None,
-            help='Min size of window for ngram prompt lookup in speculative '
-            'decoding.')
+            default=EngineArgs.ngram_prompt_lookup_min,
+            help="Min size of window for ngram prompt lookup in speculative "
+            "decoding.")
+        parser.add_argument("--model-loader-extra-config",
+                            type=str,
+                            default=EngineArgs.model_loader_extra_config,
+                            help="Extra config for model loader. "
+                            "This will be passed to the model loader "
+                            "corresponding to the chosen load_format. "
+                            "This should be a JSON string that will be "
+                            "parsed into a dictionary.")
+
         return parser
 
     @classmethod
@@ -541,23 +614,26 @@ class EngineArgs:
             self.tokenizer,
             self.tokenizer_mode,
             self.trust_remote_code,
-            self.download_dir,
-            self.load_format,
             self.dtype,
             self.seed,
             self.revision,
             self.code_revision,
+            self.rope_scaling,
             self.tokenizer_revision,
             self.max_model_len,
             self.quantization,
             self.load_in_4bit,
             self.load_in_8bit,
             self.load_in_smooth,
+            self.deepspeed_fp_bits,
             self.quantization_param_path,
             self.enforce_eager,
             self.max_context_len_to_capture,
-            self.max_log_probs,
+            self.max_seq_len_to_capture,
+            self.max_logprobs,
+            self.skip_tokenizer_init,
         )
+
         cache_config = CacheConfig(
             self.block_size,
             self.gpu_memory_utilization,
@@ -566,8 +642,9 @@ class EngineArgs:
             # self.kv_quant_params_path,
             self.num_gpu_blocks_override,
             model_config.get_sliding_window(),
-            self.context_shift,
+            self.enable_prefix_caching,
         )
+
         parallel_config = ParallelConfig(
             self.pipeline_parallel_size,
             self.tensor_parallel_size,
@@ -580,19 +657,23 @@ class EngineArgs:
                 self.tokenizer_pool_extra_config,
             ),
             self.ray_workers_use_nsight,
-        )
+            distributed_executor_backend=self.distributed_executor_backend)
+
         speculative_config = SpeculativeConfig.maybe_create_spec_config(
             target_model_config=model_config,
             target_parallel_config=parallel_config,
             target_dtype=self.dtype,
             speculative_model=self.speculative_model,
             num_speculative_tokens=self.num_speculative_tokens,
+            speculative_disable_by_batch_size=self.
+            speculative_disable_by_batch_size,
             speculative_max_model_len=self.speculative_max_model_len,
             enable_chunked_prefill=self.enable_chunked_prefill,
             use_v2_block_manager=self.use_v2_block_manager,
             ngram_prompt_lookup_max=self.ngram_prompt_lookup_max,
             ngram_prompt_lookup_min=self.ngram_prompt_lookup_min,
         )
+
         scheduler_config = SchedulerConfig(
             self.max_num_batched_tokens,
             self.max_num_seqs,
@@ -603,15 +684,25 @@ class EngineArgs:
                                  speculative_config.num_lookahead_slots),
             delay_factor=self.scheduler_delay_factor,
             enable_chunked_prefill=self.enable_chunked_prefill,
+            embedding_mode=model_config.embedding_mode,
         )
-        lora_config = (LoRAConfig(
+
+        lora_config = LoRAConfig(
             max_lora_rank=self.max_lora_rank,
             max_loras=self.max_loras,
+            fully_sharded_loras=self.fully_sharded_loras,
             lora_extra_vocab_size=self.lora_extra_vocab_size,
+            long_lora_scaling_factors=self.long_lora_scaling_factors,
             lora_dtype=self.lora_dtype,
-            max_cpu_loras=self.max_cpu_loras
-            if self.max_cpu_loras and self.max_cpu_loras > 0 else None,
-        ) if self.enable_lora else None)
+            max_cpu_loras=self.max_cpu_loras if self.max_cpu_loras
+            and self.max_cpu_loras > 0 else None) if self.enable_lora else None
+
+        load_config = LoadConfig(
+            load_format=self.load_format,
+            download_dir=self.download_dir,
+            model_loader_extra_config=self.model_loader_extra_config,
+        )
+
         if self.image_input_type:
             if (not self.image_token_id or not self.image_input_shape
                     or not self.image_feature_size):
@@ -630,6 +721,12 @@ class EngineArgs:
 
         decoding_config = DecodingConfig(
             guided_decoding_backend=self.guided_decoding_backend)
+
+        if (model_config.get_sliding_window() is not None
+                and scheduler_config.chunked_prefill_enabled):
+            raise ValueError(
+                "Chunked prefill is not supported with sliding window.")
+
         return EngineConfig(model_config=model_config,
                             cache_config=cache_config,
                             parallel_config=parallel_config,
@@ -638,6 +735,7 @@ class EngineArgs:
                             lora_config=lora_config,
                             vision_language_config=vision_language_config,
                             speculative_config=speculative_config,
+                            load_config=load_config,
                             decoding_config=decoding_config)
 
 
@@ -648,6 +746,7 @@ class AsyncEngineArgs(EngineArgs):
     engine_use_ray: bool = False
     disable_log_requests: bool = False
     max_log_len: int = 0
+    uvloop: bool = False
 
     @staticmethod
     def add_cli_args(
@@ -672,4 +771,10 @@ class AsyncEngineArgs(EngineArgs):
             "ID numbers being printed in log. "
             "Default: unlimited.",
         )
+        parser.add_argument(
+            "--uvloop",
+            action="store_true",
+            default=EngineArgs.ngram_prompt_lookup_min,
+            help="Use the Uvloop asyncio event loop to possibly increase "
+            "performance")
         return parser

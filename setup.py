@@ -238,7 +238,7 @@ def _install_punica() -> bool:
     device_count = torch.cuda.device_count()
     for i in range(device_count):
         major, minor = torch.cuda.get_device_capability(i)
-        if major <= 8:
+        if major < 8:
             install_punica = False
             break
     return install_punica
@@ -381,6 +381,18 @@ def get_requirements() -> List[str]:
 
     if _is_cuda():
         requirements = _read_requirements("requirements-cuda.txt")
+        cuda_major, cuda_minor = torch.version.cuda.split(".")
+        modified_requirements = []
+        for req in requirements:
+            if "vllm-nccl-cu12" in req:
+                req = req.replace("vllm-nccl-cu12",
+                                  f"vllm-nccl-cu{cuda_major}")
+            elif ("vllm-flash-attn" in req
+                  and not (cuda_major == "12" and cuda_minor == "1")):
+                # vllm-flash-attn is built only for CUDA 12.1.
+                # Skip for other versions.
+                continue
+            modified_requirements.append(req)
     elif _is_hip():
         requirements = _read_requirements("requirements-rocm.txt")
     elif _is_neuron():
@@ -397,13 +409,6 @@ ext_modules = []
 
 if _is_cuda():
     ext_modules.append(CMakeExtension(name="aphrodite._moe_C"))
-
-    if _install_quants():
-        ext_modules.append(CMakeExtension(name="aphrodite._quant_C"))
-
-    if _install_punica():
-        ext_modules.append(CMakeExtension(name="aphrodite._punica_C"))
-
     if _install_hadamard():
         ext_modules.append(CMakeExtension(name="aphrodite._hadamard_C"))
 
@@ -411,6 +416,8 @@ if not _is_neuron():
     ext_modules.append(CMakeExtension(name="aphrodite._C"))
     if _install_quants():
         ext_modules.append(CMakeExtension(name="aphrodite._quant_C"))
+    if _install_punica():
+        ext_modules.append(CMakeExtension(name="aphrodite._punica_C"))
 
 package_data = {
     "aphrodite": [
@@ -419,6 +426,7 @@ package_data = {
     ]
 }
 if os.environ.get("APHRODITE_USE_PRECOMPILED"):
+    ext_modules = []
     package_data["aphrodite"].append("*.so")
 
 setup(
@@ -444,12 +452,14 @@ setup(
         "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",  # noqa: E501
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
-    packages=find_packages(exclude=("kernels", "examples", "tests")),
+    packages=find_packages(exclude=("kernels", "examples", "tests*")),
     python_requires=">=3.8",
     install_requires=get_requirements(),
-    extras_require={"flash-attn": [
-        "flash-attn==2.5.8",
-    ]},
+    extras_require={
+        "flash-attn": ["flash-attn==2.5.8"],
+        "tensorizer": ["tensorizer>=2.9.0"],
+        "ray": ["ray>=2.9"],
+    },
     ext_modules=ext_modules,
     cmdclass={"build_ext": cmake_build_ext} if not _is_neuron() else {},
     package_data=package_data,

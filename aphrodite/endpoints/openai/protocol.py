@@ -1,11 +1,13 @@
 # Adapted from
 # https://github.com/lm-sys/FastChat/blob/168ccc29d3f7edc50823016105c024fe2282732a/fastchat/protocol/openai_api_protocol.py
 import time
-from typing import Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import (AliasChoices, BaseModel, Field, conint, model_validator,
                       root_validator)
+import torch
 
+from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.utils import random_uuid
 from aphrodite.common.logits_processor import BiasLogitsProcessor
@@ -62,7 +64,8 @@ class ResponseFormat(BaseModel):
 
 class ChatCompletionRequest(BaseModel):
     model: str
-    messages: List[Dict[str, str]]
+    # support list type in messages.content
+    messages: List[Dict[str, Union[str, List[Dict[str, str]]]]]
     temperature: Optional[float] = 0.7
     top_p: Optional[float] = 1.0
     tfs: Optional[float] = 1.0
@@ -72,7 +75,9 @@ class ChatCompletionRequest(BaseModel):
     n: Optional[int] = 1
     max_tokens: Optional[int] = None
     min_tokens: Optional[int] = 0
-    seed: Optional[int] = None
+    seed: Optional[int] = Field(None,
+                                ge=torch.iinfo(torch.long).min,
+                                le=torch.iinfo(torch.long).max)
     stop: Optional[Union[str, List[str]]] = Field(default_factory=list)
     include_stop_str_in_output: Optional[bool] = False
     stream: Optional[bool] = False
@@ -116,6 +121,11 @@ class ChatCompletionRequest(BaseModel):
             "If specified, will override the default guided decoding backend "
             "of the server for this specific request. If set, must be either "
             "'outlines' / 'lm-format-enforcer'"))
+    guided_whitespace_pattern: Optional[str] = Field(
+        default=None,
+        description=(
+            "If specified, will override the default whitespace pattern "
+            "for guided json decoding."))
 
     def to_sampling_params(self, vocab_size: int) -> SamplingParams:
         if self.logprobs and not self.top_logprobs:
@@ -204,7 +214,9 @@ class CompletionRequest(BaseModel):
     logprobs: Optional[int] = None
     echo: Optional[bool] = False
     stop: Optional[Union[str, List[str]]] = Field(default_factory=list)
-    seed: Optional[int] = None
+    seed: Optional[int] = Field(None,
+                                ge=torch.iinfo(torch.long).min,
+                                le=torch.iinfo(torch.long).max)
     include_stop_str_in_output: Optional[bool] = False
     presence_penalty: Optional[float] = 0.0
     frequency_penalty: Optional[float] = 0.0
@@ -251,6 +263,11 @@ class CompletionRequest(BaseModel):
             "If specified, will override the default guided decoding backend "
             "of the server for this specific request. If set, must be one of "
             "'outlines' / 'lm-format-enforcer'"))
+    guided_whitespace_pattern: Optional[str] = Field(
+        default=None,
+        description=(
+            "If specified, will override the default whitespace pattern "
+            "for guided json decoding."))
 
     def to_sampling_params(self, vocab_size: int) -> SamplingParams:
         echo_without_generation = self.echo and self.max_tokens == 0
@@ -374,6 +391,21 @@ class CompletionStreamResponse(BaseModel):
     usage: Optional[UsageInfo] = Field(default=None)
 
 
+class EmbeddingResponseData(BaseModel):
+    index: int
+    object: str = "embedding"
+    embedding: List[float]
+
+
+class EmbeddingResponse(BaseModel):
+    id: str = Field(default_factory=lambda: f"cmpl-{random_uuid()}")
+    object: str = "list"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    model: str
+    data: List[EmbeddingResponseData]
+    usage: UsageInfo
+
+
 class ChatMessage(BaseModel):
     role: str
     content: str
@@ -419,35 +451,22 @@ class ChatCompletionStreamResponse(BaseModel):
     logprobs: Optional[LogProbs] = None
 
 
-class EmbeddingsRequest(BaseModel):
-    input: List[str] = Field(
-        ..., description="List of input texts to generate embeddings for.")
-    encoding_format: str = Field(
-        "float",
-        description="Encoding format for the embeddings. "
-        "Can be 'float' or 'base64'.")
-    model: Optional[str] = Field(
-        None,
-        description="Name of the embedding model to use. "
-        "If not provided, the default model will be used.")
+class EmbeddingRequest(BaseModel):
+    # Ordered by official OpenAI API documentation
+    # https://platform.openai.com/docs/api-reference/embeddings
+    model: str
+    input: Union[List[int], List[List[int]], str, List[str]]
+    encoding_format: Optional[str] = Field('float', pattern='^(float|base64)$')
+    dimensions: Optional[int] = None
+    user: Optional[str] = None
 
+    # doc: begin-embedding-pooling-params
+    additional_data: Optional[Any] = None
 
-class EmbeddingObject(BaseModel):
-    object: str = Field("embedding", description="Type of the object.")
-    embedding: List[float] = Field(
-        ..., description="Embedding values as a list of floats.")
-    index: int = Field(
-        ...,
-        description="Index of the input text corresponding to "
-        "the embedding.")
+    # doc: end-embedding-pooling-params
 
-
-class EmbeddingsResponse(BaseModel):
-    object: str = Field("list", description="Type of the response object.")
-    data: List[EmbeddingObject] = Field(
-        ..., description="List of embedding objects.")
-    model: str = Field(..., description="Name of the embedding model used.")
-    usage: UsageInfo = Field(..., description="Information about token usage.")
+    def to_pooling_params(self):
+        return PoolingParams(additional_data=self.additional_data)
 
 
 class Prompt(BaseModel):

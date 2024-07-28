@@ -1,9 +1,31 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch
+from torch import nn
 
-from aphrodite.modeling.layers.linear import LinearMethodBase
+
+class QuantizeMethodBase(ABC):
+    """Base class for different quantized methods."""
+
+    @abstractmethod
+    def create_weights(self, layer: torch.nn.Module, *weight_args,
+                       **extra_weight_attrs):
+        """Create weights for a layer.
+        The weights will be set as attributes of the layer."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def apply(self, layer: torch.nn.Module, *args, **kwargs) -> torch.Tensor:
+        """Apply the weights in layer to the input tensor.
+        Expects create_weights to have been called before on the layer."""
+        raise NotImplementedError
+
+    def process_weights_after_loading(self, layer: nn.Module) -> None:
+        """Process the weight after loading.
+        This can be used for example, to transpose weights for computation.
+        """
+        return
 
 
 class QuantizationConfig(ABC):
@@ -41,6 +63,17 @@ class QuantizationConfig(ABC):
         """Create a config class from the model's quantization config."""
         raise NotImplementedError
 
+    @classmethod
+    def override_quantization_method(cls, hf_quant_cfg,
+                                     user_quant) -> Optional[str]:
+        """
+           Detects if this quantization method can support a given checkpoint
+           format by overriding the user specified quantization method -- 
+           this method should only be overwritten by subclasses in exceptional 
+           circumstances
+        """
+        return None
+
     @staticmethod
     def get_from_keys(config: Dict[str, Any], keys: List[str]) -> Any:
         """Get a value from the model's quantization config."""
@@ -51,8 +84,8 @@ class QuantizationConfig(ABC):
                          "quantization config.")
 
     @abstractmethod
-    def get_linear_method(self) -> LinearMethodBase:
-        """Get the linear method to use for the quantized linear layer."""
+    def get_quant_method(self, layer: torch.nn.Module) -> QuantizeMethodBase:
+        """Get the quantize method to use for the quantized layer."""
         raise NotImplementedError
 
     @abstractmethod
@@ -61,18 +94,4 @@ class QuantizationConfig(ABC):
 
         For now, this is only used by AWQ.
         """
-        raise NotImplementedError
-
-    @abstractmethod
-    def merge_weight(self) -> bool:
-        """whether fuse qkv and up/gate."""
-        raise NotImplementedError
-
-    @abstractmethod
-    def quant_vocab(self) -> List[bool]:
-        return (False, False)
-
-    @abstractmethod
-    def support_fused_moe(self) -> bool:
-        """Whether fused moe kernel is implemented"""
         raise NotImplementedError

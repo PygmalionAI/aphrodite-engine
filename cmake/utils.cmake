@@ -99,7 +99,7 @@ function (get_torch_gpu_compiler_flags OUT_GPU_FLAGS GPU_LANG)
       "Failed to determine torch nvcc compiler flags")
 
     if (CUDA_VERSION VERSION_GREATER_EQUAL 11.8)
-      list(APPEND GPU_FLAGS "-DENABLE_FP8_E5M2")
+      list(APPEND GPU_FLAGS "-DENABLE_FP8")
     endif()
     if (CUDA_VERSION VERSION_GREATER_EQUAL 12.0)
       list(REMOVE_ITEM GPU_FLAGS
@@ -119,7 +119,7 @@ function (get_torch_gpu_compiler_flags OUT_GPU_FLAGS GPU_LANG)
 
     list(APPEND GPU_FLAGS
       "-DUSE_ROCM"
-      "-DENABLE_FP8_E4M3"
+      "-DENABLE_FP8"
       "-U__HIP_NO_HALF_CONVERSIONS__"
       "-U__HIP_NO_HALF_OPERATORS__"
       "-fno-gpu-rdc")
@@ -327,7 +327,7 @@ function (define_gpu_extension_target GPU_MOD_NAME)
       ${GPU_LANGUAGE}_ARCHITECTURES "${GPU_ARCHITECTURES}")
   endif()
 
-  set_property(TARGET ${GPU_MOD_NAME} PROPERTY CXX_STANDARD 17)
+  set_property(TARGET ${GPU_MOD_NAME} PROPERTY CXX_STANDARD 20)
 
   target_compile_options(${GPU_MOD_NAME} PRIVATE
     $<$<COMPILE_LANGUAGE:${GPU_LANGUAGE}>:${GPU_COMPILE_FLAGS}>)

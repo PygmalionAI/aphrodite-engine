@@ -32,14 +32,11 @@ class LogitsProcessor(nn.Module):
         # Whether the input is logits (default is hidden states).
         self.logits_as_input = logits_as_input
         # original vocabulary size (without LoRA).
-        if org_vocab_size is not None:
-            self.org_vocab_size = min(org_vocab_size, vocab_size)
-        else:
-            self.org_vocab_size = vocab_size
+        self.org_vocab_size = org_vocab_size or vocab_size
 
     def forward(
         self,
-        lm_head: nn.Module,
+        embedding: torch.Tensor,
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
         embedding_bias: Optional[torch.Tensor] = None,
@@ -49,8 +46,9 @@ class LogitsProcessor(nn.Module):
         else:
             hidden_states = _prune_hidden_states(hidden_states,
                                                  sampling_metadata)
+
             # Get the logits for the next tokens.
-            logits = self._get_logits(hidden_states, lm_head, embedding_bias)
+            logits = self._get_logits(hidden_states, embedding, embedding_bias)
 
         if logits is not None:
             logits *= self.scale
@@ -60,10 +58,10 @@ class LogitsProcessor(nn.Module):
 
         return logits
 
-    def _get_logits(self, hidden_states: torch.Tensor, lm_head: nn.Module,
+    def _get_logits(self, hidden_states: torch.Tensor, embedding: torch.Tensor,
                     embedding_bias: Optional[torch.Tensor]) -> torch.Tensor:
         # Get the logits for the next tokens.
-        logits = lm_head(hidden_states)
+        logits = torch.matmul(hidden_states, embedding.t())
         if embedding_bias is not None:
             logits += embedding_bias
         logits = tensor_model_parallel_gather(logits)
@@ -71,6 +69,12 @@ class LogitsProcessor(nn.Module):
         if logits is not None:
             logits = logits[:, :self.org_vocab_size]
         return logits
+
+    def extra_repr(self) -> str:
+        s = f"vocab_size={self.vocab_size}"
+        s += f", forg_vocab_size={self.org_vocab_size}"
+        s += f", scale={self.scale}, logits_as_input={self.logits_as_input}"
+        return s
 
 
 def _prune_hidden_states(
@@ -85,29 +89,27 @@ def _apply_logits_processors(
     logits: torch.Tensor,
     sampling_metadata: SamplingMetadata,
 ) -> torch.Tensor:
-    logits_row_idx = 0
     found_logits_processors = False
-    for i, seq_group in enumerate(sampling_metadata.seq_groups):
-        seq_ids, sampling_params = seq_group
+    logits_processed = 0
+    for seq_group in sampling_metadata.seq_groups:
+        seq_ids = seq_group.seq_ids
+        sampling_params = seq_group.sampling_params
         logits_processors = sampling_params.logits_processors
-        # handle prompt_logprobs by skipping rows in logits added for
-        # the prompt tokens (prompt logprobs are not processed)
-        if (i < sampling_metadata.num_prompts
-                and sampling_params.prompt_logprobs is not None):
-            assert len(seq_ids) == 1
-            logits_row_idx += sampling_metadata.prompt_lens[i] - 1
+
         if logits_processors:
             found_logits_processors = True
-            for seq_id in seq_ids:
+            for seq_id, logits_row_idx in zip(seq_ids,
+                                              seq_group.sample_indices):
                 logits_row = logits[logits_row_idx]
-                token_ids = sampling_metadata.seq_data[seq_id].output_token_ids
+                token_ids = seq_group.seq_data[seq_id].output_token_ids
                 for logits_processor in logits_processors:
                     logits_row = logits_processor(token_ids, logits_row)
                 logits[logits_row_idx] = logits_row
-                logits_row_idx += 1
-        else:
-            logits_row_idx += len(seq_ids)
+
+        logits_processed += len(seq_group.sample_indices) + len(
+            seq_group.prompt_logprob_indices)
+
     if found_logits_processors:
-        # Ensure that no rows in logits were unexpectedly skipped.
-        assert logits_row_idx == logits.shape[0]
+        # verifies that no rows in logits were missed unexpectedly
+        assert logits_processed == logits.shape[0]
     return logits

@@ -5,7 +5,8 @@ from functools import cached_property
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
-from pydantic import conint
+from pydantic import Field
+from typing_extensions import Annotated
 
 _SAMPLING_EPS = 1e-5
 
@@ -170,7 +171,7 @@ class SamplingParams:
         skip_special_tokens: bool = True,
         spaces_between_special_tokens: bool = True,
         logits_processors: Optional[List[LogitsProcessorFunc]] = None,
-        truncate_prompt_tokens: Optional[conint(ge=1)] = None,
+        truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None,
     ) -> None:
         self.n = n
         self.best_of = best_of if best_of is not None else n
@@ -194,7 +195,10 @@ class SamplingParams:
         self.dynatemp_exponent = dynatemp_exponent
         self.smoothing_factor = smoothing_factor
         self.smoothing_curve = smoothing_curve
-        self.seed = seed
+        if seed == -1:
+            self.seed = None
+        else:
+            self.seed = seed
         self.use_beam_search = use_beam_search
         self.length_penalty = length_penalty
         self.early_stopping = early_stopping
@@ -220,6 +224,12 @@ class SamplingParams:
         self.logits_processors = logits_processors or []
         self.include_stop_str_in_output = include_stop_str_in_output
         self.truncate_prompt_tokens = truncate_prompt_tokens
+        # Number of characters to hold back for stop string evaluation
+        # until sequence is finished.
+        if self.stop and not include_stop_str_in_output:
+            self.output_text_buffer_length = max(len(s) for s in self.stop) - 1
+        else:
+            self.output_text_buffer_length = 0
 
         self.default_values = {
             "n": 1,
@@ -282,8 +292,8 @@ class SamplingParams:
                 self.min_p = 0.0
                 self.top_a = 0.0
                 self._verify_greedy_sampling()
-        # injected by the engine
-        self.eos_token_id = None
+        # eos_token_id is added to this by the engine
+        self.all_stop_token_ids = set(self.stop_token_ids)
 
     def _verify_args(self) -> None:
         if self.n < 1:
@@ -415,7 +425,8 @@ class SamplingParams:
             self, generation_config: Dict[str, Any]) -> None:
         """Update if there are non-default values from generation_config"""
         # Update eos_token_id for generation
-        if eos_ids := generation_config.get("eos_token_id"):
+        if (not self.ignore_eos) and (eos_ids :=
+                                      generation_config.get("eos_token_id")):
             # it can be either int or list of int
             if isinstance(eos_ids, int):
                 eos_ids = [eos_ids]

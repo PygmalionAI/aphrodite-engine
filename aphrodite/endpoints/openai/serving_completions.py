@@ -25,7 +25,7 @@ from aphrodite.endpoints.openai.protocol import (
 from aphrodite.endpoints.openai.serving_engine import LoRA, OpenAIServing
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.modeling.guided_decoding import (
-    get_guided_decoding_logits_processor)
+    get_guided_decoding_logits_processor, )
 
 TypeTokenIDs = List[int]
 TypeTopLogProbs = List[Optional[Dict[int, float]]]
@@ -60,10 +60,10 @@ class OpenAIServingCompletion(OpenAIServing):
 
     def __init__(self,
                  engine: AsyncAphrodite,
-                 served_model: str,
+                 served_model_names: List[str],
                  lora_modules: Optional[List[LoRA]] = None):
         super().__init__(engine=engine,
-                         served_model=served_model,
+                         served_model_names=served_model_names,
                          lora_modules=lora_modules)
 
     async def create_completion(self, request: CompletionRequest,
@@ -86,7 +86,7 @@ class OpenAIServingCompletion(OpenAIServing):
             return self.create_error_response(
                 "suffix is not currently supported")
 
-        model_name = request.model
+        model_name = self.served_model_names[0]
         request_id = f"cmpl-{random_uuid()}"
         created_time = int(time.time())
 

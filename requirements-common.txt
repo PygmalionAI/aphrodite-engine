@@ -3,7 +3,7 @@ ninja
 psutil
 sentencepiece
 numpy
-transformers == 4.40.0 # needed for llama
+transformers == 4.43.0 # needed for llama
 uvicorn
 openai # for fastapi's openai proxy emulation
 einops  # Required for phi-1_5
@@ -13,6 +13,7 @@ fastapi
 colorlog
 einops # for phi
 prometheus_client # for prometheus metrics
+prometheus-fastapi-instrumentator >= 7.0.0
 triton >= 2.2.0
 lark == 1.1.8 # for grammars
 scipy # for quip
@@ -21,6 +22,7 @@ bitsandbytes >= 0.41.0
 loguru
 hf_transfer # for faster downloads
 sentence-transformers # for embeddings
-tiktoken == 0.6.0 # for DBRX tokenizer
+tiktoken >= 0.6.0 # for DBRX tokenizer
 outlines >= 0.0.27
 lm-format-enforcer >= 0.10.1
+uvloop

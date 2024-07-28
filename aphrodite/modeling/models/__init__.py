@@ -1,13 +1,13 @@
 import importlib
 from typing import Dict, List, Optional, Type
-from loguru import logger
 
 import torch.nn as nn
 
+from loguru import logger
 from aphrodite.common.utils import is_hip
 
 # Architecture -> (module, class).
-_MODELS = {
+_GENERATION_MODELS = {
     "AquilaModel": ("llama", "LlamaForCausalLM"),
     "AquilaForCausalLM": ("llama", "LlamaForCausalLM"),  # AquilaChat2
     "BaiChuanForCausalLM": ("baichuan", "BaiChuanForCausalLM"),  # baichuan-7b
@@ -15,8 +15,8 @@ _MODELS = {
     "BloomForCausalLM": ("bloom", "BloomForCausalLM"),
     "ChatGLMModel": ("chatglm", "ChatGLMForCausalLM"),
     "ChatGLMForConditionalGeneration": ("chatglm", "ChatGLMForCausalLM"),
+    "CohereForCausalLM": ("commandr", "CohereForCausalLM"),
     "DbrxForCausalLM": ("dbrx", "DbrxForCausalLM"),
-    "CohereForCausalLM": ("cohere", "CohereForCausalLM"),
     "DeciLMForCausalLM": ("decilm", "DeciLMForCausalLM"),
     "DeepseekForCausalLM": ("deepseek", "DeepseekForCausalLM"),
     "FalconForCausalLM": ("falcon", "FalconForCausalLM"),
@@ -27,27 +27,40 @@ _MODELS = {
     "GPTNeoXForCausalLM": ("gpt_neox", "GPTNeoXForCausalLM"),
     "InternLMForCausalLM": ("llama", "LlamaForCausalLM"),
     "InternLM2ForCausalLM": ("internlm2", "InternLM2ForCausalLM"),
+    "JAISLMHeadModel": ("jais", "JAISLMHeadModel"),
     "LlamaForCausalLM": ("llama", "LlamaForCausalLM"),
-    # For decapoda-research/llama-*
-    "LLaMAForCausalLM": ("llama", "LlamaForCausalLM"),
     "LlavaForConditionalGeneration":
     ("llava", "LlavaForConditionalGeneration"),
+    # For decapoda-research/llama-*
+    "LLaMAForCausalLM": ("llama", "LlamaForCausalLM"),
     "MistralForCausalLM": ("llama", "LlamaForCausalLM"),
     "MixtralForCausalLM": ("mixtral", "MixtralForCausalLM"),
-    "YiForCausalLM": ("llama", "LlamaForCausalLM"),
+    "QuantMixtralForCausalLM": ("mixtral_quant", "MixtralForCausalLM"),
     # transformers's mpt class has lower case
     "MptForCausalLM": ("mpt", "MPTForCausalLM"),
     "MPTForCausalLM": ("mpt", "MPTForCausalLM"),
-    "OLMoForCausalLM": ("olmo", "OLMoForCausalLM"),
+    "MiniCPMForCausalLM": ("minicpm", "MiniCPMForCausalLM"),
+    "OlmoForCausalLM": ("olmo", "OlmoForCausalLM"),
     "OPTForCausalLM": ("opt", "OPTForCausalLM"),
+    "OrionForCausalLM": ("orion", "OrionForCausalLM"),
     "PhiForCausalLM": ("phi", "PhiForCausalLM"),
+    "Phi3ForCausalLM": ("llama", "LlamaForCausalLM"),
     "QWenLMHeadModel": ("qwen", "QWenLMHeadModel"),
     "Qwen2ForCausalLM": ("qwen2", "Qwen2ForCausalLM"),
     "Qwen2MoeForCausalLM": ("qwen2_moe", "Qwen2MoeForCausalLM"),
     "RWForCausalLM": ("falcon", "FalconForCausalLM"),
     "StableLMEpochForCausalLM": ("stablelm", "StablelmForCausalLM"),
     "StableLmForCausalLM": ("stablelm", "StablelmForCausalLM"),
+    "Starcoder2ForCausalLM": ("starcoder2", "Starcoder2ForCausalLM"),
+    "ArcticForCausalLM": ("arctic", "ArcticForCausalLM"),
+    "XverseForCausalLM": ("xverse", "XverseForCausalLM"),
 }
+
+_EMBEDDING_MODELS = {
+    "MistralModel": ("llama_embedding", "LlamaEmbeddingModel"),
+}
+
+_MODELS = {**_GENERATION_MODELS, **_EMBEDDING_MODELS}
 
 # Architecture -> type.
 # out of tree models
@@ -83,8 +96,9 @@ class ModelRegistry:
                     "ROCm for now.")
             if model_arch in _ROCM_PARTIALLY_SUPPORTED_MODELS:
                 logger.warning(
-                    f"Model architecture {model_arch} is partially supported "
-                    "by ROCm: " + _ROCM_PARTIALLY_SUPPORTED_MODELS[model_arch])
+                    f"Model architecture {model_arch} is partially "
+                    "supported by ROCm: "
+                    f"{_ROCM_PARTIALLY_SUPPORTED_MODELS[model_arch]}")
 
         module_name, model_cls_name = _MODELS[model_arch]
         module = importlib.import_module(
@@ -98,12 +112,15 @@ class ModelRegistry:
     @staticmethod
     def register_model(model_arch: str, model_cls: Type[nn.Module]):
         if model_arch in _MODELS:
-            logger.warning(
-                f"Model architecture {model_arch} is already registered, "
-                "and will be overwritten by the new model "
-                f"class {model_cls.__name__}.")
+            logger.warning(f"Model architecture {model_arch} is already "
+                           "registered, and will be overwritten by the new "
+                           f"model class {model_cls.__name__}.")
         global _OOT_MODELS
         _OOT_MODELS[model_arch] = model_cls
+
+    @staticmethod
+    def is_embedding_model(model_arch: str) -> bool:
+        return model_arch in _EMBEDDING_MODELS
 
 
 __all__ = [
