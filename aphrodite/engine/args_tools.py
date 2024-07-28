@@ -30,7 +30,7 @@ class EngineArgs:
     seed: int = 0
     max_model_len: Optional[int] = None
     worker_use_ray: Optional[bool] = False
-    distributed_executor_backend: Optional[str] = None
+    distributed_executor_backend: Optional[str] = "mp"
     pipeline_parallel_size: int = 1
     tensor_parallel_size: int = 1
     max_parallel_loading_workers: Optional[int] = None
