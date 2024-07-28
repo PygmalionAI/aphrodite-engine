@@ -374,9 +374,23 @@ def raise_if_cache_size_invalid(num_gpu_blocks, block_size,
     logger.info(f"Maximum sequence length allowed in the cache: "
                 f"{max_seq_len}")
     if max_model_len > max_seq_len:
-        raise ValueError(
-            f"The model's max seq len ({max_model_len}) "
+        original_max_model_len = max_model_len
+        max_model_len = max_seq_len
+        # raise ValueError(
+        #     f"The model's max seq len ({max_model_len}) "
+        #     "is larger than the maximum number of tokens that can be "
+        #     f"stored in KV cache ({max_seq_len}). Try increasing "
+        #     "`gpu_memory_utilization` or decreasing `max_model_len` when "
+        #     "initializing the engine.")
+        # set the max_model_len to the max_seq_len, but raise a logger.error
+        # so the user is made aware of this
+        logger.error(
+            f"The model's max seq len ({original_max_model_len}) "
             "is larger than the maximum number of tokens that can be "
-            f"stored in KV cache ({max_seq_len}). Try increasing "
-            "`gpu_memory_utilization` or decreasing `max_model_len` when "
-            "initializing the engine.")
+            f"stored in KV cache ({max_seq_len}). "
+            "Try increasing "
+            "`gpu_memory_utilization`, setting "
+            "`--enable-chunked-prefill`, or `--kv-cache-dtype fp8` "
+            "when initializing the engine. The last two are currently "
+            "mutually exclusive.\n"
+            f"Forcing max_model_len to {max_seq_len}.")
