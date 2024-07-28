@@ -2,15 +2,15 @@ import enum
 import json
 import os
 from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, ClassVar, List, Optional, Union
+from typing import TYPE_CHECKING, ClassVar, List, Optional, Tuple, Union
 
 import torch
 from loguru import logger
 from transformers import PretrainedConfig
 
 from aphrodite.common.utils import get_cpu_memory, is_cpu, is_hip, is_neuron
-from aphrodite.quantization import QUANTIZATION_METHODS
 from aphrodite.modeling.models import ModelRegistry
+from aphrodite.quantization import QUANTIZATION_METHODS
 from aphrodite.transformers_utils.config import get_config, get_hf_text_config
 
 if TYPE_CHECKING:
@@ -1050,6 +1050,7 @@ class LoRAConfig:
     lora_extra_vocab_size: int = 256
     # This is a constant.
     lora_vocab_padding_size: ClassVar[int] = 256
+    long_lora_scaling_factors: Optional[Tuple[float]] = None
 
     def __post_init__(self):
         # Keep this in sync with kernels/punica/bgmv/bgmv_config.h

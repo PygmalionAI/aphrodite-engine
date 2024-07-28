@@ -13,6 +13,7 @@ from aphrodite.lora.fully_sharded_layers import (
 # yapf: disable
 from aphrodite.lora.layers import (BaseLayerWithLoRA,
                                    ColumnParallelLinearWithLoRA,
+                                   LinearScalingRotaryEmbeddingWithLora,
                                    LogitsProcessorWithLoRA,
                                    MergedColumnParallelLinearWithLoRA,
                                    MergedQKVParallelLinearWithLora,
@@ -24,12 +25,18 @@ from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
 
 _all_lora_classes: Set[Type[BaseLayerWithLoRA]] = {
-    VocabParallelEmbeddingWithLoRA, ColumnParallelLinearWithLoRA,
-    MergedColumnParallelLinearWithLoRA, QKVParallelLinearWithLora,
-    MergedQKVParallelLinearWithLora, RowParallelLinearWithLoRA,
-    LogitsProcessorWithLoRA, ColumnParallelLinearWithShardedLoRA,
+    VocabParallelEmbeddingWithLoRA,
+    ColumnParallelLinearWithLoRA,
+    MergedColumnParallelLinearWithLoRA,
+    QKVParallelLinearWithLora,
+    MergedQKVParallelLinearWithLora,
+    RowParallelLinearWithLoRA,
+    LogitsProcessorWithLoRA,
+    ColumnParallelLinearWithShardedLoRA,
     MergedColumnParallelLinearWithShardedLoRA,
-    MergedQKVParallelLinearWithShardedLora, RowParallelLinearWithShardedLoRA
+    MergedQKVParallelLinearWithShardedLora,
+    RowParallelLinearWithShardedLoRA,
+    LinearScalingRotaryEmbeddingWithLora,
 }
 
 
