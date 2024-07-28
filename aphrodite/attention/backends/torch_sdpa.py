@@ -160,7 +160,7 @@ class TorchSDPABackendImpl(AttentionImpl[TorchSDPAMetadata]):
             PagedAttention.write_to_paged_cache(key, value, key_cache,
                                                 value_cache,
                                                 attn_metadata.slot_mapping,
-                                                self..kv_cache_dtype,
+                                                self.kv_cache_dtype,
                                                 kv_scale)
 
         if attn_metadata.is_prompt:

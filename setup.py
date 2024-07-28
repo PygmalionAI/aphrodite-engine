@@ -414,9 +414,9 @@ if _is_cuda():
 
 if not _is_neuron():
     ext_modules.append(CMakeExtension(name="aphrodite._C"))
-    if _install_quants():
+    if _install_quants() and _is_cuda() or _is_hip():
         ext_modules.append(CMakeExtension(name="aphrodite._quant_C"))
-    if _install_punica():
+    if _install_punica() and _is_cuda() or _is_hip():
         ext_modules.append(CMakeExtension(name="aphrodite._punica_C"))
 
 package_data = {

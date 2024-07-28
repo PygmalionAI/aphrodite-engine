@@ -1,14 +1,19 @@
 from typing import Any, Dict, List, Optional
+from contextlib import suppress
 
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite._quant_C import quant_ops as ops
 from aphrodite.common.utils import is_hip
 from aphrodite.modeling.layers.linear import LinearBase
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import (QuantizationConfig,
                                                 QuantizeMethodBase)
+
+HAS_QUANTS = False
+with suppress(ImportError):
+    from aphrodite._quant_C import quant_ops as ops
+    HAS_QUANTS = True
 
 
 class SqueezeLLMConfig(QuantizationConfig):
@@ -70,6 +75,8 @@ class SqueezeLLMLinearMethod(QuantizeMethodBase):
     """
 
     def __init__(self, quant_config: SqueezeLLMConfig):
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
         self.quant_config = quant_config
 
     def create_weights(self, layer: torch.nn.Module,

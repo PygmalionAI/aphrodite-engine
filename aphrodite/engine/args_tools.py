@@ -9,7 +9,7 @@ from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
                                      ModelConfig, ParallelConfig,
                                      SchedulerConfig, SpeculativeConfig,
                                      TokenizerPoolConfig, VisionLanguageConfig)
-from aphrodite.common.utils import str_to_int_tuple
+from aphrodite.common.utils import str_to_int_tuple, is_cpu
 from aphrodite.quantization import QUANTIZATION_METHODS
 
 
@@ -91,6 +91,8 @@ class EngineArgs:
     def __post_init__(self):
         if self.tokenizer is None:
             self.tokenizer = self.model
+        if is_cpu():
+            self.distributed_executor_backend = None
 
     @staticmethod
     def add_cli_args(
