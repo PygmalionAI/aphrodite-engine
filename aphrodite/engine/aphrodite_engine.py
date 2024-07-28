@@ -115,6 +115,7 @@ class AphroditeEngine:
             f"Prefix Caching = {cache_config.enable_prefix_caching}\n"
             f"KV Cache DataType = {cache_config.cache_dtype}\n"
             f"Device = {device_config.device}\n"
+            f"Rope Scaling = {model_config.rope_scaling}\n"
             f"Guided Decoding Backend = {decoding_config!r}\n")
         logger.info("-" * 76)
         # TODO: Print more configs in debug mode.

@@ -1,6 +1,7 @@
 from typing import Dict, Optional
 
 from transformers import AutoConfig, PretrainedConfig
+from loguru import logger
 
 from aphrodite.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
                                                   JAISConfig, MPTConfig,
@@ -19,7 +20,8 @@ _CONFIG_REGISTRY: Dict[str, PretrainedConfig] = {
 def get_config(model: str,
                trust_remote_code: bool,
                revision: Optional[str] = None,
-               code_revision: Optional[str] = None) -> PretrainedConfig:
+               code_revision: Optional[str] = None,
+               rope_scaling: Optional[dict] = None) -> PretrainedConfig:
     try:
         config = AutoConfig.from_pretrained(
             model,
@@ -42,6 +44,12 @@ def get_config(model: str,
         config = config_class.from_pretrained(model,
                                               revision=revision,
                                               code_revision=code_revision)
+    if rope_scaling is not None:
+        logger.info(
+            "Updating rope_scaling from "
+            f"{getattr(config, 'rope_scaling', None)} to {rope_scaling}")
+        config.update({"rope_scaling": rope_scaling})
+
     return config
 
 

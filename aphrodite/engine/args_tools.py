@@ -1,6 +1,7 @@
 import argparse
 import dataclasses
 from dataclasses import dataclass
+import json
 from typing import Optional, Tuple
 
 from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
@@ -44,6 +45,7 @@ class EngineArgs:
     disable_log_stats: bool = False
     revision: Optional[str] = None
     code_revision: Optional[str] = None
+    rope_scaling: Optional[dict] = None
     tokenizer_revision: Optional[str] = None
     quantization: Optional[str] = None
     load_in_4bit: bool = False
@@ -392,6 +394,11 @@ class EngineArgs:
             default=None,
             help="Number of floating bits to use for the deepseed "
             "quantization. Supported bits are: 4, 6, 8, 12. ")
+        parser.add_argument('--rope-scaling',
+                            default=None,
+                            type=json.loads,
+                            help='RoPE scaling configuration in JSON format. '
+                            'For example, {"type":"dynamic","factor":2.0}')
         parser.add_argument(
             "--enforce-eager",
             type=lambda x: (str(x).lower() == 'true'),
@@ -612,6 +619,7 @@ class EngineArgs:
             self.seed,
             self.revision,
             self.code_revision,
+            self.rope_scaling,
             self.tokenizer_revision,
             self.max_model_len,
             self.quantization,
