@@ -58,7 +58,7 @@ class OpenAIServingChat(OpenAIServing):
         # Deal with list in messages.content
         # Just replace the content list with the very first text message
         for message in request.messages:
-            if message.role == "user" and isinstance(message["content"], list):
+            if message["role"] == "user" and isinstance(message["content"], list):
                 message["content"] = next((content["text"]
                                            for content in message["content"]
                                            if content["type"] == "text"), "")
