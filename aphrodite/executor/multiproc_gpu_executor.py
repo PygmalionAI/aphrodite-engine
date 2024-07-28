@@ -27,7 +27,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
             os.environ["CUDA_VISIBLE_DEVICES"] = (",".join(
                 map(str, range(world_size))))
 
-        # Ensure that VLLM_INSTANCE_ID is set, to be inherited by workers
+        # Ensure that APHRODITE_INSTANCE_ID is set, to be inherited by workers
         os.environ["APHRODITE_INSTANCE_ID"] = get_aphrodite_instance_id()
 
         from torch.cuda import device_count

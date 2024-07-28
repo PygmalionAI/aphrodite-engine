@@ -170,7 +170,7 @@ def _adapt_tokenizer(tokenizer: PreTrainedTokenizerBase):
     def change_decoder(
         decoder: Callable[[List[int]],
                           str]) -> Callable[[List[int]], List[str]]:
-        """Sync vLLM's decoder with the outlines by returning list."""
+        """Sync Aphrodite's decoder with the outlines by returning list."""
 
         def new_decoder(inp_tokens: List[int]) -> List[str]:
             return [decoder(inp_tokens)]

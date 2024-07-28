@@ -79,8 +79,9 @@ def create_sequence_group_output(
         topk_token_ids (List[int]): The list of top-k token ids.
         topk_logprobs (List[float]): The list of top-k logprobs.
     """
-    # vLLM logprobs always include the sampled token. In addition, the user may
-    # request topk-logprobs (where top-k varies per user up to max_logprobs).
+    # Aphrodite logprobs always include the sampled token. In addition, the
+    # user may request topk-logprobs (where top-k varies per user up to
+    # max_logprobs).
     logprobs: Dict[int, Logprob] = {
         token_id: Logprob(
             logprob=token_id_logprob,

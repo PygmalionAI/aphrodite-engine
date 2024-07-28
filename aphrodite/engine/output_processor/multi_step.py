@@ -19,10 +19,10 @@ from aphrodite.transformers_utils.detokenizer import Detokenizer
 class MultiStepOutputProcessor(SequenceGroupOutputProcessor):
     """SequenceGroupOutputProcessor which handles logic related to
     detokenization and stopping conditions. It specializes to "multi-step
-    decoding", where vLLM's worker may generate multiple tokens per invocation.
-    This is currently mutually exclusive with advanced sampling techniques like
-    beam search, which motivates the separation of this logic from the single
-    step output processor.
+    decoding", where Aphrodite's worker may generate multiple tokens per
+    invocation. This is currently mutually exclusive with advanced sampling
+    techniques like beam search, which motivates the separation of this logic
+    from the single step output processor.
 
     This class is responsible for things such as correctly appending all new
     token ids to their sequence, detokenizing new token ids, truncating new

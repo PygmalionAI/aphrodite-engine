@@ -126,8 +126,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             proposer_worker: A worker that can produce speculative tokens for
                 sequences.
             scorer_worker: A worker that produces probabilities of speculative
-                tokens according to some base model. Typically a vanilla vLLM
-                Worker.
+                tokens according to some base model. Typically a vanilla
+                Aphrodite Worker.
             rejection_sampler: A Torch module used to perform modified rejection
                 sampling for speculative decoding.
             disable_by_batch_size: If the batch size is larger than this,
@@ -187,8 +187,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         iterations in a row without incurring the "move to CPU and serialize"
         performance penalty.
 
-        Since this requires a large change to vLLM, we defer it to later and
-        temporarily accept this broken abstraction boundary.
+        Since this requires a large change to Aphrodite, we defer it to later
+        and temporarily accept this broken abstraction boundary.
 
         NOTE: This will require a special check if the proposer worker
         does not have a sampler (e.g. ngram speculation).
@@ -403,10 +403,10 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         """
         proposal_lens_list = proposals.proposal_lens.tolist()
 
-        # vLLM currently only supports proposal lens equal to zero or the batch
-        # proposal len. This adds some complexity (splitting the batch into spec
-        # and non spec sequences) and should be removed in the future. It can be
-        # done by supporting per-sequence proposal lens.
+        # Aphrodite currently only supports proposal lens equal to zero or the
+        # batch proposal len. This adds some complexity (splitting the batch
+        # into spec and non spec sequences) and should be removed in the
+        # future. It can be done by supporting per-sequence proposal lens.
         _, spec_indices = split_batch_by_proposal_len(
             seq_group_metadata_list,
             proposal_lens_list,
