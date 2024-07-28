@@ -19,8 +19,8 @@ from aphrodite.common.utils import (CudaMemoryProfiler,
                                     make_tensor_with_pad)
 from aphrodite.distributed import broadcast_tensor_dict
 from aphrodite.distributed.communication_op import graph_capture
-from aphrodite.distributed.parallel_state import \
-    get_tensor_model_parallel_world_size
+from aphrodite.distributed.parallel_state import (
+    get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from aphrodite.lora.layers import LoRAMapping
 from aphrodite.lora.request import LoRARequest
 from aphrodite.lora.worker_manager import LRUCacheWorkerLoRAManager
@@ -171,11 +171,20 @@ class ModelRunner:
 
         self.model_memory_usage = m.consumed_memory
         tp = get_tensor_model_parallel_world_size()
+        rank = get_tensor_model_parallel_rank()
         total_time = end_time - start_time
-        logger.info(
-            f"Model weights loaded in {total_time:.2f} seconds.\nMemory usage: "
-            f"{self.model_memory_usage / float(2**30):.2f} GiB x {tp} = "
-            f"{self.model_memory_usage * tp / float(2**30):.2f} GiB")
+        if tp > 1:
+            logger.info(
+                f"Rank {rank}: Model weights loaded in {total_time:.2f} secs.")
+            if rank == 0:
+                logger.info(
+                    "Memory usage: "
+                    f"{self.model_memory_usage / float(2**30):.2f} GiB x {tp} ="
+                    f" {self.model_memory_usage * tp / float(2**30):.2f} GiB")
+        else:
+            logger.info(f"Model weights loaded in {total_time:.2f} seconds.")
+            logger.info("Memory usage: "
+                        f"{self.model_memory_usage / float(2**30):.2f} GiB")
 
         if self.lora_config:
             assert hasattr(self.model, "supported_lora_modules"
