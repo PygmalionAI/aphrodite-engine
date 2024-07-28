@@ -153,7 +153,8 @@ class BaiChuanAttention(nn.Module):
             self.attn = Attention(self.num_heads,
                                   self.head_dim,
                                   scaling,
-                                  alibi_slopes=alibi_slopes)
+                                  alibi_slopes=alibi_slopes,
+                                  quant_config=quant_config)
         else:
             self.rotary_emb = get_rope(
                 self.head_dim,
@@ -165,7 +166,8 @@ class BaiChuanAttention(nn.Module):
             self.attn = Attention(self.num_heads,
                                   self.head_dim,
                                   self.scaling,
-                                  cache_config=cache_config)
+                                  cache_config=cache_config,
+                                  quant_config=quant_config)
 
     def forward(
         self,
