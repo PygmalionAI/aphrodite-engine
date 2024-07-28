@@ -201,6 +201,14 @@ void autoquant_convert_s4_k_m8(
   int m,
   int k,
   int group_size);
+
+int cutlass_scaled_mm_dq(
+    torch::Tensor& out, 
+    torch::Tensor const &a, 
+    torch::Tensor const &b,
+    torch::Tensor const &a_scales,
+    torch::Tensor const &b_scales);
+
 #endif
 
 // SqueezeLLM

@@ -30,6 +30,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   // QuIP#
   quant_ops.def("quip_decompress", &decompress_e8p_origorder, "decompress_packed_e8p");
   quant_ops.def("quip_gemv", &e8p_mm_origorder, "e8p_mm_origorder");
+  // CUTLASS w8a8
+  quant_ops.def("cutlass_scaled_mm_dq", &cutlass_scaled_mm_dq, "CUTLASS w8a8 GEMM, supporting symmetric per-tensor or per-row/column quantization.");
 #endif
   // GPTQ
   quant_ops.def("gptq_gemm", &gptq_gemm, "Quantized GEMM for GPTQ");
