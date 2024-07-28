@@ -1,6 +1,6 @@
 """Attention layer with xFormers and PagedAttention."""
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Type
+from typing import Dict, List, Optional, Tuple, Type
 
 import torch
 from xformers import ops as xops
@@ -43,7 +43,7 @@ class XFormersBackend(AttentionBackend):
     def swap_blocks(
         src_kv_cache: torch.Tensor,
         dst_kv_cache: torch.Tensor,
-        src_to_dst: torch.Tensor,
+        src_to_dst: Dict[int, int],
     ) -> None:
         PagedAttention.swap_blocks(src_kv_cache, dst_kv_cache, src_to_dst)
 
@@ -58,6 +58,7 @@ class XFormersBackend(AttentionBackend):
 @dataclass
 class XFormersMetadata(AttentionMetadata, PagedAttentionMetadata):
     """Metadata for XFormersbackend.
+
     NOTE: Any python object stored here is not updated when it is
     cuda-graph replayed. If you have values that need to be changed
     dynamically, it should be stored in tensor. The tensor has to be
@@ -76,6 +77,9 @@ class XFormersMetadata(AttentionMetadata, PagedAttentionMetadata):
     # |-------------------- seq_len ----------------------|
     #                                   |-- query_len ---|
 
+    # Maximum query length in the batch. None for decoding.
+    max_query_len: Optional[int]
+    # FIXME: It is for flash attn.
     # Maximum sequence length among prefill batch. 0 if there are decoding
     # requests only.
     max_prefill_seq_len: int
@@ -94,6 +98,7 @@ class XFormersMetadata(AttentionMetadata, PagedAttentionMetadata):
     # (batch_size,) A tensor of context lengths (tokens that are computed
     # so far).
     context_lens_tensor: Optional[torch.Tensor]
+
     # Whether or not if cuda graph is enabled.
     # Cuda-graph is currently enabled for decoding only.
     # TODO: Move `use_cuda_graph` out since it's unrelated to attention.
@@ -201,15 +206,15 @@ class XFormersImpl(AttentionImpl[XFormersMetadata]):
         num_heads: int,
         head_size: int,
         scale: float,
-        num_kv_heads: Optional[int] = None,
-        alibi_slopes: Optional[List[float]] = None,
-        sliding_window: Optional[int] = None,
-        kv_cache_dtype: str = "auto",
+        num_kv_heads: int,
+        alibi_slopes: Optional[List[float]],
+        sliding_window: Optional[int],
+        kv_cache_dtype: str,
     ) -> None:
         self.num_heads = num_heads
         self.head_size = head_size
         self.scale = float(scale)
-        self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
+        self.num_kv_heads = num_kv_heads
         if alibi_slopes is not None:
             alibi_slopes = torch.tensor(alibi_slopes, dtype=torch.float32)
         self.alibi_slopes = alibi_slopes
