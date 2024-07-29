@@ -128,6 +128,17 @@ int cutlass_scaled_mm_dq(torch::Tensor& out, torch::Tensor const& a,
                          torch::Tensor const& b, torch::Tensor const& a_scales,
                          torch::Tensor const& b_scales);
 
+torch::Tensor fp_eXmY_linear_forward_cuda(
+    int64_t EXPONENT,
+    int64_t MANTISSA,
+    torch::Tensor _in_feats,
+    torch::Tensor _weights,
+    torch::Tensor _scales,
+    int64_t splitK=1
+);
+
+
+
 #endif
 
 void static_scaled_int8_quant(torch::Tensor& out, torch::Tensor& input,

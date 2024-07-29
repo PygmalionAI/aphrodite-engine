@@ -5,8 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
-from aphrodite.quantization.base_config import (QuantizationConfig)
 from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.quantization.base_config import QuantizationConfig
 
 
 class TorchAOFPConfig(QuantizationConfig):
@@ -130,7 +130,14 @@ class TorchAOFPLinearMethod(LinearMethodBase):
               x: torch.Tensor,
               bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         weight = layer.weight
-        return weight.forward(x, bias)
+        weights = weight.data
+        scales = weight.scales
+        if bias is None:
+            return weight.kernel(self.quant_config.exponent_bits,
+                self.quant_config.mantissa_bits, x, weights, scales)
+        else:
+            return weight.kernel(self.quant_config.exponent_bits,
+                self.quant_config.mantissa_bits, x, weights, scales) + bias
 
 class TorchAOFPParameter(nn.Parameter):
     """
@@ -142,9 +149,10 @@ class TorchAOFPParameter(nn.Parameter):
     def __new__(cls, orig_shape: torch.Size, params_dtype: torch.dtype,
                 quant_config: TorchAOFPConfig):
         try:
-            from torchao.prototype.quant_llm import to_scaled_tc_fpx,from_scaled_tc_fpx
-            from torchao.prototype.quant_llm.quant_llm import _SPLIT_K_MAP
-            from torchao.ops import quant_llm_linear
+            from aphrodite.quantization.quant_llm.utils import (
+                from_scaled_tc_fpx, to_scaled_tc_fpx)
+            from aphrodite.quantization.quant_llm.utils.utils import \
+                quant_llm_linear
         except ImportError as err:
             raise ImportError("Please install torchao via "
                               "`pip install torchao` to use "
@@ -163,7 +171,6 @@ class TorchAOFPParameter(nn.Parameter):
         self.fp_quantizer = to_scaled_tc_fpx
         self.fp_dequantizer = from_scaled_tc_fpx
         self.kernel = quant_llm_linear
-        self.split_k_map = _SPLIT_K_MAP
         return self
 
     def ao_quantize_(self, tensor: torch.Tensor):
@@ -177,20 +184,4 @@ class TorchAOFPParameter(nn.Parameter):
         output_dtype = output_dtype or torch.get_default_dtype()
         return self.fp_dequantizer(self.data, self.quant_config.exponent_bits, 
                         self.quant_config.mantissa_bits, self.scales).to(output_dtype)
-
-    def forward(self, 
-                x: torch.Tensor,
-                bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-
-        out_dim, in_dim = self.data.shape
-        bsize = x.shape[0]
-        splitK = self.split_k_map[(bsize - 1) // 64].get(out_dim, 1) if bsize <= 768 else 1
-        if bias is None:
-            return self.kernel(self.quant_config.exponent_bits,
-                self.quant_config.mantissa_bits, x, self.data, self.scales, splitK=splitK)
-        else:
-            return self.kernel(self.quant_config.exponent_bits,
-                self.quant_config.mantissa_bits, x, self.data, self.scales, splitK=splitK) + bias
-
-
 
