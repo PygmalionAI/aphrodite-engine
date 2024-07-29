@@ -21,7 +21,8 @@ from aphrodite.modeling.model_loader.tensorizer import (
 from aphrodite.modeling.model_loader.utils import (get_model_architecture,
                                                    set_default_torch_dtype)
 from aphrodite.modeling.model_loader.weight_utils import (
-    download_weights_from_hf, filter_files_not_needed_for_inference,
+    download_safetensors_index_file_from_hf, download_weights_from_hf,
+    filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
     get_quant_config, initialize_dummy_weights, np_cache_weights_iterator,
     pt_weights_iterator, safetensors_weights_iterator)
 from aphrodite.modeling.models.vlm_base import VisionLanguageModelBase
@@ -186,7 +187,19 @@ class DefaultModelLoader(BaseModelLoader):
                     use_safetensors = True
                 break
 
-        if not use_safetensors:
+        if use_safetensors:
+            # For models like Mistral-7B-Instruct-v0.3
+            # there are both sharded safetensors files and a consolidated
+            # safetensors file. Using both breaks.
+            # Here, we download the `model.safetensors.index.json` and filter
+            # any files not found in the index.
+            if not is_local:
+                download_safetensors_index_file_from_hf(
+                    model_name_or_path, self.load_config.download_dir,
+                    revision)
+            hf_weights_files = filter_duplicate_safetensors_files(
+                hf_weights_files, hf_folder)
+        else:
             hf_weights_files = filter_files_not_needed_for_inference(
                 hf_weights_files)
 
@@ -490,6 +503,7 @@ class ShardedStateLoader(BaseModelLoader):
         max_size: Optional[int] = None,
     ) -> None:
         from safetensors.torch import save_file
+
         from aphrodite.distributed import get_tensor_model_parallel_rank
         if pattern is None:
             pattern = ShardedStateLoader.DEFAULT_PATTERN
