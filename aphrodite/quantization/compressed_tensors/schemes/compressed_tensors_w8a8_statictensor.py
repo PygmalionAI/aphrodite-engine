@@ -16,7 +16,6 @@ with suppress(ImportError):
 __all__ = ["CompressedTensorsW8A8StaticTensor"]
 
 
-
 # cutlass
 def cutlass_scaled_mm_dq(a: torch.Tensor, b: torch.Tensor,
                          a_scales: torch.Tensor, b_scales: torch.Tensor,
@@ -28,6 +27,7 @@ def cutlass_scaled_mm_dq(a: torch.Tensor, b: torch.Tensor,
     out = torch.empty((m, n), dtype=out_dtype, device=a.device)
     quant_ops.cutlass_scaled_mm_dq(out, a, b, a_scales, b_scales)
     return out
+
 
 # int8
 def static_scaled_int8_quant(input: torch.Tensor,
@@ -43,7 +43,6 @@ def static_scaled_int8_quant(input: torch.Tensor,
     q = torch.empty_like(input, dtype=torch.int8)
     quant_ops.static_scaled_int8_quant(q, input, scale)
     return q
-
 
 
 class CompressedTensorsW8A8StaticTensor(CompressedTensorsScheme):
@@ -150,5 +149,5 @@ class CompressedTensorsW8A8StaticTensor(CompressedTensorsScheme):
         # Input quantize
         x_q = static_scaled_int8_quant(x, act_scale[0].item())
 
-        return cutlass_scaled_mm_dq(x_q, weight.t(), act_scale,
-                                    weight_scale, x.dtype)
+        return cutlass_scaled_mm_dq(x_q, weight.t(), act_scale, weight_scale,
+                                    x.dtype)
