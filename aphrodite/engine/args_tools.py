@@ -52,6 +52,7 @@ class EngineArgs:
     load_in_8bit: bool = False
     load_in_smooth: bool = False
     deepspeed_fp_bits: Optional[int] = None
+    torchao_fp_bits: Optional[int] = None
     enforce_eager: bool = True
     max_context_len_to_capture: Optional[int] = None
     max_seq_len_to_capture: int = 8192
@@ -401,6 +402,12 @@ class EngineArgs:
                             help='RoPE scaling configuration in JSON format. '
                             'For example, {"type":"dynamic","factor":2.0}')
         parser.add_argument(
+            "--torchao-fp-bits",
+            type=int,
+            default=None,
+            help="Number of floating bits to use for the torchao "
+            "quantization. Supported bits are: 5, 6, 7. ")
+        parser.add_argument(
             "--enforce-eager",
             type=lambda x: (str(x).lower() == 'true'),
             default=EngineArgs.enforce_eager,
@@ -628,6 +635,7 @@ class EngineArgs:
             self.load_in_8bit,
             self.load_in_smooth,
             self.deepspeed_fp_bits,
+            self.torchao_fp_bits,
             self.quantization_param_path,
             self.enforce_eager,
             self.max_context_len_to_capture,
