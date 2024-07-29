@@ -130,14 +130,7 @@ class TorchAOFPLinearMethod(LinearMethodBase):
               x: torch.Tensor,
               bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         weight = layer.weight
-        weights = weight.data
-        scales = weight.scales
-        if bias is None:
-            return weight.kernel(self.quant_config.exponent_bits,
-                self.quant_config.mantissa_bits, x, weights, scales)
-        else:
-            return weight.kernel(self.quant_config.exponent_bits,
-                self.quant_config.mantissa_bits, x, weights, scales) + bias
+        return weight.forward(x, bias)
 
 class TorchAOFPParameter(nn.Parameter):
     """
@@ -150,6 +143,7 @@ class TorchAOFPParameter(nn.Parameter):
                 quant_config: TorchAOFPConfig):
         try:
             from torchao.prototype.quant_llm import to_scaled_tc_fpx,from_scaled_tc_fpx
+            from torchao.prototype.quant_llm.quant_llm import _SPLIT_K_MAP
             from torchao.ops import quant_llm_linear
         except ImportError as err:
             raise ImportError("Please install torchao via "
@@ -169,6 +163,7 @@ class TorchAOFPParameter(nn.Parameter):
         self.fp_quantizer = to_scaled_tc_fpx
         self.fp_dequantizer = from_scaled_tc_fpx
         self.kernel = quant_llm_linear
+        self.split_k_map = _SPLIT_K_MAP
         return self
 
     def ao_quantize_(self, tensor: torch.Tensor):
@@ -182,4 +177,20 @@ class TorchAOFPParameter(nn.Parameter):
         output_dtype = output_dtype or torch.get_default_dtype()
         return self.fp_dequantizer(self.data, self.quant_config.exponent_bits, 
                         self.quant_config.mantissa_bits, self.scales).to(output_dtype)
+
+    def forward(self, 
+                x: torch.Tensor,
+                bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+
+        out_dim, in_dim = self.data.shape
+        bsize = x.shape[0]
+        splitK = self.split_k_map[(bsize - 1) // 64].get(out_dim, 1) if bsize <= 768 else 1
+        if bias is None:
+            return self.kernel(self.quant_config.exponent_bits,
+                self.quant_config.mantissa_bits, x, self.data, self.scales, splitK=splitK)
+        else:
+            return self.kernel(self.quant_config.exponent_bits,
+                self.quant_config.mantissa_bits, x, self.data, self.scales, splitK=splitK) + bias
+
+
 
