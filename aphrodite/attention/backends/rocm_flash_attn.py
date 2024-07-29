@@ -1,7 +1,7 @@
 """Attention layer ROCm GPUs."""
-from dataclasses import dataclass
 import os
-from typing import List, Optional, Tuple, Type
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 import torch
 from loguru import logger
@@ -200,7 +200,10 @@ class ROCmFlashAttentionImpl(AttentionImpl):
         alibi_slopes: Optional[List[float]],
         sliding_window: Optional[int],
         kv_cache_dtype: str,
+        blocksparse_params: Optional[Dict[str, Any]] = None,
     ) -> None:
+        assert blocksparse_params is None, ValueError(
+            "ROCm FlashAttention does not support block-sparse attention.")
         self.num_heads = num_heads
         self.head_size = head_size
         self.scale = float(scale)

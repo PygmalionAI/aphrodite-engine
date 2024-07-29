@@ -5,6 +5,7 @@ from typing import Optional, Type
 
 import torch
 from loguru import logger
+
 from aphrodite.attention.backends.abstract import AttentionBackend
 from aphrodite.common.utils import is_cpu, is_hip
 
@@ -28,7 +29,14 @@ def get_attn_backend(
     dtype: torch.dtype,
     kv_cache_dtype: Optional[str],
     block_size: int,
+    is_blocksparse: bool = False,
 ) -> Type[AttentionBackend]:
+
+    if is_blocksparse:
+        logger.info("Using BlocksparseFlashAttention backend.")
+        from aphrodite.attention.backends.blocksparse_attn import \
+            BlocksparseFlashAttentionBackend
+        return BlocksparseFlashAttentionBackend
     """Determine which attention backend to use and only import
     the selected backend module.
     """
@@ -38,7 +46,6 @@ def get_attn_backend(
     if backend == _Backend.FLASH_ATTN:
         from aphrodite.attention.backends.flash_attn import \
             FlashAttentionBackend  # noqa: F401
-        logger.info("Using FlashAttention backend.")
         return FlashAttentionBackend
     if backend == _Backend.XFORMERS:
         logger.info("Using XFormers backend.")
@@ -136,8 +143,8 @@ def which_attn_to_use(
         try:
             import vllm_flash_attn  # noqa: F401
 
-            from aphrodite.attention.backends.flash_attn import (  # noqa: F401
-                FlashAttentionBackend)
+            from aphrodite.attention.backends.flash_attn import \
+                FlashAttentionBackend  # noqa: F401
 
             supported_sizes = FlashAttentionBackend.get_supported_head_sizes()
             if head_size not in supported_sizes:
