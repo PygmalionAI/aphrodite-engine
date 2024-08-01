@@ -20,6 +20,8 @@
 #include <stdio.h>
 #include <assert.h>
 
+namespace aphrodite {
+
 template<typename TilingConfig, typename OutputDataType, int EXPONENT, int MANTISSA>
 static void Kernel_Ex(cudaStream_t    stream,
                       const uint4     *Weight,
@@ -112,14 +114,13 @@ cudaError_t fpx_linear_kernel(cudaStream_t    stream,
     }
     return cudaGetLastError();
 }
-
+} // namespace aphrodite
 
 #include <torch/extension.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <torch/library.h>
 
-namespace aphrodite {
 // MODIFICATION NOTE: dtype of _weights is changed to uint8
 /*
 Computes FPx-FP16 GEMM (PyTorch interface).
@@ -173,15 +174,15 @@ torch::Tensor fp_eXmY_linear_forward_cuda(
 
     // officially supported in Quant-LLM
     if (EXPONENT == 3 && MANTISSA == 2)
-        fpx_linear_kernel<3, 2>(stream, weight, scales, in_feats, out_feats, M, N, K, Reduction_Workspace, splitK);
+        aphrodite::fpx_linear_kernel<3, 2>(stream, weight, scales, in_feats, out_feats, M, N, K, Reduction_Workspace, splitK);
     else if (EXPONENT == 2 && MANTISSA == 2)
-        fpx_linear_kernel<2, 2>(stream, weight, scales, in_feats, out_feats, M, N, K, Reduction_Workspace, splitK);
+        aphrodite::fpx_linear_kernel<2, 2>(stream, weight, scales, in_feats, out_feats, M, N, K, Reduction_Workspace, splitK);
 
     // experimental
     else if (EXPONENT == 2 && MANTISSA == 3)
-        fpx_linear_kernel<2, 3>(stream, weight, scales, in_feats, out_feats, M, N, K, Reduction_Workspace, splitK);
+        aphrodite::fpx_linear_kernel<2, 3>(stream, weight, scales, in_feats, out_feats, M, N, K, Reduction_Workspace, splitK);
     else if (EXPONENT == 3 && MANTISSA == 1)
-        fpx_linear_kernel<3, 1>(stream, weight, scales, in_feats, out_feats, M, N, K, Reduction_Workspace, splitK);
+        aphrodite::fpx_linear_kernel<3, 1>(stream, weight, scales, in_feats, out_feats, M, N, K, Reduction_Workspace, splitK);
     // else if (EXPONENT == 2 && MANTISSA == 1)
     //     fpx_linear_kernel<2, 1>(stream, weight, scales, in_feats, out_feats, M, N, K, Reduction_Workspace, splitK);
     // else if (EXPONENT == 3 && MANTISSA == 0)
@@ -194,9 +195,3 @@ torch::Tensor fp_eXmY_linear_forward_cuda(
 
     return _out_feats;
 }
-
-TORCH_LIBRARY_IMPL(aphrodite, CUDA, m) {
-  m.impl("aphrodite::quant_llm_linear", &fp_eXmY_linear_forward_cuda);
-}
-
-} // namespace aphrodite

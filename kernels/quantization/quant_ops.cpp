@@ -46,7 +46,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
                 "CUTLASS w8a8 GEMM, supporting symmetric per-tensor or "
                 "per-row/column quantization.");
   // FP6_LLM
-  quant_ops.def("quant_llm_linear", &fp_eXmY_linear_forward_cuda, "FP6_LLM");
+  quant_ops.def("fp_eXmY_linear_forward_cuda", &fp_eXmY_linear_forward_cuda, "FP6_LLM");
 #endif
   // GPTQ
   quant_ops.def("gptq_gemm", &gptq_gemm, "Quantized GEMM for GPTQ");
