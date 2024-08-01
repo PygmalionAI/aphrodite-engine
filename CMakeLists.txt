@@ -213,6 +213,7 @@ include(FetchContent)
     "kernels/quantization/bitsandbytes/int4_fp16_gemm_kernels.cu"
     "kernels/quantization/bitsandbytes/format.cu"
     "kernels/quantization/bitsandbytes/gemm_s4_f16.cu"
+    "kernels/quantization/fp6_llm/fp6_linear.cu"
     "kernels/quantization/gguf/gguf_kernel.cu"
     "kernels/quantization/marlin/dense/marlin_cuda_kernel.cu"
     "kernels/quantization/marlin/sparse/marlin_24_cuda_kernel.cu"
