@@ -1,3 +1,4 @@
+from contextlib import suppress
 from typing import Any, Dict, List, Optional
 
 import torch
@@ -8,6 +9,13 @@ from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import QuantizationConfig
 
+from aphrodite.quantization.quant_llm.utils import (
+                from_scaled_tc_fpx, to_scaled_tc_fpx)
+
+HAS_QUANTS = False
+with suppress(ImportError):
+    from aphrodite._quant_C import quant_ops as ops
+    HAS_QUANTS = True
 
 class TorchAOFPConfig(QuantizationConfig):
     """Config for TorchAO FP quantizer. It supports fp5, fp6 and fp7.
@@ -133,11 +141,11 @@ class TorchAOFPLinearMethod(LinearMethodBase):
         weights = weight.data
         scales = weight.scales
         if bias is None:
-            return weight.kernel(self.quant_config.exponent_bits,
-                self.quant_config.mantissa_bits, x, weights, scales)
+            return ops.fp_eXmY_linear_forward_cuda(self.quant_config.exponent_bits,
+                self.quant_config.mantissa_bits, x, weights, scales, 1)
         else:
-            return weight.kernel(self.quant_config.exponent_bits,
-                self.quant_config.mantissa_bits, x, weights, scales) + bias
+            return ops.fp_eXmY_linear_forward_cuda(self.quant_config.exponent_bits,
+                self.quant_config.mantissa_bits, x, weights, scales, 1) + bias
 
 class TorchAOFPParameter(nn.Parameter):
     """
@@ -148,15 +156,8 @@ class TorchAOFPParameter(nn.Parameter):
 
     def __new__(cls, orig_shape: torch.Size, params_dtype: torch.dtype,
                 quant_config: TorchAOFPConfig):
-        try:
-            from aphrodite.quantization.quant_llm.utils import (
-                from_scaled_tc_fpx, to_scaled_tc_fpx)
-            from aphrodite.quantization.quant_llm.utils.utils import \
-                quant_llm_linear
-        except ImportError as err:
-            raise ImportError("Please install torchao via "
-                              "`pip install torchao` to use "
-                              "torchao quantizer.") from err
+        if not HAS_QUANTS:
+            raise ImportError("Could not find the quantization kernels.")
 
         data = torch.empty(torch.Size((orig_shape[0],
                             orig_shape[1] * quant_config.weight_bits // 8)),
@@ -168,20 +169,17 @@ class TorchAOFPParameter(nn.Parameter):
                                   dtype=torch.float16)
         self.quant_config = quant_config
         self.orig_shape = orig_shape
-        self.fp_quantizer = to_scaled_tc_fpx
-        self.fp_dequantizer = from_scaled_tc_fpx
-        self.kernel = quant_llm_linear
         return self
 
     def ao_quantize_(self, tensor: torch.Tensor):
         assert tensor.device.type == "cuda" and tensor.dtype != torch.int8
-        data, scales = self.fp_quantizer(tensor.data, self.quant_config.exponent_bits,
+        data, scales = to_scaled_tc_fpx(tensor.data, self.quant_config.exponent_bits,
                                                    self.quant_config.mantissa_bits)
         self.data.copy_(data)
         self.scales.copy_(scales)
 
     def ao_dequantize(self, output_dtype=None):
         output_dtype = output_dtype or torch.get_default_dtype()
-        return self.fp_dequantizer(self.data, self.quant_config.exponent_bits, 
+        return from_scaled_tc_fpx(self.data, self.quant_config.exponent_bits, 
                         self.quant_config.mantissa_bits, self.scales).to(output_dtype)
 
