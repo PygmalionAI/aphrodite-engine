@@ -11,6 +11,8 @@ from aphrodite.quantization.base_config import QuantizationConfig
 
 from aphrodite.quantization.quant_llm.utils import (
                 from_scaled_tc_fpx, to_scaled_tc_fpx)
+from aphrodite.quantization.quant_llm.utils.utils import (
+                _SPLIT_K_MAP)
 
 HAS_QUANTS = False
 with suppress(ImportError):
@@ -140,12 +142,15 @@ class TorchAOFPLinearMethod(LinearMethodBase):
         weight = layer.weight
         weights = weight.data
         scales = weight.scales
+        out_dim, in_dim = weights.shape
+        bsize = x.shape[0]
+        splitK = _SPLIT_K_MAP[(bsize - 1) // 64].get(out_dim, 1) if bsize <= 768 else 1
         if bias is None:
             return ops.fp_eXmY_linear_forward_cuda(self.quant_config.exponent_bits,
-                self.quant_config.mantissa_bits, x, weights, scales, 1)
+                self.quant_config.mantissa_bits, x, weights, scales, splitK)
         else:
             return ops.fp_eXmY_linear_forward_cuda(self.quant_config.exponent_bits,
-                self.quant_config.mantissa_bits, x, weights, scales, 1) + bias
+                self.quant_config.mantissa_bits, x, weights, scales, splitK) + bias
 
 class TorchAOFPParameter(nn.Parameter):
     """
