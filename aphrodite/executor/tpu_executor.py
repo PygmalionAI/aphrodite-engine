@@ -19,8 +19,8 @@ class TPUExecutor(ExecutorBase):
             "Speculative decoding is not yet supported for TPU backend")
         if self.model_config.dtype in (torch.float16, torch.float32):
             logger.warning(
-                "The TPU backend currently does not support %s. "
-                "Using bfloat16 instead.", self.model_config.dtype)
+                "The TPU backend currently does not support "
+                f"{self.model_config.dtype}. Using bfloat16 instead.")
             self.model_config.dtype = torch.bfloat16
 
         # Instantiate the worker and load the model to the device.
