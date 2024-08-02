@@ -21,19 +21,19 @@ MAX_INT8 = 127.5
 
 
 class QuantizedTensor(NamedTuple):
-  """A tensor which has been quantized to int8 and its scales.
+    """A tensor which has been quantized to int8 and its scales.
 
   Attributes:
     weight: Weight
     scales: Scales
   """
 
-  weight: jnp.ndarray
-  scales: jnp.ndarray
+    weight: jnp.ndarray
+    scales: jnp.ndarray
 
 
 def to_int8(x: jnp.ndarray, h: jnp.ndarray) -> jnp.ndarray:
-  """Converts a float array to an int8 array with a scale.
+    """Converts a float array to an int8 array with a scale.
 
   Args:
     x: Float array.
@@ -42,13 +42,13 @@ def to_int8(x: jnp.ndarray, h: jnp.ndarray) -> jnp.ndarray:
   Returns:
     Int8 array.
   """
-  return jnp.int8(jnp.rint(x * (MAX_INT8 / h)))
+    return jnp.int8(jnp.rint(x * (MAX_INT8 / h)))
 
 
-def from_int8(
-    x: jnp.ndarray, h: jnp.ndarray, dtype: jnp.dtype = jnp.bfloat16
-) -> jnp.ndarray:
-  """Converts an int8 array to a float array with a scale.
+def from_int8(x: jnp.ndarray,
+              h: jnp.ndarray,
+              dtype: jnp.dtype = jnp.bfloat16) -> jnp.ndarray:
+    """Converts an int8 array to a float array with a scale.
 
   Args:
     x: Int8 array.
@@ -58,11 +58,11 @@ def from_int8(
   Returns:
     Float array.
   """
-  return x.astype(dtype) * h / MAX_INT8
+    return x.astype(dtype) * h / MAX_INT8
 
 
 def get_quantization_scales(x: jnp.ndarray) -> jnp.ndarray:
-  """Computes the quantization scales for a float array.
+    """Computes the quantization scales for a float array.
 
   These are the maximum values of the trailing dimension.
 
@@ -73,13 +73,11 @@ def get_quantization_scales(x: jnp.ndarray) -> jnp.ndarray:
     Array of the same shape as input but with the trailing dimension reduced to
     a size 1 absolute max value.
   """
-  return jnp.max(jnp.abs(x), axis=-1, keepdims=True)
+    return jnp.max(jnp.abs(x), axis=-1, keepdims=True)
 
 
-def quantize_to_int8(
-    x: jnp.ndarray,
-) -> QuantizedTensor:
-  """Quantizes a float array to an int8 QuantizedTensor.
+def quantize_to_int8(x: jnp.ndarray, ) -> QuantizedTensor:
+    """Quantizes a float array to an int8 QuantizedTensor.
 
   Args:
     x: Float array to quantize.
@@ -87,15 +85,15 @@ def quantize_to_int8(
   Returns:
     Int8 QuantizedTensor.
   """
-  x_scales = get_quantization_scales(x)
-  return QuantizedTensor(weight=to_int8(x, x_scales), scales=x_scales)
+    x_scales = get_quantization_scales(x)
+    return QuantizedTensor(weight=to_int8(x, x_scales), scales=x_scales)
 
 
 def unquantize_from_int8(
     x: QuantizedTensor,
     dtype: jnp.dtype = jnp.bfloat16,
 ) -> jnp.ndarray:
-  """Unquantizes an int8 QuantizedTensor to a float array.
+    """Unquantizes an int8 QuantizedTensor to a float array.
 
   Args:
     x: Int8 QuantizedTensor to unquantize.
@@ -104,4 +102,4 @@ def unquantize_from_int8(
   Returns:
     Float array.
   """
-  return from_int8(x.weight, x.scales, dtype)
+    return from_int8(x.weight, x.scales, dtype)
