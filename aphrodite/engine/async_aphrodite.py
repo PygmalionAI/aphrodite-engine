@@ -9,11 +9,11 @@ from loguru import logger
 from transformers import PreTrainedTokenizer
 
 from aphrodite.common.config import DecodingConfig, ModelConfig
+from aphrodite.common.inputs import LLMInputs, PromptInputs
 from aphrodite.common.outputs import EmbeddingRequestOutput, RequestOutput
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.common.sequence import (ExecuteModelRequest, MultiModalData,
-                                       SamplerOutput)
+from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.executor.ray_utils import initialize_ray_cluster, ray
@@ -248,49 +248,54 @@ class _AsyncAphrodite(AphroditeEngine):
 
         return request_outputs
 
-    async def encode_request_async(
+    async def process_model_inputs_async(
         self,
-        request_id: str,  # pylint: disable=unused-argument
-        prompt: Optional[str],
-        prompt_token_ids: Optional[List[int]] = None,
+        request_id: str,
+        inputs: PromptInputs,
         lora_request: Optional[LoRARequest] = None,
-    ):
-        if prompt_token_ids is None:
-            assert prompt is not None
-            prompt_token_ids = await self.tokenizer.encode_async(
+    ) -> LLMInputs:
+        if isinstance(inputs, str):
+            inputs = {"prompt": inputs}
+
+        if "prompt_token_ids" not in inputs:
+            tokenizer = self.get_tokenizer_group("prompts must be None if "
+                                                 "skip_tokenizer_init is True")
+
+            prompt_token_ids = await tokenizer.encode_async(
                 request_id=request_id,
-                prompt=prompt,
+                prompt=inputs["prompt"],
                 lora_request=lora_request)
-        return prompt_token_ids
+        else:
+            prompt_token_ids = inputs["prompt_token_ids"]
+
+        return LLMInputs(prompt_token_ids=prompt_token_ids,
+                         prompt=inputs.get("prompt"),
+                         multi_modal_data=inputs.get("multi_modal_data"))
 
     async def add_request_async(
         self,
         request_id: str,
-        prompt: Optional[str],
+        inputs: PromptInputs,
         params: Union[SamplingParams, PoolingParams],
-        prompt_token_ids: Optional[List[int]] = None,
         arrival_time: Optional[float] = None,
         lora_request: Optional[LoRARequest] = None,
-        multi_modal_data: Optional[MultiModalData] = None,
     ) -> None:
         if lora_request is not None and not self.lora_config:
             raise ValueError(f"Got lora_request {lora_request} but LoRA is "
                              "not enabled!")
         if arrival_time is None:
             arrival_time = time.time()
-        prompt_token_ids = await self.encode_request_async(
-            request_id=request_id,
-            prompt=prompt,
-            prompt_token_ids=prompt_token_ids,
-            lora_request=lora_request)
 
-        return self.add_request(request_id,
-                                prompt=prompt,
-                                params=params,
-                                prompt_token_ids=prompt_token_ids,
-                                arrival_time=arrival_time,
-                                lora_request=lora_request,
-                                multi_modal_data=multi_modal_data)
+        processed_inputs = await self.process_model_inputs_async(
+            request_id=request_id, inputs=inputs, lora_request=lora_request)
+
+        self._add_processed_request(
+            request_id=request_id,
+            processed_inputs=processed_inputs,
+            params=params,
+            arrival_time=arrival_time,
+            lora_request=lora_request,
+        )
 
     async def check_health_async(self) -> None:
         self.model_executor.check_health()
@@ -376,8 +381,8 @@ class AsyncAphrodite:
             from aphrodite.executor.ray_gpu_executor import RayGPUExecutorAsync
             executor_class = RayGPUExecutorAsync
         elif distributed_executor_backend == "mp":
-            from aphrodite.executor.multiproc_gpu_executor import (
-                MultiprocessingGPUExecutorAsync)
+            from aphrodite.executor.multiproc_gpu_executor import \
+                MultiprocessingGPUExecutorAsync
             executor_class = MultiprocessingGPUExecutorAsync
         else:
             from aphrodite.executor.gpu_executor import GPUExecutorAsync
@@ -529,22 +534,26 @@ class AsyncAphrodite:
     async def add_request(
         self,
         request_id: str,
-        prompt: Optional[str],
+        inputs: PromptInputs,
         params: Union[SamplingParams, PoolingParams],
-        prompt_token_ids: Optional[List[int]] = None,
         arrival_time: Optional[float] = None,
         lora_request: Optional[LoRARequest] = None,
-        multi_modal_data: Optional[MultiModalData] = None,
     ) -> AsyncStream:
         if self.log_requests:
-            shortened_prompt = prompt
-            shortened_token_ids = prompt_token_ids
-            if self.max_log_len is not None:
+            if isinstance(inputs, str):
+                shortened_prompt = inputs
+                shortened_token_ids = None
+            else:
+                shortened_prompt = inputs.get("prompt")
+                shortened_token_ids = inputs.get("prompt_token_ids")
+
+            max_log_len = self.max_log_len
+            if max_log_len is not None:
                 if shortened_prompt is not None:
-                    shortened_prompt = shortened_prompt[:self.max_log_len]
+                    shortened_prompt = shortened_prompt[:max_log_len]
                 if shortened_token_ids is not None:
-                    shortened_token_ids = shortened_token_ids[:self.
-                                                              max_log_len]
+                    shortened_token_ids = shortened_token_ids[:max_log_len]
+
             logger.info(f"Received request {request_id}: "
                         f"prompt: {shortened_prompt!r}, "
                         f"params: {params}, "
@@ -565,39 +574,33 @@ class AsyncAphrodite:
             arrival_time = time.time()
 
         if self.engine_use_ray:
-            prompt_token_ids = await (
-                self.engine.encode_request_async.remote(  # type: ignore
+            processed_inputs = await self.engine.process_model_inputs_async \
+                .remote(  # type: ignore
                     request_id=request_id,
-                    prompt=prompt,
-                    prompt_token_ids=prompt_token_ids,
-                    lora_request=lora_request))
+                    inputs=inputs,
+                    lora_request=lora_request)
         else:
-            prompt_token_ids = await self.engine.encode_request_async(
+            processed_inputs = await self.engine.process_model_inputs_async(
                 request_id=request_id,
-                prompt=prompt,
-                prompt_token_ids=prompt_token_ids,
+                inputs=inputs,
                 lora_request=lora_request)
 
         stream = self._request_tracker.add_request(
             request_id,
-            prompt=prompt,
+            inputs=processed_inputs,
             params=params,
-            prompt_token_ids=prompt_token_ids,
             arrival_time=arrival_time,
             lora_request=lora_request,
-            multi_modal_data=multi_modal_data,
         )
 
         return stream
 
     async def generate(
         self,
-        prompt: Optional[str],
+        inputs: PromptInputs,
         sampling_params: SamplingParams,
         request_id: str,
-        prompt_token_ids: Optional[List[int]] = None,
         lora_request: Optional[LoRARequest] = None,
-        multi_modal_data: Optional[MultiModalData] = None
     ) -> AsyncIterator[RequestOutput]:
         """Generate outputs for a request.
 
@@ -663,24 +666,20 @@ class AsyncAphrodite:
             >>> # Process and return the final output
             >>> ...
         """
-        async for output in self.process_request(
+        async for output in self._process_request(
                 request_id,
-                prompt,
+                inputs,
                 sampling_params,
-                prompt_token_ids,
-                lora_request,
-                multi_modal_data,
+                lora_request=lora_request,
         ):
-            yield output
+            yield AphroditeEngine.validate_output(output, RequestOutput)
 
     async def encode(
         self,
-        prompt: Optional[str],
+        inputs: PromptInputs,
         pooling_params: PoolingParams,
         request_id: str,
-        prompt_token_ids: Optional[List[int]] = None,
         lora_request: Optional[LoRARequest] = None,
-        multi_modal_data: Optional[MultiModalData] = None
     ) -> AsyncIterator[EmbeddingRequestOutput]:
         """Generate outputs for a request from an embedding model.
         Generate outputs for a request. This method is a coroutine. It adds the
@@ -735,24 +734,22 @@ class AsyncAphrodite:
             >>> # Process and return the final output
             >>> ...
         """
-        async for output in self.process_request(
+        async for output in self._process_request(
                 request_id,
-                prompt,
+                inputs,
                 pooling_params,
-                prompt_token_ids,
-                lora_request,
-                multi_modal_data,
+                lora_request=lora_request,
         ):
-            yield output
+            yield AphroditeEngine.validate_output(output,
+                                                  EmbeddingRequestOutput)
 
-    async def process_request(
+    async def _process_request(
         self,
         request_id: str,
-        prompt: Optional[str],
+        inputs: PromptInputs,
         params: Union[SamplingParams, PoolingParams],
-        prompt_token_ids: Optional[List[int]] = None,
+        *,
         lora_request: Optional[LoRARequest] = None,
-        multi_modal_data: Optional[MultiModalData] = None,
     ) -> AsyncIterator[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Common logic to process requests with SamplingParams or
         PoolingParams."""
@@ -760,12 +757,10 @@ class AsyncAphrodite:
 
         stream = await self.add_request(
             request_id,
-            prompt,
+            inputs,
             params,
-            prompt_token_ids=prompt_token_ids,
             arrival_time=arrival_time,
             lora_request=lora_request,
-            multi_modal_data=multi_modal_data,
         )
 
         try:

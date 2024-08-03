@@ -172,7 +172,10 @@ class OpenAIServing:
         })
         return json_str
 
-    async def _check_model(self, request) -> Optional[ErrorResponse]:
+    async def _check_model(
+        self, request: Union[CompletionRequest, ChatCompletionRequest,
+                             EmbeddingRequest]
+    ) -> Optional[ErrorResponse]:
         if request.model in self.served_model_names:
             return
         if request.model in [lora.lora_name for lora in self.lora_requests]:
@@ -200,7 +203,10 @@ class OpenAIServing:
             lora for lora in self.lora_requests if lora.lora_name != lora_name
         ]
 
-    def _maybe_get_lora(self, request) -> Optional[LoRARequest]:
+    def _maybe_get_lora(
+        self, request: Union[CompletionRequest, ChatCompletionRequest,
+                             EmbeddingRequest]
+    ) -> Optional[LoRARequest]:
         if request.model in self.served_model_names:
             return
         for lora in self.lora_requests:
