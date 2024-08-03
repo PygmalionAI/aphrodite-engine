@@ -5,10 +5,8 @@ import torch
 
 from aphrodite.attention import get_attn_backend
 from aphrodite.common.config import CacheConfig, ModelConfig, ParallelConfig
-from aphrodite.common.utils import (
-    is_pin_memory_available,
-    STR_DTYPE_TO_TORCH_DTYPE,
-)
+from aphrodite.common.utils import (STR_DTYPE_TO_TORCH_DTYPE,
+                                    is_pin_memory_available)
 
 
 class CacheEngine:
@@ -68,8 +66,11 @@ class CacheEngine:
         pin_memory = is_pin_memory_available() if device == "cpu" else False
         kv_cache: List[torch.Tensor] = []
         for _ in range(self.num_layers):
+            # null block in CpuGpuBlockAllocator requires at least that
+            # block to be zeroed-out.
+            # We zero-out everything for simplicity.
             kv_cache.append(
-                torch.empty(kv_cache_shape,
+                torch.zeros(kv_cache_shape,
                             dtype=self.dtype,
                             pin_memory=pin_memory,
                             device=device))
