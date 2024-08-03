@@ -28,7 +28,7 @@ import torch
 from loguru import logger
 from torch.distributed import ReduceOp
 
-from aphrodite.common.utils import find_nccl_library, nccl_integrity_check
+from aphrodite.common.utils import find_nccl_library
 
 # === export types and functions from nccl to Python ===
 # for the original nccl definition, please check
@@ -186,28 +186,21 @@ class NCCLLibrary:
         so_file = so_file or find_nccl_library()
 
         try:
-            # load the library in another process.
-            # if it core dumps, it will not crash the current process
-            nccl_integrity_check(so_file)
+            if so_file not in NCCLLibrary.path_to_dict_mapping:
+                lib = ctypes.CDLL(so_file)
+                NCCLLibrary.path_to_library_cache[so_file] = lib
+            self.lib = NCCLLibrary.path_to_library_cache[so_file]
         except Exception as e:
             logger.error(
-                f"Failed to load NCCL library from {so_file} ."
+                "Failed to load NCCL library from %s ."
                 "It is expected if you are not running on NVIDIA/AMD GPUs."
                 "Otherwise, the nccl library might not exist, be corrupted "
-                "or it does not support the current platform "
-                f"{platform.platform()}."
-                "One solution is to download libnccl2 version 2.18 from "
-                "https://developer.download.nvidia.com/compute/cuda/repos/ "
-                "and extract the libnccl.so.2 file. If you already have the "
-                "library, please set the environment variable "
-                "APHRODITE_NCCL_SO_PATH to point to the correct nccl "
-                "library path.")
+                "or it does not support the current platform %s."
+                "If you already have the library, please set the "
+                "environment variable VLLM_NCCL_SO_PATH"
+                " to point to the correct nccl library path.", so_file,
+                platform.platform())
             raise e
-
-        if so_file not in NCCLLibrary.path_to_dict_mapping:
-            lib = ctypes.CDLL(so_file)
-            NCCLLibrary.path_to_library_cache[so_file] = lib
-        self.lib = NCCLLibrary.path_to_library_cache[so_file]
 
         if so_file not in NCCLLibrary.path_to_dict_mapping:
             _funcs = {}
