@@ -69,8 +69,11 @@ class cmake_build_ext(build_ext):
                 # os.sched_getaffinity() isn't universally available, so fall
                 #  back to os.cpu_count() if we get an error here.
                 num_jobs = len(os.sched_getaffinity(0))
+                logger.info(f"Using {num_jobs} CPUs as the number of jobs.")
             except AttributeError:
                 num_jobs = os.cpu_count()
+                logger.info(f"Using os.cpu_count()={num_jobs} as the number of"
+                            " jobs.")
 
         nvcc_threads = None
         if _is_cuda() and get_nvcc_cuda_version() >= Version("11.2"):

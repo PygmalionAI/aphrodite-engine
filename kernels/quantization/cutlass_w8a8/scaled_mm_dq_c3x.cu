@@ -3,6 +3,7 @@
 #include <cudaTypedefs.h>
 
 #if defined CUDA_VERSION && CUDA_VERSION >= 12000
+
 #include <torch/extension.h>
 
 #include <ATen/cuda/CUDAContext.h>
@@ -17,11 +18,14 @@
 #include "cute/atom/mma_atom.hpp"
 #include "cutlass/numeric_types.h"
 
+#include "cutlass/util/device_memory.h"
+
 #include "cutlass/gemm/device/gemm_universal_adapter.h"
 #include "cutlass/gemm/kernel/gemm_universal.hpp"
 #include "cutlass/epilogue/collective/collective_builder.hpp"
 #include "cutlass/gemm/collective/collective_builder.hpp"
 
+#include "broadcast_load_epilogue_c3x.hpp"
 #include "common.hpp"
 // clang-format on
 
@@ -31,12 +35,15 @@ using namespace cute;
    This defines a quantized GEMM operation with dequantized output, similar to
    torch._scaled_mm. It is defined using the CUTLASS 3.x API, and is used for
    NVIDIA GPUs with sm90a (Hopper) or later.
+
    A and B may be both either int8 or fp8_e4m3. A can be quantized per-tensor or
    per-row. B can be quantized per-tensor or per-column.
    Any combination of per-tensor and per-row or column is supported.
    A and B must have symmetric quantization (zero point == 0).
+
    So the GEMM operation is D = (a_scales * A) (b_scales * B), where the
    scales are applied elementwise with numpy-style broadcasting.
+
    ScaleA and ScaleB define the epilogue functions that apply the scales for
    the A and B operands respectively. These scales may be either per-tensor or
    per row or column.
@@ -61,7 +68,7 @@ struct cutlass_3x_gemm {
 
   using Accum = cutlass::epilogue::fusion::Sm90AccFetch;
 
-  using ScaleA = cutlass::epilogue::fusion::Sm90ColBroadcast<
+  using ScaleA = cutlass::epilogue::fusion::Sm90ColOrScalarBroadcast<
       0 /*Stages*/, typename EpilogueDescriptor::TileShape, float,
       Stride<Int<1>, Int<0>, Int<0>>>;
 
@@ -69,7 +76,7 @@ struct cutlass_3x_gemm {
       cutlass::epilogue::collective::detail::RowBroadcastDescriptor<
           EpilogueDescriptor, float>;
 
-  using ScaleB = cutlass::epilogue::fusion::Sm90RowBroadcast<
+  using ScaleB = cutlass::epilogue::fusion::Sm90RowOrScalarBroadcast<
       ScaleBDescriptor::Stages, typename EpilogueDescriptor::TileShape,
       typename ScaleBDescriptor::Element, Stride<Int<0>, Int<1>, Int<0>>>;
 
@@ -162,13 +169,9 @@ void cutlass_scaled_mm_dq_dispatcher(torch::Tensor& out, torch::Tensor const& a,
 
   using ScaleA_Args = typename Gemm::ScaleA::Arguments;
   using ScaleB_Args = typename Gemm::ScaleB::Arguments;
-  ScaleA_Args a_args = a_scales.numel() == 1
-                           ? ScaleA_Args{nullptr, a_scales.item<float>(), {}}
-                           : ScaleA_Args{a_scales.data_ptr<float>(), {}, {}};
 
-  ScaleB_Args b_args = b_scales.numel() == 1
-                           ? ScaleB_Args{nullptr, b_scales.item<float>(), {}}
-                           : ScaleB_Args{b_scales.data_ptr<float>(), {}, {}};
+  ScaleA_Args a_args{a_scales.data_ptr<float>(), a_scales.numel() != 1, {}};
+  ScaleB_Args b_args{b_scales.data_ptr<float>(), b_scales.numel() != 1, {}};
 
   args.epilogue.thread = {a_args, {b_args}};
 
@@ -178,10 +181,11 @@ void cutlass_scaled_mm_dq_dispatcher(torch::Tensor& out, torch::Tensor const& a,
   CUTLASS_CHECK(gemm_op.can_implement(args));
 
   size_t workspace_size = gemm_op.get_workspace_size(args);
-  TORCH_CHECK(workspace_size == 0);
+  cutlass::device_memory::allocation<uint8_t> workspace(workspace_size);
 
   auto stream = at::cuda::getCurrentCUDAStream(a.get_device());
-  cutlass::Status status = gemm_op.run(args, stream);
+
+  cutlass::Status status = gemm_op.run(args, workspace.get(), stream);
   CUTLASS_CHECK(status);
 }
 }  // namespace

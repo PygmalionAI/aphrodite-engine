@@ -22,7 +22,7 @@
 #include "cutlass/epilogue/threadblock/fusion/visitors.hpp"
 #include "cutlass/gemm/kernel/default_gemm_universal_with_visitor.h"
 
-#include "cutlass_visitor_2x_broadcast_epilogue.hpp"
+#include "broadcast_load_epilogue_c2x.hpp"
 #include "common.hpp"
 // clang-format on
 
@@ -32,12 +32,15 @@ using namespace cute;
    This defines a quantized GEMM operation with dequantized output, similar to
    torch._scaled_mm. It is defined using the CUTLASS 2.x API, and is used for
    NVIDIA GPUs with SM versions prior to sm90 (Hopper).
+
    A and B may be both either int8 or fp8_e4m3. A can be quantized per-tensor or
    per-row. B can be quantized per-tensor or per-column.
    Any combination of per-tensor and per-row or column is supported.
    A and B must have symmetric quantization (zero point == 0).
+
    So the GEMM operation is D = (a_scales * A) (b_scales * B), where the
    scales are applied elementwise with numpy-style broadcasting.
+
    ScaleA and ScaleB define the epilogue functions that apply the scales for
    the A and B operands respectively. These scales may be either per-tensor or
    per row or column.
@@ -142,17 +145,11 @@ void cutlass_scaled_mm_dq_dispatcher(torch::Tensor& out, torch::Tensor const& a,
   auto a_scales_ptr = a_scales.data_ptr<float>();
   auto b_scales_ptr = b_scales.data_ptr<float>();
 
-  // If A and B are quantized per-tensor, then these scale tensors are scalars,
-  // and they are passed in via the second argument.
   using ScaleAArgs = typename Gemm::ScaleA::Arguments;
-  ScaleAArgs a_args = a_scales.numel() == 1
-                          ? ScaleAArgs{nullptr, a_scales.item<float>(), {}}
-                          : ScaleAArgs{a_scales.data_ptr<float>(), {}, {}};
-
   using ScaleBArgs = typename Gemm::ScaleB::Arguments;
-  ScaleBArgs b_args = b_scales.numel() == 1
-                          ? ScaleBArgs{nullptr, b_scales.item<float>(), {}}
-                          : ScaleBArgs{b_scales.data_ptr<float>(), {}, {}};
+
+  ScaleBArgs b_args{b_scales.data_ptr<float>(), b_scales.numel() != 1, {}};
+  ScaleAArgs a_args{a_scales.data_ptr<float>(), a_scales.numel() != 1, {}};
 
   typename Gemm::EVTCompute0::Arguments evt0_compute_args{b_args};
 
