@@ -43,6 +43,7 @@ class ModelCard(BaseModel):
     owned_by: str = "pygmalionai"
     root: Optional[str] = None
     parent: Optional[str] = None
+    max_model_len: Optional[int] = None
     permission: List[ModelPermission] = Field(default_factory=list)
 
 
