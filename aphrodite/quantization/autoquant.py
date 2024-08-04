@@ -17,8 +17,8 @@ with suppress(ImportError):
     HAS_QUANTS = True
 
 
-class BitsandBytesConfig(QuantizationConfig):
-    """Config class for BitsandBytes.
+class AutoQuantConfig(QuantizationConfig):
+    """Config class for AutoQuant.
     Reference: https://arxiv.org/abs/2208.07339
     """
 
@@ -41,29 +41,29 @@ class BitsandBytesConfig(QuantizationConfig):
         if quant_mode == "weight_only" and self.weight_bits != 4:
             raise ValueError(
                 "Currently, only 4-bit weight quantization is supported for "
-                f"BNB weight_only, but got {self.weight_bits} bits.")
+                f"AutoQuant weight_only, but got {self.weight_bits} bits.")
         if quant_mode in ["llm_int8", "smoothquant"] and self.weight_bits != 8:
             raise ValueError(
                 "Currently, only 8-bit weight quantization is supported for "
-                "BNB llm_int8 or smoothquant, "
+                "AutoQuant llm_int8 or smoothquant, "
                 f"but got {self.weight_bits} bits.")
         self.pack_factor = 32 // self.weight_bits
 
     def __repr__(self) -> str:
-        return (f"BitsandBytesConfig(weight_bits={self.weight_bits}, "
+        return (f"AutoQuantConfig(weight_bits={self.weight_bits}, "
                 f"group_size={self.group_size}, "
                 f"zero_point={self.zero_point}, "
                 f"from_float={self.from_float}, "
                 f"quant_mode={self.quant_mode})")
 
     def get_name(self) -> str:
-        return "bitsandbytes"
+        return "autoquant"
 
     def get_supported_act_dtypes(self) -> List[torch.dtype]:
         return [torch.half, torch.bfloat16]
 
     def get_min_capability(self) -> int:
-        # The BitsandBytes kernel only supports Ampere or newer GPUs.
+        # The AutoQuant kernel only supports Ampere or newer GPUs.
         return 75
 
     @staticmethod
@@ -74,7 +74,7 @@ class BitsandBytesConfig(QuantizationConfig):
         ]
 
     @classmethod
-    def from_config(cls, config: Dict[str, Any]) -> "BitsandBytesConfig":
+    def from_config(cls, config: Dict[str, Any]) -> "AutoQuantConfig":
         weight_bits = cls.get_from_keys(config, ["w_bit", "bits"])
         group_size = cls.get_from_keys(config, ["q_group_size", "group_size"])
         zero_point = cls.get_from_keys(config, ["zero_point"])
@@ -89,22 +89,22 @@ class BitsandBytesConfig(QuantizationConfig):
         return cls(weight_bits, group_size, zero_point, from_float, quant_mode)
 
     def get_quant_method(
-            self, layer: torch.nn.Module) -> Optional["BNBLinearMethod"]:
+            self, layer: torch.nn.Module) -> Optional["AutoQuantLinearMethod"]:
         if isinstance(layer, LinearBase):
-            return BNBLinearMethod(self)
+            return AutoQuantLinearMethod(self)
         return None
 
     def get_scaled_act_names(self) -> List[str]:
         return ["gelu", "gelu_fast", "gelu_new", "gelu_pytorch_tanh"]
 
 
-class BNBLinearMethod(LinearMethodBase):
-    """Linear method for BitsandBytes.
+class AutoQuantLinearMethod(LinearMethodBase):
+    """Linear method for AutoQuant.
     Args:
-        quant_config: The BitsandBytes quantization config.
+        quant_config: The AutoQuant quantization config.
     """
 
-    def __init__(self, quant_config: BitsandBytesConfig):
+    def __init__(self, quant_config: AutoQuantConfig):
         if not HAS_QUANTS:
             raise ImportError("Could not find the quantization kernels.")
         self.quant_config = quant_config

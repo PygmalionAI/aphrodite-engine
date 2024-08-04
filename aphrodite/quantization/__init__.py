@@ -3,9 +3,9 @@ from typing import Type
 from loguru import logger
 
 from aphrodite.quantization.aqlm import AQLMConfig
+from aphrodite.quantization.autoquant import AutoQuantConfig
 from aphrodite.quantization.awq import AWQConfig
 from aphrodite.quantization.base_config import QuantizationConfig
-from aphrodite.quantization.bitsandbytes import BitsandBytesConfig
 from aphrodite.quantization.compressed_tensors.compressed_tensors import \
     CompressedTensorsConfig
 from aphrodite.quantization.deepspeedfp import DeepSpeedFPConfig
@@ -31,7 +31,7 @@ except ImportError:
 QUANTIZATION_METHODS = {
     "aqlm": AQLMConfig,
     "awq": AWQConfig,
-    "bnb": BitsandBytesConfig,
+    "autoquant": AutoQuantConfig,
     "deepspeedfp": DeepSpeedFPConfig,
     "eetq": EETQConfig,
     "exl2": Exl2Config,
