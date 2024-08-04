@@ -266,6 +266,10 @@ class LLM:
             A list of `RequestOutput` objects containing the
             generated completions in the same order as the input prompts.
         """
+        if self.llm_engine.model_config.embedding_mode:
+            raise ValueError(
+                "LLM.generate() is only supported for generation models "
+                "(XForCausalLM).")
         if prompt_token_ids is not None or multi_modal_data is not None:
             inputs = self._convert_v1_inputs(
                 prompts=cast(Optional[Union[str, List[str]]], prompts),
@@ -406,6 +410,10 @@ class LLM:
             A list of `EmbeddingRequestOutput` objects containing the
             generated embeddings in the same order as the input prompts.
         """
+        if not self.llm_engine.model_config.embedding_mode:
+            raise ValueError(
+                "LLM.encode() is only supported for embedding models (XModel)."
+            )
         if prompt_token_ids is not None or multi_modal_data is not None:
             inputs = self._convert_v1_inputs(
                 prompts=cast(Optional[Union[str, List[str]]], prompts),
