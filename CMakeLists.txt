@@ -227,11 +227,14 @@ include(FetchContent)
     # The CUTLASS kernels for Hopper require sm90a to be enabled.
     # This is done via the below gencode option, BUT that creates kernels for both sm90 and sm90a.
     # That adds an extra 17MB to compiled binary, so instead we selectively enable it.
+    if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER 11)
     set_source_files_properties(
-        "csrc/quantization/cutlass_w8a8/scaled_mm_dq_c3x.cu"
-        PROPERTIES
-        COMPILE_FLAGS
-        "-gencode arch=compute_90a,code=sm_90a")
+          "csrc/quantization/cutlass_w8a8/scaled_mm_dq_c3x.cu"
+          PROPERTIES
+          COMPILE_FLAGS
+          "-gencode arch=compute_90a,code=sm_90a")
+  endif()
+
 endif()
 
 define_gpu_extension_target(
