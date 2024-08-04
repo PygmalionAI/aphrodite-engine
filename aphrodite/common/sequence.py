@@ -250,7 +250,7 @@ class Sequence:
 
     @property
     def prompt(self) -> Optional[str]:
-        return self.inputs["prompt"]
+        return self.inputs.get("prompt")
 
     @property
     def prompt_token_ids(self) -> List[int]:
@@ -258,7 +258,7 @@ class Sequence:
 
     @property
     def multi_modal_data(self) -> Optional["MultiModalData"]:
-        return self.inputs["multi_modal_data"]
+        return self.inputs.get("multi_modal_data")
 
     @property
     def lora_int_id(self) -> int:
