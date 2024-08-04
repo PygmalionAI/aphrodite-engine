@@ -5,6 +5,7 @@ from loguru import logger
 from aphrodite.quantization.aqlm import AQLMConfig
 from aphrodite.quantization.awq import AWQConfig
 from aphrodite.quantization.base_config import QuantizationConfig
+from aphrodite.quantization.bitnet import BITNETBitBLASConfig
 from aphrodite.quantization.bitsandbytes import BitsandBytesConfig
 from aphrodite.quantization.compressed_tensors.compressed_tensors import \
     CompressedTensorsConfig
@@ -39,6 +40,7 @@ QUANTIZATION_METHODS = {
     "gguf": GGUFConfig,
     # The order of gptq methods is important for config.py iteration over
     # override_quantization_method(..)
+    "bitnet": BITNETBitBLASConfig,
     "marlin": MarlinConfig,
     "gptq_marlin_24": GPTQMarlin24Config,
     "gptq_marlin": GPTQMarlinConfig,

@@ -24,6 +24,16 @@ def adjust_marlin_shard(param, shard_size, shard_offset):
     return shard_size * marlin_tile_size, shard_offset * marlin_tile_size
 
 
+def adjust_bitblas_shard(param, shard_size, shard_offset):
+    bitblas_tile_size = getattr(param, "bitblas_tile_size", None)
+    weight_propagation = getattr(param, "weight_propagation", None)
+    if weight_propagation and bitblas_tile_size is not None:
+        return (shard_size // bitblas_tile_size,
+                shard_offset // bitblas_tile_size)
+
+    return shard_size, shard_offset
+
+
 class LinearMethodBase(QuantizeMethodBase):
     """Base class for different (maybe quantized) linear methods."""
 
@@ -262,7 +272,10 @@ class ColumnParallelLinear(LinearBase):
             param_data, loaded_weight = fp8_scales_shard_indexer(param_data,
                                                                  loaded_weight,
                                                                  shard_id=0)
-        assert param_data.shape == loaded_weight.shape
+        assert param_data.dtype == loaded_weight.dtype, (
+            f"{param_data.dtype} != {loaded_weight.dtype}")
+        assert param_data.shape == loaded_weight.shape, (
+            f"{param_data.shape} != {loaded_weight.shape}")
         param_data.copy_(loaded_weight)
 
     def forward(self, input_):
@@ -382,6 +395,9 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                     shard_size, shard_offset = adjust_marlin_shard(
                         param, shard_size, shard_offset)
 
+                shard_size, shard_offset = adjust_bitblas_shard(
+                    param, shard_size, shard_offset)
+
                 loaded_weight_shard = loaded_weight.narrow(
                     output_dim, shard_offset, shard_size)
                 self.weight_loader(param, loaded_weight_shard, shard_id)
@@ -404,6 +420,8 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                 # account for the tiling.
                 shard_size, shard_offset = adjust_marlin_shard(
                     param, shard_size, shard_offset)
+            shard_size, shard_offset = adjust_bitblas_shard(
+                param, shard_size, shard_offset)
 
             param_data = param_data.narrow(output_dim, shard_offset,
                                            shard_size)
@@ -565,6 +583,8 @@ class QKVParallelLinear(ColumnParallelLinear):
                     # account for the tiling.
                     shard_size, shard_offset = adjust_marlin_shard(
                         param, shard_size, shard_offset)
+                shard_size, shard_offset = adjust_bitblas_shard(
+                    param, shard_size, shard_offset)
 
                 loaded_weight_shard = loaded_weight.narrow(
                     output_dim, shard_offset, shard_size)
@@ -596,6 +616,8 @@ class QKVParallelLinear(ColumnParallelLinear):
                 # account for the tiling.
                 shard_size, shard_offset = adjust_marlin_shard(
                     param, shard_size, shard_offset)
+            shard_size, shard_offset = adjust_bitblas_shard(
+                param, shard_size, shard_offset)
 
             param_data = param_data.narrow(output_dim, shard_offset,
                                            shard_size)
