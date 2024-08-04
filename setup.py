@@ -129,11 +129,13 @@ class cmake_build_ext(build_ext):
                 '-DCMAKE_CXX_COMPILER_LAUNCHER=sccache',
                 '-DCMAKE_CUDA_COMPILER_LAUNCHER=sccache',
             ]
+            logger.info("Using sccache as the compiler launcher.")
         elif is_ccache_available():
             cmake_args += [
                 '-DCMAKE_CXX_COMPILER_LAUNCHER=ccache',
                 '-DCMAKE_CUDA_COMPILER_LAUNCHER=ccache',
             ]
+            logger.info("Using ccache as the compiler launcher.")
 
         # Pass the python executable to cmake so it can find an exact
         # match.
@@ -409,10 +411,8 @@ def get_requirements() -> List[str]:
 
 ext_modules = []
 
-if _is_cuda():
+if _is_cuda() or _is_hip():
     ext_modules.append(CMakeExtension(name="aphrodite._moe_C"))
-    if _install_hadamard():
-        ext_modules.append(CMakeExtension(name="aphrodite._hadamard_C"))
 
 if not _is_neuron():
     ext_modules.append(CMakeExtension(name="aphrodite._C"))
@@ -420,6 +420,9 @@ if not _is_neuron():
         ext_modules.append(CMakeExtension(name="aphrodite._quant_C"))
     if _install_punica() and _is_cuda() or _is_hip():
         ext_modules.append(CMakeExtension(name="aphrodite._punica_C"))
+    # TODO: see if hadamard kernels work with HIP
+    if _install_hadamard() and _is_cuda():
+        ext_modules.append(CMakeExtension(name="aphrodite._hadamard_C"))
 
 package_data = {
     "aphrodite": [

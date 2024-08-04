@@ -401,6 +401,9 @@ add_custom_target(default)
 if(APHRODITE_GPU_LANG STREQUAL "CUDA" OR APHRODITE_GPU_LANG STREQUAL "HIP")
   message(STATUS "Enabling C extension.")
   add_dependencies(default _C)
+
+  message(STATUS "Enabling moe extension.")
+  add_dependencies(default _moe_C)
   # Enable punica if -DAPHRODITE_INSTALL_PUNICA_KERNELS=ON or
   # APHRODITE_INSTALL_PUNICA_KERNELS is set in the environment and
   # there are supported target arches.
@@ -419,9 +422,4 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA" OR APHRODITE_GPU_LANG STREQUAL "HIP")
     message(STATUS "Enabling hadamard extension.")
     add_dependencies(default _hadamard_C)
   endif()
-endif()
-
-if(APHRODITE_GPU_LANG STREQUAL "CUDA")
-  message(STATUS "Enabling moe extension.")
-  add_dependencies(default _moe_C)
 endif()
