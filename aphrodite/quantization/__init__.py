@@ -6,6 +6,7 @@ from aphrodite.quantization.aqlm import AQLMConfig
 from aphrodite.quantization.autoquant import AutoQuantConfig
 from aphrodite.quantization.awq import AWQConfig
 from aphrodite.quantization.base_config import QuantizationConfig
+from aphrodite.quantization.bitsandbytes import BitsAndBytesConfig
 from aphrodite.quantization.compressed_tensors.compressed_tensors import \
     CompressedTensorsConfig
 from aphrodite.quantization.deepspeedfp import DeepSpeedFPConfig
@@ -46,6 +47,7 @@ QUANTIZATION_METHODS = {
     "quip": QuipConfig,
     "squeezellm": SqueezeLLMConfig,
     "sparseml": CompressedTensorsConfig,
+    "bitsandbytes": BitsAndBytesConfig,
 }
 
 

@@ -26,3 +26,5 @@ peft
 
 # Benchmarking
 aiohttp
+
+bitsandbytes==0.42.0

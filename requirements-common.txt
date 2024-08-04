@@ -17,7 +17,6 @@ prometheus-fastapi-instrumentator >= 7.0.0
 lark == 1.1.8 # for grammars
 scipy # for quip
 rich
-bitsandbytes >= 0.41.0
 loguru
 hf_transfer # for faster downloads
 sentence-transformers # for embeddings
