@@ -31,6 +31,7 @@ class ProposerWorkerBase(WorkerBase, SpeculativeProposer):
     def list_loras(self) -> Set[int]:
         raise ValueError(f"{type(self)} does not support LoRA")
 
+
 class NonLLMProposerWorkerBase(ProposerWorkerBase, ABC):
     """Proposer worker which does not use a model with kvcache"""
 
@@ -51,7 +52,7 @@ class NonLLMProposerWorkerBase(ProposerWorkerBase, ABC):
 
     def get_cache_block_size_bytes(self) -> int:
         return 0
-    
+
     def add_lora(self, lora_request: LoRARequest) -> bool:
         raise ValueError(f"{type(self)} does not support LoRA")
 
