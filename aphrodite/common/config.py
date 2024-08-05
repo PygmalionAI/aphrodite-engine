@@ -120,7 +120,11 @@ class ModelConfig:
         self.revision = revision
         self.code_revision = code_revision
         self.rope_scaling = rope_scaling
-        self.tokenizer_revision = tokenizer_revision
+        # The tokenizer version is consistent with the model version by default.
+        if tokenizer_revision is None:
+            self.tokenizer_revision = revision
+        else:
+            self.tokenizer_revision = tokenizer_revision
         self.quantization = quantization
         self.load_in_4bit = load_in_4bit
         self.load_in_8bit = load_in_8bit

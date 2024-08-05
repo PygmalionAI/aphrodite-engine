@@ -1,7 +1,8 @@
+import os
 from typing import Dict, Optional
 
-from transformers import AutoConfig, PretrainedConfig
 from loguru import logger
+from transformers import PretrainedConfig
 
 from aphrodite.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
                                                   JAISConfig, MPTConfig,
@@ -23,6 +24,10 @@ def get_config(model: str,
                code_revision: Optional[str] = None,
                rope_scaling: Optional[dict] = None) -> PretrainedConfig:
     try:
+        if os.getenv("APHRODITE_USE_MODELSCOPE", "0") == "1":
+            from modelscope import AutoConfig
+        else:
+            from transformers import AutoConfig
         config = AutoConfig.from_pretrained(
             model,
             trust_remote_code=trust_remote_code,
