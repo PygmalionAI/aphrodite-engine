@@ -31,7 +31,7 @@ def cutlass_scaled_mm_dq(a: torch.Tensor, b: torch.Tensor,
 
 # int8
 def static_scaled_int8_quant(input: torch.Tensor,
-                             scale: float) -> torch.Tensor:
+                             scale: torch.Tensor) -> torch.Tensor:
     """
     Quantize the input tensor to int8 and return the quantized tensor.
     Args:
@@ -131,7 +131,7 @@ class CompressedTensorsW8A8StaticTensor(CompressedTensorsScheme):
         act_scale = layer.input_scale
 
         # Input quantize
-        x_q = static_scaled_int8_quant(x, act_scale[0].item())
+        x_q = static_scaled_int8_quant(x, act_scale)
 
         return cutlass_scaled_mm_dq(x_q, weight.t(), act_scale, weight_scale,
                                     x.dtype)
