@@ -4,7 +4,7 @@ from typing import Optional, Tuple, Union
 import torch
 import torch.nn as nn
 
-from aphrodite._C import ops
+from aphrodite.modeling._custom_op import CustomOp
 
 
 class LayerNorm(nn.LayerNorm):
@@ -32,7 +32,7 @@ class LayerNorm(nn.LayerNorm):
             return x, residual
 
 
-class RMSNorm(nn.Module):
+class RMSNorm(CustomOp):
     """Root mean square normalization.
 
     Computes x -> w * x / sqrt(E[x^2] + eps) where w is the learned weight.
@@ -48,7 +48,7 @@ class RMSNorm(nn.Module):
         self.weight = nn.Parameter(torch.ones(hidden_size))
         self.variance_epsilon = eps
 
-    def _forward(
+    def forward_native(
         self,
         x: torch.Tensor,
         residual: Optional[torch.Tensor] = None,
@@ -68,11 +68,12 @@ class RMSNorm(nn.Module):
         else:
             return x, residual
 
-    def forward(
+    def forward_cuda(
         self,
         x: torch.Tensor,
         residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        from aphrodite._C import ops
         if residual is not None:
             ops.fused_add_rms_norm(
                 x,
