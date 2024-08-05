@@ -1,4 +1,5 @@
-from typing import List, Optional, Tuple
+from collections import defaultdict
+from typing import Dict, List, Optional, Tuple
 
 import torch
 from torch import nn
@@ -12,6 +13,7 @@ from aphrodite.common.utils import make_tensor_with_pad
 from aphrodite.distributed import broadcast_tensor_dict
 from aphrodite.modeling import SamplingMetadata
 from aphrodite.modeling.model_loader import get_model
+from aphrodite.multimodal import MULTIMODAL_REGISTRY
 
 _PAD_SLOT_ID = -1
 
@@ -60,6 +62,16 @@ class CPUModelRunner:
             self.block_size,
         )
 
+        # Create processor for multi-modal data
+        if self.vision_language_config is not None:
+            self.multi_modal_input_processor = MULTIMODAL_REGISTRY \
+                .create_input_processor(
+                    self.model_config,
+                    self.vision_language_config,
+                )
+        else:
+            self.multi_modal_input_processor = None
+
         # Lazy initialization.
         self.model: nn.Module  # Set after init_Model
 
@@ -77,14 +89,15 @@ class CPUModelRunner:
     def _prepare_prompt(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
-    ) -> Tuple[torch.Tensor, torch.Tensor, AttentionMetadata, List[int],
-               Optional[torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, AttentionMetadata, List[int], Dict[
+            str, torch.Tensor]]:
         assert len(seq_group_metadata_list) > 0
         input_tokens: List[int] = []
         input_positions: List[int] = []
         slot_mapping: List[int] = []
         seq_lens: List[int] = []
-        multi_modal_input_list: List[torch.Tensor] = []
+        multi_modal_kwargs_list: Dict[str,
+                                      List[torch.Tensor]] = defaultdict(list)
 
         for seq_group_metadata in seq_group_metadata_list:
             assert seq_group_metadata.is_prompt
@@ -105,9 +118,17 @@ class CPUModelRunner:
             # is always the first token in the sequence.
             input_positions.extend(list(range(computed_len, seq_len)))
 
-            if seq_group_metadata.multi_modal_data:
-                multi_modal_input_list.append(
-                    seq_group_metadata.multi_modal_data.data)
+            mm_data = seq_group_metadata.multi_modal_data
+            if mm_data is not None:
+                # Process multi-modal data
+                if self.multi_modal_input_processor is None:
+                    raise ValueError(
+                        "Multi-modal inputs are only supported by "
+                        "vision language models.")
+
+                mm_kwargs = self.multi_modal_input_processor(mm_data)
+                for k, v in mm_kwargs.items():
+                    multi_modal_kwargs_list[k].append(v)
 
             # Compute the slot mapping.
             block_table = seq_group_metadata.block_tables[seq_id]
@@ -131,14 +152,10 @@ class CPUModelRunner:
                 slot = block_number * self.block_size + block_offset
                 slot_mapping.append(slot)
 
-        if multi_modal_input_list:
-            assert self.vision_language_config, (
-                "Multi-modal inputs are only supported by "
-                "vision language models.")
-            multi_modal_input = torch.cat(multi_modal_input_list,
-                                          dim=0).to(self.device)
-        else:
-            multi_modal_input = None
+        multi_modal_kwargs = {
+            k: torch.cat(v, dim=0).to(self.device)
+            for k, v in multi_modal_kwargs_list.items()
+        }
 
         num_prompt_tokens = len(input_tokens)
 
@@ -164,7 +181,7 @@ class CPUModelRunner:
             slot_mapping=slot_mapping,
         )
         return (input_tokens, input_positions, attn_metadata, seq_lens,
-                multi_modal_input)
+                multi_modal_kwargs)
 
     def _prepare_decode(
         self,
@@ -254,8 +271,8 @@ class CPUModelRunner:
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[torch.Tensor, torch.Tensor, AttentionMetadata, SamplingMetadata,
-               Optional[torch.Tensor]]:
-        multi_modal_input = None
+               Optional[Dict[str, torch.Tensor]]]:
+        multi_modal_kwargs = None
         if self.is_driver_worker:
             # NOTE: We assume that all sequences in the group are all prompts or
             # all decodes.
@@ -263,7 +280,7 @@ class CPUModelRunner:
             # Prepare input tensors.
             if is_prompt:
                 (input_tokens, input_positions, attn_metadata, seq_lens,
-                 multi_modal_input
+                 multi_modal_kwargs
                  ) = self._prepare_prompt(seq_group_metadata_list)
             else:
                 (input_tokens, input_positions,
@@ -304,7 +321,7 @@ class CPUModelRunner:
             )
 
         return (input_tokens, input_positions, attn_metadata,
-                sampling_metadata, multi_modal_input)
+                sampling_metadata, multi_modal_kwargs)
 
     @torch.inference_mode()
     def execute_model(
