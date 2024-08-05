@@ -6,8 +6,8 @@ from aphrodite.common.sequence import (ExecuteModelRequest, SamplerOutput,
                                        SequenceGroupMetadata)
 from aphrodite.spec_decode.interfaces import (SpeculativeProposals,
                                               SpeculativeProposer)
+from aphrodite.spec_decode.proposer_worker_base import ProposerWorkerBase
 from aphrodite.spec_decode.util import sampler_output_to_torch
-from aphrodite.task_handler.worker_base import WorkerBase
 
 
 class Top1Proposer(SpeculativeProposer):
@@ -29,7 +29,7 @@ class Top1Proposer(SpeculativeProposer):
 
     def __init__(
         self,
-        worker: WorkerBase,
+        worker: ProposerWorkerBase,
         device: str,
         vocab_size: int,
         max_proposal_len: Optional[int] = None,
@@ -39,11 +39,12 @@ class Top1Proposer(SpeculativeProposer):
         self.max_proposal_len = max_proposal_len
         self._vocab_size = vocab_size
 
-    def get_proposals(
+    def get_spec_proposals(
         self,
         execute_model_req: ExecuteModelRequest,
     ) -> SpeculativeProposals:
         """Get speculative proposals given the input batch.
+
         Sequences which would exceed the max model length are skipped during
         speculation.
         """
@@ -56,6 +57,7 @@ class Top1Proposer(SpeculativeProposer):
             nonzero_proposal_len_seqs,
             nonzero_proposal_len_indices,
         ) = self._split_by_proposal_len(seq_group_metadata_list, proposal_len)
+
         if nonzero_proposal_len_seqs:
             # Speculate tokens using the draft worker for the speculative
             # sequences.

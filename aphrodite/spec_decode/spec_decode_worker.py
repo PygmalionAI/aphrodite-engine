@@ -15,6 +15,7 @@ from aphrodite.spec_decode.interfaces import (SpeculativeProposals,
 from aphrodite.spec_decode.metrics import AsyncMetricsCollector
 from aphrodite.spec_decode.multi_step_worker import MultiStepWorker
 from aphrodite.spec_decode.ngram_worker import NGramWorker
+from aphrodite.spec_decode.proposer_worker_base import ProposerWorkerBase
 from aphrodite.spec_decode.util import (create_sequence_group_output,
                                         get_all_num_logprobs, get_all_seq_ids,
                                         get_sampled_token_logprobs, nvtx_range,
@@ -113,7 +114,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
     def __init__(
         self,
-        proposer_worker: WorkerBase,
+        proposer_worker: ProposerWorkerBase,
         scorer_worker: WorkerBase,
         rejection_sampler: RejectionSampler,
         metrics_collector: Optional[AsyncMetricsCollector] = None,
@@ -126,8 +127,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             proposer_worker: A worker that can produce speculative tokens for
                 sequences.
             scorer_worker: A worker that produces probabilities of speculative
-                tokens according to some base model. Typically a vanilla
-                Aphrodite Worker.
+                tokens according to some base model. Typically a vanilla vLLM
+                Worker.
             rejection_sampler: A Torch module used to perform modified rejection
                 sampling for speculative decoding.
             disable_by_batch_size: If the batch size is larger than this,
@@ -187,8 +188,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         iterations in a row without incurring the "move to CPU and serialize"
         performance penalty.
 
-        Since this requires a large change to Aphrodite, we defer it to later
-        and temporarily accept this broken abstraction boundary.
+        Since this requires a large change to vLLM, we defer it to later and
+        temporarily accept this broken abstraction boundary.
 
         NOTE: This will require a special check if the proposer worker
         does not have a sampler (e.g. ngram speculation).
@@ -256,7 +257,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
         # This is required as if the number of draft model runs changes
         # dynamically, the non-driver workers won't know unless we perform a
-        # communication to inform then.
+        # communication to inform them.
         broadcast_dict = dict(
             num_lookahead_slots=num_lookahead_slots,
             disable_all_speculation=disable_all_speculation,
@@ -369,8 +370,10 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             self, execute_model_req: ExecuteModelRequest,
             num_lookahead_slots: int) -> List[SamplerOutput]:
         """Execute a single step of speculative decoding.
+
         This invokes the proposer worker to get k speculative tokens for each
         sequence, then scores each speculative token using the scoring worker.
+
         Returns a list of SamplerOutput, each containing a single token per
         sequence.
         """

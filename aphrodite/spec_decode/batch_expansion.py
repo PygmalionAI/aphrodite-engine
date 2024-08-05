@@ -56,6 +56,7 @@ class BatchExpansionTop1Scorer(SpeculativeScorer):
 
         Args:
             execute_model_req: The execution request.
+            proposals: The speculative proposals to score.
         Returns:
             SpeculativeScores: The scores of each speculative token, along with
                 which sequences were ignored during scoring.

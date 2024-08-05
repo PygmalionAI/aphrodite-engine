@@ -5,11 +5,11 @@ import torch
 
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.spec_decode.interfaces import SpeculativeProposals
+from aphrodite.spec_decode.proposer_worker_base import NonLLMProposerWorkerBase
 from aphrodite.spec_decode.top1_proposer import Top1Proposer
-from aphrodite.task_handler.worker_base import LoraNotSupportedWorkerBase
 
 
-class NGramWorker(LoraNotSupportedWorkerBase):
+class NGramWorker(NonLLMProposerWorkerBase):
     """NGramWorker provides a light drafter without need for model.
 
     Current NGramWorker only implement prompt lookup decoding,
@@ -43,29 +43,6 @@ class NGramWorker(LoraNotSupportedWorkerBase):
             vocab_size=self.vocab_size,
         )
 
-    def set_include_gpu_probs_tensor(self):
-        # NGram don't need gpu sampler
-        pass
-
-    def execute_model(
-            self,
-            execute_model_req: Optional[ExecuteModelRequest] = None) -> None:
-        """NGram doesn't depend on model execution, just pass this function"""
-        pass
-
-    def determine_num_available_blocks(self) -> None:
-        """NGram doesn't depend on model execution, no need to check blocks"""
-        pass
-
-    def initialize_cache(self, num_gpu_blocks: int,
-                         num_cpu_blocks: int) -> None:
-        """As there is no cache need to handle, just pass this function"""
-        pass
-
-    def get_cache_block_size_bytes(self):
-        """Return the size of a cache block in bytes."""
-        return 0
-
     def sampler_output(
         self,
         execute_model_req: ExecuteModelRequest,
@@ -97,7 +74,6 @@ class NGramWorker(LoraNotSupportedWorkerBase):
                     -1,
             ):
                 ngram_tensor = input_ids[-ngram_size:]
-                proposal_start_idx = None
                 if ngram_size == 1:
                     # Do not match itself and do not use unfold and all
                     matches = (input_ids[:-1] == ngram_tensor)
@@ -161,7 +137,7 @@ class NGramWorker(LoraNotSupportedWorkerBase):
         speculative tokens per sequence is determined by max_proposal_len.
         """
 
-        return self._proposer.get_proposals(execute_model_req)
+        return self._proposer.get_spec_proposals(execute_model_req)
 
     def _raise_if_unsupported(
         self,
