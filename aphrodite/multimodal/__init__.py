@@ -1,4 +1,3 @@
-
 from .base import MultiModalData, MultiModalPlugin
 from .registry import MULTIMODAL_REGISTRY, MultiModalRegistry
 
