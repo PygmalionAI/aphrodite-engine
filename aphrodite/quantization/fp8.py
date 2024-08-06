@@ -295,7 +295,8 @@ class Fp8LinearMethod(LinearMethodBase):
               bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         # ops.scaled_fp8_quant supports both dynamic and static quant.
         #   If dynamic, layer.input_scale is None and x_scale computed from x.
-        #   If static,  layer.input_scale is scalar and x_scale set to input_scale.
+        #   If static,  layer.input_scale is scalar and x_scale set to
+        # input_scale.
         if bias is None and self.cutlass_fp8_supported:
             qinput, x_scale = scaled_fp8_quant(x, layer.input_scale)
 
