@@ -59,6 +59,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   // INT8
   quant_ops.def("static_scaled_int8_quant", &static_scaled_int8_quant,
                 "Compute int8 quantized tensor for given scaling factor");
+  quant_ops.def("dynamic_scaled_int8_quant", &dynamic_scaled_int8_quant,
+                "Compute int8 quantized tensor and scaling factor");
   // ExLlamaV2
   quant_ops.def("exl2_make_q_matrix", &make_q_matrix, "preprocess for exl2");
   quant_ops.def("exl2_gemm", &exl2_gemm, "exl2 gemm");
