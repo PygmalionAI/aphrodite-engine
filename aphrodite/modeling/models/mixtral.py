@@ -179,7 +179,7 @@ class MixtralMoE(nn.Module):
             param_data[expert_id, :, :] = loaded_weight[:, shard]
 
         # Loading scales
-        if "act_scale" in weight_name or "w2.weight_scale" in weight_name:
+        if "input_scale" in weight_name or "w2.weight_scale" in weight_name:
             if param_data[expert_id] != 1 and (param_data[expert_id] -
                                                loaded_weight).abs() > 1e-5:
                 raise ValueError(
@@ -223,8 +223,8 @@ class MixtralMoE(nn.Module):
 
         else:
             # If checkpoint is fp8 + static, cleanup act_scales.
-            #   Since state_dict has an act_scale per expert but our kernels
-            #   are passed one act_scale shared across all experts.
+            #   Since state_dict has an input_scale per expert but our kernels
+            #   are passed one input_scale shared across all experts.
             if self.quant_config.activation_scheme == "static":
                 if self.a13_scale is None or self.a2_scale is None:
                     raise ValueError(
@@ -571,7 +571,7 @@ class MixtralForCausalLM(nn.Module):
             # These are the activation scales for the experts
             # (param_name, weight_name, expert_id)
             ("a13_scale" if weight_name in ["w1", "w3"] else "a2_scale",
-             f"experts.{expert_id}.{weight_name}.act_scale", expert_id)
+             f"experts.{expert_id}.{weight_name}.input_scale", expert_id)
             for expert_id in range(self.config.num_local_experts)
             for weight_name in ["w1", "w2", "w3"]
         ]
