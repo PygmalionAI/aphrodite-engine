@@ -4,6 +4,7 @@ import torch
 
 from aphrodite._quant_C import quant_ops
 
+
 # cutlass
 def cutlass_scaled_mm_dq(a: torch.Tensor, b: torch.Tensor,
                          scale_a: torch.Tensor, scale_b: torch.Tensor,
