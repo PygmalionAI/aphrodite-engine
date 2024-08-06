@@ -60,7 +60,11 @@ class UsageInfo(BaseModel):
 
 class ResponseFormat(BaseModel):
     # type must be "json_object" or "text"
-    type: str = Literal["text", "json_object"]
+    type: Literal["text", "json_object"]
+
+
+class StreamOptions(BaseModel):
+    include_usage: Optional[bool]
 
 
 class FunctionDefinition(BaseModel):
@@ -102,6 +106,7 @@ class ChatCompletionRequest(BaseModel):
     stop: Optional[Union[str, List[str]]] = Field(default_factory=list)
     include_stop_str_in_output: Optional[bool] = False
     stream: Optional[bool] = False
+    stream_options: Optional[StreamOptions] = None
     logprobs: Optional[bool] = False
     top_logprobs: Optional[int] = None
     presence_penalty: Optional[float] = 0.0
@@ -204,6 +209,15 @@ class ChatCompletionRequest(BaseModel):
             seed=self.seed,
             logits_processors=logits_processors,
         )
+
+    @model_validator(mode='before')
+    @classmethod
+    def validate_stream_options(cls, values):
+        if (values.get('stream_options') is not None
+                and not values.get('stream')):
+            raise ValueError(
+                "stream_options can only be set if stream is true")
+        return values
 
     @model_validator(mode="before")
     @classmethod
