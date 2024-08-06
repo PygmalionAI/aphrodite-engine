@@ -61,16 +61,16 @@ def scaled_fp8_quant(
 def cutlass_fp8_supported() -> bool:
     capability = torch.cuda.get_device_capability()
     capability = capability[0] * 10 + capability[1]
-    version = torch.version.cuda
-    version = version[0] * 10 + version[1]
+    major, minor = torch.version.cuda.split(".")
+    version = int(major) * 10 + int(minor)
 
     # CUTLASS FP8 kernels need at least
     #   CUDA 12.0 on SM90 systems (Hopper)
     #   CUDA 12.4 on SM89 systems (Lovelace)
     gpu_is_supported = False
-    if capability >= 900:
+    if capability >= 90:
         gpu_is_supported = version > 120
-    elif capability >= 890:
+    elif capability >= 89:
         gpu_is_supported = version > 124
 
     return gpu_is_supported
