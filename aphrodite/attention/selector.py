@@ -7,7 +7,7 @@ import torch
 from loguru import logger
 
 from aphrodite.attention.backends.abstract import AttentionBackend
-from aphrodite.common.utils import is_cpu, is_hip
+from aphrodite.common.utils import is_cpu, is_hip, is_tpu
 
 APHRODITE_ATTENTION_BACKEND = "APHRODITE_ATTENTION_BACKEND"
 
@@ -18,6 +18,7 @@ class _Backend(enum.Enum):
     ROCM_FLASH = enum.auto()
     TORCH_SDPA = enum.auto()
     FLASHINFER = enum.auto()
+    PALLAS = enum.auto()
 
 
 @lru_cache(maxsize=None)
@@ -67,6 +68,10 @@ def get_attn_backend(
                        "Please make sure --enforce-eager is set.")
         from aphrodite.attention.backends.flashinfer import FlashInferBackend
         return FlashInferBackend
+    elif backend == _Backend.PALLAS:
+        logger.info("Using Pallas backend.")
+        from aphrodite.attention.backends.pallas import PallasAttentionBackend
+        return PallasAttentionBackend
     else:
         raise ValueError("Invalid attention backend.")
 
@@ -98,6 +103,11 @@ def which_attn_to_use(
         if selected_backend != _Backend.TORCH_SDPA:
             logger.info(f"Cannot use {selected_backend} backend on CPU.")
         return _Backend.TORCH_SDPA
+
+    if is_tpu():
+        if selected_backend != _Backend.PALLAS:
+            logger.info(f"Cannot use {selected_backend} backend on TPU.")
+        return _Backend.PALLAS
 
     if is_hip():
         # AMD GPUs.

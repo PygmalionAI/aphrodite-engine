@@ -375,6 +375,9 @@ class AsyncAphrodite:
         if engine_config.device_config.device_type == "neuron":
             from aphrodite.executor.neuron_executor import NeuronExecutorAsync
             executor_class = NeuronExecutorAsync
+        elif engine_config.device_config.device_type == "tpu":
+            from aphrodite.executor.tpu_executor import TPUExecutorAsync
+            executor_class = TPUExecutorAsync
         elif engine_config.device_config.device_type == "cpu":
             from aphrodite.executor.cpu_executor import CPUExecutorAsync
             assert distributed_executor_backend is None, (

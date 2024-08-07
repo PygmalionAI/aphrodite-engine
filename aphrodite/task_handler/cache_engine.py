@@ -5,7 +5,7 @@ import torch
 
 from aphrodite.attention import get_attn_backend
 from aphrodite.common.config import CacheConfig, ModelConfig, ParallelConfig
-from aphrodite.common.utils import (STR_DTYPE_TO_TORCH_DTYPE,
+from aphrodite.common.utils import (STR_DTYPE_TO_TORCH_DTYPE, get_dtype_size,
                                     is_pin_memory_available)
 
 
@@ -106,9 +106,5 @@ class CacheEngine:
             dtype = model_config.dtype
         else:
             dtype = STR_DTYPE_TO_TORCH_DTYPE[cache_config.cache_dtype]
-        dtype_size = _get_dtype_size(dtype)
+        dtype_size = get_dtype_size(dtype)
         return dtype_size * total
-
-
-def _get_dtype_size(dtype: torch.dtype) -> int:
-    return torch.tensor([], dtype=dtype).element_size()

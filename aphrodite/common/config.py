@@ -9,7 +9,8 @@ import torch
 from loguru import logger
 from transformers import PretrainedConfig
 
-from aphrodite.common.utils import get_cpu_memory, is_cpu, is_hip, is_neuron
+from aphrodite.common.utils import (get_cpu_memory, is_cpu, is_hip, is_neuron,
+                                    is_tpu)
 from aphrodite.modeling.models import ModelRegistry
 from aphrodite.quantization import QUANTIZATION_METHODS
 from aphrodite.transformers_utils.config import get_config, get_hf_text_config
@@ -690,6 +691,7 @@ class ParallelConfig:
             # We use multiprocessing by default if world_size fits on the
             # current node and we aren't in a ray placement group.
             from torch.cuda import device_count
+
             from aphrodite.executor import ray_utils
             backend = "mp"
             ray_found = ray_utils.ray is not None
@@ -829,6 +831,8 @@ class DeviceConfig:
             # Automated device type detection
             if is_neuron():
                 self.device_type = "neuron"
+            elif is_tpu():
+                self.device_type = "tpu"
             elif is_cpu():
                 self.device_type = "cpu"
             else:
@@ -842,6 +846,8 @@ class DeviceConfig:
         # Some device types require processing inputs on CPU
         if self.device_type in ["neuron"]:
             self.device = torch.device("cpu")
+        elif self.device_type in ["tpu"]:
+            self.device = None
         else:
             # Set device with device type
             self.device = torch.device(self.device_type)
