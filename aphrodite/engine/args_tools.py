@@ -48,6 +48,7 @@ class EngineArgs:
     revision: Optional[str] = None
     code_revision: Optional[str] = None
     rope_scaling: Optional[dict] = None
+    rope_theta: Optional[float] = None
     tokenizer_revision: Optional[str] = None
     quantization: Optional[str] = None
     load_in_4bit: bool = False
@@ -463,6 +464,12 @@ class EngineArgs:
                             type=json.loads,
                             help='RoPE scaling configuration in JSON format. '
                             'For example, {"type":"dynamic","factor":2.0}')
+        parser.add_argument('--rope-theta',
+                            default=None,
+                            type=float,
+                            help='RoPE theta. Use with `rope_scaling`. In '
+                            'some cases, changing the RoPE theta improves the '
+                            'performance of the scaled model.')
         parser.add_argument(
             "--enforce-eager",
             type=lambda x: (str(x).lower() == 'true'),
@@ -688,6 +695,7 @@ class EngineArgs:
             revision=self.revision,
             code_revision=self.code_revision,
             rope_scaling=self.rope_scaling,
+            rope_theta=self.rope_theta,
             tokenizer_revision=self.tokenizer_revision,
             max_model_len=self.max_model_len,
             quantization=self.quantization,

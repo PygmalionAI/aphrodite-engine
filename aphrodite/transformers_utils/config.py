@@ -22,7 +22,8 @@ def get_config(model: str,
                trust_remote_code: bool,
                revision: Optional[str] = None,
                code_revision: Optional[str] = None,
-               rope_scaling: Optional[dict] = None) -> PretrainedConfig:
+               rope_scaling: Optional[dict] = None,
+               rope_theta: Optional[float] = None) -> PretrainedConfig:
     try:
         if os.getenv("APHRODITE_USE_MODELSCOPE", "0") == "1":
             from modelscope import AutoConfig
@@ -49,11 +50,12 @@ def get_config(model: str,
         config = config_class.from_pretrained(model,
                                               revision=revision,
                                               code_revision=code_revision)
-    if rope_scaling is not None:
-        logger.info(
-            "Updating rope_scaling from "
-            f"{getattr(config, 'rope_scaling', None)} to {rope_scaling}")
-        config.update({"rope_scaling": rope_scaling})
+    for key, value in [("rope_scaling", rope_scaling),
+                       ("rope_theta", rope_theta)]:
+        if value is not None:
+            logger.info(f"Updating {key} from "
+                        f"{getattr(config, key, None)} to {value}")
+            config.update({key: value})
 
     return config
 

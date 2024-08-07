@@ -97,6 +97,7 @@ class ModelConfig:
         revision: Optional[str] = None,
         code_revision: Optional[str] = None,
         rope_scaling: Optional[dict] = None,
+        rope_theta: Optional[float] = None,
         tokenizer_revision: Optional[str] = None,
         max_model_len: Optional[int] = None,
         quantization: Optional[str] = None,
@@ -120,6 +121,7 @@ class ModelConfig:
         self.revision = revision
         self.code_revision = code_revision
         self.rope_scaling = rope_scaling
+        self.rope_theta = rope_theta
         # The tokenizer version is consistent with the model version by default.
         if tokenizer_revision is None:
             self.tokenizer_revision = revision
@@ -143,20 +145,15 @@ class ModelConfig:
         self.skip_tokenizer_init = skip_tokenizer_init
 
         self.hf_config = get_config(self.model, trust_remote_code, revision,
-                                    code_revision, rope_scaling)
+                                    code_revision, rope_scaling, rope_theta)
         self.hf_text_config = get_hf_text_config(self.hf_config)
         self.dtype = _get_and_verify_dtype(self.hf_text_config, dtype)
         self.max_model_len = _get_and_verify_max_len(
             hf_config=self.hf_text_config,
             max_model_len=max_model_len,
             disable_sliding_window=self.disable_sliding_window,
-            sliding_window_len=self.get_hf_config_sliding_window())
-
-        if (getattr(self.hf_config, "max_position_embeddings", 0) == 131072
-                and getattr(self.hf_config, "rope_scaling", None) is None):
-            self.hf_config.update({"rope_scaling": {
-                "type": "extended",
-            }})
+            sliding_window_len=self.get_hf_config_sliding_window(),
+            rope_scaling_arg=self.rope_scaling)
 
         if not self.skip_tokenizer_init:
             self._verify_tokenizer_mode()
@@ -1285,6 +1282,7 @@ def _get_and_verify_max_len(
     max_model_len: Optional[int],
     disable_sliding_window: bool,
     sliding_window_len: Optional[int],
+    rope_scaling_arg: Optional[Dict[str, Any]],
 ) -> int:
     """Get and verify the model's maximum length."""
     derived_max_model_len = float("inf")
@@ -1357,15 +1355,20 @@ def _get_and_verify_max_len(
 
     if max_model_len is None:
         max_model_len = derived_max_model_len
-    elif max_model_len > derived_max_model_len:
+    elif max_model_len > derived_max_model_len and rope_scaling_arg is None:
+        raise ValueError(
+            f"User-specified max_model_len {max_model_len} is higher than "
+            f"the original {derived_max_model_len}. "
+            "Please provide a rope_scaling dict to scale the model.")
+    elif max_model_len > derived_max_model_len and rope_scaling_arg is not None:
         # hope this works
-        scaling_factor = max_model_len / derived_max_model_len
-        hf_config.rope_scaling = {"factor": scaling_factor, "type": "dynamic"}
         logger.warning(
             f"User-specified max_model_len {max_model_len} is higher than "
             f"the original {derived_max_model_len}. "
-            "Attempting to use RoPE scaling.")
+            "Attempting to use RoPE scaling with the provided rope_scaling "
+            "dict.")
         derived_max_model_len = max_model_len
+
     return int(max_model_len)
 
 
