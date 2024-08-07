@@ -3,8 +3,7 @@ from typing import List, Optional, Tuple
 
 import torch
 
-from aphrodite._C import ops
-from aphrodite._C import cache_ops
+from aphrodite import _custom_ops as ops
 from aphrodite.attention.ops.prefix_prefill import context_attention_fwd
 
 # Should be the same as PARTITION_SIZE in `paged_attention_v2_launcher`.
@@ -69,7 +68,7 @@ class PagedAttention:
         kv_cache_dtype: str,
         kv_scale: float,
     ) -> None:
-        cache_ops.reshape_and_cache(
+        ops.reshape_and_cache(
             key,
             value,
             key_cache,
@@ -224,11 +223,11 @@ class PagedAttention:
     ) -> None:
         src_key_cache = src_kv_cache[0]
         dst_key_cache = dst_kv_cache[0]
-        cache_ops.swap_blocks(src_key_cache, dst_key_cache, src_to_dst)
+        ops.swap_blocks(src_key_cache, dst_key_cache, src_to_dst)
 
         src_value_cache = src_kv_cache[1]
         dst_value_cache = dst_kv_cache[1]
-        cache_ops.swap_blocks(src_value_cache, dst_value_cache, src_to_dst)
+        ops.swap_blocks(src_value_cache, dst_value_cache, src_to_dst)
 
     @staticmethod
     def copy_blocks(
@@ -237,4 +236,4 @@ class PagedAttention:
     ) -> None:
         key_caches = [kv_cache[0] for kv_cache in kv_caches]
         value_caches = [kv_cache[1] for kv_cache in kv_caches]
-        cache_ops.copy_blocks(key_caches, value_caches, src_to_dists)
+        ops.copy_blocks(key_caches, value_caches, src_to_dists)

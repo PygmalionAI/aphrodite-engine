@@ -149,10 +149,10 @@ def get_max_shared_memory_bytes(gpu: int = 0) -> int:
     """Returns the maximum shared memory per thread block in bytes."""
     # NOTE: This import statement should be executed lazily since
     # the Neuron-X backend does not have the `cuda_utils` module.
-    from aphrodite._C import cuda_utils
+    from aphrodite import _custom_ops as ops
 
     max_shared_mem = (
-        cuda_utils.get_max_shared_memory_per_block_device_attribute(gpu))
+        ops.get_max_shared_memory_per_block_device_attribute(gpu))
     # value 0 will cause MAX_SEQ_LEN become negative and test_attention.py
     # will fail
     assert max_shared_mem > 0, "max_shared_mem can not be zero"
@@ -329,10 +329,10 @@ def _generate_random_fp8(
     #-----|-------------|-------------------
     # Inf | N/A         | s.11111.00
     # NaN | s.1111.111  | s.11111.{01,10,11}
-    from aphrodite._C import cache_ops
+    from aphrodite import _custom_ops as ops
     tensor_tmp = torch.empty_like(tensor, dtype=torch.float16)
     tensor_tmp.uniform_(low, high)
-    cache_ops.convert_fp8(tensor, tensor_tmp)
+    ops.convert_fp8(tensor, tensor_tmp)
     del tensor_tmp
 
 

@@ -1,16 +1,11 @@
-from contextlib import suppress
 from typing import Any, Dict, List, Optional
 
 import torch
 
+from aphrodite import _custom_ops as ops
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import QuantizationConfig
-
-HAS_QUANTS = False
-with suppress(ImportError):
-    from aphrodite._quant_C import quant_ops as ops
-    HAS_QUANTS = True
 
 
 def make_group_map(q_groups, num_qrows):
@@ -88,8 +83,6 @@ class Exl2LinearMethod(LinearMethodBase):
     """
 
     def __init__(self, quant_config: Exl2Config):
-        if not HAS_QUANTS:
-            raise ImportError("Could not find the quantization kernels.")
         self.quant_config = quant_config
 
     def create_weights(self, layer: torch.nn.Module,

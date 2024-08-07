@@ -128,7 +128,9 @@ class CompressedTensorsLinearMethod(LinearMethodBase):
                        **extra_weight_attrs):
         """
         Use the CompressedTensorsScheme associated with each layer to create 
-        the necessary parameters for the layer.
+        the necessary parameters for the layer. See LinearMethodBase for param
+        details
+
         """
         weight_loader = extra_weight_attrs.get("weight_loader")
 
@@ -150,7 +152,8 @@ class CompressedTensorsLinearMethod(LinearMethodBase):
         """
         Use the output of create_weights and the CompressedTensorsScheme 
         associated with the layer to apply the forward pass with the 
-        layer input.
+        layer input.  See LinearMethodBase for param details
+
         """
 
         if bias is not None:

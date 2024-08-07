@@ -147,7 +147,7 @@ class RotaryEmbedding(CustomOp):
         key: torch.Tensor,
         offsets: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        from aphrodite._C import ops
+        from aphrodite import _custom_ops as ops
         self.cos_sin_cache = self.cos_sin_cache.to(positions.device,
                                                    dtype=query.dtype)
         # ops.rotary_embedding()/batched_rotary_embedding()

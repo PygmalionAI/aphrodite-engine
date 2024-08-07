@@ -1,20 +1,15 @@
-from contextlib import suppress
 from typing import Any, Dict, List, Optional
 
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite.modeling.layers.linear import LinearMethodBase, LinearBase
+from aphrodite import _custom_ops as ops
+from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
+from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import QuantizationConfig
 from aphrodite.quantization.quip_utils import (get_hadK, get_packed_abs_grid,
                                                matmul_hadU_cuda,
                                                matmul_hadUt_cuda)
-from aphrodite.modeling.utils import set_weight_attrs
-
-HAS_QUANTS = False
-with suppress(ImportError):
-    from aphrodite._quant_C import quant_ops as ops
-    HAS_QUANTS = True
 
 
 class QuipConfig(QuantizationConfig):
@@ -24,8 +19,6 @@ class QuipConfig(QuantizationConfig):
     """
 
     def __init__(self, codebook: int, use_rand: bool) -> None:
-        if not HAS_QUANTS:
-            raise ImportError("Could not find the quantization kernels.")
         self.codebook = codebook
         self.use_rand = use_rand
 
@@ -77,8 +70,6 @@ class QuipLinearMethod(LinearMethodBase):
     """
 
     def __init__(self, quant_config: QuipConfig):
-        if not HAS_QUANTS:
-            raise ImportError("Could not find the quantization kernels.")
         self.quant_config = quant_config
         self.grid_packed_abs = get_packed_abs_grid().to(device="cuda")
         self.pack = 8

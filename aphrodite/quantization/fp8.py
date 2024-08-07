@@ -1,4 +1,3 @@
-from contextlib import suppress
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -6,6 +5,7 @@ from loguru import logger
 from torch.nn import Module
 from torch.nn.parameter import Parameter
 
+from aphrodite import _custom_ops as ops
 from aphrodite.common.utils import print_warning_once
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
 from aphrodite.modeling.utils import set_weight_attrs
@@ -13,11 +13,6 @@ from aphrodite.quantization.base_config import (QuantizationConfig,
                                                 QuantizeMethodBase)
 from aphrodite.quantization.compressed_tensors.schemes.compressed_tensors_w8a8_statictensor import \
     cutlass_scaled_mm_dq  # noqa: E501
-
-HAS_QUANTS = False
-with suppress(ImportError):
-    from aphrodite._quant_C import quant_ops as ops
-    HAS_QUANTS = True
 
 ACTIVATION_SCHEMES = ["static", "dynamic"]
 
@@ -149,8 +144,6 @@ class Fp8LinearMethod(LinearMethodBase):
     """
 
     def __init__(self, quant_config: Fp8Config):
-        if not HAS_QUANTS:
-            raise ImportError("Could not find the quantization kernels.")
         self.quant_config = quant_config
         self.cutlass_fp8_supported = cutlass_fp8_supported()
 

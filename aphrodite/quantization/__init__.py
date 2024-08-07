@@ -1,7 +1,5 @@
 from typing import Type
 
-from loguru import logger
-
 from aphrodite.quantization.aqlm import AQLMConfig
 from aphrodite.quantization.autoquant import AutoQuantConfig
 from aphrodite.quantization.awq import AWQConfig
@@ -20,14 +18,6 @@ from aphrodite.quantization.gptq_marlin_24 import GPTQMarlin24Config
 from aphrodite.quantization.marlin import MarlinConfig
 from aphrodite.quantization.quip import QuipConfig
 from aphrodite.quantization.squeezellm import SqueezeLLMConfig
-
-try:
-    from aphrodite._quant_C import quant_ops  # noqa: F401
-except ImportError:
-    logger.warning("The Quantization Kernels are not installed. "
-                   "To use quantization with Aphrodite, make sure "
-                   "you've exported the `APHRODITE_INSTALL_QUANT_KERNELS=1`"
-                   "environment variable during the compilation process.")
 
 QUANTIZATION_METHODS = {
     "aqlm": AQLMConfig,

@@ -6,7 +6,7 @@ import torch
 from flashinfer import BatchDecodeWithPagedKVCacheWrapper
 from vllm_flash_attn import flash_attn_varlen_func
 
-from aphrodite._C import cache_ops as ops
+from aphrodite import _custom_ops as ops
 from aphrodite.attention.backends.abstract import (AttentionBackend,
                                                    AttentionImpl,
                                                    AttentionMetadata)

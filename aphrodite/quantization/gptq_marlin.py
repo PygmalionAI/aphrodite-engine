@@ -1,5 +1,4 @@
 import enum
-from contextlib import suppress
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -7,14 +6,10 @@ import torch
 from loguru import logger
 from torch.nn.parameter import Parameter
 
+from aphrodite import _custom_ops as ops
 from aphrodite.modeling.layers.linear import (LinearBase, LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.quantization.base_config import QuantizationConfig
-
-HAS_QUANTS = False
-with suppress(ImportError):
-    from aphrodite._quant_C import quant_ops as ops
-    HAS_QUANTS = True
 
 GPTQ_MARLIN_TILE = 16
 GPTQ_MARLIN_MIN_THREAD_N = 64
@@ -189,8 +184,6 @@ class GPTQMarlinLinearMethod(LinearMethodBase):
     """
 
     def __init__(self, quant_config: GPTQMarlinConfig) -> None:
-        if not HAS_QUANTS:
-            raise ImportError("Could not find the quantization kernels.")
         self.quant_config = quant_config
 
     def create_weights(
