@@ -10,7 +10,7 @@ from torch.distributed import ProcessGroup
 from aphrodite.distributed.device_communicators.custom_all_reduce_utils import \
     gpu_p2p_access_check
 from aphrodite.distributed.parallel_state import (
-    get_local_rank, get_tensor_model_parallel_cpu_group)
+    get_local_rank, get_tensor_model_parallel_cpu_group, is_in_the_same_node)
 
 try:
     import pynvml
@@ -104,6 +104,13 @@ class CustomAllreduce:
 
         assert dist.get_backend(group) != dist.Backend.NCCL, (
             "CustomAllreduce should be attached to a non-NCCL group.")
+
+        if not is_in_the_same_node(group):
+            # No need to initialize custom allreduce for multi-node case.
+            logger.warning(
+                "Custom allreduce is disabled because this process group"
+                " spans across nodes.")
+            return
 
         rank = dist.get_rank(group=self.group)
         world_size = dist.get_world_size(group=self.group)
