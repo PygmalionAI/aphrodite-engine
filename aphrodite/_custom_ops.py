@@ -315,10 +315,11 @@ def quip_gemv(
 ) -> torch.Tensor:
     return torch.ops._C.quip_gemv(A, B, CB)
 
+
 def quip_decompress(
-        YIs: torch.Tensor,
-        CB: torch.Tensor,
-        Y: torch.Tensor,
+    YIs: torch.Tensor,
+    CB: torch.Tensor,
+    Y: torch.Tensor,
 ) -> torch.Tensor:
     return torch.ops._C.quip_decompress(YIs, CB, Y)
 

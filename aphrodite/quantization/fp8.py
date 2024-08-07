@@ -6,51 +6,13 @@ from torch.nn import Module
 from torch.nn.parameter import Parameter
 
 from aphrodite import _custom_ops as ops
-from aphrodite.common.utils import print_warning_once
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
-from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import (QuantizationConfig,
                                                 QuantizeMethodBase)
-from aphrodite.quantization.compressed_tensors.schemes.compressed_tensors_w8a8_statictensor import \
-    cutlass_scaled_mm_dq  # noqa: E501
+from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.common.utils import print_warning_once
 
 ACTIVATION_SCHEMES = ["static", "dynamic"]
-
-
-def scaled_fp8_quant(
-    input: torch.Tensor,
-    scale: Optional[torch.Tensor] = None,
-    batch_dim_padding: Optional[int] = None,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Quantize input tensor to FP8 and return quantized tensor and scale.
-    This function supports both static and dynamic quantization: If you
-    provide the scale, it will use static scaling and if you omit it,
-    the scale will be determined dynamically. The function also allows
-    optional padding of the output tensor for downstream kernels that
-    will benefit from padding.
-    Args:
-        input: The input tensor to be quantized to FP8
-        scale: Optional scaling factor for the FP8 quantization
-        batch_dim_padding: If specified, pad the first dimension
-            of the output to at least this value.
-    Returns:
-        Tuple[torch.Tensor, torch.Tensor]: The output tensor in FP8 and
-            scaling factor.
-    """
-    if batch_dim_padding:
-        shape = (max(batch_dim_padding, input.shape[0]), *input.shape[1:])
-        output = torch.empty(shape,
-                             device=input.device,
-                             dtype=torch.float8_e4m3fn)
-    else:
-        output = torch.empty_like(input, dtype=torch.float8_e4m3fn)
-    if scale is None:
-        scale = torch.zeros(1, device=input.device, dtype=torch.float32)
-        ops.dynamic_scaled_fp8_quant(output, input, scale)
-    else:
-        ops.static_scaled_fp8_quant(output, input, scale)
-    return output, scale
 
 
 def cutlass_fp8_supported() -> bool:
@@ -114,8 +76,7 @@ class Fp8Config(QuantizationConfig):
 
     def get_quant_method(
             self, layer: torch.nn.Module) -> Optional["QuantizeMethodBase"]:
-        from aphrodite.attention.layer import \
-            Attention  # Avoid circular import
+        from aphrodite.attention.layer import Attention  # Avoid circular import
 
         if isinstance(layer, LinearBase):
             return Fp8LinearMethod(self)
@@ -131,14 +92,16 @@ class Fp8LinearMethod(LinearMethodBase):
     """Linear method for FP8.
     Supports loading FP8 checkpoints with static weight scale and
     dynamic/static activation scale.
+
     Also supports loading quantized FP16/BF16 model checkpoints with dynamic
     activation scaling. The weight scaling factor will be initialized after
     the model weights are loaded.
+
     Limitations:
     1. Only support per-tensor quantization due to torch._scaled_mm support.
     2. Only support float8_e4m3fn data type due to the limitation of
        torch._scaled_mm (https://github.com/pytorch/pytorch/blob/2e48b39603411a41c5025efbe52f89560b827825/aten/src/ATen/native/cuda/Blas.cpp#L854-L856)
-       
+
     Args:
         quant_config: The quantization config.
     """
@@ -206,7 +169,7 @@ class Fp8LinearMethod(LinearMethodBase):
                 output_partition_sizes=output_partition_sizes,
                 **extra_weight_attrs)
 
-            # ACTIVATION SCALE
+            # INPUT ACTIVATION SCALE
             if self.quant_config.activation_scheme == "static":
                 self._create_scale_param(
                     scale_name="input_scale",
@@ -237,7 +200,8 @@ class Fp8LinearMethod(LinearMethodBase):
 
         # If checkpoint is fp/bf16 (not serialized fp8), quantize the weights.
         if not self.quant_config.is_checkpoint_fp8_serialized:
-            qweight, weight_scale = scaled_fp8_quant(layer.weight, scale=None)
+            qweight, weight_scale = ops.scaled_fp8_quant(layer.weight,
+                                                         scale=None)
             layer.weight = Parameter(qweight.t(), requires_grad=False)
             layer.weight_scale = Parameter(weight_scale, requires_grad=False)
             layer.logical_widths = None
@@ -266,16 +230,16 @@ class Fp8LinearMethod(LinearMethodBase):
             weight = layer.weight
             layer.weight = Parameter(weight.t(), requires_grad=False)
 
-            # ACT_SCALE
+            # INPUT ACTIVATION SCALE
             #   Dynamic: set to None (required input to ops.scaled_fp8_quant).
-            #   Static:  set to max of the act_scales (since they are equal).
+            #   Static:  set to max of the input_scales (since they are equal).
             if self.quant_config.activation_scheme == "dynamic":
                 layer.input_scale = None
             elif self.quant_config.activation_scheme == "static":
                 if not all_close_1d(layer.input_scale):
                     raise ValueError(
-                        "All the act_scales for the logical weights of a layer "
-                        f"must be equal. But got {layer.input_scale}")
+                        "All the input_scales for the logical weights of a "
+                        f"layer must be equal. But got {layer.input_scale}")
                 layer.input_scale = Parameter(layer.input_scale.max(),
                                               requires_grad=False)
             else:
@@ -286,15 +250,16 @@ class Fp8LinearMethod(LinearMethodBase):
               layer: torch.nn.Module,
               x: torch.Tensor,
               bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+
         # ops.scaled_fp8_quant supports both dynamic and static quant.
         #   If dynamic, layer.input_scale is None and x_scale computed from x.
-        #   If static,  layer.input_scale is scalar and x_scale set to
-        # input_scale.
+        #   If static, layer.input_scale is scalar and x_scale is input_scale.
+
         if bias is None and self.cutlass_fp8_supported:
-            qinput, x_scale = scaled_fp8_quant(x, layer.input_scale)
+            qinput, x_scale = ops.scaled_fp8_quant(x, layer.input_scale)
 
             # Fused GEMM_DQ
-            output = cutlass_scaled_mm_dq(
+            output = ops.cutlass_scaled_mm_dq(
                 qinput,
                 layer.weight,
                 out_dtype=x.dtype,
@@ -303,9 +268,9 @@ class Fp8LinearMethod(LinearMethodBase):
             )
 
         else:
-            qinput, x_scale = scaled_fp8_quant(x,
-                                               layer.input_scale,
-                                               batch_dim_padding=17)
+            qinput, x_scale = ops.scaled_fp8_quant(x,
+                                                   layer.input_scale,
+                                                   batch_dim_padding=17)
 
             # Fused GEMM_DQ -- note we padded the input above because
             # torch._scaled_mm is more performant for matrices with
@@ -331,8 +296,8 @@ class Fp8KVCacheMethod(QuantizeMethodBase):
         self.quant_config = quant_config
 
     def create_weights(self, layer: torch.nn.Module):
-        """Create "weight" (aka kv_scale) for an attention layer. 
-        
+        """Create "weight" (aka kv_scale) for an attention layer.
+
         Args:
             layer: The layer that is using the QuantizeMethodBase factory.
         """
