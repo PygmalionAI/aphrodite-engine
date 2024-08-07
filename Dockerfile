@@ -65,10 +65,6 @@ ARG nvcc_threads=8
 ENV NVCC_THREADS=${nvcc_threads}
 # make sure punica kernels are built (for LoRA)
 ENV APHRODITE_INSTALL_PUNICA_KERNELS=1
-# make sure quant kernels are built
-ENV APHRODITE_INSTALL_QUANT_KERNELS=1
-# make sure hadamard kernels are build
-ENV APHRODITE_INSTALL_HADAMARD_KERNELS=1
 
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
@@ -91,7 +87,7 @@ RUN apt-get update -y \
 # or future versions of triton.
 RUN ldconfig /usr/local/cuda-12.4/compat/
 
-# install vllm wheel first, so that torch etc will be installed
+# install aphrodite wheel first, so that torch etc will be installed
 RUN --mount=type=bind,from=build,src=/workspace/dist,target=/aphrodite-workspace/dist \
     --mount=type=cache,target=/root/.cache/pip \
     pip install dist/*.whl --verbose
