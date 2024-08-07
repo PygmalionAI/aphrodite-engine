@@ -36,7 +36,7 @@ QUANTIZATION_METHODS = {
     "gptq": GPTQConfig,
     "quip": QuipConfig,
     "squeezellm": SqueezeLLMConfig,
-    "sparseml": CompressedTensorsConfig,
+    "compressed-tensors": CompressedTensorsConfig,
     "bitsandbytes": BitsAndBytesConfig,
 }
 
