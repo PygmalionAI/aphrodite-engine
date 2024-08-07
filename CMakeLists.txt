@@ -67,19 +67,6 @@ endif()
 find_package(Torch REQUIRED)
 
 #
-# Normally `torch.utils.cpp_extension.CUDAExtension` would add
-# `libtorch_python.so` for linking against an extension. Torch's cmake
-# configuration does not include this library (presumably since the cmake
-# config is used for standalone C++ binaries that link against torch).
-# The `libtorch_python.so` library defines some of the glue code between
-# torch/python via pybind and is required by APHRODITE extensions for this
-# reason. So, add it by manually using `append_torchlib_if_found` from
-# torch's cmake setup.
-#
-find_library(torch_python_LIBRARY torch_python PATHS
-  "${TORCH_INSTALL_PREFIX}/lib")
-
-#
 # Forward the non-CUDA device extensions to external CMake scripts.
 #
 if (NOT APHRODITE_TARGET_DEVICE STREQUAL "cuda" AND
@@ -165,13 +152,50 @@ set(APHRODITE_EXT_SRC
   "kernels/pos_encoding_kernels.cu"
   "kernels/activation_kernels.cu"
   "kernels/layernorm_kernels.cu"
+  "kernels/quantization/squeezellm/quant_cuda_kernel.cu"
+  "kernels/quantization/gptq/q_gemm.cu"
+  "kernels/quantization/compressed_tensors/int8_quant_kernels.cu"
+  "kernels/quantization/fp8/common.cu"
   "kernels/cuda_utils_kernels.cu"
   "kernels/moe/align_block_size_kernel.cu"
-  "kernels/pybind.cpp")
+  "kernels/torch_bindings.cpp")
 
 if(APHRODITE_GPU_LANG STREQUAL "CUDA")
+  include(FetchContent)
+  SET(CUTLASS_ENABLE_HEADERS_ONLY=ON)
+  FetchContent_Declare(
+        cutlass
+        GIT_REPOSITORY https://github.com/nvidia/cutlass.git
+        # CUTLASS 3.5.0
+        GIT_TAG 7d49e6c7e2f8896c47f586706e67e1fb215529dc
+  )
+  FetchContent_MakeAvailable(cutlass)
+
   list(APPEND APHRODITE_EXT_SRC
-    "kernels/all_reduce/custom_all_reduce.cu")
+    "kernels/quantization/aqlm/gemm_kernels.cu"
+    "kernels/quantization/awq/gemm_kernels.cu"
+    "kernels/quantization/quip/origin_order.cu"
+    "kernels/quantization/marlin/dense/marlin_cuda_kernel.cu"
+    "kernels/quantization/marlin/sparse/marlin_24_cuda_kernel.cu"
+    "kernels/quantization/gptq_marlin/gptq_marlin.cu"
+    "kernels/quantization/gptq_marlin/gptq_marlin_repack.cu"
+    "kernels/all_reduce/custom_all_reduce.cu"
+    "kernels/quantization/cutlass_w8a8/scaled_mm_dq_entry.cu"
+    "kernels/quantization/cutlass_w8a8/scaled_mm_dq_c2x.cu"
+    "kernels/quantization/cutlass_w8a8/scaled_mm_dq_c3x.cu")
+
+  #
+  # The CUTLASS kernels for Hopper require sm90a to be enabled.
+  # This is done via the below gencode option, BUT that creates kernels for both sm90 and sm90a.
+  # That adds an extra 17MB to compiled binary, so instead we selectively enable it.
+  if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER 12.0)
+    set_source_files_properties(
+          "kernels/quantization/cutlass_w8a8/scaled_mm_dq_c3x.cu"
+          PROPERTIES
+          COMPILE_FLAGS
+          "-gencode arch=compute_90a,code=sm_90a")
+  endif()
+
 endif()
 
 define_gpu_extension_target(
@@ -181,70 +205,8 @@ define_gpu_extension_target(
   SOURCES ${APHRODITE_EXT_SRC}
   COMPILE_FLAGS ${APHRODITE_GPU_FLAGS}
   ARCHITECTURES ${APHRODITE_GPU_ARCHES}
-  WITH_SOABI)
-
-
-#
-# _quant_C extension
-#
-
-set (APHRODITE_QUANT_EXT_SRC
-  "kernels/quantization/gptq/q_gemm.cu"
-  "kernels/quantization/squeezellm/quant_cuda_kernel.cu"
-  "kernels/quantization/exl2/q_matrix.cu"
-  "kernels/quantization/exl2/q_gemm_exl2.cu"
-  "kernels/quantization/fp8/common.cu"
-  "kernels/quantization/compressed_tensors/int8_quant_kernels.cu"
-  "kernels/quantization/quant_ops.cpp")
-
-if(APHRODITE_GPU_LANG STREQUAL "CUDA")
-include(FetchContent)
-  SET(CUTLASS_ENABLE_HEADERS_ONLY=ON)
-  FetchContent_Declare(
-        cutlass 
-        GIT_REPOSITORY https://github.com/nvidia/cutlass.git
-        # CUTLASS 3.5.0
-        GIT_TAG 7d49e6c7e2f8896c47f586706e67e1fb215529dc
-  )
-  FetchContent_MakeAvailable(cutlass)
-  list(APPEND APHRODITE_QUANT_EXT_SRC
-    "kernels/quantization/aqlm/gemm_kernels.cu"
-    "kernels/quantization/awq/gemm_kernels.cu"
-    "kernels/quantization/autoquant/int4_fp16_gemm_kernels.cu"
-    "kernels/quantization/autoquant/format.cu"
-    "kernels/quantization/autoquant/gemm_s4_f16.cu"
-    "kernels/quantization/gguf/gguf_kernel.cu"
-    "kernels/quantization/marlin/dense/marlin_cuda_kernel.cu"
-    "kernels/quantization/marlin/sparse/marlin_24_cuda_kernel.cu"
-    "kernels/quantization/gptq_marlin/gptq_marlin.cu"
-    "kernels/quantization/gptq_marlin/gptq_marlin_repack.cu"
-    "kernels/quantization/quip/origin_order.cu"
-    "kernels/quantization/cutlass_w8a8/scaled_mm_dq_entry.cu"
-    "kernels/quantization/cutlass_w8a8/scaled_mm_dq_c2x.cu"
-    "kernels/quantization/cutlass_w8a8/scaled_mm_dq_c3x.cu")
-
-    #
-    # The CUTLASS kernels for Hopper require sm90a to be enabled.
-    # This is done via the below gencode option, BUT that creates kernels for both sm90 and sm90a.
-    # That adds an extra 17MB to compiled binary, so instead we selectively enable it.
-    if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER 12.0)
-    set_source_files_properties(
-          "csrc/quantization/cutlass_w8a8/scaled_mm_dq_c3x.cu"
-          PROPERTIES
-          COMPILE_FLAGS
-          "-gencode arch=compute_90a,code=sm_90a")
-  endif()
-
-endif()
-
-define_gpu_extension_target(
-  _quant_C
-  DESTINATION aphrodite
-  LANGUAGE ${APHRODITE_GPU_LANG}
-  SOURCES ${APHRODITE_QUANT_EXT_SRC}
-  COMPILE_FLAGS ${APHRODITE_GPU_FLAGS}
-  ARCHITECTURES ${APHRODITE_GPU_ARCHES}
   INCLUDE_DIRECTORIES ${CUTLASS_INCLUDE_DIR};${CUTLASS_TOOLS_UTIL_INCLUDE_DIR}
+  USE_SABI 3
   WITH_SOABI)
 
 #
@@ -252,7 +214,7 @@ define_gpu_extension_target(
 #
 
 set(APHRODITE_MOE_EXT_SRC
-  "kernels/moe/moe_ops.cpp"
+  "kernels/moe/torch_bindings.cpp"
   "kernels/moe/softmax.cu")
 
 define_gpu_extension_target(
@@ -262,6 +224,7 @@ define_gpu_extension_target(
   SOURCES ${APHRODITE_MOE_EXT_SRC}
   COMPILE_FLAGS ${APHRODITE_GPU_FLAGS}
   ARCHITECTURES ${APHRODITE_GPU_ARCHES}
+  USE_SABI 3
   WITH_SOABI)
 
 #
@@ -288,7 +251,7 @@ set(APHRODITE_PUNICA_EXT_SRC
   "kernels/punica/bgmv/bgmv_fp32_fp32_bf16.cu"
   "kernels/punica/bgmv/bgmv_fp32_fp32_fp16.cu"
   "kernels/punica/punica_ops.cu"
-  "kernels/punica/punica_pybind.cpp")
+  "kernels/punica/torch_bindings.cpp")
 
 #
 # Copy GPU compilation flags+update for punica
@@ -325,63 +288,64 @@ if (APHRODITE_PUNICA_GPU_ARCHES)
     SOURCES ${APHRODITE_PUNICA_EXT_SRC}
     COMPILE_FLAGS ${APHRODITE_PUNICA_GPU_FLAGS}
     ARCHITECTURES ${APHRODITE_PUNICA_GPU_ARCHES}
+    USE_SABI 3
     WITH_SOABI)
 else()
   message(WARNING "Unable to create _punica_C target because none of the "
     "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 8.0")
 endif()
 
-#
-# _hadamard_C extension
-#
+# #
+# # _hadamard_C extension
+# #
 
-set(APHRODITE_HADAMARD_EXT_SRC
-  "kernels/hadamard/fast_hadamard_transform.cpp"
-  "kernels/hadamard/fast_hadamard_transform_cuda.cu")
+# set(APHRODITE_HADAMARD_EXT_SRC
+#   "kernels/hadamard/fast_hadamard_transform.cpp"
+#   "kernels/hadamard/fast_hadamard_transform_cuda.cu")
 
-#
-# Copy GPU compilation flags+update for hadamard
-#
-set(APHRODITE_HADAMARD_GPU_FLAGS ${APHRODITE_GPU_FLAGS})
-list(APPEND APHRODITE_HADAMARD_GPU_FLAGS
-  "-U__CUDA_NO_HALF_OPERATORS__"
-  "-U__CUDA_NO_HALF_CONVERSIONS__"
-  "-U__CUDA_NO_BFLOAT16_OPERATORS__"
-  "-U__CUDA_NO_BFLOAT16_CONVERSIONS__"
-  "-U__CUDA_NO_BFLOAT162_OPERATORS__"
-  "-U__CUDA_NO_BFLOAT162_CONVERSIONS__"
-  "--expt-relaxed-constexpr"
-  "--expt-extended-lambda"
-  "--use_fast_math"
-  "-lineinfo")
+# #
+# # Copy GPU compilation flags+update for hadamard
+# #
+# set(APHRODITE_HADAMARD_GPU_FLAGS ${APHRODITE_GPU_FLAGS})
+# list(APPEND APHRODITE_HADAMARD_GPU_FLAGS
+#   "-U__CUDA_NO_HALF_OPERATORS__"
+#   "-U__CUDA_NO_HALF_CONVERSIONS__"
+#   "-U__CUDA_NO_BFLOAT16_OPERATORS__"
+#   "-U__CUDA_NO_BFLOAT16_CONVERSIONS__"
+#   "-U__CUDA_NO_BFLOAT162_OPERATORS__"
+#   "-U__CUDA_NO_BFLOAT162_CONVERSIONS__"
+#   "--expt-relaxed-constexpr"
+#   "--expt-extended-lambda"
+#   "--use_fast_math"
+#   "-lineinfo")
 
-#
-# Filter out CUDA architectures < 7.0 for hadamard.
-#
-if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
-  set(APHRODITE_HADAMARD_GPU_ARCHES)
-  foreach(ARCH ${APHRODITE_GPU_ARCHES})
-    string_to_ver(CODE_VER ${ARCH})
-    if (CODE_VER GREATER_EQUAL 6.0)
-      list(APPEND APHRODITE_HADAMARD_GPU_ARCHES ${ARCH})
-    endif()
-  endforeach()
-  message(STATUS "Hadamard target arches: ${APHRODITE_HADAMARD_GPU_ARCHES}")
-endif()
+# #
+# # Filter out CUDA architectures < 7.0 for hadamard.
+# #
+# if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
+#   set(APHRODITE_HADAMARD_GPU_ARCHES)
+#   foreach(ARCH ${APHRODITE_GPU_ARCHES})
+#     string_to_ver(CODE_VER ${ARCH})
+#     if (CODE_VER GREATER_EQUAL 6.0)
+#       list(APPEND APHRODITE_HADAMARD_GPU_ARCHES ${ARCH})
+#     endif()
+#   endforeach()
+#   message(STATUS "Hadamard target arches: ${APHRODITE_HADAMARD_GPU_ARCHES}")
+# endif()
 
-if (APHRODITE_HADAMARD_GPU_ARCHES)
-  define_gpu_extension_target(
-    _hadamard_C
-    DESTINATION aphrodite
-    LANGUAGE ${APHRODITE_GPU_LANG}
-    SOURCES ${APHRODITE_HADAMARD_EXT_SRC}
-    COMPILE_FLAGS ${APHRODITE_HADAMARD_GPU_FLAGS}
-    ARCHITECTURES ${APHRODITE_HADAMARD_GPU_ARCHES}
-    WITH_SOABI)
-else()
-  message(WARNING "Unable to create _hadamard_C target because none of the "
-    "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 6.0")
-endif()
+# if (APHRODITE_HADAMARD_GPU_ARCHES)
+#   define_gpu_extension_target(
+#     _hadamard_C
+#     DESTINATION aphrodite
+#     LANGUAGE ${APHRODITE_GPU_LANG}
+#     SOURCES ${APHRODITE_HADAMARD_EXT_SRC}
+#     COMPILE_FLAGS ${APHRODITE_HADAMARD_GPU_FLAGS}
+#     ARCHITECTURES ${APHRODITE_HADAMARD_GPU_ARCHES}
+#     WITH_SOABI)
+# else()
+#   message(WARNING "Unable to create _hadamard_C target because none of the "
+#     "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 6.0")
+# endif()
 
 #
 # Add the `default` target which detects which extensions should be
@@ -404,22 +368,18 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA" OR APHRODITE_GPU_LANG STREQUAL "HIP")
 
   message(STATUS "Enabling moe extension.")
   add_dependencies(default _moe_C)
+
   # Enable punica if -DAPHRODITE_INSTALL_PUNICA_KERNELS=ON or
   # APHRODITE_INSTALL_PUNICA_KERNELS is set in the environment and
   # there are supported target arches.
-  if (APHRODITE_QUANT_EXT_SRC AND
-      (ENV{APHRODITE_INSTALL_QUANT_KERNELS} OR APHRODITE_INSTALL_QUANT_KERNELS))
-    message(STATUS "Enabling quant extension.")
-    add_dependencies(default _quant_C)
-  endif()
   if (APHRODITE_PUNICA_GPU_ARCHES AND
       (ENV{APHRODITE_INSTALL_PUNICA_KERNELS} OR APHRODITE_INSTALL_PUNICA_KERNELS))
     message(STATUS "Enabling punica extension.")
     add_dependencies(default _punica_C)
   endif()
-  if (APHRODITE_HADAMARD_GPU_ARCHES AND
-      (ENV{APHRODITE_INSTALL_HADAMARD_KERNELS} OR APHRODITE_INSTALL_HADAMARD_KERNELS))
-    message(STATUS "Enabling hadamard extension.")
-    add_dependencies(default _hadamard_C)
-  endif()
+  # if (APHRODITE_HADAMARD_GPU_ARCHES AND
+  #     (ENV{APHRODITE_INSTALL_HADAMARD_KERNELS} OR APHRODITE_INSTALL_HADAMARD_KERNELS))
+  #   message(STATUS "Enabling hadamard extension.")
+  #   add_dependencies(default _hadamard_C)
+  # endif()
 endif()

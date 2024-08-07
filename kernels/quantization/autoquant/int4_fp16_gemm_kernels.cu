@@ -1,4 +1,4 @@
-#include <torch/extension.h>
+#include <torch/all.h>
 #include <cuda_fp16.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <vector>
@@ -20,9 +20,9 @@ void autoquant_convert_s4_k_m8(
   torch::Tensor _quant_weight_src,
   torch::Tensor _quant_scales,
   torch::Tensor _quant_zeros,
-  int m,
-  int k,
-  int group_size){
+  int64_t m,
+  int64_t k,
+  int64_t group_size){
       auto st_ = _quant_scales.scalar_type();
       const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
       if(st_ == at::ScalarType::Half){

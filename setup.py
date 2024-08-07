@@ -46,7 +46,7 @@ def remove_prefix(text, prefix):
 class CMakeExtension(Extension):
 
     def __init__(self, name: str, cmake_lists_dir: str = '.', **kwa) -> None:
-        super().__init__(name, sources=[], **kwa)
+        super().__init__(name, sources=[], py_limited_api=True, **kwa)
         self.cmake_lists_dir = os.path.abspath(cmake_lists_dir)
 
 
@@ -143,14 +143,11 @@ class cmake_build_ext(build_ext):
             '-DAPHRODITE_PYTHON_EXECUTABLE={}'.format(sys.executable)
         ]
 
-        if _install_quants():
-            cmake_args += ['-DAPHRODITE_INSTALL_QUANT_KERNELS=ON']
-
         if _install_punica():
             cmake_args += ['-DAPHRODITE_INSTALL_PUNICA_KERNELS=ON']
 
-        if _install_hadamard():
-            cmake_args += ['-DAPHRODITE_INSTALL_HADAMARD_KERNELS=ON']
+        # if _install_hadamard():
+        #     cmake_args += ['-DAPHRODITE_INSTALL_HADAMARD_KERNELS=ON']
 
         #
         # Setup parallelism and build tool
@@ -227,18 +224,6 @@ def _is_cpu() -> bool:
     return APHRODITE_TARGET_DEVICE == "cpu"
 
 
-def _install_quants() -> bool:
-    install_quants = bool(
-        int(os.getenv("APHRODITE_INSTALL_QUANT_KERNELS", "1")))
-    device_count = torch.cuda.device_count()
-    for i in range(device_count):
-        major, minor = torch.cuda.get_device_capability(i)
-        if major < 6:
-            install_quants = False
-            break
-    return install_quants
-
-
 def _install_punica() -> bool:
     install_punica = bool(
         int(os.getenv("APHRODITE_INSTALL_PUNICA_KERNELS", "1")))
@@ -251,16 +236,16 @@ def _install_punica() -> bool:
     return install_punica
 
 
-def _install_hadamard() -> bool:
-    install_hadamard = bool(
-        int(os.getenv("APHRODITE_INSTALL_HADAMARD_KERNELS", "1")))
-    device_count = torch.cuda.device_count()
-    for i in range(device_count):
-        major, minor = torch.cuda.get_device_capability(i)
-        if major <= 6:
-            install_hadamard = False
-            break
-    return install_hadamard
+# def _install_hadamard() -> bool:
+#     install_hadamard = bool(
+#         int(os.getenv("APHRODITE_INSTALL_HADAMARD_KERNELS", "1")))
+#     device_count = torch.cuda.device_count()
+#     for i in range(device_count):
+#         major, minor = torch.cuda.get_device_capability(i)
+#         if major <= 6:
+#             install_hadamard = False
+#             break
+#     return install_hadamard
 
 
 def get_hipcc_rocm_version():
@@ -416,13 +401,11 @@ if _is_cuda() or _is_hip():
 
 if not _is_neuron():
     ext_modules.append(CMakeExtension(name="aphrodite._C"))
-    if _install_quants() and _is_cuda() or _is_hip():
-        ext_modules.append(CMakeExtension(name="aphrodite._quant_C"))
     if _install_punica() and _is_cuda() or _is_hip():
         ext_modules.append(CMakeExtension(name="aphrodite._punica_C"))
     # TODO: see if hadamard kernels work with HIP
-    if _install_hadamard() and _is_cuda():
-        ext_modules.append(CMakeExtension(name="aphrodite._hadamard_C"))
+    # if _install_hadamard() and _is_cuda():
+    #     ext_modules.append(CMakeExtension(name="aphrodite._hadamard_C"))
 
 package_data = {
     "aphrodite": [

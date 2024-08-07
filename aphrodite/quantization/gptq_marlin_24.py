@@ -1,18 +1,13 @@
 from typing import Any, Dict, List, Optional
-from contextlib import suppress
 
 import torch
-from torch.nn.parameter import Parameter
 from loguru import logger
+from torch.nn.parameter import Parameter
 
+from aphrodite import _custom_ops as ops
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
-from aphrodite.quantization.base_config import (QuantizationConfig)
 from aphrodite.modeling.utils import set_weight_attrs
-
-HAS_QUANTS = False
-with suppress(ImportError):
-    from aphrodite._quant_C import quant_ops as ops
-    HAS_QUANTS = True
+from aphrodite.quantization.base_config import QuantizationConfig
 
 GPTQ_MARLIN_24_TILE = 16
 GPTQ_MARLIN_24_MIN_THREAD_N = 128
@@ -130,8 +125,6 @@ class GPTQMarlin24LinearMethod(LinearMethodBase):
     """
 
     def __init__(self, quant_config: GPTQMarlin24Config):
-        if not HAS_QUANTS:
-            raise ImportError("Could not find the quantization kernels.")
         self.quant_config = quant_config
 
     def create_weights(

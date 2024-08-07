@@ -3,11 +3,10 @@ from typing import Callable, List, Tuple, Union
 import torch
 from torch.nn import Parameter
 
+from aphrodite import _custom_ops as custom_ops
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.compressed_tensors.schemes import \
     CompressedTensorsScheme
-from aphrodite.quantization.compressed_tensors.schemes.utils import (
-    cutlass_scaled_mm_dq, scaled_int8_quant)
 
 __all__ = ["CompressedTensorsW8A8DynamicToken"]
 
@@ -81,6 +80,6 @@ class CompressedTensorsW8A8DynamicToken(CompressedTensorsScheme):
         weight = layer.weight
         weight_scale = layer.weight_scale
 
-        x_q, input_scales = scaled_int8_quant(x)
-        return cutlass_scaled_mm_dq(x_q, weight.t(), input_scales,
-                                    weight_scale, x.dtype)
+        x_q, input_scales = custom_ops.scaled_int8_quant(x)
+        return custom_ops.cutlass_scaled_mm_dq(x_q, weight.t(), input_scales,
+                                               weight_scale, x.dtype)

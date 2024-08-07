@@ -1,20 +1,15 @@
-from contextlib import suppress
 from typing import Any, Dict, List, NamedTuple, Optional, TypeVar
 
 import torch
 from torch.nn.parameter import Parameter
 
+from aphrodite import _custom_ops as ops
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear, LinearBase,
                                               LinearMethodBase,
                                               QKVParallelLinear,
                                               RowParallelLinear)
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import QuantizationConfig
-
-HAS_QUANTS = False
-with suppress(ImportError):
-    from aphrodite._quant_C import quant_ops as ops
-    HAS_QUANTS = True
 
 
 class AutoQuantConfig(QuantizationConfig):
@@ -30,8 +25,6 @@ class AutoQuantConfig(QuantizationConfig):
             from_float: bool,
             quant_mode: str,  # llm_int8, smoothquant, weight_only
     ) -> None:
-        if not HAS_QUANTS:
-            raise ImportError("Could not find the quantization kernels.")
         self.weight_bits = weight_bits
         self.group_size = group_size
         self.zero_point = zero_point
@@ -105,8 +98,6 @@ class AutoQuantLinearMethod(LinearMethodBase):
     """
 
     def __init__(self, quant_config: AutoQuantConfig):
-        if not HAS_QUANTS:
-            raise ImportError("Could not find the quantization kernels.")
         self.quant_config = quant_config
 
     def create_weights(self, layer: torch.nn.Module,

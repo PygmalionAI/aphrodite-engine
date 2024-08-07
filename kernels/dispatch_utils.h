@@ -4,7 +4,7 @@
  */
 #pragma once
 
-#include <torch/extension.h>
+#include <torch/all.h>
 
 #define APHRODITE_DISPATCH_CASE_FLOATING_TYPES(...)    \
   AT_DISPATCH_CASE(at::ScalarType::Float, __VA_ARGS__) \

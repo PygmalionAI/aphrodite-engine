@@ -9,8 +9,7 @@ import triton
 import triton.language as tl
 from loguru import logger
 
-import aphrodite._moe_C as moe_kernels
-from aphrodite._C import ops
+from aphrodite import _custom_ops as ops
 
 
 @triton.jit
@@ -353,7 +352,7 @@ def fused_topk(
                                         topk,
                                         dtype=torch.int32,
                                         device=hidden_states.device)
-    moe_kernels.topk_softmax(
+    ops.topk_softmax(
         topk_weights,
         topk_ids,
         token_expert_indicies,

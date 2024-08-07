@@ -1,17 +1,12 @@
-from contextlib import suppress
 from typing import Any, Dict, List, Optional
 
 import torch
 from torch.nn.parameter import Parameter
 
+from aphrodite import _custom_ops as ops
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import QuantizationConfig
-
-HAS_QUANTS = False
-with suppress(ImportError):
-    from aphrodite._quant_C import quant_ops as ops
-    HAS_QUANTS = True
 
 GGML_QUANT_SIZES = {
     0: (1, 4),  # F32
@@ -92,8 +87,6 @@ class GGUFLinearMethod(LinearMethodBase):
     """
 
     def __init__(self, quant_config: GGUFConfig):
-        if not HAS_QUANTS:
-            raise ImportError("Could not find the quantization kernels.")
         self.quant_config = quant_config
 
     def create_weights(self, layer: torch.nn.Module,

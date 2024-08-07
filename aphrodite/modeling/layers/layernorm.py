@@ -73,7 +73,7 @@ class RMSNorm(CustomOp):
         x: torch.Tensor,
         residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        from aphrodite._C import ops
+        from aphrodite import _custom_ops as ops
         if residual is not None:
             ops.fused_add_rms_norm(
                 x,

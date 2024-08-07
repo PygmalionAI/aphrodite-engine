@@ -12,7 +12,7 @@ include_directories("${CMAKE_SOURCE_DIR}/kernels")
 #
 # Check the compile flags
 #
-list(APPEND CXX_COMPILE_FLAGS 
+list(APPEND CXX_COMPILE_FLAGS
     "-fopenmp"
     "-DAPHRODITE_CPU_EXTENSION")
 
@@ -44,8 +44,8 @@ if (AVX512_FOUND)
 
     find_isa(${CPUINFO} "avx512_bf16" AVX512BF16_FOUND)
     if (AVX512BF16_FOUND OR ENABLE_AVX512BF16)
-        if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND 
-            CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12.3) 
+        if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+            CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12.3)
             list(APPEND CXX_COMPILE_FLAGS "-mavx512bf16")
         else()
             message(WARNING "Disable AVX512-BF16 ISA support, requires gcc/g++ >= 12.3")
@@ -73,7 +73,7 @@ set(APHRODITE_EXT_SRC
     "kernels/cpu/cache.cpp"
     "kernels/cpu/layernorm.cpp"
     "kernels/cpu/pos_encoding.cpp"
-    "kernels/cpu/pybind.cpp")
+    "kernels/cpu/torch_bindings.cpp")
 
 define_gpu_extension_target(
     _C
@@ -81,7 +81,8 @@ define_gpu_extension_target(
     LANGUAGE CXX
     SOURCES ${APHRODITE_EXT_SRC}
     COMPILE_FLAGS ${CXX_COMPILE_FLAGS}
-    WITH_SOABI 
+    USE_SABI 3
+    WITH_SOABI
 )
 
 add_custom_target(default)
