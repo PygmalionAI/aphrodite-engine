@@ -3,3 +3,4 @@
 
 # Dependencies for x86_64 CPUs
 torch == 2.3.0+cpu
+triton >= 2.2.0
