@@ -283,6 +283,9 @@ class AphroditeEngine:
         if engine_config.device_config.device_type == "neuron":
             from aphrodite.executor.neuron_executor import NeuronExecutor
             executor_class = NeuronExecutor
+        elif engine_config.device_config.device_type == "tpu":
+            from aphrodite.executor.tpu_executor import TPUExecutor
+            executor_class = TPUExecutor
         elif engine_config.device_config.device_type == "cpu":
             from aphrodite.executor.cpu_executor import CPUExecutor
             executor_class = CPUExecutor

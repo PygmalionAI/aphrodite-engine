@@ -20,6 +20,7 @@ from aphrodite.common.config import (APHRODITE_USE_MODELSCOPE, CacheConfig,
                                      DeviceConfig, LoadConfig, LoadFormat,
                                      LoRAConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig, VisionLanguageConfig)
+from aphrodite.common.utils import is_tpu
 from aphrodite.modeling.model_loader.tensorizer import (
     TensorizerConfig, is_aphrodite_tensorized, load_with_tensorizer,
     tensorizer_weights_iterator)
@@ -225,12 +226,26 @@ class DefaultModelLoader(BaseModelLoader):
         if self.load_config.load_format == LoadFormat.NPCACHE:
             # Currently np_cache only support *.bin checkpoints
             assert use_safetensors is False
-            return np_cache_weights_iterator(model_name_or_path,
-                                             self.load_config.download_dir,
-                                             hf_folder, hf_weights_files)
-        if use_safetensors:
-            return safetensors_weights_iterator(hf_weights_files)
-        return pt_weights_iterator(hf_weights_files)
+            weights_iterator = np_cache_weights_iterator(
+                model_name_or_path, self.load_config.download_dir, hf_folder,
+                hf_weights_files)
+        elif use_safetensors:
+            weights_iterator = safetensors_weights_iterator(hf_weights_files)
+        else:
+            weights_iterator = pt_weights_iterator(hf_weights_files)
+
+        if is_tpu():
+            # In PyTorch XLA, we should call `xm.mark_step` frequently so that
+            # not too many ops are accumulated in the XLA program.
+            import torch_xla.core.xla_model as xm
+
+            def _xla_weights_iterator(iterator: Generator):
+                for weights in iterator:
+                    yield weights
+                    xm.mark_step()
+
+            weights_iterator = _xla_weights_iterator(weights_iterator)
+        return weights_iterator
 
     def load_model(self, *, model_config: ModelConfig,
                    device_config: DeviceConfig,
