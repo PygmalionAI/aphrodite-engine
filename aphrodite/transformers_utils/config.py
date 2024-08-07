@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, Type
 
 from loguru import logger
 from transformers import PretrainedConfig
@@ -8,7 +8,7 @@ from aphrodite.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
                                                   JAISConfig, MPTConfig,
                                                   RWConfig)
 
-_CONFIG_REGISTRY: Dict[str, PretrainedConfig] = {
+_CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     "chatglm": ChatGLMConfig,
     "dbrx": DbrxConfig,
     "mpt": MPTConfig,
