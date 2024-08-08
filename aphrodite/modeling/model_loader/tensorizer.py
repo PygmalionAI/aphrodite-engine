@@ -426,7 +426,7 @@ def serialize_aphrodite_model(
         serializer = TensorSerializer(stream, encryption=encryption_params)
         serializer.write_module(model)
         serializer.close()
-    logger.info("Successfully serialized model to %s", str(output_file))
+    logger.info(f"Successfully serialized model to {str(output_file)}")
     return model
 
 
