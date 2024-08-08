@@ -29,6 +29,7 @@ from aphrodite.lora.request import LoRARequest
 from aphrodite.lora.worker_manager import LRUCacheWorkerLoRAManager
 from aphrodite.modeling import SamplingMetadata
 from aphrodite.modeling.model_loader import get_model
+from aphrodite.modeling.model_loader.tensorizer import TensorizerConfig
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
 
 _PAD_SLOT_ID = -1
@@ -240,6 +241,16 @@ class ModelRunner:
             path,
             pattern=pattern,
             max_size=max_size,
+        )
+
+    def save_tensorized_model(
+        self,
+        tensorizer_config: TensorizerConfig,
+    ) -> None:
+        from aphrodite.modeling.model_loader.loader import TensorizerLoader
+        TensorizerLoader.save_model(
+            self.model,
+            tensorizer_config=tensorizer_config,
         )
 
     def get_max_block_per_batch(self) -> int:

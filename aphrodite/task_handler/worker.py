@@ -19,6 +19,7 @@ from aphrodite.distributed import (broadcast_tensor_dict,
                                    set_custom_all_reduce)
 from aphrodite.lora.request import LoRARequest
 from aphrodite.modeling import set_random_seed
+from aphrodite.modeling.model_loader.tensorizer import TensorizerConfig
 from aphrodite.task_handler.cache_engine import CacheEngine
 from aphrodite.task_handler.embedding_model_runner import EmbeddingModelRunner
 from aphrodite.task_handler.model_runner import ModelRunner
@@ -134,6 +135,13 @@ class Worker(WorkerBase):
             pattern=pattern,
             max_size=max_size,
         )
+
+    def save_tensorized_model(
+        self,
+        tensorizer_config: TensorizerConfig,
+    ) -> None:
+        self.model_runner.save_tensorized_model(
+            tensorizer_config=tensorizer_config, )
 
     @torch.inference_mode()
     def determine_num_available_blocks(self) -> Tuple[int, int]:

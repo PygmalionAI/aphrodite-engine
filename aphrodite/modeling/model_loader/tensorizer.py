@@ -2,11 +2,11 @@ import argparse
 import dataclasses
 import io
 import os
+import re
 import time
-import typing
 from dataclasses import dataclass
 from functools import partial
-from typing import Generator, Optional, Tuple, Type, Union
+from typing import BinaryIO, Generator, Optional, Tuple, Type, Union
 
 import torch
 from loguru import logger
@@ -15,6 +15,7 @@ from transformers import PretrainedConfig
 
 from aphrodite.common.config import ModelConfig, ParallelConfig
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
+from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.modeling.layers.vocab_parallel_embedding import \
     VocabParallelEmbedding
 from aphrodite.quantization.base_config import QuantizationConfig
@@ -44,8 +45,7 @@ __all__ = [
 
 @dataclass
 class TensorizerConfig:
-    tensorizer_uri: Union[io.BufferedIOBase, io.RawIOBase, typing.BinaryIO,
-                          str, bytes, os.PathLike, int]
+    tensorizer_uri: str
     aphrodite_tensorized: Optional[bool] = False
     verify_hash: Optional[bool] = False
     num_readers: Optional[int] = None
@@ -56,6 +56,12 @@ class TensorizerConfig:
     model_class: Optional[Type[torch.nn.Module]] = None
     hf_config: Optional[PretrainedConfig] = None
     dtype: Optional[Union[str, torch.dtype]] = None
+    _is_sharded: bool = False
+
+    def __post_init__(self):
+        # check if the configuration is for a sharded Aphrodite model
+        self._is_sharded = isinstance(self.tensorizer_uri, str) \
+            and re.search(r'%0\dd', self.tensorizer_uri) is not None
 
     def _construct_tensorizer_args(self) -> "TensorizerArgs":
         tensorizer_args = {
@@ -74,13 +80,12 @@ class TensorizerConfig:
         self,
         parallel_config: "ParallelConfig",
     ) -> None:
-        if (parallel_config.tensor_parallel_size > 1
-                and self.tensorizer_uri is not None):
+        if parallel_config.tensor_parallel_size > 1 \
+            and not self._is_sharded:
             raise ValueError(
-                "Loading to multiple GPUs is not currently supported with "
-                "aphrodite-serialized models. Please set "
-                "tensor_parallel_size=1. or use a non-aphrodite-serialized "
-                "model, such as a serialized Hugging Face `PretrainedModel`.")
+                "For a sharded model, tensorizer_uri should include a"
+                " string format template like '%04d' to be formatted"
+                " with the rank of the shard")
 
     def verify_with_model_config(self, model_config: "ModelConfig") -> None:
         if (model_config.quantization is not None
@@ -98,8 +103,8 @@ def load_with_tensorizer(tensorizer_config: TensorizerConfig,
 
 @dataclass
 class TensorizerArgs:
-    tensorizer_uri: Union[io.BufferedIOBase, io.RawIOBase, typing.BinaryIO,
-                          str, bytes, os.PathLike, int]
+    tensorizer_uri: Union[io.BufferedIOBase, io.RawIOBase, BinaryIO, str,
+                          bytes, os.PathLike, int]
     aphrodite_tensorized: Optional[bool] = False
     verify_hash: Optional[bool] = False
     num_readers: Optional[int] = None
@@ -329,6 +334,7 @@ class TensorizerAgent:
         ) as stream, TensorDeserializer(
                 stream,
                 dtype=self.tensorizer_config.dtype,
+                device=f'cuda:{torch.cuda.current_device()}',
                 **self.tensorizer_args.deserializer_params) as deserializer:
             deserializer.load_into_module(self.model)
             end = time.perf_counter()
@@ -396,33 +402,70 @@ def is_aphrodite_tensorized(tensorizer_config: "TensorizerConfig") -> bool:
     return False
 
 
-def get_pretensorized_aphrodite_model(engine: "AphroditeEngine") -> nn.Module:
-    model = (engine.model_executor.driver_worker.model_runner.model)
+def serialize_aphrodite_model(
+    model: nn.Module,
+    tensorizer_config: TensorizerConfig,
+) -> nn.Module:
     model.register_parameter(
         "aphrodite_tensorized_marker",
         nn.Parameter(torch.tensor((1, ), device="meta"), requires_grad=False))
-    return model
-
-
-def serialize_aphrodite_model(engine: "AphroditeEngine",
-                         tensorizer_config : TensorizerConfig,
-                         encryption_key_path: Optional[str] = None) \
-        -> nn.Module:
-
-    model = get_pretensorized_aphrodite_model(engine)
     tensorizer_args = tensorizer_config._construct_tensorizer_args()
-    encryption_params = None
-    if encryption_key_path is not None:
-        encryption_params = EncryptionParams.random()
-        with _write_stream(encryption_key_path,
-                           **tensorizer_args.stream_params) as stream:
-            stream.write(encryption_params.key)
 
-    with _write_stream(tensorizer_args.tensorizer_uri,
-                       **tensorizer_args.stream_params) as stream:
+    encryption_params = None
+    if (keyfile := tensorizer_config.encryption_keyfile) is not None:
+        with open(keyfile, "rb") as f:
+            key = f.read()
+        encryption_params = EncryptionParams(key=key)
+
+    output_file = tensorizer_args.tensorizer_uri
+    if tensorizer_config._is_sharded:
+        from aphrodite.distributed import get_tensor_model_parallel_rank
+        output_file = output_file % get_tensor_model_parallel_rank()
+
+    with _write_stream(output_file, **tensorizer_args.stream_params) as stream:
         serializer = TensorSerializer(stream, encryption=encryption_params)
         serializer.write_module(model)
         serializer.close()
-    logger.info("Successfully serialized model to "
-                f"{str(tensorizer_args.tensorizer_uri)}")
+    logger.info("Successfully serialized model to %s", str(output_file))
     return model
+
+
+def tensorize_aphrodite_model(engine_args: EngineArgs,
+                              tensorizer_config: TensorizerConfig,
+                              generate_keyfile: bool = True):
+    """Utility to load a model and then serialize it with Tensorizer
+       Intended to be used separately from running a aphrodite server since it
+       creates its own Engine instance.
+    """
+    engine_config = engine_args.create_engine_config()
+    tensorizer_config.verify_with_model_config(engine_config.model_config)
+    tensorizer_config.verify_with_parallel_config(
+        engine_config.parallel_config)
+
+    # generate the encryption key before creating the engine to support
+    # sharding
+    if generate_keyfile and (keyfile :=
+                             tensorizer_config.encryption_keyfile) is not None:
+        encryption_params = EncryptionParams.random()
+        with _write_stream(
+                keyfile,
+                s3_access_key_id=tensorizer_config.s3_access_key_id,
+                s3_secret_access_key=tensorizer_config.s3_secret_access_key,
+                s3_endpoint=tensorizer_config.s3_endpoint,
+        ) as stream:
+            stream.write(encryption_params.key)
+
+    engine = AphroditeEngine.from_engine_args(engine_args)
+    if tensorizer_config._is_sharded:
+        # if the engine is a distributed engine (for tensor parallel) then each
+        # worker shard needs to serialize its part of the model.
+        engine.model_executor._run_workers(
+            "save_tensorized_model",
+            tensorizer_config=tensorizer_config,
+        )
+    else:
+        # with a single worker, we can get to the underlying model directly
+        serialize_aphrodite_model(
+            engine.model_executor.driver_worker.model_runner.model,
+            tensorizer_config,
+        )
