@@ -1,3 +1,4 @@
+import contextlib
 import os
 from typing import Dict, Optional, Type
 
@@ -23,8 +24,12 @@ _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     "RefinedWeb": RWConfig,  # For tiiuae/falcon-40b(-instruct)
     "RefinedWebModel": RWConfig,  # For tiiuae/falcon-7b(-instruct)
     "jais": JAISConfig,
-    "mlpspeculator": MLPSpeculatorConfig,
+    "mlp_speculator": MLPSpeculatorConfig,
 }
+
+for name, cls in _CONFIG_REGISTRY.items():
+    with contextlib.suppress(ValueError):
+        AutoConfig.register(name, cls)
 
 
 def get_config(model: str,
