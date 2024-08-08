@@ -83,6 +83,8 @@ def run_aphrodite(
     gpu_memory_utilization: float = 0.9,
     download_dir: Optional[str] = None,
     load_format: str = EngineArgs.load_format,
+    speculative_model: Optional[str] = None,
+    use_v2_block_manager: bool = False,
 ) -> float:
     from aphrodite import LLM, SamplingParams
     llm = LLM(
@@ -325,7 +327,8 @@ if __name__ == "__main__":
                         'the model executor, which can range from 0 to 1.'
                         'If unspecified, will use the default value of 0.9.')
     parser.add_argument("--enforce-eager",
-                        action="store_true",
+                        type=lambda x: (str(x).lower() == 'true'),
+                        default=True,
                         help="enforce eager execution")
     parser.add_argument(
         '--kv-cache-dtype',
@@ -403,6 +406,13 @@ if __name__ == "__main__":
         'section for more information.\n'
         '* "bitsandbytes" will load the weights using bitsandbytes '
         'quantization.\n')
+    parser.add_argument('--speculative-model',
+                        type=str,
+                        default=None,
+                        help='speculative model for speculative decoding')
+    parser.add_argument('--use-v2-block-manager',
+                        action='store_true',
+                        help='use v2 block manage.')
     args = parser.parse_args()
     if args.tokenizer is None:
         args.tokenizer = args.model
