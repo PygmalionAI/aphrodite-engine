@@ -5,8 +5,16 @@ from loguru import logger
 from transformers import PretrainedConfig
 
 from aphrodite.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
-                                                  JAISConfig, MPTConfig,
-                                                  RWConfig)
+                                                  JAISConfig,
+                                                  MLPSpeculatorConfig,
+                                                  MPTConfig, RWConfig)
+
+APHRODITE_USE_MODELSCOPE = os.getenv("APHRODITE_USE_MODELSCOPE", "0") == "1"
+
+if APHRODITE_USE_MODELSCOPE:
+    from modelscope import AutoConfig
+else:
+    from transformers import AutoConfig
 
 _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     "chatglm": ChatGLMConfig,
@@ -15,6 +23,7 @@ _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     "RefinedWeb": RWConfig,  # For tiiuae/falcon-40b(-instruct)
     "RefinedWebModel": RWConfig,  # For tiiuae/falcon-7b(-instruct)
     "jais": JAISConfig,
+    "mlpspeculator": MLPSpeculatorConfig,
 }
 
 
@@ -25,10 +34,6 @@ def get_config(model: str,
                rope_scaling: Optional[dict] = None,
                rope_theta: Optional[float] = None) -> PretrainedConfig:
     try:
-        if os.getenv("APHRODITE_USE_MODELSCOPE", "0") == "1":
-            from modelscope import AutoConfig
-        else:
-            from transformers import AutoConfig
         config = AutoConfig.from_pretrained(
             model,
             trust_remote_code=trust_remote_code,
