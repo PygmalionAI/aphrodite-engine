@@ -102,5 +102,7 @@ FROM aphrodite-base AS aphrodite-openai
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install accelerate hf_transfer modelscope
 
+ENV NUMBA_CACHE_DIR=$HOME/.numba_cache
+
 ENTRYPOINT ["python3", "-m", "aphrodite.endpoints.openai.api_server"]
 #################### OPENAI API SERVER ####################
