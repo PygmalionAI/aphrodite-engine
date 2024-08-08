@@ -180,9 +180,9 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     "kernels/quantization/gptq_marlin/gptq_marlin.cu"
     "kernels/quantization/gptq_marlin/gptq_marlin_repack.cu"
     "kernels/all_reduce/custom_all_reduce.cu"
-    "kernels/quantization/cutlass_w8a8/scaled_mm_dq_entry.cu"
-    "kernels/quantization/cutlass_w8a8/scaled_mm_dq_c2x.cu"
-    "kernels/quantization/cutlass_w8a8/scaled_mm_dq_c3x.cu")
+    "kernels/quantization/cutlass_w8a8/scaled_mm_entry.cu"
+    "kernels/quantization/cutlass_w8a8/scaled_mm_c2x.cu"
+    "kernels/quantization/cutlass_w8a8/scaled_mm_c3x.cu")
 
   #
   # The CUTLASS kernels for Hopper require sm90a to be enabled.
@@ -190,7 +190,7 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
   # That adds an extra 17MB to compiled binary, so instead we selectively enable it.
   if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER 12.0)
     set_source_files_properties(
-          "kernels/quantization/cutlass_w8a8/scaled_mm_dq_c3x.cu"
+          "kernels/quantization/cutlass_w8a8/scaled_mm_c3x.cu"
           PROPERTIES
           COMPILE_FLAGS
           "-gencode arch=compute_90a,code=sm_90a")

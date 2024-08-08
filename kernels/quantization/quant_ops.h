@@ -85,9 +85,9 @@ at::Tensor e8p_mm_origorder(const at::Tensor& A, const at::Tensor& B,
 void decompress_e8p_origorder(torch::Tensor YIs, torch::Tensor CB,
                               torch::Tensor& Y);
 
-void cutlass_scaled_mm_dq(torch::Tensor& out, torch::Tensor const& a,
-                          torch::Tensor const& b, torch::Tensor const& a_scales,
-                          torch::Tensor const& b_scales);
+void cutlass_scaled_mm(torch::Tensor& out, torch::Tensor const& a,
+                       torch::Tensor const& b, torch::Tensor const& a_scales,
+                       torch::Tensor const& b_scales);
 
 #endif
 
