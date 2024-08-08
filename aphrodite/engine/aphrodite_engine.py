@@ -7,7 +7,6 @@ from typing import Type, TypeVar, Union
 from loguru import logger
 from transformers import GenerationConfig, PreTrainedTokenizer
 
-import aphrodite
 from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
                                      LoadConfig, LoRAConfig, ModelConfig,
                                      ParallelConfig, SchedulerConfig,
@@ -38,6 +37,7 @@ from aphrodite.processing.scheduler import (ScheduledSequenceGroup, Scheduler,
 from aphrodite.transformers_utils.detokenizer import Detokenizer
 from aphrodite.transformers_utils.tokenizer_group import (BaseTokenizerGroup,
                                                           get_tokenizer_group)
+from aphrodite.version import __version__ as APHRODITE_VERSION
 
 _LOCAL_LOGGING_INTERVAL_SEC = 5
 
@@ -157,7 +157,7 @@ class AphroditeEngine:
     ) -> None:
         logger.info(
             "-" * 76 + "\n"
-            f"Initializing the Aphrodite Engine (v{aphrodite.__version__}) "
+            f"Initializing the Aphrodite Engine (v{APHRODITE_VERSION}) "
             "with the following config:\n"
             f"Model = {model_config.model!r}\n"
             f"Speculative Config = {speculative_config!r}\n"

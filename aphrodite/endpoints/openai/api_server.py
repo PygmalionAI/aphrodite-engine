@@ -21,7 +21,6 @@ from loguru import logger
 from prometheus_client import make_asgi_app
 from starlette.routing import Mount
 
-import aphrodite
 from aphrodite.common.logger import UVICORN_LOG_CONFIG
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import _SAMPLING_EPS, SamplingParams
@@ -38,6 +37,7 @@ from aphrodite.endpoints.openai.serving_engine import LoRA
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
+from aphrodite.version import __version__ as APHRODITE_VERSION
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
@@ -133,7 +133,7 @@ async def create_embeddings(request: EmbeddingRequest,
 
 @router.get("/version", description="Fetch the Aphrodite Engine version.")
 async def show_version(x_api_key: Optional[str] = Header(None)):
-    ver = {"version": aphrodite.__version__}
+    ver = {"version": APHRODITE_VERSION}
     return JSONResponse(content=ver)
 
 

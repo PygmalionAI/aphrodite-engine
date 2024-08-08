@@ -328,7 +328,7 @@ def find_version(filepath: str) -> str:
 
 
 def get_aphrodite_version() -> str:
-    version = find_version(get_path("aphrodite", "__init__.py"))
+    version = find_version(get_path("aphrodite", "version.py"))
 
     if _is_cuda():
         cuda_version = str(get_nvcc_cuda_version())
