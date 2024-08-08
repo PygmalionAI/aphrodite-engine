@@ -16,6 +16,7 @@ from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.engine.args_tools import AsyncEngineArgs
+from aphrodite.engine.async_timeout import asyncio_timeout
 from aphrodite.executor.ray_utils import initialize_ray_cluster, ray
 from aphrodite.lora.request import LoRARequest
 from aphrodite.processing.scheduler import SchedulerOutputs
@@ -540,8 +541,8 @@ class AsyncAphrodite:
             # Abort if iteration takes too long due to unrecoverable errors
             # (eg. NCCL timeouts).
             try:
-                has_requests_in_progress = await asyncio.wait_for(
-                    self.engine_step(), ENGINE_ITERATION_TIMEOUT_S)
+                async with asyncio_timeout(ENGINE_ITERATION_TIMEOUT_S):
+                    has_requests_in_progress = await self.engine_step()
             except asyncio.TimeoutError as exc:
                 logger.error(
                     "Engine iteration timed out. This should never happen!")
