@@ -124,7 +124,7 @@ FROM aphrodite-base AS aphrodite-openai
 
 # install additional dependencies for openai api server
 RUN --mount=type=cache,target=/root/.cache/pip \
-    python3 -m pip install accelerate hf_transfer modelscope
+    python3 -m pip install accelerate hf_transfer 'modelscope!=1.15.0'
 
 ENV NUMBA_CACHE_DIR=$HOME/.numba_cache
 
