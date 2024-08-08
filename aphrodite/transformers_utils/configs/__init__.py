@@ -5,6 +5,8 @@ from aphrodite.transformers_utils.configs.dbrx import DbrxConfig
 # `FalconConfig` class from the official HuggingFace transformers library.
 from aphrodite.transformers_utils.configs.falcon import RWConfig
 from aphrodite.transformers_utils.configs.jais import JAISConfig
+from aphrodite.transformers_utils.configs.mlp_speculator import \
+    MLPSpeculatorConfig
 from aphrodite.transformers_utils.configs.mpt import MPTConfig
 
 __all__ = [
@@ -13,4 +15,5 @@ __all__ = [
     "MPTConfig",
     "RWConfig",
     "JAISConfig",
+    "MLPSpeculatorConfig",
 ]
