@@ -1,3 +1,4 @@
+from typing import Callable, List, Tuple, Union
 
 import torch
 from torch.nn import Parameter

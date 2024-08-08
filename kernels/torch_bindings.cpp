@@ -142,6 +142,12 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "                  Tensor b_scales) -> ()");
   ops.impl("cutlass_scaled_mm", torch::kCUDA, &cutlass_scaled_mm);
 
+  // Check if cutlass scaled_mm is supported for CUDA devices of the given
+  // capability
+  ops.def("cutlass_scaled_mm_supports_fp8", &cutlass_scaled_mm_supports_fp8);
+  ops.impl("cutlass_scaled_mm_supports_fp8", torch::kCUDA,
+           &cutlass_scaled_mm_supports_fp8);
+
   // QuIP# GEMV
   ops.def("quip_gemv", &e8p_mm_origorder);
   ops.impl("quip_gemv", torch::kCUDA, &e8p_mm_origorder);
