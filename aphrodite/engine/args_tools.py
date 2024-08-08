@@ -518,7 +518,7 @@ class EngineArgs:
                             "parsed into a dictionary. Ignored if "
                             "tokenizer_pool_size is 0.")
         parser.add_argument(
-            '--preemption_mode',
+            '--preemption-mode',
             type=str,
             default=None,
             help='If \'recompute\', the engine performs preemption by block '
