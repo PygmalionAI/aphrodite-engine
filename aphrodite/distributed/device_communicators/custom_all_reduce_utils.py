@@ -11,9 +11,6 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from loguru import logger
 
-from aphrodite.distributed.parallel_state import (get_cpu_world_group,
-                                                  get_local_rank)
-
 
 @contextmanager
 def mute_output():
@@ -85,9 +82,11 @@ def can_actually_p2p(i, j):
     https://forums.developer.nvidia.com/t/direct-gpu-gpu-communication-does-not-seem-to-work-properly/283264/10
     Therefore, we have to perform a real P2P access to check if it is actually
     possible.
+
     Note on p2p and cuda IPC:
     Usually, one process uses one GPU:
     GPU i --> cuda context i --> tensor i --> process i
+
     We need to combine p2p and cuda IPC, so that:
     GPU i --> cuda context i --> tensor i --> process i
                                  |shared|
@@ -158,11 +157,12 @@ def gpu_p2p_access_check(i: int, j: int) -> bool:
         f"{APHRODITE_CONFIG_ROOT}/aphrodite/gpu_p2p_access_cache_for_{cuda_visible_devices}.json"
     )
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    if ((not is_distributed or get_local_rank() == 0)
+    from aphrodite.distributed.parallel_state import get_world_group
+    if ((not is_distributed or get_world_group().local_rank == 0)
             and (not os.path.exists(path))):
         # only the local master process (with local_rank == 0) can
         #  enter this block to calculate the cache
-        logger.info("generating GPU P2P access cache for in %s", path)
+        logger.info(f"generating GPU P2P access cache in {path}")
         cache = {}
         for _i in range(num_dev):
             for _j in range(num_dev):
@@ -170,8 +170,7 @@ def gpu_p2p_access_check(i: int, j: int) -> bool:
         with open(path, "w") as f:
             json.dump(cache, f, indent=4)
     if is_distributed:
-        cpu_world_group = get_cpu_world_group()
-        dist.barrier(cpu_world_group)
+        get_world_group().barrier()
     logger.info(f"reading GPU P2P access cache from {path}")
     with open(path, "r") as f:
         cache = json.load(f)

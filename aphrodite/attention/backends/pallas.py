@@ -42,7 +42,7 @@ class PallasAttentionBackend(AttentionBackend):
         kv_caches: List[torch.Tensor],
         src_to_dists: Dict[int, List[int]],
     ) -> None:
-        # TODO(woosuk): Implement this.
+        # TODO: Implement this.
         raise NotImplementedError("copy_blocks is not implemented.")
 
 
@@ -111,12 +111,12 @@ class PallasAttentionBackendImpl(AttentionImpl):
             raise NotImplementedError("TPU version must be 4 or higher.")
 
         self.megacore_mode = None
-        tpu_type = torch_xla.tpu.get_tpu_env()["TYPE"].lower()
+        tpu_type = torch_xla.tpu.get_tp_groupu_env()["TYPE"].lower()
         if not tpu_type.endswith("lite"):
             if self.num_kv_heads % 2 == 0:
                 self.megacore_mode = "kv_head"
             else:
-                # NOTE(woosuk): If the batch size is not a multiple of 2, the
+                # NOTE: If the batch size is not a multiple of 2, the
                 # megacore mode will be None.
                 self.megacore_mode = "batch"
 
@@ -181,13 +181,13 @@ class PallasAttentionBackendImpl(AttentionImpl):
             # Decoding run.
             assert kv_cache is not None
 
-            pages_per_compute_block = 16  # TODO(woosuk): Tune this value.
+            pages_per_compute_block = 16  # TODO: Tune this value.
             if self.megacore_mode == "batch" and batch_size % 2 != 0:
                 megacore_mode = None
             else:
                 megacore_mode = self.megacore_mode
 
-            # NOTE(woosuk): A temporary workaround to avoid the error:
+            # NOTE: A temporary workaround to avoid the error:
             # "xla::paged_attention() Expected a value of type 'str' for
             # argument 'megacore_mode' but instead found type 'NoneType'."
             if megacore_mode is not None:

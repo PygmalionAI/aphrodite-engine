@@ -21,7 +21,7 @@ from aphrodite.common.utils import (CudaMemoryProfiler,
                                     is_pin_memory_available,
                                     make_tensor_with_pad)
 from aphrodite.distributed import broadcast_tensor_dict
-from aphrodite.distributed.communication_op import graph_capture
+from aphrodite.distributed.parallel_state import graph_capture
 from aphrodite.distributed.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size)
 from aphrodite.lora.layers import LoRAMapping
