@@ -52,7 +52,7 @@ class XPUExecutor(GPUExecutor):
                        rank: int = 0,
                        distributed_init_method: Optional[str] = None):
         if self.speculative_config is None:
-            worker_module_name = "aphrodite.worker.xpu_worker"
+            worker_module_name = "aphrodite.task_handler.xpu_worker"
             worker_class_name = "XPUWorker"
         else:
             raise NotImplementedError(
