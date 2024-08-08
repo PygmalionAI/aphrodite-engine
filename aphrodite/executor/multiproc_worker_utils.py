@@ -25,7 +25,7 @@ JOIN_TIMEOUT_S = 2
 
 # Use dedicated multiprocess context for workers.
 # Both spawn and fork work
-mp_method = os.getenv("APHRODITE_WORKER_MULTIPROC_METHOD", "spawn")
+mp_method = os.getenv("APHRODITE_WORKER_MULTIPROC_METHOD", "fork")
 mp = multiprocessing.get_context(mp_method)
 
 
