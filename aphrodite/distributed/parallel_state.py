@@ -138,7 +138,7 @@ class GroupCoordinator:
 
         # lazy import to avoid documentation build error
         from aphrodite.distributed.device_communicators.custom_all_reduce import \
-            CustomAllreduce
+            CustomAllreduce  # noqa: E501
         from aphrodite.distributed.device_communicators.pynccl import \
             PyNcclCommunicator
 
