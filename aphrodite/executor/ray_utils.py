@@ -1,10 +1,8 @@
 import pickle
 from typing import List, Optional, Tuple
 
-from loguru import logger
-
 from aphrodite.common.config import ParallelConfig
-from aphrodite.common.utils import get_ip, is_hip
+from aphrodite.common.utils import get_ip, is_hip, is_xpu
 from aphrodite.task_handler.worker_base import WorkerWrapperBase
 
 try:
@@ -68,7 +66,7 @@ def initialize_ray_cluster(
             "`pip install aphrodite-engine[\"ray\"]`.")
 
     # Connect to a ray cluster.
-    if is_hip():
+    if is_hip() or is_xpu():
         ray.init(address=ray_address,
                  ignore_reinit_error=True,
                  num_gpus=parallel_config.world_size)

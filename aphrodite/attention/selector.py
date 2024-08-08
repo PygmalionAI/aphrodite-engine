@@ -7,7 +7,7 @@ import torch
 from loguru import logger
 
 from aphrodite.attention.backends.abstract import AttentionBackend
-from aphrodite.common.utils import is_cpu, is_hip, is_tpu
+from aphrodite.common.utils import is_cpu, is_hip, is_tpu, is_xpu
 
 APHRODITE_ATTENTION_BACKEND = "APHRODITE_ATTENTION_BACKEND"
 
@@ -19,6 +19,7 @@ class _Backend(enum.Enum):
     TORCH_SDPA = enum.auto()
     FLASHINFER = enum.auto()
     PALLAS = enum.auto()
+    IPEX = enum.auto()
 
 
 @lru_cache(maxsize=None)
@@ -59,12 +60,17 @@ def get_attn_backend(
             ROCmFlashAttentionBackend  # noqa: F401
         return ROCmFlashAttentionBackend
     elif backend == _Backend.TORCH_SDPA:
-        # TODO: make XPUs work with Torch SDPA.
         assert is_cpu(), RuntimeError(
             "Torch SDPA backend is only used for CPU devices.")
         logger.info("Using Torch SDPA backend.")
         from aphrodite.attention.backends.torch_sdpa import TorchSDPABackend
         return TorchSDPABackend
+    elif backend == _Backend.IPEX:
+        assert is_xpu(), RuntimeError(
+            "IPEX attention backend is only used for the XPU device.")
+        logger.info("Using IPEX attention backend.")
+        from aphrodite.attention.backends.ipex_attn import IpexAttnBackend
+        return IpexAttnBackend
     elif backend == _Backend.FLASHINFER:
         logger.info("Using Flashinfer backend.")
         logger.warning("Eager mode is required for the Flashinfer backend. "
@@ -105,7 +111,12 @@ def which_attn_to_use(
     if is_cpu():
         if selected_backend != _Backend.TORCH_SDPA:
             logger.info(f"Cannot use {selected_backend} backend on CPU.")
-        return _Backend.TORCH_SDPA
+        return _Backend.TORCH_SDPA\
+
+    if is_xpu():
+        if selected_backend != _Backend.IPEX:
+            logger.info(f"Cannot use {selected_backend} backend on XPU.")
+        return _Backend.IPEX
 
     if is_tpu():
         if selected_backend != _Backend.PALLAS:

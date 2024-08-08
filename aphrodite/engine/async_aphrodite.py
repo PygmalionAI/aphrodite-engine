@@ -383,6 +383,18 @@ class AsyncAphrodite:
             assert distributed_executor_backend is None, (
                 "Distributed execution is not supported with the CPU backend.")
             executor_class = CPUExecutorAsync
+        elif engine_config.device_config.device_type == "xpu":
+            if distributed_executor_backend is None:
+                from aphrodite.executor.xpu_executor import XPUExecutorAsync
+                executor_class = XPUExecutorAsync
+            elif distributed_executor_backend == "ray":
+                initialize_ray_cluster(engine_config.parallel_config)
+                from aphrodite.executor.ray_xpu_executor import \
+                    RayXPUExecutorAsync
+                executor_class = RayXPUExecutorAsync
+            else:
+                raise RuntimeError(
+                    "Unsupported distributed executor backend for XPU.")
         elif distributed_executor_backend == "ray":
             initialize_ray_cluster(engine_config.parallel_config)
             from aphrodite.executor.ray_gpu_executor import RayGPUExecutorAsync

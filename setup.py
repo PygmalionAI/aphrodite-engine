@@ -228,6 +228,10 @@ def _is_cpu() -> bool:
     return APHRODITE_TARGET_DEVICE == "cpu"
 
 
+def _is_xpu() -> bool:
+    return APHRODITE_TARGET_DEVICE == "xpu"
+
+
 def _build_custom_ops() -> bool:
     return _is_cuda() or _is_hip() or _is_cpu()
 
@@ -351,6 +355,8 @@ def get_aphrodite_version() -> str:
         version += "+tpu"
     elif _is_cpu():
         version += "+cpu"
+    elif _is_xpu():
+        version += "+xpu"
     else:
         raise RuntimeError("Unknown runtime environment, "
                            "must be either CUDA, ROCm, CPU, or Neuron.")
@@ -400,6 +406,8 @@ def get_requirements() -> List[str]:
         requirements = _read_requirements("requirements-tpu.txt")
     elif _is_cpu():
         requirements = _read_requirements("requirements-cpu.txt")
+    elif _is_xpu():
+        requirements = _read_requirements("requirements-xpu.txt")
     else:
         raise ValueError(
             "Unsupported platform, please use CUDA, ROCm, Neuron, or CPU.")
