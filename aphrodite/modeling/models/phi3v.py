@@ -34,7 +34,6 @@ from aphrodite.multimodal import MULTIMODAL_REGISTRY
 from aphrodite.multimodal.image import get_dummy_image_data
 from aphrodite.quantization.base_config import QuantizationConfig
 
-
 _KEYS_TO_MODIFY_MAPPING = {
     "model.vision_embed_tokens": "vision_embed_tokens",
 }
