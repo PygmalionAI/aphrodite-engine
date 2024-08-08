@@ -6,8 +6,8 @@ from typing import Any, List, Optional
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.common.utils import (cuda_device_count_stateless,
                                     get_aphrodite_instance_id,
-                                    get_distributed_init_method, get_ip,
-                                    get_open_port, make_async)
+                                    get_distributed_init_method, get_open_port,
+                                    make_async)
 from aphrodite.executor.distributed_gpu_executor import (  # yapf: disable
     DistributedGPUExecutor, DistributedGPUExecutorAsync)
 from aphrodite.executor.multiproc_worker_utils import (ProcessWorkerWrapper,
@@ -36,8 +36,11 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         assert world_size <= cuda_device_count_stateless(), (
             "please set tensor_parallel_size to less than max local gpu count")
 
+        # Multiprocessing-based executor does not support multi-node setting.
+        # Since it only works for single node, we can use the loopback address
+        # 127.0.0.1 for communication.
         distributed_init_method = get_distributed_init_method(
-            get_ip(), get_open_port())
+            "127.0.0.1", get_open_port())
 
         if world_size == 1:
             self.workers = []
