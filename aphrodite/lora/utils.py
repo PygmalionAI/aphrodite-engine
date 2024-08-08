@@ -7,7 +7,8 @@ from aphrodite.common.config import LoRAConfig
 from aphrodite.lora.fully_sharded_layers import (
     ColumnParallelLinearWithShardedLoRA,
     MergedColumnParallelLinearWithShardedLoRA,
-    MergedQKVParallelLinearWithShardedLora, RowParallelLinearWithShardedLoRA)
+    MergedQKVParallelLinearWithShardedLora, QKVParallelLinearWithShardedLora,
+    RowParallelLinearWithShardedLoRA)
 # being imported for _all_lora_classes below
 # yapf conflicts with isort for this block
 # yapf: disable
@@ -33,6 +34,7 @@ _all_lora_classes: Set[Type[BaseLayerWithLoRA]] = {
     RowParallelLinearWithLoRA,
     LogitsProcessorWithLoRA,
     ColumnParallelLinearWithShardedLoRA,
+    QKVParallelLinearWithShardedLora,
     MergedColumnParallelLinearWithShardedLoRA,
     MergedQKVParallelLinearWithShardedLora,
     RowParallelLinearWithShardedLoRA,
