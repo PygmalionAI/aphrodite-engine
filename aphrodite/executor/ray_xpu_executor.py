@@ -6,6 +6,8 @@ from itertools import islice, repeat
 from typing import (TYPE_CHECKING, Any, Awaitable, Dict, List, Optional, Set,
                     Tuple, Union)
 
+from loguru import logger
+
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig, SpeculativeConfig,
@@ -215,8 +217,8 @@ class RayXPUExecutor(DistributedGPUExecutor):
         # NOTE: We log here to avoid multiple logs when number of workers is
         # greater than one. We could log in the engine, but not all executors
         # have GPUs.
-        logger.info("# GPU blocks: %d, "
-                    "# CPU blocks: %d", num_gpu_blocks, num_cpu_blocks)
+        logger.info(f"# GPU blocks: {num_gpu_blocks}, "
+                    f"# CPU blocks: {num_cpu_blocks}")
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
