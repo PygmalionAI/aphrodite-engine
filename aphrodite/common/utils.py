@@ -156,7 +156,7 @@ def is_tpu() -> bool:
 @lru_cache(maxsize=None)
 def is_xpu() -> bool:
     from importlib.metadata import version
-    is_xpu_flag = "xpu" in version("aphrodite")
+    is_xpu_flag = "xpu" in version("aphrodite-engine")
     # aphrodite is not build with xpu
     if not is_xpu_flag:
         return False
