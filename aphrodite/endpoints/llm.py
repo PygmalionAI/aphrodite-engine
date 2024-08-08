@@ -26,12 +26,6 @@ class LLM:
     this class generates texts from the model, using an intelligent batching
     mechanism and efficient memory management.
 
-    NOTE: This class is intended to be used for offline inference. For online
-    serving, use the :class:`~aphrodite.AsyncAphrodite` class instead.
-
-    NOTE: For the comprehensive list of arguments, see
-    :class:`~aphrodite.EngineArgs`.
-
     Args:
         model: The name or path of a HuggingFace Transformers model.
         tokenizer: The name or path of a HuggingFace Transformers tokenizer.
@@ -80,6 +74,12 @@ class LLM:
             When a sequence has context length larger than this, we fall back
             to eager mode.
         disable_custom_all_reduce: See ParallelConfig
+        **kwargs: Arguments for :class:`~aphrodite.EngineArgs`. (See
+            :ref:`engine_args`)
+    
+    Note:
+        This class is intended to be used for offline inference. For online
+        serving, use the :class:`~aphrodite.AsyncAphrodite` class instead.
     """
 
     DEPRECATE_LEGACY: ClassVar[bool] = False
@@ -248,7 +248,7 @@ class LLM:
     ) -> List[RequestOutput]:
         """Generates the completions for the input prompts.
 
-        NOTE: This class automatically batches the given prompts, considering
+        This class automatically batches the given prompts, considering
         the memory constraint. For the best performance, put all of your prompts
         into a single list and pass it to this method.
 
@@ -265,11 +265,17 @@ class LLM:
         Returns:
             A list of `RequestOutput` objects containing the
             generated completions in the same order as the input prompts.
+
+        Note:
+            Using ``prompts`` and ``prompt_token_ids`` as keyword parameters is
+            considered legacy and may be deprecated in the future. You should
+            instead pass them via the ``inputs`` parameter.
         """
         if self.llm_engine.model_config.embedding_mode:
             raise ValueError(
                 "LLM.generate() is only supported for generation models "
                 "(XForCausalLM).")
+
         if prompt_token_ids is not None:
             inputs = self._convert_v1_inputs(
                 prompts=cast(Optional[Union[str, List[str]]], prompts),
@@ -384,7 +390,7 @@ class LLM:
     ) -> List[EmbeddingRequestOutput]:
         """Generates the completions for the input prompts.
 
-        NOTE: This class automatically batches the given prompts, considering
+        This class automatically batches the given prompts, considering
         the memory constraint. For the best performance, put all of your prompts
         into a single list and pass it to this method.
 
@@ -401,11 +407,17 @@ class LLM:
         Returns:
             A list of `EmbeddingRequestOutput` objects containing the
             generated embeddings in the same order as the input prompts.
+
+        Note:
+            Using ``prompts`` and ``prompt_token_ids`` as keyword parameters is
+            considered legacy and may be deprecated in the future. You should
+            instead pass them via the ``inputs`` parameter.
         """
         if not self.llm_engine.model_config.embedding_mode:
             raise ValueError(
                 "LLM.encode() is only supported for embedding models (XModel)."
             )
+
         if prompt_token_ids is not None:
             inputs = self._convert_v1_inputs(
                 prompts=cast(Optional[Union[str, List[str]]], prompts),
@@ -483,7 +495,7 @@ class LLM:
         inputs: Union[PromptStrictInputs, Sequence[PromptStrictInputs]],
         params: Union[SamplingParams, Sequence[SamplingParams], PoolingParams,
                       Sequence[PoolingParams]],
-        lora_request: Optional[LoRARequest],
+        lora_request: Optional[Union[Sequence[LoRARequest], LoRARequest]],
     ) -> None:
         if isinstance(inputs, (str, dict)):
             # Convert a single prompt to a list.
@@ -530,7 +542,7 @@ class LLM:
                 total=num_requests,
                 desc="Processed prompts",
                 dynamic_ncols=True,
-                postfix=(f"estimated speed input: {0:.2f} toks/s, "
+                postfix=(f"est. speed input: {0:.2f} toks/s, "
                          f"output: {0:.2f} toks/s"),
             )
         # Run the engine.
@@ -552,7 +564,7 @@ class LLM:
                             out_spd = total_out_toks / pbar.format_dict[
                                 "elapsed"]
                             pbar.postfix = (
-                                f"estimated speed input: {in_spd:.2f} toks/s, "
+                                f"est. speed input: {in_spd:.2f} toks/s, "
                                 f"output: {out_spd:.2f} toks/s")
                         pbar.update(1)
         if use_tqdm:
