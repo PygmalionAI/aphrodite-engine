@@ -4,6 +4,7 @@
 # Dependencies for NVIDIA GPUs
 nvidia-ml-py == 12.555.43
 torch == 2.3.0
+torchvision == 0.18.0  # for phi3v
 xformers == 0.0.26.post1  # Requires torch 2.3.0
 triton >= 2.2.0
 vllm-flash-attn == 2.5.9 # Requires PyTorch 2.3.0
