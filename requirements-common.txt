@@ -2,7 +2,7 @@ cmake >= 3.21
 ninja
 psutil
 sentencepiece
-numpy
+numpy < 2.0.0
 transformers == 4.43.0 # needed for llama
 uvicorn
 openai # for fastapi's openai proxy emulation
