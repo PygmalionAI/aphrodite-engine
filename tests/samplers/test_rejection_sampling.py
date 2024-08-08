@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from aphrodite.modeling.utils import set_random_seed
 
-from aphrodite.modeling.layers.rejection import RejectionSampler
+from aphrodite.modeling.layers.rejection_sampler import RejectionSampler
 
 
 def mock_causal_accepted_tensor(

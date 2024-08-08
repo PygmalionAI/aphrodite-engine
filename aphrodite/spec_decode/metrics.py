@@ -5,7 +5,7 @@ from typing import Callable, Optional
 import torch
 
 from aphrodite.common.utils import is_pin_memory_available
-from aphrodite.modeling.layers.rejection import RejectionSampler
+from aphrodite.modeling.layers.rejection_sampler import RejectionSampler
 
 
 @dataclass

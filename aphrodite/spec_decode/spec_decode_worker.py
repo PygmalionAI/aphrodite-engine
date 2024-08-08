@@ -8,7 +8,7 @@ from aphrodite.common.config import SpeculativeConfig
 from aphrodite.common.sequence import (ExecuteModelRequest, SamplerOutput,
                                        SequenceGroupMetadata)
 from aphrodite.distributed.communication_op import broadcast_tensor_dict
-from aphrodite.modeling.layers.rejection import RejectionSampler
+from aphrodite.modeling.layers.rejection_sampler import RejectionSampler
 from aphrodite.spec_decode.batch_expansion import BatchExpansionTop1Scorer
 from aphrodite.spec_decode.interfaces import (SpeculativeProposals,
                                               SpeculativeScorer,
