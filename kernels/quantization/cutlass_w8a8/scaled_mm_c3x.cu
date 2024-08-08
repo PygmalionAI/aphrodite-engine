@@ -44,11 +44,6 @@ using namespace cute;
 
 namespace {
 
-uint32_t next_pow_2(uint32_t const num) {
-  if (num <= 1) return num;
-  return 1 << (CHAR_BIT * sizeof(num) - __builtin_clz(num - 1));
-}
-
 // A wrapper for the GEMM kernel that is used to guard against compilation on
 // architectures that will never use the kernel. The purpose of this is to
 // reduce the size of the compiled binary.
@@ -466,29 +461,20 @@ void cutlass_scaled_mm_sm90(torch::Tensor& out, torch::Tensor const& a,
           out, a, b, a_scales, b_scales);
     }
   } else {
-    TORCH_CHECK(out.dtype() == torch::kFloat16);
+    TORCH_CHECK(a.dtype() == torch::kFloat8_e4m3fn);
+    TORCH_CHECK(b.dtype() == torch::kFloat8_e4m3fn);
 
-    return cutlass_gemm_caller<
-        cutlass_3x_gemm<int8_t, cutlass::half_t, ScaledEpilogue, TileShape,
-                        ClusterShape, KernelSchedule, EpilogueSchedule>>(
-        out, a, b, a_scales, b_scales);
+    if (out.dtype() == torch::kBFloat16) {
+      return cutlass_gemm_sm90_fp8_dispatch<
+          cutlass::float_e4m3_t, cutlass::bfloat16_t, ScaledEpilogue>(
+          out, a, b, a_scales, b_scales);
+    } else {
+      TORCH_CHECK(out.dtype() == torch::kFloat16);
+      return cutlass_gemm_sm90_fp8_dispatch<cutlass::float_e4m3_t,
+                                            cutlass::half_t, ScaledEpilogue>(
+          out, a, b, a_scales, b_scales);
+    }
   }
-}
-else {
-  TORCH_CHECK(a.dtype() == torch::kFloat8_e4m3fn);
-  TORCH_CHECK(b.dtype() == torch::kFloat8_e4m3fn);
-
-  if (out.dtype() == torch::kBFloat16) {
-    return cutlass_gemm_sm90_fp8_dispatch<cutlass::float_e4m3_t,
-                                          cutlass::bfloat16_t, ScaledEpilogue>(
-        out, a, b, a_scales, b_scales);
-  } else {
-    TORCH_CHECK(out.dtype() == torch::kFloat16);
-    return cutlass_gemm_sm90_fp8_dispatch<cutlass::float_e4m3_t,
-                                          cutlass::half_t, ScaledEpilogue>(
-        out, a, b, a_scales, b_scales);
-  }
-}
 }
 
 #endif
