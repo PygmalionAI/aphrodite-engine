@@ -4,7 +4,8 @@ from functools import partial
 from typing import Any, List, Optional
 
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
-from aphrodite.common.utils import (get_aphrodite_instance_id,
+from aphrodite.common.utils import (cuda_device_count_stateless,
+                                    get_aphrodite_instance_id,
                                     get_distributed_init_method, get_ip,
                                     get_open_port, make_async)
 from aphrodite.executor.distributed_gpu_executor import (  # yapf: disable
@@ -32,8 +33,7 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         # Disable torch async compiling which won't work with daemonic processes
         os.environ["TORCHINDUCTOR_COMPILE_THREADS"] = "1"
 
-        from torch.cuda import device_count
-        assert world_size <= device_count(), (
+        assert world_size <= cuda_device_count_stateless(), (
             "please set tensor_parallel_size to less than max local gpu count")
 
         distributed_init_method = get_distributed_init_method(

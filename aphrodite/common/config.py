@@ -9,7 +9,8 @@ import torch
 from loguru import logger
 from transformers import PretrainedConfig
 
-from aphrodite.common.utils import (get_cpu_memory, is_cpu, is_hip, is_neuron,
+from aphrodite.common.utils import (cuda_device_count_stateless,
+                                    get_cpu_memory, is_cpu, is_hip, is_neuron,
                                     is_tpu)
 from aphrodite.modeling.models import ModelRegistry
 from aphrodite.quantization import QUANTIZATION_METHODS
@@ -690,12 +691,11 @@ class ParallelConfig:
         if self.distributed_executor_backend is None and self.world_size > 1:
             # We use multiprocessing by default if world_size fits on the
             # current node and we aren't in a ray placement group.
-            from torch.cuda import device_count
 
             from aphrodite.executor import ray_utils
             backend = "mp"
             ray_found = ray_utils.ray is not None
-            if device_count() < self.world_size:
+            if cuda_device_count_stateless() < self.world_size:
                 if not ray_found:
                     raise ValueError("Unable to load Ray which is "
                                      "required for multi-node inference")

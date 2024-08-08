@@ -11,6 +11,8 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from loguru import logger
 
+from aphrodite.common.utils import cuda_device_count_stateless
+
 
 @contextmanager
 def mute_output():
@@ -148,7 +150,7 @@ def gpu_p2p_access_check(i: int, j: int) -> bool:
 
     is_distributed = dist.is_initialized()
 
-    num_dev = torch.cuda.device_count()
+    num_dev = cuda_device_count_stateless()
     cuda_visible_devices = os.getenv('CUDA_VISIBLE_DEVICES', None)
     if cuda_visible_devices is None:
         cuda_visible_devices = ",".join(str(i) for i in range(num_dev))
