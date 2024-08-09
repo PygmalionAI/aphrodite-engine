@@ -32,6 +32,7 @@ class TPUModelRunner:
         cache_config: CacheConfig,
         load_config: LoadConfig,
         vision_language_config: Optional[VisionLanguageConfig] = None,
+        is_driver_worker: bool = False,
     ):
         self.model_config = model_config
         self.parallel_config = parallel_config
@@ -40,6 +41,7 @@ class TPUModelRunner:
         self.cache_config = cache_config
         self.load_config = load_config
         self.vision_language_config = vision_language_config
+        self.is_driver_worker = is_driver_worker
 
         self.block_size = self.cache_config.block_size
         self.max_num_blocks_per_seq = (self.model_config.max_model_len //
@@ -372,6 +374,8 @@ class TPUModelRunner:
         inputs = self.prepare_inputs(seq_group_metadata_list)
         next_token_ids = self.model(inputs[0], inputs[1], kv_caches,
                                     *inputs[2:])
+        if not self.is_driver_worker:
+            return []
         next_token_ids = next_token_ids.cpu().tolist()
 
         i = 0
@@ -430,6 +434,7 @@ class ModelWrapper(nn.Module):
         p: torch.Tensor,
     ) -> torch.Tensor:
         """Executes the forward pass of the model and samples the next token.
+
         Args:
             token_ids: The input token IDs of shape [batch_size, seq_len].
             position_ids: The input position IDs of shape [batch_size, seq_len].
