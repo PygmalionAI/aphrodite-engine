@@ -928,6 +928,9 @@ class AphroditeEngine:
     def list_loras(self) -> List[int]:
         return self.model_executor.list_loras()
 
+    def pin_lora(self, lora_id: int) -> bool:
+        return self.model_executor.pin_lora(lora_id)
+
     def check_health(self) -> None:
         self.model_executor.check_health()
 

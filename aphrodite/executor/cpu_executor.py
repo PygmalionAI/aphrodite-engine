@@ -85,6 +85,9 @@ class CPUExecutor(ExecutorBase):
     def list_loras(self) -> Set[int]:
         return self.driver_worker.list_loras()
 
+    def pin_lora(self, lora_id: int) -> bool:
+        return self.driver_worker.pin_lora(lora_id)
+
     def check_health(self) -> None:
         # CPUExecutor will always be healthy as long as
         # it's running.

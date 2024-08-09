@@ -86,6 +86,9 @@ class TPUExecutor(ExecutorBase):
     def list_loras(self) -> Set[int]:
         raise NotImplementedError("LoRA is not implemented for TPU backend.")
 
+    def pin_lora(self, lora_id: int) -> bool:
+        raise NotImplementedError("LoRA is not implemented for TPU backend.")
+
     def check_health(self) -> None:
         # TPUExecutor will always be healthy as long as it's running.
         return

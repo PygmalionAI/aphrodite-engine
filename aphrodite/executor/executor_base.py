@@ -92,6 +92,10 @@ class ExecutorBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def pin_lora(self, lora_id: int) -> bool:
+        raise NotImplementedError  # type: ignore
+
+    @abstractmethod
     def check_health(self) -> None:
         """Checks if the executor is healthy. If not, it should raise an
         exception."""
