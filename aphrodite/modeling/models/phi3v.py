@@ -14,14 +14,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Iterable, List, Literal, Optional, Tuple, TypedDict
+from typing import Dict, Iterable, List, Literal, Optional, Tuple, TypedDict
 
+import numpy as np
+import PIL as Image
 import torch
 import torch.nn as nn
+from loguru import logger
 from transformers import CLIPVisionConfig, CLIPVisionModel, PretrainedConfig
 
 from aphrodite.attention import AttentionMetadata
-from aphrodite.common.config import CacheConfig, VisionLanguageConfig
+from aphrodite.common.config import (CacheConfig, ModelConfig,
+                                     VisionLanguageConfig)
 from aphrodite.common.sequence import SamplerOutput
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.sampler import Sampler
@@ -31,7 +35,7 @@ from aphrodite.modeling.models.llama import LlamaModel
 from aphrodite.modeling.models.vlm_base import VisionLanguageModelBase
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
-from aphrodite.multimodal.image import get_dummy_image_data
+from aphrodite.multimodal.image import ImagePixelData, get_dummy_image_data
 from aphrodite.quantization.base_config import QuantizationConfig
 
 _KEYS_TO_MODIFY_MAPPING = {
@@ -266,7 +270,63 @@ class Phi3VImagePixelInputs(TypedDict):
     """Shape: (batch_size, 2)"""
 
 
-@MULTIMODAL_REGISTRY.register_image_pixel_input()
+# FIXME: Remove these after dynamic num_img_tokens is supported
+# copied from https://huggingface.co/microsoft/Phi-3-vision-128k-instruct/blob/main/image_processing_phi3_v.py
+def calc_padded_size(width, height, padding_unit=336):
+    target_height = int(np.ceil(height / padding_unit) * padding_unit)
+    top_padding = int((target_height - height) / 2)
+    bottom_padding = target_height - height - top_padding
+    padded_width = width
+    padded_height = height + top_padding + bottom_padding
+    return padded_width, padded_height
+
+
+# copied from https://huggingface.co/microsoft/Phi-3-vision-128k-instruct/blob/main/image_processing_phi3_v.py
+def calc_hd_transform_size(width, height, hd_num=16):
+    transposed = False
+    if width < height:
+        width, height = height, width
+        transposed = True
+
+    ratio = width / height
+    scale = 1
+    while scale * np.ceil(scale / ratio) <= hd_num:
+        scale += 1
+    scale -= 1
+
+    new_width = int(scale * 336)
+    new_height = int(new_width / ratio)
+
+    padded_width, padded_height = calc_padded_size(new_width, new_height)
+
+    if transposed:
+        padded_width, padded_height = padded_height, padded_width
+
+    return padded_width, padded_height
+
+
+def _image_processor(
+    data: ImagePixelData,
+    model_config: ModelConfig,
+    vlm_config: VisionLanguageConfig,
+) -> Dict[str, torch.Tensor]:
+    image = data.image
+
+    if isinstance(image, Image.Image):
+        # Temporary patch before dynamic number of image tokens is supported
+        _, _, h, w = vlm_config.image_input_shape
+        if (w, h) != calc_hd_transform_size(image.width, image.height):
+            logger.warning(
+                "Dynamic image shape is currently not supported. "
+                "Resizing input image to (%d, %d).", w, h)
+
+            data.image = image.resize((w, h))
+
+    return MULTIMODAL_REGISTRY._get_plugin_for_data_type(ImagePixelData) \
+            ._default_input_processor(data, model_config, vlm_config)
+
+
+@MULTIMODAL_REGISTRY.register_image_pixel_input(_image_processor)
 @MULTIMODAL_REGISTRY.register_dummy_data(get_dummy_image_data)
 class Phi3VForCausalLM(VisionLanguageModelBase):
 
