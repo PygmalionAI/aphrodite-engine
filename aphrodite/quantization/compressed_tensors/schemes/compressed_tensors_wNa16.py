@@ -12,10 +12,11 @@ from aphrodite.quantization.gptq_marlin import (GPTQ_MARLIN_MAX_PARALLEL,
                                                 GPTQMarlinState,
                                                 marlin_permute_scales)
 
-__all__ = ["CompressedTensorsW4A16"]
+__all__ = ["CompressedTensorsWNA16"]
+WNA16_SUPPORTED_BITS = [4, 8]
 
 
-class CompressedTensorsW4A16(CompressedTensorsScheme):
+class CompressedTensorsWNA16(CompressedTensorsScheme):
 
     def __init__(self,
                  strategy: str,

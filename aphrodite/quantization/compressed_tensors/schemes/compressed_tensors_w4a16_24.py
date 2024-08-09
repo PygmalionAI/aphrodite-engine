@@ -11,6 +11,7 @@ from aphrodite.quantization.gptq_marlin_24 import (GPTQ_MARLIN_24_MAX_PARALLEL,
                                                    GPTQ_MARLIN_24_MIN_THREAD_N)
 
 __all__ = ["CompressedTensorsW4A16Sparse24"]
+W4A16SPARSE24_SUPPORTED_BITS = [4]
 
 
 class CompressedTensorsW4A16Sparse24(CompressedTensorsScheme):
