@@ -76,15 +76,18 @@ def run_aphrodite(
     kv_cache_dtype: str,
     quantization_param_path: Optional[str],
     device: str,
+    speculative_model: str,
+    num_speculative_tokens: int,
+    use_v2_block_manager: bool,
+    ngram_prompt_lookup_min: int,
+    ngram_prompt_lookup_max: int,
     enable_prefix_caching: bool,
     enable_chunked_prefill: bool,
     max_num_batched_tokens: int,
-    distributed_executor_backend: Optional[str],
+    distributed_executor_backend: Optional[str] = None,
     gpu_memory_utilization: float = 0.9,
     download_dir: Optional[str] = None,
     load_format: str = EngineArgs.load_format,
-    speculative_model: Optional[str] = None,
-    use_v2_block_manager: bool = False,
 ) -> float:
     from aphrodite import LLM, SamplingParams
     llm = LLM(
@@ -107,6 +110,11 @@ def run_aphrodite(
         max_num_batched_tokens=max_num_batched_tokens,
         distributed_executor_backend=distributed_executor_backend,
         load_format=load_format,
+        speculative_model=speculative_model,
+        num_speculative_tokens=num_speculative_tokens,
+        use_v2_block_manager=use_v2_block_manager,
+        ngram_prompt_lookup_min=ngram_prompt_lookup_min,
+        ngram_prompt_lookup_max=ngram_prompt_lookup_max,
     )
 
     # Add the requests to the engine.
@@ -230,7 +238,9 @@ def main(args: argparse.Namespace):
             args.tensor_parallel_size, args.seed, args.n, args.use_beam_search,
             args.trust_remote_code, args.dtype, args.max_model_len,
             args.enforce_eager, args.kv_cache_dtype,
-            args.quantization_param_path, args.device,
+            args.quantization_param_path, args.device, args.speculative_model,
+            args.num_speculative_tokens, args.use_v2_block_manager,
+            args.ngram_prompt_lookup_min, args.ngram_prompt_lookup_max,
             args.enable_prefix_caching, args.enable_chunked_prefill,
             args.max_num_batched_tokens, args.distributed_executor_backend,
             args.gpu_memory_utilization, args.download_dir, args.load_format)
@@ -413,6 +423,18 @@ if __name__ == "__main__":
     parser.add_argument('--use-v2-block-manager',
                         action='store_true',
                         help='use v2 block manage.')
+    parser.add_argument('--num-speculative-tokens',
+                        type=int,
+                        default=None,
+                        help='number of speculative tokens.')
+    parser.add_argument('--ngram-prompt-lookup-min',
+                        type=int,
+                        default=None,
+                        help='minimum ngram prompt lookup size')
+    parser.add_argument('--ngram-prompt-lookup-max',
+                        type=int,
+                        default=None,
+                        help='maximum ngram prompt lookup size')
     args = parser.parse_args()
     if args.tokenizer is None:
         args.tokenizer = args.model
