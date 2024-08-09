@@ -269,7 +269,7 @@ class CPUWorker(LoraNotSupportedWorkerBase):
         if execute_model_req is None:
             seq_group_metadata_list = None
         else:
-            seq_group_metadata_list = execute_model_req.seq_group_metadata_list
+            seq_group_metadata_list = execute_model_req.seq_group_metadata_listv
         if self.is_driver_worker:
             assert seq_group_metadata_list is not None
             num_seq_groups: int = len(seq_group_metadata_list)

@@ -303,6 +303,8 @@ class _AsyncAphrodite(AphroditeEngine):
         )
 
     async def check_health_async(self) -> None:
+        if self.tokenizer:
+            self.tokenizer.check_health()
         self.model_executor.check_health()
 
 
