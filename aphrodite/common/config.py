@@ -879,6 +879,7 @@ class SpeculativeConfig:
         target_parallel_config: ParallelConfig,
         target_dtype: str,
         speculative_model: Optional[str],
+        speculative_draft_tensor_parallel_size: Optional[int],
         num_speculative_tokens: Optional[int],
         speculative_max_model_len: Optional[int],
         enable_chunked_prefill: bool,
@@ -904,6 +905,8 @@ class SpeculativeConfig:
             num_speculative_tokens (Optional[int]): The number of speculative
                 tokens, if provided. Will default to the number in the draft
                 model config if present, otherwise is required.
+            speculative_draft_tensor_parallel_size (Optional[int]): The degree
+                of the tensor parallelism for the draft model.
             speculative_max_model_len (Optional[int]): The maximum model len of
                 the speculative model. Used when testing the ability to skip
                 speculation for some sequences.
@@ -1020,7 +1023,8 @@ class SpeculativeConfig:
 
             draft_parallel_config = (
                 SpeculativeConfig.create_draft_parallel_config(
-                    target_parallel_config))
+                    target_parallel_config,
+                    speculative_draft_tensor_parallel_size))
 
         if num_speculative_tokens is None:
             raise ValueError(
@@ -1071,16 +1075,24 @@ class SpeculativeConfig:
 
     @staticmethod
     def create_draft_parallel_config(
-            target_parallel_config: ParallelConfig) -> ParallelConfig:
+        target_parallel_config: ParallelConfig,
+        speculative_draft_tensor_parallel_size: Optional[int]
+    ) -> ParallelConfig:
         """Create a parallel config for use by the draft worker.
-
-        This is mostly a copy of the target parallel config. In the future the
-        draft worker can have a different parallel strategy, e.g. TP=1.
+        This is mostly a copy of the target parallel config, except the tp_size.
         """
+        if speculative_draft_tensor_parallel_size is None:
+            speculative_draft_tensor_parallel_size = \
+                  target_parallel_config.tensor_parallel_size
+        elif speculative_draft_tensor_parallel_size != 1:
+            # TODO: allow tp values larger than 1
+            raise ValueError(
+                f"{speculative_draft_tensor_parallel_size=} cannot be"
+                f"other value than 1")
         draft_parallel_config = ParallelConfig(
             pipeline_parallel_size=target_parallel_config.
             pipeline_parallel_size,
-            tensor_parallel_size=target_parallel_config.tensor_parallel_size,
+            tensor_parallel_size=speculative_draft_tensor_parallel_size,
             distributed_executor_backend=target_parallel_config.
             distributed_executor_backend,
             max_parallel_loading_workers=target_parallel_config.

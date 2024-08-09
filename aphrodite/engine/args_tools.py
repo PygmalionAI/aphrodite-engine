@@ -90,6 +90,7 @@ class EngineArgs:
     guided_decoding_backend: str = 'outlines'
     # Speculative decoding config
     speculative_model: Optional[str] = None
+    speculative_draft_tensor_parallel_size: Optional[int] = None
     num_speculative_tokens: Optional[int] = None
     speculative_max_model_len: Optional[int] = None
     speculative_disable_by_batch_size: Optional[int] = None
@@ -612,6 +613,13 @@ class EngineArgs:
             help=
             "The name of the draft model to be used in speculative decoding.")
         parser.add_argument(
+            "--speculative-draft-tensor-parallel-size",
+            "-spec-draft-tp",
+            type=int,
+            default=EngineArgs.speculative_draft_tensor_parallel_size,
+            help="Number of tensor parallel replicas for "
+            "the draft model in speculative decoding.")
+        parser.add_argument(
             "--num-speculative-tokens",
             type=int,
             default=EngineArgs.num_speculative_tokens,
@@ -741,6 +749,8 @@ class EngineArgs:
             target_parallel_config=parallel_config,
             target_dtype=self.dtype,
             speculative_model=self.speculative_model,
+            speculative_draft_tensor_parallel_size=self.
+            speculative_draft_tensor_parallel_size,
             num_speculative_tokens=self.num_speculative_tokens,
             speculative_disable_by_batch_size=self.
             speculative_disable_by_batch_size,
