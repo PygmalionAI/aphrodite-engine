@@ -7,7 +7,7 @@ from loguru import logger
 
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.common.utils import (enable_trace_function_call_for_thread,
-                                    update_environment_variables)
+                                    is_hip, update_environment_variables)
 from aphrodite.lora.request import LoRARequest
 
 
@@ -124,6 +124,14 @@ class WorkerWrapperBase:
             # overwriting CUDA_VISIBLE_DEVICES is desired behavior
             # suppress the warning in `update_environment_variables`
             del os.environ[key]
+            if is_hip():
+                hip_env_var = "HIP_VISIBLE_DEVICES"
+                if hip_env_var in os.environ:
+                    logger.warning(
+                        f"Ignoring pre-set environment variable `{hip_env_var}="
+                        f"{os.environ[hip_env_var]}` as {key} has also been "
+                        "set, which takes precedence.")
+                os.environ.pop(hip_env_var, None)
         update_environment_variables(envs)
 
     def init_worker(self, *args, **kwargs):

@@ -11,7 +11,8 @@ from transformers import PretrainedConfig
 
 from aphrodite.common.utils import (cuda_device_count_stateless,
                                     get_cpu_memory, is_cpu, is_hip, is_neuron,
-                                    is_tpu, is_xpu)
+                                    is_tpu, is_xpu,
+                                    update_environment_variables)
 from aphrodite.modeling.models import ModelRegistry
 from aphrodite.quantization import QUANTIZATION_METHODS
 from aphrodite.transformers_utils.config import get_config, get_hf_text_config
@@ -718,6 +719,14 @@ class ParallelConfig:
             self.distributed_executor_backend = backend
             logger.info(
                 f"Defaulting to use {backend} for distributed inference.")
+        # If CUDA_VISIBLE_DEVICES is set on ROCm prior to Aphrodite init,
+        # propagate changes to HIP_VISIBLE_DEVICES (conversion handled by
+        # the update_environment_variables function)
+        if is_hip() and os.getenv("CUDA_VISIBLE_DEVICES"):
+            update_environment_variables({
+                "CUDA_VISIBLE_DEVICES":
+                os.getenv("CUDA_VISIBLE_DEVICES", "")
+            })
         self._verify_args()
 
     def _verify_args(self) -> None:

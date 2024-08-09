@@ -7,7 +7,7 @@ from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.common.utils import (cuda_device_count_stateless,
                                     get_aphrodite_instance_id,
                                     get_distributed_init_method, get_open_port,
-                                    make_async)
+                                    make_async, update_environment_variables)
 from aphrodite.executor.distributed_gpu_executor import (  # yapf: disable
     DistributedGPUExecutor, DistributedGPUExecutorAsync)
 from aphrodite.executor.multiproc_worker_utils import (ProcessWorkerWrapper,
@@ -25,8 +25,9 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
 
         # Set CUDA_VISIBLE_DEVICES for the driver, inherited by workers
         if "CUDA_VISIBLE_DEVICES" not in os.environ:
-            os.environ["CUDA_VISIBLE_DEVICES"] = (",".join(
-                map(str, range(world_size))))
+            update_environment_variables({
+                "CUDA_VISIBLE_DEVICES": (",".join(map(str, range(world_size))))
+            })
 
         # Ensure that APHRODITE_INSTANCE_ID is set, to be inherited by workers
         os.environ["APHRODITE_INSTANCE_ID"] = get_aphrodite_instance_id()

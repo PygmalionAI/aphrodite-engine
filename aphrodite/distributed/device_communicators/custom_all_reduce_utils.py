@@ -11,7 +11,8 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from loguru import logger
 
-from aphrodite.common.utils import cuda_device_count_stateless
+from aphrodite.common.utils import (cuda_device_count_stateless,
+                                    update_environment_variables)
 from aphrodite.distributed.device_communicators.cuda_wrapper import \
     CudaRTLibrary
 
@@ -22,7 +23,8 @@ def producer(batch_src: Sequence[int],
              result_queue,
              cuda_visible_devices: Optional[str] = None):
     if cuda_visible_devices is not None:
-        os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
+        update_environment_variables(
+            {"CUDA_VISIBLE_DEVICES": cuda_visible_devices})
 
     lib = CudaRTLibrary()
     for i in batch_src:
@@ -54,7 +56,8 @@ def consumer(batch_tgt: Sequence[int],
              result_queue,
              cuda_visible_devices: Optional[str] = None):
     if cuda_visible_devices is not None:
-        os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
+        update_environment_variables(
+            {"CUDA_VISIBLE_DEVICES": cuda_visible_devices})
 
     lib = CudaRTLibrary()
     for j in batch_tgt:
