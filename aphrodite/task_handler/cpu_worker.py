@@ -1,5 +1,5 @@
 """A CPU worker class."""
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.distributed
@@ -8,14 +8,15 @@ from aphrodite.attention import get_attn_backend
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig, VisionLanguageConfig)
-from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
+from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.common.utils import STR_DTYPE_TO_TORCH_DTYPE
-from aphrodite.distributed import (broadcast_tensor_dict,
-                                   ensure_model_parallel_initialized,
+from aphrodite.distributed import (ensure_model_parallel_initialized,
                                    init_distributed_environment)
 from aphrodite.modeling import set_random_seed
 from aphrodite.task_handler.cpu_model_runner import CPUModelRunner
-from aphrodite.task_handler.worker_base import LoraNotSupportedWorkerBase
+from aphrodite.task_handler.worker_base import (LocalOrDistributedWorkerBase,
+                                                LoraNotSupportedWorkerBase,
+                                                WorkerInput)
 
 
 class CPUCacheEngine:
@@ -107,7 +108,7 @@ class CPUCacheEngine:
         return dtype_size * total
 
 
-class CPUWorker(LoraNotSupportedWorkerBase):
+class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
     """A worker class that executes (a partition of) the model on a CPU socket.
 
     Each worker is associated with a single CPU socket. The worker is 
@@ -151,7 +152,7 @@ class CPUWorker(LoraNotSupportedWorkerBase):
             # note: lazy import to avoid importing torch before initializing
             from aphrodite.common.utils import init_cached_hf_modules
             init_cached_hf_modules()
-        self.model_runner = CPUModelRunner(
+        self.model_runner: CPUModelRunner = CPUModelRunner(
             model_config,
             parallel_config,
             scheduler_config,
@@ -210,7 +211,7 @@ class CPUWorker(LoraNotSupportedWorkerBase):
         assert (num_cpu_blocks == 0
                 ), f"{type(self)} does not support swappable cache"
 
-        # Note: To reuse the cache management procedure,
+        # NOTE: To reuse the cache management procedure,
         # use cpu cache as 'gpu cache'.
         num_cpu_blocks = num_gpu_blocks
 
@@ -253,53 +254,37 @@ class CPUWorker(LoraNotSupportedWorkerBase):
         for layer_cache in self.cpu_cache:
             layer_cache.fill_(0)
 
-    def cache_copy(
+    @property
+    def do_metadata_broadcast(self) -> bool:
+        return self.parallel_config.tensor_parallel_size > 1
+
+    @property
+    def kv_cache(self) -> Optional[List[torch.Tensor]]:
+        return self.cpu_cache
+
+    def execute_worker(
         self,
-        blocks_to_copy: torch.Tensor,
+        worker_input: WorkerInput,
     ) -> None:
-        if blocks_to_copy.numel() > 0:
-            self.cache_engine.copy(blocks_to_copy)
+        if (worker_input.blocks_to_copy is not None
+                and worker_input.blocks_to_copy.numel() > 0):
+            self.cache_engine.copy(worker_input.blocks_to_copy)
 
     @torch.inference_mode()
-    def execute_model(
-        self,
-        execute_model_req: Optional[ExecuteModelRequest] = None,
-    ) -> List[SamplerOutput]:
-
-        if execute_model_req is None:
-            seq_group_metadata_list = None
-        else:
-            seq_group_metadata_list = execute_model_req.seq_group_metadata_listv
-        if self.is_driver_worker:
-            assert seq_group_metadata_list is not None
-            num_seq_groups: int = len(seq_group_metadata_list)
-            assert execute_model_req is not None
-            blocks_to_copy = torch.tensor(execute_model_req.blocks_to_copy,
-                                          device="cpu",
-                                          dtype=torch.int64).view(-1, 2)
-            assert len(execute_model_req.blocks_to_swap_in) == 0
-            assert len(execute_model_req.blocks_to_swap_out) == 0
-            data: Dict[str, Any] = {
-                "num_seq_groups": num_seq_groups,
-                "blocks_to_copy": execute_model_req.blocks_to_copy,
-            }
-            broadcast_tensor_dict(data, src=0)
-        else:
-            data = broadcast_tensor_dict(src=0)
-            num_seq_groups = data["num_seq_groups"]
-            blocks_to_copy = data["blocks_to_copy"]
-
-        self.cache_copy(blocks_to_copy)
-
-        # If there is no input, we don't need to execute the model.
-        if num_seq_groups == 0:
-            return []
-
-        output = self.model_runner.execute_model(seq_group_metadata_list,
-                                                 self.cpu_cache)
-
-        # CPU worker only supports single-step execution.
-        return [output]
+    def prepare_worker_input(
+            self, execute_model_req: ExecuteModelRequest) -> WorkerInput:
+        assert execute_model_req is not None
+        num_seq_groups: int = len(execute_model_req.seq_group_metadata_list)
+        blocks_to_copy = execute_model_req.blocks_to_copy
+        blocks_to_copy = torch.tensor(execute_model_req.blocks_to_copy,
+                                      device="cpu",
+                                      dtype=torch.int64).view(-1, 2)
+        assert len(execute_model_req.blocks_to_swap_in) == 0
+        assert len(execute_model_req.blocks_to_swap_out) == 0
+        return WorkerInput(
+            num_seq_groups=num_seq_groups,
+            blocks_to_copy=blocks_to_copy,
+        )
 
     def init_distributed_environment(self) -> None:
         """Initialize the distributed environment."""

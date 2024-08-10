@@ -26,8 +26,8 @@ class IpexAttnBackend(AttentionBackend):
         return IpexAttnBackendImpl
 
     @staticmethod
-    def make_metadata(*args, **kwargs) -> "IpexAttnMetadata":
-        return IpexAttnMetadata(*args, **kwargs)
+    def get_metadata_cls() -> Type["IpexAttnMetadata"]:
+        return IpexAttnMetadata
 
     @staticmethod
     def get_kv_cache_shape(
