@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.21)
 
 project(aphrodite_extensions LANGUAGES CXX)
 
-option(APHRODITE_TARGET_DEVICE "Target device backend for Aphrodite" "cuda")
+# CUDA by default, can be overridden by using -DAPHRODITE_TARGET_DEVICE=... (used by setup.py)
+set(APHRODITE_TARGET_DEVICE "cuda" CACHE STRING "Target device backend for Aphrodite")
 
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Target device: ${APHRODITE_TARGET_DEVICE}")
