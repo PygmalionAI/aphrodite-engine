@@ -7,7 +7,6 @@ from aphrodite.common.sequence import (ExecuteModelRequest, SamplerOutput,
 from aphrodite.modeling import SamplingMetadata
 from aphrodite.spec_decode.multi_step_worker import MultiStepWorker
 from aphrodite.spec_decode.proposer_worker_base import NonLLMProposerWorkerBase
-from aphrodite.task_handler.model_runner import ModelInput
 
 
 class MLPSpeculatorWorker(NonLLMProposerWorkerBase, MultiStepWorker):
@@ -54,7 +53,7 @@ class MLPSpeculatorWorker(NonLLMProposerWorkerBase, MultiStepWorker):
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
     ) -> Tuple[torch.Tensor, List[int], List[int]]:
         if not seq_group_metadata_list:
-            return ModelInput.empty(self.device)
+            return torch.empty(0, device=self.device), [], []
 
         input_tokens: List[int] = []
         seq_lens: List[int] = []
