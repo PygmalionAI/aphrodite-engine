@@ -14,6 +14,12 @@ from loguru import logger
 APHRODITE_RINGBUFFER_WARNING_INTERVAL = os.getenv(
     "APHRODITE_RINGBUFFER_WARNING_INTERVAL", 60)
 
+# time to wait if the queue is full or empty
+# if we sleep for too short, it will consume too much CPU
+# if we sleep for too long, it will slow down the writer/reader
+# 0.1 us is a good balance
+RINGBUFFER_SLEEP_INTERVAL = 1e-7
+
 
 class ShmRingBuffer:
 
@@ -143,8 +149,7 @@ class ShmRingBufferIO:
     @contextmanager
     def acquire_write(self):
         assert self._is_writer, "Only writers can acquire write"
-        start_index = self.current_idx
-        start_time = time.time()
+        start_time = time.monotonic()
         n_warning = 1
         while True:
             with self.buffer.get_metadata(self.current_idx) as metadata_buffer:
@@ -152,19 +157,20 @@ class ShmRingBufferIO:
                 written_flag = metadata_buffer[0]
                 if written_flag and read_count != self.buffer.n_reader:
                     # this block is written and not read by all readers
-                    # try to write to the next block
-                    self.current_idx = (self.current_idx +
-                                        1) % self.buffer.max_chunks
-                    if self.current_idx == start_index:
-                        # no empty block found
-                        if time.time(
-                        ) - start_time > APHRODITE_RINGBUFFER_WARNING_INTERVAL * n_warning:  # type: ignore # noqa
-                            logger.warning(
-                                "No available block found in %s second. ",
-                                APHRODITE_RINGBUFFER_WARNING_INTERVAL)
-                            n_warning += 1
-                        # wait for a while (0.1 us)
-                        time.sleep(1e-7)
+                    # for writers, `self.current_idx` is the next block to write
+                    # if this block is not ready to write,
+                    # we need to wait until it is read by all readers
+
+                    # wait for a while
+                    time.sleep(RINGBUFFER_SLEEP_INTERVAL)
+
+                    # if we wait for a long time, we should warn the user
+                    if time.monotonic(
+                    ) - start_time > APHRODITE_RINGBUFFER_WARNING_INTERVAL * n_warning:  # type: ignore # noqa
+                        logger.warning(
+                            "No available block found in "
+                            f"{APHRODITE_RINGBUFFER_WARNING_INTERVAL} seconds")
+                        n_warning += 1
                     continue
                 # found a block that is either
                 # (1) not written
@@ -186,13 +192,14 @@ class ShmRingBufferIO:
                     metadata_buffer[i] = 0
                 # mark the block as written
                 metadata_buffer[0] = 1
+                self.current_idx = (self.current_idx +
+                                    1) % self.buffer.max_chunks
                 break
 
     @contextmanager
     def acquire_read(self):
         assert self._is_reader, "Only readers can acquire read"
-        start_index = self.current_idx
-        start_time = time.time()
+        start_time = time.monotonic()
         n_warning = 1
         while True:
             with self.buffer.get_metadata(self.current_idx) as metadata_buffer:
@@ -202,19 +209,21 @@ class ShmRingBufferIO:
                     # this block is either
                     # (1) not written
                     # (2) already read by this reader
-                    # try to read the next block
-                    self.current_idx = (self.current_idx +
-                                        1) % self.buffer.max_chunks
-                    if self.current_idx == start_index:
-                        # no block found
-                        if time.time(
-                        ) - start_time > APHRODITE_RINGBUFFER_WARNING_INTERVAL * n_warning:  # type: ignore # noqa
-                            logger.warning(
-                                "No available block found in %s second. ",
-                                APHRODITE_RINGBUFFER_WARNING_INTERVAL)
-                            n_warning += 1
-                        # wait for a while (0.1 us)
-                        time.sleep(1e-7)
+                    # for readers, `self.current_idx` is the next block to read
+                    # if this block is not ready,
+                    # we need to wait until it is written
+
+                    # wait for a while
+                    time.sleep(RINGBUFFER_SLEEP_INTERVAL)
+
+                    # if we wait for a long time, we should warn the user
+                    if time.monotonic(
+                    ) - start_time > APHRODITE_RINGBUFFER_WARNING_INTERVAL * n_warning:  # type: ignore # noqa
+                        logger.warning(
+                            "No available block found in "
+                            f"{APHRODITE_RINGBUFFER_WARNING_INTERVAL} seconds."
+                        )
+                        n_warning += 1
                     continue
                 # found a block that is not read by this reader
                 # let caller read from the buffer
@@ -224,6 +233,8 @@ class ShmRingBufferIO:
                 # caller has read from the buffer
                 # set the read flag
                 metadata_buffer[self.reader_rank + 1] = 1
+                self.current_idx = (self.current_idx +
+                                    1) % self.buffer.max_chunks
                 break
 
     def enqueue(self, obj):
