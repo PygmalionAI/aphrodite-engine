@@ -122,7 +122,7 @@ class CompressedTensorsWNA16(CompressedTensorsScheme):
             layer.marlin_state = GPTQMarlinState.READY
 
             # Newly generated tensors need to replace existing tensors that are
-            # already registered as parameters by vLLM (and won't be freed)
+            # already registered as parameters by Aphrodite (and won't be freed)
             def replace_tensor(name, new_t):
                 # It is important to use resize_() here since it ensures
                 # the same buffer is reused

@@ -18,7 +18,7 @@ class SmallerTpProposerWorker(ProposerWorkerBase):
     This reduces the communication overhead of small draft models.
     To implement this feature, this class differs behavior based on is_dummy
     flag, where dummy means worker that does not participate draft generation.
-    Participating workers use a smaller tp group by patching vLLM's tensor
+    Participating workers use a smaller tp group by patching Aphrodite's tensor
     parallel group temporarily during forward passes of draft models.
     """
 

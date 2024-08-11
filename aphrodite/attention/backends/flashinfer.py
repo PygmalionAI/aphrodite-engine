@@ -95,7 +95,7 @@ class FlashInferMetadata(AttentionMetadata):
     num_kv_heads: Optional[int] = None
     # The dimension of the attention heads
     head_dim: Optional[int] = None
-    # Block size of vllm
+    # Block size of Aphrodite
     page_size: Optional[int] = None
     # The data type of the paged kv cache
     data_type: torch.dtype = None
@@ -125,7 +125,7 @@ class FlashInferMetadata(AttentionMetadata):
                 self.num_kv_heads,
                 self.head_dim,
                 self.page_size,
-                # Disable flashinfer's pos encoding and use vllm's rope.
+                # Disable flashinfer's pos encoding and use Aphrodite's rope.
                 pos_encoding_mode="NONE",
                 data_type=self.data_type)
 

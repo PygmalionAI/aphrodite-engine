@@ -226,8 +226,9 @@ class LlavaNextForConditionalGeneration(nn.Module, SupportsVision):
     def _validate_image_pixels(self, data: torch.Tensor) -> torch.Tensor:
         _, num_channels, _, _ = self.vlm_config.image_input_shape
 
-        # Note that this is different from that of vLLM vision_language_config
-        # since the image is resized by the HuggingFace preprocessor
+        # Note that this is different from that of Aphrodite
+        # vision_language_config since the image is resized by the HuggingFace
+        # preprocessor
         height = width = self.config.vision_config.image_size
 
         if list(data.shape[2:]) != [num_channels, height, width]:
@@ -235,7 +236,7 @@ class LlavaNextForConditionalGeneration(nn.Module, SupportsVision):
                 f"The expected image tensor shape is batch dimension plus "
                 f"num_patches plus {[num_channels, height, width]}. "
                 f"You supplied {data.shape}. "
-                f"If you are using vLLM's entrypoint, make sure your "
+                f"If you are using Aphrodite's entrypoint, make sure your "
                 f"supplied image input is consistent with "
                 f"image_input_shape in engine args.")
 

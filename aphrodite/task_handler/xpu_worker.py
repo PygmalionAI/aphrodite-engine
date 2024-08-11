@@ -134,7 +134,7 @@ class XPUWorker(LoraNotSupportedWorkerBase, Worker):
         peak_memory = self.init_gpu_memory - free_gpu_memory
         assert peak_memory > 0, (
             "Error in memory profiling. This happens when the GPU memory was "
-            "not properly cleaned up before initializing the vLLM instance.")
+            "not properly cleaned up before initializing the Aphrodite.")
 
         cache_block_size = self.get_cache_block_size_bytes()
         num_gpu_blocks = int(
