@@ -89,9 +89,8 @@ class MultiModalPlugin(ABC, Generic[D]):
         def wrapper(model_cls: N) -> N:
             if model_cls in self._input_mappers:
                 logger.warning(
-                    "Model class %s already has an input mapper "
-                    "registered to %s. It is overwritten by the new one.",
-                    model_cls, self)
+                    f"Model class {model_cls} already has an input mapper "
+                    f"registered to {self}. It is overwritten by the new one.")
 
             self._input_mappers[model_cls] = mapper \
                 or self._default_input_mapper

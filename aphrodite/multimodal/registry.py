@@ -34,9 +34,8 @@ class MultiModalRegistry:
 
         if data_type in self._plugins_by_data_type:
             logger.warning(
-                "A plugin is already registered for data type %s, "
-                "and will be overwritten by the new plugin %s.", data_type,
-                plugin)
+                f"A plugin is already registered for data type {data_type}, "
+                f"and will be overwritten by the new plugin {plugin}.")
 
         self._plugins_by_data_type[data_type] = plugin
 

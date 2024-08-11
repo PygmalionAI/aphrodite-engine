@@ -455,8 +455,8 @@ class LoRAModelManager:
         index, _ = first_free_slot
         self._active_loras[lora_id] = None
         lora_model = self._registered_loras[lora_id]
-        logger.debug("Activating LoRA. int id: %d, slot index: %d",
-                     lora_model.id, index)
+        logger.debug(f"Activating LoRA. int id: {lora_model.id}, "
+                     f"slot index: {index}")
         self.lora_index_to_id[index] = lora_model.id
         for module_name, module in self.modules.items():
             module_lora = lora_model.get_lora(module_name)
@@ -505,10 +505,9 @@ class LoRAModelManager:
 
     def add_lora(self, lora: LoRAModel) -> bool:
         """Add a LoRAModel to the manager CPU cache."""
-        logger.debug(
-            "Adding lora. Model id: %d, "
-            "int id: %d, "
-            "scaling factor: %s", lora.id, lora.id, lora.scaling_factor)
+        logger.debug(f"Adding lora. Model id: {lora.id}, "
+                     f"int id: {lora.id}, "
+                     f"scaling factor: {lora.scaling_factor}")
         if lora.id not in self._registered_loras:
             if len(self._registered_loras) >= self.capacity:
                 raise RuntimeError("No free LoRA slots.")
@@ -722,7 +721,7 @@ class LoRALRUCache(LRUCache[LoRAModel]):
         self.deactivate_lora_fn = deactivate_lora_fn
 
     def _on_remove(self, key: int, value: LoRAModel):
-        logger.debug("Removing LoRA. int id: %d", key)
+        logger.debug(f"Removing LoRA. int id: {key}")
         self.deactivate_lora_fn(key)
         return super()._on_remove(key, value)
 
@@ -751,10 +750,9 @@ class LRUCacheLoRAModelManager(LoRAModelManager):
 
     def add_lora(self, lora: LoRAModel) -> bool:
         """Add a LoRAModel to the manager."""
-        logger.debug(
-            "Adding lora. Model id: %d, "
-            "int id: %d, "
-            "scaling factor: %s", lora.id, lora.id, lora.scaling_factor)
+        logger.debug(f"Adding lora. Model id: {lora.id}, "
+                     f"int id: {lora.id}, "
+                     f"scaling factor: {lora.scaling_factor}")
         if lora.id not in self._registered_loras:
             self._add_lora(lora)
             was_added = True

@@ -161,7 +161,7 @@ class TPUModelRunner:
             while True:
                 self._dummy_run(batch_size, seq_len, kv_caches, is_prompt=True)
                 xm.wait_device_ops()
-                logger.info("batch_size: %d, seq_len: %d", batch_size, seq_len)
+                logger.info(f"batch_size: {batch_size}, seq_len: {seq_len}")
 
                 if seq_len >= self.model_config.max_model_len:
                     break
@@ -180,14 +180,14 @@ class TPUModelRunner:
         while True:
             self._dummy_run(batch_size, seq_len, kv_caches, is_prompt=False)
             xm.wait_device_ops()
-            logger.info("batch_size: %d, seq_len: %d", batch_size, seq_len)
+            logger.info(f"batch_size: {batch_size}, seq_len: {seq_len}")
 
             if batch_size >= self.scheduler_config.max_num_seqs:
                 break
             batch_size = batch_size + 16 if batch_size >= 16 else batch_size * 2
 
         end = time.time()
-        logger.info("Compilation for decode done in %.2f s.", end - start)
+        logger.info(f"Compilation for decode done in {end - start:.2f} s.")
 
     def _prepare_prompt(
         self,

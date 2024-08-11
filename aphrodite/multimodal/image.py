@@ -70,7 +70,7 @@ class ImagePixelPlugin(MultiModalPlugin[ImagePixelData]):
                 return image_processor.preprocess(image, return_tensors="pt") \
                     .to(model_config.dtype).data
             except Exception:
-                logger.error("Failed to process image (%s)", image)
+                logger.error(f"Failed to process image ({image})")
                 raise
         elif isinstance(image, torch.Tensor):
             pixel_values = image.to(model_config.dtype)
