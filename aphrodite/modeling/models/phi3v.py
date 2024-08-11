@@ -21,7 +21,7 @@ import PIL as Image
 import torch
 import torch.nn as nn
 from loguru import logger
-from transformers import CLIPVisionConfig, CLIPVisionModel, PretrainedConfig
+from transformers import CLIPVisionConfig, CLIPVisionModel, LlamaConfig
 
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import (CacheConfig, ModelConfig,
@@ -32,11 +32,11 @@ from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.models.llama import LlamaModel
-from aphrodite.modeling.models.vlm_base import VisionLanguageModelBase
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
 from aphrodite.multimodal.image import ImagePixelData, get_dummy_image_data
 from aphrodite.quantization.base_config import QuantizationConfig
+from aphrodite.modeling.models.interfaces import SupportsVision
 
 _KEYS_TO_MODIFY_MAPPING = {
     "model.vision_embed_tokens": "vision_embed_tokens",
@@ -63,12 +63,6 @@ class Phi3ImageEmbeddingBase(nn.Module):
         self.type_feature: str
         self.img_processor: CLIPVisionModel
 
-    def set_img_features(self, img_features: torch.FloatTensor) -> None:
-        self.img_features = img_features
-
-    def set_img_sizes(self, img_sizes: torch.LongTensor) -> None:
-        self.img_sizes = img_sizes
-
     def get_img_features(self,
                          img_embeds: torch.FloatTensor) -> torch.FloatTensor:
         LAYER_IDX = self.layer_idx
@@ -93,12 +87,12 @@ class Phi3HDImageEmbedding(Phi3ImageEmbeddingBase):
     """Phi3 Image embedding with HD transform."""
 
     def __init__(self,
-                 vision_language_config: VisionLanguageConfig,
-                 config: PretrainedConfig,
+                 vlm_config: VisionLanguageConfig,
+                 config: LlamaConfig,
                  wte=None) -> None:
         super().__init__(wte)
 
-        self.image_token_id = vision_language_config.image_token_id
+        self.image_token_id = vlm_config.image_token_id
         # n_embed or hidden_size
         hidden_size = config.n_embd if hasattr(
             config, 'n_embd') else config.hidden_size
@@ -141,21 +135,16 @@ class Phi3HDImageEmbedding(Phi3ImageEmbeddingBase):
         self.layer_idx = config.img_processor.get('layer_idx', -2)
         self.type_feature = config.img_processor.get('type_feature', 'patch')
 
-    def forward(self,
-                input_ids: torch.LongTensor,
+    def forward(self, input_ids: torch.LongTensor,
                 pixel_values: torch.FloatTensor,
-                image_sizes=None) -> torch.FloatTensor:
+                image_sizes: torch.Tensor) -> torch.FloatTensor:
         """process and merge text embeddings with image embeddings."""
 
+        # (batch_size, max_num_crops, 3, height, width)
         img_embeds = pixel_values
+
+        # (batch_size, 2)
         img_sizes = image_sizes
-
-        if self.img_features is not None:
-            img_embeds = self.img_features.clone()
-            self.img_features = None
-
-        if self.img_sizes is not None:
-            img_sizes = self.img_sizes
 
         input_shape = input_ids.size()
         input_ids = input_ids.view(-1, input_shape[-1])
@@ -187,11 +176,8 @@ class Phi3HDImageEmbedding(Phi3ImageEmbeddingBase):
             output_imgs = []
             output_len = []
 
-            if isinstance(img_sizes, torch.Tensor):
-                img_sizes.squeeze_(0)
-
             for _bs in range(bs):
-                h, w = img_sizes
+                h, w = img_sizes[_bs]
                 h = h // 336
                 w = w // 336
                 B_ = h * w
@@ -328,18 +314,20 @@ def _image_processor(
 
 @MULTIMODAL_REGISTRY.register_image_pixel_input(_image_processor)
 @MULTIMODAL_REGISTRY.register_dummy_data(get_dummy_image_data)
-class Phi3VForCausalLM(VisionLanguageModelBase):
+class Phi3VForCausalLM(nn.Module, SupportsVision):
+    supports_vision = True
 
     def __init__(self,
-                 config: PretrainedConfig,
-                 vision_language_config: VisionLanguageConfig,
+                 config: LlamaConfig,
+                 vlm_config: VisionLanguageConfig,
                  cache_config: Optional[CacheConfig] = None,
                  quant_config: Optional[QuantizationConfig] = None) -> None:
-        super().__init__(vision_language_config)
+        super().__init__(vlm_config)
         self.config = config
+        self.vlm_config = vlm_config
         self.model = LlamaModel(config, cache_config, quant_config)
         self.vision_embed_tokens = Phi3HDImageEmbedding(
-            vision_language_config, config, self.model.embed_tokens)
+            vlm_config, config, self.model.embed_tokens)
         self.lm_head = ParallelLMHead(config.vocab_size, config.hidden_size)
         self.logits_processor = LogitsProcessor(config.vocab_size)
         self.sampler = Sampler()
@@ -349,7 +337,7 @@ class Phi3VForCausalLM(VisionLanguageModelBase):
         pixel_values = kwargs.pop("pixel_values", None)
         image_sizes = kwargs.pop("image_sizes", None)
 
-        expected_input_type = self.vision_language_config.image_input_type
+        expected_input_type = self.vlm_config.image_input_type
         ImageInputType = VisionLanguageConfig.ImageInputType
 
         if expected_input_type != ImageInputType.PIXEL_VALUES:
