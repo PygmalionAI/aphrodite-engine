@@ -315,7 +315,6 @@ def _image_processor(
 @MULTIMODAL_REGISTRY.register_image_pixel_input(_image_processor)
 @MULTIMODAL_REGISTRY.register_dummy_data(get_dummy_image_data)
 class Phi3VForCausalLM(nn.Module, SupportsVision):
-    supports_vision = True
 
     def __init__(self,
                  config: LlamaConfig,

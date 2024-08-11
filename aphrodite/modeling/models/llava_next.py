@@ -106,8 +106,6 @@ def _image_pixel_processor(
 @MULTIMODAL_REGISTRY.register_image_pixel_input(_image_pixel_processor)
 @MULTIMODAL_REGISTRY.register_dummy_data(_get_dummy_image_data)
 class LlavaNextForConditionalGeneration(nn.Module, SupportsVision):
-
-    supports_vision = True
     """
     Args to `forward()`:
         input_ids: Flattened (concatenated) input_ids corresponding to a

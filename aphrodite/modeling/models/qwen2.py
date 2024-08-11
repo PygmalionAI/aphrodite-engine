@@ -264,7 +264,6 @@ class Qwen2Model(nn.Module):
 
 
 class Qwen2ForCausalLM(nn.Module, SupportsLoRA):
-    supports_lora = True
     packed_modules_mapping = {
         "qkv_proj": [
             "q_proj",
