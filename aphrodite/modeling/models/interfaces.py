@@ -105,16 +105,14 @@ def supports_lora(
         if getattr(model, "supports_lora", False):
             if missing_attrs:
                 logger.warning(
-                    "The model (%s) sets `supports_lora=True`, "
-                    "but is missing LoRA-specific attributes: %s",
-                    model,
-                    missing_attrs,
+                    f"The model ({model}) sets `supports_lora=True`, "
+                    f"but is missing LoRA-specific attributes: {missing_attrs}."
                 )
         else:
             if not missing_attrs:
                 logger.warning(
-                    "The model (%s) contains all LoRA-specific attributes, "
-                    "but does not set `supports_lora=True`.", model)
+                    f"The model ({model}) contains all LoRA-specific "
+                    "attributes, but does not set `supports_lora=True`.")
 
     return result
 
