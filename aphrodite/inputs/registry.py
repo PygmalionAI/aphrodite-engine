@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from aphrodite.common.sequence import SequenceData
     from aphrodite.multimodal import MultiModalData
 
-
 C = TypeVar("C", bound=PretrainedConfig)
 
 
