@@ -94,14 +94,13 @@ class TokensPrompt(TypedDict):
 class TextTokensPrompt(TypedDict):
     """It is assumed that :attr:`prompt` is consistent with
     :attr:`prompt_token_ids`. This is currently used in
-    :class:`AsyncLLMEngine` for logging both the text and token IDs."""
+    :class:`AsyncAphrodite` for logging both the text and token IDs."""
 
     prompt: str
     """The prompt text."""
 
     prompt_token_ids: List[int]
-    """The token IDs of the prompt. If None, we use the
-    tokenizer to convert the prompts to token IDs."""
+    """The token IDs of the prompt."""
 
     multi_modal_data: NotRequired["MultiModalData"]
     """
@@ -123,6 +122,21 @@ PromptInputs = Union[str, TextPrompt, TokensPrompt, TextTokensPrompt]
 
 
 class LLMInputs(TypedDict):
+    """
+    The inputs in :class:`~aphrodite.AphroditeEngine` before they are
+    passed to the model executor.
+    """
+
     prompt_token_ids: List[int]
+    """The token IDs of the prompt."""
+
     prompt: NotRequired[Optional[str]]
+    """
+    The original prompt text corresponding to the token IDs, if available.
+    """
+
     multi_modal_data: NotRequired[Optional["MultiModalData"]]
+    """
+    Optional multi-modal data to pass to the model,
+    if the model supports it.
+    """

@@ -1,5 +1,4 @@
 # coding=utf-8
-# Copyright 2024 The PygmalionAI team.
 # Copyright 2024 The vLLM team.
 # Copyright 2024 Microsoft and the HuggingFace Inc. team. All rights reserved.
 #
@@ -17,26 +16,29 @@
 from typing import Dict, Iterable, List, Literal, Optional, Tuple, TypedDict
 
 import numpy as np
-import PIL as Image
 import torch
 import torch.nn as nn
 from loguru import logger
-from transformers import CLIPVisionConfig, CLIPVisionModel, LlamaConfig
+from PIL import Image
+from transformers import CLIPVisionConfig, PretrainedConfig
 
 from aphrodite.attention import AttentionMetadata
-from aphrodite.common.config import (CacheConfig, ModelConfig,
-                                     VisionLanguageConfig)
+from aphrodite.common.config import CacheConfig, VisionLanguageConfig
 from aphrodite.common.sequence import SamplerOutput
+from aphrodite.inputs import INPUT_REGISTRY, InputContext
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
+from aphrodite.modeling.models.clip import CLIPVisionModel
 from aphrodite.modeling.models.llama import LlamaModel
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
-from aphrodite.multimodal.image import ImagePixelData, get_dummy_image_data
+from aphrodite.multimodal.image import ImagePixelData
 from aphrodite.quantization.base_config import QuantizationConfig
-from aphrodite.modeling.models.interfaces import SupportsVision
+
+from .clip import dummy_pixel_data_for_clip, dummy_seq_data_for_clip
+from .interfaces import SupportsVision
 
 _KEYS_TO_MODIFY_MAPPING = {
     "model.vision_embed_tokens": "vision_embed_tokens",
@@ -68,9 +70,10 @@ class Phi3ImageEmbeddingBase(nn.Module):
         LAYER_IDX = self.layer_idx
         TYPE_FEATURE = self.type_feature
 
-        img_processor_output = self.img_processor(img_embeds,
-                                                  output_hidden_states=True)
-        img_feature = img_processor_output.hidden_states[LAYER_IDX]
+        # NOTE: we skip the step to select the vision feature layer since
+        # this is already done inside the img_processor
+        img_feature = self.img_processor(img_embeds,
+                                         vision_feature_layer=LAYER_IDX)
 
         if TYPE_FEATURE == "patch":
             patch_feature = img_feature[:, 1:]
@@ -87,12 +90,12 @@ class Phi3HDImageEmbedding(Phi3ImageEmbeddingBase):
     """Phi3 Image embedding with HD transform."""
 
     def __init__(self,
-                 vlm_config: VisionLanguageConfig,
-                 config: LlamaConfig,
+                 vision_language_config: VisionLanguageConfig,
+                 config: PretrainedConfig,
                  wte=None) -> None:
         super().__init__(wte)
 
-        self.image_token_id = vlm_config.image_token_id
+        self.image_token_id = vision_language_config.image_token_id
         # n_embed or hidden_size
         hidden_size = config.n_embd if hasattr(
             config, 'n_embd') else config.hidden_size
@@ -103,7 +106,6 @@ class Phi3HDImageEmbedding(Phi3ImageEmbeddingBase):
         self.num_img_tokens = config.img_processor['num_img_tokens']
 
         self.image_dim_out = image_dim_out
-        self.img_sizes = None
 
         # global_gn and sub_gn for hd transform, serves as line separator
         self.use_hd_transform = config.embd_layer.get('use_hd_transform',
@@ -130,7 +132,6 @@ class Phi3HDImageEmbedding(Phi3ImageEmbeddingBase):
         self.img_projection = nn.Sequential(*layers)
 
         self.vocab_size = config.vocab_size
-        self.img_features = None
 
         self.layer_idx = config.img_processor.get('layer_idx', -2)
         self.type_feature = config.img_processor.get('type_feature', 'patch')
@@ -256,9 +257,44 @@ class Phi3VImagePixelInputs(TypedDict):
     """Shape: (batch_size, 2)"""
 
 
-# FIXME: Remove these after dynamic num_img_tokens is supported
-# copied from https://huggingface.co/microsoft/Phi-3-vision-128k-instruct/blob/main/image_processing_phi3_v.py
-def calc_padded_size(width, height, padding_unit=336):
+def _get_phi3v_image_feature_size(
+    *,
+    input_height: int,
+    input_width: int,
+) -> int:
+    h, w = input_height, input_width
+
+    # https://huggingface.co/microsoft/Phi-3-vision-128k-instruct/blob/main/image_processing_phi3_v.py#L178
+    return (h // 336 * w // 336 + 1) * 144 + 1 + (h // 336 + 1) * 12
+
+
+def dummy_data_for_phi3v(ctx: InputContext, seq_len: int):
+    multimodal_config = ctx.get_multimodal_config()
+
+    #TODO: change the logic for dummy data to support dynamic shape
+    _, _, dummy_height, dummy_width = multimodal_config.image_input_shape
+    image_feature_size = _get_phi3v_image_feature_size(
+        input_height=dummy_height,
+        input_width=dummy_width,
+    )
+
+    seq_data = dummy_seq_data_for_clip(
+        CLIP_VIT_LARGE_PATCH14_336_CONFIG,
+        seq_len,
+        image_token_id=32044,
+        image_feature_size_override=image_feature_size,
+    )
+    mm_data = dummy_pixel_data_for_clip(
+        CLIP_VIT_LARGE_PATCH14_336_CONFIG,
+        image_width_override=dummy_width,
+        image_height_override=dummy_height,
+    )
+
+    return seq_data, mm_data
+
+
+# Based on https://huggingface.co/microsoft/Phi-3-vision-128k-instruct/blob/main/image_processing_phi3_v.py
+def _calc_padded_size(*, width: int, height: int, padding_unit: int = 336):
     target_height = int(np.ceil(height / padding_unit) * padding_unit)
     top_padding = int((target_height - height) / 2)
     bottom_padding = target_height - height - top_padding
@@ -267,8 +303,8 @@ def calc_padded_size(width, height, padding_unit=336):
     return padded_width, padded_height
 
 
-# copied from https://huggingface.co/microsoft/Phi-3-vision-128k-instruct/blob/main/image_processing_phi3_v.py
-def calc_hd_transform_size(width, height, hd_num=16):
+# Based on https://huggingface.co/microsoft/Phi-3-vision-128k-instruct/blob/main/image_processing_phi3_v.py
+def _calc_hd_transform_size(*, width: int, height: int, hd_num: int = 16):
     transposed = False
     if width < height:
         width, height = height, width
@@ -283,7 +319,8 @@ def calc_hd_transform_size(width, height, hd_num=16):
     new_width = int(scale * 336)
     new_height = int(new_width / ratio)
 
-    padded_width, padded_height = calc_padded_size(new_width, new_height)
+    padded_width, padded_height = _calc_padded_size(width=new_width,
+                                                    height=new_height)
 
     if transposed:
         padded_width, padded_height = padded_height, padded_width
@@ -291,39 +328,38 @@ def calc_hd_transform_size(width, height, hd_num=16):
     return padded_width, padded_height
 
 
-def _image_processor(
-    data: ImagePixelData,
-    model_config: ModelConfig,
-    vlm_config: VisionLanguageConfig,
-) -> Dict[str, torch.Tensor]:
+def _image_processor(ctx: InputContext,
+                     data: ImagePixelData) -> Dict[str, torch.Tensor]:
     image = data.image
 
     if isinstance(image, Image.Image):
         # Temporary patch before dynamic number of image tokens is supported
-        _, _, h, w = vlm_config.image_input_shape
-        if (w, h) != calc_hd_transform_size(image.width, image.height):
-            logger.warning(
-                "Dynamic image shape is currently not supported. "
-                "Resizing input image to (%d, %d).", w, h)
+        _, _, h, w = ctx.get_multimodal_config().image_input_shape
+        if (w, h) != _calc_hd_transform_size(width=image.width,
+                                             height=image.height):
+            logger.warning("Dynamic image shape is currently not supported. "
+                           f"Resizing input image to ({w}, {h}).")
 
             data.image = image.resize((w, h))
 
     return MULTIMODAL_REGISTRY._get_plugin_for_data_type(ImagePixelData) \
-            ._default_input_processor(data, model_config, vlm_config)
+            ._default_input_mapper(ctx, data)
 
 
-@MULTIMODAL_REGISTRY.register_image_pixel_input(_image_processor)
-@MULTIMODAL_REGISTRY.register_dummy_data(get_dummy_image_data)
+@MULTIMODAL_REGISTRY.register_image_pixel_input_mapper(_image_processor)
+@INPUT_REGISTRY.register_dummy_data(dummy_data_for_phi3v)
 class Phi3VForCausalLM(nn.Module, SupportsVision):
 
     def __init__(self,
-                 config: LlamaConfig,
+                 config: PretrainedConfig,
                  vlm_config: VisionLanguageConfig,
                  cache_config: Optional[CacheConfig] = None,
                  quant_config: Optional[QuantizationConfig] = None) -> None:
-        super().__init__(vlm_config)
+        super().__init__()
+
         self.config = config
         self.vlm_config = vlm_config
+
         self.model = LlamaModel(config, cache_config, quant_config)
         self.vision_embed_tokens = Phi3HDImageEmbedding(
             vlm_config, config, self.model.embed_tokens)
@@ -398,6 +434,9 @@ class Phi3VForCausalLM(nn.Module, SupportsVision):
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
+                continue
+            # post_layernorm is not needed in CLIPVisionModel
+            if "vision_model.post_layernorm" in name:
                 continue
             for key_to_modify, new_key in _KEYS_TO_MODIFY_MAPPING.items():
                 if key_to_modify in name:

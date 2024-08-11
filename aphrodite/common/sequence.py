@@ -8,14 +8,13 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 import torch
 
-from aphrodite.common.inputs import LLMInputs
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.lora.request import LoRARequest
 
 if TYPE_CHECKING:
+    from aphrodite.inputs import LLMInputs
     from aphrodite.multimodal import MultiModalData
-
     from aphrodite.spec_decode.metrics import SpecDecodeWorkerMetrics
 
 
@@ -223,7 +222,7 @@ class Sequence:
     def __init__(
         self,
         seq_id: int,
-        inputs: LLMInputs,
+        inputs: "LLMInputs",
         block_size: int,
         eos_token_id: Optional[int] = None,
         lora_request: Optional[LoRARequest] = None,

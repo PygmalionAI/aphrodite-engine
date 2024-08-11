@@ -11,7 +11,6 @@ from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
                                      LoadConfig, LoRAConfig, ModelConfig,
                                      ParallelConfig, SchedulerConfig,
                                      SpeculativeConfig, VisionLanguageConfig)
-from aphrodite.common.inputs import LLMInputs, PromptInputs
 from aphrodite.common.logger import setup_logger
 from aphrodite.common.outputs import (EmbeddingRequestOutput, RequestOutput,
                                       RequestOutputFactory)
@@ -31,6 +30,7 @@ from aphrodite.engine.output_processor.util import \
     create_output_by_sequence_group
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.executor.ray_utils import initialize_ray_cluster
+from aphrodite.inputs import INPUT_REGISTRY, LLMInputs, PromptInputs
 from aphrodite.lora.request import LoRARequest
 from aphrodite.processing.scheduler import (ScheduledSequenceGroup, Scheduler,
                                             SchedulerOutputs)
@@ -199,6 +199,9 @@ class AphroditeEngine:
         self.seq_counter = Counter()
         self.generation_config_fields = _load_generation_config_dict(
             model_config)
+
+        self.input_processor = INPUT_REGISTRY.create_input_processor(
+            self.model_config)
 
         self.model_executor = executor_class(
             model_config=model_config,
@@ -436,9 +439,11 @@ class AphroditeEngine:
         else:
             prompt_token_ids = inputs["prompt_token_ids"]
 
-        return LLMInputs(prompt_token_ids=prompt_token_ids,
-                         prompt=inputs.get("prompt"),
-                         multi_modal_data=inputs.get("multi_modal_data"))
+        llm_inputs = LLMInputs(prompt_token_ids=prompt_token_ids,
+                               prompt=inputs.get("prompt"),
+                               multi_modal_data=inputs.get("multi_modal_data"))
+
+        return self.input_processor(llm_inputs)
 
     def add_request(
         self,

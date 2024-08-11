@@ -56,7 +56,6 @@ def _get_quantization_config(
                 f"{model_config.dtype} is not supported for quantization "
                 f"method {model_config.quantization}. Supported dtypes: "
                 f"{supported_dtypes}")
-
         return quant_config
     return None
 
@@ -78,11 +77,13 @@ def _get_model_initialization_kwargs(
             "but LoRA is enabled. Support for this model may "
             "be added in the future. If this is important to you, "
             "please open an issue on github.")
+
     if supports_vision(model_class):
         if vlm_config is None:
             raise ValueError("Provide `image_input_type` and other vision "
                              "related configurations through LLM entrypoint "
                              "or engine arguments.")
+
         extra_kwargs["vlm_config"] = vlm_config
 
     return extra_kwargs
@@ -134,7 +135,6 @@ class DefaultModelLoader(BaseModelLoader):
             self, model: str, revision: Optional[str]) -> Optional[str]:
         """Download model from ModelScope hub if APHRODITE_USE_MODELSCOPE is
         True.
-        
         Returns the path to the downloaded model, or None if the model is not
         downloaded from ModelScope."""
         if APHRODITE_USE_MODELSCOPE:
@@ -270,6 +270,7 @@ class DefaultModelLoader(BaseModelLoader):
                                                model,
                                                "fall_back_to_pt_during_load",
                                                True)), )
+
             for _, module in model.named_modules():
                 quant_method = getattr(module, "quant_method", None)
                 if quant_method is not None:
@@ -278,7 +279,6 @@ class DefaultModelLoader(BaseModelLoader):
                 # to use quant_method.
                 if hasattr(module, "process_weights_after_loading"):
                     module.process_weights_after_loading()
-
         return model.eval()
 
 
@@ -339,6 +339,7 @@ class TensorizerLoader(BaseModelLoader):
         cache_config: CacheConfig,
     ) -> nn.Module:
         """Load a serialized model with tensorizer to the CPU.
+
         This is only necessary when the model isn't Aphrodite-tensorized (see
         examples/tensorize_aphrodite_model.py) This should still be faster than
         default HuggingFace loading, but will be slower than loading a
@@ -362,6 +363,7 @@ class TensorizerLoader(BaseModelLoader):
         cache_config: CacheConfig,
     ) -> nn.Module:
         """Load a serialized model with tensorizer.
+
         Expects a Aphrodite-tensorized model. See the
         examples/tensorize_aphrodite_model.py example script
         for serializing Aphrodite models."""
@@ -424,7 +426,7 @@ class ShardedStateLoader(BaseModelLoader):
     Model loader that directly loads each worker's model state dict, which
     enables a fast load path for large tensor-parallel models where each worker
     only needs to read its own shard rather than the entire checkpoint. See
-    `examples/save_sharded_states.py` for creating a sharded checkpoint.
+    `examples/save_sharded_state.py` for creating a sharded checkpoint.
     """
 
     DEFAULT_PATTERN = "model-rank-{rank}-part-{part}.safetensors"
@@ -446,7 +448,8 @@ class ShardedStateLoader(BaseModelLoader):
         Filter out all tensors that share the same memory or a subset of the
         memory of another tensor.
         """
-        same_storage_groups = collections.defaultdict(list)
+        same_storage_groups: Dict[Any, List[Tuple[
+            str, torch.Tensor]]] = collections.defaultdict(list)
         for key, tensor in tensors.items():
             if tensor.numel():
                 ptr = tensor.untyped_storage().data_ptr()
@@ -455,7 +458,7 @@ class ShardedStateLoader(BaseModelLoader):
         def get_end_ptr(tensor: torch.Tensor) -> int:
             return tensor.view(-1)[-1].data_ptr() + tensor.element_size()
 
-        result = {}
+        result: Dict[str, torch.Tensor] = {}
         for group in same_storage_groups.values():
             for k, t in group:
                 a, b = t.data_ptr(), get_end_ptr(t)
@@ -494,8 +497,10 @@ class ShardedStateLoader(BaseModelLoader):
         from safetensors.torch import safe_open
 
         from aphrodite.distributed import get_tensor_model_parallel_rank
+
         local_model_path = self._prepare_weights(model_config.model,
                                                  model_config.revision)
+
         with set_default_torch_dtype(model_config.dtype):
             with torch.device(device_config.device):
                 model = _initialize_model(model_config, self.load_config,

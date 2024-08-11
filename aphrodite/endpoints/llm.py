@@ -4,9 +4,9 @@ from typing import ClassVar, List, Optional, Sequence, Union, cast, overload
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
-from aphrodite.common.inputs import (PromptInputs, PromptStrictInputs,
-                                     TextPrompt, TextTokensPrompt,
-                                     TokensPrompt, parse_and_batch_prompt)
+from aphrodite.inputs import (PromptInputs, PromptStrictInputs, TextPrompt,
+                              TextTokensPrompt, TokensPrompt,
+                              parse_and_batch_prompt)
 from aphrodite.common.outputs import EmbeddingRequestOutput, RequestOutput
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams

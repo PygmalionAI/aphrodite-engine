@@ -50,6 +50,8 @@ void gelu_new(torch::Tensor& out, torch::Tensor& input);
 
 void gelu_fast(torch::Tensor& out, torch::Tensor& input);
 
+void gelu_quick(torch::Tensor& out, torch::Tensor& input);
+
 void moe_align_block_size(torch::Tensor topk_ids, int64_t num_experts,
                           int64_t block_size, torch::Tensor sorted_token_ids,
                           torch::Tensor expert_ids,

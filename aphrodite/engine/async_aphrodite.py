@@ -9,7 +9,7 @@ from loguru import logger
 from transformers import PreTrainedTokenizer
 
 from aphrodite.common.config import DecodingConfig, ModelConfig
-from aphrodite.common.inputs import LLMInputs, PromptInputs
+from aphrodite.inputs import LLMInputs, PromptInputs
 from aphrodite.common.outputs import EmbeddingRequestOutput, RequestOutput
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
@@ -273,9 +273,11 @@ class _AsyncAphrodite(AphroditeEngine):
         else:
             prompt_token_ids = inputs["prompt_token_ids"]
 
-        return LLMInputs(prompt_token_ids=prompt_token_ids,
-                         prompt=inputs.get("prompt"),
-                         multi_modal_data=inputs.get("multi_modal_data"))
+        llm_inputs = LLMInputs(prompt_token_ids=prompt_token_ids,
+                               prompt=inputs.get("prompt"),
+                               multi_modal_data=inputs.get("multi_modal_data"))
+
+        return self.input_processor(llm_inputs)
 
     async def add_request_async(
         self,

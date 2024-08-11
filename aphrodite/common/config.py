@@ -115,6 +115,7 @@ class ModelConfig:
         max_logprobs: int = 5,
         disable_sliding_window: bool = False,
         skip_tokenizer_init: bool = False,
+        multimodal_config: Optional["VisionLanguageConfig"] = None,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -157,6 +158,7 @@ class ModelConfig:
             disable_sliding_window=self.disable_sliding_window,
             sliding_window_len=self.get_hf_config_sliding_window(),
             rope_scaling_arg=self.rope_scaling)
+        self.multimodal_config = multimodal_config
 
         if not self.skip_tokenizer_init:
             self._verify_tokenizer_mode()

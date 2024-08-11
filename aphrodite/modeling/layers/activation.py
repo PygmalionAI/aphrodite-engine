@@ -137,6 +137,21 @@ class FastGELU(CustomOp):
         return out
 
 
+class QuickGELU(CustomOp):
+
+    # https://github.com/huggingface/transformers/blob/main/src/transformers/activations.py#L90
+    def forward_native(self, x: torch.Tensor) -> torch.Tensor:
+        """PyTorch-native implementation equivalent to forward()."""
+        return x * torch.sigmoid(1.702 * x)
+
+    def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
+        from aphrodite import _custom_ops as ops
+
+        out = torch.empty_like(x)
+        ops.gelu_quick(out, x)
+        return out
+
+
 class ScaledActivation(nn.Module):
     """An activation function with post-scale parameters.
 
@@ -185,6 +200,7 @@ _ACTIVATION_REGISTRY = {
     "gelu_new": NewGELU(),
     "gelu_pytorch_tanh": nn.GELU(approximate="tanh"),
     "relu": nn.ReLU(),
+    "quick_gelu": QuickGELU(),
 }
 
 
