@@ -2,16 +2,16 @@ from aphrodite import LLM, SamplingParams
 
 # Sample prompts.
 prompts = [
-    "<|system|>Enter chat mode.<|user|>Hello!<|model|>",
-    "<|system|>Enter RP mode.<|model|>Hello!<|user|>What are you doing?",
-    "<|system|>Enter chat mode.<|user|>What is the meaning of life?<|model|>",
-    "<|system|>Enter QA mode.<|user|>What is a man?<|model|>A miserable",
+    "Once upon a time,",
+    "In a galaxy far, far away,",
+    "The quick brown fox jumps over the lazy dog.",
+    "The meaning of life is",
 ]
 # Create a sampling params object.
-sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
+sampling_params = SamplingParams(temperature=1.15, min_p=0.06)
 
 # Create an LLM.
-llm = LLM(model="PygmalionAI/pygmalion-2-7b"
+llm = LLM(model="NousResearch/Meta-Llama-3.1-8B-Instruct"
           )  # pass additional arguments here, such as `quantization`
 # Generate texts from the prompts. The output is a list of RequestOutput objects
 # that contain the prompt, generated text, and other information.
