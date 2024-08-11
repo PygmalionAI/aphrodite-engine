@@ -26,6 +26,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import torch
 from torch import nn
+from transformers import PretrainedConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig, LoRAConfig
@@ -46,6 +47,7 @@ from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
+from aphrodite.modeling.models.interfaces import SupportsLoRA
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import QuantizationConfig
@@ -387,7 +389,8 @@ class MiniCPMModel(nn.Module):
         return hidden_states
 
 
-class MiniCPMForCausalLM(nn.Module):
+class MiniCPMForCausalLM(nn.Module, SupportsLoRA):
+    supports_lora = True
     packed_modules_mapping = {
         "qkv_proj": [
             "q_proj",
@@ -417,13 +420,14 @@ class MiniCPMForCausalLM(nn.Module):
 
     def __init__(
         self,
-        config,
+        config: PretrainedConfig,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         lora_config: Optional[LoRAConfig] = None,
     ) -> None:
         super().__init__()
         self.config = config
+        self.lora_config = lora_config
         self.num_experts = getattr(self.config, "num_experts", 0)
         self.quant_config = quant_config
         self.model = MiniCPMModel(config,

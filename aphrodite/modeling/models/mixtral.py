@@ -27,6 +27,7 @@ import torch
 from torch import nn
 from transformers import MixtralConfig
 
+from aphrodite import _custom_ops as ops
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig, LoRAConfig
 from aphrodite.common.sequence import SamplerOutput
@@ -45,11 +46,12 @@ from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
+from aphrodite.modeling.models.interfaces import SupportsLoRA
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import QuantizationConfig
 from aphrodite.quantization.fp8 import (Fp8Config, per_tensor_dequantize,
-                                        per_tensor_quantize, scaled_fp8_quant)
+                                        per_tensor_quantize)
 
 
 class MixtralMoE(nn.Module):
@@ -212,11 +214,11 @@ class MixtralMoE(nn.Module):
                                                      dtype=torch.float32),
                                           requires_grad=False)
             for expert in range(self.num_total_experts):
-                w13_weight[
-                    expert, :, :], self.w13_scale[expert] = scaled_fp8_quant(
+                w13_weight[expert, :, :], self.w13_scale[
+                    expert] = ops.scaled_fp8_quant(
                         self.w13_weight.data[expert, :, :])
-                w2_weight[
-                    expert, :, :], self.w2_scale[expert] = scaled_fp8_quant(
+                w2_weight[expert, :, :], self.w2_scale[
+                    expert] = ops.scaled_fp8_quant(
                         self.w2_weight.data[expert, :, :])
             self.w13_weight = nn.Parameter(w13_weight, requires_grad=False)
             self.w2_weight = nn.Parameter(w2_weight, requires_grad=False)
@@ -467,7 +469,8 @@ class MixtralModel(nn.Module):
         return hidden_states
 
 
-class MixtralForCausalLM(nn.Module):
+class MixtralForCausalLM(nn.Module, SupportsLoRA):
+    supports_lora = True
     fall_back_to_pt_during_load = False
 
     packed_modules_mapping = {
@@ -500,6 +503,7 @@ class MixtralForCausalLM(nn.Module):
     ) -> None:
         super().__init__()
         self.config = config
+        self.lora_config = lora_config
         self.model = MixtralModel(config,
                                   cache_config,
                                   quant_config,

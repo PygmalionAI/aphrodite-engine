@@ -8,19 +8,18 @@ from transformers import CLIPVisionModel, LlavaConfig
 
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, VisionLanguageConfig
+from aphrodite.common.sequence import SamplerOutput
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
-from aphrodite.quantization.base_config import (QuantizationConfig)
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
+from aphrodite.modeling.models.interfaces import SupportsVision
 from aphrodite.modeling.models.llama import LlamaModel
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
 from aphrodite.multimodal.image import get_dummy_image_data
-from aphrodite.common.sequence import SamplerOutput
-
-from .vlm_base import VisionLanguageModelBase
+from aphrodite.quantization.base_config import QuantizationConfig
 
 _KEYS_TO_MODIFY_MAPPING = {
     "language_model.lm_head": "lm_head",
@@ -86,18 +85,21 @@ LlavaImageInputs = Union[LlavaImagePixelInputs, LlavaImageFeatureInputs]
 @MULTIMODAL_REGISTRY.register_image_feature_input()
 @MULTIMODAL_REGISTRY.register_image_pixel_input()
 @MULTIMODAL_REGISTRY.register_dummy_data(get_dummy_image_data)
-class LlavaForConditionalGeneration(VisionLanguageModelBase):
+class LlavaForConditionalGeneration(nn.Module, SupportsVision):
+
+    supports_vision = True
 
     def __init__(self,
                  config: LlavaConfig,
-                 vision_language_config: VisionLanguageConfig,
+                 vlm_config: VisionLanguageConfig,
                  cache_config: Optional[CacheConfig] = None,
                  quant_config: Optional[QuantizationConfig] = None) -> None:
-        super().__init__(vision_language_config)
+        super().__init__()
 
         self.config = config
+        self.vlm_config = vlm_config
 
-        if self.vision_language_config.image_input_type == (
+        if self.vlm_config.image_input_type == (
                 VisionLanguageConfig.ImageInputType.PIXEL_VALUES):
             self.vision_tower = CLIPVisionModel(config.vision_config)
         else:
@@ -122,11 +124,10 @@ class LlavaForConditionalGeneration(VisionLanguageModelBase):
         self.sampler = Sampler()
 
     def _validate_image_data(self, data: torch.Tensor) -> torch.Tensor:
-        if list(data.shape[1:]) != list(
-                self.vision_language_config.image_input_shape[1:]):
+        if list(data.shape[1:]) != list(self.vlm_config.image_input_shape[1:]):
             raise ValueError(
                 f"The expected image tensor shape is batch dimension plus "
-                f"{self.vision_language_config.image_input_shape[1:]}. "
+                f"{self.vlm_config.image_input_shape[1:]}. "
                 f"You supplied {data.shape}. "
                 f"If you are using vLLM's entrypoint, make sure your "
                 f"supplied image input is consistent with "
@@ -139,7 +140,7 @@ class LlavaForConditionalGeneration(VisionLanguageModelBase):
         pixel_values = kwargs.pop("pixel_values", None)
         image_features = kwargs.pop("image_features", None)
 
-        expected_input_type = self.vision_language_config.image_input_type
+        expected_input_type = self.vlm_config.image_input_type
         ImageInputType = VisionLanguageConfig.ImageInputType
 
         if expected_input_type == ImageInputType.PIXEL_VALUES:
@@ -271,7 +272,7 @@ class LlavaForConditionalGeneration(VisionLanguageModelBase):
 
             inputs_embeds = merge_vision_embeddings(
                 input_ids, inputs_embeds, vision_embeddings,
-                self.vision_language_config.image_token_id)
+                self.vlm_config.image_token_id)
 
             input_ids = None
         else:

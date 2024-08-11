@@ -39,6 +39,7 @@ from aphrodite.modeling.layers.vocab_parallel_embedding import \
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.quantization.base_config import QuantizationConfig
+from aphrodite.modeling.models.interfaces import SupportsLoRA
 
 
 @lru_cache(maxsize=None)
@@ -285,7 +286,8 @@ class GemmaModel(nn.Module):
         return hidden_states
 
 
-class GemmaForCausalLM(nn.Module):
+class GemmaForCausalLM(nn.Module, SupportsLoRA):
+    supports_lora = True
     packed_modules_mapping = {
         "qkv_proj": [
             "q_proj",
@@ -316,9 +318,9 @@ class GemmaForCausalLM(nn.Module):
         quant_config: Optional[QuantizationConfig] = None,
         lora_config: Optional[LoRAConfig] = None,
     ) -> None:
-        del lora_config  # Unused.
         super().__init__()
         self.config = config
+        self.lora_config = lora_config
         self.quant_config = quant_config
         self.model = GemmaModel(config, cache_config, quant_config)
         self.logits_processor = LogitsProcessor(config.vocab_size)

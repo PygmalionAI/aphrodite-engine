@@ -20,6 +20,7 @@ from aphrodite.lora.lora import LoRALayerWeights, PackedLoRALayerWeights
 from aphrodite.lora.utils import (from_layer, from_layer_logits_processor,
                                   parse_fine_tuned_lora_name,
                                   replace_submodule)
+from aphrodite.modeling.models.interfaces import SupportsLoRA
 
 _GLOBAL_LORA_ID = 0
 
@@ -362,7 +363,7 @@ class LoRAModelManager:
 
     def __init__(
         self,
-        model: nn.Module,
+        model: SupportsLoRA,
         max_num_seqs: int,
         max_num_batched_tokens: int,
         vocab_size: int,
@@ -410,7 +411,7 @@ class LoRAModelManager:
         # embeddings_indices
         self.indices_len: List[Optional[int]] = [None] * 4
 
-        self.model: nn.Module = model
+        self.model = model
         if hasattr(self.model, "supported_lora_modules"):
             self.supported_lora_modules = copy.deepcopy(
                 self.model.supported_lora_modules)
@@ -427,7 +428,6 @@ class LoRAModelManager:
         self._active_loras: Dict[int, None] = {}
         self._last_mapping: Optional[LoRAMapping] = None
         self._create_lora_modules()
-        self.model.lora_manager = self
 
     @property
     def capacity(self) -> int:

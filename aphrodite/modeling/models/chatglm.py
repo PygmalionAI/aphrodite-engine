@@ -23,6 +23,7 @@ from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
+from aphrodite.modeling.models.interfaces import SupportsLoRA
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.quantization.base_config import QuantizationConfig
 from aphrodite.transformers_utils.configs import ChatGLMConfig
@@ -321,7 +322,8 @@ class ChatGLMModel(nn.Module):
         return hidden_states
 
 
-class ChatGLMForCausalLM(nn.Module):
+class ChatGLMForCausalLM(nn.Module, SupportsLoRA):
+    supports_lora = True
     packed_modules_mapping = {
         "query_key_value": ["query_key_value"],
         "dense_h_to_4h": ["dense_h_to_4h"]
@@ -344,7 +346,9 @@ class ChatGLMForCausalLM(nn.Module):
         lora_config: Optional[LoRAConfig] = None,
     ):
         super().__init__()
-        self.config: ChatGLMConfig = config
+
+        self.config = config
+        self.lora_config = lora_config
         self.quant_config = quant_config
         self.max_position_embeddings = getattr(config, "max_sequence_length",
                                                8192)

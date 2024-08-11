@@ -31,6 +31,7 @@ from aphrodite.lora.worker_manager import LRUCacheWorkerLoRAManager
 from aphrodite.modeling import SamplingMetadata
 from aphrodite.modeling.model_loader import get_model
 from aphrodite.modeling.model_loader.tensorizer import TensorizerConfig
+from aphrodite.modeling.models.interfaces import supports_lora
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
 from aphrodite.task_handler.model_runner_base import (
     ModelRunnerBase, ModelRunnerInputBase,
@@ -244,14 +245,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                         f"{self.model_memory_usage / float(2**30):.2f} GiB")
 
         if self.lora_config:
-            assert hasattr(self.model, "supported_lora_modules"
-                           ) and self.model.supported_lora_modules, (
-                               "Model does not support LoRA")
-            assert hasattr(
-                self.model,
-                "embedding_modules"), "Model does not have embedding_modules"
-            assert hasattr(self.model, "embedding_padding_modules"
-                           ), "Model does not have embedding_padding_modules"
+            assert supports_lora(self.model), "Model does not support LoRA"
             self.lora_manager = LRUCacheWorkerLoRAManager(
                 self.scheduler_config.max_num_seqs,
                 self.scheduler_config.max_num_batched_tokens,

@@ -26,7 +26,7 @@
 from typing import Iterable, Optional, Tuple
 
 import torch
-from transformers import PretrainedConfig
+from transformers import LlamaConfig
 
 from aphrodite.common.config import CacheConfig, LoRAConfig
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
@@ -54,7 +54,7 @@ class DeciLMForCausalLM(LlamaForCausalLM):
 
     def __init__(
         self,
-        config: Optional[PretrainedConfig] = None,
+        config: LlamaConfig,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         lora_config: Optional[LoRAConfig] = None,

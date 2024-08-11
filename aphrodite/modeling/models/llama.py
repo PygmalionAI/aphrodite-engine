@@ -30,6 +30,7 @@ from transformers import LlamaConfig
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig, LoRAConfig
 from aphrodite.common.sequence import SamplerOutput
+from aphrodite.common.utils import is_hip, print_warning_once
 from aphrodite.distributed import (get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size)
 from aphrodite.modeling.layers.activation import SiluAndMul
@@ -44,9 +45,9 @@ from aphrodite.modeling.layers.vocab_parallel_embedding import (
     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import (
     default_weight_loader, kv_cache_scales_loader)
+from aphrodite.modeling.models.interfaces import SupportsLoRA
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.quantization.base_config import QuantizationConfig
-from aphrodite.common.utils import is_hip, print_warning_once
 
 
 class LlamaMLP(nn.Module):
@@ -299,7 +300,8 @@ class LlamaModel(nn.Module):
         return hidden_states
 
 
-class LlamaForCausalLM(nn.Module):
+class LlamaForCausalLM(nn.Module, SupportsLoRA):
+    supports_lora = True
     packed_modules_mapping = {
         "qkv_proj": [
             "q_proj",
@@ -340,6 +342,7 @@ class LlamaForCausalLM(nn.Module):
     ) -> None:
         super().__init__()
         self.config = config
+        self.lora_config = lora_config
         self.model = LlamaModel(config,
                                 cache_config,
                                 quant_config,

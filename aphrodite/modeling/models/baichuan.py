@@ -41,6 +41,7 @@ from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
+from aphrodite.modeling.models.interfaces import SupportsLoRA
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.quantization.base_config import QuantizationConfig
 
@@ -291,7 +292,8 @@ class BaiChuanModel(nn.Module):
         return hidden_states
 
 
-class BaiChuanBaseForCausalLM(nn.Module):
+class BaiChuanBaseForCausalLM(nn.Module, SupportsLoRA):
+    supports_lora = True
     packed_modules_mapping = {
         "W_pack": ["W_pack"],
         "gate_up_proj": [
@@ -311,14 +313,16 @@ class BaiChuanBaseForCausalLM(nn.Module):
 
     def __init__(
         self,
-        config,
+        config: PretrainedConfig,
         position_embedding: str,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         lora_config: Optional[LoRAConfig] = None,
     ):
         super().__init__()
+
         self.config = config
+        self.lora_config: Optional[LoRAConfig] = lora_config
         self.quant_config = quant_config
         self.model = BaiChuanModel(config, position_embedding, cache_config,
                                    quant_config)

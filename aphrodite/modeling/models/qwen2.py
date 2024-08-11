@@ -44,6 +44,7 @@ from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
+from aphrodite.modeling.models.interfaces import SupportsLoRA
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.quantization.base_config import QuantizationConfig
 
@@ -262,7 +263,8 @@ class Qwen2Model(nn.Module):
         return hidden_states
 
 
-class Qwen2ForCausalLM(nn.Module):
+class Qwen2ForCausalLM(nn.Module, SupportsLoRA):
+    supports_lora = True
     packed_modules_mapping = {
         "qkv_proj": [
             "q_proj",
@@ -292,7 +294,6 @@ class Qwen2ForCausalLM(nn.Module):
         quant_config: Optional[QuantizationConfig] = None,
         lora_config: Optional[LoRAConfig] = None,
     ) -> None:
-        del lora_config
         # TODO (: see if this can be moved out
         if (cache_config.sliding_window is not None
                 and hasattr(config, "max_window_layers")):
@@ -306,6 +307,7 @@ class Qwen2ForCausalLM(nn.Module):
                 " to discuss this feature.")
         super().__init__()
         self.config = config
+        self.lora_config = lora_config
         self.quant_config = quant_config
         self.model = Qwen2Model(config, cache_config, quant_config)
 

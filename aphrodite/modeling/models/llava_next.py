@@ -20,14 +20,14 @@ from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
+from aphrodite.modeling.models.interfaces import SupportsVision
 from aphrodite.modeling.models.llama import LlamaModel
+from aphrodite.modeling.models.llava import (LlavaMultiModalProjector,
+                                             merge_vision_embeddings)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import MULTIMODAL_REGISTRY, MultiModalData
 from aphrodite.multimodal.image import ImagePixelData, get_dummy_image_data
 from aphrodite.quantization.base_config import QuantizationConfig
-
-from .llava import LlavaMultiModalProjector, merge_vision_embeddings
-from .vlm_base import VisionLanguageModelBase
 
 _KEYS_TO_MODIFY_MAPPING = {
     "language_model.lm_head": "lm_head",
@@ -105,7 +105,9 @@ def _image_pixel_processor(
 
 @MULTIMODAL_REGISTRY.register_image_pixel_input(_image_pixel_processor)
 @MULTIMODAL_REGISTRY.register_dummy_data(_get_dummy_image_data)
-class LlavaNextForConditionalGeneration(VisionLanguageModelBase):
+class LlavaNextForConditionalGeneration(nn.Module, SupportsVision):
+
+    supports_vision = True
     """
     Args to `forward()`:
         input_ids: Flattened (concatenated) input_ids corresponding to a
@@ -118,15 +120,16 @@ class LlavaNextForConditionalGeneration(VisionLanguageModelBase):
 
     def __init__(self,
                  config: LlavaNextConfig,
-                 vision_language_config: VisionLanguageConfig,
+                 vlm_config: VisionLanguageConfig,
                  cache_config: Optional[CacheConfig] = None,
                  quant_config: Optional[QuantizationConfig] = None) -> None:
-        super().__init__(vision_language_config)
+        super().__init__()
 
         # Update the type annotation from that of its superclass
         self.config = config
+        self.vlm_config = vlm_config
 
-        if self.vision_language_config.image_input_type == (
+        if self.vlm_config.image_input_type == (
                 VisionLanguageConfig.ImageInputType.PIXEL_VALUES):
             self.vision_tower = CLIPVisionModel(config.vision_config)
         else:
@@ -154,9 +157,9 @@ class LlavaNextForConditionalGeneration(VisionLanguageModelBase):
             torch.empty(config.text_config.hidden_size))
 
     def _validate_image_pixels(self, data: torch.Tensor) -> torch.Tensor:
-        _, num_channels, _, _ = self.vision_language_config.image_input_shape
+        _, num_channels, _, _ = self.vlm_config.image_input_shape
 
-        # Note that this is different from that of vLLM vision_language_config
+        # Note that this is different from that of vLLM vlm_config
         # since the image is resized by the HuggingFace preprocessor
         height = width = self.config.vision_config.image_size
 
@@ -185,7 +188,7 @@ class LlavaNextForConditionalGeneration(VisionLanguageModelBase):
         image_sizes = kwargs.pop("image_sizes", None)
         image_features = kwargs.pop("image_features", None)
 
-        expected_input_type = self.vision_language_config.image_input_type
+        expected_input_type = self.vlm_config.image_input_type
         ImageInputType = VisionLanguageConfig.ImageInputType
 
         if expected_input_type == ImageInputType.PIXEL_VALUES:
@@ -370,7 +373,7 @@ class LlavaNextForConditionalGeneration(VisionLanguageModelBase):
 
             inputs_embeds = merge_vision_embeddings(
                 input_ids, inputs_embeds, vision_embeddings,
-                self.vision_language_config.image_token_id)
+                self.vlm_config.image_token_id)
 
             input_ids = None
         else:
