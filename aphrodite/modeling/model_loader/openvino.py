@@ -19,9 +19,8 @@ from aphrodite.modeling.layers.logits_processor import (LogitsProcessor,
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 
-
-APHRODITE_OPENVINO_ENABLE_QUANTIZED_WEIGHTS = bool(os.getenv(
-    "APHRODITE_OPENVINO_ENABLE_QUANTIZED_WEIGHTS", False))
+APHRODITE_OPENVINO_ENABLE_QUANTIZED_WEIGHTS = bool(
+    os.getenv("APHRODITE_OPENVINO_ENABLE_QUANTIZED_WEIGHTS", False))
 
 
 def _flattenize_inputs(inputs):

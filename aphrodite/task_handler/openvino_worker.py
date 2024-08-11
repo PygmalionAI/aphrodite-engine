@@ -198,8 +198,8 @@ class OpenVINOWorker(LoraNotSupportedWorkerBase):
         KV cache space.
         Note that since Aphrodite assumes a block resides on GPU if it can be
         modified, we return num_gpu_blocks=num_cpu_blocks and num_cpu_blocks=0.
-        This allows us to reuse the scheduler of Aphrodite without generalizing it
-        to different devices.
+        This allows us to reuse the scheduler of Aphrodite without generalizing
+        it to different devices.
         """
         # For OpenVINO backend, the block number will be calculated based on the
         # openvino_kvcache_space_bytes.
@@ -249,8 +249,8 @@ class OpenVINOWorker(LoraNotSupportedWorkerBase):
                 f"The model's max seq len ({self.model_config.max_model_len}) "
                 "is larger than the maximum number of tokens that can be "
                 f"stored in KV cache ({max_seq_len}). Try increasing "
-                "`APHRODITE_OPENVINO_KVCACHE_SPACE` or decreasing `max_model_len` "
-                "when initializing the engine.")
+                "`APHRODITE_OPENVINO_KVCACHE_SPACE` or decreasing "
+                "`max_model_len` when initializing the engine.")
 
     def _init_cache_engine(self) -> None:
         self.cache_engine = OpenVINOCacheEngine(

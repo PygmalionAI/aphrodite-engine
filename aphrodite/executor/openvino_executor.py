@@ -13,9 +13,8 @@ from aphrodite.common.utils import (get_distributed_init_method, get_ip,
 from aphrodite.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from aphrodite.lora.request import LoRARequest
 
-
-APHRODITE_OPENVINO_KVCACHE_SPACE = int(os.getenv("APHRODITE_OPENVINO_KVCACHE_SPACE",
-                                             0))
+APHRODITE_OPENVINO_KVCACHE_SPACE = int(
+    os.getenv("APHRODITE_OPENVINO_KVCACHE_SPACE", 0))
 APHRODITE_OPENVINO_CPU_KV_CACHE_PRECISION = os.getenv(
     "APHRODITE_OPENVINO_CPU_KV_CACHE_PRECISION", None)
 
@@ -73,7 +72,7 @@ class OpenVINOExecutor(ExecutorBase):
         # NOTE: `cpu block` for OpenVINO backend is located on CPU memory but is
         # referred as `gpu block`. Because we want to reuse the existing block
         # management procedure.
-        logger.info("# CPU blocks: %d", num_gpu_blocks)
+        logger.info(f"# CPU blocks: {num_gpu_blocks}")
         logger.info(
             f"Minimum concurrency: {num_gpu_blocks * self.cache_config.block_size / self.scheduler_config.max_model_len:.2f}x"  # noqa: E501
         )
