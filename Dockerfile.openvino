@@ -18,7 +18,7 @@ COPY setup.py /workspace/aphrodite-engine/
 # install build requirements
 RUN PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cpu" python3 -m pip install -r /workspace/aphrodite-engine/requirements-build.txt
 # build Aphrodite with OpenVINO backend
-RUN PIP_PRE=1 PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cpu https://storage.openvinotoolkit.org/simple/wheels/nightly/" APHRODITE_TARGET_DEVICE="openvino" python3 -m pip install /workspace/aphrodite-engine/
+RUN PIP_PRE=1 PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cpu https://storage.openvinotoolkit.org/simple/wheels/nightly/" APHRODITE_TARGET_DEVICE="openvino" python3 -m pip install -e /workspace/aphrodite-engine/
 
 # temporary hack until the dependencies are upgraded
 RUN pip install -U transformers
