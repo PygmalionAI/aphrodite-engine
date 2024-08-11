@@ -589,7 +589,9 @@ class EngineArgs:
             "--device",
             type=str,
             default=EngineArgs.device,
-            choices=["auto", "cuda", "neuron", "cpu", "tpu", "xpu"],
+            choices=[
+                "auto", "cuda", "neuron", "cpu", "openvino", "tpu", "xpu"
+            ],
             help=("Device to use for model execution."),
         )
         # Related to Vision-language models such as llava

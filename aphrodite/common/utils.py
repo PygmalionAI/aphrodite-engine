@@ -169,6 +169,15 @@ def is_cpu() -> bool:
 
 
 @lru_cache(maxsize=None)
+def is_openvino() -> bool:
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return "openvino" in version("aphrodite-engine")
+    except PackageNotFoundError:
+        return False
+
+
+@lru_cache(maxsize=None)
 def is_neuron() -> bool:
     try:
         import transformers_neuronx

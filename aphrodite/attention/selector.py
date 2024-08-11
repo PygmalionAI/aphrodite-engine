@@ -7,7 +7,7 @@ import torch
 from loguru import logger
 
 from aphrodite.attention.backends.abstract import AttentionBackend
-from aphrodite.common.utils import is_cpu, is_hip, is_tpu, is_xpu
+from aphrodite.common.utils import is_cpu, is_hip, is_openvino, is_tpu, is_xpu
 
 APHRODITE_ATTENTION_BACKEND = "APHRODITE_ATTENTION_BACKEND"
 
@@ -17,6 +17,7 @@ class _Backend(enum.Enum):
     XFORMERS = enum.auto()
     ROCM_FLASH = enum.auto()
     TORCH_SDPA = enum.auto()
+    OPENVINO = enum.auto()
     FLASHINFER = enum.auto()
     PALLAS = enum.auto()
     IPEX = enum.auto()
@@ -65,6 +66,11 @@ def get_attn_backend(
         logger.info("Using Torch SDPA backend.")
         from aphrodite.attention.backends.torch_sdpa import TorchSDPABackend
         return TorchSDPABackend
+    elif backend == _Backend.OPENVINO:
+        logger.info("Using OpenVINO attention backend.")
+        from aphrodite.attention.backends.openvino import \
+            OpenVINOAttentionBackend
+        return OpenVINOAttentionBackend
     elif backend == _Backend.IPEX:
         assert is_xpu(), RuntimeError(
             "IPEX attention backend is only used for the XPU device.")
@@ -111,7 +117,12 @@ def which_attn_to_use(
     if is_cpu():
         if selected_backend != _Backend.TORCH_SDPA:
             logger.info(f"Cannot use {selected_backend} backend on CPU.")
-        return _Backend.TORCH_SDPA\
+        return _Backend.TORCH_SDPA
+
+    if is_openvino():
+        if selected_backend != _Backend.OPENVINO:
+            logger.info(f"Cannot use {selected_backend} backend on OpenVINO.")
+        return _Backend.OPENVINO
 
     if is_xpu():
         if selected_backend != _Backend.IPEX:
@@ -132,7 +143,7 @@ def which_attn_to_use(
                 # not Instinct series GPUs.
                 logger.info("flash_attn is not supported on NAVI GPUs.")
         else:
-            logger.info("f{selected_backend} is not supported in AMD GPUs.")
+            logger.info(f"{selected_backend} is not supported in AMD GPUs.")
         return _Backend.ROCM_FLASH
 
     # FlashAttn in NVIDIA GPUs.
