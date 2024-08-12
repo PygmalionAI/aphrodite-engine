@@ -977,7 +977,10 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
         self,
         model_input: ModelInputForGPUWithSamplingMetadata,
         kv_caches: List[torch.Tensor],
-    ) -> SamplerOutput:
+        num_steps: int = 1,
+    ) -> Optional[List[SamplerOutput]]:
+        if num_steps > 1:
+            raise ValueError("num_steps > 1 is not supported in ModelRunner")
         if self.lora_config:
             assert model_input.lora_requests is not None
             assert model_input.lora_mapping is not None
@@ -1010,7 +1013,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
 
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:
-            return None
+            return []
 
         # Sample the next token.
         output: SamplerOutput = self.model.sample(
@@ -1028,7 +1031,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                 hidden_states = hidden_states[:len(indices)]
             output.hidden_states = hidden_states
 
-        return output
+        return [output]
 
 
 class CUDAGraphRunner:

@@ -11,6 +11,7 @@ from aphrodite.common.sequence import (ExecuteModelRequest, HiddenStates,
 from aphrodite.distributed.communication_op import broadcast_tensor_dict
 from aphrodite.modeling.layers.rejection_sampler import RejectionSampler
 from aphrodite.spec_decode.batch_expansion import BatchExpansionTop1Scorer
+from aphrodite.spec_decode.draft_model_runner import TP1DraftModelRunner
 from aphrodite.spec_decode.interfaces import (SpeculativeProposals,
                                               SpeculativeScorer,
                                               SpeculativeScores)
@@ -114,6 +115,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             draft_tp = draft_parallel_config.tensor_parallel_size
             target_tp = scorer_worker.parallel_config.tensor_parallel_size
 
+            if draft_tp == 1:
+                draft_worker_kwargs["model_runner_cls"] = TP1DraftModelRunner
             proposer_worker = MultiStepWorker(**draft_worker_kwargs)
             proposer_worker = SmallerTpProposerWorker.maybe_wrap_worker(
                 proposer_worker, draft_tp, target_tp)
