@@ -169,6 +169,15 @@ def is_cpu() -> bool:
 
 
 @lru_cache(maxsize=None)
+def is_openvino() -> bool:
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return "openvino" in version("aphrodite-engine")
+    except PackageNotFoundError:
+        return False
+
+
+@lru_cache(maxsize=None)
 def is_neuron() -> bool:
     try:
         import transformers_neuronx
@@ -527,7 +536,7 @@ def is_pin_memory_available() -> bool:
     elif is_neuron():
         print_warning_once("Pin memory is not supported on Neuron.")
         return False
-    elif is_cpu():
+    elif is_cpu() or is_openvino():
         return False
     return True
 

@@ -292,6 +292,9 @@ class AphroditeEngine:
         elif engine_config.device_config.device_type == "cpu":
             from aphrodite.executor.cpu_executor import CPUExecutor
             executor_class = CPUExecutor
+        elif engine_config.device_config.device_type == "openvino":
+            from aphrodite.executor.openvino_executor import OpenVINOExecutor
+            executor_class = OpenVINOExecutor
         elif engine_config.device_config.device_type == "xpu":
             if distributed_executor_backend == "ray":
                 initialize_ray_cluster(engine_config.parallel_config)

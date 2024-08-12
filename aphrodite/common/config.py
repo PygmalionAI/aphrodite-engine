@@ -11,7 +11,7 @@ from transformers import PretrainedConfig
 
 from aphrodite.common.utils import (cuda_device_count_stateless,
                                     get_cpu_memory, is_cpu, is_hip, is_neuron,
-                                    is_tpu, is_xpu,
+                                    is_openvino, is_tpu, is_xpu,
                                     update_environment_variables)
 from aphrodite.modeling.models import ModelRegistry
 from aphrodite.quantization import QUANTIZATION_METHODS
@@ -853,6 +853,8 @@ class DeviceConfig:
             # Automated device type detection
             if is_neuron():
                 self.device_type = "neuron"
+            elif is_openvino():
+                self.device_type = "openvino"
             elif is_tpu():
                 self.device_type = "tpu"
             elif is_cpu():
@@ -868,7 +870,7 @@ class DeviceConfig:
             self.device_type = device
 
         # Some device types require processing inputs on CPU
-        if self.device_type in ["neuron"]:
+        if self.device_type in ["neuron", "openvino"]:
             self.device = torch.device("cpu")
         elif self.device_type in ["tpu"]:
             self.device = None
