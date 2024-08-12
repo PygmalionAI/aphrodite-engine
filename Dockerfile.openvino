@@ -21,7 +21,7 @@ RUN PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cpu" python3 -m pip in
 RUN PIP_PRE=1 PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cpu https://storage.openvinotoolkit.org/simple/wheels/nightly/" APHRODITE_TARGET_DEVICE="openvino" python3 -m pip install -e /workspace/aphrodite-engine/
 
 # temporary hack until the dependencies are upgraded
-RUN pip install -U transformers
+RUN pip install 'transformers==4.43.0'
 
 COPY examples/ /workspace/aphrodite-engine/examples
 COPY tests/benchmarks/ /workspace/aphrodite-engine/tests/benchmarks
