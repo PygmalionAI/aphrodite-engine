@@ -1,16 +1,16 @@
 import argparse
 import dataclasses
-from dataclasses import dataclass
 import json
 import warnings
-from typing import Optional, Tuple
+from dataclasses import dataclass
+from typing import List, Optional, Tuple, Union
 
 from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
                                      EngineConfig, LoadConfig, LoRAConfig,
                                      ModelConfig, ParallelConfig,
                                      SchedulerConfig, SpeculativeConfig,
                                      TokenizerPoolConfig, VisionLanguageConfig)
-from aphrodite.common.utils import str_to_int_tuple, is_cpu
+from aphrodite.common.utils import is_cpu, str_to_int_tuple
 from aphrodite.quantization import QUANTIZATION_METHODS
 
 
@@ -19,6 +19,7 @@ class EngineArgs:
     """Arguments for Aphrodite engine."""
 
     model: str
+    served_model_name: Optional[Union[List[str]]] = None
     tokenizer: Optional[str] = None
     skip_tokenizer_init: bool = False
     tokenizer_mode: str = "auto"
@@ -660,6 +661,20 @@ class EngineArgs:
                             "corresponding to the chosen load_format. "
                             "This should be a JSON string that will be "
                             "parsed into a dictionary.")
+        parser.add_argument(
+            "--served-model-name",
+            nargs="+",
+            type=str,
+            default=None,
+            help="The model name(s) used in the API. If multiple "
+            "names are provided, the server will respond to any "
+            "of the provided names. The model name in the model "
+            "field of a response will be the first name in this "
+            "list. If not specified, the model name will be the "
+            "same as the `--model` argument. Noted that this name(s)"
+            "will also be used in `model_name` tag content of "
+            "prometheus metrics, if multiple names provided, metrics"
+            "tag will take the first one.")
         parser.add_argument("--qlora-adapter-name-or-path",
                             type=str,
                             default=None,
@@ -750,6 +765,7 @@ class EngineArgs:
             max_logprobs=self.max_logprobs,
             disable_sliding_window=self.disable_sliding_window,
             skip_tokenizer_init=self.skip_tokenizer_init,
+            served_model_name=self.served_model_name,
             multimodal_config=vision_language_config,
         )
 

@@ -35,6 +35,8 @@ class ModelConfig:
 
     Args:
         model: Name or path of the huggingface model to use.
+            It is also used as the content for `model_name` tag in metrics 
+            output when `served_model_name` is not specified. 
         tokenizer: Name or path of the huggingface tokenizer to use.
         tokenizer_mode: Tokenizer mode. "auto" will use the fast tokenizer if
             available, and "slow" will always use the slow tokenizer.
@@ -87,6 +89,10 @@ class ModelConfig:
             ignored.
         skip_tokenizer_init: If true, skip initialization of tokenizer and
             detokenizer.
+        served_model_name: The model name used in metrics tag `model_name`,
+            matches the model name exposed via the APIs. If multiple model 
+            names provided, the first name will be used. If not specified, 
+            the model name will be the same as `model`.
     """
 
     def __init__(
@@ -115,6 +121,7 @@ class ModelConfig:
         max_logprobs: int = 5,
         disable_sliding_window: bool = False,
         skip_tokenizer_init: bool = False,
+        served_model_name: Optional[Union[str, List[str]]] = None,
         multimodal_config: Optional["VisionLanguageConfig"] = None,
     ) -> None:
         self.model = model
@@ -158,6 +165,8 @@ class ModelConfig:
             disable_sliding_window=self.disable_sliding_window,
             sliding_window_len=self.get_hf_config_sliding_window(),
             rope_scaling_arg=self.rope_scaling)
+        self.served_model_name = get_served_model_name(model,
+                                                       served_model_name)
         self.multimodal_config = multimodal_config
 
         if not self.skip_tokenizer_init:
@@ -1463,6 +1472,22 @@ def _get_and_verify_max_len(
         derived_max_model_len = max_model_len
 
     return int(max_model_len)
+
+
+def get_served_model_name(model: str,
+                          served_model_name: Optional[Union[str, List[str]]]):
+    """
+    If the input is a non-empty list, the first model_name in 
+    `served_model_name` is taken. 
+    If the input is a non-empty string, it is used directly. 
+    For cases where the input is either an empty string or an 
+    empty list, the fallback is to use `self.model`.
+    """
+    if not served_model_name:
+        return model
+    if isinstance(served_model_name, list):
+        return served_model_name[0]
+    return served_model_name
 
 
 @dataclass
