@@ -1,11 +1,11 @@
 import time
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, ClassVar, Dict, Iterable, List, Optional
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, Iterable, List, Optional
 from typing import Sequence as GenericSequence
 from typing import Type, TypeVar, Union
 
 from loguru import logger
-from transformers import GenerationConfig, PreTrainedTokenizer
+from transformers import PreTrainedTokenizer
 
 from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
                                      LoadConfig, LoRAConfig, ModelConfig,
@@ -35,6 +35,7 @@ from aphrodite.inputs import INPUT_REGISTRY, LLMInputs, PromptInputs
 from aphrodite.lora.request import LoRARequest
 from aphrodite.processing.scheduler import (ScheduledSequenceGroup, Scheduler,
                                             SchedulerOutputs)
+from aphrodite.transformers_utils.config import try_get_generation_config
 from aphrodite.transformers_utils.detokenizer import Detokenizer
 from aphrodite.transformers_utils.tokenizer_group import (BaseTokenizerGroup,
                                                           get_tokenizer_group)
@@ -43,15 +44,17 @@ from aphrodite.version import __version__ as APHRODITE_VERSION
 _LOCAL_LOGGING_INTERVAL_SEC = 5
 
 
-def _load_generation_config_dict(model_config: ModelConfig):
-    try:
-        return GenerationConfig.from_pretrained(
-            model_config.model,
-            revision=model_config.revision,
-        ).to_diff_dict()
-    except OSError:
-        # Not found.
+def _load_generation_config_dict(model_config: ModelConfig) -> Dict[str, Any]:
+    config = try_get_generation_config(
+        model_config.model,
+        trust_remote_code=model_config.trust_remote_code,
+        revision=model_config.revision,
+    )
+
+    if config is None:
         return {}
+
+    return config.to_diff_dict()
 
 
 _O = TypeVar("_O", RequestOutput, EmbeddingRequestOutput)

@@ -6,7 +6,6 @@ repos
 *.so
 .conda
 build
-dist*
 .VSCodeCounter
 conda/
 umamba.exe
