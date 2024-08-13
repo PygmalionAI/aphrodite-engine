@@ -41,7 +41,8 @@ class EETQConfig(QuantizationConfig):
     def get_supported_act_dtypes(self) -> List[torch.dtype]:
         return [torch.half]
 
-    def get_min_capability(self) -> int:
+    @classmethod
+    def get_min_capability(cls) -> int:
         # The EETQ kernel only supports Turing or newer GPUs.
         return 70
 
