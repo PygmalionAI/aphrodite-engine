@@ -18,7 +18,7 @@ from aphrodite.common.utils import make_tensor_with_pad
 from aphrodite.modeling.model_loader import get_model
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 
-_PAD_SLOT_ID = 0  # FIXME
+_PAD_SLOT_ID = -1  # NOTE: In PyTorch XLA, index -1 is ignored
 # FIXME: Temporarily disabled top-p sampling since it's too slow.
 _ENABLE_TOP_P = False
 # FIXME: A temporary hack to support `n > 1`.
