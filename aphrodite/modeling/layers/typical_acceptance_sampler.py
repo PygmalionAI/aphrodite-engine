@@ -1,52 +1,48 @@
 import torch
 import torch.jit
-import torch.nn as nn
 
 from aphrodite.modeling.layers.spec_decode_base_sampler import \
     SpecDecodeBaseSampler
 
 
-class TypicalAcceptanceSampler(SpecDecodeBaseSampler, nn.Module):
-    """Apply typical acceptance sampling as described in section 3.3.1 in 
+class TypicalAcceptanceSampler(SpecDecodeBaseSampler):
+    """Apply typical acceptance sampling as described in section 3.3.2 in 
         "MEDUSA: Simple LLM Inference Acceleration Framework with 
         Multiple Decoding Heads"
-        https://arxiv.org/pdf/2401.10774
+        https://arxiv.org/abs/2401.10774
     """
 
     def __init__(
         self,
+        posterior_threshold: float,
+        posterior_alpha: float,
         disable_bonus_tokens: bool = False,
         strict_mode: bool = False,
-        posterior_threshold: float = 0.09,
-        posterior_alpha: float = 0.3,
     ):
         """Create a Typical Acceptance Sampler.
         Args:
             disable_bonus_tokens: Whether or not to disable the bonus token.
-            Require when bonus tokens will cause corrupt KV cache for
-            proposal methods that require KV cache.
+                Require when bonus tokens will cause corrupt KV cache for
+                proposal methods that require KV cache.
             strict_mode: Whether or not to perform shape/device/dtype checks
-            during sampling. This catches correctness issues but adds
-            nontrivial latency.
+                during sampling. This catches correctness issues but adds
+                nontrivial latency.
             posterior_threshold : A threshold value that sets a lower bound 
-            on the posterior probability of a token in target model for it
-            to be accepted. Default is 0.09
+                on the posterior probability of a token in target model for it
+                to be accepted.
             posterior_alpha : A scaling factor for the entropy-based
-            threshold in typical acceptance sampling. Typically defaults to
-            sqrt of posterior_threshold and is set to 0.3.
+                threshold in typical acceptance sampling.
         """
-        SpecDecodeBaseSampler.__init__(
-            self,
-            disable_bonus_tokens=disable_bonus_tokens,
-            strict_mode=strict_mode)
-        nn.Module.__init__(self)
         self._posterior_threshold = posterior_threshold
         self._posterior_alpha = posterior_alpha
+        super().__init__(disable_bonus_tokens=disable_bonus_tokens,
+                         strict_mode=strict_mode)
 
     def forward(
         self,
         target_probs: torch.Tensor,
         bonus_token_ids: torch.Tensor,
+        draft_probs: torch.Tensor,
         draft_token_ids: torch.Tensor,
     ) -> torch.Tensor:
         """Sample token ids using typical acceptance sampling. This accepts 
@@ -63,6 +59,7 @@ class TypicalAcceptanceSampler(SpecDecodeBaseSampler, nn.Module):
             bonus_token_ids: The "bonus" token ids that are accepted iff all
                 speculative tokens in a sequence are accepted.
             shape = [batch_size, num_bonus_tokens]
+            draft_probs: This parameter is unused by the acceptance sampler.
             draft_token_ids: The token ids that were sampled from the draft
                 probabilities.
             shape = [batch_size, num_speculative_tokens]
