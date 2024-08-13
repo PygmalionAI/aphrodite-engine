@@ -12,6 +12,7 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      SchedulerConfig, SpeculativeConfig,
                                      VisionLanguageConfig)
 from aphrodite.common.sequence import ExecuteModelRequest
+from aphrodite.common.utils import get_device_capability_stateless
 from aphrodite.distributed import (ensure_model_parallel_initialized,
                                    init_distributed_environment,
                                    set_custom_all_reduce)
@@ -325,7 +326,7 @@ def init_worker_distributed_environment(
 def _check_if_gpu_supports_dtype(torch_dtype: torch.dtype):
     # Check if the GPU supports the dtype.
     if torch_dtype == torch.bfloat16:
-        compute_capability = torch.cuda.get_device_capability()
+        compute_capability = get_device_capability_stateless()
         if compute_capability[0] < 8:
             gpu_name = torch.cuda.get_device_name()
             raise ValueError(

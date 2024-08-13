@@ -6,17 +6,18 @@ from torch.nn import Module
 from torch.nn.parameter import Parameter
 
 from aphrodite import _custom_ops as ops
+from aphrodite.common.utils import (get_device_capability_stateless,
+                                    print_warning_once)
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
+from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import (QuantizationConfig,
                                                 QuantizeMethodBase)
-from aphrodite.modeling.utils import set_weight_attrs
-from aphrodite.common.utils import print_warning_once
 
 ACTIVATION_SCHEMES = ["static", "dynamic"]
 
 
 def cutlass_fp8_supported() -> bool:
-    capability = torch.cuda.get_device_capability()
+    capability = get_device_capability_stateless()
     capability = capability[0] * 10 + capability[1]
     return ops.cutlass_scaled_mm_supports_fp8(capability)
 
@@ -64,7 +65,8 @@ class Fp8Config(QuantizationConfig):
 
     def get_quant_method(
             self, layer: torch.nn.Module) -> Optional["QuantizeMethodBase"]:
-        from aphrodite.attention.layer import Attention  # Avoid circular import
+        from aphrodite.attention.layer import \
+            Attention  # Avoid circular import
 
         if isinstance(layer, LinearBase):
             return Fp8LinearMethod(self)
