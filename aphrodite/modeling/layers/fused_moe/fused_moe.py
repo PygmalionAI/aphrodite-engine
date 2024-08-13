@@ -421,6 +421,10 @@ def fused_experts(hidden_states: torch.Tensor,
     M, _ = hidden_states.shape
     E, N, _ = w1.shape
 
+    if M > 65536:
+        raise ValueError("MoE kernel does not support more than 65536 tokens, "
+                         f"but got {M}")
+
     if override_config:
         config = override_config
     else:
