@@ -1,35 +1,36 @@
+import base64
 import time
-from typing import AsyncIterator, List, Tuple, Optional
+from typing import AsyncIterator, List, Optional, Tuple
 
+import numpy as np
 from fastapi import Request
 
-from aphrodite.engine.async_aphrodite import AsyncAphrodite
+from aphrodite.common.outputs import EmbeddingRequestOutput
+from aphrodite.common.utils import merge_async_iterators, random_uuid
 from aphrodite.endpoints.openai.protocol import (EmbeddingRequest,
                                                  EmbeddingResponse,
                                                  EmbeddingResponseData,
                                                  UsageInfo)
 from aphrodite.endpoints.openai.serving_completions import parse_prompt_format
-from aphrodite.endpoints.openai.serving_engine import OpenAIServing, LoRA
-from aphrodite.common.outputs import EmbeddingRequestOutput
-from aphrodite.common.utils import merge_async_iterators, random_uuid
+from aphrodite.endpoints.openai.serving_engine import LoRA, OpenAIServing
+from aphrodite.engine.async_aphrodite import AsyncAphrodite
 
 TypeTokenIDs = List[int]
 
 
 def request_output_to_embedding_response(
-    final_res_batch: List[EmbeddingRequestOutput],
-    request_id: str,
-    created_time: int,
-    model_name: str,
-) -> EmbeddingResponse:
+        final_res_batch: List[EmbeddingRequestOutput], request_id: str,
+        created_time: int, model_name: str,
+        encoding_format: str) -> EmbeddingResponse:
     data = []
     num_prompt_tokens = 0
     for idx, final_res in enumerate(final_res_batch):
         assert final_res is not None
         prompt_token_ids = final_res.prompt_token_ids
-
-        embedding_data = EmbeddingResponseData(
-            index=idx, embedding=final_res.outputs.embedding)
+        embedding = final_res.outputs.embedding
+        if encoding_format == "base64":
+            embedding = base64.b64encode(np.array(embedding))
+        embedding_data = EmbeddingResponseData(index=idx, embedding=embedding)
         data.append(embedding_data)
 
         num_prompt_tokens += len(prompt_token_ids)
@@ -69,9 +70,8 @@ class OpenAIServingEmbedding(OpenAIServing):
             return error_check_ret
 
         # Return error for unsupported features.
-        if request.encoding_format == "base64":
-            return self.create_error_response(
-                "base64 encoding is not currently supported")
+        encoding_format = (request.encoding_format
+                           if request.encoding_format else "float")
         if request.dimensions is not None:
             return self.create_error_response(
                 "dimensions is currently not supported")
@@ -125,7 +125,8 @@ class OpenAIServingEmbedding(OpenAIServing):
                     return self.create_error_response("Client disconnected")
                 final_res_batch[i] = res
             response = request_output_to_embedding_response(
-                final_res_batch, request_id, created_time, model_name)
+                final_res_batch, request_id, created_time, model_name,
+                encoding_format)
         except ValueError as e:
             # TODO: Use a aphrodite-specific Validation Error
             return self.create_error_response(str(e))
