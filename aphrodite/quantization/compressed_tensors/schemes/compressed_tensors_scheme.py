@@ -28,3 +28,11 @@ class CompressedTensorsScheme(ABC):
         :param x: input to the layer
         """
         raise NotImplementedError
+
+    @abstractmethod
+    def process_weights_after_loading(self, layer: torch.nn.Module):
+        """
+        Called after weight loading is complete for any cleanup that
+        needs to occur.
+        """
+        raise NotImplementedError
