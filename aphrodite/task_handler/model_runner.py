@@ -254,6 +254,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
 
         if self.lora_config:
             assert supports_lora(self.model), "Model does not support LoRA"
+
             self.lora_manager = LRUCacheWorkerLoRAManager(
                 self.scheduler_config.max_num_seqs,
                 self.scheduler_config.max_num_batched_tokens,
@@ -617,6 +618,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                     last_paged_kv_indptr = paged_kv_indptr[-1]
                     paged_kv_indptr.append(last_paged_kv_indptr)
                     paged_kv_last_page_len.append(0)
+
             batch_size = graph_batch_size
             num_decode_tokens = batch_size
 
@@ -690,8 +692,10 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                 paged_kv_indices_tensor = None
                 paged_kv_indptr_tensor = None
                 paged_kv_last_page_len_tensor = None
+
             kv_cache_dtype = get_kv_cache_torch_dtype(self.kv_cache_dtype,
                                                       self.model_config.dtype)
+
             attn_metadata = self.attn_backend.make_metadata(
                 num_prefills=num_prefills,
                 slot_mapping=slot_mapping_tensor,
@@ -715,7 +719,6 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                 use_cuda_graph=use_captured_graph)
 
         else:
-
             attn_metadata = self.attn_backend.make_metadata(
                 num_prefills=num_prefills,
                 slot_mapping=slot_mapping_tensor,
@@ -1035,7 +1038,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
         # This usually takes < 10 seconds.
-        logger.info(f"Graph capturing finished in {elapsed_time} secs.")
+        logger.info(f"Graph capturing finished in {elapsed_time:2f} secs.")
 
     @property
     def vocab_size(self) -> int:
@@ -1099,6 +1102,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
     ) -> Optional[List[SamplerOutput]]:
         if num_steps > 1:
             raise ValueError("num_steps > 1 is not supported in ModelRunner")
+
         if self.lora_config:
             assert model_input.lora_requests is not None
             assert model_input.lora_mapping is not None
@@ -1177,6 +1181,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                 hidden_states = hidden_states.index_select(0, indices)
             elif decode_meta.use_cuda_graph:
                 hidden_states = hidden_states[:len(indices)]
+
             output.hidden_states = hidden_states
 
         return [output]
@@ -1187,6 +1192,7 @@ class CUDAGraphRunner:
     def __init__(self, model: nn.Module, backend_name: str):
         self.model = model
         self.backend_name = backend_name
+
         self.input_buffers: Dict[str, torch.Tensor] = {}
         self.output_buffers: Dict[str, torch.Tensor] = {}
 

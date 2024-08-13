@@ -69,6 +69,7 @@ class FlashInferMetadata(AttentionMetadata):
 
     use_cuda_graph: bool = True
 
+    prefill_wrapper: Optional[BatchPrefillWithPagedKVCacheWrapper] = None
     decode_wrapper: Optional[BatchDecodeWithPagedKVCacheWrapper] = None
 
     # Metadata for the prefill stage
@@ -142,7 +143,6 @@ class FlashInferMetadata(AttentionMetadata):
                     self.device)
 
             assert self.decode_wrapper is not None
-
             self.decode_wrapper.begin_forward(
                 self.paged_kv_indptr,
                 self.paged_kv_indices,
