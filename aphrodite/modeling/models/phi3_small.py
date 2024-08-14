@@ -7,7 +7,7 @@ from transformers.configuration_utils import PretrainedConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig, LoRAConfig
-from aphrodite.common.sequence import SamplerOutput
+from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
 from aphrodite.distributed import (get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size)
 from aphrodite.modeling.layers.linear import (MergedColumnParallelLinear,
@@ -411,6 +411,7 @@ class Phi3SmallForCausalLM(nn.Module):
         positions: Optional[torch.LongTensor],
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
+        intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> torch.Tensor:
         output_hidden_states = self.model(
             input_ids=input_ids,

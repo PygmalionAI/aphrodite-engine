@@ -37,7 +37,6 @@ _PP_SUPPORTED_MODELS = [
     "LLaMAForCausalLM",
     "MistralForCausalLM",
     "Phi3ForCausalLM",
-    "GPT2LMHeadModel",
 ]
 
 

@@ -25,7 +25,7 @@ from transformers import CLIPVisionConfig, PretrainedConfig
 
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, VisionLanguageConfig
-from aphrodite.common.sequence import SamplerOutput
+from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
 from aphrodite.inputs import INPUT_REGISTRY, InputContext
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.sampler import Sampler
@@ -378,9 +378,13 @@ class Phi3VForCausalLM(nn.Module, SupportsVision):
 
         return None
 
-    def forward(self, input_ids: torch.Tensor, positions: torch.Tensor,
+    def forward(self,
+                input_ids: torch.Tensor,
+                positions: torch.Tensor,
                 kv_caches: List[torch.Tensor],
-                attn_metadata: AttentionMetadata, **kwargs: object):
+                attn_metadata: AttentionMetadata,
+                intermediate_tensors: Optional[IntermediateTensors] = None,
+                **kwargs: object):
         image_input = self._parse_and_validate_image_input(**kwargs)
 
         if image_input is not None:
@@ -395,6 +399,7 @@ class Phi3VForCausalLM(nn.Module, SupportsVision):
                                    positions,
                                    kv_caches,
                                    attn_metadata,
+                                   intermediate_tensors,
                                    inputs_embeds=inputs_embeds)
 
         return hidden_states
