@@ -1,14 +1,10 @@
-from typing import List, Optional, Union
-from dataclasses import dataclass
 import time
+from dataclasses import dataclass
+from typing import List, Optional, Tuple, Union
 
-from aphrodite.common.sequence import (
-    PromptLogprobs,
-    SampleLogprobs,
-    SequenceGroup,
-    SequenceStatus,
-    RequestMetrics,
-)
+from aphrodite.common.sequence import (PromptLogprobs, RequestMetrics,
+                                       SampleLogprobs, SequenceGroup,
+                                       SequenceStatus)
 from aphrodite.lora.request import LoRARequest
 
 
@@ -33,7 +29,7 @@ class CompletionOutput:
 
     index: int
     text: str
-    token_ids: List[int]
+    token_ids: Tuple[int, ...]
     cumulative_logprob: float
     logprobs: Optional[SampleLogprobs]
     finish_reason: Optional[str] = None
