@@ -12,7 +12,7 @@ from .data import LLMInputs
 if TYPE_CHECKING:
     from aphrodite.common.config import ModelConfig, VisionLanguageConfig
     from aphrodite.common.sequence import SequenceData
-    from aphrodite.multimodal import MultiModalData
+    from aphrodite.multimodal import MultiModalDataDict
 
 C = TypeVar("C", bound=PretrainedConfig)
 
@@ -61,7 +61,8 @@ class InputContext:
 N = TypeVar("N", bound=Type[nn.Module])
 
 DummyDataFactory = Callable[[InputContext, int],
-                            Tuple["SequenceData", Optional["MultiModalData"]]]
+                            Tuple["SequenceData",
+                                  Optional["MultiModalDataDict"]]]
 """
 Create dummy data to be inputted into the model.
 Note:
@@ -88,7 +89,7 @@ class InputRegistry:
         self,
         ctx: InputContext,
         seq_len: int,
-    ) -> Tuple["SequenceData", Optional["MultiModalData"]]:
+    ) -> Tuple["SequenceData", Optional["MultiModalDataDict"]]:
         """
         The default dummy data factory represents the longest possible text
         that can be inputted to the model.

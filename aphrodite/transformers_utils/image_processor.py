@@ -1,5 +1,3 @@
-from typing import Optional
-
 from transformers import AutoImageProcessor
 from transformers.image_processing_utils import BaseImageProcessor
 
@@ -8,7 +6,6 @@ def get_image_processor(
     processor_name: str,
     *args,
     trust_remote_code: bool = False,
-    revision: Optional[str] = None,
     **kwargs,
 ) -> BaseImageProcessor:
     """Gets an image processor for the given model name via HuggingFace."""
@@ -17,7 +14,6 @@ def get_image_processor(
             processor_name,
             *args,
             trust_remote_code=trust_remote_code,
-            revision=revision,
             **kwargs)
     except ValueError as e:
         # If the error pertains to the processor class not existing or not

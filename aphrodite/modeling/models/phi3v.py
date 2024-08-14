@@ -1,4 +1,5 @@
 # coding=utf-8
+# Copyright 2024 The PygmalionAI team.
 # Copyright 2024 The vLLM team.
 # Copyright 2024 Microsoft and the HuggingFace Inc. team. All rights reserved.
 #
@@ -34,10 +35,9 @@ from aphrodite.modeling.models.clip import CLIPVisionModel
 from aphrodite.modeling.models.llama import LlamaModel
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
-from aphrodite.multimodal.image import ImagePixelData
 from aphrodite.quantization.base_config import QuantizationConfig
 
-from .clip import dummy_pixel_data_for_clip, dummy_seq_data_for_clip
+from .clip import dummy_image_for_clip, dummy_seq_data_for_clip
 from .interfaces import SupportsVision
 
 _KEYS_TO_MODIFY_MAPPING = {
@@ -283,7 +283,7 @@ def dummy_data_for_phi3v(ctx: InputContext, seq_len: int):
         image_token_id=32044,
         image_feature_size_override=image_feature_size,
     )
-    mm_data = dummy_pixel_data_for_clip(
+    mm_data = dummy_image_for_clip(
         CLIP_VIT_LARGE_PATCH14_336_CONFIG,
         image_width_override=dummy_width,
         image_height_override=dummy_height,
@@ -328,8 +328,7 @@ def _calc_hd_transform_size(*, width: int, height: int, hd_num: int = 16):
 
 
 def _image_processor(ctx: InputContext,
-                     data: ImagePixelData) -> Dict[str, torch.Tensor]:
-    image = data.image
+                     image: object) -> Dict[str, torch.Tensor]:
 
     if isinstance(image, Image.Image):
         # Temporary patch before dynamic number of image tokens is supported
@@ -339,13 +338,14 @@ def _image_processor(ctx: InputContext,
             logger.warning("Dynamic image shape is currently not supported. "
                            f"Resizing input image to ({w}, {h}).")
 
-            data.image = image.resize((w, h))
+            image = image.resize((w, h))
 
-    return MULTIMODAL_REGISTRY._get_plugin_for_data_type(ImagePixelData) \
-            ._default_input_mapper(ctx, data)
+        return MULTIMODAL_REGISTRY._get_plugin("image") \
+                ._default_input_mapper(ctx, image)
+    raise TypeError(f"Invalid type for 'image': {type(image)}")
 
 
-@MULTIMODAL_REGISTRY.register_image_pixel_input_mapper(_image_processor)
+@MULTIMODAL_REGISTRY.register_image_input_mapper(_image_processor)
 @INPUT_REGISTRY.register_dummy_data(dummy_data_for_phi3v)
 class Phi3VForCausalLM(nn.Module, SupportsVision):
 
@@ -370,14 +370,6 @@ class Phi3VForCausalLM(nn.Module, SupportsVision):
             self, **kwargs: object) -> Optional[Phi3VImagePixelInputs]:
         pixel_values = kwargs.pop("pixel_values", None)
         image_sizes = kwargs.pop("image_sizes", None)
-
-        expected_input_type = self.vlm_config.image_input_type
-        ImageInputType = VisionLanguageConfig.ImageInputType
-
-        if expected_input_type != ImageInputType.PIXEL_VALUES:
-            raise ValueError(
-                f"Unexpected image input type: {expected_input_type}."
-                "Phi3v only support pixel_values input currently.")
 
         if pixel_values is not None and image_sizes is not None:
             return Phi3VImagePixelInputs(type="pixel_values",
