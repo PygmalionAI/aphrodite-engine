@@ -9,7 +9,7 @@ from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.common.utils import (get_aphrodite_instance_id,
                                     get_distributed_init_method, get_ip,
                                     get_open_port, make_async)
-from aphrodite.executor.distributed_gpu_executor import (
+from aphrodite.executor.distributed_gpu_executor import (  # yapf: disable
     DistributedGPUExecutor, DistributedGPUExecutorAsync)
 from aphrodite.executor.ray_utils import RayWorkerWrapper, ray
 
@@ -23,12 +23,12 @@ if TYPE_CHECKING:
 # which optimizes the control plane overhead.
 # Run Aphrodite with APHRODITE_USE_RAY_COMPILED_DAG=1 to enable it.
 USE_RAY_COMPILED_DAG = bool(os.getenv("APHRODITE_USE_RAY_COMPILED_DAG", 0))
+APHRODITE_TRACE_FUNCTION = int(os.getenv("APHRODITE_TRACE_FUNCTION", 0))
 
 
 class RayGPUExecutor(DistributedGPUExecutor):
 
     def _init_executor(self) -> None:
-
         assert self.parallel_config.distributed_executor_backend == "ray"
         placement_group = self.parallel_config.placement_group
 
@@ -73,7 +73,7 @@ class RayGPUExecutor(DistributedGPUExecutor):
 
         # The driver dummy worker does not actually use any resources.
         # It holds the resource for the driver worker.
-        self.driver_dummy_worker: RayWorkerWrapper = None
+        self.driver_dummy_worker: Optional[RayWorkerWrapper] = None
         # The remaining workers are the actual ray actors.
         self.workers: List[RayWorkerWrapper] = []
 
@@ -91,12 +91,14 @@ class RayGPUExecutor(DistributedGPUExecutor):
                 placement_group_capture_child_tasks=True,
                 placement_group_bundle_index=bundle_id,
             )
+
             if self.speculative_config is not None:
                 worker_module_name = "aphrodite.spec_decode.spec_decode_worker"
                 worker_class_name = "create_spec_worker"
             else:
                 worker_module_name = "aphrodite.task_handler.worker"
                 worker_class_name = "Worker"
+
             worker = ray.remote(
                 num_cpus=0,
                 num_gpus=num_gpus,
@@ -136,6 +138,7 @@ class RayGPUExecutor(DistributedGPUExecutor):
         node_gpus = defaultdict(list)
 
         for i, (node_id, gpu_ids) in enumerate(worker_node_and_gpu_ids):
+            node_workers[node_id].append(i)
             # `gpu_ids` can be a list of strings or integers.
             # convert them to integers for consistency.
             # NOTE: gpu_ids can be larger than 9 (e.g. 16 GPUs),
@@ -154,7 +157,7 @@ class RayGPUExecutor(DistributedGPUExecutor):
             "APHRODITE_INSTANCE_ID":
             APHRODITE_INSTANCE_ID,
             "APHRODITE_TRACE_FUNCTION":
-            os.getenv("APHRODITE_TRACE_FUNCTION", "0"),
+            str(APHRODITE_TRACE_FUNCTION),
         }, ) for (node_id, _) in worker_node_and_gpu_ids]
         self._run_workers("update_environment_variables",
                           all_args=all_args_to_update_environment_variables)
@@ -211,6 +214,7 @@ class RayGPUExecutor(DistributedGPUExecutor):
         self, execute_model_req: Optional[ExecuteModelRequest]
     ) -> Optional[List[SamplerOutput]]:
         """Run execute_model in the driver worker.
+
         Passing None will cause the driver to stop the model execution
         loop running in each of the remote workers.
         """
@@ -231,6 +235,7 @@ class RayGPUExecutor(DistributedGPUExecutor):
     ) -> Any:
         """Runs the given method on all workers. Can be used in the following
         ways:
+
         Args:
         - async_run_tensor_parallel_workers_only: If True the method will be
           run only in the remote TP workers, not the driver worker.
@@ -240,6 +245,7 @@ class RayGPUExecutor(DistributedGPUExecutor):
         - all_args/all_kwargs: args/kwargs for each worker are specified
           individually
         """
+
         if max_concurrent_workers:
             raise NotImplementedError(
                 "max_concurrent_workers is not supported yet.")
@@ -251,8 +257,9 @@ class RayGPUExecutor(DistributedGPUExecutor):
             else islice(all_args, 1, None)
         all_worker_kwargs = repeat(kwargs, count) if all_kwargs is None \
             else islice(all_kwargs, 1, None)
+
         if use_ray_compiled_dag:
-            # Right now, compiled DAG can only accepts a single
+            # Right now, compiled DAG can only accept a single
             # input. TODO: Fix it.
             assert self.forward_dag is not None
             output_channels = self.forward_dag.execute(1)
@@ -281,6 +288,7 @@ class RayGPUExecutor(DistributedGPUExecutor):
             driver_worker_output = self.driver_worker.execute_method(
                 method, *driver_args, **driver_kwargs)
         else:
+            assert self.driver_dummy_worker is not None
             driver_worker_output = ray.get(
                 self.driver_dummy_worker.execute_method.remote(
                     method, *driver_args, **driver_kwargs))
@@ -321,8 +329,9 @@ class RayGPUExecutor(DistributedGPUExecutor):
         # a dummy value for now. It will be fixed soon.
         with InputNode() as input_data:
             forward_dag = MultiOutputNode([
-                worker.execute_model_compiled_dag_remote.bind(input_data)
-                for worker in self.workers
+                worker.execute_model_compiled_dag_remote.
+                bind(  # type: ignore[attr-defined]
+                    input_data) for worker in self.workers
             ])
         return forward_dag.experimental_compile()
 
