@@ -755,7 +755,7 @@ class AphroditeEngine:
         # Log stats.
         self.do_log_stats(scheduler_outputs, output)
 
-        if not request_outputs:
+        if not self.has_unfinished_requests():
             # Stop the execute model loop in parallel workers until there are
             # more requests to process. This avoids waiting indefinitely in
             # torch.distributed ops which may otherwise timeout, and unblocks
