@@ -7,7 +7,8 @@ from torch import nn
 
 from aphrodite.common.config import (DeviceConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig)
-from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
+from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
+                                       SequenceGroupMetadata)
 from aphrodite.common.utils import (is_pin_memory_available,
                                     make_tensor_with_pad)
 from aphrodite.modeling import SamplingMetadata
@@ -175,6 +176,7 @@ class NeuronModelRunner(ModelRunnerBase[ModelInputForNeuron]):
     def prepare_model_input(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
+        virtual_engine: int = 0,
     ) -> ModelInputForNeuron:
         # NOTE: We assume that all sequences in the group are all prompts or
         # all decodes.
@@ -207,6 +209,7 @@ class NeuronModelRunner(ModelRunnerBase[ModelInputForNeuron]):
         self,
         model_input: ModelInputForNeuron,
         kv_caches: Optional[List[torch.Tensor]] = None,
+        intermediate_tensors: Optional[IntermediateTensors] = None,
         num_steps: int = 1,
     ) -> Optional[List[SamplerOutput]]:
         if num_steps > 1:

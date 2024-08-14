@@ -10,8 +10,8 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig, VisionLanguageConfig)
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.common.sequence import (SamplerOutput, SequenceData,
-                                       SequenceGroupMetadata)
+from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
+                                       SequenceData, SequenceGroupMetadata)
 from aphrodite.common.utils import CudaMemoryProfiler, make_tensor_with_pad
 from aphrodite.distributed import broadcast_tensor_dict
 from aphrodite.modeling.model_loader import get_model
@@ -190,6 +190,7 @@ class XPUModelRunner(ModelRunnerBase[ModelInputForXPU]):
     def prepare_model_input(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
+        virtual_engine: int = 0,
     ) -> ModelInputForXPU:
         multi_modal_input = None
         if self.is_driver_worker:
@@ -334,6 +335,7 @@ class XPUModelRunner(ModelRunnerBase[ModelInputForXPU]):
         self,
         model_input: ModelInputForXPU,
         kv_caches: List[torch.Tensor],
+        intermediate_tensors: Optional[IntermediateTensors] = None,
         num_steps: int = 1,
     ) -> Optional[List[SamplerOutput]]:
         if num_steps > 1:

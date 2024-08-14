@@ -9,7 +9,8 @@ from aphrodite.attention import AttentionMetadata, get_attn_backend
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig, VisionLanguageConfig)
-from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
+from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
+                                       SequenceGroupMetadata)
 from aphrodite.common.utils import make_tensor_with_pad
 from aphrodite.modeling import SamplingMetadata
 from aphrodite.modeling.model_loader import get_model
@@ -312,6 +313,7 @@ class CPUModelRunner(ModelRunnerBase[CPUModelInput]):
     def prepare_model_input(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
+        virtual_engine: int = 0,
     ) -> CPUModelInput:
         multi_modal_kwargs = None
         # NOTE: We assume that all sequences in the group are all prompts or
@@ -348,6 +350,7 @@ class CPUModelRunner(ModelRunnerBase[CPUModelInput]):
         self,
         model_input: CPUModelInput,
         kv_caches: List[torch.Tensor],
+        intermediate_tensors: Optional[IntermediateTensors] = None,
         num_steps: int = 1,
     ) -> Optional[List[SamplerOutput]]:
         if num_steps > 1:

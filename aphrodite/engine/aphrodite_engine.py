@@ -168,7 +168,8 @@ class AphroditeEngine:
             f"Speculative Config = {speculative_config!r}\n"
             f"DataType = {model_config.dtype}\n"
             f"Model Load Format = {load_config.load_format}\n"
-            f"Number of GPUs = {parallel_config.tensor_parallel_size}\n"
+            f"Tensor Parallel Size = {parallel_config.tensor_parallel_size}\n"
+            f"Pipeline Parallel Size = {parallel_config.pipeline_parallel_size}\n"  # noqa: E501
             f"Disable Custom All-Reduce = "
             f"{parallel_config.disable_custom_all_reduce}\n"
             f"Quantization Format = {model_config.quantization}\n"
@@ -231,7 +232,11 @@ class AphroditeEngine:
         # Create the scheduler.
         # NOTE: the cache_config here have been updated with the numbers of
         # GPU and CPU blocks, which are profiled in the distributed executor.
-        self.scheduler = Scheduler(scheduler_config, cache_config, lora_config)
+        self.scheduler = [
+            Scheduler(scheduler_config, cache_config, lora_config,
+                      parallel_config.pipeline_parallel_size)
+            for _ in range(parallel_config.pipeline_parallel_size)
+        ]
 
         # Metric Logging.
         if self.log_stats:
@@ -435,8 +440,16 @@ class AphroditeEngine:
             raise ValueError(
                 "Either SamplingParams or PoolingParams must be provided.")
 
-        # Add the sequence group to the scheduler.
-        self.scheduler.add_seq_group(seq_group)
+        # Add the sequence group to the scheduler with least unfinished seqs.
+        costs = [
+            scheduler.get_num_unfinished_seq_groups()
+            for scheduler in self.scheduler
+        ]
+        min_cost_scheduler = self.scheduler[costs.index(min(costs))]
+        min_cost_scheduler.add_seq_group(seq_group)
+
+    def stop_remote_worker_execution_loop(self) -> None:
+        self.model_executor.stop_remote_worker_execution_loop()
 
     def process_model_inputs(
         self,
@@ -601,7 +614,8 @@ class AphroditeEngine:
             >>> # abort the request
             >>> engine.abort_request(request_id)
         """
-        self.scheduler.abort_seq_group(request_id)
+        for scheduler in self.scheduler:
+            scheduler.abort_seq_group(request_id)
 
     def get_model_config(self) -> ModelConfig:
         """Gets the model configuration."""
@@ -613,11 +627,20 @@ class AphroditeEngine:
 
     def get_num_unfinished_requests(self) -> int:
         """Gets the number of unfinished requests."""
-        return self.scheduler.get_num_unfinished_seq_groups()
+        return sum(scheduler.get_num_unfinished_seq_groups()
+                   for scheduler in self.scheduler)
 
     def has_unfinished_requests(self) -> bool:
         """Returns True if there are unfinished requests."""
-        return self.scheduler.has_unfinished_seqs()
+        return any(scheduler.has_unfinished_seqs()
+                   for scheduler in self.scheduler)
+
+    def has_unfinished_requests_for_virtual_engine(
+            self, virtual_engine: int) -> bool:
+        """
+        Returns True if there are unfinished requests for the virtual engine.
+        """
+        return self.scheduler[virtual_engine].has_unfinished_seqs()
 
     def _process_sequence_group_outputs(
         self,
@@ -666,7 +689,8 @@ class AphroditeEngine:
                 self.output_processor.process_outputs(seq_group, outputs)
 
         # Free the finished sequence groups.
-        self.scheduler.free_finished_seq_groups()
+        for scheduler in self.scheduler:
+            scheduler.free_finished_seq_groups()
 
         # Create the outputs.
         request_outputs: List[Union[RequestOutput,
@@ -732,7 +756,12 @@ class AphroditeEngine:
             >>>     if not (engine.has_unfinished_requests() or example_inputs):
             >>>         break
         """
-        seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
+        if self.parallel_config.pipeline_parallel_size > 1:
+            raise NotImplementedError(
+                "Pipeline parallelism is only supported through AsyncAphrodite "
+                "as performance will be severely degraded otherwise.")
+        seq_group_metadata_list, scheduler_outputs = self.scheduler[
+            0].schedule()
 
         if not scheduler_outputs.is_empty():
             execute_model_req = ExecuteModelRequest(
@@ -800,23 +829,28 @@ class AphroditeEngine:
 
         # System State
         #   Scheduler State
-        num_running_sys = len(self.scheduler.running)
-        num_swapped_sys = len(self.scheduler.swapped)
-        num_waiting_sys = len(self.scheduler.waiting)
+        num_running_sys = sum(
+            len(scheduler.running) for scheduler in self.scheduler)
+        num_swapped_sys = sum(
+            len(scheduler.swapped) for scheduler in self.scheduler)
+        num_waiting_sys = sum(
+            len(scheduler.waiting) for scheduler in self.scheduler)
 
         # KV Cache Usage in %
         num_total_gpu = self.cache_config.num_gpu_blocks
         gpu_cache_usage_sys = 0.
         if num_total_gpu is not None:
-            num_free_gpu = self.scheduler.block_manager.get_num_free_gpu_blocks(
-            )
+            num_free_gpu = sum(
+                scheduler.block_manager.get_num_free_gpu_blocks()
+                for scheduler in self.scheduler)
             gpu_cache_usage_sys = 1.0 - (num_free_gpu / num_total_gpu)
 
         num_total_cpu = self.cache_config.num_cpu_blocks
         cpu_cache_usage_sys = 0.
         if num_total_cpu is not None and num_total_cpu > 0:
-            num_free_cpu = self.scheduler.block_manager.get_num_free_cpu_blocks(
-            )
+            num_free_cpu = sum(
+                scheduler.block_manager.get_num_free_cpu_blocks()
+                for scheduler in self.scheduler)
             cpu_cache_usage_sys = 1.0 - (num_free_cpu / num_total_cpu)
 
         # Iteration stats
