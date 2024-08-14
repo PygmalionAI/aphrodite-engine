@@ -7,8 +7,8 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig, VisionLanguageConfig)
 from aphrodite.common.pooling_params import PoolingParams
-from aphrodite.common.sequence import (PoolerOutput, SequenceData,
-                                       SequenceGroupMetadata)
+from aphrodite.common.sequence import (IntermediateTensors, PoolerOutput,
+                                       SequenceData, SequenceGroupMetadata)
 from aphrodite.modeling.pooling_metadata import PoolingMetadata
 from aphrodite.task_handler.model_runner import (GPUModelRunnerBase,
                                                  ModelInputForGPU)
@@ -56,11 +56,13 @@ class EmbeddingModelRunner(
         self,
         model_input: ModelInputForGPUWithPoolingMetadata,
         kv_caches: List[torch.Tensor],
+        intermediate_tensors: Optional[IntermediateTensors] = None,
         num_steps: int = 1,
     ) -> Optional[List[PoolerOutput]]:
         if num_steps > 1:
             raise ValueError(
                 "EmbeddingModelRunner does not support multi-step execution.")
+
         if self.lora_config:
             assert model_input.lora_requests is not None
             assert model_input.lora_mapping is not None
@@ -71,10 +73,12 @@ class EmbeddingModelRunner(
         assert model_input.attn_metadata is not None
         prefill_meta = model_input.attn_metadata.prefill_metadata
         decode_meta = model_input.attn_metadata.decode_metadata
+        virtual_engine = model_input.virtual_engine
         if prefill_meta is None and decode_meta.use_cuda_graph:
             assert model_input.input_tokens is not None
             graph_batch_size = model_input.input_tokens.shape[0]
-            model_executable = self.graph_runners[graph_batch_size]
+            model_executable = self.graph_runners[virtual_engine][
+                graph_batch_size]
         else:
             model_executable = self.model
 
@@ -113,6 +117,7 @@ class EmbeddingModelRunner(
     def prepare_model_input(
         self,
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
+        virtual_engine: int = 0,
     ) -> ModelInputForGPUWithPoolingMetadata:
         assert seq_group_metadata_list is not None
         model_input = self._prepare_model_input_tensors(
