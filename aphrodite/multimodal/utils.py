@@ -10,9 +10,9 @@ from PIL import Image
 from aphrodite.common.config import ModelConfig
 from aphrodite.multimodal.base import MultiModalDataDict
 
+APHRODITE_IMAGE_FETCH_TIMEOUT = int(
+    os.getenv("APHRODITE_IMAGE_FETCH_TIMEOUT", 10))
 
-APHRODITE_IMAGE_FETCH_TIMEOUT = int(os.getenv("APHRODITE_IMAGE_FETCH_TIMEOUT",
-                                              10))
 
 class ImageFetchAiohttp:
     aiohttp_client: Optional[aiohttp.ClientSession] = None
@@ -20,7 +20,8 @@ class ImageFetchAiohttp:
     @classmethod
     def get_aiohttp_client(cls) -> aiohttp.ClientSession:
         if cls.aiohttp_client is None:
-            timeout = aiohttp.ClientTimeout(total=APHRODITE_IMAGE_FETCH_TIMEOUT)
+            timeout = aiohttp.ClientTimeout(
+                total=APHRODITE_IMAGE_FETCH_TIMEOUT)
             connector = aiohttp.TCPConnector()
             cls.aiohttp_client = aiohttp.ClientSession(timeout=timeout,
                                                        connector=connector)
