@@ -6,6 +6,7 @@ from torch.nn.parameter import Parameter
 
 from aphrodite import _custom_ops as ops
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
+from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import QuantizationConfig
 
@@ -19,9 +20,11 @@ class MarlinConfig(QuantizationConfig):
     def __init__(
         self,
         group_size: int,
+        lm_head_quantized: bool,
     ) -> None:
         # Group size for the quantization.
         self.group_size = group_size
+        self.lm_head_quantized = lm_head_quantized
         if self.group_size != 128 and self.group_size != -1:
             raise ValueError(
                 "Currently, only group size 128 and -1 (channelwise) "
@@ -48,7 +51,8 @@ class MarlinConfig(QuantizationConfig):
         self.perm_len = 1024
 
     def __repr__(self) -> str:
-        return f"MarlinConfig(group_size={self.group_size})"
+        return (f"MarlinConfig(group_size={self.group_size}, "
+                f"lm_head_quantized={self.lm_head_quantized})")
 
     @classmethod
     def get_name(cls) -> str:
@@ -70,7 +74,9 @@ class MarlinConfig(QuantizationConfig):
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "MarlinConfig":
         group_size = cls.get_from_keys(config, ["group_size"])
-        return cls(group_size)
+        lm_head_quantized = cls.get_from_keys_or(config, ["lm_head"],
+                                                 default=False)
+        return cls(group_size, lm_head_quantized)
 
     @classmethod
     def override_quantization_method(cls, hf_quant_cfg,
@@ -93,7 +99,8 @@ class MarlinConfig(QuantizationConfig):
 
     def get_quant_method(
             self, layer: torch.nn.Module) -> Optional["MarlinLinearMethod"]:
-        if isinstance(layer, LinearBase):
+        if (isinstance(layer, LinearBase) or
+            (isinstance(layer, ParallelLMHead) and self.lm_head_quantized)):
             return MarlinLinearMethod(self)
         return None
 
