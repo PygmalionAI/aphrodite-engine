@@ -8,8 +8,8 @@ from aphrodite.common.sequence import SamplerOutput
 from aphrodite.modeling import SamplingMetadata
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.sampler import Sampler
-from aphrodite.modeling.layers.vocab_parallel_embedding import \
-    VocabParallelEmbedding
+from aphrodite.modeling.layers.vocab_parallel_embedding import (
+    ParallelLMHead, VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.transformers_utils.configs import MLPSpeculatorConfig
 
@@ -87,7 +87,7 @@ class MLPSpeculator(nn.Module):
             self.proj = nn.ModuleList([proj_first] + [proj_tied] *
                                       (self.max_speculative_tokens - 1))
 
-            head = nn.Linear(self.inner_dim, self.vocab_size, bias=False)
+            head = ParallelLMHead(self.vocab_size, self.inner_dim, bias=False)
             self.head = nn.ModuleList([head] * self.max_speculative_tokens)
 
             ln = MLPSpeculatorLayerNorm(self.inner_dim,
@@ -169,8 +169,8 @@ class MLPSpeculator(nn.Module):
             # TODO: not yet supporting top_k_tokens_per_head
             previous_hidden_states = states
 
-            logits = self.logits_processor(self.head[head_index].weight,
-                                           states, sampling_metadata)
+            logits = self.logits_processor(self.head[head_index], states,
+                                           sampling_metadata)
 
             output = self.sampler(logits.flatten(0, 1), sampling_metadata)
             last_tokens = output.sampled_token_ids
