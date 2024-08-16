@@ -4,7 +4,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <torch/extension.h>
+#include <torch/all.h>
 #include <vector>
 
 #include "selective_scan.h"
@@ -251,6 +251,6 @@ std::vector<at::Tensor> selective_scan_fwd(
   return result;
 }
 
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("fwd", &selective_scan_fwd, "Selective scan forward");
-}
+// PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+//   m.def("fwd", &selective_scan_fwd, "Selective scan forward");
+// }

@@ -77,4 +77,30 @@ std::tuple<torch::Tensor, std::vector<int64_t>> get_graph_buffer_ipc_meta(
     fptr_t _fa);
 void register_graph_buffers(fptr_t _fa, const std::vector<std::string>& handles,
                             const std::vector<std::vector<int64_t>>& offsets);
+
+/* Mamba Kernels */
+
+// causal conv1d
+at::Tensor causal_conv1d_fwd(const at::Tensor& x, const at::Tensor& weight,
+                             const c10::optional<at::Tensor>& bias_,
+                             const c10::optional<at::Tensor>& seq_idx_,
+                             const c10::optional<at::Tensor>& initial_states_,
+                             c10::optional<at::Tensor>& final_states_out_,
+                             bool silu_activation);
+
+at::Tensor causal_conv1d_update(const at::Tensor& x,
+                                const at::Tensor& conv_state,
+                                const at::Tensor& weight,
+                                const c10::optional<at::Tensor>& bias_,
+                                bool silu_activation);
+
+// selective scan
+at::Tensor selective_scan_fwd(const at::Tensor& u, const at::Tensor& delta,
+                              const at::Tensor& A, const at::Tensor& B,
+                              const at::Tensor& C,
+                              const c10::optional<at::Tensor>& D_,
+                              const c10::optional<at::Tensor>& z_,
+                              const c10::optional<at::Tensor>& delta_bias_,
+                              bool delta_softplus);
+
 #endif

@@ -4,7 +4,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <torch/extension.h>
+#include <torch/all.h>
 #include <vector>
 
 #include "causal_conv1d.h"
@@ -274,7 +274,8 @@ at::Tensor causal_conv1d_update(const at::Tensor& x,
   return out;
 }
 
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("causal_conv1d_fwd", &causal_conv1d_fwd, "Causal conv1d forward");
-  m.def("causal_conv1d_update", &causal_conv1d_update, "Causal conv1d update");
-}
+// PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+//   m.def("causal_conv1d_fwd", &causal_conv1d_fwd, "Causal conv1d forward");
+//   m.def("causal_conv1d_update", &causal_conv1d_update, "Causal conv1d
+//   update");
+// }
