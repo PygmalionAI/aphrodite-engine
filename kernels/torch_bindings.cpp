@@ -297,23 +297,6 @@ TORCH_LIBRARY_EXPAND(CONCAT(TORCH_EXTENSION_NAME, _custom_ar), custom_ar) {
   custom_ar.impl("register_graph_buffers", torch::kCPU,
                  &register_graph_buffers);
 }
-
-TORCH_LIBRARY_EXPAND(CONCAT(TORCH_EXTENSION_NAME, _mamba_conv1d),
-                     mamba_conv1d) {
-  // Custom kernels for mamba causal 1D convolution ops
-  mamba_conv1d.def("causal_conv1d_fwd", &causal_conv1d_fwd);
-  mamba_conv1d.impl("causal_conv1d_fwd", torch::kCUDA, &causal_conv1d_fwd);
-
-  mamba_conv1d.def("causal_conv1d_update", &causal_conv1d_update);
-  mamba_conv1d.impl("causal_conv1d_update", torch::kCUDA,
-                    &causal_conv1d_update);
-}
-
-TORCH_LIBRARY_EXPAND(CONCAT(TORCH_EXTENSION_NAME, _mamba_ss), mamba_ss) {
-  // Custom kernels for mamba selective scan ops
-  mamba_ss.def("fwd", &selective_scan_fwd);
-  mamba_ss.impl("fwd", torch::kCUDA, &selective_scan_fwd);
-}
 #endif
 
 REGISTER_EXTENSION(TORCH_EXTENSION_NAME)

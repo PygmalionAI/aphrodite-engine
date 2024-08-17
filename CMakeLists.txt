@@ -288,102 +288,57 @@ else()
     "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 8.0")
 endif()
 
-#
-# _mamba_conv1d_C extension
-#
+# #
+# # _hadamard_C extension
+# #
 
-set(APHRODITE_MAMBA_CONV1D_EXT_SRC
-  "kernels/mamba/causal_conv1d/causal_conv1d.cpp"
-  "kernels/mamba/causal_conv1d/causal_conv1d_fwd.cu"
-  "kernels/mamba/causal_conv1d/causal_conv1d_update.cu")
+# set(APHRODITE_HADAMARD_EXT_SRC
+#   "kernels/hadamard/fast_hadamard_transform.cpp"
+#   "kernels/hadamard/fast_hadamard_transform_cuda.cu")
 
-#
-# Copy GPU compilation flags+update for mamba
-#
-set(APHRODITE_MAMBA_CONV1D_GPU_FLAGS ${APHRODITE_GPU_FLAGS})
-list(APPEND APHRODITE_MAMBA_CONV1D_GPU_FLAGS
-  "-U__CUDA_NO_HALF_OPERATORS__"
-  "-U__CUDA_NO_HALF_CONVERSIONS__"
-  "-U__CUDA_NO_BFLOAT16_OPERATORS__"
-  "-U__CUDA_NO_BFLOAT16_CONVERSIONS__"
-  "-U__CUDA_NO_BFLOAT162_OPERATORS__"
-  "-U__CUDA_NO_BFLOAT162_CONVERSIONS__"
-  "--expt-relaxed-constexpr"
-  "--expt-extended-lambda"
-  "--use_fast_math"
-  "-lineinfo")
+# #
+# # Copy GPU compilation flags+update for hadamard
+# #
+# set(APHRODITE_HADAMARD_GPU_FLAGS ${APHRODITE_GPU_FLAGS})
+# list(APPEND APHRODITE_HADAMARD_GPU_FLAGS
+#   "-U__CUDA_NO_HALF_OPERATORS__"
+#   "-U__CUDA_NO_HALF_CONVERSIONS__"
+#   "-U__CUDA_NO_BFLOAT16_OPERATORS__"
+#   "-U__CUDA_NO_BFLOAT16_CONVERSIONS__"
+#   "-U__CUDA_NO_BFLOAT162_OPERATORS__"
+#   "-U__CUDA_NO_BFLOAT162_CONVERSIONS__"
+#   "--expt-relaxed-constexpr"
+#   "--expt-extended-lambda"
+#   "--use_fast_math"
+#   "-lineinfo")
 
-#
-# Filter out arches < 6.0 for mamba
-if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
-  set(APHRODITE_MAMBA_CONV1D_GPU_ARCHES)
-  foreach(ARCH ${APHRODITE_GPU_ARCHES})
-    string_to_ver(CODE_VER ${ARCH})
-    if (CODE_VER GREATER_EQUAL 6.0)
-      list(APPEND APHRODITE_MAMBA_CONV1D_GPU_ARCHES ${ARCH})
-    endif()
-  endforeach()
-  message(STATUS "Mamba kernel target arches: ${APHRODITE_MAMBA_CONV1D_GPU_ARCHES}")
-endif()
+# #
+# # Filter out CUDA architectures < 7.0 for hadamard.
+# #
+# if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
+#   set(APHRODITE_HADAMARD_GPU_ARCHES)
+#   foreach(ARCH ${APHRODITE_GPU_ARCHES})
+#     string_to_ver(CODE_VER ${ARCH})
+#     if (CODE_VER GREATER_EQUAL 6.0)
+#       list(APPEND APHRODITE_HADAMARD_GPU_ARCHES ${ARCH})
+#     endif()
+#   endforeach()
+#   message(STATUS "Hadamard target arches: ${APHRODITE_HADAMARD_GPU_ARCHES}")
+# endif()
 
-if (APHRODITE_MAMBA_CONV1D_GPU_ARCHES)
-  define_gpu_extension_target(
-    _mamba_conv1d_C
-    DESTINATION aphrodite
-    LANGUAGE ${APHRODITE_GPU_LANG}
-    SOURCES ${APHRODITE_MAMBA_CONV1D_EXT_SRC}
-    COMPILE_FLAGS ${APHRODITE_MAMBA_CONV1D_GPU_FLAGS}
-    ARCHITECTURES ${APHRODITE_MAMBA_CONV1D_GPU_ARCHES}
-    USE_SABI 3
-    WITH_SOABI)
-else()
-  message(WARNING "Unable to create _mamba_conv1d_C target because none of the "
-    "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 6.0")
-endif()
-
-#
-# _mamba_ss_C extension
-#
-
-set(APHRODITE_MAMBA_SS_EXT_SRC
-  "kernels/mamba/selective_scan/selective_scan.cpp"
-  "kernels/mamba/selective_scan/selective_scan_fwd_fp32.cu"
-  "kernels/mamba/selective_scan/selective_scan_fwd_fp16.cu"
-  "kernels/mamba/selective_scan/selective_scan_fwd_bf16.cu")
-
-#
-# Use the same GPU flags as mamba_conv1d
-#
-set(APHRODITE_MAMBA_SS_GPU_FLAGS ${APHRODITE_MAMBA_CONV1D_GPU_FLAGS})
-
-#
-# Filter out arches < 6.0 for mamba
-#
-if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
-  set(APHRODITE_MAMBA_SS_GPU_ARCHES)
-  foreach(ARCH ${APHRODITE_GPU_ARCHES})
-    string_to_ver(CODE_VER ${ARCH})
-    if (CODE_VER GREATER_EQUAL 6.0)
-      list(APPEND APHRODITE_MAMBA_SS_GPU_ARCHES ${ARCH})
-    endif()
-  endforeach()
-  message(STATUS "Mamba kernel target arches: ${APHRODITE_MAMBA_SS_GPU_ARCHES}")
-endif()
-
-if (APHRODITE_MAMBA_SS_GPU_ARCHES)
-  define_gpu_extension_target(
-    _mamba_ss_C
-    DESTINATION aphrodite
-    LANGUAGE ${APHRODITE_GPU_LANG}
-    SOURCES ${APHRODITE_MAMBA_SS_EXT_SRC}
-    COMPILE_FLAGS ${APHRODITE_MAMBA_SS_GPU_FLAGS}
-    ARCHITECTURES ${APHRODITE_MAMBA_SS_GPU_ARCHES}
-    USE_SABI 3
-    WITH_SOABI)
-else()
-  message(WARNING "Unable to create _mamba_ss_C target because none of the "
-    "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 6.0")
-endif()
+# if (APHRODITE_HADAMARD_GPU_ARCHES)
+#   define_gpu_extension_target(
+#     _hadamard_C
+#     DESTINATION aphrodite
+#     LANGUAGE ${APHRODITE_GPU_LANG}
+#     SOURCES ${APHRODITE_HADAMARD_EXT_SRC}
+#     COMPILE_FLAGS ${APHRODITE_HADAMARD_GPU_FLAGS}
+#     ARCHITECTURES ${APHRODITE_HADAMARD_GPU_ARCHES}
+#     WITH_SOABI)
+# else()
+#   message(WARNING "Unable to create _hadamard_C target because none of the "
+#     "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 6.0")
+# endif()
 
 #
 # Add the `default` target which detects which extensions should be
@@ -415,13 +370,9 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA" OR APHRODITE_GPU_LANG STREQUAL "HIP")
     message(STATUS "Enabling punica extension.")
     add_dependencies(default _punica_C)
   endif()
-  # Enable mamba if -DAPHRODITE_INSTALL_MAMBA_KERNELS=ON or
-  # APHRODITE_INSTALL_MAMBA_KERNELS is set in the environment and
-  # there are supported target arches.
-  if (APHRODITE_MAMBA_GPU_ARCHES AND
-      (ENV{APHRODITE_INSTALL_MAMBA_KERNELS} OR APHRODITE_INSTALL_MAMBA_KERNELS))
-    message(STATUS "Enabling mamba kernel extension.")
-    add_dependencies(default _mamba_conv1d_C)
-    add_dependencies(default _mamba_ss_C)
-  endif()
+  # if (APHRODITE_HADAMARD_GPU_ARCHES AND
+  #     (ENV{APHRODITE_INSTALL_HADAMARD_KERNELS} OR APHRODITE_INSTALL_HADAMARD_KERNELS))
+  #   message(STATUS "Enabling hadamard extension.")
+  #   add_dependencies(default _hadamard_C)
+  # endif()
 endif()
