@@ -115,6 +115,9 @@ RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 RUN --mount=type=bind,from=build,src=/workspace/dist,target=/aphrodite-workspace/dist \
     --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install dist/*.whl --verbose
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install https://github.com/flashinfer-ai/flashinfer/releases/download/v0.0.8/flashinfer-0.0.8+cu121torch2.3-cp310-cp310-linux_x86_64.whl
 #################### Aphrodite installation IMAGE ####################
 
 
