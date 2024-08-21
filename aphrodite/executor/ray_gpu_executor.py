@@ -6,7 +6,8 @@ from itertools import islice, repeat
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
-from aphrodite.common.utils import (get_aphrodite_instance_id,
+from aphrodite.common.utils import (error_on_invalid_device_count_status,
+                                    get_aphrodite_instance_id,
                                     get_distributed_init_method, get_ip,
                                     get_open_port, make_async)
 from aphrodite.executor.distributed_gpu_executor import (  # yapf: disable
@@ -174,6 +175,8 @@ class RayGPUExecutor(DistributedGPUExecutor):
             driver_ip = "127.0.0.1"
         distributed_init_method = get_distributed_init_method(
             driver_ip, get_open_port())
+
+        error_on_invalid_device_count_status()
 
         # Initialize the actual workers inside worker wrapper.
         init_worker_all_kwargs = [
