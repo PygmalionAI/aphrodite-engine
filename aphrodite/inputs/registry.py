@@ -10,7 +10,7 @@ from transformers import PretrainedConfig
 from .data import LLMInputs
 
 if TYPE_CHECKING:
-    from aphrodite.common.config import ModelConfig, VisionLanguageConfig
+    from aphrodite.common.config import ModelConfig, MultiModalConfig
     from aphrodite.common.sequence import SequenceData
     from aphrodite.multimodal import MultiModalDataDict
 
@@ -27,7 +27,7 @@ class InputContext:
     model_config: "ModelConfig"
     """The configuration of the model."""
 
-    def get_multimodal_config(self) -> "VisionLanguageConfig":
+    def get_multimodal_config(self) -> "MultiModalConfig":
         """
         Get the multimodal configuration of the model.
         Raises:

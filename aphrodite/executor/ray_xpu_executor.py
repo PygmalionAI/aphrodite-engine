@@ -9,9 +9,9 @@ from typing import (TYPE_CHECKING, Any, Awaitable, Dict, List, Optional, Set,
 from loguru import logger
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
-                                     LoRAConfig, ModelConfig, ParallelConfig,
-                                     SchedulerConfig, SpeculativeConfig,
-                                     VisionLanguageConfig)
+                                     LoRAConfig, ModelConfig, MultiModalConfig,
+                                     ParallelConfig, SchedulerConfig,
+                                     SpeculativeConfig)
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.common.utils import (get_distributed_init_method, get_ip,
                                     get_open_port, make_async)
@@ -43,7 +43,7 @@ class RayXPUExecutor(DistributedGPUExecutor):
         device_config: DeviceConfig,
         load_config: LoadConfig,
         lora_config: Optional[LoRAConfig],
-        vision_language_config: Optional[VisionLanguageConfig],
+        multimodal_config: Optional[MultiModalConfig],
         speculative_config: Optional[SpeculativeConfig],
     ) -> None:
         assert device_config.device_type == "xpu"
@@ -57,7 +57,7 @@ class RayXPUExecutor(DistributedGPUExecutor):
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
         self.device_config = device_config
-        self.vision_language_config = vision_language_config
+        self.multimodal_config = multimodal_config
 
         placement_group = self.parallel_config.placement_group
 
@@ -197,7 +197,7 @@ class RayXPUExecutor(DistributedGPUExecutor):
                     rank=rank,
                     distributed_init_method=distributed_init_method,
                     lora_config=self.lora_config,
-                    vision_language_config=self.vision_language_config,
+                    multimodal_config=self.multimodal_config,
                     is_driver_worker=rank == 0,
                 ))
         self._run_workers("init_worker", all_kwargs=init_worker_all_kwargs)

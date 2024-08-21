@@ -9,8 +9,8 @@ from loguru import logger
 
 from aphrodite.attention import AttentionMetadata, get_attn_backend
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
-                                     ModelConfig, ParallelConfig,
-                                     SchedulerConfig, VisionLanguageConfig)
+                                     ModelConfig, MultiModalConfig,
+                                     ParallelConfig, SchedulerConfig)
 from aphrodite.common.sequence import (CompletionSequenceGroupOutput, Logprob,
                                        SamplerOutput, SequenceGroupMetadata,
                                        SequenceOutput)
@@ -38,7 +38,7 @@ class TPUModelRunner:
         device_config: DeviceConfig,
         cache_config: CacheConfig,
         load_config: LoadConfig,
-        vision_language_config: Optional[VisionLanguageConfig] = None,
+        multimodal_config: Optional[MultiModalConfig] = None,
         is_driver_worker: bool = False,
     ):
         self.model_config = model_config
@@ -47,7 +47,7 @@ class TPUModelRunner:
         self.device_config = device_config
         self.cache_config = cache_config
         self.load_config = load_config
-        self.vision_language_config = vision_language_config
+        self.multimodal_config = multimodal_config
         self.is_driver_worker = is_driver_worker
 
         self.block_size = self.cache_config.block_size
@@ -81,7 +81,7 @@ class TPUModelRunner:
             parallel_config=self.parallel_config,
             cache_config=self.cache_config,
             scheduler_config=self.scheduler_config,
-            vision_language_config=self.vision_language_config,
+            multimodal_config=self.multimodal_config,
             lora_config=None,
         )
         xm.wait_device_ops()

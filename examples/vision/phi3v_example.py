@@ -12,13 +12,11 @@ def run_phi3v():
     # max_model_len (128k) for this model may cause OOM.
     # In this example, we override max_num_seqs to 5 while
     # keeping the original context length of 128k.
+    # You may lower either max_num_seqs or max_model_len
+    # to run this example on a machine with limited memory.
     llm = LLM(
         model=model_path,
         trust_remote_code=True,
-        image_token_id=32044,
-        image_input_shape="1,3,1008,1344",
-        # Use the maximum possible value for memory profiling
-        image_feature_size=2653,
         max_num_seqs=5,
     )
 

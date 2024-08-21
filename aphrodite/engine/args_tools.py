@@ -6,10 +6,10 @@ from typing import List, Optional, Tuple, Union
 
 from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
                                      EngineConfig, LoadConfig, LoRAConfig,
-                                     ModelConfig, ParallelConfig,
-                                     SchedulerConfig, SpeculativeConfig,
-                                     TokenizerPoolConfig, VisionLanguageConfig)
-from aphrodite.common.utils import is_cpu, str_to_int_tuple
+                                     ModelConfig, MultiModalConfig,
+                                     ParallelConfig, SchedulerConfig,
+                                     SpeculativeConfig, TokenizerPoolConfig)
+from aphrodite.common.utils import is_cpu
 from aphrodite.quantization import QUANTIZATION_METHODS
 
 
@@ -76,10 +76,6 @@ class EngineArgs:
     num_lookahead_slots: int = 0
     model_loader_extra_config: Optional[dict] = None
     preemption_mode: Optional[str] = None
-    # Related to Vision-language models such as llava
-    image_token_id: Optional[int] = None
-    image_input_shape: Optional[str] = None
-    image_feature_size: Optional[int] = None
     # Scheduler config
     scheduler_delay_factor: float = 0.0
     enable_chunked_prefill: bool = False
@@ -103,27 +99,6 @@ class EngineArgs:
             self.tokenizer = self.model
         if is_cpu():
             self.distributed_executor_backend = None
-
-    @staticmethod
-    def add_cli_args_for_vlm(
-            parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
-        parser.add_argument('--image-token-id',
-                            type=int,
-                            default=None,
-                            help=('Input id for image token.'))
-        parser.add_argument(
-            '--image-input-shape',
-            type=str,
-            default=None,
-            help=('The biggest image input shape (worst for memory footprint) '
-                  'given an input type. Only used for the profile_run.'))
-        parser.add_argument(
-            '--image-feature-size',
-            type=int,
-            default=None,
-            help=('The image feature size along the context dimension.'))
-
-        return parser
 
     @staticmethod
     def add_cli_args(
@@ -567,8 +542,6 @@ class EngineArgs:
             ],
             help=("Device to use for model execution."),
         )
-        # Related to Vision-language models such as llava
-        parser = EngineArgs.add_cli_args_for_vlm(parser)
         parser.add_argument(
             "--scheduler-delay-factor",
             "-sdf",
@@ -711,19 +684,7 @@ class EngineArgs:
             raise ValueError(
                 "BitsAndBytes load format and QLoRA adapter only support "
                 f"'bitsandbytes' quantization, but got {self.quantization}")
-        if self.image_token_id is not None:
-            if (not self.image_input_shape or not self.image_feature_size):
-                raise ValueError(
-                    'Specify `image_input_shape` and '
-                    '`image_feature_size` together with `image_token_id`.')
-
-            vision_language_config = VisionLanguageConfig(
-                image_token_id=self.image_token_id,
-                image_input_shape=str_to_int_tuple(self.image_input_shape),
-                image_feature_size=self.image_feature_size,
-            )
-        else:
-            vision_language_config = None
+        multimodal_config = MultiModalConfig()
 
         device_config = DeviceConfig(device=self.device)
 
@@ -753,7 +714,7 @@ class EngineArgs:
             disable_sliding_window=self.disable_sliding_window,
             skip_tokenizer_init=self.skip_tokenizer_init,
             served_model_name=self.served_model_name,
-            multimodal_config=vision_language_config,
+            multimodal_config=multimodal_config,
         )
 
         cache_config = CacheConfig(
@@ -856,7 +817,7 @@ class EngineArgs:
                             scheduler_config=scheduler_config,
                             device_config=device_config,
                             lora_config=lora_config,
-                            vision_language_config=vision_language_config,
+                            multimodal_config=multimodal_config,
                             speculative_config=speculative_config,
                             load_config=load_config,
                             decoding_config=decoding_config)

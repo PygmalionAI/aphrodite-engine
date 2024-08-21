@@ -4,7 +4,7 @@ from typing import (ClassVar, Dict, List, Literal, Optional, Protocol, Type,
 from loguru import logger
 from typing_extensions import TypeGuard
 
-from aphrodite.common.config import LoRAConfig, VisionLanguageConfig
+from aphrodite.common.config import LoRAConfig, MultiModalConfig
 
 
 @runtime_checkable
@@ -20,7 +20,7 @@ class SupportsVision(Protocol):
         MRO of your model class.
     """
 
-    def __init__(self, *, vlm_config: VisionLanguageConfig) -> None:
+    def __init__(self, *, multimodal_config: MultiModalConfig) -> None:
         ...
 
 
@@ -30,7 +30,7 @@ class SupportsVision(Protocol):
 class _SupportsVisionType(Protocol):
     supports_vision: Literal[True]
 
-    def __call__(self, *, vlm_config: VisionLanguageConfig) -> None:
+    def __call__(self, *, multimodal_config: MultiModalConfig) -> None:
         ...
 
 

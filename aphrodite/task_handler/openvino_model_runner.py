@@ -7,8 +7,8 @@ from torch import nn
 from aphrodite.attention import get_attn_backend
 from aphrodite.attention.backends.openvino import OpenVINOAttentionMetadata
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
-                                     LoRAConfig, ModelConfig, ParallelConfig,
-                                     SchedulerConfig, VisionLanguageConfig)
+                                     LoRAConfig, ModelConfig, MultiModalConfig,
+                                     ParallelConfig, SchedulerConfig)
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 from aphrodite.modeling import SamplingMetadata
 from aphrodite.modeling.model_loader.openvino import get_model
@@ -45,7 +45,7 @@ class OpenVINOModelRunner:
         cache_config: CacheConfig,
         load_config: LoadConfig,
         lora_config: Optional[LoRAConfig],
-        vision_language_config: Optional[VisionLanguageConfig],
+        multimodal_config: Optional[MultiModalConfig],
         kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
         *args,
@@ -57,7 +57,7 @@ class OpenVINOModelRunner:
         self.device_config = device_config
         self.cache_config = cache_config
         self.lora_config = lora_config
-        self.vision_language_config = vision_language_config
+        self.multimodal_config = multimodal_config
         self.load_config = load_config
         self.is_driver_worker = is_driver_worker
 

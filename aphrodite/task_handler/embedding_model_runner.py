@@ -4,8 +4,8 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 import torch
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
-                                     LoRAConfig, ModelConfig, ParallelConfig,
-                                     SchedulerConfig, VisionLanguageConfig)
+                                     LoRAConfig, ModelConfig, MultiModalConfig,
+                                     ParallelConfig, SchedulerConfig)
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sequence import (IntermediateTensors, PoolerOutput,
                                        SequenceData, SequenceGroupMetadata)
@@ -38,7 +38,7 @@ class EmbeddingModelRunner(
         lora_config: Optional[LoRAConfig],
         kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
-        vision_language_config: Optional[VisionLanguageConfig] = None,
+        multimodal_config: Optional[MultiModalConfig] = None,
     ):
         super().__init__(model_config,
                          parallel_config,
@@ -49,7 +49,7 @@ class EmbeddingModelRunner(
                          lora_config=lora_config,
                          kv_cache_dtype=kv_cache_dtype,
                          is_driver_worker=is_driver_worker,
-                         vision_language_config=vision_language_config)
+                         multimodal_config=multimodal_config)
 
     @torch.inference_mode()
     def execute_model(

@@ -4,9 +4,9 @@ import torch
 from loguru import logger
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
-                                     LoRAConfig, ModelConfig, ParallelConfig,
-                                     SchedulerConfig, SpeculativeConfig,
-                                     VisionLanguageConfig)
+                                     LoRAConfig, ModelConfig, MultiModalConfig,
+                                     ParallelConfig, SchedulerConfig,
+                                     SpeculativeConfig)
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.common.utils import make_async
 from aphrodite.executor.executor_base import ExecutorAsyncBase
@@ -25,7 +25,7 @@ class XPUExecutor(GPUExecutor):
         device_config: DeviceConfig,
         load_config: LoadConfig,
         lora_config: Optional[LoRAConfig],
-        vision_language_config: Optional[VisionLanguageConfig],
+        multimodal_config: Optional[MultiModalConfig],
         speculative_config: Optional[SpeculativeConfig],
     ) -> None:
         assert device_config.device_type == "xpu"
@@ -41,7 +41,7 @@ class XPUExecutor(GPUExecutor):
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
         self.device_config = device_config
-        self.vision_language_config = vision_language_config
+        self.multimodal_config = multimodal_config
         self.speculative_config = None
 
         # Instantiate the worker and load the model to GPU.

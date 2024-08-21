@@ -7,8 +7,8 @@ import torch_xla.experimental.dynamo_set_buffer_donor  # noqa: F401
 import torch_xla.runtime as xr
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
-                                     ModelConfig, ParallelConfig,
-                                     SchedulerConfig, VisionLanguageConfig)
+                                     ModelConfig, MultiModalConfig,
+                                     ParallelConfig, SchedulerConfig)
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.common.utils import STR_DTYPE_TO_TORCH_DTYPE, get_dtype_size
 from aphrodite.distributed import (ensure_model_parallel_initialized,
@@ -28,7 +28,7 @@ class TPUWorker(LoraNotSupportedWorkerBase):
         device_config: DeviceConfig,
         cache_config: CacheConfig,
         load_config: LoadConfig,
-        vision_language_config: Optional[VisionLanguageConfig],
+        multimodal_config: Optional[MultiModalConfig],
         local_rank: int,
         rank: int,
         distributed_init_method: str,
@@ -40,7 +40,7 @@ class TPUWorker(LoraNotSupportedWorkerBase):
         self.device_config = device_config
         self.cache_config = cache_config
         self.load_config = load_config
-        self.vision_language_config = vision_language_config
+        self.multimodal_config = multimodal_config
         self.local_rank = local_rank
         self.rank = rank
         self.distributed_init_method = distributed_init_method
@@ -59,7 +59,7 @@ class TPUWorker(LoraNotSupportedWorkerBase):
                                            device_config,
                                            cache_config,
                                            load_config,
-                                           vision_language_config,
+                                           multimodal_config,
                                            is_driver_worker=is_driver_worker)
 
     def init_device(self) -> None:

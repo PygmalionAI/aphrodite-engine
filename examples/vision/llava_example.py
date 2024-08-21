@@ -9,12 +9,7 @@ from aphrodite import LLM, SamplingParams
 
 
 def run_llava():
-    llm = LLM(
-        model="llava-hf/llava-1.5-7b-hf",
-        image_token_id=32000,
-        image_input_shape="1,3,336,336",
-        image_feature_size=576,
-    )
+    llm = LLM(model="llava-hf/llava-1.5-7b-hf")
 
     prompt = "USER: <image>\nWhat is the content of this image?\nASSISTANT:"
     image_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),

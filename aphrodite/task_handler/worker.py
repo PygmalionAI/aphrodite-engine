@@ -8,9 +8,9 @@ import torch.distributed
 from loguru import logger
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
-                                     LoRAConfig, ModelConfig, ParallelConfig,
-                                     SchedulerConfig, SpeculativeConfig,
-                                     VisionLanguageConfig)
+                                     LoRAConfig, ModelConfig, MultiModalConfig,
+                                     ParallelConfig, SchedulerConfig,
+                                     SpeculativeConfig)
 from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.distributed import (ensure_model_parallel_initialized,
                                    init_distributed_environment,
@@ -46,7 +46,7 @@ class Worker(LocalOrDistributedWorkerBase):
         rank: int,
         distributed_init_method: str,
         lora_config: Optional[LoRAConfig] = None,
-        vision_language_config: Optional[VisionLanguageConfig] = None,
+        multimodal_config: Optional[MultiModalConfig] = None,
         speculative_config: Optional[SpeculativeConfig] = None,
         is_driver_worker: bool = False,
         model_runner_cls: Optional[Type[GPUModelRunnerBase]] = None,
@@ -70,10 +70,7 @@ class Worker(LocalOrDistributedWorkerBase):
             # note: lazy import to avoid importing torch before initializing
             from aphrodite.common.utils import init_cached_hf_modules
             init_cached_hf_modules()
-        self.vision_language_config = vision_language_config
-        if self.vision_language_config:
-            assert not self.lora_config, (
-                "To be tested: vision language model with LoRA settings.")
+        self.multimodal_config = multimodal_config
 
         # Return hidden states from target model if the draft model is an
         # mlp_speculator
@@ -98,7 +95,7 @@ class Worker(LocalOrDistributedWorkerBase):
             lora_config=self.lora_config,
             kv_cache_dtype=self.cache_config.cache_dtype,
             is_driver_worker=is_driver_worker,
-            vision_language_config=vision_language_config,
+            multimodal_config=multimodal_config,
             **speculative_args,
         )
         # Uninitialized cache engine. Will be initialized by

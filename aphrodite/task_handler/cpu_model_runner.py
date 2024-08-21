@@ -7,8 +7,8 @@ from torch import nn
 
 from aphrodite.attention import AttentionMetadata, get_attn_backend
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
-                                     LoRAConfig, ModelConfig, ParallelConfig,
-                                     SchedulerConfig, VisionLanguageConfig)
+                                     LoRAConfig, ModelConfig, MultiModalConfig,
+                                     ParallelConfig, SchedulerConfig)
 from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceGroupMetadata)
 from aphrodite.common.utils import make_tensor_with_pad
@@ -76,7 +76,7 @@ class CPUModelRunner(ModelRunnerBase[CPUModelInput]):
         cache_config: CacheConfig,
         load_config: LoadConfig,
         lora_config: Optional[LoRAConfig],
-        vision_language_config: Optional[VisionLanguageConfig],
+        multimodal_config: Optional[MultiModalConfig],
         kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
         *args,
@@ -90,7 +90,7 @@ class CPUModelRunner(ModelRunnerBase[CPUModelInput]):
         self.device_config = device_config
         self.cache_config = cache_config
         self.lora_config = lora_config
-        self.vision_language_config = vision_language_config
+        self.multimodal_config = multimodal_config
         self.load_config = load_config
         self.is_driver_worker = is_driver_worker
 
@@ -117,15 +117,14 @@ class CPUModelRunner(ModelRunnerBase[CPUModelInput]):
         self.model: nn.Module  # Set after init_Model
 
     def load_model(self) -> None:
-        self.model = get_model(
-            model_config=self.model_config,
-            load_config=self.load_config,
-            device_config=self.device_config,
-            vision_language_config=self.vision_language_config,
-            lora_config=self.lora_config,
-            parallel_config=self.parallel_config,
-            scheduler_config=self.scheduler_config,
-            cache_config=self.cache_config)
+        self.model = get_model(model_config=self.model_config,
+                               load_config=self.load_config,
+                               device_config=self.device_config,
+                               multimodal_config=self.multimodal_config,
+                               lora_config=self.lora_config,
+                               parallel_config=self.parallel_config,
+                               scheduler_config=self.scheduler_config,
+                               cache_config=self.cache_config)
 
     def _prepare_prompt(
         self,
