@@ -140,6 +140,8 @@ endif()
 #
 
 set(APHRODITE_EXT_SRC
+  "kernels/mamba/mamba_ssm/selective_scan_fwd.cu"
+  "kernels/mamba/causal_conv1d/causal_conv1d.cu"
   "kernels/cache_kernels.cu"
   "kernels/attention/attention_kernels.cu"
   "kernels/pos_encoding_kernels.cu"
