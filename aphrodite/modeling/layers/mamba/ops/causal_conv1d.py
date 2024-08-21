@@ -59,8 +59,7 @@ def causal_conv1d_fn(
         final_states_out = None
 
     out = causal_conv1d_fwd(x, weight, bias, seq_idx, initial_states,
-                            final_states_out, activation
-                            in ["silu", "swish"])
+                            final_states_out, activation in ["silu", "swish"])
     return (out, None) if not return_final_states else (out, final_states_out)
 
 
