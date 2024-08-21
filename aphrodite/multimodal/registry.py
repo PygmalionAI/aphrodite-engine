@@ -7,7 +7,7 @@ from loguru import logger
 from aphrodite.common.config import ModelConfig
 
 from .base import (MultiModalDataDict, MultiModalInputMapper, MultiModalInputs,
-                   MultiModalPlugin)
+                   MultiModalPlugin, MultiModalTokensCalc)
 from .image import ImagePlugin
 
 
@@ -46,46 +46,23 @@ class MultiModalRegistry:
         msg = f"Unknown multi-modal data type: {data_type_key}"
         raise NotImplementedError(msg)
 
+    def register_input_mapper(
+        self,
+        data_type_key: str,
+        mapper: Optional[MultiModalInputMapper] = None,
+    ):
+        """
+        Register an input mapper for a specific modality to a model class.
+        See :meth:`MultiModalPlugin.register_input_mapper` for more details.
+        """
+        return self._get_plugin(data_type_key).register_input_mapper(mapper)
+
     def register_image_input_mapper(
         self,
         mapper: Optional[MultiModalInputMapper] = None,
     ):
         """
         Register an input mapper for image data to a model class.
-
-        See :meth:`MultiModalPlugin.register_input_mapper` for more details.
-        """
-        return self.register_input_mapper("image", mapper)
-
-    def _process_input(self, key: str, value: object,
-                       model_config: ModelConfig) -> MultiModalInputs:
-        plugin = self._plugins.get(key)
-        if plugin:
-            return plugin.map_input(model_config, value)
-        msg = f"Unknown multi-modal data type: {key}"
-        raise NotImplementedError(msg)
-
-    def register_input_mapper(
-        self,
-        data_type: str,
-        mapper: Optional[MultiModalInputMapper] = None,
-    ):
-        """
-        Register an input mapper for a specific modality to a model class.
-
-        See :meth:`MultiModalPlugin.register_input_mapper` for more details.
-        """
-        plugin = self._plugins.get(data_type)
-        if not plugin:
-            msg = f"Unknown multi-modal data type: {data_type}"
-            raise NotImplementedError(msg)
-        return plugin.register_input_mapper(mapper)
-
-    def register_image_input(self,
-                             mapper: Optional[MultiModalInputMapper] = None):
-        """
-        Register an input mapper for image pixel data to a model class.
-
         See :meth:`MultiModalPlugin.register_input_mapper` for more details.
         """
         return self.register_input_mapper("image", mapper)
@@ -100,17 +77,15 @@ class MultiModalRegistry:
         merged_dict: Dict[str, torch.Tensor] = {}
 
         for data_key, data_value in data.items():
-            input_dict = self._process_input(data_key, data_value,
-                                             model_config)
+            input_dict = self._get_plugin(data_key) \
+                .map_input(model_config, data_value)
 
             for input_key, input_tensor in input_dict.items():
                 if input_key in merged_dict:
                     raise ValueError(f"The input mappers (keys={set(data)}) "
                                      f"resulted in a conflicting keyword "
                                      f"argument to `forward()`: {input_key}")
-
                 merged_dict[input_key] = input_tensor
-
         return MultiModalInputs(merged_dict)
 
     def create_input_mapper(self, model_config: ModelConfig):
@@ -119,9 +94,35 @@ class MultiModalRegistry:
         """
         return functools.partial(self.map_input, model_config)
 
-    def get_num_input_tokens(self):
+    def register_max_multimodal_tokens(
+        self,
+        data_type_key: str,
+        max_mm_tokens: Optional[MultiModalTokensCalc] = None,
+    ):
         """
-        Get the number of input tokens for profiling purposes.
+        Register the maximum number of tokens, belonging to a
+        specific modality, input to the language model for a model class.
         """
-        # TODO: Provide this number on a per model basis.
-        return 3000
+        return self._get_plugin(data_type_key) \
+            .register_max_multimodal_tokens(max_mm_tokens)
+
+    def register_max_image_tokens(
+        self,
+        max_mm_tokens: Optional[MultiModalTokensCalc] = None,
+    ):
+        """
+        Register the maximum number of image tokens
+        input to the language model for a model class.
+        """
+        return self.register_max_multimodal_tokens("image", max_mm_tokens)
+
+    def get_max_multimodal_tokens(self, model_config: ModelConfig) -> int:
+        """
+        Get the maximum number of multi-modal tokens
+        for profiling the memory usage of a model.
+        
+        See :meth:`MultiModalPlugin.get_max_multimodal_tokens` for more details.
+        """
+        return sum(
+            plugin.get_max_multimodal_tokens(model_config)
+            for plugin in self._plugins.values())
