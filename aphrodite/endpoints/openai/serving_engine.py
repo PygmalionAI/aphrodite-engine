@@ -13,11 +13,18 @@ from aphrodite.endpoints.openai.protocol import (
     LogProbs, ModelCard, ModelList, ModelPermission, Prompt)
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.lora.request import LoRARequest
+from aphrodite.prompt_adapter.request import PromptAdapterRequest
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 
 
 @dataclass
-class LoRA:
+class PromptAdapterPath:
+    name: str
+    local_path: str
+
+
+@dataclass
+class LoRAModulePath:
     name: str
     local_path: str
 
@@ -27,12 +34,12 @@ class OpenAIServing:
     def __init__(self,
                  engine: AsyncAphrodite,
                  served_model_names: List[str],
-                 lora_modules=Optional[List[LoRA]]):
+                 lora_modules=Optional[List[LoRAModulePath]],
+                 prompt_adapters: Optional[List[PromptAdapterPath]] = None):
         self.engine = engine
         self.served_model_names = served_model_names
-        if lora_modules is None:
-            self.lora_requests = []
-        else:
+        self.lora_requests = []
+        if lora_modules is not None:
             self.lora_requests = [
                 LoRARequest(
                     lora_name=lora.name,
@@ -40,6 +47,20 @@ class OpenAIServing:
                     lora_local_path=lora.local_path,
                 ) for i, lora in enumerate(lora_modules, start=1)
             ]
+
+        self.prompt_adapter_requests = []
+        if prompt_adapters is not None:
+            for i, prompt_adapter in enumerate(prompt_adapters, start=1):
+                with open(f"./{prompt_adapter.local_path}"
+                          f"/adapter_config.json") as f:
+                    adapter_config = json.load(f)
+                    num_virtual_tokens = adapter_config["num_virtual_tokens"]
+                self.prompt_adapter_requests.append(
+                    PromptAdapterRequest(
+                        prompt_adapter_name=prompt_adapter.name,
+                        prompt_adapter_id=i,
+                        prompt_adapter_local_path=prompt_adapter.local_path,
+                        prompt_adapter_num_virtual_tokens=num_virtual_tokens))
 
         self.max_model_len = 0
         self.tokenizer = None
@@ -84,7 +105,14 @@ class OpenAIServing:
                       permission=[ModelPermission()])
             for lora in self.lora_requests
         ]
+        prompt_adapter_cards = [
+            ModelCard(id=prompt_adapter.prompt_adapter_name,
+                      root=self.served_model_names[0],
+                      permission=[ModelPermission()])
+            for prompt_adapter in self.prompt_adapter_requests
+        ]
         model_cards.extend(lora_cards)
+        model_cards.extend(prompt_adapter_cards)
         return ModelList(data=model_cards)
 
     async def tokenize(self, prompt: Prompt):
@@ -181,12 +209,17 @@ class OpenAIServing:
             return
         if request.model in [lora.lora_name for lora in self.lora_requests]:
             return
+        if request.model in [
+                prompt_adapter.prompt_adapter_name
+                for prompt_adapter in self.prompt_adapter_requests
+        ]:
+            return
         return self.create_error_response(
             message=f"The model `{request.model}` does not exist.",
             err_type="NotFoundError",
             status_code=HTTPStatus.NOT_FOUND)
 
-    def add_lora(self, lora: LoRA):
+    def add_lora(self, lora: LoRAModulePath):
         if lora.name in [
                 existing_lora.lora_name for existing_lora in self.lora_requests
         ]:
@@ -204,15 +237,19 @@ class OpenAIServing:
             lora for lora in self.lora_requests if lora.lora_name != lora_name
         ]
 
-    def _maybe_get_lora(
+    def _maybe_get_adapter(
         self, request: Union[CompletionRequest, ChatCompletionRequest,
                              EmbeddingRequest]
-    ) -> Optional[LoRARequest]:
+    ) -> Tuple[Optional[str], Optional[Union[LoRARequest,
+                                             PromptAdapterRequest]]]:
         if request.model in self.served_model_names:
-            return
+            return None, None
         for lora in self.lora_requests:
             if request.model == lora.lora_name:
-                return lora
+                return 'LoRA', lora
+        for prompt_adapter in self.prompt_adapter_requests:
+            if request.model == prompt_adapter.prompt_adapter_name:
+                return 'PromptAdapter', prompt_adapter
         # if _check_model has been called earlier, this will be unreachable
         raise ValueError("The model `{request.model}` does not exist.")
 

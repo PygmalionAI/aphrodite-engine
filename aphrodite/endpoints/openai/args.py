@@ -7,8 +7,9 @@ purposes.
 import argparse
 import json
 
+from aphrodite.endpoints.openai.serving_engine import (LoRAModulePath,
+                                                       PromptAdapterPath)
 from aphrodite.engine.args_tools import AsyncEngineArgs
-from aphrodite.endpoints.openai.serving_engine import LoRA
 
 
 class LoRAParserAction(argparse.Action):
@@ -17,8 +18,18 @@ class LoRAParserAction(argparse.Action):
         lora_list = []
         for item in values:
             name, path = item.split('=')
-            lora_list.append(LoRA(name, path))
+            lora_list.append(LoRAModulePath(name, path))
         setattr(namespace, self.dest, lora_list)
+
+
+class PromptAdapterParserAction(argparse.Action):
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        adapter_list = []
+        for item in values:
+            name, path = item.split('=')
+            adapter_list.append(PromptAdapterPath(name, path))
+        setattr(namespace, self.dest, adapter_list)
 
 
 def make_arg_parser(parser=None):
@@ -75,6 +86,14 @@ def make_arg_parser(parser=None):
         help=
         "LoRA module configurations in the format name=path. Multiple modules "
         "can be specified.")
+    parser.add_argument(
+        "--prompt-adapters",
+        type=str,
+        default=None,
+        nargs='+',
+        action=PromptAdapterParserAction,
+        help="Prompt adapter configurations in the format name=path. "
+        "Multiple adapters can be specified.")
     parser.add_argument("--chat-template",
                         type=str,
                         default=None,

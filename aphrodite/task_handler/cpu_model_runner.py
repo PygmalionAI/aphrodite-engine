@@ -8,7 +8,8 @@ from torch import nn
 from aphrodite.attention import AttentionMetadata, get_attn_backend
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, MultiModalConfig,
-                                     ParallelConfig, SchedulerConfig)
+                                     ParallelConfig, PromptAdapterConfig,
+                                     SchedulerConfig)
 from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceGroupMetadata)
 from aphrodite.common.utils import make_tensor_with_pad
@@ -78,6 +79,7 @@ class CPUModelRunner(ModelRunnerBase[CPUModelInput]):
         lora_config: Optional[LoRAConfig],
         multimodal_config: Optional[MultiModalConfig],
         kv_cache_dtype: Optional[str] = "auto",
+        prompt_adapter_config: Optional[PromptAdapterConfig] = None,
         is_driver_worker: bool = False,
         *args,
         **kwargs,
@@ -91,6 +93,7 @@ class CPUModelRunner(ModelRunnerBase[CPUModelInput]):
         self.cache_config = cache_config
         self.lora_config = lora_config
         self.multimodal_config = multimodal_config
+        self.prompt_adapter_config = prompt_adapter_config
         self.load_config = load_config
         self.is_driver_worker = is_driver_worker
 

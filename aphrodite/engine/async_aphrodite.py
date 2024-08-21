@@ -9,7 +9,6 @@ from loguru import logger
 from transformers import PreTrainedTokenizer
 
 from aphrodite.common.config import DecodingConfig, ModelConfig
-from aphrodite.inputs import LLMInputs, PromptInputs
 from aphrodite.common.outputs import EmbeddingRequestOutput, RequestOutput
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
@@ -18,8 +17,10 @@ from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_timeout import asyncio_timeout
 from aphrodite.executor.ray_utils import initialize_ray_cluster, ray
+from aphrodite.inputs import LLMInputs, PromptInputs
 from aphrodite.lora.request import LoRARequest
 from aphrodite.processing.scheduler import SchedulerOutputs
+from aphrodite.prompt_adapter.request import PromptAdapterRequest
 
 ENGINE_ITERATION_TIMEOUT_S = int(
     os.environ.get("APHRODITE_ENGINE_ITERATION_TIMEOUT_S", "60"))
@@ -260,6 +261,7 @@ class _AsyncAphrodite(AphroditeEngine):
         request_id: str,
         inputs: PromptInputs,
         lora_request: Optional[LoRARequest] = None,
+        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
     ) -> LLMInputs:
         if isinstance(inputs, str):
             inputs = {"prompt": inputs}
@@ -275,6 +277,12 @@ class _AsyncAphrodite(AphroditeEngine):
         else:
             prompt_token_ids = inputs["prompt_token_ids"]
 
+        if prompt_adapter_request:
+            prompt_token_ids = [
+                0
+            ] * prompt_adapter_request.prompt_adapter_num_virtual_tokens + \
+                prompt_token_ids
+
         llm_inputs = LLMInputs(prompt_token_ids=prompt_token_ids,
                                prompt=inputs.get("prompt"),
                                multi_modal_data=inputs.get("multi_modal_data"))
@@ -282,12 +290,14 @@ class _AsyncAphrodite(AphroditeEngine):
         return self.input_processor(llm_inputs)
 
     async def add_request_async(
-        self,
-        request_id: str,
-        inputs: PromptInputs,
-        params: Union[SamplingParams, PoolingParams],
-        arrival_time: Optional[float] = None,
-        lora_request: Optional[LoRARequest] = None,
+            self,
+            request_id: str,
+            inputs: PromptInputs,
+            params: Union[SamplingParams, PoolingParams],
+            arrival_time: Optional[float] = None,
+            lora_request: Optional[LoRARequest] = None,
+            trace_headers: Optional[Dict[str, str]] = None,
+            prompt_adapter_request: Optional[PromptAdapterRequest] = None
     ) -> None:
         if lora_request is not None and not self.lora_config:
             raise ValueError(f"Got lora_request {lora_request} but LoRA is "
@@ -296,7 +306,10 @@ class _AsyncAphrodite(AphroditeEngine):
             arrival_time = time.time()
 
         processed_inputs = await self.process_model_inputs_async(
-            request_id=request_id, inputs=inputs, lora_request=lora_request)
+            request_id=request_id,
+            inputs=inputs,
+            lora_request=lora_request,
+            prompt_adapter_request=prompt_adapter_request)
 
         self._add_processed_request(
             request_id=request_id,
@@ -304,6 +317,7 @@ class _AsyncAphrodite(AphroditeEngine):
             params=params,
             arrival_time=arrival_time,
             lora_request=lora_request,
+            prompt_adapter_request=prompt_adapter_request,
         )
 
     async def check_health_async(self) -> None:
@@ -623,6 +637,7 @@ class AsyncAphrodite:
         params: Union[SamplingParams, PoolingParams],
         arrival_time: Optional[float] = None,
         lora_request: Optional[LoRARequest] = None,
+        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
     ) -> AsyncStream:
         if self.log_requests:
             if isinstance(inputs, str):
@@ -664,7 +679,7 @@ class AsyncAphrodite:
             params=params,
             arrival_time=arrival_time,
             lora_request=lora_request,
-        )
+            prompt_adapter_request=prompt_adapter_request)
 
         return stream
 
@@ -674,6 +689,7 @@ class AsyncAphrodite:
         sampling_params: SamplingParams,
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
+        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
     ) -> AsyncIterator[RequestOutput]:
         """Generate outputs for a request.
 
@@ -689,7 +705,8 @@ class AsyncAphrodite:
             prompt_token_ids: The token IDs of the prompt. If None, we
                 use the tokenizer to convert the prompts to token IDs.
             lora_request: LoRA request to use for generation, if any.
-            multi_modal_data: Multi modal data per request.
+            prompt_adapter_request: Prompt Adapter request to use 
+                                            for generation, if any.
 
         Yields:
             The output `RequestOutput` objects from the LLMEngine
@@ -744,6 +761,7 @@ class AsyncAphrodite:
                 inputs,
                 sampling_params,
                 lora_request=lora_request,
+                prompt_adapter_request=prompt_adapter_request,
         ):
             yield AphroditeEngine.validate_output(output, RequestOutput)
 
@@ -823,6 +841,7 @@ class AsyncAphrodite:
         params: Union[SamplingParams, PoolingParams],
         *,
         lora_request: Optional[LoRARequest] = None,
+        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
     ) -> AsyncIterator[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Common logic to process requests with SamplingParams or
         PoolingParams."""
@@ -834,7 +853,7 @@ class AsyncAphrodite:
             params,
             arrival_time=arrival_time,
             lora_request=lora_request,
-        )
+            prompt_adapter_request=prompt_adapter_request)
 
         try:
             async for request_output in stream:

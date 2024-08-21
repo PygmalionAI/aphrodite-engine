@@ -4,10 +4,11 @@ from typing import List, Optional, Set, Tuple
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, MultiModalConfig,
-                                     ParallelConfig, SchedulerConfig,
-                                     SpeculativeConfig)
+                                     ParallelConfig, PromptAdapterConfig,
+                                     SchedulerConfig, SpeculativeConfig)
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.lora.request import LoRARequest
+from aphrodite.prompt_adapter.request import PromptAdapterRequest
 
 
 class ExecutorBase(ABC):
@@ -29,6 +30,7 @@ class ExecutorBase(ABC):
         lora_config: Optional[LoRAConfig],
         multimodal_config: Optional[MultiModalConfig],
         speculative_config: Optional[SpeculativeConfig],
+        prompt_adapter_config: Optional[PromptAdapterConfig],
     ) -> None:
         self.model_config = model_config
         self.cache_config = cache_config
@@ -39,6 +41,7 @@ class ExecutorBase(ABC):
         self.device_config = device_config
         self.multimodal_config = multimodal_config
         self.speculative_config = speculative_config
+        self.prompt_adapter_config = prompt_adapter_config
 
         self._init_executor()
 
@@ -94,7 +97,24 @@ class ExecutorBase(ABC):
 
     @abstractmethod
     def pin_lora(self, lora_id: int) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    def add_prompt_adapter(
+            self, prompt_adapter_request: PromptAdapterRequest) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    def remove_prompt_adapter(self, prompt_adapter_id: int) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    def pin_prompt_adapter(self, prompt_adapter_id: int) -> bool:
         raise NotImplementedError  # type: ignore
+
+    @abstractmethod
+    def list_prompt_adapters(self) -> Set[int]:
+        raise NotImplementedError
 
     @abstractmethod
     def check_health(self) -> None:
@@ -123,12 +143,14 @@ class ExecutorAsyncBase(ExecutorBase):
         lora_config: Optional[LoRAConfig],
         multimodal_config: Optional[MultiModalConfig],
         speculative_config: Optional[SpeculativeConfig],
+        prompt_adapter_config: Optional[PromptAdapterConfig],
     ) -> None:
         self.pp_locks: Optional[List[asyncio.Lock]] = None
 
         super().__init__(model_config, cache_config, parallel_config,
                          scheduler_config, device_config, load_config,
-                         lora_config, multimodal_config, speculative_config)
+                         lora_config, multimodal_config, speculative_config,
+                         prompt_adapter_config)
 
     @abstractmethod
     async def execute_model_async(

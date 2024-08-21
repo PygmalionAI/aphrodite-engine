@@ -10,8 +10,8 @@ from loguru import logger
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, MultiModalConfig,
-                                     ParallelConfig, SchedulerConfig,
-                                     SpeculativeConfig)
+                                     ParallelConfig, PromptAdapterConfig,
+                                     SchedulerConfig, SpeculativeConfig)
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.common.utils import (get_distributed_init_method, get_ip,
                                     get_open_port, make_async)
@@ -45,6 +45,7 @@ class RayXPUExecutor(DistributedGPUExecutor):
         lora_config: Optional[LoRAConfig],
         multimodal_config: Optional[MultiModalConfig],
         speculative_config: Optional[SpeculativeConfig],
+        prompt_adapter_config: Optional[PromptAdapterConfig],
     ) -> None:
         assert device_config.device_type == "xpu"
         assert (not speculative_config
@@ -58,6 +59,7 @@ class RayXPUExecutor(DistributedGPUExecutor):
         self.scheduler_config = scheduler_config
         self.device_config = device_config
         self.multimodal_config = multimodal_config
+        self.prompt_adapter_config = prompt_adapter_config
 
         placement_group = self.parallel_config.placement_group
 

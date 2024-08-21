@@ -9,7 +9,8 @@ from loguru import logger
 from aphrodite.attention import get_attn_backend
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, MultiModalConfig,
-                                     ParallelConfig, SchedulerConfig)
+                                     ParallelConfig, PromptAdapterConfig,
+                                     SchedulerConfig)
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceGroupMetadata)
@@ -87,6 +88,7 @@ class XPUModelRunner(ModelRunnerBase[ModelInputForXPU]):
         lora_config: Optional[LoRAConfig],
         multimodal_config: Optional[MultiModalConfig],
         kv_cache_dtype: Optional[str] = "auto",
+        prompt_adapter_config: Optional[PromptAdapterConfig] = None,
         is_driver_worker: bool = False,
         *args,
         **kwargs,
@@ -97,6 +99,7 @@ class XPUModelRunner(ModelRunnerBase[ModelInputForXPU]):
         self.lora_config = lora_config
         self.load_config = load_config
         self.cache_config = cache_config
+        self.prompt_adapter_config = prompt_adapter_config
         self.multimodal_config = multimodal_config
         self.is_driver_worker = is_driver_worker
 

@@ -5,7 +5,8 @@ import torch
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, MultiModalConfig,
-                                     ParallelConfig, SchedulerConfig)
+                                     ParallelConfig, PromptAdapterConfig,
+                                     SchedulerConfig)
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sequence import (IntermediateTensors, PoolerOutput,
                                        SequenceData, SequenceGroupMetadata)
@@ -37,6 +38,7 @@ class EmbeddingModelRunner(
         load_config: LoadConfig,
         lora_config: Optional[LoRAConfig],
         kv_cache_dtype: Optional[str] = "auto",
+        prompt_adapter_config: Optional[PromptAdapterConfig] = None,
         is_driver_worker: bool = False,
         multimodal_config: Optional[MultiModalConfig] = None,
     ):
@@ -49,6 +51,7 @@ class EmbeddingModelRunner(
                          lora_config=lora_config,
                          kv_cache_dtype=kv_cache_dtype,
                          is_driver_worker=is_driver_worker,
+                         prompt_adapter_config=prompt_adapter_config,
                          multimodal_config=multimodal_config)
 
     @torch.inference_mode()
@@ -68,6 +71,13 @@ class EmbeddingModelRunner(
             assert model_input.lora_mapping is not None
             self.set_active_loras(model_input.lora_requests,
                                   model_input.lora_mapping)
+
+        if self.prompt_adapter_config:
+            assert model_input.prompt_adapter_requests is not None
+            assert model_input.prompt_adapter_mapping is not None
+            self.set_active_prompt_adapters(
+                model_input.prompt_adapter_requests,
+                model_input.prompt_adapter_mapping)
 
         # Currently cuda graph is only supported by the decode phase.
         assert model_input.attn_metadata is not None
