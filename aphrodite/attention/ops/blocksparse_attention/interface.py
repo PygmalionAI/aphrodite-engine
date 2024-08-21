@@ -4,11 +4,11 @@ import torch
 
 from aphrodite.attention.ops.blocksparse_attention.utils import (
     dense_to_crow_col, get_head_sliding_step, get_sparse_attn_mask)
-from aphrodite.common.utils import (get_device_capability_stateless, is_cpu,
-                                    is_hip)
+from aphrodite.platforms import current_platform
+from aphrodite.common.utils import is_cpu, is_hip
 
 IS_COMPUTE_8_OR_ABOVE = (torch.cuda.is_available()
-                         and get_device_capability_stateless()[0] >= 8)
+                         and current_platform.get_device_capability()[0] >= 8)
 
 if IS_COMPUTE_8_OR_ABOVE:
     from aphrodite.attention.ops.blocksparse_attention.blocksparse_attention_kernel import \

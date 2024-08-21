@@ -12,13 +12,13 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      SchedulerConfig, SpeculativeConfig,
                                      VisionLanguageConfig)
 from aphrodite.common.sequence import ExecuteModelRequest
-from aphrodite.common.utils import get_device_capability_stateless
 from aphrodite.distributed import (ensure_model_parallel_initialized,
                                    init_distributed_environment,
                                    set_custom_all_reduce)
 from aphrodite.lora.request import LoRARequest
 from aphrodite.modeling import set_random_seed
 from aphrodite.modeling.model_loader.tensorizer import TensorizerConfig
+from aphrodite.platforms import current_platform
 from aphrodite.task_handler.cache_engine import CacheEngine
 from aphrodite.task_handler.embedding_model_runner import EmbeddingModelRunner
 from aphrodite.task_handler.model_runner import GPUModelRunnerBase, ModelRunner
@@ -335,7 +335,7 @@ def init_worker_distributed_environment(
 def _check_if_gpu_supports_dtype(torch_dtype: torch.dtype):
     # Check if the GPU supports the dtype.
     if torch_dtype == torch.bfloat16:
-        compute_capability = get_device_capability_stateless()
+        compute_capability = current_platform.get_device_capability()
         if compute_capability[0] < 8:
             gpu_name = torch.cuda.get_device_name()
             raise ValueError(

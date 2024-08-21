@@ -3,8 +3,8 @@ from typing import Any, Dict, List, Optional
 import torch
 from pydantic import BaseModel
 
-from aphrodite.common.utils import get_device_capability_stateless
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
+from aphrodite.platforms import current_platform
 from aphrodite.quantization.base_config import QuantizationConfig  # noqa: E501
 from aphrodite.quantization.compressed_tensors.schemes import (
     W4A16SPARSE24_SUPPORTED_BITS, WNA16_SUPPORTED_BITS,
@@ -83,7 +83,7 @@ class CompressedTensorsConfig(QuantizationConfig):
         return []
 
     def _check_gptq_and_marlin_can_run(self):
-        capability = get_device_capability_stateless()
+        capability = current_platform.get_device_capability()
         capability = capability[0] * 10 + capability[1]
         if capability < 80:
             raise RuntimeError("The quantization config is not supported for ",

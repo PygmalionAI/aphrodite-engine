@@ -6,12 +6,12 @@ from torch.nn import Module
 from torch.nn.parameter import Parameter
 
 from aphrodite import _custom_ops as ops
-from aphrodite.common.utils import (get_device_capability_stateless,
-                                    print_warning_once)
+from aphrodite.common.utils import print_warning_once
 from aphrodite.modeling.layers.fused_moe import (FusedMoE, FusedMoEMethodBase,
                                                  fused_moe)
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
 from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.platforms import current_platform
 from aphrodite.quantization.base_config import (QuantizationConfig,
                                                 QuantizeMethodBase)
 
@@ -19,7 +19,7 @@ ACTIVATION_SCHEMES = ["static", "dynamic"]
 
 
 def cutlass_fp8_supported() -> bool:
-    capability = get_device_capability_stateless()
+    capability = current_platform.get_device_capability()
     capability = capability[0] * 10 + capability[1]
     return ops.cutlass_scaled_mm_supports_fp8(capability)
 

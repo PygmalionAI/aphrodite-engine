@@ -841,10 +841,3 @@ def is_full_nvlink(device_ids: List[int]) -> bool:
                         exc_info=error)
                     return False
     return True
-
-
-@lru_cache(maxsize=8)
-@with_nvml_context
-def get_device_capability_stateless(device_id: int = 0) -> Tuple[int, int]:
-    handle = pynvml.nvmlDeviceGetHandleByIndex(device_id)
-    return pynvml.nvmlDeviceGetCudaComputeCapability(handle)

@@ -7,7 +7,7 @@ from loguru import logger
 from torch.nn.parameter import Parameter
 
 from aphrodite import _custom_ops as ops
-from aphrodite.common.utils import get_device_capability_stateless
+from aphrodite.platforms import current_platform
 from aphrodite.modeling.layers.linear import (LinearBase, LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
@@ -169,7 +169,7 @@ class GPTQMarlinConfig(QuantizationConfig):
             return False
 
         # If the capability of the device is too low, cannot convert.
-        major, minor = get_device_capability_stateless()
+        major, minor = current_platform.get_device_capability()
         device_capability = major * 10 + minor
         if device_capability < cls.get_min_capability():
             return False
