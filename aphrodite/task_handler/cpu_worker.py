@@ -9,7 +9,7 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, MultiModalConfig,
                                      ParallelConfig, SchedulerConfig)
 from aphrodite.common.sequence import ExecuteModelRequest
-from aphrodite.common.utils import STR_DTYPE_TO_TORCH_DTYPE
+from aphrodite.common.utils import STR_DTYPE_TO_TORCH_DTYPE, init_kmp_env
 from aphrodite.distributed import (ensure_model_parallel_initialized,
                                    init_distributed_environment)
 from aphrodite.modeling import set_random_seed
@@ -147,6 +147,9 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self.is_driver_worker = is_driver_worker
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
+
+        # try to initialize intel openmp optimized tunings
+        init_kmp_env()
 
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
