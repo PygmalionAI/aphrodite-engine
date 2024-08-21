@@ -7,7 +7,8 @@ import torch_xla.experimental.dynamo_set_buffer_donor
 
 from aphrodite.attention.backends.abstract import (AttentionBackend,
                                                    AttentionImpl,
-                                                   AttentionMetadata)
+                                                   AttentionMetadata,
+                                                   AttentionType)
 
 
 class PallasAttentionBackend(AttentionBackend):
@@ -133,6 +134,7 @@ class PallasAttentionBackendImpl(AttentionImpl):
         kv_cache: Tuple[Optional[torch.Tensor], Optional[torch.Tensor]],
         attn_metadata: PallasMetadata,
         kv_scale: float = 1.0,
+        attn_type: AttentionType = AttentionType.DECODER,
     ) -> torch.Tensor:
         """Forward pass with Pallas attention.
         Args:
@@ -146,6 +148,11 @@ class PallasAttentionBackendImpl(AttentionImpl):
             shape = [batch_size, seq_len, num_heads * head_size]
         """
         assert kv_scale == 1.0
+        if attn_type != AttentionType.DECODER:
+            raise NotImplementedError("Encoder self-attention and "
+                                      "encoder/decoder cross-attention "
+                                      "are not implemented for "
+                                      "PallasAttentionBackendImpl")
         batch_size, seq_len, hidden_size = query.shape
         query = query.view(batch_size, seq_len, self.num_heads, self.head_size)
         key = key.view(batch_size, seq_len, self.num_kv_heads, self.head_size)
