@@ -5369,7 +5369,7 @@ Current version indicated by LITEVER below.
 	}
 	function is_using_kcpp_with_mirostat()
 	{
-		return (custom_kobold_endpoint!="" && koboldcpp_version && koboldcpp_version!="" && compare_version_str(koboldcpp_version, "1.37") >= 0);
+		return (custom_kobold_endpoint!="" && koboldcpp_version && koboldcpp_version!="" && compare_version_str(koboldcpp_version, "1.99") >= 0);
 	}
 	function is_using_kcpp_with_grammar()
 	{
@@ -5377,7 +5377,7 @@ Current version indicated by LITEVER below.
 	}
 	function is_using_kcpp_with_added_memory()
 	{
-		return (custom_kobold_endpoint!="" && koboldcpp_version && koboldcpp_version!="" && compare_version_str(koboldcpp_version, "1.49") >= 0);
+		return (custom_kobold_endpoint!="" && koboldcpp_version && koboldcpp_version!="" && compare_version_str(koboldcpp_version, "1.99") >= 0);
 	}
 	function is_using_kcpp_with_llava()
 	{
@@ -5389,7 +5389,7 @@ Current version indicated by LITEVER below.
 	}
 	function is_using_kcpp_with_dry()
 	{
-		return (custom_kobold_endpoint!="" && koboldcpp_version && koboldcpp_version!="" && compare_version_str(koboldcpp_version, "1.70") >= 0);
+		return (custom_kobold_endpoint!="" && koboldcpp_version && koboldcpp_version!="" && compare_version_str(koboldcpp_version, "1.99") >= 0);
 	}
 
 
