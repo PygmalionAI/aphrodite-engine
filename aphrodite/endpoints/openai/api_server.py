@@ -577,6 +577,14 @@ def run_server(args):
         _set_badwords(tokenizer, engine_model_config.hf_config)
 
     available_port = find_available_port(args.port)
+
+    logger.debug("Available routes:")
+    for route in app.routes:
+        if not hasattr(route, 'methods'):
+            continue
+        methods = ', '.join(route.methods)
+        logger.debug(f"Route: {route.path}, Methods: {methods}")
+
     try:
         uvicorn.run(app,
                     host=args.host,

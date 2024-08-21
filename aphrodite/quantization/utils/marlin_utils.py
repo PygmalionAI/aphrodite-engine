@@ -9,10 +9,13 @@ from aphrodite.quantization.utils.format_24 import (
     mask_creator, sparse_semi_structured_from_dense_cutlass)
 from aphrodite.quantization.utils.marlin_24_perms import (
     marlin_24_perm, marlin_24_scale_perm, marlin_24_scale_perm_single)
-from aphrodite.quantization.utils.marlin_perms import (
-    marlin_perm, marlin_scale_perm, marlin_scale_perm_single)
-from aphrodite.quantization.utils.quant_utils import (
-    get_pack_factor, quantize_weights, sort_weights)
+from aphrodite.quantization.utils.marlin_perms import (marlin_perm,
+                                                       marlin_scale_perm,
+                                                       marlin_scale_perm_single
+                                                       )
+from aphrodite.quantization.utils.quant_utils import (get_pack_factor,
+                                                      quantize_weights,
+                                                      sort_weights)
 from aphrodite.platforms import current_platform
 from aphrodite.common.utils import print_warning_once
 
