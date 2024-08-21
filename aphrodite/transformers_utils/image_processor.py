@@ -1,5 +1,4 @@
-from transformers import AutoImageProcessor
-from transformers.image_processing_utils import BaseImageProcessor
+from typing import cast
 
 
 def get_image_processor(
@@ -7,10 +6,15 @@ def get_image_processor(
     *args,
     trust_remote_code: bool = False,
     **kwargs,
-) -> BaseImageProcessor:
+):
     """Gets an image processor for the given model name via HuggingFace."""
+    # don't put this import at the top level
+    # it will call torch.cuda.device_count()
+    from transformers import AutoImageProcessor
+    from transformers.image_processing_utils import BaseImageProcessor
+
     try:
-        processor: BaseImageProcessor = AutoImageProcessor.from_pretrained(
+        processor = AutoImageProcessor.from_pretrained(
             processor_name,
             *args,
             trust_remote_code=trust_remote_code,
@@ -30,4 +34,4 @@ def get_image_processor(
         else:
             raise e
 
-    return processor
+    return cast(BaseImageProcessor, processor)

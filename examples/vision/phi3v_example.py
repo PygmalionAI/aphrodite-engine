@@ -1,5 +1,4 @@
 import os
-import subprocess
 
 from PIL import Image
 
@@ -18,17 +17,21 @@ def run_phi3v():
         trust_remote_code=True,
         image_token_id=32044,
         image_input_shape="1,3,1008,1344",
-        image_feature_size=1921,
+        # Use the maximum possible value for memory profiling
+        image_feature_size=2653,
         max_num_seqs=5,
     )
 
-    image = Image.open("images/cherry_blossom.jpg")
+    image_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                              "burg.jpg")
+    image = Image.open(image_path)
 
     # single-image prompt
-    prompt = "<|user|>\n<|image_1|>\nWhat is the season?<|end|>\n<|assistant|>\n"  # noqa: E501
-    prompt = prompt.replace("<|image_1|>", "<|image|>" * 1921 + "<s>")
+    prompt = "<|user|>\n<|image_1|>\nWhat is shown in this image?<|end|>\n<|assistant|>\n"  # noqa: E501
 
-    sampling_params = SamplingParams(temperature=0, max_tokens=64)
+    sampling_params = SamplingParams(temperature=1.1,
+                                     min_p=0.06,
+                                     max_tokens=512)
 
     outputs = llm.generate(
         {
@@ -44,19 +47,4 @@ def run_phi3v():
 
 
 if __name__ == "__main__":
-    s3_bucket_path = "s3://air-example-data-2/vllm_opensource_llava/"
-    local_directory = "images"
-
-    # Make sure the local directory exists or create it
-    os.makedirs(local_directory, exist_ok=True)
-
-    # Use AWS CLI to sync the directory, assume anonymous access
-    subprocess.check_call([
-        "aws",
-        "s3",
-        "sync",
-        s3_bucket_path,
-        local_directory,
-        "--no-sign-request",
-    ])
     run_phi3v()

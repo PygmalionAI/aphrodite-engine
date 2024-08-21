@@ -485,7 +485,11 @@ class YaRNScalingRotaryEmbedding(RotaryEmbedding):
         return cache
 
 
-class Phi3LongRoPERotaryEmbedding(nn.Module):
+class Phi3LongRoPEScaledRotaryEmbedding(nn.Module):
+    """Phi3 family of models scaled rotary embedding.
+
+    Based on the original RotaryEmbedding implementation.
+    """
 
     def __init__(
         self,
@@ -505,11 +509,13 @@ class Phi3LongRoPERotaryEmbedding(nn.Module):
 
         if rotary_dim != head_size:
             raise ValueError(
-                f"Rotary dim must be equal to head size, got {rotary_dim} "
-                f"and {head_size}")
+                f"`Phi3LongRoPEScaledRotaryEmbedding` does not support \
+                    rotary_dim != head_size ({rotary_dim}!={head_size}).")
         if is_neox_style is False:
             raise ValueError(
-                "Phi3SuScaledRotaryEmbedding only supports Neox style")
+                "`Phi3LongRoPEScaledRotaryEmbedding` only supports neox_style."
+            )
+
         self.head_size = head_size
         self.max_position_embeddings = max_position_embeddings
         self.original_max_position_embeddings = original_max_position_embeddings
@@ -536,8 +542,8 @@ class Phi3LongRoPERotaryEmbedding(nn.Module):
                              short_cache,
                              persistent=False)
 
-        long_cache = self._compute_cos_sin_cache(
-            original_max_position_embeddings, long_factor, long_mscale)
+        long_cache = self._compute_cos_sin_cache(max_position_embeddings,
+                                                 long_factor, long_mscale)
         long_cache = long_cache.to(dtype)
         self.register_buffer("long_cos_sin_cache",
                              long_cache,
@@ -555,9 +561,12 @@ class Phi3LongRoPERotaryEmbedding(nn.Module):
             0, self.head_size, 2, dtype=torch.float) / self.head_size)))
         return inv_freq
 
-    def _compute_cos_sin_cache(self, max_position_embeddings: int,
-                               rescale_factors: List[float],
-                               mscale: float) -> torch.Tensor:
+    def _compute_cos_sin_cache(
+        self,
+        max_position_embeddings: int,
+        rescale_factors: List[float],
+        mscale: float,
+    ) -> torch.Tensor:
         inv_freq = self._compute_inv_freq(rescale_factors)
         t = torch.arange(max_position_embeddings, dtype=torch.float)
         freqs = torch.einsum("i,j -> ij", t, inv_freq)
@@ -575,15 +584,17 @@ class Phi3LongRoPERotaryEmbedding(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         query = query.view(*query.shape[:-1], -1, self.head_size)
         key = key.view(*key.shape[:-1], -1, self.head_size)
+
         k = self.original_max_position_embeddings
         long_prompt_offset = (torch.any(positions > k).float() *
                               torch.full_like(positions, k)).long()
         idx = (torch.add(positions, long_prompt_offset)
                if long_prompt_offset is not None else positions)
-        self.long_short_cos_sin_cache = self.long_short_cos_sin_cache.to(
-            idx.device)
+        self.long_short_cos_sin_cache: torch.Tensor = (
+            self.long_short_cos_sin_cache.to(idx.device))
         idx = torch.add(idx, offsets) if offsets is not None else idx
         cos_sin = torch.index_select(self.long_short_cos_sin_cache, 0, idx)
+
         cos, sin = cos_sin.chunk(2, dim=-1)
         cos = cos.repeat(1, 2).unsqueeze(-2)
         sin = sin.repeat(1, 2).unsqueeze(-2)
@@ -820,7 +831,7 @@ def get_rope(
                 for k, v in rope_scaling.items()
                 if k in ("short_mscale", "long_mscale")
             }
-            rotary_emb = Phi3LongRoPERotaryEmbedding(
+            rotary_emb = Phi3LongRoPEScaledRotaryEmbedding(
                 head_size, rotary_dim, max_position, original_max_position,
                 base, is_neox_style, dtype, short_factor, long_factor,
                 **extra_kwargs)

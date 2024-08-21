@@ -7,7 +7,7 @@ from transformers import CLIPVisionConfig, LlavaConfig
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, VisionLanguageConfig
 from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
-from aphrodite.inputs import INPUT_REGISTRY, InputContext
+from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.sampler import Sampler
@@ -19,8 +19,10 @@ from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
 from aphrodite.quantization.base_config import QuantizationConfig
 
-from .clip import dummy_image_for_clip, dummy_seq_data_for_clip
+from .clip import (dummy_image_for_clip, dummy_seq_data_for_clip,
+                   input_processor_for_clip)
 from .interfaces import SupportsVision
+from .utils import merge_vision_embeddings
 
 _KEYS_TO_MODIFY_MAPPING = {
     "language_model.lm_head": "lm_head",
@@ -50,28 +52,10 @@ class LlavaMultiModalProjector(nn.Module):
         return hidden_states
 
 
-def merge_vision_embeddings(input_ids: torch.Tensor,
-                            inputs_embeds: torch.Tensor,
-                            vision_embeddings: torch.Tensor,
-                            image_token_id: int) -> torch.Tensor:
-    """In place merges in vision_embeddings with inputs_embeds."""
-    mask = (input_ids == image_token_id)
-
-    image_feature_size = vision_embeddings.shape[0] * vision_embeddings.shape[1]
-    if mask.sum() != image_feature_size:
-        raise ValueError(f"image_feature_size should be {image_feature_size}, "
-                         f"but found: {mask.sum()}")
-
-    inputs_embeds[mask] = vision_embeddings.view(image_feature_size,
-                                                 vision_embeddings.shape[-1])
-
-    return inputs_embeds
-
-
 class LlavaImagePixelInputs(TypedDict):
     type: Literal["pixel_values"]
     data: torch.Tensor
-    """Shape: (batch_size, num_channels, height, width)"""
+    """Shape: `(batch_size, num_channels, height, width)`"""
 
 
 LlavaImageInputs = LlavaImagePixelInputs
@@ -89,8 +73,28 @@ def dummy_data_for_llava(ctx: InputContext, seq_len: int):
         )
 
         mm_data = dummy_image_for_clip(vision_config)
-
         return seq_data, mm_data
+
+    msg = f"Unsupported vision config: {type(vision_config)}"
+    raise NotImplementedError(msg)
+
+
+def input_processor_for_llava(ctx: InputContext, llm_inputs: LLMInputs):
+    multi_modal_data = llm_inputs.get("multi_modal_data")
+    if multi_modal_data is None or "image" not in multi_modal_data:
+        return llm_inputs
+
+    model_config = ctx.model_config
+    hf_config = ctx.get_hf_config(LlavaConfig)
+    vision_config = hf_config.vision_config
+
+    if isinstance(vision_config, CLIPVisionConfig):
+        return input_processor_for_clip(
+            model_config,
+            vision_config,
+            llm_inputs,
+            image_token_id=hf_config.image_token_index,
+        )
 
     msg = f"Unsupported vision config: {type(vision_config)}"
     raise NotImplementedError(msg)
@@ -98,6 +102,7 @@ def dummy_data_for_llava(ctx: InputContext, seq_len: int):
 
 @MULTIMODAL_REGISTRY.register_image_input_mapper()
 @INPUT_REGISTRY.register_dummy_data(dummy_data_for_llava)
+@INPUT_REGISTRY.register_input_processor(input_processor_for_llava)
 class LlavaForConditionalGeneration(nn.Module, SupportsVision):
 
     def __init__(self,
@@ -112,7 +117,6 @@ class LlavaForConditionalGeneration(nn.Module, SupportsVision):
 
         # TODO: Optionally initializes this for supporting embeddings.
         self.vision_tower = CLIPVisionModel(config.vision_config)
-
         self.multi_modal_projector = LlavaMultiModalProjector(
             vision_hidden_size=config.vision_config.hidden_size,
             text_hidden_size=config.text_config.hidden_size,
@@ -138,7 +142,7 @@ class LlavaForConditionalGeneration(nn.Module, SupportsVision):
                 f"The expected image tensor shape is batch dimension plus "
                 f"{self.vlm_config.image_input_shape[1:]}. "
                 f"You supplied {data.shape}. "
-                f"If you are using Aphrodite's entrypoint, make sure your "
+                f"If you are using vLLM's entrypoint, make sure your "
                 f"supplied image input is consistent with "
                 f"image_input_shape in engine args.")
 

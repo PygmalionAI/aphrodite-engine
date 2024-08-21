@@ -1,4 +1,4 @@
-from typing import List, NamedTuple, Optional, Tuple
+from typing import List, Mapping, NamedTuple, Optional, Tuple
 
 import openvino as ov
 import torch
@@ -12,6 +12,8 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 from aphrodite.modeling import SamplingMetadata
 from aphrodite.modeling.model_loader.openvino import get_model
+from aphrodite.multimodal import (MULTIMODAL_REGISTRY, BatchedTensors,
+                                  MultiModalInputs)
 
 
 class ModelInput(NamedTuple):
@@ -20,7 +22,7 @@ class ModelInput(NamedTuple):
     attn_metadata: Optional[OpenVINOAttentionMetadata]
     seq_lens: List[int]
     query_lens: List[int]
-    multi_modal_input: Optional[torch.Tensor]
+    multi_modal_kwargs: Mapping[str, BatchedTensors]
 
     @classmethod
     def empty(cls, device):
@@ -29,7 +31,7 @@ class ModelInput(NamedTuple):
                           attn_metadata=None,
                           seq_lens=[],
                           query_lens=[],
-                          multi_modal_input=None)
+                          multi_modal_kwargs={})
 
 
 class OpenVINOModelRunner:
@@ -75,6 +77,10 @@ class OpenVINOModelRunner:
             self.block_size,
         )
 
+        # Multi-modal data support
+        self.multi_modal_input_mapper = MULTIMODAL_REGISTRY \
+            .create_input_mapper(self.model_config)
+
         # Lazy initialization.
         self.model: nn.Module  # Set after init_Model
 
@@ -102,6 +108,7 @@ class OpenVINOModelRunner:
         seq_lens: List[int] = []
         past_lens: List[int] = []
         query_lens: List[int] = []
+        multi_modal_inputs_list: List[MultiModalInputs] = []
         subsequence_begins: List[int] = []
         block_indices: List[int] = []
         block_indices_begins: List[int] = []
@@ -153,6 +160,11 @@ class OpenVINOModelRunner:
                                     and len(computed_block_nums) > 0
                                     and self.sliding_window is None
                                     and is_prompt)
+
+                mm_data = seq_group_metadata.multi_modal_data
+                if mm_data:
+                    mm_kwargs = self.multi_modal_input_mapper(mm_data)
+                    multi_modal_inputs_list.append(mm_kwargs)
 
                 block_table = seq_group_metadata.block_tables[seq_id]
                 # TODO: Combine chunked prefill and prefix caching by
@@ -245,22 +257,24 @@ class OpenVINOModelRunner:
             block_indices_begins=block_indices_begins_tensor,
             max_context_len=max_context_len_tensor,
         )
+
+        multi_modal_kwargs = MultiModalInputs.batch(multi_modal_inputs_list,
+                                                    device=self.device)
+
         return ModelInput(
             input_tokens,
             input_positions,
             attn_metadata,
             seq_lens,
             query_lens,
-            None,
+            multi_modal_kwargs=multi_modal_kwargs,
         )
 
     def prepare_input_tensors(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[torch.Tensor, torch.Tensor, OpenVINOAttentionMetadata,
-               SamplingMetadata, Optional[torch.Tensor], ]:
-        multi_modal_input = None
-
+               SamplingMetadata, Mapping[str, BatchedTensors]]:
         # Prepare input tensors.
         (
             input_tokens,
@@ -268,7 +282,7 @@ class OpenVINOModelRunner:
             attn_metadata,
             seq_lens,
             query_lens,
-            multi_modal_input,
+            multi_modal_kwargs,
         ) = self._prepare_model_input(seq_group_metadata_list)
 
         sampling_metadata = SamplingMetadata.prepare(
@@ -284,7 +298,7 @@ class OpenVINOModelRunner:
             input_positions,
             attn_metadata,
             sampling_metadata,
-            multi_modal_input,
+            multi_modal_kwargs,
         )
 
     @torch.inference_mode()
@@ -298,7 +312,7 @@ class OpenVINOModelRunner:
             input_positions,
             attn_metadata,
             sampling_metadata,
-            multi_modal_input,
+            multi_modal_kwargs,
         ) = self.prepare_input_tensors(seq_group_metadata_list)
 
         model_executable = self.model
@@ -307,9 +321,8 @@ class OpenVINOModelRunner:
             "positions": input_positions,
             "kv_caches": kv_caches,
             "attn_metadata": attn_metadata,
+            **(multi_modal_kwargs or {}),
         }
-        if self.vision_language_config:
-            execute_model_kwargs.update({"image_input": multi_modal_input})
 
         hidden_states = model_executable(**execute_model_kwargs)
 

@@ -3,8 +3,8 @@ import gc
 import time
 import warnings
 from collections import defaultdict
-from typing import (TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Type,
-                    TypeVar, Union)
+from typing import (TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Set,
+                    Tuple, Type, TypeVar, Union)
 
 import numpy as np
 import torch
@@ -46,7 +46,8 @@ from aphrodite.modeling import SamplingMetadata
 from aphrodite.modeling.model_loader import get_model
 from aphrodite.modeling.model_loader.tensorizer import TensorizerConfig
 from aphrodite.modeling.models.interfaces import supports_lora
-from aphrodite.multimodal import MULTIMODAL_REGISTRY
+from aphrodite.multimodal import (MULTIMODAL_REGISTRY, BatchedTensors,
+                                  MultiModalInputs)
 from aphrodite.task_handler.model_runner_base import (
     ModelRunnerBase, ModelRunnerInputBase,
     _add_attn_metadata_broadcastable_dict,
@@ -85,7 +86,7 @@ class ModelInputForGPU(ModelRunnerInputBase):
     lora_mapping: Optional["LoRAMapping"] = None
     lora_requests: Optional[Set[LoRARequest]] = None
     attn_metadata: Optional["AttentionMetadata"] = None
-    multi_modal_kwargs: Optional[Dict[str, torch.Tensor]] = None
+    multi_modal_kwargs: Optional[Mapping[str, BatchedTensors]] = None
     request_ids_to_seq_ids: Optional[Dict[str, List[int]]] = None
     finished_requests_ids: Optional[List[str]] = None
     virtual_engine: int = 0
@@ -374,8 +375,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         context_lens: List[int] = []
         query_lens: List[int] = []
         block_tables: List[List[int]] = []
-        multi_modal_kwargs_list: Dict[str,
-                                      List[torch.Tensor]] = defaultdict(list)
+        multi_modal_inputs_list: List[MultiModalInputs] = []
         request_ids_to_seq_ids: Dict[str, List[int]] = defaultdict(list)
         decode_only = True
         num_prefills = 0
@@ -546,8 +546,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                 if mm_data:
                     # Process multi-modal data
                     mm_kwargs = self.multi_modal_input_mapper(mm_data)
-                    for k, v in mm_kwargs.items():
-                        multi_modal_kwargs_list[k].append(v)
+                    multi_modal_inputs_list.append(mm_kwargs)
 
                 is_profile_run = _is_block_tables_empty(
                     seq_group_metadata.block_tables)
@@ -764,10 +763,8 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         else:
             lora_mapping = None
 
-        multi_modal_kwargs = {
-            k: torch.cat(v, dim=0).to(self.device)
-            for k, v in multi_modal_kwargs_list.items()
-        }
+        multi_modal_kwargs = MultiModalInputs.batch(multi_modal_inputs_list,
+                                                    device=self.device)
         request_ids_to_seq_ids = {
             seq_group_metadata.request_id:
             list(seq_group_metadata.seq_data.keys())
@@ -841,7 +838,11 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
 
             seq_data, dummy_multi_modal_data = INPUT_REGISTRY \
                 .dummy_data_for_profiling(model_config, seq_len)
-            assert len(seq_data.prompt_token_ids) == seq_len
+
+            # Having more tokens is over-conservative but otherwise fine
+            assert len(seq_data.prompt_token_ids) >= seq_len, (
+                f"Expected at least {seq_len} dummy tokens for profiling, "
+                f"but got: {len(seq_data.prompt_token_ids)}")
 
             seq = SequenceGroupMetadata(
                 request_id=str(group_id),
