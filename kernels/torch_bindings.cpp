@@ -196,17 +196,36 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.impl("moe_align_block_size", torch::kCUDA, &moe_align_block_size);
 
   // Compute int8 quantized tensor for given scaling factor.
+  /*
+    Implementation:
+    void static_scaled_int8_quant(torch::Tensor& out, torch::Tensor const& input,
+                                torch::Tensor const& scale);
+  */
   ops.def(
       "static_scaled_int8_quant(Tensor! out, Tensor input, Tensor scale) -> "
       "()");
   ops.impl("static_scaled_int8_quant", torch::kCUDA, &static_scaled_int8_quant);
 
   // Compute int8 quantized tensor and scaling factor
+  /*
+    Implementation:
+    void dynamic_scaled_int8_quant(torch::Tensor& out, torch::Tensor const& input,
+                                torch::Tensor& scales);
+  */
   ops.def(
       "dynamic_scaled_int8_quant(Tensor! out, Tensor input, Tensor! scale) -> "
       "()");
   ops.impl("dynamic_scaled_int8_quant", torch::kCUDA,
            &dynamic_scaled_int8_quant);
+
+  ops.def(
+      "selective_scan_fwd(Tensor! u, Tensor! delta,"
+      "                   Tensor! A, Tensor! B, Tensor C,"
+      "                   Tensor? D_, Tensor? z_, Tensor? delta_bias_,"
+      "                   bool delta_softplus,"
+      "                   Tensor? index_, Tensor? x) -> Tensor[]");
+  ops.impl("selective_scan_fwd", torch::kCUDA, &selective_scan_fwd);
+
 }
 
 TORCH_LIBRARY_EXPAND(CONCAT(TORCH_EXTENSION_NAME, _cache_ops), cache_ops) {
