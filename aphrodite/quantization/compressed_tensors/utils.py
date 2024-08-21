@@ -9,6 +9,7 @@ from torch.nn import Module
 class CompressionFormat(Enum):
     dense = "dense"
     sparse_bitmask = "sparse-bitmask"
+    float_quantized = "float-quantized"
     int_quantized = "int-quantized"
     pack_quantized = "pack-quantized"
     marlin_24 = "marlin-24"
@@ -39,6 +40,7 @@ class QuantizationArgs(BaseModel):
     """
     User facing arguments used to define a quantization config 
     for weights or activations
+
     :param num_bits: quantization bit depth
     :param type: dtype to quantized to, either int or float
     :param symmetric: whether or not quantization scale is symmetric
@@ -84,6 +86,7 @@ def find_first_name_or_class_match(
     for a given list of targets against each model layer. First uses the
     layer name to try and find a match. If no name match is found, uses
     the layer class name. Returns None otherwise.
+
     :param name: layer name
     :param module: torch.nn.Module
     :param targets: list of targets to match the layer against
@@ -101,6 +104,7 @@ def _find_first_match(value: str,
     Returns first element of target that matches value either
     exactly or as a regex after 're:'. If check_contains is set to True,
     additionally checks if the target string is contained within the value.
+
     :param value: string to compare the list of targets against
     :param targets: list of targets to match the layer against
     :param check_contains: whether or not to do a substring match

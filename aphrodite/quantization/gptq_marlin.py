@@ -7,41 +7,38 @@ from loguru import logger
 from torch.nn.parameter import Parameter
 
 from aphrodite import _custom_ops as ops
-from aphrodite.platforms import current_platform
 from aphrodite.modeling.layers.linear import (LinearBase, LinearMethodBase,
                                               set_weight_attrs)
 from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
+from aphrodite.platforms import current_platform
 from aphrodite.quantization.base_config import QuantizationConfig
-
-GPTQ_MARLIN_TILE = 16
-GPTQ_MARLIN_MIN_THREAD_N = 64
-GPTQ_MARLIN_MIN_THREAD_K = 128
-GPTQ_MARLIN_MAX_PARALLEL = 16
-
-GPTQ_MARLIN_SUPPORTED_NUM_BITS = [4, 8]
-GPTQ_MARLIN_SUPPORTED_GROUP_SIZES = [-1, 32, 64, 128]
-GPTQ_MARLIN_SUPPORTED_SYM = [True]
+from aphrodite.quantization.utils.marlin_utils import (
+    GPTQ_MARLIN_MAX_PARALLEL, GPTQ_MARLIN_MIN_THREAD_K,
+    GPTQ_MARLIN_MIN_THREAD_N, GPTQ_MARLIN_SUPPORTED_GROUP_SIZES,
+    GPTQ_MARLIN_SUPPORTED_NUM_BITS, GPTQ_MARLIN_SUPPORTED_SYM,
+    GPTQ_MARLIN_TILE)
 
 
 # Permutations for Marlin scale shuffling
-def get_scale_perms(num_bits):
-    scale_perm = []
+def get_scale_perms(num_bits: int):
+    scale_perm: List[int] = []
     for i in range(8):
         scale_perm.extend([i + 8 * j for j in range(8)])
-    scale_perm_single = []
+    scale_perm_single: List[int] = []
     for i in range(4):
         scale_perm_single.extend(
             [2 * i + j for j in [0, 1, 8, 9, 16, 17, 24, 25]])
     return scale_perm, scale_perm_single
 
 
-def get_pack_factor(num_bits):
+def get_pack_factor(num_bits: int):
     assert (num_bits in GPTQ_MARLIN_SUPPORTED_NUM_BITS
             ), f"Unsupported num_bits = {num_bits}"
     return 32 // num_bits
 
 
-def marlin_permute_scales(s, size_k, size_n, group_size, num_bits):
+def marlin_permute_scales(s: torch.Tensor, size_k: int, size_n: int,
+                          group_size: int, num_bits: int):
     scale_perm, scale_perm_single = get_scale_perms(num_bits)
     if group_size < size_k and group_size != -1:
         s = s.reshape((-1, len(scale_perm)))[:, scale_perm]
@@ -187,6 +184,7 @@ class GPTQMarlinState(Enum):
 
 class GPTQMarlinLinearMethod(LinearMethodBase):
     """Linear method for GPTQ Marlin.
+
     Args:
         quant_config: The GPTQ Marlin quantization config.
     """
@@ -275,13 +273,15 @@ class GPTQMarlinLinearMethod(LinearMethodBase):
             requires_grad=False,
         )
         set_weight_attrs(
-            qweight, {
+            qweight,
+            {
                 **extra_weight_attrs,
                 "input_dim": 0,
                 "output_dim": 1,
                 "packed_dim": 0,
                 "pack_factor": self.quant_config.pack_factor,
-            })
+            },
+        )
 
         # Activation order
         g_idx = Parameter(
@@ -292,10 +292,13 @@ class GPTQMarlinLinearMethod(LinearMethodBase):
             requires_grad=False,
         )
         # Ignore warning from fused linear layers such as QKVParallelLinear.
-        set_weight_attrs(g_idx, {
-            **extra_weight_attrs, "input_dim": 0,
-            "ignore_warning": True
-        })
+        set_weight_attrs(
+            g_idx,
+            {
+                **extra_weight_attrs, "input_dim": 0,
+                "ignore_warning": True
+            },
+        )
 
         g_idx_sort_indices = torch.empty(
             g_idx.shape,
@@ -312,29 +315,34 @@ class GPTQMarlinLinearMethod(LinearMethodBase):
             requires_grad=False,
         )
         set_weight_attrs(
-            scales, {
+            scales,
+            {
                 **extra_weight_attrs,
                 "input_dim": scales_and_zp_input_dim,
                 "output_dim": 1,
-            })
+            },
+        )
 
         # Quantized zero-points
         qzeros = Parameter(
-            torch.empty(scales_and_zp_size,
-                        output_size_per_partition //
-                        self.quant_config.pack_factor,
-                        dtype=torch.int32,
-                        device="meta"),
+            torch.empty(
+                scales_and_zp_size,
+                output_size_per_partition // self.quant_config.pack_factor,
+                dtype=torch.int32,
+                device="meta",
+            ),
             requires_grad=False,
         )
         set_weight_attrs(
-            qzeros, {
+            qzeros,
+            {
                 **extra_weight_attrs,
                 "input_dim": scales_and_zp_input_dim,
                 "output_dim": 1,
                 "packed_dim": 1,
                 "pack_factor": self.quant_config.pack_factor,
-            })
+            },
+        )
 
         # Allocate marlin workspace
         max_workspace_size = (
@@ -375,8 +383,7 @@ class GPTQMarlinLinearMethod(LinearMethodBase):
             layer.marlin_state = GPTQMarlinState.READY
 
             # Newly generated tensors need to replace existing tensors that are
-            # already registered as parameters by Aphrodite (and won't be
-            # freed)
+            # already registered as parameters by vLLM (and won't be freed)
             def replace_tensor(name, new_t):
                 # It is important to use resize_() here since it ensures
                 # the same buffer is reused
@@ -398,13 +405,14 @@ class GPTQMarlinLinearMethod(LinearMethodBase):
 
             else:
                 # Reset g_idx related tensors
-                layer.g_idx = Parameter(torch.empty(0,
-                                                    dtype=torch.int,
-                                                    device=cur_device),
-                                        requires_grad=False)
-                layer.g_idx_sort_indices = Parameter(torch.empty(
-                    0, dtype=torch.int, device=cur_device),
-                                                     requires_grad=False)
+                layer.g_idx = Parameter(
+                    torch.empty(0, dtype=torch.int, device=cur_device),
+                    requires_grad=False,
+                )
+                layer.g_idx_sort_indices = Parameter(
+                    torch.empty(0, dtype=torch.int, device=cur_device),
+                    requires_grad=False,
+                )
 
             # Repack weights
             marlin_qweight = ops.gptq_marlin_repack(

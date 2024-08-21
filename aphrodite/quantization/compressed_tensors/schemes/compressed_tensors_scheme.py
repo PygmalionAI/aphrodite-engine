@@ -15,6 +15,7 @@ class CompressedTensorsScheme(ABC):
     def create_weights(self, *args, **kwargs):
         """
         Weight creation for the particular scheme. Inputs to this function 
+
         """
         raise NotImplementedError
 
@@ -23,9 +24,11 @@ class CompressedTensorsScheme(ABC):
         """
         Run the forward pass for the particular scheme. This is where 
         scheme-specific dequant/quant steps/kernels should be applied.
+
         :param layer: toch.nn.Module with the registered weights and 
             other parameters relevant to the particular scheme. 
         :param x: input to the layer
+
         """
         raise NotImplementedError
 
