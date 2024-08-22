@@ -14,6 +14,7 @@ from aphrodite.executor.distributed_gpu_executor import (  # yapf: disable
 from aphrodite.executor.multiproc_worker_utils import (ProcessWorkerWrapper,
                                                        ResultHandler,
                                                        WorkerMonitor)
+from aphrodite.triton_utils import maybe_set_triton_cache_manager
 
 
 class MultiprocessingGPUExecutor(DistributedGPUExecutor):
@@ -39,6 +40,9 @@ class MultiprocessingGPUExecutor(DistributedGPUExecutor):
         # contention amongst the shards
         if "OMP_NUM_THREADS" not in os.environ:
             os.environ["OMP_NUM_THREADS"] = "1"
+
+        if world_size > 1:
+            maybe_set_triton_cache_manager()
 
         assert world_size <= cuda_device_count_stateless(), (
             "please set tensor_parallel_size to less than max local gpu count")
