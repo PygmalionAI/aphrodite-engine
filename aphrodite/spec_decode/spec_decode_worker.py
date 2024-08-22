@@ -19,6 +19,7 @@ from aphrodite.spec_decode.draft_model_runner import TP1DraftModelRunner
 from aphrodite.spec_decode.interfaces import (SpeculativeProposals,
                                               SpeculativeScorer,
                                               SpeculativeScores)
+from aphrodite.spec_decode.medusa_worker import MedusaWorker
 from aphrodite.spec_decode.metrics import AsyncMetricsCollector
 from aphrodite.spec_decode.mlp_speculator_worker import MLPSpeculatorWorker
 from aphrodite.spec_decode.multi_step_worker import MultiStepWorker
@@ -125,6 +126,10 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                     "model_config"].hf_config.model_type == "mlp_speculator":
                 disable_bonus_tokens = False
                 proposer_worker = MLPSpeculatorWorker(**draft_worker_kwargs)
+            elif draft_worker_kwargs[
+                    "model_config"].hf_config.model_type == "medusa":
+                disable_bonus_tokens = False
+                proposer_worker = MedusaWorker(**draft_worker_kwargs)
             else:
                 if draft_tp == 1:
                     draft_worker_kwargs[
