@@ -33,7 +33,7 @@ def encode_image_base64_from_file(image_path: str) -> str:
 
 
 image_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                          "burg.jpg")
+                          "../vision/burg.jpg")
 image_base64 = encode_image_base64_from_file(image_path=image_path)
 
 chat_completion_from_base64 = client.chat.completions.create(

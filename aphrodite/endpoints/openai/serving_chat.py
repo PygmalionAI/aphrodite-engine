@@ -7,6 +7,7 @@ from typing import (AsyncGenerator, AsyncIterator, Awaitable, Dict, Iterable,
 from typing import Sequence as GenericSequence
 from typing import TypedDict, Union, cast, final
 
+import requests
 from fastapi import Request
 from loguru import logger
 from openai.types.chat import (ChatCompletionContentPartImageParam,
@@ -69,8 +70,16 @@ class OpenAIServingChat(OpenAIServing):
 
         if chat_template is not None:
             try:
-                with open(chat_template, "r") as f:
-                    tokenizer.chat_template = f.read()
+                if chat_template.startswith('http'):
+                    response = requests.get(chat_template)
+                    if response.status_code == 200:
+                        tokenizer.chat_template = response.text
+                    else:
+                        raise ValueError("Failed to download chat template "
+                                         f"from {chat_template}")
+                else:
+                    with open(chat_template, "r") as f:
+                        tokenizer.chat_template = f.read()
             except OSError as e:
                 JINJA_CHARS = "{}\n"
                 if not any(c in chat_template for c in JINJA_CHARS):
