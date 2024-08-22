@@ -12,7 +12,7 @@ from aphrodite.endpoints.openai.protocol import (EmbeddingRequest,
                                                  EmbeddingResponseData,
                                                  UsageInfo)
 from aphrodite.endpoints.openai.serving_completions import parse_prompt_format
-from aphrodite.endpoints.openai.serving_engine import LoRA, OpenAIServing
+from aphrodite.endpoints.openai.serving_engine import LoRAModulePath, OpenAIServing
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 
 TypeTokenIDs = List[int]
@@ -54,7 +54,7 @@ class OpenAIServingEmbedding(OpenAIServing):
     def __init__(self,
                  engine: AsyncAphrodite,
                  served_model_names: List[str],
-                 lora_modules: Optional[List[LoRA]] = None):
+                 lora_modules: Optional[List[LoRAModulePath]] = None):
         super().__init__(engine=engine,
                          served_model_names=served_model_names,
                          lora_modules=lora_modules)
