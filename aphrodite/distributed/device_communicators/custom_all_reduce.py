@@ -11,7 +11,7 @@ from aphrodite import _custom_ops as ops
 from aphrodite.common.utils import cuda_device_count_stateless, is_full_nvlink
 from aphrodite.distributed.device_communicators.custom_all_reduce_utils import \
     gpu_p2p_access_check
-from aphrodite.distributed.parallel_state import is_in_the_same_node
+from aphrodite.distributed.parallel_state import in_the_same_node_as
 
 try:
     assert ops.is_custom_op_supported("_C_custom_ar::meta_size")
@@ -63,7 +63,7 @@ class CustomAllreduce:
         assert dist.get_backend(group) != dist.Backend.NCCL, (
             "CustomAllreduce should be attached to a non-NCCL group.")
 
-        if not is_in_the_same_node(group):
+        if not all(in_the_same_node_as(group, source_rank=0)):
             # No need to initialize custom allreduce for multi-node case.
             logger.warning(
                 "Custom allreduce is disabled because this process group"
