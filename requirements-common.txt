@@ -26,3 +26,4 @@ lm-format-enforcer >= 0.10.3
 uvloop
 pillow
 pyzmq
+aiohttp
