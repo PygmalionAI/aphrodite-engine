@@ -83,7 +83,7 @@ ENV APHRODITE_INSTALL_PUNICA_KERNELS=1
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
     --mount=type=cache,target=/root/.cache/pip \
-    python3 setup.py bdist_wheel --dist-dir=dist
+    python3 setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38
 
 #################### EXTENSION Build IMAGE ####################
 
