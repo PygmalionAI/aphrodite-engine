@@ -9,8 +9,8 @@ from loguru import logger
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, MultiModalConfig,
-                                     ParallelConfig, SchedulerConfig,
-                                     SpeculativeConfig)
+                                     ParallelConfig, PromptAdapterConfig,
+                                     SchedulerConfig, SpeculativeConfig)
 from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.distributed import (ensure_model_parallel_initialized,
                                    init_distributed_environment,
@@ -19,6 +19,7 @@ from aphrodite.lora.request import LoRARequest
 from aphrodite.modeling import set_random_seed
 from aphrodite.modeling.model_loader.tensorizer import TensorizerConfig
 from aphrodite.platforms import current_platform
+from aphrodite.prompt_adapter.request import PromptAdapterRequest
 from aphrodite.task_handler.cache_engine import CacheEngine
 from aphrodite.task_handler.embedding_model_runner import EmbeddingModelRunner
 from aphrodite.task_handler.model_runner import GPUModelRunnerBase, ModelRunner
@@ -48,6 +49,7 @@ class Worker(LocalOrDistributedWorkerBase):
         lora_config: Optional[LoRAConfig] = None,
         multimodal_config: Optional[MultiModalConfig] = None,
         speculative_config: Optional[SpeculativeConfig] = None,
+        prompt_adapter_config: Optional[PromptAdapterConfig] = None,
         is_driver_worker: bool = False,
         model_runner_cls: Optional[Type[GPUModelRunnerBase]] = None,
     ) -> None:
@@ -61,6 +63,7 @@ class Worker(LocalOrDistributedWorkerBase):
         self.rank = rank
         self.distributed_init_method = distributed_init_method
         self.lora_config = lora_config
+        self.prompt_adapter_config = prompt_adapter_config
         self.load_config = load_config
         self.is_driver_worker = is_driver_worker
         if parallel_config and is_driver_worker:
@@ -96,6 +99,7 @@ class Worker(LocalOrDistributedWorkerBase):
             lora_config=self.lora_config,
             kv_cache_dtype=self.cache_config.cache_dtype,
             is_driver_worker=is_driver_worker,
+            prompt_adapter_config=prompt_adapter_config,
             multimodal_config=multimodal_config,
             **speculative_args,
         )
@@ -297,6 +301,19 @@ class Worker(LocalOrDistributedWorkerBase):
 
     def list_loras(self) -> Set[int]:
         return self.model_runner.list_loras()
+
+    def add_prompt_adapter(
+            self, prompt_adapter_request: PromptAdapterRequest) -> bool:
+        return self.model_runner.add_prompt_adapter(prompt_adapter_request)
+
+    def remove_prompt_adapter(self, prompt_adapter_id: int) -> bool:
+        return self.model_runner.remove_lora(prompt_adapter_id)
+
+    def pin_prompt_adapter(self, prompt_adapter_id: int) -> bool:
+        return self.model_runner.pin_prompt_adapter(prompt_adapter_id)
+
+    def list_prompt_adapters(self) -> Set[int]:
+        return self.model_runner.list_prompt_adapters()
 
     @property
     def max_model_len(self) -> int:

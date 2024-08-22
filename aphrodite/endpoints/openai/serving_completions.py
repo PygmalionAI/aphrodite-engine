@@ -1,31 +1,21 @@
 import time
-from typing import (
-    AsyncGenerator,
-    AsyncIterator,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-)
+from typing import (AsyncGenerator, AsyncIterator, Callable, Dict, List,
+                    Optional, Tuple)
 
 from fastapi import Request
 
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.utils import merge_async_iterators, random_uuid
 from aphrodite.endpoints.openai.protocol import (
-    CompletionRequest,
-    CompletionResponse,
-    CompletionResponseChoice,
-    CompletionResponseStreamChoice,
-    CompletionStreamResponse,
-    LogProbs,
-    UsageInfo,
-)
-from aphrodite.endpoints.openai.serving_engine import LoRA, OpenAIServing
+    CompletionRequest, CompletionResponse, CompletionResponseChoice,
+    CompletionResponseStreamChoice, CompletionStreamResponse, LogProbs,
+    UsageInfo)
+from aphrodite.endpoints.openai.serving_engine import (LoRAModulePath,
+                                                       OpenAIServing,
+                                                       PromptAdapterPath)
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
-from aphrodite.modeling.guided_decoding import (
-    get_guided_decoding_logits_processor, )
+from aphrodite.modeling.guided_decoding import \
+    get_guided_decoding_logits_processor
 
 TypeTokenIDs = List[int]
 TypeTopLogProbs = List[Optional[Dict[int, float]]]
@@ -58,13 +48,13 @@ def parse_prompt_format(prompt) -> Tuple[bool, list]:
 
 class OpenAIServingCompletion(OpenAIServing):
 
-    def __init__(self,
-                 engine: AsyncAphrodite,
-                 served_model_names: List[str],
-                 lora_modules: Optional[List[LoRA]] = None):
+    def __init__(self, engine: AsyncAphrodite, served_model_names: List[str],
+                 lora_modules: Optional[List[LoRAModulePath]],
+                 prompt_adapters: Optional[List[PromptAdapterPath]]):
         super().__init__(engine=engine,
                          served_model_names=served_model_names,
-                         lora_modules=lora_modules)
+                         lora_modules=lora_modules,
+                         prompt_adapters=prompt_adapters)
 
     async def create_completion(self, request: CompletionRequest,
                                 raw_request: Request):
@@ -95,7 +85,12 @@ class OpenAIServingCompletion(OpenAIServing):
         try:
             sampling_params = request.to_sampling_params(
                 self.tokenizer.vocab_size)
-            lora_request = self._maybe_get_lora(request)
+            adapter_type, adapter_request = self._maybe_get_adapter(request)
+            lora_request, prompt_adapter_request = None, None
+            if adapter_type == 'LoRA':
+                lora_request, prompt_adapter_request = adapter_request, None
+            elif adapter_type == 'PromptAdapter':
+                lora_request, prompt_adapter_request = None, adapter_request
             decoding_config = self.engine.engine.decoding_config
             guided_decoding_backend = request.guided_decoding_backend \
                 or decoding_config.guided_decoding_backend
@@ -131,6 +126,7 @@ class OpenAIServingCompletion(OpenAIServing):
                     sampling_params,
                     f"{request_id}-{i}",
                     lora_request=lora_request,
+                    prompt_adapter_request=prompt_adapter_request,
                 )
 
                 generators.append(generator)

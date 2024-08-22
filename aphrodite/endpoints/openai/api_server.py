@@ -96,7 +96,7 @@ async def health() -> Response:
 
 @router.get("/v1/models")
 async def show_available_models(x_api_key: Optional[str] = Header(None)):
-    models = await openai_serving_chat.show_available_models()
+    models = await openai_serving_completion.show_available_models()
     return JSONResponse(content=models.model_dump())
 
 
@@ -568,7 +568,7 @@ def run_server(args):
                                             args.lora_modules,
                                             args.chat_template)
     openai_serving_completion = OpenAIServingCompletion(
-        engine, served_model_names, args.lora_modules)
+        engine, served_model_names, args.lora_modules, args.prompt_adapters)
     openai_serving_embedding = OpenAIServingEmbedding(engine,
                                                       served_model_names)
     engine_model_config = asyncio.run(engine.get_model_config())

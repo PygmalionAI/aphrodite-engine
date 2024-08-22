@@ -13,7 +13,8 @@ from aphrodite.endpoints.openai.protocol import (
     ChatCompletionResponseStreamChoice, ChatCompletionStreamResponse,
     ChatMessage, DeltaMessage, ErrorResponse, FunctionCall, ToolCall,
     UsageInfo)
-from aphrodite.endpoints.openai.serving_engine import LoRA, OpenAIServing
+from aphrodite.endpoints.openai.serving_engine import (LoRAModulePath,
+                                                       OpenAIServing)
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.modeling.guided_decoding import \
     get_guided_decoding_logits_processor
@@ -25,7 +26,7 @@ class OpenAIServingChat(OpenAIServing):
                  engine: AsyncAphrodite,
                  served_model_names: List[str],
                  response_role: str,
-                 lora_modules: Optional[List[LoRA]] = None,
+                 lora_modules: Optional[List[LoRAModulePath]] = None,
                  chat_template=None):
         super().__init__(engine=engine,
                          served_model_names=served_model_names,
@@ -76,7 +77,7 @@ class OpenAIServingChat(OpenAIServing):
                 request, prompt=prompt)
             sampling_params = request.to_sampling_params(
                 self.tokenizer.vocab_size)
-            lora_request = self._maybe_get_lora(request)
+            _, lora_request = self._maybe_get_adapter(request)
             guided_decode_logits_processor = (
                 await get_guided_decoding_logits_processor(
                     request.guided_decoding_backend, request, await

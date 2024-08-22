@@ -10,6 +10,7 @@ from aphrodite.common.utils import (get_distributed_init_method, get_ip,
                                     get_open_port, make_async)
 from aphrodite.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from aphrodite.lora.request import LoRARequest
+from aphrodite.prompt_adapter.request import PromptAdapterRequest
 
 
 class CPUExecutor(ExecutorBase):
@@ -46,6 +47,7 @@ class CPUExecutor(ExecutorBase):
             lora_config=self.lora_config,
             multimodal_config=self.multimodal_config,
             kv_cache_dtype=self.cache_config.cache_dtype,
+            prompt_adapter_config=self.prompt_adapter_config,
             is_driver_worker=True,
         )
         self.driver_worker.init_device()
@@ -84,6 +86,19 @@ class CPUExecutor(ExecutorBase):
 
     def list_loras(self) -> Set[int]:
         return self.driver_worker.list_loras()
+
+    def add_prompt_adapter(
+            self, prompt_adapter_request: PromptAdapterRequest) -> bool:
+        return self.driver_worker.add_prompt_adapter(prompt_adapter_request)
+
+    def remove_prompt_adapter(self, prompt_adapter_id: int) -> bool:
+        return self.driver_worker.remove_prompt_adapter(prompt_adapter_id)
+
+    def list_prompt_adapters(self) -> Set[int]:
+        return self.driver_worker.list_prompt_adapters()
+
+    def pin_prompt_adapter(self, prompt_adapter_id: int) -> bool:
+        return self.driver_worker.pin_prompt_adapter(prompt_adapter_id)
 
     def pin_lora(self, lora_id: int) -> bool:
         return self.driver_worker.pin_lora(lora_id)
