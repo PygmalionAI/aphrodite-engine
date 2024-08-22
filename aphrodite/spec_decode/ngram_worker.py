@@ -1,5 +1,5 @@
 import weakref
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 import torch
 
@@ -47,6 +47,9 @@ class NGramWorker(NonLLMProposerWorkerBase):
         self,
         execute_model_req: ExecuteModelRequest,
         sample_len: int,
+        # Unused parameter. NGramWorker does not use the KV Cache and
+        # therefore does not need this parameter.
+        seq_ids_with_bonus_token_in_last_step: Set[int],
     ) -> Tuple[Optional[List[SamplerOutput]], bool]:
         """NGram match algo to pick proposal candidate. Returns the list of
         sampler output, one per SequenceGroupMetadata.
@@ -132,12 +135,16 @@ class NGramWorker(NonLLMProposerWorkerBase):
     def get_spec_proposals(
         self,
         execute_model_req: ExecuteModelRequest,
+        # Unused parameter. NGramWorker does not use the KV Cache and
+        # therefore does not need this parameter.
+        seq_ids_with_bonus_token_in_last_step: Set[int],
     ) -> SpeculativeProposals:
         """Produce speculations given an input batch of sequences. The number of
         speculative tokens per sequence is determined by max_proposal_len.
         """
 
-        return self._proposer.get_spec_proposals(execute_model_req)
+        return self._proposer.get_spec_proposals(
+            execute_model_req, seq_ids_with_bonus_token_in_last_step)
 
     def _raise_if_unsupported(
         self,
