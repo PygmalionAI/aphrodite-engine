@@ -371,10 +371,6 @@ def get_open_port() -> int:
 
 
 def update_environment_variables(envs: Dict[str, str]):
-    if is_hip() and "CUDA_VISIBLE_DEVICES" in envs:
-        # Propagate changes from CUDA_VISIBLE_DEVICES to
-        # ROCm's HIP_VISIBLE_DEVICES as well
-        envs["HIP_VISIBLE_DEVICES"] = envs["CUDA_VISIBLE_DEVICES"]
     for k, v in envs.items():
         if k in os.environ and os.environ[k] != v:
             logger.warning(f"Overwriting environment variable {k} "
