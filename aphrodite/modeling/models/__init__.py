@@ -65,6 +65,8 @@ _GENERATION_MODELS = {
     "MLPSpeculatorPreTrainedModel": ("mlp_speculator", "MLPSpeculator"),
     "JambaForCausalLM": ("jamba", "JambaForCausalLM"),
     "MedusaModel": ("medusa", "Medusa"),
+    "FuyuForCausalLM": ("fuyu", "FuyuForCausalLM"),
+    "PersimmonForCausalLM": ("persimmon", "PersimmonForCausalLM"),
 }
 
 _EMBEDDING_MODELS = {
