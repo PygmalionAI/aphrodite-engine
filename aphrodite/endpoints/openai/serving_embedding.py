@@ -4,7 +4,9 @@ from typing import AsyncIterator, List, Optional, Tuple
 
 import numpy as np
 from fastapi import Request
+from loguru import logger
 
+from aphrodite.common.config import ModelConfig
 from aphrodite.common.outputs import EmbeddingRequestOutput
 from aphrodite.common.utils import merge_async_iterators, random_uuid
 from aphrodite.endpoints.openai.protocol import (EmbeddingRequest,
@@ -12,8 +14,7 @@ from aphrodite.endpoints.openai.protocol import (EmbeddingRequest,
                                                  EmbeddingResponseData,
                                                  UsageInfo)
 from aphrodite.endpoints.openai.serving_completions import parse_prompt_format
-from aphrodite.endpoints.openai.serving_engine import (LoRAModulePath,
-                                                       OpenAIServing)
+from aphrodite.endpoints.openai.serving_engine import OpenAIServing
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 
 TypeTokenIDs = List[int]
@@ -23,7 +24,7 @@ def request_output_to_embedding_response(
         final_res_batch: List[EmbeddingRequestOutput], request_id: str,
         created_time: int, model_name: str,
         encoding_format: str) -> EmbeddingResponse:
-    data = []
+    data: List[EmbeddingResponseData] = []
     num_prompt_tokens = 0
     for idx, final_res in enumerate(final_res_batch):
         assert final_res is not None
@@ -52,17 +53,18 @@ def request_output_to_embedding_response(
 
 class OpenAIServingEmbedding(OpenAIServing):
 
-    def __init__(self,
-                 engine: AsyncAphrodite,
-                 served_model_names: List[str],
-                 lora_modules: Optional[List[LoRAModulePath]] = None):
+    def __init__(self, engine: AsyncAphrodite, model_config: ModelConfig,
+                 served_model_names: List[str]):
         super().__init__(engine=engine,
+                         model_config=model_config,
                          served_model_names=served_model_names,
-                         lora_modules=lora_modules)
+                         lora_modules=None)
+        self._check_embedding_mode(model_config.embedding_mode)
 
     async def create_embedding(self, request: EmbeddingRequest,
                                raw_request: Request):
         """Completion API similar to OpenAI's API.
+
         See https://platform.openai.com/docs/api-reference/embeddings/create
         for the API specification. This API mimics the OpenAI Embedding API.
         """
@@ -70,7 +72,6 @@ class OpenAIServingEmbedding(OpenAIServing):
         if error_check_ret is not None:
             return error_check_ret
 
-        # Return error for unsupported features.
         encoding_format = (request.encoding_format
                            if request.encoding_format else "float")
         if request.dimensions is not None:
@@ -108,7 +109,7 @@ class OpenAIServingEmbedding(OpenAIServing):
 
                 generators.append(generator)
         except ValueError as e:
-            # TODO: Use a aphrodite-specific Validation Error
+            # TODO: Use an aphrodite-specific Validation Error
             return self.create_error_response(str(e))
 
         result_generator: AsyncIterator[Tuple[
@@ -122,14 +123,21 @@ class OpenAIServingEmbedding(OpenAIServing):
                 if await raw_request.is_disconnected():
                     # Abort the request if the client disconnects.
                     await self.engine.abort(f"{request_id}-{i}")
-                    # TODO: Use a aphrodite-specific Validation Error
+                    # TODO: Use an aphrodite-specific Validation Error
                     return self.create_error_response("Client disconnected")
                 final_res_batch[i] = res
             response = request_output_to_embedding_response(
                 final_res_batch, request_id, created_time, model_name,
                 encoding_format)
         except ValueError as e:
-            # TODO: Use a aphrodite-specific Validation Error
+            # TODO: Use an aphrodite-specific Validation Error
             return self.create_error_response(str(e))
 
         return response
+
+    def _check_embedding_mode(self, embedding_mode: bool):
+        if not embedding_mode:
+            logger.warning(
+                "embedding_mode is False. Embedding API will not work.")
+        else:
+            logger.info("Activating the server engine with embedding enabled.")

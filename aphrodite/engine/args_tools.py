@@ -10,7 +10,7 @@ from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
                                      ParallelConfig, PromptAdapterConfig,
                                      SchedulerConfig, SpeculativeConfig,
                                      TokenizerPoolConfig)
-from aphrodite.common.utils import is_cpu
+from aphrodite.common.utils import FlexibleArgumentParser, is_cpu
 from aphrodite.quantization import QUANTIZATION_METHODS
 
 
@@ -105,8 +105,7 @@ class EngineArgs:
             self.distributed_executor_backend = None
 
     @staticmethod
-    def add_cli_args(
-            parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
         """Shared CLI arguments for the Aphrodite engine."""
 
         # NOTE: If you update any of the arguments below, please also
@@ -854,28 +853,23 @@ class AsyncEngineArgs(EngineArgs):
     uvloop: bool = False
 
     @staticmethod
-    def add_cli_args(
-            parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
-        parser = EngineArgs.add_cli_args(parser)
-        parser.add_argument(
-            "--engine-use-ray",
-            action="store_true",
-            help="use Ray to start the LLM engine in a "
-            "separate process as the server process.",
-        )
-        parser.add_argument(
-            "--disable-log-requests",
-            action="store_true",
-            help="disable logging requests",
-        )
-        parser.add_argument(
-            "--max-log-len",
-            type=int,
-            default=0,
-            help="max number of prompt characters or prompt "
-            "ID numbers being printed in log. "
-            "Default: unlimited.",
-        )
+    def add_cli_args(parser: FlexibleArgumentParser,
+                     async_args_only: bool = False) -> FlexibleArgumentParser:
+        if not async_args_only:
+            parser = EngineArgs.add_cli_args(parser)
+        parser.add_argument('--engine-use-ray',
+                            action='store_true',
+                            help='Use Ray to start the LLM engine in a '
+                            'separate process as the server process.')
+        parser.add_argument('--disable-log-requests',
+                            action='store_true',
+                            help='Disable logging requests.')
+        parser.add_argument('--max-log-len',
+                            type=int,
+                            default=0,
+                            help='Max number of prompt characters or prompt '
+                            'ID numbers being printed in log.'
+                            '\n\nDefault: Unlimited')
         parser.add_argument(
             "--uvloop",
             action="store_true",
