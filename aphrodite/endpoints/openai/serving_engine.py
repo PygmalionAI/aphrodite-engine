@@ -132,19 +132,23 @@ class OpenAIServing:
                              DetokenizeRequest, EmbeddingRequest,
                              TokenizeRequest]
     ) -> Optional[ErrorResponse]:
-        if request.model in self.served_model_names:
-            return None
-        if request.model in [lora.lora_name for lora in self.lora_requests]:
-            return None
-        if request.model in [
-                prompt_adapter.prompt_adapter_name
-                for prompt_adapter in self.prompt_adapter_requests
-        ]:
-            return None
-        return self.create_error_response(
-            message=f"The model `{request.model}` does not exist.",
-            err_type="NotFoundError",
-            status_code=HTTPStatus.NOT_FOUND)
+        # only check these if it's not a Tokenizer/Detokenize Request
+        if not isinstance(request, (TokenizeRequest, DetokenizeRequest)):
+            if request.model in self.served_model_names:
+                return None
+            if request.model in [
+                    lora.lora_name for lora in self.lora_requests
+            ]:
+                return None
+            if request.model in [
+                    prompt_adapter.prompt_adapter_name
+                    for prompt_adapter in self.prompt_adapter_requests
+            ]:
+                return None
+            return self.create_error_response(
+                message=f"The model `{request.model}` does not exist.",
+                err_type="NotFoundError",
+                status_code=HTTPStatus.NOT_FOUND)
 
     def _maybe_get_adapter(
         self, request: Union[CompletionRequest, ChatCompletionRequest,

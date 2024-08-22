@@ -21,4 +21,3 @@ responses = client.embeddings.create(input=[
 
 for data in responses.data:
     print(data.embedding)  # list of float of len 4096
-    

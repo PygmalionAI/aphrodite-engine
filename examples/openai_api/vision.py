@@ -22,6 +22,7 @@ client = OpenAI(
 models = client.models.list()
 model = models.data[0].id
 
+
 def encode_image_base64_from_file(image_path: str) -> str:
     """Encode an image from a local file to base64 format."""
 
@@ -29,6 +30,7 @@ def encode_image_base64_from_file(image_path: str) -> str:
         result = base64.b64encode(image_file.read()).decode('utf-8')
 
     return result
+
 
 image_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),
                           "burg.jpg")

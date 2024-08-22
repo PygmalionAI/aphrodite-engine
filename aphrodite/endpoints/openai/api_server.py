@@ -85,7 +85,7 @@ async def health() -> Response:
     return Response(status_code=200)
 
 
-@router.post("/tokenize")
+@router.post("/v1/tokenize")
 async def tokenize(request: TokenizeRequest):
     generator = await openai_serving_completion.create_tokenize(request)
     if isinstance(generator, ErrorResponse):
@@ -96,7 +96,7 @@ async def tokenize(request: TokenizeRequest):
         return JSONResponse(content=generator.model_dump())
 
 
-@router.post("/detokenize")
+@router.post("/v1/detokenize")
 async def detokenize(request: DetokenizeRequest):
     generator = await openai_serving_completion.create_detokenize(request)
     if isinstance(generator, ErrorResponse):
@@ -199,18 +199,12 @@ def prepare_engine_payload(
         kai_payload.n = 1
         kai_payload.top_p = 1.0
         kai_payload.top_k = -1
-    if kai_payload.dynatemp_range is not None:
-        dynatemp_min = kai_payload.temperature - kai_payload.dynatemp_range
-        dynatemp_max = kai_payload.temperature + kai_payload.dynatemp_range
 
     sampling_params = SamplingParams(
         n=kai_payload.n,
         best_of=kai_payload.n,
         repetition_penalty=kai_payload.rep_pen,
         temperature=kai_payload.temperature,
-        dynatemp_min=dynatemp_min if kai_payload.dynatemp_range > 0 else 0.0,
-        dynatemp_max=dynatemp_max if kai_payload.dynatemp_range > 0 else 0.0,
-        dynatemp_exponent=kai_payload.dynatemp_exponent,
         smoothing_factor=kai_payload.smoothing_factor,
         smoothing_curve=kai_payload.smoothing_curve,
         tfs=kai_payload.tfs,
@@ -221,9 +215,6 @@ def prepare_engine_payload(
         typical_p=kai_payload.typical,
         eta_cutoff=kai_payload.eta_cutoff,
         epsilon_cutoff=kai_payload.eps_cutoff,
-        mirostat_mode=kai_payload.mirostat,
-        mirostat_tau=kai_payload.mirostat_tau,
-        mirostat_eta=kai_payload.mirostat_eta,
         stop=kai_payload.stop_sequence,
         include_stop_str_in_output=kai_payload.include_stop_str_in_output,
         custom_token_bans=badwordsids
@@ -324,14 +315,12 @@ async def abort_generation(request: Request):
     return JSONResponse({})
 
 
-# @extra_api.post("/tokencount")
-# async def count_tokens(request: Request):
-#     """Tokenize string and return token count"""
+@extra_api.post("/tokencount")
+async def count_tokens(request: TokenizeRequest):
+    """Tokenize string and return token count"""
 
-#     request_dict = await request.json()
-#     tokenizer_result = await openai_serving_chat.tokenize(
-#         Prompt(**request_dict))
-#     return JSONResponse({"value": tokenizer_result["value"]})
+    generator = await openai_serving_completion.create_tokenize(request)
+    return JSONResponse({"value": generator.model_dump()["tokens"]})
 
 
 @kai_api.get("/info/version")
