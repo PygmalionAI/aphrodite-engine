@@ -31,7 +31,7 @@ from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig, LoRAConfig
 from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
 from aphrodite.common.utils import is_hip, print_warning_once
-from aphrodite.distributed import (get_pp_group, get_pp_indices,
+from aphrodite.distributed import (get_pp_group,
                                    get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size)
 from aphrodite.modeling.layers.activation import SiluAndMul
@@ -47,6 +47,8 @@ from aphrodite.modeling.layers.vocab_parallel_embedding import (
 from aphrodite.modeling.model_loader.weight_utils import (
     default_weight_loader, kv_cache_scales_loader)
 from aphrodite.modeling.models.interfaces import SupportsLoRA
+from aphrodite.modeling.models.utils import (is_pp_missing_parameter,
+                                             make_layers)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.quantization.base_config import QuantizationConfig
 
@@ -264,20 +266,11 @@ class LlamaModel(nn.Module):
             config.hidden_size,
             org_num_embeddings=config.vocab_size,
         )
-        self.start_layer, self.end_layer = get_pp_indices(
+        self.start_layer, self.end_layer, self.layers = make_layers(
             config.num_hidden_layers,
-            get_pp_group().rank_in_group,
-            get_pp_group().world_size)
-        self.layers = nn.ModuleList(
-            [nn.Identity() for _ in range(self.start_layer)] + [
-                LlamaDecoderLayer(config=config,
-                                  cache_config=cache_config,
-                                  quant_config=quant_config)
-                for _ in range(self.start_layer, self.end_layer)
-            ] + [
-                nn.Identity()
-                for _ in range(self.end_layer, config.num_hidden_layers)
-            ])
+            lambda: LlamaDecoderLayer(config=config,
+                                      cache_config=cache_config,
+                                      quant_config=quant_config))
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
@@ -454,12 +447,13 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
                 # Skip loading extra bias for GPTQ models.
                 if name.endswith(".bias") and name not in params_dict:
                     continue
-                try:
-                    param = params_dict[name]
-                    weight_loader = param.weight_loader
-                    weight_loader(param, loaded_weight, shard_id)
-                except KeyError:
-                    pass
+
+                if is_pp_missing_parameter(name, self):
+                    continue
+
+                param = params_dict[name]
+                weight_loader = param.weight_loader
+                weight_loader(param, loaded_weight, shard_id)
                 break
             else:
                 # Skip loading extra bias for GPTQ models.
@@ -478,13 +472,14 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
                         continue
                     else:
                         name = remapped_kv_scale_name
-                try:
-                    param = params_dict[name]
-                    weight_loader = getattr(param, "weight_loader",
-                                            default_weight_loader)
-                    weight_loader(param, loaded_weight)
-                except KeyError:
-                    pass
+
+                if is_pp_missing_parameter(name, self):
+                    continue
+
+                param = params_dict[name]
+                weight_loader = getattr(param, "weight_loader",
+                                        default_weight_loader)
+                weight_loader(param, loaded_weight)
 
     # If this function is called, it should always initialize KV cache scale
     # factors (or else raise an exception). Thus, handled exceptions should
