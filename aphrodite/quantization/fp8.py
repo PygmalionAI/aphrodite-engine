@@ -14,7 +14,7 @@ from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.platforms import current_platform
 from aphrodite.quantization.base_config import (QuantizationConfig,
                                                 QuantizeMethodBase)
-from aphrodite.quantization.utils.marlin_utils import (
+from aphrodite.quantization.utils.marlin_utils_fp8 import (
     apply_fp8_marlin_linear, prepare_fp8_layer_for_marlin)
 from aphrodite.quantization.utils.w8a8_utils import (
     all_close_1d, apply_fp8_linear, create_per_tensor_scale_param,
