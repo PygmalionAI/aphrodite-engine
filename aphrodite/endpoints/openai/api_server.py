@@ -33,7 +33,7 @@ from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
 from aphrodite.endpoints.openai.serving_completions import \
     OpenAIServingCompletion
 from aphrodite.endpoints.openai.serving_embedding import OpenAIServingEmbedding
-from aphrodite.endpoints.openai.serving_engine import LoRA
+from aphrodite.endpoints.openai.serving_engine import LoRAModulePath
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
@@ -154,7 +154,8 @@ async def show_samplers(x_api_key: Optional[str] = Header(None)):
 
 
 @router.post("/v1/lora/load")
-async def load_lora(lora: LoRA, x_api_key: Optional[str] = Header(None)):
+async def load_lora(lora: LoRAModulePath,
+                    x_api_key: Optional[str] = Header(None)):
     openai_serving_chat.add_lora(lora)
     openai_serving_completion.add_lora(lora)
     if engine_args.enable_lora is False:

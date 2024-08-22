@@ -12,7 +12,8 @@ from aphrodite.endpoints.openai.protocol import (EmbeddingRequest,
                                                  EmbeddingResponseData,
                                                  UsageInfo)
 from aphrodite.endpoints.openai.serving_completions import parse_prompt_format
-from aphrodite.endpoints.openai.serving_engine import LoRAModulePath, OpenAIServing
+from aphrodite.endpoints.openai.serving_engine import (LoRAModulePath,
+                                                       OpenAIServing)
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 
 TypeTokenIDs = List[int]
