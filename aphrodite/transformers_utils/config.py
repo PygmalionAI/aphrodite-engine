@@ -6,7 +6,7 @@ from loguru import logger
 from transformers import GenerationConfig, PretrainedConfig
 
 from aphrodite.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
-                                                  JAISConfig,
+                                                  JAISConfig, MedusaConfig,
                                                   MLPSpeculatorConfig,
                                                   MPTConfig, RWConfig)
 
@@ -25,6 +25,7 @@ _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     "RefinedWebModel": RWConfig,  # For tiiuae/falcon-7b(-instruct)
     "jais": JAISConfig,
     "mlp_speculator": MLPSpeculatorConfig,
+    "medusa": MedusaConfig,
 }
 
 for name, cls in _CONFIG_REGISTRY.items():
