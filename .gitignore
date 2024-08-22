@@ -11,6 +11,7 @@ conda/
 umamba.exe
 bin/
 *.whl
+aphrodite/commit_id.py
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

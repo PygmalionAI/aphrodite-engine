@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import sys
+import warnings
 from shutil import which
 from typing import List
 
@@ -17,6 +18,34 @@ ROOT_DIR = os.path.dirname(__file__)
 logger = logging.getLogger(__name__)
 # Target device of Aphrodite, supporting [cuda (by default), rocm, neuron, cpu]
 APHRODITE_TARGET_DEVICE = os.getenv("APHRODITE_TARGET_DEVICE", "cuda")
+
+
+def embed_commit_hash():
+    try:
+        commit_id = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                            encoding="utf-8").strip()
+        short_commit_id = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], encoding="utf-8").strip()
+
+        commit_contents = f'__commit__ = "{commit_id}"\n'
+        short_commit_contents = f'__short_commit__ = "{short_commit_id}"\n'
+
+        version_file = os.path.join(ROOT_DIR, "aphrodite", "commit_id.py")
+        with open(version_file, "w", encoding="utf-8") as f:
+            f.write(commit_contents)
+            f.write(short_commit_contents)
+
+    except subprocess.CalledProcessError as e:
+        warnings.warn(f"Failed to get commit hash:\n{e}",
+                      RuntimeWarning,
+                      stacklevel=2)
+    except Exception as e:
+        warnings.warn(f"Failed to embed commit hash:\n{e}",
+                      RuntimeWarning,
+                      stacklevel=2)
+
+
+embed_commit_hash()
 
 # Aphrodite only supports Linux platform
 assert sys.platform.startswith(

@@ -165,27 +165,48 @@ class AphroditeEngine:
         log_stats: bool,
         stat_loggers: Optional[Dict[str, StatLoggerBase]] = None,
     ) -> None:
-        logger.info(
-            "-" * 76 + "\n"
-            f"Initializing the Aphrodite Engine (v{APHRODITE_VERSION}) "
-            "with the following config:\n"
-            f"Model = {model_config.model!r}\n"
-            f"Speculative Config = {speculative_config!r}\n"
-            f"DataType = {model_config.dtype}\n"
-            f"Model Load Format = {load_config.load_format}\n"
-            f"Tensor Parallel Size = {parallel_config.tensor_parallel_size}\n"
-            f"Pipeline Parallel Size = {parallel_config.pipeline_parallel_size}\n"  # noqa: E501
-            f"Disable Custom All-Reduce = "
-            f"{parallel_config.disable_custom_all_reduce}\n"
-            f"Quantization Format = {model_config.quantization}\n"
-            f"Context Length = {model_config.max_model_len}\n"
-            f"Enforce Eager Mode = {model_config.enforce_eager}\n"
-            f"Prefix Caching = {cache_config.enable_prefix_caching}\n"
-            f"KV Cache DataType = {cache_config.cache_dtype}\n"
-            f"Device = {device_config.device}\n"
-            f"Rope Scaling = {model_config.rope_scaling}\n"
-            f"Guided Decoding Backend = {decoding_config!r}\n")
-        logger.info("-" * 76)
+        try:
+            import aphrodite.commit_id
+            commit_id = True
+        except ImportError:
+            commit_id = False
+
+        config_dict = {
+            "Model": model_config.model,
+            "Speculative Config": speculative_config,
+            "DataType": model_config.dtype,
+            "Model Load Format": load_config.load_format,
+            "Tensor Parallel Size": parallel_config.tensor_parallel_size,
+            "Pipeline Parallel Size": parallel_config.pipeline_parallel_size,
+            "Disable Custom All-Reduce":
+            parallel_config.disable_custom_all_reduce,
+            "Quantization Format": model_config.quantization,
+            "Context Length": model_config.max_model_len,
+            "Enforce Eager Mode": model_config.enforce_eager,
+            "Prefix Caching": cache_config.enable_prefix_caching,
+            "KV Cache DataType": cache_config.cache_dtype,
+            "Device": device_config.device,
+            "Rope Scaling": model_config.rope_scaling,
+            "Guided Decoding Backend": decoding_config
+        }
+
+        logger.info("-" * 85)
+        if not commit_id:
+            logger.info(
+                f"Initializing Aphrodite Engine (v{APHRODITE_VERSION}) "
+                "with the following config:")
+        else:
+            logger.info(f"Initializing Aphrodite Engine (v{APHRODITE_VERSION} "
+                        f"commit {aphrodite.__short_commit__}) with the "
+                        "following config:")
+
+        for key, value in config_dict.items():
+            if value is not None and not ((key == "Model Load Format" or key ==\
+                                           "KV Cache DataType") and value == \
+                                            "auto"):
+                logger.info(f"{key} = {value!r}")
+
+        logger.info("-" * 85)
         # TODO: Print more configs in debug mode.
 
         self.model_config = model_config
