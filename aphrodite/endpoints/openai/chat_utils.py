@@ -39,7 +39,7 @@ def load_chat_template(self, chat_template: Optional[str]):
                     tokenizer.chat_template = response.text
                 else:
                     raise ValueError("Failed to download chat template "
-                                        f"from {chat_template}")
+                                     f"from {chat_template}")
             else:
                 with open(chat_template, "r") as f:
                     tokenizer.chat_template = f.read()
@@ -47,21 +47,20 @@ def load_chat_template(self, chat_template: Optional[str]):
             JINJA_CHARS = "{}\n"
             if not any(c in chat_template for c in JINJA_CHARS):
                 msg = (f"The supplied chat template ({chat_template}) "
-                        f"looks like a file path, but it failed to be "
-                        f"opened. Reason: {e}")
+                       f"looks like a file path, but it failed to be "
+                       f"opened. Reason: {e}")
                 raise ValueError(msg) from e
 
             # If opening a file fails, set chat template to be args to
             # ensure we decode so our escape are interpreted correctly
-            tokenizer.chat_template = codecs.decode(
-                chat_template, "unicode_escape")
+            tokenizer.chat_template = codecs.decode(chat_template,
+                                                    "unicode_escape")
 
         logger.info("Using supplied chat template")
     elif tokenizer.chat_template is not None:
         logger.info("Using default chat template")
     else:
-        logger.warning(
-            "No chat template provided. Chat API will not work.")
+        logger.warning("No chat template provided. Chat API will not work.")
 
 
 @lru_cache(maxsize=None)
