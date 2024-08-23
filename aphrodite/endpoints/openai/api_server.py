@@ -32,6 +32,8 @@ from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
 from aphrodite.endpoints.openai.serving_completions import \
     OpenAIServingCompletion
 from aphrodite.endpoints.openai.serving_embedding import OpenAIServingEmbedding
+from aphrodite.endpoints.openai.serving_tokenization import \
+    OpenAIServingTokenization
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
@@ -44,6 +46,7 @@ engine_args: AsyncEngineArgs
 openai_serving_chat: OpenAIServingChat
 openai_serving_completion: OpenAIServingCompletion
 openai_serving_embedding: OpenAIServingEmbedding
+openai_serving_tokenization: OpenAIServingTokenization
 router = APIRouter()
 kai_api = APIRouter()
 extra_api = APIRouter()
@@ -87,7 +90,7 @@ async def health() -> Response:
 
 @router.post("/v1/tokenize")
 async def tokenize(request: TokenizeRequest):
-    generator = await openai_serving_completion.create_tokenize(request)
+    generator = await openai_serving_tokenization.create_tokenize(request)
     if isinstance(generator, ErrorResponse):
         return JSONResponse(content=generator.model_dump(),
                             status_code=generator.code)
@@ -98,7 +101,7 @@ async def tokenize(request: TokenizeRequest):
 
 @router.post("/v1/detokenize")
 async def detokenize(request: DetokenizeRequest):
-    generator = await openai_serving_completion.create_detokenize(request)
+    generator = await openai_serving_tokenization.create_detokenize(request)
     if isinstance(generator, ErrorResponse):
         return JSONResponse(content=generator.model_dump(),
                             status_code=generator.code)
@@ -319,7 +322,7 @@ async def abort_generation(request: Request):
 async def count_tokens(request: TokenizeRequest):
     """Tokenize string and return token count"""
 
-    generator = await openai_serving_completion.create_tokenize(request)
+    generator = await openai_serving_tokenization.create_tokenize(request)
     return JSONResponse({"value": generator.model_dump()["tokens"]})
 
 
@@ -512,6 +515,7 @@ def run_server(args, llm_engine=None):
     global openai_serving_chat
     global openai_serving_completion
     global openai_serving_embedding
+    global openai_serving_tokenization
 
     openai_serving_chat = OpenAIServingChat(engine, model_config,
                                             served_model_names,
@@ -523,6 +527,8 @@ def run_server(args, llm_engine=None):
         args.prompt_adapters)
     openai_serving_embedding = OpenAIServingEmbedding(engine, model_config,
                                                       served_model_names)
+    openai_serving_tokenization = OpenAIServingTokenization(
+        engine, model_config, served_model_names, args.chat_template)
     app.root_path = args.root_path
 
     tokenizer = get_tokenizer(
