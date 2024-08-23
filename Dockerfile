@@ -1,13 +1,14 @@
 # The Aphrodite Dockerfile is used to construct Aphrodite image that can be directly used
 # to run the OpenAI compatible server.
 
+
 ARG CUDA_VERSION=12.4.1
 #################### BASE BUILD IMAGE ####################
 # prepare basic build environment
-FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 AS base
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu20.04 AS base
 
 ARG CUDA_VERSION=12.4.1
-ARG PYTHON_VERSION=3
+ARG PYTHON_VERSION=3.10
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -17,13 +18,16 @@ RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
     && apt-get install -y ccache software-properties-common \
     && add-apt-repository ppa:deadsnakes/ppa \
     && apt-get update -y \
-    && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv python3-pip \
+    && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
     && if [ "${PYTHON_VERSION}" != "3" ]; then update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1; fi \
-    && python3 --version \
-    && python3 -m pip --version
+    && python3 --version
 
 RUN apt-get update -y \
-    && apt-get install -y python3-pip git
+    && apt-get install -y git curl sudo
+
+# Install pip s.t. it will be compatible with our PYTHON_VERSION
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION}
+RUN python3 -m pip --version
 
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
@@ -39,6 +43,10 @@ COPY requirements-cuda.txt requirements-cuda.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install -r requirements-cuda.txt
 
+COPY requirements-mamba.txt requirements-mamba.txt
+RUN python3 -m pip install packaging
+RUN python3 -m pip install -r requirements-mamba.txt
+
 # cuda arch list used by torch
 # can be useful for both `dev` and `test`
 # explicitly set the list to avoid issues with torch 2.2
@@ -47,14 +55,14 @@ ARG torch_cuda_arch_list='6.0 6.1 7.0 7.5 8.0 8.6 8.9 9.0+PTX'
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 #################### BASE BUILD IMAGE ####################
 
-
 #################### WHEEL BUILD IMAGE ####################
 FROM base AS build
 
-ARG PYTHON_VERSION=3
+ARG PYTHON_VERSION=3.10
 
 # install build dependencies
 COPY requirements-build.txt requirements-build.txt
+
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install -r requirements-build.txt
 
@@ -76,9 +84,10 @@ ARG max_jobs=2
 ENV MAX_JOBS=${max_jobs}
 # number of threads used by nvcc
 ARG nvcc_threads=8
-ENV NVCC_THREADS=${nvcc_threads}
+ENV NVCC_THREADS=$nvcc_threads
 # make sure punica kernels are built (for LoRA)
 ENV APHRODITE_INSTALL_PUNICA_KERNELS=1
+
 
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
@@ -95,15 +104,45 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install -r requirements-dev.txt
 
 #################### DEV IMAGE ####################
+#################### MAMBA Build IMAGE ####################
+FROM dev as mamba-builder
+# max jobs used for build
+ARG max_jobs=2
+ENV MAX_JOBS=${max_jobs}
+
+WORKDIR /usr/src/mamba
+
+COPY requirements-mamba.txt requirements-mamba.txt
+
+# Download the wheel or build it if a pre-compiled release doesn't exist
+RUN pip --verbose wheel -r requirements-mamba.txt \
+    --no-build-isolation --no-deps --no-cache-dir
+
+#################### MAMBA Build IMAGE ####################
 
 #################### Aphrodite installation IMAGE ####################
 # image with Aphrodite installed
-FROM nvidia/cuda:${CUDA_VERSION}-base-ubuntu22.04 AS aphrodite-base
+FROM nvidia/cuda:${CUDA_VERSION}-base-ubuntu20.04 AS aphrodite-base
 ARG CUDA_VERSION=12.4.1
+ARG PYTHON_VERSION=3.10
 WORKDIR /aphrodite-workspace
 
+RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
+    && echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections \
+    && apt-get update -y \
+    && apt-get install -y ccache software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update -y \
+    && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
+    && if [ "${PYTHON_VERSION}" != "3" ]; then update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1; fi \
+    && python3 --version
+
 RUN apt-get update -y \
-    && apt-get install -y python3-pip git vim
+    && apt-get install -y python3-pip git curl
+
+# Install pip s.t. it will be compatible with our PYTHON_VERSION
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION}
+RUN python3 -m pip --version
 
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
@@ -116,6 +155,10 @@ RUN --mount=type=bind,from=build,src=/workspace/dist,target=/aphrodite-workspace
     --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install dist/*.whl --verbose
 
+RUN --mount=type=bind,from=mamba-builder,src=/usr/src/mamba,target=/usr/src/mamba \
+    --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install /usr/src/mamba/*.whl --no-cache-dir
+
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install https://github.com/flashinfer-ai/flashinfer/releases/download/v0.0.9/flashinfer-0.0.9+cu121torch2.3-cp310-cp310-linux_x86_64.whl
 #################### Aphrodite installation IMAGE ####################
@@ -127,9 +170,7 @@ FROM aphrodite-base AS aphrodite-openai
 
 # install additional dependencies for openai api server
 RUN --mount=type=cache,target=/root/.cache/pip \
-    python3 -m pip install accelerate hf_transfer 'modelscope!=1.15.0'
-
-ENV NUMBA_CACHE_DIR=$HOME/.numba_cache
+    pip install accelerate hf_transfer 'modelscope!=1.15.0'
 
 ENTRYPOINT ["python3", "-m", "aphrodite.endpoints.openai.api_server"]
 #################### OPENAI API SERVER ####################

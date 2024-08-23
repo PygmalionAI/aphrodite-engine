@@ -8,5 +8,3 @@ torchvision == 0.18.1  # for phi3v
 xformers == 0.0.27  # Requires torch 2.3.1
 triton >= 2.2.1
 vllm-flash-attn == 2.5.9.post1 # Requires PyTorch 2.3.1
-causal-conv1d >= 1.2.1
-mamba-ssm >= 1.2.2
