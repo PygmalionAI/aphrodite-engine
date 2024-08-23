@@ -765,8 +765,10 @@ class BatchRequestOutput(OpenAIBaseModel):
 
 
 class TokenizeRequest(OpenAIBaseModel):
-    prompt: str
-    add_special_tokens: bool = Field(default=True)
+    add_generation_prompt: bool = Field(default=True)
+    add_special_tokens: bool = Field(default=False)
+    prompt: Optional[str] = Field(default=None)
+    messages: Optional[List[ChatCompletionMessageParam]] = Field(default=None)
 
 
 class TokenizeResponse(OpenAIBaseModel):

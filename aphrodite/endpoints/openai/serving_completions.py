@@ -15,8 +15,7 @@ from aphrodite.common.utils import merge_async_iterators, random_uuid
 from aphrodite.endpoints.openai.protocol import (
     CompletionLogProbs, CompletionRequest, CompletionResponse,
     CompletionResponseChoice, CompletionResponseStreamChoice,
-    CompletionStreamResponse, DetokenizeRequest, DetokenizeResponse,
-    TokenizeRequest, TokenizeResponse, UsageInfo)
+    CompletionStreamResponse, UsageInfo)
 # yapf: enable
 from aphrodite.endpoints.openai.serving_engine import (LoRAModulePath,
                                                        OpenAIServing,
@@ -438,29 +437,3 @@ class OpenAIServingCompletion(OpenAIServing):
             tokens=out_tokens,
             top_logprobs=out_top_logprobs,
         )
-
-    async def create_tokenize(self,
-                              request: TokenizeRequest) -> TokenizeResponse:
-        error_check_ret = await self._check_model(request)
-        if error_check_ret is not None:
-            return error_check_ret
-
-        (input_ids, input_text) = self._validate_prompt_and_tokenize(
-            request,
-            prompt=request.prompt,
-            add_special_tokens=request.add_special_tokens)
-
-        return TokenizeResponse(tokens=input_ids,
-                                count=len(input_ids),
-                                max_model_len=self.max_model_len)
-
-    async def create_detokenize(
-            self, request: DetokenizeRequest) -> DetokenizeResponse:
-        error_check_ret = await self._check_model(request)
-        if error_check_ret is not None:
-            return error_check_ret
-
-        (input_ids, input_text) = self._validate_prompt_and_tokenize(
-            request, prompt_ids=request.tokens)
-
-        return DetokenizeResponse(prompt=input_text)
