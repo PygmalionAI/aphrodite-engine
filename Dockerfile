@@ -40,6 +40,10 @@ RUN pip install packaging wheel
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install -r requirements-cuda.txt
 
+COPY requirements-mamba.txt requirements-mamba.txt
+RUN python3 -m pip install packaging
+RUN python3 -m pip install -r requirements-mamba.txt
+
 # cuda arch list used by torch
 # can be useful for both `dev` and `test`
 # explicitly set the list to avoid issues with torch 2.2
@@ -132,6 +136,10 @@ RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 RUN --mount=type=bind,from=build,src=/workspace/dist,target=/aphrodite-workspace/dist \
     --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install dist/*.whl --verbose
+
+RUN --mount=type=bind,from=mamba-builder,src=/usr/src/mamba,target=/usr/src/mamba \
+    --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install /usr/src/mamba/*.whl --no-cache-dir
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install https://github.com/flashinfer-ai/flashinfer/releases/download/v0.0.9/flashinfer-0.0.9+cu121torch2.3-cp310-cp310-linux_x86_64.whl
