@@ -97,6 +97,22 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 #################### DEV IMAGE ####################
 
+#################### MAMBA Build IMAGE ####################
+FROM dev as mamba-builder
+# max jobs used for build
+ARG max_jobs=2
+ENV MAX_JOBS=${max_jobs}
+
+WORKDIR /usr/src/mamba
+
+COPY requirements-mamba.txt requirements-mamba.txt
+
+# Download the wheel or build it if a pre-compiled release doesn't exist
+RUN pip --verbose wheel -r requirements-mamba.txt \
+    --no-build-isolation --no-deps --no-cache-dir
+
+#################### MAMBA Build IMAGE ####################
+
 #################### Aphrodite installation IMAGE ####################
 # image with Aphrodite installed
 FROM nvidia/cuda:${CUDA_VERSION}-base-ubuntu22.04 AS aphrodite-base
