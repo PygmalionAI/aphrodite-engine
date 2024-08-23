@@ -13,6 +13,7 @@ from aphrodite.common.utils import (cuda_device_count_stateless,
                                     get_cpu_memory, is_cpu, is_hip, is_neuron,
                                     is_openvino, is_tpu, is_xpu,
                                     print_warning_once)
+from aphrodite.distributed import get_current_tp_rank_partition_size
 from aphrodite.modeling.models import ModelRegistry
 from aphrodite.quantization import QUANTIZATION_METHODS
 from aphrodite.transformers_utils.config import get_config, get_hf_text_config
@@ -350,11 +351,13 @@ class ModelConfig:
         total_num_attention_heads = getattr(self.hf_text_config,
                                             "num_attention_heads", 0)
         tensor_parallel_size = parallel_config.tensor_parallel_size
-        if total_num_attention_heads % tensor_parallel_size != 0:
+        if (total_num_attention_heads % tensor_parallel_size != 0
+                and self.quantization is not None):
             raise ValueError(
-                f"Total number of attention heads ({total_num_attention_heads})"
+                f"Total number of attention heads "
+                f"({total_num_attention_heads})"
                 " must be divisible by tensor parallel size "
-                f"({tensor_parallel_size}).")
+                f"({tensor_parallel_size}) when quantization is used.")
 
         pipeline_parallel_size = parallel_config.pipeline_parallel_size
         architectures = getattr(self.hf_config, "architectures", [])
@@ -453,20 +456,32 @@ class ModelConfig:
         # equal to the number of attention heads.
         return self.hf_text_config.num_attention_heads
 
-    def get_num_kv_heads(self, parallel_config: "ParallelConfig") -> int:
+    def get_num_kv_heads(self,
+                         parallel_config: "ParallelConfig",
+                         tp_rank: int = 0) -> int:
         """Returns the number of KV heads per GPU."""
         total_num_kv_heads = self.get_total_num_kv_heads()
         # If tensor parallelism is used, we divide the number of KV heads by
         # the tensor parallel size. We will replicate the KV heads in the
         # case where the number of KV heads is smaller than the tensor
         # parallel size so each GPU has at least one KV head.
-        return max(1,
-                   total_num_kv_heads // parallel_config.tensor_parallel_size)
+        result = get_current_tp_rank_partition_size(
+            total_num_kv_heads, tp_rank, parallel_config.tensor_parallel_size)
+        return max(1, result)
 
     def get_num_attention_heads(self,
-                                parallel_config: "ParallelConfig") -> int:
-        num_heads = getattr(self.hf_text_config, "num_attention_heads", 0)
-        return num_heads // parallel_config.tensor_parallel_size
+                                parallel_config: "ParallelConfig",
+                                tp_rank: int = 0) -> int:
+        if getattr(self.hf_text_config, "num_attention_heads", None) is None:
+            return 0
+
+        num_total_kv_heads = self.get_total_num_kv_heads()
+        num_kv_heads = self.get_num_kv_heads(parallel_config, tp_rank)
+        num_total_attention_heads = self.hf_text_config.num_attention_heads
+        num_heads_per_kv_head = num_total_attention_heads // num_total_kv_heads
+        # For GQA attention we make sure the whole attention head group is
+        # together on the same GPU.
+        return num_kv_heads * num_heads_per_kv_head
 
     def get_num_layers(self, parallel_config: "ParallelConfig") -> int:
         from aphrodite.distributed.utils import get_pp_indices
@@ -1366,6 +1381,11 @@ class LoRAConfig:
         if scheduler_config.chunked_prefill_enabled:
             raise ValueError("LoRA is not supported with chunked prefill yet.")
 
+    def verify_with_parallel_config(self, parallel_config: ParallelConfig):
+        if self.lora_vocab_padding_size % parallel_config.world_size != 0:
+            raise ValueError("LoRA vocab padding size must be divisible "
+                             "by world size.")
+
 
 @dataclass
 class PromptAdapterConfig:
@@ -1631,6 +1651,7 @@ class EngineConfig:
             self.lora_config.verify_with_model_config(self.model_config)
             self.lora_config.verify_with_scheduler_config(
                 self.scheduler_config)
+            self.lora_config.verify_with_parallel_config(self.parallel_config)
         if self.prompt_adapter_config:
             self.prompt_adapter_config.verify_with_model_config(
                 self.model_config)

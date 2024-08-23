@@ -47,6 +47,7 @@ class TP1DraftModelRunner(ModelRunner):
         multimodal_config: Optional[MultiModalConfig] = None,
         prompt_adapter_config: Optional[PromptAdapterConfig] = None,
         return_hidden_states: bool = False,
+        **kwargs,
     ):
         if return_hidden_states:
             raise ValueError(
@@ -66,6 +67,7 @@ class TP1DraftModelRunner(ModelRunner):
             multimodal_config=multimodal_config,
             prompt_adapter_config=prompt_adapter_config,
             return_hidden_states=return_hidden_states,
+            **kwargs,
         )
 
         # TODO: Remove this cache when we are able to update model_input

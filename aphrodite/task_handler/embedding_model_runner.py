@@ -41,6 +41,7 @@ class EmbeddingModelRunner(
         prompt_adapter_config: Optional[PromptAdapterConfig] = None,
         is_driver_worker: bool = False,
         multimodal_config: Optional[MultiModalConfig] = None,
+        tp_rank: int = 0,
     ):
         super().__init__(model_config,
                          parallel_config,
@@ -52,7 +53,8 @@ class EmbeddingModelRunner(
                          kv_cache_dtype=kv_cache_dtype,
                          is_driver_worker=is_driver_worker,
                          prompt_adapter_config=prompt_adapter_config,
-                         multimodal_config=multimodal_config)
+                         multimodal_config=multimodal_config,
+                         tp_rank=tp_rank)
 
     @torch.inference_mode()
     def execute_model(

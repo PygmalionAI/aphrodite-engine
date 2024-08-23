@@ -102,6 +102,7 @@ class Worker(LocalOrDistributedWorkerBase):
             is_driver_worker=is_driver_worker,
             prompt_adapter_config=prompt_adapter_config,
             multimodal_config=multimodal_config,
+            tp_rank=self.rank,
             **speculative_args,
         )
         # Uninitialized cache engine. Will be initialized by
@@ -226,7 +227,7 @@ class Worker(LocalOrDistributedWorkerBase):
         assert self.cache_config.num_gpu_blocks is not None
         self.cache_engine = [
             CacheEngine(self.cache_config, self.model_config,
-                        self.parallel_config, self.device_config)
+                        self.parallel_config, self.device_config, self.rank)
             for _ in range(self.parallel_config.pipeline_parallel_size)
         ]
         self.gpu_cache = [
