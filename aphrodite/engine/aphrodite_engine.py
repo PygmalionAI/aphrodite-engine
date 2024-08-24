@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, ClassVar, Dict, Iterable, List, Optional
 from typing import Sequence as GenericSequence
 from typing import Type, TypeVar, Union
+import os
 
 from loguru import logger
 from transformers import PreTrainedTokenizer
@@ -44,6 +45,9 @@ from aphrodite.transformers_utils.tokenizer_group import (BaseTokenizerGroup,
 from aphrodite.version import __version__ as APHRODITE_VERSION
 
 _LOCAL_LOGGING_INTERVAL_SEC = 5
+
+APHRODITE_USE_RAY_SPMD_WORKER = bool(
+    os.getenv("APHRODITE_USE_RAY_SPMD_WORKER", 0))
 
 
 def _load_generation_config_dict(model_config: ModelConfig) -> Dict[str, Any]:
@@ -358,6 +362,9 @@ class AphroditeEngine:
         elif distributed_executor_backend == "mp":
             from aphrodite.executor.multiproc_gpu_executor import \
                 MultiprocessingGPUExecutor
+            assert not APHRODITE_USE_RAY_SPMD_WORKER, (
+                "multiprocessing distributed executor backend does not "
+                "support APHRODITE_USE_RAY_SPMD_WORKER=1")
             executor_class = MultiprocessingGPUExecutor
         else:
             from aphrodite.executor.gpu_executor import GPUExecutor

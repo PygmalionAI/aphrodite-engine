@@ -1,7 +1,7 @@
-import pickle
 from typing import List, Optional, Tuple
 
 from aphrodite.common.config import ParallelConfig
+from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.common.utils import get_ip, is_hip, is_xpu
 from aphrodite.task_handler.worker_base import WorkerWrapperBase
 
@@ -28,16 +28,18 @@ try:
             gpu_ids = ray.get_gpu_ids()
             return node_id, gpu_ids
 
-        def execute_model_compiled_dag_remote(self, ignored):
-            """Used only when compiled DAG is enabled."""
+        def execute_model_spmd(self, execute_model_req: ExecuteModelRequest):
+            """Used only when SPMD worker and compiled DAG are both
+            enabled."""
+            # TODO: This is needed right now because Ray DAG executes
+            # on a background thread, so we need to reset torch's current
+            # device.
             import torch
             if not self.compiled_dag_cuda_device_set:
                 torch.cuda.set_device(self.worker.device)
                 self.compiled_dag_cuda_device_set = True
 
-            output = self.worker.execute_model()
-            output = pickle.dumps(output)
-            return output
+            return self.worker._execute_model_spmd(execute_model_req)
 
     ray_import_err = None
 
