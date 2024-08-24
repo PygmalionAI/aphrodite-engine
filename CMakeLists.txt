@@ -151,6 +151,7 @@ set(APHRODITE_EXT_SRC
   "kernels/quantization/fp8/common.cu"
   "kernels/cuda_utils_kernels.cu"
   "kernels/moe/align_block_size_kernel.cu"
+  "kernels/prepare_inputs/advance_step.cu"
   "kernels/torch_bindings.cpp")
 
 if(APHRODITE_GPU_LANG STREQUAL "CUDA")
