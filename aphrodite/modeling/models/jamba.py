@@ -4,9 +4,6 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import torch
-from causal_conv1d import causal_conv1d_fn, causal_conv1d_update
-from mamba_ssm.ops.selective_scan_interface import selective_scan_fn
-from mamba_ssm.ops.triton.selective_state_update import selective_state_update
 from torch import nn
 from torch.nn.parameter import Parameter
 from transformers import JambaConfig
@@ -27,6 +24,10 @@ from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               ReplicatedLinear,
                                               RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
+from aphrodite.modeling.layers.mamba import (causal_conv1d_fn,
+                                             causal_conv1d_update,
+                                             selective_scan_fn,
+                                             selective_state_update)
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, VocabParallelEmbedding)
@@ -162,7 +163,7 @@ class JambaMambaMixer(nn.Module):
                     (self.conv_kernel_size - hidden_states.shape[-1], 0))
                 cache_params.conv_state.copy_(conv_states)
 
-            hidden_states = causal_conv1d_fn(
+            hidden_states, _ = causal_conv1d_fn(
                 hidden_states,
                 conv_weights,
                 self.conv1d.bias,
