@@ -10,6 +10,7 @@ from tqdm import tqdm
 from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           PreTrainedTokenizerBase)
 
+from aphrodite.common.utils import FlexibleArgumentParser
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.quantization import QUANTIZATION_METHODS
 
@@ -76,15 +77,10 @@ def run_aphrodite(
     kv_cache_dtype: str,
     quantization_param_path: Optional[str],
     device: str,
-    speculative_model: str,
-    num_speculative_tokens: int,
-    use_v2_block_manager: bool,
-    ngram_prompt_lookup_min: int,
-    ngram_prompt_lookup_max: int,
     enable_prefix_caching: bool,
     enable_chunked_prefill: bool,
     max_num_batched_tokens: int,
-    distributed_executor_backend: Optional[str] = None,
+    distributed_executor_backend: Optional[str],
     gpu_memory_utilization: float = 0.9,
     download_dir: Optional[str] = None,
     load_format: str = EngineArgs.load_format,
@@ -110,11 +106,6 @@ def run_aphrodite(
         max_num_batched_tokens=max_num_batched_tokens,
         distributed_executor_backend=distributed_executor_backend,
         load_format=load_format,
-        speculative_model=speculative_model,
-        num_speculative_tokens=num_speculative_tokens,
-        use_v2_block_manager=use_v2_block_manager,
-        ngram_prompt_lookup_min=ngram_prompt_lookup_min,
-        ngram_prompt_lookup_max=ngram_prompt_lookup_max,
     )
 
     # Add the requests to the engine.
@@ -238,9 +229,7 @@ def main(args: argparse.Namespace):
             args.tensor_parallel_size, args.seed, args.n, args.use_beam_search,
             args.trust_remote_code, args.dtype, args.max_model_len,
             args.enforce_eager, args.kv_cache_dtype,
-            args.quantization_param_path, args.device, args.speculative_model,
-            args.num_speculative_tokens, args.use_v2_block_manager,
-            args.ngram_prompt_lookup_min, args.ngram_prompt_lookup_max,
+            args.quantization_param_path, args.device,
             args.enable_prefix_caching, args.enable_chunked_prefill,
             args.max_num_batched_tokens, args.distributed_executor_backend,
             args.gpu_memory_utilization, args.download_dir, args.load_format)
@@ -257,7 +246,7 @@ def main(args: argparse.Namespace):
     total_num_tokens = sum(prompt_len + output_len
                            for _, prompt_len, output_len in requests)
     print(f"Throughput: {len(requests) / elapsed_time:.2f} requests/s, "
-          f"{total_num_tokens / elapsed_time:.2f} total tokens/s")
+          f"{total_num_tokens / elapsed_time:.2f} tokens/s")
 
     # Output JSON results if specified
     if args.output_json:
@@ -273,7 +262,7 @@ def main(args: argparse.Namespace):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Benchmark the throughput.")
+    parser = FlexibleArgumentParser(description="Benchmark the throughput.")
     parser.add_argument("--backend",
                         type=str,
                         choices=["aphrodite", "hf", "mii"],
@@ -337,8 +326,7 @@ if __name__ == "__main__":
                         'the model executor, which can range from 0 to 1.'
                         'If unspecified, will use the default value of 0.9.')
     parser.add_argument("--enforce-eager",
-                        type=lambda x: (str(x).lower() == 'true'),
-                        default=True,
+                        action="store_true",
                         help="enforce eager execution")
     parser.add_argument(
         '--kv-cache-dtype',
@@ -363,15 +351,15 @@ if __name__ == "__main__":
         type=str,
         default="auto",
         choices=["auto", "cuda", "cpu", "openvino", "tpu", "xpu"],
-        help='device type for Aphrodite execution, supporting CUDA, OpenVINO, '
-        'CPU, TPU, and XPU.')
+        help='device type for Aphrodite execution, supporting CUDA, OpenVINO and '
+        'CPU.')
     parser.add_argument(
         "--enable-prefix-caching",
         action='store_true',
-        help="enable automatic prefix caching for aphrodite backend.")
+        help="enable automatic prefix caching for Aphrodite backend.")
     parser.add_argument("--enable-chunked-prefill",
                         action='store_true',
-                        help="enable chunked prefill for aphrodite backend.")
+                        help="enable chunked prefill for Aphrodite backend.")
     parser.add_argument('--max-num-batched-tokens',
                         type=int,
                         default=None,
@@ -413,29 +401,10 @@ if __name__ == "__main__":
         '* "dummy" will initialize the weights with random values, '
         'which is mainly for profiling.\n'
         '* "tensorizer" will load the weights using tensorizer from '
-        'CoreWeave. See the Tensorize aphrodite Model script in the Examples'
+        'CoreWeave. See the Tensorize Aphrodite Model script in the Examples'
         'section for more information.\n'
         '* "bitsandbytes" will load the weights using bitsandbytes '
         'quantization.\n')
-    parser.add_argument('--speculative-model',
-                        type=str,
-                        default=None,
-                        help='speculative model for speculative decoding')
-    parser.add_argument('--use-v2-block-manager',
-                        action='store_true',
-                        help='use v2 block manage.')
-    parser.add_argument('--num-speculative-tokens',
-                        type=int,
-                        default=None,
-                        help='number of speculative tokens.')
-    parser.add_argument('--ngram-prompt-lookup-min',
-                        type=int,
-                        default=None,
-                        help='minimum ngram prompt lookup size')
-    parser.add_argument('--ngram-prompt-lookup-max',
-                        type=int,
-                        default=None,
-                        help='maximum ngram prompt lookup size')
     args = parser.parse_args()
     if args.tokenizer is None:
         args.tokenizer = args.model
@@ -452,7 +421,7 @@ if __name__ == "__main__":
         if args.hf_max_batch_size is None:
             raise ValueError("HF max batch size is required for HF backend.")
         if args.quantization is not None:
-            raise ValueError("Quantization is only for aphrodite backend.")
+            raise ValueError("Quantization is only for Aphrodite backend.")
     elif args.backend == "mii":
         if args.dtype != "auto":
             raise ValueError("dtype must be auto for MII backend.")
@@ -461,7 +430,7 @@ if __name__ == "__main__":
         if args.use_beam_search:
             raise ValueError("Beam search is not supported for MII backend.")
         if args.quantization is not None:
-            raise ValueError("Quantization is only for aphrodite backend.")
+            raise ValueError("Quantization is only for Aphrodite backend.")
         if args.hf_max_batch_size is not None:
             raise ValueError("HF max batch size is only for HF backend.")
         if args.tokenizer != args.model:
