@@ -38,6 +38,7 @@ _PP_SUPPORTED_MODELS = [
     "LLaMAForCausalLM",
     "MistralForCausalLM",
     "Phi3ForCausalLM",
+    "MixtralForCausalLM",
 ]
 
 

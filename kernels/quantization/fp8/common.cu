@@ -219,9 +219,10 @@ void static_scaled_fp8_quant(torch::Tensor& out,          // [..., d]
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   APHRODITE_DISPATCH_FLOATING_TYPES(
       input.scalar_type(), "scaled_fp8_quant_kernel", [&] {
-        aphrodite::scaled_fp8_quant_kernel<scalar_t><<<grid, block, 0, stream>>>(
-            out.data_ptr<c10::Float8_e4m3fn>(), input.data_ptr<scalar_t>(),
-            scale.data_ptr<float>(), num_elems);
+        aphrodite::scaled_fp8_quant_kernel<scalar_t>
+            <<<grid, block, 0, stream>>>(out.data_ptr<c10::Float8_e4m3fn>(),
+                                         input.data_ptr<scalar_t>(),
+                                         scale.data_ptr<float>(), num_elems);
       });
 }
 
@@ -237,11 +238,13 @@ void dynamic_scaled_fp8_quant(torch::Tensor& out,          // [..., d]
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   APHRODITE_DISPATCH_FLOATING_TYPES(
       input.scalar_type(), "scaled_fp8_quant_kernel", [&] {
-        aphrodite::segmented_max_reduction<scalar_t><<<grid, block, 0, stream>>>(
-            scale.data_ptr<float>(), input.data_ptr<scalar_t>(), num_elems);
-        aphrodite::scaled_fp8_quant_kernel<scalar_t><<<grid, block, 0, stream>>>(
-            out.data_ptr<c10::Float8_e4m3fn>(), input.data_ptr<scalar_t>(),
-            scale.data_ptr<float>(), num_elems);
+        aphrodite::segmented_max_reduction<scalar_t>
+            <<<grid, block, 0, stream>>>(scale.data_ptr<float>(),
+                                         input.data_ptr<scalar_t>(), num_elems);
+        aphrodite::scaled_fp8_quant_kernel<scalar_t>
+            <<<grid, block, 0, stream>>>(out.data_ptr<c10::Float8_e4m3fn>(),
+                                         input.data_ptr<scalar_t>(),
+                                         scale.data_ptr<float>(), num_elems);
       });
 }
 

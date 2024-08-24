@@ -351,7 +351,8 @@ if __name__ == "__main__":
         type=str,
         default="auto",
         choices=["auto", "cuda", "cpu", "openvino", "tpu", "xpu"],
-        help='device type for Aphrodite execution, supporting CUDA, OpenVINO and '
+        help=
+        'device type for Aphrodite execution, supporting CUDA, OpenVINO and '
         'CPU.')
     parser.add_argument(
         "--enable-prefix-caching",

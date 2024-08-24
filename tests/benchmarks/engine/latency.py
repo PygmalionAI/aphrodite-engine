@@ -135,12 +135,8 @@ if __name__ == '__main__':
                         '-spec-draft-tp',
                         type=int,
                         default=None)
-    parser.add_argument('--ngram-prompt-lookup-max',
-                        type=int,
-                        default=None)
-    parser.add_argument('--ngram-prompt-lookup-min',
-                        type=int,
-                        default=None)
+    parser.add_argument('--ngram-prompt-lookup-max', type=int, default=None)
+    parser.add_argument('--ngram-prompt-lookup-min', type=int, default=None)
     parser.add_argument('--tokenizer', type=str, default=None)
     parser.add_argument('--quantization',
                         '-q',
