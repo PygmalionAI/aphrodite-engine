@@ -47,6 +47,7 @@ from aphrodite.modeling import SamplingMetadata
 from aphrodite.modeling.model_loader import get_model
 from aphrodite.modeling.model_loader.tensorizer import TensorizerConfig
 from aphrodite.modeling.models.interfaces import supports_lora, supports_vision
+from aphrodite.modeling.models.utils import set_cpu_offload_max_bytes
 from aphrodite.multimodal import (MULTIMODAL_REGISTRY, BatchedTensors,
                                   MultiModalInputs)
 from aphrodite.prompt_adapter.layers import PromptAdapterMapping
@@ -546,6 +547,9 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         self.flashinfer_decode_wrapper = None
         self.flashinfer_prefill_workspace_buffer = None
         self.flashinfer_prefill_wrapper = None
+
+        set_cpu_offload_max_bytes(
+            int(self.cache_config.cpu_offload_gb * 1024**3))
 
     def load_model(self) -> None:
         with CudaMemoryProfiler() as m:
