@@ -765,6 +765,7 @@ class BatchRequestOutput(OpenAIBaseModel):
 
 
 class TokenizeRequest(OpenAIBaseModel):
+    model: Optional[str]
     add_generation_prompt: bool = Field(default=True)
     add_special_tokens: bool = Field(default=False)
     prompt: Optional[str] = Field(default=None)
@@ -778,6 +779,7 @@ class TokenizeResponse(OpenAIBaseModel):
 
 
 class DetokenizeRequest(OpenAIBaseModel):
+    model: Optional[str]
     tokens: List[int]
 
 

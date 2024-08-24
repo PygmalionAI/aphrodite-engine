@@ -5,6 +5,7 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pydantic import Field
+from transformers import PreTrainedTokenizer
 from typing_extensions import Annotated
 
 from aphrodite.common.config import ModelConfig
@@ -16,7 +17,6 @@ from aphrodite.endpoints.openai.protocol import (
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.lora.request import LoRARequest
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
-from aphrodite.transformers_utils.tokenizer import get_tokenizer
 
 
 @dataclass
@@ -46,14 +46,6 @@ class OpenAIServing:
         self.engine = engine
         self.model_config = model_config
         self.max_model_len = model_config.max_model_len
-
-        # A separate tokenizer to map token IDs to strings.
-        self.tokenizer = get_tokenizer(
-            model_config.tokenizer,
-            tokenizer_mode=model_config.tokenizer_mode,
-            tokenizer_revision=model_config.tokenizer_revision,
-            trust_remote_code=model_config.trust_remote_code,
-            truncation_side="left")
 
         self.served_model_names = served_model_names
 
@@ -153,7 +145,8 @@ class OpenAIServing:
 
     def _maybe_get_adapter(
         self, request: Union[CompletionRequest, ChatCompletionRequest,
-                             EmbeddingRequest]
+                             EmbeddingRequest, TokenizeRequest,
+                             DetokenizeRequest]
     ) -> Tuple[Optional[str], Optional[Union[LoRARequest,
                                              PromptAdapterRequest]]]:
         if request.model in self.served_model_names:
@@ -167,18 +160,19 @@ class OpenAIServing:
         # if _check_model has been called earlier, this will be unreachable
         raise ValueError(f"The model `{request.model}` does not exist.")
 
-    def _validate_prompt_and_tokenize(
+    async def _validate_prompt_and_tokenize(
             self,
             request: Union[ChatCompletionRequest, CompletionRequest,
                            DetokenizeRequest, EmbeddingRequest,
                            TokenizeRequest],
+            tokenizer: "PreTrainedTokenizer",
             prompt: Optional[str] = None,
             prompt_ids: Optional[List[int]] = None,
             truncate_prompt_tokens: Optional[Annotated[int,
                                                        Field(ge=1)]] = None,
             add_special_tokens: Optional[bool] = True
     ) -> Tuple[List[int], str]:
-        if not (prompt or prompt_ids):
+        if prompt and prompt_ids:
             raise ValueError("Either prompt or prompt_ids should be provided.")
         if (prompt and prompt_ids):
             raise ValueError(
@@ -199,14 +193,14 @@ class OpenAIServing:
                     "truncation": True,
                     "max_length": truncate_prompt_tokens,
                 })
-            input_ids = self.tokenizer(prompt, **tokenizer_kwargs).input_ids
+            input_ids = tokenizer(prompt, **tokenizer_kwargs).input_ids
         elif truncate_prompt_tokens is not None:
             input_ids = prompt_ids[-truncate_prompt_tokens:]
         else:
             input_ids = prompt_ids
 
-        input_text = prompt if prompt is not None else self.tokenizer.decode(
-            prompt_ids)
+        input_text = prompt if prompt is not None else tokenizer.decode(
+            input_ids)
         token_num = len(input_ids)
 
         # Note: EmbeddingRequest doesn't have max_tokens
@@ -244,7 +238,9 @@ class OpenAIServing:
         else:
             return input_ids, input_text
 
-    def _get_decoded_token(self, logprob: Logprob, token_id: int) -> str:
+    @staticmethod
+    def _get_decoded_token(logprob: Logprob, token_id: int,
+                           tokenizer: PreTrainedTokenizer) -> str:
         if logprob.decoded_token is not None:
             return logprob.decoded_token
-        return self.tokenizer.decode(token_id)
+        return tokenizer.decode(token_id)

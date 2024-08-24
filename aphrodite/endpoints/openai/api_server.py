@@ -528,7 +528,8 @@ def run_server(args, llm_engine=None):
     openai_serving_embedding = OpenAIServingEmbedding(engine, model_config,
                                                       served_model_names)
     openai_serving_tokenization = OpenAIServingTokenization(
-        engine, model_config, served_model_names, args.chat_template)
+        engine, model_config, served_model_names, args.lora_modules,
+        args.chat_template)
     app.root_path = args.root_path
 
     tokenizer = get_tokenizer(
