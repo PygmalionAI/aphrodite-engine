@@ -12,6 +12,7 @@ from aphrodite.attention.backends.abstract import (AttentionBackend,
                                                    AttentionType)
 from aphrodite.attention.ops.paged_attn import (PagedAttention,
                                                 PagedAttentionMetadata)
+from aphrodite.attention.backends.utils import CommonMetadataBuilder
 
 _PARTITION_SIZE = 512
 
@@ -29,6 +30,10 @@ class IpexAttnBackend(AttentionBackend):
     @staticmethod
     def get_metadata_cls() -> Type["IpexAttnMetadata"]:
         return IpexAttnMetadata
+
+    @staticmethod
+    def get_builder_cls() -> Type["IpexAttnMetadataBuilder"]:
+        return IpexAttnMetadataBuilder
 
     @staticmethod
     def get_kv_cache_shape(
@@ -93,6 +98,11 @@ class IpexAttnMetadata(AttentionMetadata, PagedAttentionMetadata):
             return None
 
         return self
+
+
+class IpexAttnMetadataBuilder(CommonMetadataBuilder[IpexAttnMetadata]):
+
+    _metadata_cls = IpexAttnMetadata
 
 
 class IpexAttnBackendImpl(AttentionImpl[IpexAttnMetadata]):

@@ -13,6 +13,7 @@ from aphrodite.attention.backends.abstract import (AttentionBackend,
                                                    AttentionImpl,
                                                    AttentionMetadata,
                                                    AttentionType)
+from aphrodite.attention.backends.utils import CommonMetadataBuilder
 from aphrodite.attention.ops.paged_attn import (PagedAttention,
                                                 PagedAttentionMetadata)
 
@@ -30,6 +31,10 @@ class XFormersBackend(AttentionBackend):
     @staticmethod
     def get_metadata_cls() -> Type["AttentionMetadata"]:
         return XFormersMetadata
+
+    @staticmethod
+    def get_builder_cls() -> Type["XFormersMetadataBuilder"]:
+        return XFormersMetadataBuilder
 
     @staticmethod
     def get_kv_cache_shape(
@@ -359,6 +364,11 @@ def _get_seq_len_block_table_args(
                 attn_metadata.max_encoder_seq_len, None)
     else:
         raise AttributeError(f"Invalid attention type {str(attn_type)}")
+
+
+class XFormersMetadataBuilder(CommonMetadataBuilder[XFormersMetadata]):
+
+    _metadata_cls = XFormersMetadata
 
 
 class XFormersImpl(AttentionImpl[XFormersMetadata]):

@@ -8,6 +8,7 @@ from loguru import logger
 
 from aphrodite.attention.backends.abstract import AttentionBackend
 from aphrodite.common.utils import is_cpu, is_hip, is_openvino, is_tpu, is_xpu
+from aphrodite.platforms import current_platform
 
 APHRODITE_ATTENTION_BACKEND = "APHRODITE_ATTENTION_BACKEND"
 
@@ -137,7 +138,7 @@ def which_attn_to_use(
         selected_backend = (_Backend.ROCM_FLASH if selected_backend
                             == _Backend.FLASH_ATTN else selected_backend)
         if selected_backend == _Backend.ROCM_FLASH:
-            if torch.cuda.get_device_capability()[0] != 9:
+            if current_platform.get_device_capability()[0] != 9:
                 # not Instinct series GPUs.
                 logger.info("flash_attn is not supported on NAVI GPUs.")
         else:
@@ -146,7 +147,7 @@ def which_attn_to_use(
 
     # FlashAttn in NVIDIA GPUs.
     if selected_backend == _Backend.FLASH_ATTN:
-        if torch.cuda.get_device_capability()[0] < 8:
+        if current_platform.get_device_capability()[0] < 8:
             # Volta and Turing NVIDIA GPUs.
             logger.info(
                 "Cannot use FlashAttention-2 backend for Volta and Turing "

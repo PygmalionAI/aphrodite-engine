@@ -7,6 +7,7 @@ from aphrodite.attention.backends.abstract import (AttentionBackend,
                                                    AttentionImpl,
                                                    AttentionMetadata,
                                                    AttentionType)
+from aphrodite.attention.backends.utils import CommonMetadataBuilder
 from aphrodite.attention.ops.blocksparse_attention.interface import (
     LocalStridedBlockSparseAttn, get_head_sliding_step)
 from aphrodite.attention.ops.paged_attn import PagedAttention
@@ -96,6 +97,10 @@ class BlocksparseFlashAttentionBackend(AttentionBackend):
         return BlocksparseFlashAttentionMetadata
 
     @staticmethod
+    def get_builder_cls() -> Type["BlocksparseFlashAttentionMetadataBuilder"]:
+        return BlocksparseFlashAttentionMetadataBuilder
+
+    @staticmethod
     def get_kv_cache_shape(
         num_blocks: int,
         block_size: int,
@@ -174,7 +179,7 @@ class BlocksparseFlashAttentionMetadata(AttentionMetadata):
 
     # Whether or not if cuda graph is enabled.
     # Cuda-graph is currently enabled for decoding only.
-    # TODO(woosuk): Move `use_cuda_graph` out since it's unrelated to attention.
+    # TODO: Move `use_cuda_graph` out since it's unrelated to attention.
     use_cuda_graph: bool
 
     _cached_prefill_metadata: Optional[
@@ -243,6 +248,12 @@ class BlocksparseFlashAttentionMetadata(AttentionMetadata):
             use_cuda_graph=self.use_cuda_graph,
         )
         return self._cached_decode_metadata
+
+
+class BlocksparseFlashAttentionMetadataBuilder(
+        CommonMetadataBuilder[BlocksparseFlashAttentionMetadata]):
+
+    _metadata_cls = BlocksparseFlashAttentionMetadata
 
 
 class BlocksparseFlashAttentionImpl(AttentionImpl):

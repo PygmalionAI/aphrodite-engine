@@ -10,6 +10,7 @@ from aphrodite.attention.backends.abstract import (AttentionBackend,
                                                    AttentionImpl,
                                                    AttentionMetadata,
                                                    AttentionType)
+from aphrodite.attention.backends.utils import CommonMetadataBuilder
 from aphrodite.attention.ops.paged_attn import PagedAttentionMetadata
 from aphrodite.common.utils import is_cpu
 
@@ -35,6 +36,10 @@ class TorchSDPABackend(AttentionBackend):
     @staticmethod
     def get_metadata_cls() -> Type["AttentionMetadata"]:
         return TorchSDPAMetadata
+    
+    @staticmethod
+    def get_builder_cls() -> Type["TorchSDPAMetadataBuilder"]:
+        return TorchSDPAMetadataBuilder
 
     @staticmethod
     def get_kv_cache_shape(
@@ -97,6 +102,12 @@ class TorchSDPAMetadata(AttentionMetadata, PagedAttentionMetadata):
             return None
 
         return self
+
+
+class TorchSDPAMetadataBuilder(CommonMetadataBuilder[TorchSDPAMetadata]):
+
+    _metadata_cls = TorchSDPAMetadata
+
 
 
 class TorchSDPABackendImpl(AttentionImpl[TorchSDPAMetadata]):
