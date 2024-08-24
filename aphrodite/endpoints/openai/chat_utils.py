@@ -1,4 +1,5 @@
 import codecs
+import tempfile
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Awaitable, Iterable, List, Optional, TypedDict, cast, final
@@ -7,10 +8,11 @@ import requests
 from loguru import logger
 from openai.types.chat import (ChatCompletionContentPartImageParam,
                                ChatCompletionContentPartTextParam)
+from transformers import PreTrainedTokenizer
 
+from aphrodite.common.config import ModelConfig
 from aphrodite.endpoints.openai.protocol import (
     ChatCompletionContentPartParam, ChatCompletionMessageParam)
-from aphrodite.endpoints.openai.serving_engine import OpenAIServing
 from aphrodite.multimodal import MultiModalDataDict
 from aphrodite.multimodal.utils import async_get_and_parse_image
 
@@ -28,46 +30,41 @@ class ChatMessageParseResult:
         default_factory=list)
 
 
-def load_chat_template(self, chat_template: Optional[str]):
-    tokenizer = self.tokenizer
+def load_chat_template(chat_template: Optional[str]) -> Optional[str]:
+    if chat_template is None:
+        return None
+    try:
+        if chat_template.startswith(('http')):
+            response = requests.get(chat_template)
+            temp = tempfile.NamedTemporaryFile(delete=False)
+            temp.write(response.content)
+            temp.close()
+            chat_template = temp.name
 
-    if chat_template is not None:
-        try:
-            if chat_template.startswith('http'):
-                response = requests.get(chat_template)
-                if response.status_code == 200:
-                    tokenizer.chat_template = response.text
-                else:
-                    raise ValueError("Failed to download chat template "
-                                     f"from {chat_template}")
-            else:
-                with open(chat_template, "r") as f:
-                    tokenizer.chat_template = f.read()
-        except OSError as e:
-            JINJA_CHARS = "{}\n"
-            if not any(c in chat_template for c in JINJA_CHARS):
-                msg = (f"The supplied chat template ({chat_template}) "
-                       f"looks like a file path, but it failed to be "
-                       f"opened. Reason: {e}")
-                raise ValueError(msg) from e
+        with open(chat_template, "r") as f:
+            resolved_chat_template = f.read()
+    except OSError as e:
+        JINJA_CHARS = "{}\n"
+        if not any(c in chat_template for c in JINJA_CHARS):
+            msg = (f"The supplied chat template ({chat_template}) "
+                   "looks like a file path, but it failed to be "
+                   f"opened. Reason: {e}")
+            raise ValueError(msg) from e
 
-            # If opening a file fails, set chat template to be args to
-            # ensure we decode so our escape are interpreted correctly
-            tokenizer.chat_template = codecs.decode(chat_template,
-                                                    "unicode_escape")
+        # If opening a file fails, set chat template to be args to
+        # ensure we decode so our escape are interpreted correctly
+        resolved_chat_template = codecs.decode(chat_template, "unicode_escape")
 
-        logger.info("Using supplied chat template")
-    elif tokenizer.chat_template is not None:
-        logger.info("Using default chat template")
-    else:
-        logger.warning("No chat template provided. Chat API will not work.")
+    logger.info(f"Using supplied chat template:\n{resolved_chat_template}")
+    return resolved_chat_template
 
 
 @lru_cache(maxsize=None)
-def _image_token_str(engine: OpenAIServing) -> Optional[str]:
+def _image_token_str(model_config: ModelConfig,
+                     tokenizer: PreTrainedTokenizer) -> Optional[str]:
     # TODO: Let user specify how to insert image tokens into prompt
     # (similar to chat template)
-    model_type = engine.model_config.hf_config.model_type
+    model_type = model_config.hf_config.model_type
     if model_type == "phi3_v":
         # Workaround since this token is not defined in the tokenizer
         return "<|image_1|>"
@@ -75,17 +72,14 @@ def _image_token_str(engine: OpenAIServing) -> Optional[str]:
         # These models do not use image tokens in the prompt
         return None
     if model_type.startswith("llava"):
-        return engine.tokenizer.decode(
-            engine.model_config.hf_config.image_token_index)
+        return tokenizer.decode(model_config.hf_config.image_token_index)
 
-    else:
-        raise TypeError(f"Unknown model type: {model_type}")
+    raise TypeError(f"Unknown model type: {model_type}")
 
 
 # TODO: Let user specify how to insert image tokens into prompt
 # (similar to chat template)
-def _get_full_image_text_prompt(engine: OpenAIServing, image_token_str: str,
-                                text_prompt: str) -> str:
+def _get_full_image_text_prompt(image_token_str: str, text_prompt: str) -> str:
     """Combine image and text prompts for vision language model"""
 
     # NOTE: For now we assume all model architectures use the same
@@ -94,9 +88,10 @@ def _get_full_image_text_prompt(engine: OpenAIServing, image_token_str: str,
 
 
 def _parse_chat_message_content_parts(
-    engine: OpenAIServing,
     role: str,
     parts: Iterable[ChatCompletionContentPartParam],
+    model_config: ModelConfig,
+    tokenizer: PreTrainedTokenizer,
 ) -> ChatMessageParseResult:
     texts: List[str] = []
     mm_futures: List[Awaitable[MultiModalDataDict]] = []
@@ -127,7 +122,7 @@ def _parse_chat_message_content_parts(
     text_prompt = "\n".join(texts)
 
     if mm_futures:
-        image_token_str = _image_token_str(engine)
+        image_token_str = _image_token_str(model_config, tokenizer)
         if image_token_str is not None:
             if image_token_str in text_prompt:
                 logger.warning(
@@ -135,7 +130,6 @@ def _parse_chat_message_content_parts(
                     "Skipping prompt formatting.")
             else:
                 text_prompt = _get_full_image_text_prompt(
-                    engine,
                     image_token_str=image_token_str,
                     text_prompt=text_prompt,
                 )
@@ -146,8 +140,9 @@ def _parse_chat_message_content_parts(
 
 
 def parse_chat_message_content(
-    engine: OpenAIServing,
     message: ChatCompletionMessageParam,
+    model_config: ModelConfig,
+    tokenizer: PreTrainedTokenizer,
 ) -> ChatMessageParseResult:
     role = message["role"]
     content = message.get("content")
@@ -158,4 +153,5 @@ def parse_chat_message_content(
         messages = [ConversationMessage(role=role, content=content)]
         return ChatMessageParseResult(messages=messages, mm_futures=[])
 
-    return _parse_chat_message_content_parts(engine, role, content)
+    return _parse_chat_message_content_parts(role, content, model_config,
+                                             tokenizer)
