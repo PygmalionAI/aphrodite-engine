@@ -328,7 +328,8 @@ class ModelConfig:
                     f"{self.quantization} quantization is currently not "
                     "supported in ROCm.")
             if (self.quantization
-                    not in ["fp8", "marlin", "gptq_marlin_24", "gptq_marlin"]):
+                    not in ("fp8", "marlin", "gptq_marlin_24", "gptq_marlin",
+                            "compressed_tensors")):
                 logger.warning(
                     f"{self.quantization} quantization is not fully "
                     "optimized yet. The speed can be slower than "
