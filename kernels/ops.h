@@ -52,6 +52,11 @@ void gelu_fast(torch::Tensor& out, torch::Tensor& input);
 
 void gelu_quick(torch::Tensor& out, torch::Tensor& input);
 
+void advance_step(int64_t num_seqs, int64_t num_queries, int64_t block_size,
+                  torch::Tensor& input_tokens, torch::Tensor& sampled_token_ids,
+                  torch::Tensor& input_positions, torch::Tensor& seq_lens,
+                  torch::Tensor& slot_mapping, torch::Tensor& block_tables);
+
 void moe_align_block_size(torch::Tensor topk_ids, int64_t num_experts,
                           int64_t block_size, torch::Tensor sorted_token_ids,
                           torch::Tensor expert_ids,
