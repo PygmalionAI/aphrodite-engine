@@ -1,8 +1,8 @@
-import argparse
 import cProfile
 import pstats
 
 from aphrodite import LLM, SamplingParams
+from aphrodite.common.utils import FlexibleArgumentParser
 
 # A very long prompt, total number of tokens is about 15k.
 LONG_PROMPT = ["You are an expert in large language models, aren't you?"
@@ -17,7 +17,6 @@ def main(args):
         enable_prefix_caching=True,
         tensor_parallel_size=args.tensor_parallel_size,
         use_v2_block_manager=args.use_v2_block_manager,
-        max_model_len=args.max_model_len,
     )
 
     sampling_params = SamplingParams(temperature=0, max_tokens=args.output_len)
@@ -48,12 +47,10 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
+    parser = FlexibleArgumentParser(
         description='Benchmark the performance of hashing function in'
         'automatic prefix caching.')
-    parser.add_argument('--model',
-                        type=str,
-                        default='NousResearch/Meta-Llama-3-8B')
+    parser.add_argument('--model', type=str, default='lmsys/longchat-7b-16k')
     parser.add_argument('--tensor-parallel-size', '-tp', type=int, default=1)
     parser.add_argument('--output-len', type=int, default=10)
     parser.add_argument('--enable-prefix-caching',
@@ -62,9 +59,5 @@ if __name__ == "__main__":
     parser.add_argument('--use-v2-block-manager',
                         action='store_true',
                         help='Use BlockSpaceMangerV2')
-    parser.add_argument('--max-model-len',
-                        type=int,
-                        default=None,
-                        help='maximum length of the model')
     args = parser.parse_args()
     main(args)
