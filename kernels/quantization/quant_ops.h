@@ -110,8 +110,12 @@ void squeezellm_gemm(torch::Tensor vec, torch::Tensor mat, torch::Tensor mul,
                      torch::Tensor lookup_table);
 
 // FP8
-void static_scaled_fp8_quant(torch::Tensor& out, torch::Tensor& input,
-                             torch::Tensor& scale);
+void static_scaled_fp8_quant(torch::Tensor& out, torch::Tensor const& input,
+                             torch::Tensor const& scale);
 
-void dynamic_scaled_fp8_quant(torch::Tensor& out, torch::Tensor& input,
+void dynamic_scaled_fp8_quant(torch::Tensor& out, torch::Tensor const& input,
                               torch::Tensor& scale);
+
+void dynamic_per_token_scaled_fp8_quant(torch::Tensor& out,
+                                        torch::Tensor const& input,
+                                        torch::Tensor& scale);
