@@ -5,7 +5,7 @@ import torch
 
 from aphrodite.common.sequence import (ExecuteModelRequest, SamplerOutput,
                                        SequenceData, SequenceGroupMetadata,
-                                       get_all_seq_ids)
+                                       SequenceGroupState, get_all_seq_ids)
 from aphrodite.spec_decode.interfaces import (SpeculativeProposals,
                                               SpeculativeScorer,
                                               SpeculativeScores)
@@ -294,6 +294,15 @@ class BatchExpansionTop1Scorer(SpeculativeScorer):
         for data in new_seq_data_dict.values():
             data.update_num_computed_tokens(data.get_len() - 1)
 
+        if (seq_group_metadata.state is not None
+                and seq_group_metadata.state.generator is not None):
+            generator = torch.Generator(
+                device=seq_group_metadata.state.generator.device)
+            generator.set_state(seq_group_metadata.state.generator.get_state())
+            state = SequenceGroupState(generator=generator)
+        else:
+            state = None
+
         return SequenceGroupMetadata(
             request_id=seq_group_metadata.request_id,
             is_prompt=seq_group_metadata.is_prompt,
@@ -304,6 +313,7 @@ class BatchExpansionTop1Scorer(SpeculativeScorer):
             },
             lora_request=None,
             token_chunk_size=1,
+            state=state,
         )
 
     def _split_scoring_output(

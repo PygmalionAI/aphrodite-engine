@@ -11,8 +11,8 @@ from aphrodite.common.sequence import (ExecuteModelRequest, HiddenStates,
                                        get_all_seq_ids_and_request_ids)
 from aphrodite.distributed.communication_op import broadcast_tensor_dict
 from aphrodite.modeling.layers.rejection_sampler import RejectionSampler
-from aphrodite.modeling.layers.spec_decode_base_sampler import \
-    SpecDecodeBaseSampler
+from aphrodite.modeling.layers.spec_decode_base_sampler import (
+    SpecDecodeBaseSampler, SpecDecodeStochasticBaseSampler)
 from aphrodite.modeling.layers.typical_acceptance_sampler import \
     TypicalAcceptanceSampler
 from aphrodite.spec_decode.batch_expansion import BatchExpansionTop1Scorer
@@ -519,11 +519,28 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         # Get proposed tokens.
         proposal_token_ids = proposals.proposal_token_ids[spec_indices]
 
+        # Sampler arguments
+        sampler_extra_kwargs = {}
+        if isinstance(self.spec_decode_sampler,
+                      SpecDecodeStochasticBaseSampler):
+
+            # Get sequence group state
+            generators = []
+            for seq_group_metadata in seq_group_metadata_list:
+                if (seq_group_metadata.state is not None
+                        and seq_group_metadata.state.generator is not None):
+                    generators.append(seq_group_metadata.state.generator)
+                else:
+                    generators.append(None)
+
+            sampler_extra_kwargs["generators"] = generators
+
         accepted_token_ids = self.spec_decode_sampler(
             target_probs=proposal_verifier_probs,
             bonus_token_ids=bonus_token_ids,
             draft_probs=proposal_probs,
             draft_token_ids=proposal_token_ids,
+            **sampler_extra_kwargs,
         )
 
         # Append output tokens from non-speculative sequences to
