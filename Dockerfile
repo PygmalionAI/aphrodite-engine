@@ -23,7 +23,7 @@ RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
     && python3 -m pip --version
 
 RUN apt-get update -y \
-    && apt-get install -y python3-pip git
+    && apt-get install -y python3-pip git curl libibverbs-dev
 
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
