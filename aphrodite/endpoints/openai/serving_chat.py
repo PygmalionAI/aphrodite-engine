@@ -12,9 +12,9 @@ from aphrodite.common.config import ModelConfig
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sequence import Logprob
 from aphrodite.common.utils import random_uuid
-from aphrodite.endpoints.openai.chat_utils import (ConversationMessage,
-                                                   load_chat_template,
-                                                   parse_chat_message_content)
+from aphrodite.endpoints.chat_utils import (ConversationMessage,
+                                            load_chat_template,
+                                            parse_chat_message_content)
 from aphrodite.endpoints.openai.protocol import (
     ChatCompletionLogProb, ChatCompletionLogProbs,
     ChatCompletionLogProbsContent, ChatCompletionNamedToolChoiceParam,

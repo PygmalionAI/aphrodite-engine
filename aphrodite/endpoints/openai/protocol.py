@@ -3,48 +3,15 @@
 import time
 from typing import Any, Dict, List, Literal, Optional, Union
 
-import openai.types.chat
 import torch
 from pydantic import (BaseModel, ConfigDict, Field, model_validator,
                       root_validator)
-from typing_extensions import Annotated, Required, TypedDict
+from typing_extensions import Annotated
 
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.utils import random_uuid
-
-
-class CustomChatCompletionContentPartParam(TypedDict, total=False):
-    __pydantic_config__ = ConfigDict(extra="allow")  # type: ignore
-
-    type: Required[str]
-    """The type of the content part."""
-
-
-ChatCompletionContentPartParam = Union[
-    openai.types.chat.ChatCompletionContentPartParam,
-    CustomChatCompletionContentPartParam]
-
-
-class CustomChatCompletionMessageParam(TypedDict, total=False):
-    """Enables custom roles in the Chat Completion API."""
-    role: Required[str]
-    """The role of the message's author."""
-
-    content: Union[str, List[ChatCompletionContentPartParam]]
-    """The contents of the message."""
-
-    name: str
-    """An optional name for the participant.
-
-    Provides the model information to differentiate between participants of the
-    same role.
-    """
-
-
-ChatCompletionMessageParam = Union[
-    openai.types.chat.ChatCompletionMessageParam,
-    CustomChatCompletionMessageParam]
+from aphrodite.endpoints.chat_utils import ChatCompletionMessageParam
 
 
 class OpenAIBaseModel(BaseModel):

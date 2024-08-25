@@ -1,9 +1,9 @@
 from typing import List, Optional
 
 from aphrodite.common.config import ModelConfig
-from aphrodite.endpoints.openai.chat_utils import (ConversationMessage,
-                                                   load_chat_template,
-                                                   parse_chat_message_content)
+from aphrodite.endpoints.chat_utils import (ConversationMessage,
+                                            load_chat_template,
+                                            parse_chat_message_content)
 from aphrodite.endpoints.openai.protocol import (DetokenizeRequest,
                                                  DetokenizeResponse,
                                                  TokenizeRequest,
