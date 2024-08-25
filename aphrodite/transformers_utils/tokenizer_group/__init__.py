@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Type
 
 from aphrodite.common.config import TokenizerPoolConfig
 from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import (
@@ -16,18 +16,22 @@ else:
 
 def get_tokenizer_group(tokenizer_pool_config: Optional[TokenizerPoolConfig],
                         **init_kwargs) -> BaseTokenizerGroup:
+    tokenizer_cls: Type[BaseTokenizerGroup]
     if tokenizer_pool_config is None:
-        return TokenizerGroup(**init_kwargs)
-    if tokenizer_pool_config.pool_type == "ray":
+        tokenizer_cls = TokenizerGroup
+    elif isinstance(tokenizer_pool_config.pool_type, type) and issubclass(
+            tokenizer_pool_config.pool_type, BaseTokenizerGroup):
+        tokenizer_cls = tokenizer_pool_config.pool_type
+    elif tokenizer_pool_config.pool_type == "ray":
         if RayTokenizerGroupPool is None:
             raise ImportError(
                 "RayTokenizerGroupPool is not available. Please install "
                 "the ray package to use the Ray tokenizer group pool.")
-        return RayTokenizerGroupPool.from_config(tokenizer_pool_config,
-                                                 **init_kwargs)
+        tokenizer_cls = RayTokenizerGroupPool
     else:
-        raise ValueError(f"Unknown tokenizer pool type: "
-                         f"{tokenizer_pool_config.pool_type}")
+        raise ValueError(
+            f"Unknown pool type: {tokenizer_pool_config.pool_type}")
+    return tokenizer_cls.from_config(tokenizer_pool_config, **init_kwargs)
 
 
 __all__ = ["get_tokenizer_group", "BaseTokenizerGroup"]

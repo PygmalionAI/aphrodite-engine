@@ -2,13 +2,14 @@ from typing import List, Optional
 
 from transformers import PreTrainedTokenizer
 
+from aphrodite.common.config import TokenizerPoolConfig
+from aphrodite.common.utils import LRUCache
 from aphrodite.lora.request import LoRARequest
 from aphrodite.transformers_utils.tokenizer import (get_lora_tokenizer,
-                                                    get_lora_tokenizer_async)
-from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import (
-    BaseTokenizerGroup)
-from aphrodite.common.utils import LRUCache
-from aphrodite.transformers_utils.tokenizer import get_tokenizer
+                                                    get_lora_tokenizer_async,
+                                                    get_tokenizer)
+from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import \
+    BaseTokenizerGroup
 
 
 class TokenizerGroup(BaseTokenizerGroup):
@@ -23,6 +24,11 @@ class TokenizerGroup(BaseTokenizerGroup):
         self.tokenizer = get_tokenizer(self.tokenizer_id, **tokenizer_config)
         self.lora_tokenizers = LRUCache[PreTrainedTokenizer](
             capacity=max_num_seqs) if enable_lora else None
+
+    @classmethod
+    def from_config(cls, tokenizer_pool_config: Optional[TokenizerPoolConfig],
+                    **init_kwargs) -> "TokenizerGroup":
+        return cls(**init_kwargs)
 
     def ping(self) -> bool:
         """Check if the tokenizer group is alive."""

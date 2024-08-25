@@ -8,7 +8,7 @@ from typing import (AsyncIterator, Callable, Dict, Iterable, List, Optional,
 from loguru import logger
 from transformers import PreTrainedTokenizer
 
-from aphrodite.common.config import DecodingConfig, ModelConfig
+from aphrodite.common.config import DecodingConfig, EngineConfig, ModelConfig
 from aphrodite.common.outputs import EmbeddingRequestOutput, RequestOutput
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
@@ -16,6 +16,8 @@ from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_timeout import asyncio_timeout
+from aphrodite.engine.metrics import StatLoggerBase
+from aphrodite.executor.executor_base import ExecutorAsyncBase
 from aphrodite.executor.ray_utils import initialize_ray_cluster, ray
 from aphrodite.inputs import LLMInputs, PromptInputs
 from aphrodite.lora.request import LoRARequest
@@ -382,23 +384,19 @@ class AsyncAphrodite:
         self._request_tracker: RequestTracker
 
     @classmethod
-    def from_engine_args(
-        cls,
-        engine_args: AsyncEngineArgs,
-        start_engine_loop: bool = True,
-    ) -> "AsyncAphrodite":
-        """Creates an async LLM engine from the engine arguments."""
-        # Create the engine configs.
-        engine_config = engine_args.create_engine_config()
-
-        if engine_args.engine_use_ray:
-            from aphrodite.executor import ray_utils
-            ray_utils.assert_ray_available()
-
+    def _get_executor_cls(
+            cls, engine_config: EngineConfig) -> Type[ExecutorAsyncBase]:
         distributed_executor_backend = (
             engine_config.parallel_config.distributed_executor_backend)
-
-        if engine_config.device_config.device_type == "neuron":
+        if isinstance(distributed_executor_backend, type):
+            if not issubclass(distributed_executor_backend, ExecutorAsyncBase):
+                raise TypeError(
+                    "distributed_executor_backend must be a subclass of "
+                    f"ExecutorAsyncBase. Got {distributed_executor_backend}.")
+            if distributed_executor_backend.uses_ray:  # type: ignore
+                initialize_ray_cluster(engine_config.parallel_config)
+            executor_class = distributed_executor_backend
+        elif engine_config.device_config.device_type == "neuron":
             from aphrodite.executor.neuron_executor import NeuronExecutorAsync
             executor_class = NeuronExecutorAsync
         elif engine_config.device_config.device_type == "tpu":
@@ -439,9 +437,27 @@ class AsyncAphrodite:
         else:
             from aphrodite.executor.gpu_executor import GPUExecutorAsync
             executor_class = GPUExecutorAsync
+        return executor_class
+
+    @classmethod
+    def from_engine_args(
+        cls,
+        engine_args: AsyncEngineArgs,
+        start_engine_loop: bool = True,
+        stat_loggers: Optional[Dict[str, StatLoggerBase]] = None,
+    ) -> "AsyncAphrodite":
+        """Creates an async LLM engine from the engine arguments."""
+        # Create the engine configs.
+        engine_config = engine_args.create_engine_config()
+
+        if engine_args.engine_use_ray:
+            from aphrodite.executor import ray_utils
+            ray_utils.assert_ray_available()
+
+        executor_class = cls._get_executor_cls(engine_config)
         # Create the async LLM engine.
         engine = cls(
-            distributed_executor_backend == "ray",
+            executor_class.uses_ray,
             engine_args.engine_use_ray,
             **engine_config.to_dict(),
             executor_class=executor_class,
@@ -449,6 +465,7 @@ class AsyncAphrodite:
             log_stats=not engine_args.disable_log_stats,
             max_log_len=engine_args.max_log_len,
             start_engine_loop=start_engine_loop,
+            stat_loggers=stat_loggers,
         )
         return engine
 

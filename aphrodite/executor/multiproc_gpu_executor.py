@@ -24,6 +24,8 @@ from aphrodite.triton_utils import maybe_set_triton_cache_manager
 class MultiprocessingGPUExecutor(DistributedGPUExecutor):
     """Python multiprocessing-based multi-GPU executor"""
 
+    uses_ray: bool = False
+
     def _init_executor(self) -> None:
 
         # Create the parallel GPU workers.

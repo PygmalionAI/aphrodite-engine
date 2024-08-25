@@ -1,18 +1,18 @@
+import os
 import time
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, ClassVar, Dict, Iterable, List, Optional
 from typing import Sequence as GenericSequence
 from typing import Type, TypeVar, Union
-import os
 
 from loguru import logger
 from transformers import PreTrainedTokenizer
 
 from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
-                                     LoadConfig, LoRAConfig, ModelConfig,
-                                     MultiModalConfig, ParallelConfig,
-                                     PromptAdapterConfig, SchedulerConfig,
-                                     SpeculativeConfig)
+                                     EngineConfig, LoadConfig, LoRAConfig,
+                                     ModelConfig, MultiModalConfig,
+                                     ParallelConfig, PromptAdapterConfig,
+                                     SchedulerConfig, SpeculativeConfig)
 from aphrodite.common.logger import setup_logger
 from aphrodite.common.outputs import (EmbeddingRequestOutput, RequestOutput,
                                       RequestOutputFactory)
@@ -324,18 +324,20 @@ class AphroditeEngine:
         self.model_executor.initialize_cache(num_gpu_blocks, num_cpu_blocks)
 
     @classmethod
-    def from_engine_args(
-        cls,
-        engine_args: EngineArgs,
-    ) -> "AphroditeEngine":
-        """Creates an LLM engine from the engine arguments."""
-        # Create the engine configs.
-        engine_config = engine_args.create_engine_config()
+    def _get_executor_cls(cls,
+                          engine_config: EngineConfig) -> Type[ExecutorBase]:
         distributed_executor_backend = (
             engine_config.parallel_config.distributed_executor_backend)
-
         # Initialize the cluster and specify the executor class.
-        if engine_config.device_config.device_type == "neuron":
+        if isinstance(distributed_executor_backend, type):
+            if not issubclass(distributed_executor_backend, ExecutorBase):
+                raise TypeError(
+                    "distributed_executor_backend must be a subclass of "
+                    f"ExecutorBase. Got {distributed_executor_backend}.")
+            if distributed_executor_backend.uses_ray:  # type: ignore
+                initialize_ray_cluster(engine_config.parallel_config)
+            executor_class = distributed_executor_backend
+        elif engine_config.device_config.device_type == "neuron":
             from aphrodite.executor.neuron_executor import NeuronExecutor
             executor_class = NeuronExecutor
         elif engine_config.device_config.device_type == "tpu":
@@ -369,6 +371,18 @@ class AphroditeEngine:
         else:
             from aphrodite.executor.gpu_executor import GPUExecutor
             executor_class = GPUExecutor
+        return executor_class
+
+    @classmethod
+    def from_engine_args(
+        cls,
+        engine_args: EngineArgs,
+        stat_loggers: Optional[Dict[str, StatLoggerBase]] = None,
+    ) -> "AphroditeEngine":
+        """Creates an LLM engine from the engine arguments."""
+        # Create the engine configs.
+        engine_config = engine_args.create_engine_config()
+        executor_class = cls._get_executor_cls(engine_config)
 
         # Create the LLM engine.
         engine = cls(

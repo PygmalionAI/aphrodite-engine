@@ -3,7 +3,7 @@ import json
 import os
 from dataclasses import dataclass, field, fields
 from typing import (TYPE_CHECKING, Any, ClassVar, Dict, List, Optional, Tuple,
-                    Union)
+                    Type, Union)
 
 import torch
 from loguru import logger
@@ -21,7 +21,10 @@ from aphrodite.transformers_utils.config import get_config, get_hf_text_config
 if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
 
+    from aphrodite.executor.executor_base import ExecutorBase
     from aphrodite.modeling.model_loader.loader import BaseModelLoader
+    from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import \
+        BaseTokenizerGroup  # noqa: E501
 
 # If true, will load models from ModelScope instead of Hugging Face Hub.
 APHRODITE_USE_MODELSCOPE = os.environ.get("APHRODITE_USE_MODELSCOPE",
@@ -177,9 +180,9 @@ class ModelConfig:
                 and self.hf_text_config.sliding_window is not None):
             print_warning_once(
                 "Gemma 2 uses sliding window attention for every odd layer, "
-                "which is currently not supported by vLLM. Disabling sliding "
-                "window and capping the max length to the sliding window size "
-                f"({self.hf_text_config.sliding_window}).")
+                "which is currently not supported by Aphrodite. Disabling "
+                "sliding window and capping the max length to the sliding "
+                f"window size ({self.hf_text_config.sliding_window}).")
             self.disable_sliding_window = True
 
         self.max_model_len = _get_and_verify_max_len(
@@ -628,11 +631,12 @@ class TokenizerPoolConfig:
             pool type.
     """
     pool_size: int
-    pool_type: str
+    pool_type: Union[str, Type["BaseTokenizerGroup"]]
     extra_config: dict
 
     def __post_init__(self):
-        if self.pool_type not in ("ray", ):
+        if self.pool_type not in ("ray", ) and not isinstance(
+                self.pool_type, type):
             raise ValueError(f"Unknown pool type: {self.pool_type}")
         if not isinstance(self.extra_config, dict):
             raise ValueError("extra_config must be a dictionary.")
@@ -762,7 +766,8 @@ class ParallelConfig:
         tokenizer_pool_config: Optional[TokenizerPoolConfig] = None,
         ray_workers_use_nsight: bool = False,
         placement_group: Optional["PlacementGroup"] = None,
-        distributed_executor_backend: Optional[str] = None,
+        distributed_executor_backend: Optional[Union[
+            str, Type["ExecutorBase"]]] = None,
     ) -> None:
         self.pipeline_parallel_size = pipeline_parallel_size
         self.tensor_parallel_size = tensor_parallel_size
@@ -777,7 +782,7 @@ class ParallelConfig:
         if worker_use_ray:
             if self.distributed_executor_backend is None:
                 self.distributed_executor_backend = "ray"
-            elif self.distributed_executor_backend != "ray":
+            elif not self.use_ray:
                 raise ValueError(f"worker-use-ray can't be used with "
                                  f"distributed executor backend "
                                  f"'{self.distributed_executor_backend}'.")
@@ -811,12 +816,25 @@ class ParallelConfig:
         self._verify_args()
         self.rank = 0
 
+    @property
+    def use_ray(self) -> bool:
+        return self.distributed_executor_backend == "ray" or (
+            isinstance(self.distributed_executor_backend, type)
+            and self.distributed_executor_backend.uses_ray)
+
     def _verify_args(self) -> None:
-        if self.distributed_executor_backend not in ("ray", "mp", None):
+        # Lazy import to avoid circular import
+        from aphrodite.executor.executor_base import ExecutorBase
+
+        if self.distributed_executor_backend not in (
+                "ray", "mp", None) and not (isinstance(
+                    self.distributed_executor_backend, type) and issubclass(
+                        self.distributed_executor_backend, ExecutorBase)):
             raise ValueError(
-                "Unrecognized distributed executor backend. Supported values "
-                "are 'ray' or 'mp'.")
-        if self.distributed_executor_backend == "ray":
+                "Unrecognized distributed executor backend "
+                f"{self.distributed_executor_backend}. Supported "
+                "values are 'ray', 'mp' or custom ExecutorBase subclass.")
+        if self.use_ray:
             from aphrodite.executor import ray_utils
             ray_utils.assert_ray_available()
         if is_hip():
@@ -824,8 +842,7 @@ class ParallelConfig:
             logger.info(
                 "Disabled the custom all-reduce kernel because it is not "
                 "supported on AMD GPUs.")
-        if self.ray_workers_use_nsight and (
-                not self.distributed_executor_backend == "ray"):
+        if self.ray_workers_use_nsight and not self.use_ray:
             raise ValueError("Unable to use nsight profiling unless workers "
                              "run with Ray.")
 

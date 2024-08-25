@@ -15,6 +15,8 @@ from aphrodite.prompt_adapter.request import PromptAdapterRequest
 
 class CPUExecutor(ExecutorBase):
 
+    uses_ray: bool = False
+
     def _init_executor(self) -> None:
         assert self.device_config.device_type == "cpu"
         assert self.lora_config is None, "cpu backend doesn't support LoRA"
