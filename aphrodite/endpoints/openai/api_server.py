@@ -73,11 +73,12 @@ async def lifespan(app: fastapi.FastAPI):
     yield
 
 
-# Add prometheus asgi middleware to route /metrics requests
-route = Mount("/metrics", make_asgi_app())
-# Workaround for 307 Redirect for /metrics
-route.path_regex = re.compile('^/metrics(?P<path>.*)$')
-router.routes.append(route)
+def mount_metrics(app: fastapi.FastAPI):
+    # Add prometheus asgi middleware to route /metrics requests
+    metrics_route = Mount("/metrics", make_asgi_app())
+    # Workaround for 307 Redirect for /metrics
+    metrics_route.path_regex = re.compile('^/metrics(?P<path>.*)$')
+    app.routes.append(metrics_route)
 
 
 @router.get("/health")
@@ -417,6 +418,8 @@ def build_app(args):
                            prefix="/api/latest",
                            include_in_schema=False)
         app.include_router(extra_api, prefix="/api/extra")
+
+    mount_metrics(app)
 
     app.add_middleware(
         CORSMiddleware,
