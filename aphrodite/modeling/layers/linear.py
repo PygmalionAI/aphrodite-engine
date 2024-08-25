@@ -171,8 +171,8 @@ class ReplicatedLinear(LinearBase):
         skip_bias_add: If true, skip adding bias but instead return it.
         params_dtype: Data type for the parameters.
         quant_config: Quantization configure.
-        prefix: The name of  the layer in the state dict, including all parents
-            (e.g. model.layers.0.qkv_proj)
+        prefix: The name of the layer in the state dict, including all parents
+                        (e.g. model.layers.0.qkv_proj)
     """
 
     def __init__(self,
@@ -306,7 +306,6 @@ class ColumnParallelLinear(LinearBase):
             self.register_parameter("bias", None)
 
     def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
-
         tp_rank = get_tensor_model_parallel_rank()
         output_dim = getattr(param, "output_dim", None)
         param_data = param.data
@@ -398,7 +397,6 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
         output_dim = getattr(param, "output_dim", None)
         # Special case for AQLM codebooks.
         is_metadata = getattr(param, "is_metadata", False)
-
         # Special case for per-tensor scale to load scalar into fused array.
         needs_scalar_to_array = getattr(param, "needs_scalar_to_array", False)
 
@@ -413,7 +411,7 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                 param_data.copy_(loaded_weight)
                 return
             current_shard_offset = 0
-            shard_offsets = []
+            shard_offsets: List[Tuple[int, int, int]] = []
             for i, output_size in enumerate(self.output_sizes):
                 shard_offsets.append((i, current_shard_offset, output_size))
                 current_shard_offset += output_size
@@ -546,6 +544,9 @@ class QKVParallelLinear(ColumnParallelLinear):
             self.num_kv_heads = 1
             self.num_kv_head_replicas = divide(tp_size,
                                                self.total_num_kv_heads)
+        # else:
+        #     self.num_kv_heads = divide(self.total_num_kv_heads, tp_size)
+        #     self.num_kv_head_replicas = 1
         input_size = self.hidden_size
         output_size = (self.num_heads +
                        2 * self.num_kv_heads) * tp_size * self.head_size
@@ -728,8 +729,8 @@ class RowParallelLinear(LinearBase):
                  params_dtype: Optional[torch.dtype] = None,
                  reduce_results: bool = True,
                  quant_config: Optional[QuantizationConfig] = None,
-                 prefix: str = "",
-                 partition_multiple_of: int = 1):
+                 partition_multiple_of: int = 1,
+                 prefix: str = ""):
         super().__init__(input_size, output_size, skip_bias_add, params_dtype,
                          quant_config, prefix)
 
@@ -737,8 +738,8 @@ class RowParallelLinear(LinearBase):
         self.reduce_results = reduce_results
 
         # Divide the weight matrix along the last dimension.
-        self.tp_size = get_tensor_model_parallel_world_size()
         self.tp_rank = get_tensor_model_parallel_rank()
+        self.tp_size = get_tensor_model_parallel_world_size()
         self.partition_multiple_of = partition_multiple_of
         self.input_size_per_partition = get_current_tp_rank_partition_size(
             input_size, self.tp_rank, self.tp_size, partition_multiple_of)
@@ -767,7 +768,6 @@ class RowParallelLinear(LinearBase):
             self.register_parameter("bias", None)
 
     def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
-
         input_dim = getattr(param, "input_dim", None)
         param_data = param.data
         if input_dim is not None:
@@ -789,7 +789,6 @@ class RowParallelLinear(LinearBase):
         param_data.copy_(loaded_weight)
 
     def forward(self, input_):
-        # Set up backprop all-reduce.
         if self.input_is_parallel:
             input_parallel = input_
         else:

@@ -3,6 +3,7 @@ from typing import Type
 from aphrodite.quantization.aqlm import AQLMConfig
 from aphrodite.quantization.autoquant import AutoQuantConfig
 from aphrodite.quantization.awq import AWQConfig
+from aphrodite.quantization.awq_marlin import AWQMarlinConfig
 from aphrodite.quantization.base_config import QuantizationConfig
 from aphrodite.quantization.bitsandbytes import BitsAndBytesConfig
 from aphrodite.quantization.compressed_tensors.compressed_tensors import \
@@ -35,6 +36,7 @@ QUANTIZATION_METHODS = {
     "marlin": MarlinConfig,
     "gptq_marlin_24": GPTQMarlin24Config,
     "gptq_marlin": GPTQMarlinConfig,
+    "awq_marlin": AWQMarlinConfig,
     "gptq": GPTQConfig,
     "quip": QuipConfig,
     "squeezellm": SqueezeLLMConfig,
