@@ -44,6 +44,16 @@ _PP_SUPPORTED_MODELS = [
     "MixtralForCausalLM",
 ]
 
+_OPTIMIZED_QUANTS = [
+    "fp8",
+    "marlin",
+    "gptq_marlin_24",
+    "gptq_marlin",
+    "awq_marlin",
+    "fbgemm_fp8",
+    "compressed_tensors",
+]
+
 
 class ModelConfig:
     """Configuration for the model.
@@ -330,9 +340,7 @@ class ModelConfig:
                 raise ValueError(
                     f"{self.quantization} quantization is currently not "
                     "supported in ROCm.")
-            if (self.quantization
-                    not in ("fp8", "marlin", "gptq_marlin_24", "gptq_marlin",
-                            "fbgemm_fp8", "compressed_tensors")):
+            if self.quantization not in _OPTIMIZED_QUANTS:
                 logger.warning(
                     f"{self.quantization} quantization is not fully "
                     "optimized yet. The speed can be slower than "
