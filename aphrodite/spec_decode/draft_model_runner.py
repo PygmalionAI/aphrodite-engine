@@ -56,6 +56,7 @@ class TP1DraftModelRunner(ModelRunner):
         multimodal_config: Optional[MultiModalConfig] = None,
         prompt_adapter_config: Optional[PromptAdapterConfig] = None,
         return_hidden_states: bool = False,
+        **kwargs,
     ):
         if return_hidden_states:
             raise ValueError(
@@ -75,6 +76,7 @@ class TP1DraftModelRunner(ModelRunner):
             multimodal_config=multimodal_config,
             prompt_adapter_config=prompt_adapter_config,
             return_hidden_states=return_hidden_states,
+            **kwargs,
         )
 
     def _update_flash_attn_metadata(self, attn_metadata, num_seqs,
