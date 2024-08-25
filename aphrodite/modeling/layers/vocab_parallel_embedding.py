@@ -160,6 +160,7 @@ class VocabParallelEmbedding(torch.nn.Module):
         org_num_embeddings: original vocabulary size (without LoRA).
         padding_size: padding size for the vocabulary.
         quant_config: quant config for the layer.
+        prefix: full name of the layer in the state dict
     """  # noqa: E501
 
     def __init__(self,
@@ -168,7 +169,8 @@ class VocabParallelEmbedding(torch.nn.Module):
                  params_dtype: Optional[torch.dtype] = None,
                  org_num_embeddings: Optional[int] = None,
                  padding_size: Optional[int] = None,
-                 quant_config: Optional[QuantizationConfig] = None):
+                 quant_config: Optional[QuantizationConfig] = None,
+                 prefix: str = ""):
         super().__init__()
 
         padding_size = padding_size or get_tensor_model_parallel_world_size()
@@ -195,7 +197,7 @@ class VocabParallelEmbedding(torch.nn.Module):
 
         linear_method = None
         if quant_config is not None:
-            linear_method = quant_config.get_quant_method(self)
+            linear_method = quant_config.get_quant_method(self, prefix=prefix)
         if linear_method is None:
             linear_method = UnquantizedLinearMethod()
         self.linear_method: QuantizeMethodBase = linear_method
@@ -381,9 +383,11 @@ class ParallelLMHead(VocabParallelEmbedding):
                  params_dtype: Optional[torch.dtype] = None,
                  org_num_embeddings: Optional[int] = None,
                  padding_size: Optional[int] = None,
-                 quant_config: Optional[QuantizationConfig] = None):
+                 quant_config: Optional[QuantizationConfig] = None,
+                 prefix: str = ""):
         super().__init__(num_embeddings, embedding_dim, params_dtype,
-                         org_num_embeddings, padding_size, quant_config)
+                         org_num_embeddings, padding_size, quant_config,
+                         prefix)
         if bias:
             self.bias = Parameter(
                 torch.empty(self.num_embeddings_per_partition,
