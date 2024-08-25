@@ -59,8 +59,8 @@ class EETQConfig(QuantizationConfig):
         zero_point = cls.get_from_keys(config, ["zero_point"])
         return cls(weight_bits, zero_point)
 
-    def get_quant_method(
-            self, layer: torch.nn.Module) -> Optional["EETQLinearMethod"]:
+    def get_quant_method(self, layer: torch.nn.Module,
+                         prefix: str) -> Optional["EETQLinearMethod"]:
         if isinstance(layer, LinearBase):
             return EETQLinearMethod(self)
         return None

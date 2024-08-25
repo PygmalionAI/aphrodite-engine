@@ -64,8 +64,8 @@ class Fp8Config(QuantizationConfig):
         return cls(is_checkpoint_fp8_serialized=is_checkpoint_fp8_serialized,
                    activation_scheme=activation_scheme)
 
-    def get_quant_method(
-            self, layer: torch.nn.Module) -> Optional["QuantizeMethodBase"]:
+    def get_quant_method(self, layer: torch.nn.Module,
+                         prefix: str) -> Optional["QuantizeMethodBase"]:
         from aphrodite.attention.layer import \
             Attention  # Avoid circular import
 

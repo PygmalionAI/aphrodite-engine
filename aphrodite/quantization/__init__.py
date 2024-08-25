@@ -10,6 +10,7 @@ from aphrodite.quantization.compressed_tensors.compressed_tensors import \
 from aphrodite.quantization.deepspeedfp import DeepSpeedFPConfig
 from aphrodite.quantization.eetq import EETQConfig
 from aphrodite.quantization.exl2 import Exl2Config
+from aphrodite.quantization.fbgemm_fp8 import FBGEMMFp8Config
 from aphrodite.quantization.fp8 import Fp8Config
 from aphrodite.quantization.gguf import GGUFConfig
 from aphrodite.quantization.gptq import GPTQConfig
@@ -27,6 +28,7 @@ QUANTIZATION_METHODS = {
     "eetq": EETQConfig,
     "exl2": Exl2Config,
     "fp8": Fp8Config,
+    "fbgemm_fp8": FBGEMMFp8Config,
     "gguf": GGUFConfig,
     # The order of gptq methods is important for config.py iteration over
     # override_quantization_method(..)

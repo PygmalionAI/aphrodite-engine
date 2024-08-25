@@ -58,8 +58,8 @@ class GGUFConfig(QuantizationConfig):
     def from_config(cls, config: Dict[str, Any]) -> "GGUFConfig":
         return cls()
 
-    def get_quant_method(
-            self, layer: torch.nn.Module) -> Optional["GGUFLinearMethod"]:
+    def get_quant_method(self, layer: torch.nn.Module,
+                         prefix: str) -> Optional["GGUFLinearMethod"]:
         if isinstance(layer, LinearBase):
             return GGUFLinearMethod(self)
         return None
