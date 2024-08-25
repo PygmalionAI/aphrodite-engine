@@ -126,6 +126,18 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.def("awq_dequantize", &awq_dequantize);
   ops.impl("awq_dequantize", torch::kCUDA, &awq_dequantize);
 
+  // Dequantization for GGML.
+  ops.def("ggml_dequantize", &ggml_dequantize);
+  ops.impl("ggml_dequantize", torch::kCUDA, &ggml_dequantize);
+
+  // mmvq kernel for GGML.
+  ops.def("ggml_mul_mat_vec_a8", &ggml_mul_mat_vec_a8);
+  ops.impl("ggml_mul_mat_vec_a8", torch::kCUDA, &ggml_mul_mat_vec_a8);
+
+  // mmq kernel for GGML.
+  ops.def("ggml_mul_mat_a8", &ggml_mul_mat_a8);
+  ops.impl("ggml_mul_mat_a8", torch::kCUDA, &ggml_mul_mat_a8);
+
   // Marlin (Dense) Optimized Quantized GEMM for GPTQ.
   ops.def("marlin_gemm", &marlin_gemm);
   ops.impl("marlin_gemm", torch::kCUDA, &marlin_gemm);
