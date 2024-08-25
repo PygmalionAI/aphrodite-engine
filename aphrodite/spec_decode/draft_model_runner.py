@@ -4,7 +4,14 @@ import torch
 from loguru import logger
 
 from aphrodite import _custom_ops as ops
-from aphrodite.attention.backends.flash_attn import FlashAttentionMetadata
+
+try:
+    from aphrodite.attention.backends.flash_attn import FlashAttentionMetadata
+except ModuleNotFoundError:
+    # vllm_flash_attn is not installed, use the identical ROCm FA metadata
+    from aphrodite.attention.backends.rocm_flash_attn import (
+        ROCmFlashAttentionMetadata as FlashAttentionMetadata)
+
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, MultiModalConfig,
                                      ParallelConfig, PromptAdapterConfig,
