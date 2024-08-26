@@ -1,26 +1,42 @@
 import { defineConfig } from 'vitepress';
-import { getSidebar } from "vitepress-plugin-auto-sidebar";
 
 export default defineConfig({
-  title: "Aphrodite Docs",
-  description: "Documentation for the Aphrodite engine.",
+  title: "Aphrodite Engine",
+  description: "User and Developer Documentation",
   themeConfig: {
 		// nav: [{ text: "Home", link: "/" }],
 
 		sidebar: [
-			...getSidebar({
-				contentRoot: "/",
-
-				// list of folders to include in the sidebar
-				contentDirs: [
-					"pages/api",
-					"pages/other",
-					"pages/markdown"
+			{
+				text: "Installation",
+				link: "/pages/installation",
+				items: [
+					{
+						text: "NVIDIA GPU",
+						link: "/pages/installation/installation",
+					},
+					{
+						text: "AMD ROCm",
+						link: "/pages/installation/installation-rocm",
+					},
+					{
+						text: "CPU",
+						link: "/pages/installation/installation-cpu",
+					},
+					{
+						text: "AWS Trainium1/Inferentia2",
+						link: "/pages/installation/installation-neuron",
+					},
+					{
+						text: "Google TPU",
+						link: "/pages/installation/installation-tpu",
+					},
+					{
+						text: "Intel XPU",
+						link: "/pages/installation/installation-xpu",
+					},
 				],
-
-				collapsible: true,
-				collapsed: false,
-			}),
+			},
 		],
 
 		socialLinks: [
