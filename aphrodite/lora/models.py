@@ -763,10 +763,9 @@ class LRUCacheLoRAModelManager(LoRAModelManager):
 
     def add_adapter(self, lora: LoRAModel) -> bool:
         """Add a LoRAModel to the manager."""
-        logger.debug(
-            "Adding lora. Model id: %d, "
-            "int id: %d, "
-            "scaling factor: %s", lora.id, lora.id, lora.scaling_factor)
+        logger.debug(f"Adding lora. Model id: {lora.id}, "
+                     f"int id: {lora.id}, "
+                     f"scaling factor: {lora.scaling_factor}")
         if lora.id not in self._registered_adapters:
             self._add_adapter(lora)
             was_added = True

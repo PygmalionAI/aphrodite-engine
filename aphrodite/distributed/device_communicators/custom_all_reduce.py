@@ -79,9 +79,10 @@ class CustomAllreduce:
         if world_size not in CustomAllreduce._SUPPORTED_WORLD_SIZES:
             logger.warning(
                 "Custom allreduce is disabled due to an unsupported world"
-                " size: %d. Supported world sizes: %s. To silence this "
-                "warning, specify disable_custom_all_reduce=True explicitly.",
-                world_size, str(CustomAllreduce._SUPPORTED_WORLD_SIZES))
+                f" size: {world_size}. Supported world sizes:"
+                f"{str(CustomAllreduce._SUPPORTED_WORLD_SIZES)}. To silence "
+                "this warning, specify disable_custom_all_reduce=True "
+                "explicitly.")
             return
 
         if isinstance(device, int):
@@ -215,7 +216,7 @@ class CustomAllreduce:
     def register_graph_buffers(self):
         handle, offset = ops.get_graph_buffer_ipc_meta(self._ptr)
         handles, offsets = self._gather_ipc_meta((bytes(handle), offset))
-        logger.info("Registering %d cuda graph addresses", len(offset))
+        logger.info(f"Registering {len(offset)} cuda graph addresses")
         ops.register_graph_buffers(self._ptr, handles, offsets)
 
     def should_custom_ar(self, inp: torch.Tensor):

@@ -95,7 +95,7 @@ class OpenAIServingChat(OpenAIServing):
                 **(request.chat_template_kwargs or {}),
             )
         except Exception as e:
-            logger.error("Error in applying chat template from request: %s", e)
+            logger.error(f"Error in applying chat template from request: {e}")
             return self.create_error_response(str(e))
 
         mm_data: Optional[MultiModalDataDict] = None
