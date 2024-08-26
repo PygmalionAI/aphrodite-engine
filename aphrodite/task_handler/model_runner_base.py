@@ -7,6 +7,7 @@ import torch
 
 from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceGroupMetadata)
+from aphrodite.platforms import current_platform
 
 if TYPE_CHECKING:
     from aphrodite.attention import AttentionMetadata
@@ -163,7 +164,7 @@ class ModelRunnerBase(ABC, Generic[T]):
         """
         raise NotImplementedError
 
-    @torch.inference_mode()
+    @current_platform.inference_mode()
     def execute_model(
         self,
         model_input: T,

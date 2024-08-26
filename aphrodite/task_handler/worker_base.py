@@ -13,6 +13,7 @@ from aphrodite.common.utils import (enable_trace_function_call_for_thread,
                                     update_environment_variables)
 from aphrodite.distributed import broadcast_tensor_dict, get_pp_group
 from aphrodite.lora.request import LoRARequest
+from aphrodite.platforms import current_platform
 from aphrodite.task_handler.model_runner_base import (ModelRunnerBase,
                                                       ModelRunnerInputBase)
 
@@ -52,7 +53,7 @@ class WorkerBase(ABC):
         """
         raise NotImplementedError
 
-    @torch.inference_mode()
+    @current_platform.inference_mode()
     def start_worker_execution_loop(self) -> None:
         """Execute model loop in parallel worker.
 
