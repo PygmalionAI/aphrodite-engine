@@ -2,8 +2,8 @@ import asyncio
 import os
 import time
 from functools import partial
-from typing import (AsyncIterator, Callable, Dict, Iterable, List, Optional,
-                    Set, Tuple, Type, Union)
+from typing import (AsyncIterator, Callable, Dict, Iterable, List, Mapping,
+                    Optional, Set, Tuple, Type, Union)
 
 from loguru import logger
 from transformers import PreTrainedTokenizer
@@ -149,7 +149,10 @@ class RequestTracker:
             logger.info(f"Finished request {request_id}.")
         self.abort_request(request_id)
 
-    def add_request(self, request_id: str,
+    def add_request(self,
+                    request_id: str,
+                    *,
+                    verbose: bool = False,
                     **engine_add_request_kwargs) -> AsyncStream:
         """Add a request to be sent to the engine on the next background
         loop iteration."""
@@ -163,6 +166,9 @@ class RequestTracker:
         }))
 
         self.new_requests_event.set()
+
+        if verbose:
+            logger.info(f"Added request {request_id}.")
 
         return stream
 
@@ -295,14 +301,13 @@ class _AsyncAphrodite(AphroditeEngine):
         return self.input_processor(llm_inputs)
 
     async def add_request_async(
-            self,
-            request_id: str,
-            inputs: PromptInputs,
-            params: Union[SamplingParams, PoolingParams],
-            arrival_time: Optional[float] = None,
-            lora_request: Optional[LoRARequest] = None,
-            trace_headers: Optional[Dict[str, str]] = None,
-            prompt_adapter_request: Optional[PromptAdapterRequest] = None
+        self,
+        request_id: str,
+        inputs: PromptInputs,
+        params: Union[SamplingParams, PoolingParams],
+        arrival_time: Optional[float] = None,
+        lora_request: Optional[LoRARequest] = None,
+        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
     ) -> None:
         if lora_request is not None and not self.lora_config:
             raise ValueError(f"Got lora_request {lora_request} but LoRA is "
@@ -351,8 +356,6 @@ class AsyncAphrodite:
             async frontend will be executed in a separate process as the
             model workers.
         log_requests: Whether to log the requests.
-        max_log_len: Maximum number of prompt characters or prompt ID numbers
-            being printed in log.
         start_engine_loop: If True, the background task to run the engine
             will be automatically started in the generate call.
         *args: Arguments for AphroditeEngine.
@@ -366,13 +369,11 @@ class AsyncAphrodite:
                  engine_use_ray: bool,
                  *args,
                  log_requests: bool = True,
-                 max_log_len: int = 0,
                  start_engine_loop: bool = True,
                  **kwargs) -> None:
         self.worker_use_ray = worker_use_ray
         self.engine_use_ray = engine_use_ray
         self.log_requests = log_requests
-        self.max_log_len = max_log_len
         self.engine = self._init_engine(*args, **kwargs)
 
         self.background_loop: Optional[asyncio.Future] = None
@@ -466,7 +467,6 @@ class AsyncAphrodite:
             executor_class=executor_class,
             log_requests=not engine_args.disable_log_requests,
             log_stats=not engine_args.disable_log_stats,
-            max_log_len=engine_args.max_log_len,
             start_engine_loop=start_engine_loop,
             stat_loggers=stat_loggers,
         )
@@ -666,26 +666,6 @@ class AsyncAphrodite:
         lora_request: Optional[LoRARequest] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
     ) -> AsyncStream:
-        if self.log_requests:
-            if isinstance(inputs, str):
-                shortened_prompt = inputs
-                shortened_token_ids = None
-            else:
-                shortened_prompt = inputs.get("prompt")
-                shortened_token_ids = inputs.get("prompt_token_ids")
-
-            max_log_len = self.max_log_len
-            if max_log_len is not None:
-                if shortened_prompt is not None:
-                    shortened_prompt = shortened_prompt[:max_log_len]
-                if shortened_token_ids is not None:
-                    shortened_token_ids = shortened_token_ids[:max_log_len]
-
-            logger.info(f"Received request {request_id}: "
-                        f"prompt: {shortened_prompt!r}, "
-                        f"params: {params}, "
-                        f"prompt_token_ids: {shortened_token_ids}, "
-                        f"lora_request: {lora_request}.")
 
         if not self.is_running:
             if self.start_engine_loop:
@@ -702,6 +682,7 @@ class AsyncAphrodite:
 
         stream = self._request_tracker.add_request(
             request_id,
+            verbose=self.log_requests,
             inputs=inputs,
             params=params,
             arrival_time=arrival_time,
