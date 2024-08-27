@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Mapping, Optional
 from urllib.parse import urlparse
 
