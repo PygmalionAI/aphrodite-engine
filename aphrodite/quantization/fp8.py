@@ -9,7 +9,8 @@ from aphrodite import _custom_ops as ops
 from aphrodite.common.utils import print_warning_once
 from aphrodite.modeling.layers.fused_moe import (FusedMoE, FusedMoEMethodBase,
                                                  fused_moe)
-from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
+from aphrodite.modeling.layers.linear import (LinearBase, LinearMethodBase,
+                                              UnquantizedLinearMethod)
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.platforms import current_platform
 from aphrodite.quantization.base_config import (QuantizationConfig,
@@ -17,6 +18,7 @@ from aphrodite.quantization.base_config import (QuantizationConfig,
 from aphrodite.quantization.kv_cache import BaseKVCacheMethod
 from aphrodite.quantization.utils.marlin_utils_fp8 import (
     apply_fp8_marlin_linear, prepare_fp8_layer_for_marlin)
+from aphrodite.quantization.utils.quant_utils import is_layer_skipped
 from aphrodite.quantization.utils.w8a8_utils import (
     all_close_1d, apply_fp8_linear, create_per_tensor_scale_param,
     cutlass_fp8_supported, per_tensor_dequantize, requantize_with_max_scale)
@@ -31,6 +33,7 @@ class Fp8Config(QuantizationConfig):
         self,
         is_checkpoint_fp8_serialized: bool = False,
         activation_scheme: str = "dynamic",
+        ignored_layers: Optional[List[str]] = None,
     ) -> None:
         self.is_checkpoint_fp8_serialized = is_checkpoint_fp8_serialized
         if is_checkpoint_fp8_serialized:
@@ -40,6 +43,7 @@ class Fp8Config(QuantizationConfig):
             raise ValueError(
                 f"Unsupported activation scheme {activation_scheme}")
         self.activation_scheme = activation_scheme
+        self.ignored_layers = ignored_layers or []
 
     @classmethod
     def get_name(cls) -> str:
@@ -62,8 +66,10 @@ class Fp8Config(QuantizationConfig):
         quant_method = cls.get_from_keys(config, ["quant_method"])
         is_checkpoint_fp8_serialized = ("fp8" in quant_method)
         activation_scheme = cls.get_from_keys(config, ["activation_scheme"])
+        ignored_layers = cls.get_from_keys_or(config, ["ignored_layers"], None)
         return cls(is_checkpoint_fp8_serialized=is_checkpoint_fp8_serialized,
-                   activation_scheme=activation_scheme)
+                   activation_scheme=activation_scheme,
+                   ignored_layers=ignored_layers)
 
     def get_quant_method(self, layer: torch.nn.Module,
                          prefix: str) -> Optional["QuantizeMethodBase"]:
@@ -71,6 +77,8 @@ class Fp8Config(QuantizationConfig):
             Attention  # Avoid circular import
 
         if isinstance(layer, LinearBase):
+            if is_layer_skipped(prefix, self.ignored_layers):
+                return UnquantizedLinearMethod()
             return Fp8LinearMethod(self)
         elif isinstance(layer, FusedMoE):
             return Fp8MoEMethod(self)
