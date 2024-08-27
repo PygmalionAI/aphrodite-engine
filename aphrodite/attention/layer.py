@@ -9,7 +9,7 @@ from aphrodite.attention.backends.abstract import (AttentionMetadata,
 from aphrodite.attention.selector import get_attn_backend
 from aphrodite.common.config import CacheConfig
 from aphrodite.quantization.base_config import QuantizationConfig
-from aphrodite.quantization.fp8 import Fp8KVCacheMethod
+from aphrodite.quantization.kv_cache import BaseKVCacheMethod
 
 
 class Attention(nn.Module):
@@ -59,19 +59,18 @@ class Attention(nn.Module):
         quant_method = quant_config.get_quant_method(
             self, prefix=prefix) if quant_config else None
         if quant_method is not None:
-            assert isinstance(quant_method, Fp8KVCacheMethod)
+            assert isinstance(quant_method, BaseKVCacheMethod)
             # TODO: kv cache dtype should be specified in the FP8
             # checkpoint config and become the "auto" behavior
-            if "fp8" in self.kv_cache_dtype:
-                if self.kv_cache_dtype == "fp8_e5m2":
-                    raise ValueError("fp8_e5m2 kv-cache is not supported with "
-                                     "fp8 checkpoints.")
-                # When FP8 quantization is enabled, we make a parameter
-                # "k/v_scale" so that it can be loaded from FP8 checkpoint.
-                # The k/v_scale will then be converted back to self._k/v_scale
-                # in a native float32 value after weight loading.
-                self.quant_method = quant_method
-                self.quant_method.create_weights(self)
+            if self.kv_cache_dtype == "fp8_e5m2":
+                raise ValueError("fp8_e5m2 kv-cache is not supported with "
+                                 "fp8 checkpoints.")
+            # If quantization is enabled, we make "k_scale" and "v_scale"
+            # parameters so that it can be loaded from the model checkpoint.
+            # The k/v_scale will then be converted back to native float32
+            # values after weight loading.
+            self.quant_method = quant_method
+            self.quant_method.create_weights(self)
 
         # During model initialization, the default dtype is set as the model
         # weight and activation dtype.

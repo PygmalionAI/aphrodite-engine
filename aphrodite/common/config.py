@@ -51,7 +51,7 @@ _OPTIMIZED_QUANTS = [
     "gptq_marlin",
     "awq_marlin",
     "fbgemm_fp8",
-    "compressed_tensors",
+    "compressed-tensors",
 ]
 
 
