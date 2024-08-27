@@ -8,7 +8,8 @@ from typing import Type, TypeVar, Union
 from loguru import logger
 from transformers import PreTrainedTokenizer
 
-from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
+from aphrodite.common.config import (CacheConfig, ControlVectorConfig,
+                                     DecodingConfig, DeviceConfig,
                                      EngineConfig, LoadConfig, LoRAConfig,
                                      ModelConfig, MultiModalConfig,
                                      ParallelConfig, PromptAdapterConfig,
@@ -23,6 +24,7 @@ from aphrodite.common.sequence import (EmbeddingSequenceGroupOutput,
                                        SamplerOutput, Sequence, SequenceGroup,
                                        SequenceGroupMetadata, SequenceStatus)
 from aphrodite.common.utils import Counter
+from aphrodite.control_vectors.request import ControlVectorRequest
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.metrics import (LoggingStatLogger, PrometheusStatLogger,
                                       StatLoggerBase, Stats)
@@ -165,6 +167,7 @@ class AphroditeEngine:
         speculative_config: Optional[SpeculativeConfig],
         decoding_config: Optional[DecodingConfig],
         prompt_adapter_config: Optional[PromptAdapterConfig],
+        control_vector_config: Optional[ControlVectorConfig],
         executor_class: Type[ExecutorBase],
         log_stats: bool,
         stat_loggers: Optional[Dict[str, StatLoggerBase]] = None,
@@ -224,6 +227,7 @@ class AphroditeEngine:
         self.load_config = load_config
         self.decoding_config = decoding_config or DecodingConfig()
         self.prompt_adapter_config = prompt_adapter_config
+        self.control_vector_config = control_vector_config
         self.log_stats = log_stats
 
         if not self.model_config.skip_tokenizer_init:
@@ -251,6 +255,7 @@ class AphroditeEngine:
             speculative_config=speculative_config,
             load_config=load_config,
             prompt_adapter_config=prompt_adapter_config,
+            control_vector_config=control_vector_config,
         )
 
         if not self.model_config.embedding_mode:
@@ -466,6 +471,7 @@ class AphroditeEngine:
         arrival_time: float,
         lora_request: Optional[LoRARequest],
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        control_vector_request: Optional[ControlVectorRequest] = None,
     ) -> None:
         # Create the sequences.
         block_size = self.cache_config.block_size
@@ -484,6 +490,7 @@ class AphroditeEngine:
                 arrival_time=arrival_time,
                 lora_request=lora_request,
                 prompt_adapter_request=prompt_adapter_request,
+                control_vector_request=control_vector_request,
             )
         elif isinstance(params, PoolingParams):
             seq_group = self._create_sequence_group_with_pooling(
@@ -493,6 +500,7 @@ class AphroditeEngine:
                 arrival_time=arrival_time,
                 lora_request=lora_request,
                 prompt_adapter_request=prompt_adapter_request,
+                control_vector_request=control_vector_request,
             )
         else:
             raise ValueError(
@@ -548,6 +556,7 @@ class AphroditeEngine:
         arrival_time: Optional[float] = None,
         lora_request: Optional[LoRARequest] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        control_vector_request: Optional[ControlVectorRequest] = None,
     ) -> None:
         """Add a request to the engine's request pool.
 
@@ -603,7 +612,8 @@ class AphroditeEngine:
             request_id=request_id,
             inputs=inputs,
             lora_request=lora_request,
-            prompt_adapter_request=prompt_adapter_request)
+            prompt_adapter_request=prompt_adapter_request,
+            control_vector_request=control_vector_request)
 
         self._add_processed_request(
             request_id=request_id,
@@ -612,6 +622,7 @@ class AphroditeEngine:
             arrival_time=arrival_time,
             lora_request=lora_request,
             prompt_adapter_request=prompt_adapter_request,
+            control_vector_request=control_vector_request,
         )
 
     def _create_sequence_group_with_sampling(
@@ -622,6 +633,7 @@ class AphroditeEngine:
         arrival_time: float,
         lora_request: Optional[LoRARequest],
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        control_vector_request: Optional[ControlVectorRequest] = None,
     ) -> SequenceGroup:
         """Creates a SequenceGroup with SamplingParams."""
         max_logprobs = self.get_model_config().max_logprobs
@@ -645,7 +657,8 @@ class AphroditeEngine:
             arrival_time=arrival_time,
             sampling_params=sampling_params,
             lora_request=lora_request,
-            prompt_adapter_request=prompt_adapter_request)
+            prompt_adapter_request=prompt_adapter_request,
+            control_vector_request=control_vector_request)
 
         return seq_group
 
@@ -657,6 +670,7 @@ class AphroditeEngine:
         arrival_time: float,
         lora_request: Optional[LoRARequest],
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        control_vector_request: Optional[ControlVectorRequest] = None,
     ) -> SequenceGroup:
         """Creates a SequenceGroup with PoolingParams."""
         # Defensive copy of PoolingParams, which are used by the pooler
@@ -668,7 +682,8 @@ class AphroditeEngine:
             arrival_time=arrival_time,
             lora_request=lora_request,
             pooling_params=pooling_params,
-            prompt_adapter_request=prompt_adapter_request)
+            prompt_adapter_request=prompt_adapter_request,
+            control_vector_request=control_vector_request)
 
         return seq_group
 

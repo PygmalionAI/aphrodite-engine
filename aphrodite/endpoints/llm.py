@@ -8,6 +8,7 @@ from aphrodite.common.outputs import EmbeddingRequestOutput, RequestOutput
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.utils import Counter, deprecate_kwargs
+from aphrodite.control_vectors.request import ControlVectorRequest
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.inputs import (PromptInputs, PromptStrictInputs, TextPrompt,
@@ -258,6 +259,7 @@ class LLM:
         use_tqdm: bool = True,
         lora_request: Optional[Union[List[LoRARequest], LoRARequest]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        control_vector_request: Optional[ControlVectorRequest] = None,
     ) -> List[RequestOutput]:
         """Generates the completions for the input prompts.
 
@@ -310,6 +312,7 @@ class LLM:
             params=sampling_params,
             lora_request=lora_request,
             prompt_adapter_request=prompt_adapter_request,
+            control_vector_request=control_vector_request,
         )
 
         outputs = self._run_engine(use_tqdm=use_tqdm)
@@ -404,6 +407,7 @@ class LLM:
         use_tqdm: bool = True,
         lora_request: Optional[Union[List[LoRARequest], LoRARequest]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        control_vector_request: Optional[ControlVectorRequest] = None,
     ) -> List[EmbeddingRequestOutput]:
         """Generates the completions for the input prompts.
 
@@ -455,7 +459,9 @@ class LLM:
             inputs=inputs,
             params=pooling_params,
             lora_request=lora_request,
-            prompt_adapter_request=prompt_adapter_request)
+            prompt_adapter_request=prompt_adapter_request,
+            control_vector_request=control_vector_request,
+        )
 
         outputs = self._run_engine(use_tqdm=use_tqdm)
         return AphroditeEngine.validate_outputs(outputs,
@@ -516,6 +522,7 @@ class LLM:
                       Sequence[PoolingParams]],
         lora_request: Optional[Union[Sequence[LoRARequest], LoRARequest]],
         prompt_adapter_request: Optional[PromptAdapterRequest],
+        control_vector_request: Optional[ControlVectorRequest],
     ) -> None:
         if isinstance(inputs, (str, dict)):
             # Convert a single prompt to a list.
@@ -539,15 +546,16 @@ class LLM:
                 lora_request=lora_request[i] if isinstance(
                     lora_request, Sequence) else lora_request,
                 prompt_adapter_request=prompt_adapter_request,
+                control_vector_request=control_vector_request,
             )
 
     def _add_request(
-            self,
-            inputs: PromptInputs,
-            params: Union[SamplingParams, PoolingParams],
-            lora_request: Optional[Union[List[LoRARequest],
-                                         LoRARequest]] = None,
-            prompt_adapter_request: Optional[PromptAdapterRequest] = None
+        self,
+        inputs: PromptInputs,
+        params: Union[SamplingParams, PoolingParams],
+        lora_request: Optional[Union[List[LoRARequest], LoRARequest]] = None,
+        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        control_vector_request: Optional[ControlVectorRequest] = None,
     ) -> None:
         request_id = str(next(self.request_counter))
         self.llm_engine.add_request(
@@ -555,7 +563,8 @@ class LLM:
             inputs,
             params,
             lora_request=lora_request,
-            prompt_adapter_request=prompt_adapter_request)
+            prompt_adapter_request=prompt_adapter_request,
+            control_vector_request=control_vector_request)
 
     def _run_engine(
             self, *, use_tqdm: bool
