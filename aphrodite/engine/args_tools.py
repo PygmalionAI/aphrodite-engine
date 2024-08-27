@@ -4,6 +4,8 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, List, Optional, Tuple, Type, Union
 
+from loguru import logger
+
 from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
                                      EngineConfig, LoadConfig, LoRAConfig,
                                      ModelConfig, MultiModalConfig,
@@ -46,7 +48,7 @@ class EngineArgs:
     tensor_parallel_size: int = 1
     max_parallel_loading_workers: Optional[int] = None
     block_size: int = 16
-    enable_prefix_caching: bool = False
+    enable_prefix_caching: Optional[bool] = False
     disable_sliding_window: bool = False
     use_v2_block_manager: bool = False
     swap_space: int = 4  # GiB
@@ -66,7 +68,7 @@ class EngineArgs:
     load_in_8bit: bool = False
     load_in_smooth: bool = False
     deepspeed_fp_bits: Optional[int] = None
-    enforce_eager: bool = True
+    enforce_eager: Optional[bool] = True
     max_context_len_to_capture: Optional[int] = None
     max_seq_len_to_capture: int = 8192
     disable_custom_all_reduce: bool = False
@@ -452,8 +454,10 @@ class EngineArgs:
                             'performance of the scaled model.')
         parser.add_argument(
             "--enforce-eager",
-            type=lambda x: (str(x).lower() == 'true'),
+            action=StoreBoolean,
             default=EngineArgs.enforce_eager,
+            nargs="?",
+            const="True",
             help="Always use eager-mode PyTorch. If False, "
             "will use eager mode and CUDA graph in hybrid "
             "for maximal performance and flexibility.",
@@ -593,7 +597,10 @@ class EngineArgs:
             "prompt latency) before scheduling next prompt.")
         parser.add_argument(
             "--enable-chunked-prefill",
-            action="store_true",
+            action=StoreBoolean,
+            default=EngineArgs.enable_chunked_prefill,
+            nargs="?",
+            const="True",
             help="If True, the prefill requests can be chunked based on the "
             "max_num_batched_tokens.")
         parser.add_argument(
@@ -800,6 +807,39 @@ class EngineArgs:
             ray_workers_use_nsight=self.ray_workers_use_nsight,
             distributed_executor_backend=self.distributed_executor_backend)
 
+        max_model_len = model_config.max_model_len
+        use_long_context = max_model_len > 32768
+        if self.enable_chunked_prefill is None:
+            # If not explicitly set, enable chunked prefill by default for
+            # long context (> 32K) models. This is to avoid OOM errors in the
+            # initial memory profiling phase.
+            if use_long_context:
+                is_gpu = device_config.device_type == "cuda"
+                use_sliding_window = (model_config.get_sliding_window()
+                                      is not None)
+                use_spec_decode = self.speculative_model is not None
+                if (is_gpu and not use_sliding_window and not use_spec_decode
+                        and not self.enable_lora
+                        and not self.enable_prompt_adapter
+                        and not self.enable_prefix_caching):
+                    self.enable_chunked_prefill = True
+                    logger.warning(
+                        "Chunked prefill is enabled by default for models with "
+                        "max_model_len > 32K. Currently, chunked prefill might "
+                        "not work with some features or models. If you "
+                        "encounter any issues, please disable chunked prefill "
+                        "by setting --enable-chunked-prefill=False.")
+            if self.enable_chunked_prefill is None:
+                self.enable_chunked_prefill = False
+
+        if not self.enable_chunked_prefill and use_long_context:
+            logger.warning(
+                f"The model has a long context length ({max_model_len}). "
+                "This may cause OOM errors during the initial memory "
+                "profiling phase, or result in low performance due to small "
+                "KV cache space. Consider setting --max-model-len to a "
+                "smaller value.")
+
         speculative_config = SpeculativeConfig.maybe_create_spec_config(
             target_model_config=model_config,
             target_parallel_config=parallel_config,
@@ -915,3 +955,15 @@ class AsyncEngineArgs(EngineArgs):
             help="Use the Uvloop asyncio event loop to possibly increase "
             "performance")
         return parser
+
+
+class StoreBoolean(argparse.Action):
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if values.lower() == "true":
+            setattr(namespace, self.dest, True)
+        elif values.lower() == "false":
+            setattr(namespace, self.dest, False)
+        else:
+            raise ValueError(f"Invalid boolean value: {values}. "
+                             "Expected 'true' or 'false'.")
