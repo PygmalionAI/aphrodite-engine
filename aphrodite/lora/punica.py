@@ -17,9 +17,9 @@ def _check_punica_support():
             "punica LoRA kernels require compute capability >= 8.0")
     else:
         raise ImportError(
-            "punica LoRA kernels could not be imported. If you built vLLM "
-            "from source, make sure VLLM_INSTALL_PUNICA_KERNELS=1 env var "
-            "was set.")
+            "punica LoRA kernels could not be imported. If you built "
+            "Aphrodite from source, make sure "
+            "APHRODITE_INSTALL_PUNICA_KERNELS=1 env var was set.")
 
 
 def bgmv(

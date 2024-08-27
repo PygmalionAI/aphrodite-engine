@@ -332,7 +332,7 @@ class CompressedTensorsKVCacheMethod(BaseKVCacheMethod):
     def validate_kv_cache_scheme(kv_cache_scheme: Optional[Dict[str, Any]]):
         """
         Validator for the kv cache scheme. Useful for controlling the
-        kv cache quantization schemes, that are being supported in vLLM
+        kv cache quantization schemes, that are being supported in Aphrodite
         :param kv_cache_scheme: the compressed-tensors kv cache scheme
         """
         if kv_cache_scheme is None:

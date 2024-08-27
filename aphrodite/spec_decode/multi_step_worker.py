@@ -236,9 +236,9 @@ class MultiStepWorker(Worker, ProposerWorkerBase):
         """Copy input data structures to remove side-effects when input data
         structures are shared with other modules.
 
-        Helpful when the vLLM scheduler runs in the same process as the worker.
-        The alternative is deep-copying (or other form of deep copy); this has
-        performance downsides.
+        Helpful when the Aphrodite scheduler runs in the same process as
+        the worker. The alternative is deep-copying (or other form of deep
+        copy); this has performance downsides.
         """
         # Shallow-copy the SequenceGroupMetadata. This allows us to
         # append tokens and change is_prompt without external side-effects.
@@ -313,8 +313,8 @@ class MultiStepWorker(Worker, ProposerWorkerBase):
             # plus one token per step.
             final_seq_len = seq.get_len() + num_steps
 
-            # We will have final_seq_len - 1 KV because vLLM saves KV for a
-            # token in the iteration after the token was generated.
+            # We will have final_seq_len - 1 KV because Aphrodite saves KV for
+            # a token in the iteration after the token was generated.
             required_num_kv_slots = final_seq_len - 1
 
             # The allocated number of kv slots is the number of allocated blocks

@@ -503,7 +503,7 @@ class FlashInferImpl(AttentionImpl):
         if prefill_meta := attn_metadata.prefill_metadata:
             # We will use flash attention for prefill
             # when kv_cache is not provided.
-            # This happens when vllm runs the profiling to
+            # This happens when Aphrodite runs the profiling to
             # determine the number of blocks.
             if kv_cache is None:
                 output = flash_attn_varlen_func(

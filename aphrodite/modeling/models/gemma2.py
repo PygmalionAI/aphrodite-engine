@@ -375,7 +375,8 @@ class Gemma2ForCausalLM(nn.Module, SupportsLoRA):
                 weight_loader(param, loaded_weight, shard_id)
                 break
             else:
-                # lm_head is not used in vllm as it is tied with embed_token.
+                # lm_head is not used in Aphrodite as it is tied with
+                # embed_token.
                 # To prevent errors, skip loading lm_head.weight.
                 if "lm_head.weight" in name:
                     continue

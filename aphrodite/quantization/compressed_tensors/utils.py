@@ -128,8 +128,9 @@ def should_ignore_layer(layer_name: Optional[str],
             # If shard_idx=1+ confirm scheme matches prior shards.
             elif should_ignore_shard != should_ignore_layer:
                 raise ValueError(f"Found a different quantization schemes for "
-                                 f"{shard_proj_names} in {layer_name}. vLLM "
-                                 "requires all to use the same scheme.")
+                                 f"{shard_proj_names} in {layer_name}. "
+                                 "Aphrodite requires all to use the same "
+                                 "scheme.")
 
     # Unfused layers like down_proj and o_proj will match
     # the safetensors checkpoint already.

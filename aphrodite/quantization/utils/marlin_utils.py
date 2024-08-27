@@ -222,7 +222,7 @@ def awq_to_marlin_zero_points(q_zp_packed: torch.Tensor, size_k: int,
 
 
 # Newly generated tensors need to replace existing tensors that are
-# already registered as parameters by vLLM (and won't be freed)
+# already registered as parameters by Aphrodite (and won't be freed)
 def replace_tensor(layer: torch.nn.Module, name: str,
                    new_t: torch.Tensor) -> None:
     # It is important to use resize_() here since it ensures

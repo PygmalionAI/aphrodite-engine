@@ -166,8 +166,8 @@ class OpenAIServingCompletion(OpenAIServing):
                 assert final_res is not None
 
                 # The output should contain the input text
-                # We did not pass it into vLLM engine to avoid being redundant
-                # with the inputs token IDs
+                # We did not pass it into Aphrodite engine to avoid being
+                # redundant with the inputs token IDs
                 if final_res.prompt is None:
                     final_res.prompt = prompts[i]["prompt"]
 
