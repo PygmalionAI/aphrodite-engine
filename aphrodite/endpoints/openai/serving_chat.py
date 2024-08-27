@@ -231,7 +231,14 @@ class OpenAIServingChat(OpenAIServing):
                             model=model_name)
                         if (request.stream_options
                                 and request.stream_options.include_usage):
-                            chunk.usage = None
+                            if (request.stream_options.continuous_usage_stats):
+                                prompt_tokens = len(res.prompt_token_ids)
+                                usage = UsageInfo(prompt_tokens=prompt_tokens,
+                                                  completion_tokens=0,
+                                                  total_tokens=prompt_tokens)
+                                chunk.usage = usage
+                            else:
+                                chunk.usage = None
                         data = chunk.model_dump_json(exclude_unset=True)
                         yield f"data: {data}\n\n"
 
@@ -261,7 +268,17 @@ class OpenAIServingChat(OpenAIServing):
                                     model=model_name)
                                 if (request.stream_options and
                                         request.stream_options.include_usage):
-                                    chunk.usage = None
+                                    if (request.stream_options.
+                                            continuous_usage_stats):
+                                        prompt_tokens = len(
+                                            res.prompt_token_ids)
+                                        usage = UsageInfo(
+                                            prompt_tokens=prompt_tokens,
+                                            completion_tokens=0,
+                                            total_tokens=prompt_tokens)
+                                        chunk.usage = usage
+                                    else:
+                                        chunk.usage = None
                                 data = chunk.model_dump_json(
                                     exclude_unset=True)
                                 yield f"data: {data}\n\n"
@@ -320,7 +337,18 @@ class OpenAIServingChat(OpenAIServing):
                             model=model_name)
                         if (request.stream_options
                                 and request.stream_options.include_usage):
-                            chunk.usage = None
+                            if (request.stream_options.continuous_usage_stats):
+                                prompt_tokens = len(res.prompt_token_ids)
+                                completion_tokens = len(output.token_ids)
+                                usage = UsageInfo(
+                                    prompt_tokens=prompt_tokens,
+                                    completion_tokens=completion_tokens,
+                                    total_tokens=prompt_tokens +
+                                    completion_tokens,
+                                )
+                                chunk.usage = usage
+                            else:
+                                chunk.usage = None
                         data = chunk.model_dump_json(exclude_unset=True)
                         yield f"data: {data}\n\n"
                     else:
@@ -340,7 +368,18 @@ class OpenAIServingChat(OpenAIServing):
                             model=model_name)
                         if (request.stream_options
                                 and request.stream_options.include_usage):
-                            chunk.usage = None
+                            if (request.stream_options.continuous_usage_stats):
+                                prompt_tokens = len(res.prompt_token_ids)
+                                completion_tokens = len(output.token_ids)
+                                usage = UsageInfo(
+                                    prompt_tokens=prompt_tokens,
+                                    completion_tokens=completion_tokens,
+                                    total_tokens=prompt_tokens +
+                                    completion_tokens,
+                                )
+                                chunk.usage = usage
+                            else:
+                                chunk.usage = None
                         data = chunk.model_dump_json(exclude_unset=True)
                         yield f"data: {data}\n\n"
                         finish_reason_sent[i] = True
