@@ -4,12 +4,11 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, List, Optional, Tuple, Type, Union
 
-from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
-                                     EngineConfig, LoadConfig, LoRAConfig,
-                                     ModelConfig, MultiModalConfig,
-                                     ParallelConfig, PromptAdapterConfig,
-                                     SchedulerConfig, SpeculativeConfig,
-                                     TokenizerPoolConfig)
+from aphrodite.common.config import (
+    CacheConfig, ControlVectorConfig, DecodingConfig, DeviceConfig,
+    EngineConfig, LoadConfig, LoRAConfig, ModelConfig, MultiModalConfig,
+    ParallelConfig, PromptAdapterConfig, SchedulerConfig, SpeculativeConfig,
+    TokenizerPoolConfig)
 from aphrodite.common.utils import FlexibleArgumentParser, is_cpu
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.quantization import QUANTIZATION_METHODS
@@ -82,6 +81,9 @@ class EngineArgs:
     enable_prompt_adapter: bool = False
     max_prompt_adapters: int = 1
     max_prompt_adapter_token: int = 0
+    enable_control_vector: bool = False
+    max_control_vectors: int = 1
+    normalize_control_vector: bool = False
     fully_sharded_loras: bool = False
     lora_extra_vocab_size: int = 256
     long_lora_scaling_factors: Optional[Tuple[float]] = None
@@ -575,6 +577,17 @@ class EngineArgs:
                             type=int,
                             default=EngineArgs.max_prompt_adapter_token,
                             help='Max number of PromptAdapters tokens')
+        parser.add_argument('--enable-control-vector',
+                            action='store_true',
+                            help='If True, enable handling of ControlVectors.')
+        parser.add_argument('--max-control-vectors',
+                            type=int,
+                            default=EngineArgs.max_control_vectors,
+                            help='Max number of Control Vectors in a batch.')
+        parser.add_argument('--normalize-control-vector',
+                            type=bool,
+                            default=EngineArgs.normalize_control_vector,
+                            help='Enable normalization of control vector')
         parser.add_argument(
             "--device",
             type=str,
@@ -866,6 +879,11 @@ class EngineArgs:
             max_prompt_adapter_token=self.max_prompt_adapter_token) \
                                         if self.enable_prompt_adapter else None
 
+        control_vector_config = ControlVectorConfig(
+            max_control_vectors=self.max_control_vectors,
+            normalize=self.normalize_control_vector,
+        ) if self.enable_control_vector else None
+
         decoding_config = DecodingConfig(
             guided_decoding_backend=self.guided_decoding_backend)
 
@@ -886,7 +904,8 @@ class EngineArgs:
                             speculative_config=speculative_config,
                             load_config=load_config,
                             decoding_config=decoding_config,
-                            prompt_adapter_config=prompt_adapter_config)
+                            prompt_adapter_config=prompt_adapter_config,
+                            control_vector_config=control_vector_config)
 
 
 @dataclass
