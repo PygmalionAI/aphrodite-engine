@@ -32,10 +32,9 @@ class RequestLogger:
             if prompt_token_ids is not None:
                 prompt_token_ids = prompt_token_ids[:max_log_len]
 
-        logger.info(
-            f"Received request {request_id}: "
-            f"prompt: {prompt}, "
-            f"params: {params}, "
-            f"prompt_token_ids: {prompt_token_ids}, "
-            f"lora_request: {lora_request}, "
-            f"prompt_adapter_request: {prompt_adapter_request}.")
+        logger.info(f"Received request {request_id}: "
+                    f"prompt: {prompt}, "
+                    f"params: {params}, "
+                    f"prompt_token_ids: {prompt_token_ids}, "
+                    f"lora_request: {lora_request}, "
+                    f"prompt_adapter_request: {prompt_adapter_request}.")

@@ -381,6 +381,8 @@ class CompletionRequest(OpenAIBaseModel):
     skip_special_tokens: Optional[bool] = True
     spaces_between_special_tokens: Optional[bool] = True
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None
+    include_stop_str_in_output: Optional[bool] = False
+    add_special_tokens: Optional[bool] = False
     # doc: end-completion-sampling-params
 
     # doc: begin-completion-extra-params

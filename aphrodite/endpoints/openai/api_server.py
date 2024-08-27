@@ -25,16 +25,10 @@ from aphrodite.common.sampling_params import _SAMPLING_EPS, SamplingParams
 from aphrodite.common.utils import FlexibleArgumentParser, random_uuid
 from aphrodite.endpoints.logger import RequestLogger
 from aphrodite.endpoints.openai.args import make_arg_parser
-from aphrodite.endpoints.openai.protocol import (ChatCompletionRequest,
-                                                 ChatCompletionResponse,
-                                                 CompletionRequest,
-                                                 DetokenizeRequest,
-                                                 DetokenizeResponse,
-                                                 EmbeddingRequest,
-                                                 ErrorResponse,
-                                                 KAIGenerationInputSchema,
-                                                 TokenizeRequest,
-                                                 TokenizeResponse)
+from aphrodite.endpoints.openai.protocol import (
+    ChatCompletionRequest, ChatCompletionResponse, CompletionRequest,
+    DetokenizeRequest, DetokenizeResponse, EmbeddingRequest, ErrorResponse,
+    KAIGenerationInputSchema, TokenizeRequest, TokenizeResponse)
 from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
 from aphrodite.endpoints.openai.serving_completions import \
     OpenAIServingCompletion
