@@ -11,7 +11,7 @@ def maybe_set_triton_cache_manager() -> None:
     cache_manger = os.environ.get("TRITON_CACHE_MANAGER", None)
     if cache_manger is None:
         manager = "aphrodite.triton_utils.custom_cache_manager:CustomCacheManager"  # noqa: E501
-        logger.info(f"Setting Triton cache manager to: {manager}")
+        logger.debug(f"Setting Triton cache manager to: {manager}")
         os.environ["TRITON_CACHE_MANAGER"] = manager
 
 

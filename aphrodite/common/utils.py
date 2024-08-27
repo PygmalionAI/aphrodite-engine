@@ -712,8 +712,8 @@ def find_nccl_library():
 
     # manually load the nccl library
     if so_file:
-        logger.info("Found nccl from environment variable "
-                    f"APHRODITE_NCCL_SO_PATH={so_file}")
+        logger.debug("Found nccl from environment variable "
+                     f"APHRODITE_NCCL_SO_PATH={so_file}")
     else:
         if torch.version.cuda is not None:
             so_file = "libnccl.so.2"
@@ -721,7 +721,7 @@ def find_nccl_library():
             so_file = "librccl.so.1"
         else:
             raise ValueError("NCCL only supports CUDA and ROCm backends.")
-        logger.info(f"Found nccl from library {so_file}")
+        logger.debug(f"Found nccl from library {so_file}")
     return so_file
 
 

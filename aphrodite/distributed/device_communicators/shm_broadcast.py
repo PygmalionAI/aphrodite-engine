@@ -236,8 +236,8 @@ class MessageQueue:
             remote_sync_port=remote_sync_port,
         )
 
-        logger.info("Aphrodite message queue communication handle: "
-                    f"{self.handle}")
+        logger.debug("Aphrodite message queue communication handle: "
+                     f"{self.handle}")
 
     def export_handle(self) -> Handle:
         return self.handle

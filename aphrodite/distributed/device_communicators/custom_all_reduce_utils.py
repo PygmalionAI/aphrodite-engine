@@ -226,7 +226,7 @@ def gpu_p2p_access_check(src: int, tgt: int) -> bool:
             json.dump(cache, f, indent=4)
     if is_distributed:
         get_world_group().barrier()
-    logger.info(f"reading GPU P2P access cache from {path}")
+    logger.debug(f"reading GPU P2P access cache from {path}")
     with open(path, "r") as f:
         cache = json.load(f)
     _gpu_p2p_access_cache = cache
