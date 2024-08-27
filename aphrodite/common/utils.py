@@ -660,6 +660,11 @@ def merge_dicts(dict1: Dict[Any, List[Any]],
     return dict(merged_dict)
 
 
+def flatten_2d_lists(lists: List[List[T]]) -> List[T]:
+    """Flatten a list of lists to a single list."""
+    return [item for sublist in lists for item in sublist]
+
+
 def init_cached_hf_modules():
     """
     Lazy initialization of the Hugging Face modules.
