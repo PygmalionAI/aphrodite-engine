@@ -105,4 +105,43 @@ std::tuple<torch::Tensor, std::vector<int64_t>> get_graph_buffer_ipc_meta(
     fptr_t _fa);
 void register_graph_buffers(fptr_t _fa, const std::vector<std::string>& handles,
                             const std::vector<std::vector<int64_t>>& offsets);
+
+// Sampling kernels
+torch::Tensor sampling_from_probs(torch::Tensor probs,
+                                  torch::Tensor uniform_samples,
+                                  bool deterministic);
+
+std::vector<torch::Tensor> top_p_sampling_from_probs(
+    torch::Tensor probs, torch::Tensor uniform_samples,
+    std::optional<torch::Tensor> maybe_top_p_arr, double top_p_val,
+    bool deterministic);
+
+std::vector<torch::Tensor> top_k_sampling_from_probs(
+    torch::Tensor probs, torch::Tensor uniform_samples,
+    std::optional<torch::Tensor> maybe_top_k_arr, int64_t top_k_val,
+    bool deterministic);
+
+std::vector<torch::Tensor> min_p_sampling_from_probs(
+    torch::Tensor probs, torch::Tensor uniform_samples,
+    std::optional<torch::Tensor> maybe_min_p_arr, double min_p_val,
+    bool deterministic);
+
+std::vector<torch::Tensor> top_k_top_p_sampling_from_probs(
+    torch::Tensor probs, torch::Tensor uniform_samples,
+    std::optional<torch::Tensor> maybe_top_k_arr, double top_k_val,
+    std::optional<torch::Tensor> maybe_top_p_arr, double top_p_val,
+    bool deterministic);
+
+torch::Tensor top_p_renorm_prob(torch::Tensor probs,
+                                std::optional<torch::Tensor> maybe_top_p_arr,
+                                double top_p_val);
+
+torch::Tensor top_k_renorm_prob(torch::Tensor probs,
+                                std::optional<torch::Tensor> maybe_top_k_arr,
+                                int64_t top_k_val);
+
+torch::Tensor top_k_mask_logits(torch::Tensor logits,
+                                std::optional<torch::Tensor> maybe_top_k_arr,
+                                int64_t top_k_val);
+
 #endif

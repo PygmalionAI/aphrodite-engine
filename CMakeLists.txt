@@ -178,6 +178,7 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     "kernels/quantization/gptq_marlin/awq_marlin_repack.cu"
     "kernels/quantization/fp8/fp8_marlin.cu"
     "kernels/all_reduce/custom_all_reduce.cu"
+    "kernels/sampling/sampling.cu"
     "kernels/quantization/cutlass_w8a8/scaled_mm_entry.cu"
     "kernels/quantization/cutlass_w8a8/scaled_mm_c2x.cu"
     "kernels/quantization/cutlass_w8a8/scaled_mm_c3x.cu")

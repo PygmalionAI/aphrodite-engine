@@ -171,6 +171,35 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   // QuIP# Decompress
   ops.def("quip_decompress", &decompress_e8p_origorder);
   ops.impl("quip_decompress", torch::kCUDA, &decompress_e8p_origorder);
+
+  // Sampling Kernels
+  ops.def("sampling_from_probs", &sampling_from_probs);
+  ops.impl("sampling_from_probs", torch::kCUDA, &sampling_from_probs);
+
+  ops.def("top_k_sampling_from_probs", &top_k_sampling_from_probs);
+  ops.impl("top_k_sampling_from_probs", torch::kCUDA,
+           &top_k_sampling_from_probs);
+
+  ops.def("min_p_sampling_from_probs", &min_p_sampling_from_probs);
+  ops.impl("min_p_sampling_from_probs", torch::kCUDA,
+           &min_p_sampling_from_probs);
+
+  ops.def("top_p_sampling_from_probs", &top_p_sampling_from_probs);
+  ops.impl("top_p_sampling_from_probs", torch::kCUDA,
+           &top_p_sampling_from_probs);
+
+  ops.def("top_k_top_p_sampling_from_probs", &top_k_top_p_sampling_from_probs);
+  ops.impl("top_k_top_p_sampling_from_probs", torch::kCUDA,
+           &top_k_top_p_sampling_from_probs);
+
+  ops.def("top_k_renorm_prob", &top_k_renorm_prob);
+  ops.impl("top_k_renorm_prob", torch::kCUDA, &top_k_renorm_prob);
+
+  ops.def("top_p_renorm_prob", &top_p_renorm_prob);
+  ops.impl("top_p_renorm_prob", torch::kCUDA, &top_p_renorm_prob);
+
+  ops.def("top_k_mask_logits", &top_k_mask_logits);
+  ops.impl("top_k_mask_logits", torch::kCUDA, &top_k_mask_logits);
 #endif
 
   // Quantized GEMM for GPTQ.
