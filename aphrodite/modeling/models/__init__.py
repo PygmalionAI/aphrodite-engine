@@ -68,7 +68,6 @@ _GENERATION_MODELS = {
     "MedusaModel": ("medusa", "Medusa"),
     "FuyuForCausalLM": ("fuyu", "FuyuForCausalLM"),
     "PersimmonForCausalLM": ("persimmon", "PersimmonForCausalLM"),
-    "ChameleonForCausalLM": ("chameleon", "ChameleonForConditionalGeneration"),
     "ChameleonForConditionalGeneration":
     ("chameleon", "ChameleonForConditionalGeneration"),
 }
