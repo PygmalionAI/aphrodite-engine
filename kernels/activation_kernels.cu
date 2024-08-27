@@ -43,7 +43,7 @@ template <typename T>
 __device__ __forceinline__ T gelu_tanh_kernel(const T& x) {
   // Equivalent to PyTorch GELU with `tanh` approximation
   const float f = (float)x;
-  constexpr float BETA = M_SQRT2 * M_2_SQRTPI / 0.5f;
+  constexpr float BETA = M_SQRT2 * M_2_SQRTPI * 0.5f;
   constexpr float KAPPA = 0.044715;
   float x_cube = f * f * f;
   float inner = BETA * (f + KAPPA * x_cube);
