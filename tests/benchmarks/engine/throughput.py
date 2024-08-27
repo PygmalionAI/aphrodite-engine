@@ -80,6 +80,7 @@ def run_aphrodite(
     enable_prefix_caching: bool,
     enable_chunked_prefill: bool,
     max_num_batched_tokens: int,
+    max_num_seqs: int,
     distributed_executor_backend: Optional[str],
     gpu_memory_utilization: float = 0.9,
     download_dir: Optional[str] = None,
@@ -104,6 +105,7 @@ def run_aphrodite(
         download_dir=download_dir,
         enable_chunked_prefill=enable_chunked_prefill,
         max_num_batched_tokens=max_num_batched_tokens,
+        max_num_seqs=max_num_seqs,
         distributed_executor_backend=distributed_executor_backend,
         load_format=load_format,
     )
@@ -231,8 +233,9 @@ def main(args: argparse.Namespace):
             args.enforce_eager, args.kv_cache_dtype,
             args.quantization_param_path, args.device,
             args.enable_prefix_caching, args.enable_chunked_prefill,
-            args.max_num_batched_tokens, args.distributed_executor_backend,
-            args.gpu_memory_utilization, args.download_dir, args.load_format)
+            args.max_num_batched_tokens, args.max_num_seqs,
+            args.distributed_executor_backend, args.gpu_memory_utilization,
+            args.download_dir, args.load_format)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -366,6 +369,10 @@ if __name__ == "__main__":
                         default=None,
                         help='maximum number of batched tokens per '
                         'iteration')
+    parser.add_argument('--max-num-seqs',
+                        type=int,
+                        default=None,
+                        help='maximum number of sequences per iteration')
     parser.add_argument('--download-dir',
                         type=str,
                         default=None,

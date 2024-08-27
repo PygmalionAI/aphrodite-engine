@@ -24,6 +24,8 @@ APHRODITE_USE_CUDA_KERNELS_FOR_SAMPLING = bool(
 if APHRODITE_USE_CUDA_KERNELS_FOR_SAMPLING:
     print_warning_once("Using CUDA kernels for sampling.")
     aphrodite_use_cuda_kernels_for_sampling = True
+else:
+    aphrodite_use_cuda_kernels_for_sampling = False
 
 # (num_token_ids, num_parent_ids) per sequence group.
 SampleResultType = List[Tuple[List[int], List[int]]]
