@@ -381,15 +381,11 @@ class CompletionRequest(OpenAIBaseModel):
     skip_special_tokens: Optional[bool] = True
     spaces_between_special_tokens: Optional[bool] = True
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None
+    include_stop_str_in_output: Optional[bool] = False
+    add_special_tokens: Optional[bool] = False
     # doc: end-completion-sampling-params
 
     # doc: begin-completion-extra-params
-    include_stop_str_in_output: Optional[bool] = Field(
-        default=False,
-        description=(
-            "Whether to include the stop string in the output. "
-            "This is only applied when the stop or stop_token_ids is set."),
-    )
     response_format: Optional[ResponseFormat] = Field(
         default=None,
         description=
@@ -521,7 +517,7 @@ class CompletionRequest(OpenAIBaseModel):
         return data
 
 
-class EmbeddingRequest(BaseModel):
+class EmbeddingRequest(OpenAIBaseModel):
     # Ordered by official OpenAI API documentation
     # https://platform.openai.com/docs/api-reference/embeddings
     model: str
@@ -593,13 +589,13 @@ class CompletionStreamResponse(OpenAIBaseModel):
     usage: Optional[UsageInfo] = Field(default=None)
 
 
-class EmbeddingResponseData(BaseModel):
+class EmbeddingResponseData(OpenAIBaseModel):
     index: int
     object: str = "embedding"
     embedding: Union[List[float], str]
 
 
-class EmbeddingResponse(BaseModel):
+class EmbeddingResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"cmpl-{random_uuid()}")
     object: str = "list"
     created: int = Field(default_factory=lambda: int(time.time()))
@@ -698,8 +694,8 @@ class BatchRequestInput(OpenAIBaseModel):
     # /v1/chat/completions is supported.
     url: str
 
-    # The parameteters of the request.
-    body: Union[ChatCompletionRequest, ]
+    # The parameters of the request.
+    body: ChatCompletionRequest
 
 
 class BatchResponseData(OpenAIBaseModel):
@@ -731,12 +727,20 @@ class BatchRequestOutput(OpenAIBaseModel):
     error: Optional[Any]
 
 
-class TokenizeRequest(OpenAIBaseModel):
-    model: Optional[str]
+class TokenizeCompletionRequest(OpenAIBaseModel):
+    model: str
+    prompt: str
+    add_special_tokens: bool = Field(default=True)
+
+
+class TokenizeChatRequest(OpenAIBaseModel):
+    model: str
+    messages: List[ChatCompletionMessageParam]
     add_generation_prompt: bool = Field(default=True)
     add_special_tokens: bool = Field(default=False)
-    prompt: Optional[str] = Field(default=None)
-    messages: Optional[List[ChatCompletionMessageParam]] = Field(default=None)
+
+
+TokenizeRequest = Union[TokenizeCompletionRequest, TokenizeChatRequest]
 
 
 class TokenizeResponse(OpenAIBaseModel):

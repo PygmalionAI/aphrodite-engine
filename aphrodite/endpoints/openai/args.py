@@ -134,6 +134,12 @@ def make_arg_parser(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
         "--launch-kobold-api",
         action="store_true",
         help="Launch the Kobold API server alongside the OpenAI server")
+    parser.add_argument("--max-log-len",
+                        type=int,
+                        default=0,
+                        help="Max number of prompt characters or prompt "
+                        "ID numbers being printed in log."
+                        "\n\nDefault: 0")
 
     parser = AsyncEngineArgs.add_cli_args(parser)
     return parser

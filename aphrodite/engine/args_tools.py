@@ -895,7 +895,6 @@ class AsyncEngineArgs(EngineArgs):
 
     engine_use_ray: bool = False
     disable_log_requests: bool = False
-    max_log_len: int = 0
     uvloop: bool = False
 
     @staticmethod
@@ -910,12 +909,6 @@ class AsyncEngineArgs(EngineArgs):
         parser.add_argument('--disable-log-requests',
                             action='store_true',
                             help='Disable logging requests.')
-        parser.add_argument('--max-log-len',
-                            type=int,
-                            default=0,
-                            help='Max number of prompt characters or prompt '
-                            'ID numbers being printed in log.'
-                            '\n\nDefault: Unlimited')
         parser.add_argument(
             "--uvloop",
             action="store_true",
