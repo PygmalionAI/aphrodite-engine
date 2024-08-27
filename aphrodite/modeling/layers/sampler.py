@@ -1,8 +1,8 @@
 """A layer that samples the next tokens from the model's outputs."""
 import itertools
+import os
 import warnings
 from typing import Dict, List, Optional, Tuple
-import os
 
 import torch
 import torch.nn as nn
@@ -12,6 +12,7 @@ from aphrodite.common.sampling_params import SamplingType
 from aphrodite.common.sequence import (CompletionSequenceGroupOutput, Logprob,
                                        PromptLogprobs, SampleLogprobs,
                                        SamplerOutput, SequenceOutput)
+from aphrodite.common.utils import print_warning_once
 from aphrodite.modeling.layers.ops.sample import sample as sample_triton
 from aphrodite.modeling.sampling_metadata import (SamplingMetadata,
                                                   SamplingTensors,
@@ -19,6 +20,10 @@ from aphrodite.modeling.sampling_metadata import (SamplingMetadata,
 
 APHRODITE_USE_CUDA_KERNELS_FOR_SAMPLING = bool(
     int(os.getenv("APHRODITE_USE_CUDA_KERNELS_FOR_SAMPLING", 0)))
+
+if APHRODITE_USE_CUDA_KERNELS_FOR_SAMPLING:
+    print_warning_once("Using CUDA kernels for sampling.")
+    aphrodite_use_cuda_kernels_for_sampling = True
 
 # (num_token_ids, num_parent_ids) per sequence group.
 SampleResultType = List[Tuple[List[int], List[int]]]
@@ -135,7 +140,7 @@ class Sampler(nn.Module):
         # Use in-place division to avoid creating a new tensor.
         logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
 
-        if do_top_p_top_k and not APHRODITE_USE_CUDA_KERNELS_FOR_SAMPLING:
+        if do_top_p_top_k and not aphrodite_use_cuda_kernels_for_sampling:
             logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
                                         sampling_tensors.top_ks)
 
@@ -798,7 +803,7 @@ def _sample_with_torch(
             seq_groups_arg = (None if sampling_type == SamplingType.RANDOM else
                               seq_groups)
 
-            if APHRODITE_USE_CUDA_KERNELS_FOR_SAMPLING is not None:
+            if aphrodite_use_cuda_kernels_for_sampling is not None:
                 multinomial_samples[
                     sampling_type] = _top_k_top_p_multinomial_with_cuda_kernels(
                         probs[long_sample_indices],
