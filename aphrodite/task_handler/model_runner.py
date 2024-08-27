@@ -678,6 +678,10 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
             int(self.cache_config.cpu_offload_gb * 1024**3))
 
     def load_model(self) -> None:
+        tp = get_tensor_model_parallel_world_size()
+        rank = get_tensor_model_parallel_rank()
+        if rank == 0:
+            logger.info(f"Loading model {self.model_config.model}...")
         with CudaMemoryProfiler() as m:
             # measure the time it takes to load the model
             start_time = time.time()
@@ -692,13 +696,10 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
             end_time = time.time()
 
         self.model_memory_usage = m.consumed_memory
-        tp = get_tensor_model_parallel_world_size()
-        rank = get_tensor_model_parallel_rank()
         total_time = end_time - start_time
         if tp > 1:
-            logger.info(
-                f"Rank {rank}: Model weights loaded in {total_time:.2f} secs.")
             if rank == 0:
+                logger.info(f"Model loaded in {total_time:.2f} seconds.")
                 logger.info(
                     "Memory usage: "
                     f"{self.model_memory_usage / float(2**30):.2f} GiB x {tp} ="
@@ -819,6 +820,9 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
 
     @torch.inference_mode()
     def profile_run(self) -> None:
+        rank = get_tensor_model_parallel_rank()
+        if rank == 0:
+            logger.info("Profiling memory usage...")
         # Enable top-k sampling to reflect the accurate memory usage.
         sampling_params = SamplingParams(top_p=0.99, top_k=self.vocab_size - 1)
         max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens

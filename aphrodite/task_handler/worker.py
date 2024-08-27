@@ -13,6 +13,7 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      SchedulerConfig, SpeculativeConfig)
 from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.distributed import (ensure_model_parallel_initialized,
+                                   get_tensor_model_parallel_rank,
                                    init_distributed_environment,
                                    set_custom_all_reduce)
 from aphrodite.lora.request import LoRARequest
@@ -365,13 +366,15 @@ def _check_if_gpu_supports_dtype(torch_dtype: torch.dtype):
 
 def raise_if_cache_size_invalid(num_gpu_blocks, block_size,
                                 max_model_len) -> None:
+    rank = get_tensor_model_parallel_rank()
     if num_gpu_blocks <= 0:
         raise ValueError("No available memory for the cache blocks. "
                          "Try increasing `gpu_memory_utilization` when "
                          "initializing the engine.")
     max_seq_len = block_size * num_gpu_blocks
-    logger.info(f"Maximum sequence length allowed in the cache: "
-                f"{max_seq_len}")
+    if rank == 0:
+        logger.info(f"Maximum sequence length allowed in the cache: "
+                    f"{max_seq_len}")
     if max_model_len > max_seq_len:
         original_max_model_len = max_model_len
         max_model_len = max_seq_len

@@ -20,6 +20,7 @@ from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
 from aphrodite.common.config import LoadConfig, ModelConfig
 from aphrodite.common.utils import print_warning_once
+from aphrodite.distributed import get_tensor_model_parallel_rank
 from aphrodite.quantization import QuantizationConfig, get_quantization_config
 from aphrodite.quantization.schema import QuantParamSchema
 
@@ -211,8 +212,9 @@ def download_weights_from_hf(
             if len(matching) > 0:
                 allow_patterns = [pattern]
                 break
-
-    logger.info(f"Using model weights format {allow_patterns}")
+    rank = get_tensor_model_parallel_rank()
+    if rank == 0:
+        logger.info(f"Using model weights format {allow_patterns}")
     # Use file lock to prevent multiple processes from
     # downloading the same model weights at the same time.
     with get_lock(model_name_or_path, cache_dir):
@@ -316,6 +318,8 @@ def np_cache_weights_iterator(
 
     Will dump the model weights to numpy files if they are not already dumped.
     """
+    enable_tqdm = not torch.distributed.is_initialized(
+    ) or torch.distributed.get_rank() == 0
     # Convert the model weights from torch tensors to numpy arrays for
     # faster loading.
     np_folder = os.path.join(hf_folder, "np")
@@ -326,7 +330,11 @@ def np_cache_weights_iterator(
     with get_lock(model_name_or_path, cache_dir):
         if not os.path.exists(weight_names_file):
             weight_names = []
-            for bin_file in hf_weights_files:
+            for bin_file in tqdm(
+                    hf_weights_files,
+                    desc="Loading np_cache checkpoint shards",
+                    disable=not enable_tqdm,
+            ):
                 state = torch.load(bin_file, map_location="cpu")
                 for name, param in state.items():
                     param_path = os.path.join(np_folder, name)
@@ -350,7 +358,13 @@ def safetensors_weights_iterator(
     hf_weights_files: List[str]
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model safetensor files."""
-    for st_file in hf_weights_files:
+    enable_tqdm = not torch.distributed.is_initialized(
+    ) or torch.distributed.get_rank() == 0
+    for st_file in tqdm(
+            hf_weights_files,
+            desc="Loading safetensors checkpoint shards",
+            disable=not enable_tqdm,
+    ):
         with safe_open(st_file, framework="pt") as f:
             for name in f.keys():  # noqa: SIM118
                 param = f.get_tensor(name)
@@ -361,7 +375,13 @@ def pt_weights_iterator(
     hf_weights_files: List[str]
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model bin/pt files."""
-    for bin_file in hf_weights_files:
+    enable_tqdm = not torch.distributed.is_initialized(
+    ) or torch.distributed.get_rank() == 0
+    for bin_file in tqdm(
+            hf_weights_files,
+            desc="Loading pt checkpoint shards",
+            disable=not enable_tqdm,
+    ):
         state = torch.load(bin_file, map_location="cpu")
         for name, param in state.items():
             yield name, param
