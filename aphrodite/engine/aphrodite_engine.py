@@ -389,6 +389,7 @@ class AphroditeEngine:
             **engine_config.to_dict(),
             executor_class=executor_class,
             log_stats=not engine_args.disable_log_stats,
+            stat_loggers=stat_loggers,
         )
         return engine
 
