@@ -135,7 +135,7 @@ class Sampler(nn.Module):
         # Use in-place division to avoid creating a new tensor.
         logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
 
-        if do_top_p_top_k:
+        if do_top_p_top_k and not APHRODITE_USE_CUDA_KERNELS_FOR_SAMPLING:
             logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
                                         sampling_tensors.top_ks)
 
