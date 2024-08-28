@@ -752,6 +752,9 @@ void paged_attention_v1_launcher(
     case 112:
       LAUNCH_PAGED_ATTENTION_V1(112);
       break;
+    case 120:
+      LAUNCH_PAGED_ATTENTION_V1(120);
+      break;
     case 128:
       LAUNCH_PAGED_ATTENTION_V1(128);
       break;
@@ -912,6 +915,9 @@ void paged_attention_v2_launcher(
       break;
     case 112:
       LAUNCH_PAGED_ATTENTION_V2(112);
+      break;
+    case 120:
+      LAUNCH_PAGED_ATTENTION_V2(120);
       break;
     case 128:
       LAUNCH_PAGED_ATTENTION_V2(128);
