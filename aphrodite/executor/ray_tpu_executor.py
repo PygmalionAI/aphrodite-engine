@@ -21,7 +21,6 @@ if ray is not None:
 if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
 
-
 APHRODITE_TRACE_FUNCTION = int(os.getenv("APHRODITE_TRACE_FUNCTION", 0))
 
 
