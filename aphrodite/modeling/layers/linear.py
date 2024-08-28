@@ -192,17 +192,22 @@ class ReplicatedLinear(LinearBase):
 
         # All the linear layer supports quant method.
         assert self.quant_method is not None
-        self.quant_method.create_weights(self,
-                                         self.input_size, [self.output_size],
-                                         self.input_size,
-                                         self.output_size,
-                                         self.params_dtype,
-                                         prefix=prefix)
+        self.quant_method.create_weights(
+            self,
+            self.input_size, [self.output_size],
+            self.input_size,
+            self.output_size,
+            self.params_dtype,
+            weight_loader=self.extra_weight_loader,
+            prefix=prefix)
 
         if bias:
             self.bias = Parameter(
                 torch.empty(self.output_size, dtype=self.params_dtype))
-            set_weight_attrs(self.bias, {"output_dim": 0})
+            set_weight_attrs(self.bias, {
+                "output_dim": 0,
+                "weight_loader": self.weight_loader,
+            })
         else:
             self.register_parameter("bias", None)
 
