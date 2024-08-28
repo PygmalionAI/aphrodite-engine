@@ -1,4 +1,5 @@
 """A CPU worker class."""
+import os
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -10,7 +11,7 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      ParallelConfig, PromptAdapterConfig,
                                      SchedulerConfig)
 from aphrodite.common.sequence import ExecuteModelRequest
-from aphrodite.common.utils import STR_DTYPE_TO_TORCH_DTYPE, init_kmp_env
+from aphrodite.common.utils import STR_DTYPE_TO_TORCH_DTYPE
 from aphrodite.distributed import (ensure_model_parallel_initialized,
                                    init_distributed_environment)
 from aphrodite.modeling import set_random_seed
@@ -18,6 +19,9 @@ from aphrodite.task_handler.cpu_model_runner import CPUModelRunner
 from aphrodite.task_handler.worker_base import (LocalOrDistributedWorkerBase,
                                                 LoraNotSupportedWorkerBase,
                                                 WorkerInput)
+
+APHRODITE_CPU_OMP_THREADS_BIND = os.getenv("APHRODITE_CPU_OMP_THREADS_BIND",
+                                           "all")
 
 
 class CPUCacheEngine:
@@ -151,13 +155,18 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
 
-        # try to initialize intel openmp optimized tunings
-        init_kmp_env()
-
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
             from aphrodite.common.utils import init_cached_hf_modules
             init_cached_hf_modules()
+
+        # Setup OpenMP threads affinity.
+        omp_cpuids = APHRODITE_CPU_OMP_THREADS_BIND
+        if omp_cpuids == "all":
+            self.local_omp_cpuid = "all"
+        else:
+            self.local_omp_cpuid = omp_cpuids.split("|")[rank]
+
         self.model_runner: CPUModelRunner = CPUModelRunner(
             model_config,
             parallel_config,
@@ -176,6 +185,8 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self.cpu_cache: List[List[torch.Tensor]]
 
     def init_device(self) -> None:
+        if self.local_omp_cpuid != "all":
+            torch.ops._C_utils.init_cpu_threads_env(self.local_omp_cpuid)
         self.init_distributed_environment()
         # Set random seed.
         set_random_seed(self.model_config.seed)

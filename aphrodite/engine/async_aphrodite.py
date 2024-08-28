@@ -408,8 +408,6 @@ class AsyncAphrodite:
             executor_class = TPUExecutorAsync
         elif engine_config.device_config.device_type == "cpu":
             from aphrodite.executor.cpu_executor import CPUExecutorAsync
-            assert distributed_executor_backend is None, (
-                "Distributed execution is not supported with the CPU backend.")
             executor_class = CPUExecutorAsync
         elif engine_config.device_config.device_type == "openvino":
             assert distributed_executor_backend is None, (

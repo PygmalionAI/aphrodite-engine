@@ -83,6 +83,8 @@ endif()
 
 message(STATUS "CPU extension compile flags: ${CXX_COMPILE_FLAGS}")
 
+list(APPEND LIBS "numa")
+
 
 #
 # Define extension targets
@@ -95,6 +97,7 @@ set(APHRODITE_EXT_SRC
     "kernels/cpu/activation.cpp"
     "kernels/cpu/attention.cpp"
     "kernels/cpu/cache.cpp"
+    "kernels/cpu/utils.cpp"
     "kernels/cpu/layernorm.cpp"
     "kernels/cpu/pos_encoding.cpp"
     "kernels/cpu/torch_bindings.cpp")
@@ -104,6 +107,7 @@ define_gpu_extension_target(
     DESTINATION aphrodite
     LANGUAGE CXX
     SOURCES ${APHRODITE_EXT_SRC}
+    LIBRARIES ${LIBS}
     COMPILE_FLAGS ${CXX_COMPILE_FLAGS}
     USE_SABI 3
     WITH_SOABI
