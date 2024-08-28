@@ -889,8 +889,9 @@ class AphroditeEngine:
             model_output: Optional[List[SamplerOutput]] = None) -> None:
         """Forced log when no requests active."""
         if self.log_stats:
+            stats = self._get_stats(scheduler_outputs, model_output)
             for loggers in self.stat_loggers.values():
-                loggers.log(self._get_stats(scheduler_outputs, model_output))
+                loggers.log(stats)
 
     def _get_stats(
             self,
