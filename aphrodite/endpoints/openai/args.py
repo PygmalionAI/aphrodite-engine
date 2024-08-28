@@ -140,6 +140,12 @@ def make_arg_parser(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
                         help="Max number of prompt characters or prompt "
                         "ID numbers being printed in log."
                         "\n\nDefault: 0")
+    parser.add_argument(
+        "--return-tokens-as-token-ids",
+        action="store_true",
+        help="When --max-logprobs is specified, represents single tokens as"
+        "strings of the form 'token_id:{token_id}' so that tokens that"
+        "are not JSON-encodable can be identified.")
 
     parser = AsyncEngineArgs.add_cli_args(parser)
     return parser
