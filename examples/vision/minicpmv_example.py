@@ -11,16 +11,14 @@ from aphrodite import LLM, SamplingParams
 MODEL_NAME = "openbmb/MiniCPM-Llama3-V-2_5"
 
 image_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                            "burg.jpg")
+                          "burg.jpg")
 image = Image.open(image_path)
 
 # convert the image to rgb with pil
 image = image.convert("RGB")
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
-llm = LLM(model=MODEL_NAME,
-          trust_remote_code=True,
-          max_model_len=4096)
+llm = LLM(model=MODEL_NAME, trust_remote_code=True, max_model_len=4096)
 
 messages = [{
     'role':
@@ -49,7 +47,7 @@ sampling_params = SamplingParams(
     # use_beam_search=True,
     # length_penalty=1.2,
     # best_of=3
-    )
+)
 
 outputs = llm.generate({
     "prompt": prompt,

@@ -1103,7 +1103,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
 
                         num_qo_heads = (
                             self.model_config.get_num_attention_heads(
-                                self.parallel_config), self.tp_rank)
+                                self.parallel_config, self.tp_rank))
                         num_kv_heads = self.model_config.get_num_kv_heads(
                             self.parallel_config, self.tp_rank)
                         if num_qo_heads // num_kv_heads >= 4:
