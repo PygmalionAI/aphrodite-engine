@@ -26,3 +26,4 @@ scipy # for quip
 rich
 loguru
 hf_transfer # for faster downloads
+timm==0.9.10  # for minicpmv
