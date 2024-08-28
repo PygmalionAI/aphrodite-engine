@@ -216,7 +216,8 @@ class CustomAllreduce:
     def register_graph_buffers(self):
         handle, offset = ops.get_graph_buffer_ipc_meta(self._ptr)
         handles, offsets = self._gather_ipc_meta((bytes(handle), offset))
-        logger.info(f"Registering {len(offset)} cuda graph addresses")
+        if self.rank == 0:
+            logger.info(f"Registering {len(offset)} cuda graph addresses")
         ops.register_graph_buffers(self._ptr, handles, offsets)
 
     def should_custom_ar(self, inp: torch.Tensor):

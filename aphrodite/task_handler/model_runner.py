@@ -740,12 +740,12 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
             if rank == 0:
                 logger.info(f"Model loaded in {total_time:.2f} seconds.")
                 logger.info(
-                    "Memory usage: "
+                    "Weights memory usage: "
                     f"{self.model_memory_usage / float(2**30):.2f} GiB x {tp} ="
                     f" {self.model_memory_usage * tp / float(2**30):.2f} GiB")
         else:
             logger.info(f"Model weights loaded in {total_time:.2f} seconds.")
-            logger.info("Memory usage: "
+            logger.info("Weights memory usage: "
                         f"{self.model_memory_usage / float(2**30):.2f} GiB")
 
         if self.lora_config:
@@ -803,6 +803,9 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                     "Using FP8 KV cache but no scaling factors "
                     "provided. Defaulting to scaling factors of 1.0. "
                     "This may lead to less accurate results!")
+
+    def get_model_memory_usage(self):
+        return self.model_memory_usage
 
     def save_sharded_state(
         self,
@@ -1033,16 +1036,20 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         Since it is used for decoding-only, it assumes there's only 1 token
         per sequence in the batch.
         """
+        tp_rank = get_tensor_model_parallel_rank()
         assert not self.model_config.enforce_eager
-        logger.info("Capturing the model for CUDA graphs. This may lead to "
-                    "unexpected consequences if the model is not static. To "
-                    "run the model in eager mode, set 'enforce_eager=True' or "
-                    "use '--enforce-eager' in the CLI.")
-        logger.info("CUDA graphs can take additional 1~3 GiB memory per GPU. "
-                    "If you are running out of memory, consider decreasing "
-                    "`gpu_memory_utilization` or enforcing eager mode. "
-                    "You can also reduce the `max_num_seqs` as needed "
-                    "to decrease memory usage.")
+        if tp_rank == 0:
+            logger.info(
+                "Capturing the model for CUDA graphs. This may lead to "
+                "unexpected consequences if the model is not static. To "
+                "run the model in eager mode, set 'enforce_eager=True' or "
+                "use '--enforce-eager' in the CLI.")
+            logger.info(
+                "CUDA graphs can take additional 1~3 GiB memory per GPU. "
+                "If you are running out of memory, consider decreasing "
+                "`gpu_memory_utilization` or enforcing eager mode. "
+                "You can also reduce the `max_num_seqs` as needed "
+                "to decrease memory usage.")
         start_time = time.perf_counter()
 
         # Prepare dummy inputs. These will be reused for all batch sizes.
@@ -1235,7 +1242,8 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
         # This usually takes < 10 seconds.
-        logger.info(f"Graph capturing finished in {elapsed_time:2f} secs.")
+        if tp_rank == 0:
+            logger.info(f"Graph capturing finished in {elapsed_time:.2f} secs")
 
     @property
     def vocab_size(self) -> int:

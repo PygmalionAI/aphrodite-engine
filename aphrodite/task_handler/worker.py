@@ -1,6 +1,7 @@
 """A GPU worker class."""
 import gc
 import os
+import time
 from typing import List, Optional, Set, Tuple, Type
 
 import torch
@@ -14,6 +15,7 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
 from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.distributed import (ensure_model_parallel_initialized,
                                    get_tensor_model_parallel_rank,
+                                   get_tensor_model_parallel_world_size,
                                    init_distributed_environment,
                                    set_custom_all_reduce)
 from aphrodite.lora.request import LoRARequest
@@ -178,10 +180,16 @@ class Worker(LocalOrDistributedWorkerBase):
         # Profile the memory usage of the model and get the maximum number of
         # cache blocks that can be allocated with the remaining free memory.
         torch.cuda.empty_cache()
+        tp_rank = get_tensor_model_parallel_rank()
+        world_size = get_tensor_model_parallel_world_size()
 
         # Execute a forward pass with dummy inputs to profile the memory usage
         # of the model.
+        start = time.time()
         self.model_runner.profile_run()
+        end = time.time()
+        if tp_rank == 0:
+            logger.info(f"Model profiling took {end - start:.2f} seconds.")
 
         # Calculate the number of blocks that can be allocated with the
         # profiled peak memory.
@@ -190,6 +198,19 @@ class Worker(LocalOrDistributedWorkerBase):
         # NOTE: Here we assume that the other processes using the same
         # GPU did not change their memory usage during the profiling.
         peak_memory = self.init_gpu_memory - free_gpu_memory
+        weights_memory = self.model_runner.get_model_memory_usage()
+        kv_cache_memory = peak_memory - weights_memory
+        # log peak memory usage in GB
+        if world_size > 1:
+            if tp_rank == 0:
+                logger.info(f"KV Cache memory usage for "
+                            f"{self.model_config.max_model_len} tokens: "
+                            f"{(kv_cache_memory) / 1e9:.2f} x {world_size} = "
+                            f"{(kv_cache_memory * world_size) / 1e9:.2f} GB")
+        else:
+            logger.info(f"KV Cache memory usage for "
+                        f"{self.model_config.max_model_len} tokens: "
+                        f"{(kv_cache_memory) / 1e9:.2f} GB")
         assert peak_memory > 0, (
             "Error in memory profiling. This happens when the GPU memory was "
             "not properly cleaned up before initializing Aphrodite.")
