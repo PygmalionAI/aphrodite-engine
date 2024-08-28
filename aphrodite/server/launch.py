@@ -16,7 +16,6 @@ async def serve_http(app: FastAPI, **uvicorn_kwargs: Any) -> None:
         if methods is None or path is None:
             continue
 
-
     config = uvicorn.Config(app, **uvicorn_kwargs)
     server = uvicorn.Server(config)
 
