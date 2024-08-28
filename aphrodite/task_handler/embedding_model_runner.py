@@ -12,7 +12,8 @@ from aphrodite.common.sequence import (IntermediateTensors, PoolerOutput,
                                        SequenceData, SequenceGroupMetadata)
 from aphrodite.modeling.pooling_metadata import PoolingMetadata
 from aphrodite.task_handler.model_runner import (GPUModelRunnerBase,
-                                                 ModelInputForGPU)
+                                                 ModelInputForGPU,
+                                                 ModelInputForGPUBuilder)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -27,6 +28,7 @@ class EmbeddingModelRunner(
         GPUModelRunnerBase[ModelInputForGPUWithPoolingMetadata]):
     _model_input_cls: Type[ModelInputForGPUWithPoolingMetadata] = (
         ModelInputForGPUWithPoolingMetadata)
+    _builder_cls: Type[ModelInputForGPUBuilder] = ModelInputForGPUBuilder
 
     def __init__(
         self,
