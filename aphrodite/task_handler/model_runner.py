@@ -860,7 +860,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
     def profile_run(self) -> None:
         rank = get_tensor_model_parallel_rank()
         if rank == 0:
-            logger.info("Profiling memory usage...")
+            logger.info("Profiling peak memory usage...")
         # Enable top-k sampling to reflect the accurate memory usage.
         sampling_params = SamplingParams(top_p=0.99, top_k=self.vocab_size - 1)
         max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens
