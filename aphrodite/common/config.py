@@ -384,7 +384,11 @@ class ModelConfig:
                 parallel_config.tensor_parallel_size > 1
                 or parallel_config.pipeline_parallel_size > 1):
             raise ValueError(
-                "BitAndBytes quantization with TP or PP is not supported yet.")
+                "BitsAndBytes quantization with TP/PP is not supported yet.")
+
+        if self.quantization == "bitsandbytes" and self.enforce_eager is False:
+            raise ValueError(
+                "BitsAndBytes with enforce_eager=False is not supported yet.")
 
     def get_hf_config_sliding_window(self) -> Optional[int]:
         """Get the sliding window size, or None if disabled.
