@@ -4,15 +4,13 @@ import inspect
 import json
 import os
 import re
-import signal
+from argparse import Namespace
 from contextlib import asynccontextmanager
 from http import HTTPStatus
-from typing import AsyncGenerator, List, Optional, Set, Tuple
+from typing import Any, AsyncGenerator, List, Optional, Set, Tuple
 
-import fastapi
-import uvicorn
 import uvloop
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (HTMLResponse, JSONResponse, Response,
@@ -26,10 +24,18 @@ from aphrodite.common.sampling_params import _SAMPLING_EPS, SamplingParams
 from aphrodite.common.utils import FlexibleArgumentParser, random_uuid
 from aphrodite.endpoints.logger import RequestLogger
 from aphrodite.endpoints.openai.args import make_arg_parser
-from aphrodite.endpoints.openai.protocol import (
-    ChatCompletionRequest, ChatCompletionResponse, CompletionRequest,
-    DetokenizeRequest, DetokenizeResponse, EmbeddingRequest, ErrorResponse,
-    KAIGenerationInputSchema, TokenizeRequest, TokenizeResponse)
+# yapf: disable
+from aphrodite.endpoints.openai.protocol import (ChatCompletionRequest,
+                                                 ChatCompletionResponse,
+                                                 CompletionRequest,
+                                                 DetokenizeRequest,
+                                                 DetokenizeResponse,
+                                                 EmbeddingRequest,
+                                                 ErrorResponse,
+                                                 KAIGenerationInputSchema,
+                                                 TokenizeRequest,
+                                                 TokenizeResponse)
+# yapf: enable
 from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
 from aphrodite.endpoints.openai.serving_completions import \
     OpenAIServingCompletion
@@ -38,6 +44,7 @@ from aphrodite.endpoints.openai.serving_tokenization import \
     OpenAIServingTokenization
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
+from aphrodite.server import serve_http
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.version import __version__ as APHRODITE_VERSION
 
@@ -60,7 +67,7 @@ _running_tasks: Set[asyncio.Task] = set()
 
 
 @asynccontextmanager
-async def lifespan(app: fastapi.FastAPI):
+async def lifespan(app: FastAPI):
 
     async def _force_log():
         while True:
@@ -75,7 +82,7 @@ async def lifespan(app: fastapi.FastAPI):
     yield
 
 
-def mount_metrics(app: fastapi.FastAPI):
+def mount_metrics(app: FastAPI):
     # Add prometheus asgi middleware to route /metrics requests
     metrics_route = Mount("/metrics", make_asgi_app())
     # Workaround for 307 Redirect for /metrics
@@ -403,8 +410,8 @@ async def get_kobold_lite_ui():
 # ============ KoboldAI API ============ #
 
 
-def build_app(args):
-    app = fastapi.FastAPI(lifespan=lifespan)
+def build_app(args: Namespace) -> FastAPI:
+    app = FastAPI(lifespan=lifespan)
     app.include_router(router)
     # Add prometheus asgi middleware to route /metrics requests
     route = Mount("/metrics", make_asgi_app())
@@ -483,11 +490,8 @@ def build_app(args):
     return app
 
 
-async def build_server(
-    args,
-    llm_engine: Optional[AsyncAphrodite] = None,
-    **uvicorn_kwargs,
-) -> uvicorn.Server:
+async def init_app(args: Namespace,
+                   llm_engine: Optional[AsyncAphrodite] = None) -> FastAPI:
     app = build_app(args)
 
     logger.debug(f"args: {args}")
@@ -565,7 +569,15 @@ async def build_server(
     if args.launch_kobold_api:
         _set_badwords(tokenizer, model_config.hf_config)
 
-    config = uvicorn.Config(
+    return app
+
+
+async def run_server(args: Namespace,
+                     llm_engine: Optional[AsyncAphrodite] = None,
+                     **uvicorn_kwargs: Any) -> None:
+
+    app = await init_app(args, llm_engine)
+    await serve_http(
         app,
         host=args.host,
         port=args.port,
@@ -577,34 +589,6 @@ async def build_server(
         ssl_cert_reqs=args.ssl_cert_reqs,
         **uvicorn_kwargs,
     )
-
-    return uvicorn.Server(config)
-
-
-async def run_server(args, llm_engine=None, **uvicorn_kwargs) -> None:
-
-    server = await build_server(
-        args,
-        llm_engine,
-        **uvicorn_kwargs,
-    )
-
-    loop = asyncio.get_running_loop()
-
-    server_task = loop.create_task(server.serve())
-
-    def signal_handler() -> None:
-        # prevents the uvicorn signal handler to exit early
-        server_task.cancel()
-
-    loop.add_signal_handler(signal.SIGINT, signal_handler)
-    loop.add_signal_handler(signal.SIGTERM, signal_handler)
-
-    try:
-        await server_task
-    except asyncio.CancelledError:
-        print("Gracefully stopping http server")
-        await server.shutdown()
 
 
 if __name__ == "__main__":
