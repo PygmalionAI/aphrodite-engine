@@ -1,8 +1,9 @@
 import sys
 from abc import ABC, abstractmethod
 from collections import UserDict, defaultdict
-from typing import (Any, Callable, Dict, List, Optional, Type, TypedDict,
-                    TypeVar, Union, cast)
+from typing import Any, Callable, Dict, List, Optional
+from typing import Sequence as GenericSequence
+from typing import Type, TypedDict, TypeVar, Union, cast
 
 import torch
 import torch.types
@@ -13,13 +14,13 @@ from torch import nn
 from aphrodite.common.config import ModelConfig
 from aphrodite.inputs import InputContext
 
-NestedTensors = Union[List[torch.Tensor], torch.Tensor]
+NestedTensors = Union[GenericSequence[torch.Tensor], torch.Tensor]
 """
 Use a list instead of a tensor if the dimensions of each element do not match.
 Currently only supports up to singly nested list of tensors.
 """
 
-BatchedTensors = Union[List[NestedTensors], NestedTensors]
+BatchedTensors = Union[GenericSequence[NestedTensors], NestedTensors]
 """
 If each input tensor in the batch has the same size, this is a single batched
 tensor; otherwise, this is a list of :class:`NestedTensors` with one element
@@ -54,7 +55,7 @@ class MultiModalInputs(_MultiModalInputsBase):
         # may be list rather than tensors
         if isinstance(tensors[0], list):
             return [[t.to(device=device) for t in tensor[0]]
-                    for tensor in tensors]
+                    for tensor in cast(List[List[torch.Tensor]], tensors)]
 
         tensors_ = cast(List[torch.Tensor], tensors)
 
