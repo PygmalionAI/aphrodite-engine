@@ -4,6 +4,7 @@ import inspect
 import json
 import os
 import re
+import signal
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 from typing import AsyncGenerator, List, Optional, Set, Tuple
@@ -482,7 +483,11 @@ def build_app(args):
     return app
 
 
-def run_server(args, llm_engine=None):
+async def build_server(
+    args,
+    llm_engine: Optional[AsyncAphrodite] = None,
+    **uvicorn_kwargs,
+) -> uvicorn.Server:
     app = build_app(args)
 
     logger.debug(f"args: {args}")
@@ -502,19 +507,7 @@ def run_server(args, llm_engine=None):
     engine = (llm_engine if llm_engine is not None else
               AsyncAphrodite.from_engine_args(engine_args))
 
-    event_loop: Optional[asyncio.AbstractEventLoop]
-    try:
-        event_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        event_loop = None
-
-    if event_loop is not None and event_loop.is_running():
-        # If the current is instanced by Ray Serve,
-        # there is already a running event loop.
-        model_config = event_loop.run_until_complete(engine.get_model_config())
-    else:
-        # When using single Aphrodite without engine_use_ray
-        model_config = asyncio.run(engine.get_model_config())
+    model_config = await engine.get_model_config()
 
     if args.disable_log_requests:
         request_logger = None
@@ -570,20 +563,46 @@ def run_server(args, llm_engine=None):
     if args.launch_kobold_api:
         _set_badwords(tokenizer, model_config.hf_config)
 
+    config = uvicorn.Config(
+        app,
+        host=args.host,
+        port=args.port,
+        log_level=args.uvicorn_log_level,
+        timeout_keep_alive=TIMEOUT_KEEP_ALIVE,
+        ssl_keyfile=args.ssl_keyfile,
+        ssl_certfile=args.ssl_certfile,
+        ssl_ca_certs=args.ssl_ca_certs,
+        ssl_cert_reqs=args.ssl_cert_reqs,
+        **uvicorn_kwargs,
+    )
+
+    return uvicorn.Server(config)
+
+
+async def run_server(args, llm_engine=None, **uvicorn_kwargs) -> None:
+
+    server = await build_server(
+        args,
+        llm_engine,
+        **uvicorn_kwargs,
+    )
+
+    loop = asyncio.get_running_loop()
+
+    server_task = loop.create_task(server.serve())
+
+    def signal_handler() -> None:
+        # prevents the uvicorn signal handler to exit early
+        server_task.cancel()
+
+    loop.add_signal_handler(signal.SIGINT, signal_handler)
+    loop.add_signal_handler(signal.SIGTERM, signal_handler)
+
     try:
-        uvicorn.run(app,
-                    host=args.host,
-                    port=args.port,
-                    log_level=args.uvicorn_log_level,
-                    timeout_keep_alive=TIMEOUT_KEEP_ALIVE,
-                    ssl_keyfile=args.ssl_keyfile,
-                    ssl_certfile=args.ssl_certfile,
-                    ssl_ca_certs=args.ssl_ca_certs,
-                    ssl_cert_reqs=args.ssl_cert_reqs)
-    except KeyboardInterrupt:
-        logger.info("API server stopped by user. Exiting.")
-    except asyncio.exceptions.CancelledError:
-        logger.info("API server stopped due to a cancelled request. Exiting.")
+        await server_task
+    except asyncio.CancelledError:
+        print("Gracefully stopping http server")
+        await server.shutdown()
 
 
 if __name__ == "__main__":
@@ -594,4 +613,4 @@ if __name__ == "__main__":
         description="Aphrodite OpenAI-Compatible RESTful API Server")
     parser = make_arg_parser(parser)
     args = parser.parse_args()
-    run_server(args)
+    asyncio.run(run_server(args))
