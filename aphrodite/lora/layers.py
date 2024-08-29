@@ -1084,10 +1084,10 @@ class LogitsProcessorWithLoRA(BaseLayerWithLoRA):
         lora_config: LoRAConfig,
         model_config: Optional[PretrainedConfig] = None,
     ) -> None:
-        # Keep this in sync with csrc/punica/bgmv/bgmv_config.h
-        if 32000 < self.base_layer.vocab_size > 128512:
+        # Keep this in sync with kernels/punica/bgmv/bgmv_config.h
+        if 32000 < self.base_layer.vocab_size > 131072:
             raise ValueError("When using LoRA, vocab size must be "
-                             "32000 >= vocab_size <= 128512")
+                             "32000 >= vocab_size <= 131072")
         self.lora_a_stacked = torch.zeros(
             (
                 max_loras,
