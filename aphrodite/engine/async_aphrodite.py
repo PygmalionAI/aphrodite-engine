@@ -404,8 +404,15 @@ class AsyncAphrodite:
             from aphrodite.executor.neuron_executor import NeuronExecutorAsync
             executor_class = NeuronExecutorAsync
         elif engine_config.device_config.device_type == "tpu":
-            from aphrodite.executor.tpu_executor import TPUExecutorAsync
-            executor_class = TPUExecutorAsync
+            if distributed_executor_backend == "ray":
+                initialize_ray_cluster(engine_config.parallel_config)
+                from aphrodite.executor.ray_tpu_executor import \
+                    RayTPUExecutorAsync
+                executor_class = RayTPUExecutorAsync
+            else:
+                assert distributed_executor_backend is None
+                from aphrodite.executor.tpu_executor import TPUExecutorAsync
+                executor_class = TPUExecutorAsync
         elif engine_config.device_config.device_type == "cpu":
             from aphrodite.executor.cpu_executor import CPUExecutorAsync
             executor_class = CPUExecutorAsync
