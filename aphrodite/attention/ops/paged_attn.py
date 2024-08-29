@@ -4,7 +4,10 @@ from typing import List, Optional, Tuple
 import torch
 
 from aphrodite import _custom_ops as ops
-from aphrodite.attention.ops.prefix_prefill import context_attention_fwd
+from aphrodite.triton_utils import HAS_TRITON
+
+if HAS_TRITON:
+    from aphrodite.attention.ops.prefix_prefill import context_attention_fwd
 
 # Should be the same as PARTITION_SIZE in `paged_attention_v2_launcher`.
 _PARTITION_SIZE = 512

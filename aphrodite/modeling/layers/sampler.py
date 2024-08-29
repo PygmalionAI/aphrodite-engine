@@ -10,7 +10,11 @@ from aphrodite.common.sampling_params import SamplingType
 from aphrodite.common.sequence import (CompletionSequenceGroupOutput, Logprob,
                                        PromptLogprobs, SampleLogprobs,
                                        SamplerOutput, SequenceOutput)
-from aphrodite.modeling.layers.ops.sample import sample as sample_triton
+from aphrodite.triton_utils import HAS_TRITON
+
+if HAS_TRITON:
+    from aphrodite.modeling.layers.ops.sample import sample as sample_triton
+
 from aphrodite.modeling.sampling_metadata import (SamplingMetadata,
                                                   SamplingTensors,
                                                   SequenceGroupToSample)

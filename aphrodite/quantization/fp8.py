@@ -7,8 +7,7 @@ from torch.nn.parameter import Parameter
 
 from aphrodite import _custom_ops as ops
 from aphrodite.common.utils import print_warning_once
-from aphrodite.modeling.layers.fused_moe import (FusedMoE, FusedMoEMethodBase,
-                                                 fused_moe)
+from aphrodite.modeling.layers.fused_moe import FusedMoE, FusedMoEMethodBase
 from aphrodite.modeling.layers.linear import (LinearBase, LinearMethodBase,
                                               UnquantizedLinearMethod)
 from aphrodite.modeling.utils import set_weight_attrs
@@ -402,6 +401,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
               num_expert_group: Optional[int] = None,
               topk_group: Optional[int] = None) -> torch.Tensor:
 
+        from aphrodite.modeling.layers.fused_moe import fused_moe
         return fused_moe(x,
                          layer.w13_weight,
                          layer.w2_weight,
