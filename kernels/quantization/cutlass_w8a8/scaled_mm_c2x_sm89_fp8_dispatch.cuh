@@ -4,7 +4,7 @@
 #include "cutlass/float8.h"
 
 /**
- * This file defines Gemm kernel configurations for SM89 based on the Gemm
+ * This file defines Gemm kernel configurations for SM89 (FP8) based on the Gemm
  * shape.
  */
 
@@ -12,7 +12,7 @@ namespace aphrodite {
 
 template <typename InType, typename OutType,
           template <typename, typename> typename Epilogue>
-struct sm89_fallback_gemm {
+struct sm89_fp8_fallback_gemm {
   // Shared Memory required by this Gemm - 61440 bytes
   static_assert(std::is_same<InType, cutlass::float_e4m3_t>());
   using TileShape = typename cutlass::gemm::GemmShape<64, 128, 64>;
@@ -25,7 +25,7 @@ struct sm89_fallback_gemm {
                       FP8MathOperator>;
 };
 
-struct sm89_config_default {
+struct sm89_fp8_config_default {
   // M in (256, inf)
   using WarpShape = typename cutlass::gemm::GemmShape<64, 64, 64>;
   using InstructionShape = typename cutlass::gemm::GemmShape<16, 8, 32>;
@@ -40,7 +40,8 @@ struct sm89_config_default {
     TORCH_CHECK(a.dtype() == torch::kFloat8_e4m3fn);
 
     using FallbackGemm =
-        typename sm89_fallback_gemm<InType, OutType, Epilogue>::Cutlass2xGemm;
+        typename sm89_fp8_fallback_gemm<InType, OutType,
+                                        Epilogue>::Cutlass2xGemm;
 
     uint32_t const n = out.size(1);
     uint32_t const np2 = next_pow_2(n);
@@ -77,7 +78,7 @@ struct sm89_config_default {
   }
 };
 
-struct sm89_config_M256 {
+struct sm89_fp8_config_M256 {
   // M in (128, 256]
   using WarpShape = typename cutlass::gemm::GemmShape<64, 64, 64>;
   using InstructionShape = typename cutlass::gemm::GemmShape<16, 8, 32>;
@@ -92,7 +93,8 @@ struct sm89_config_M256 {
     TORCH_CHECK(a.dtype() == torch::kFloat8_e4m3fn);
 
     using FallbackGemm =
-        typename sm89_fallback_gemm<InType, OutType, Epilogue>::Cutlass2xGemm;
+        typename sm89_fp8_fallback_gemm<InType, OutType,
+                                        Epilogue>::Cutlass2xGemm;
 
     uint32_t const n = out.size(1);
     uint32_t const np2 = next_pow_2(n);
@@ -119,7 +121,7 @@ struct sm89_config_M256 {
   }
 };
 
-struct sm89_config_M128 {
+struct sm89_fp8_config_M128 {
   // M in (64, 128]
   using WarpShape = typename cutlass::gemm::GemmShape<64, 64, 64>;
   using InstructionShape = typename cutlass::gemm::GemmShape<16, 8, 32>;
@@ -134,7 +136,8 @@ struct sm89_config_M128 {
     TORCH_CHECK(a.dtype() == torch::kFloat8_e4m3fn);
 
     using FallbackGemm =
-        typename sm89_fallback_gemm<InType, OutType, Epilogue>::Cutlass2xGemm;
+        typename sm89_fp8_fallback_gemm<InType, OutType,
+                                        Epilogue>::Cutlass2xGemm;
 
     uint32_t const n = out.size(1);
     uint32_t const np2 = next_pow_2(n);
@@ -171,7 +174,7 @@ struct sm89_config_M128 {
   }
 };
 
-struct sm89_config_M64 {
+struct sm89_fp8_config_M64 {
   // M in (32, 64]
   using InstructionShape = typename cutlass::gemm::GemmShape<16, 8, 32>;
 
@@ -184,7 +187,8 @@ struct sm89_config_M64 {
     TORCH_CHECK(a.dtype() == torch::kFloat8_e4m3fn);
 
     using FallbackGemm =
-        typename sm89_fallback_gemm<InType, OutType, Epilogue>::Cutlass2xGemm;
+        typename sm89_fp8_fallback_gemm<InType, OutType,
+                                        Epilogue>::Cutlass2xGemm;
 
     uint32_t const n = out.size(1);
     uint32_t const np2 = next_pow_2(n);
@@ -226,7 +230,7 @@ struct sm89_config_M64 {
   }
 };
 
-struct sm89_config_M32 {
+struct sm89_fp8_config_M32 {
   // M in (16, 32]
   using InstructionShape = typename cutlass::gemm::GemmShape<16, 8, 32>;
   using FP8MathOperator = typename cutlass::arch::OpMultiplyAddFastAccum;
@@ -240,7 +244,8 @@ struct sm89_config_M32 {
     TORCH_CHECK(a.dtype() == torch::kFloat8_e4m3fn);
 
     using FallbackGemm =
-        typename sm89_fallback_gemm<InType, OutType, Epilogue>::Cutlass2xGemm;
+        typename sm89_fp8_fallback_gemm<InType, OutType,
+                                        Epilogue>::Cutlass2xGemm;
 
     uint32_t const n = out.size(1);
     uint32_t const np2 = next_pow_2(n);
@@ -279,7 +284,7 @@ struct sm89_config_M32 {
   }
 };
 
-struct sm89_config_M16 {
+struct sm89_fp8_config_M16 {
   // M in [1, 16]
   using WarpShape = typename cutlass::gemm::GemmShape<16, 64, 64>;
   using InstructionShape = typename cutlass::gemm::GemmShape<16, 8, 32>;
@@ -295,7 +300,8 @@ struct sm89_config_M16 {
     TORCH_CHECK(a.dtype() == torch::kFloat8_e4m3fn);
 
     using FallbackGemm =
-        typename sm89_fallback_gemm<InType, OutType, Epilogue>::Cutlass2xGemm;
+        typename sm89_fp8_fallback_gemm<InType, OutType,
+                                        Epilogue>::Cutlass2xGemm;
 
     uint32_t const n = out.size(1);
     uint32_t const np2 = next_pow_2(n);
@@ -334,10 +340,10 @@ struct sm89_config_M16 {
 template <typename InType, typename OutType,
           template <typename, typename> typename Epilogue,
           typename... EpilogueArgs>
-inline void cutlass_gemm_sm89_dispatch(torch::Tensor& out,
-                                       torch::Tensor const& a,
-                                       torch::Tensor const& b,
-                                       EpilogueArgs&&... args) {
+inline void cutlass_gemm_sm89_fp8_dispatch(torch::Tensor& out,
+                                           torch::Tensor const& a,
+                                           torch::Tensor const& b,
+                                           EpilogueArgs&&... args) {
   static_assert(std::is_same<InType, cutlass::float_e4m3_t>());
   TORCH_CHECK(a.dtype() == torch::kFloat8_e4m3fn);
   TORCH_CHECK(b.dtype() == torch::kFloat8_e4m3fn);
@@ -348,27 +354,27 @@ inline void cutlass_gemm_sm89_dispatch(torch::Tensor& out,
 
   if (mp2 <= 16) {
     // M in [1, 16]
-    return sm89_config_M16::dispatch<InType, OutType, Epilogue>(
+    return sm89_fp8_config_M16::dispatch<InType, OutType, Epilogue>(
         out, a, b, std::forward<EpilogueArgs>(args)...);
   } else if (mp2 <= 32) {
     // M in (16, 32]
-    return sm89_config_M32::dispatch<InType, OutType, Epilogue>(
+    return sm89_fp8_config_M32::dispatch<InType, OutType, Epilogue>(
         out, a, b, std::forward<EpilogueArgs>(args)...);
   } else if (mp2 <= 64) {
     // M in (32, 64]
-    return sm89_config_M64::dispatch<InType, OutType, Epilogue>(
+    return sm89_fp8_config_M64::dispatch<InType, OutType, Epilogue>(
         out, a, b, std::forward<EpilogueArgs>(args)...);
   } else if (mp2 <= 128) {
     // M in (64, 128]
-    return sm89_config_M128::dispatch<InType, OutType, Epilogue>(
+    return sm89_fp8_config_M128::dispatch<InType, OutType, Epilogue>(
         out, a, b, std::forward<EpilogueArgs>(args)...);
   } else if (mp2 <= 256) {
     // M in (128, 256]
-    return sm89_config_M256::dispatch<InType, OutType, Epilogue>(
+    return sm89_fp8_config_M256::dispatch<InType, OutType, Epilogue>(
         out, a, b, std::forward<EpilogueArgs>(args)...);
   } else {
     // M in (256, inf)
-    return sm89_config_default::dispatch<InType, OutType, Epilogue>(
+    return sm89_fp8_config_default::dispatch<InType, OutType, Epilogue>(
         out, a, b, std::forward<EpilogueArgs>(args)...);
   }
 }

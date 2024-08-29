@@ -4,7 +4,8 @@
 
 #include "scaled_mm_c2x.cuh"
 #include "scaled_mm_c2x_sm80_dispatch.cuh"
-#include "scaled_mm_c2x_sm89_dispatch.cuh"
+#include "scaled_mm_c2x_sm89_fp8_dispatch.cuh"
+#include "scaled_mm_c2x_sm89_int8_dispatch.cuh"
 
 /*
    This file defines quantized GEMM operations using the CUTLASS 2.x API, for
@@ -98,37 +99,31 @@ template <template <typename, typename> typename Epilogue,
 void cutlass_scaled_mm_sm89_epilogue(torch::Tensor& out, torch::Tensor const& a,
                                      torch::Tensor const& b,
                                      EpilogueArgs&&... epilogue_args) {
-  using TileShape = typename cutlass::gemm::GemmShape<128, 128, 64>;
-  using WarpShape = typename cutlass::gemm::GemmShape<64, 64, 64>;
-  using InstructionShape = typename cutlass::gemm::GemmShape<16, 8, 32>;
-
   if (a.dtype() == torch::kInt8) {
     TORCH_CHECK(b.dtype() == torch::kInt8);
 
     if (out.dtype() == torch::kBFloat16) {
-      return aphrodite::cutlass_gemm_caller<aphrodite::cutlass_2x_gemm<
-          cutlass::arch::Sm89, aphrodite::enable_sm89_to_sm90, int8_t,
-          cutlass::bfloat16_t, Epilogue, TileShape, WarpShape, InstructionShape,
-          5>>(out, a, b, std::forward<EpilogueArgs>(epilogue_args)...);
+      return aphrodite::cutlass_gemm_sm89_int8_dispatch<
+          int8_t, cutlass::bfloat16_t, Epilogue>(
+          out, a, b, std::forward<EpilogueArgs>(epilogue_args)...);
     } else {
       assert(out.dtype() == torch::kFloat16);
-      return aphrodite::cutlass_gemm_caller<aphrodite::cutlass_2x_gemm<
-          cutlass::arch::Sm89, aphrodite::enable_sm89_to_sm90, int8_t,
-          cutlass::half_t, Epilogue, TileShape, WarpShape, InstructionShape,
-          5>>(out, a, b, std::forward<EpilogueArgs>(epilogue_args)...);
+      return aphrodite::cutlass_gemm_sm89_int8_dispatch<int8_t, cutlass::half_t,
+                                                        Epilogue>(
+          out, a, b, std::forward<EpilogueArgs>(epilogue_args)...);
     }
   } else {
     TORCH_CHECK(a.dtype() == torch::kFloat8_e4m3fn);
     TORCH_CHECK(b.dtype() == torch::kFloat8_e4m3fn);
 
     if (out.dtype() == torch::kBFloat16) {
-      return aphrodite::cutlass_gemm_sm89_dispatch<
+      return aphrodite::cutlass_gemm_sm89_fp8_dispatch<
           cutlass::float_e4m3_t, cutlass::bfloat16_t, Epilogue>(
           out, a, b, std::forward<EpilogueArgs>(epilogue_args)...);
     } else {
       TORCH_CHECK(out.dtype() == torch::kFloat16);
-      return aphrodite::cutlass_gemm_sm89_dispatch<cutlass::float_e4m3_t,
-                                                   cutlass::half_t, Epilogue>(
+      return aphrodite::cutlass_gemm_sm89_fp8_dispatch<
+          cutlass::float_e4m3_t, cutlass::half_t, Epilogue>(
           out, a, b, std::forward<EpilogueArgs>(epilogue_args)...);
     }
   }
