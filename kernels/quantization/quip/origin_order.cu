@@ -39,7 +39,7 @@ constexpr __host__ __device__ auto roundUp(U a, V b) -> decltype(a + b) {
 }
 
 constexpr int32_t kWarpSize = 32;
-constexpr int32_t KTilesPerWarp = 8;
+[[maybe_unused]] constexpr int32_t KTilesPerWarp = 8;
 constexpr int32_t kMTileSize = 16;
 constexpr int32_t kNTileSize = 8;
 constexpr int32_t kKTileSize = 16;
@@ -427,6 +427,7 @@ at::Tensor d4_mm_origorder(const at::Tensor& A, const at::Tensor& B,
 
   return C_final;
 #endif
+  return {};  // Squash missing return statement warning
 }
 
 at::Tensor e8p_mm_origorder(const at::Tensor& A, const at::Tensor& B,
@@ -464,6 +465,7 @@ at::Tensor e8p_mm_origorder(const at::Tensor& A, const at::Tensor& B,
 
   return C_final;
 #endif
+  return {};  // Squash missing return statement warning
 }
 
 at::Tensor hi_mm_origorder(const at::Tensor& A, const at::Tensor& B) {
@@ -499,6 +501,7 @@ at::Tensor hi_mm_origorder(const at::Tensor& A, const at::Tensor& B) {
 
   return C_final;
 #endif
+  return {};  // Squash missing return statement warning
 }
 
 #define DECOMPRESS_D4_BLOCK_SIZE 256

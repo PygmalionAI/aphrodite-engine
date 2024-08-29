@@ -431,7 +431,7 @@ __global__ void __launch_bounds__(64) group_gemm_forward_4bit_cuda_m16nXk32(
 #else
   int num_tokens = *num_tokens_post_padded;
   int j_factors1 = ((OC + N - 1) / N);
-  int blockIdx_x = 0;
+  [[maybe_unused]] int blockIdx_x = 0;
   int blockIdx_y = blockIdx.x % ((pad_M + 16 - 1) / 16 * j_factors1);
   int blockIdx_z = blockIdx.x / ((pad_M + 16 - 1) / 16 * j_factors1);
   int block = blockIdx_y / j_factors1;
@@ -442,8 +442,8 @@ __global__ void __launch_bounds__(64) group_gemm_forward_4bit_cuda_m16nXk32(
   __shared__ half A_shared[16 * (32 + 8)];
   __shared__ half B_shared[32 * (N + 8)];
 
-  __shared__ half scaling_factors_shared[N];
-  __shared__ half zeros_shared[N];
+  [[maybe_unused]] __shared__ half scaling_factors_shared[N];
+  [[maybe_unused]] __shared__ half zeros_shared[N];
 
   half A_shared_warp[8];
   half B_shared_warp[N / 4];
@@ -455,7 +455,7 @@ __global__ void __launch_bounds__(64) group_gemm_forward_4bit_cuda_m16nXk32(
 
   static constexpr int row_stride_warp = 32 * 8 / 32;
   static constexpr int row_stride = 2 * 32 * 8 / N;
-  bool ld_zero_flag = (threadIdx.y * 32 + threadIdx.x) * 8 < N;
+  [[maybe_unused]] bool ld_zero_flag = (threadIdx.y * 32 + threadIdx.x) * 8 < N;
   // TODO: Haotian: blockIdx_y / j_factors1 in A loading to support bsz > 16
 
   int row = (block * 16 + threadIdx.y * row_stride_warp + threadIdx.x * 8 / 32);

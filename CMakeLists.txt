@@ -188,10 +188,11 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
   # That adds an extra 17MB to compiled binary, so instead we selectively enable it.
   if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER 12.0)
     set_source_files_properties(
+          "kernels/quantization/cutlass_w8a8/scaled_mm_c2x.cu"
           "kernels/quantization/cutlass_w8a8/scaled_mm_c3x.cu"
           PROPERTIES
           COMPILE_FLAGS
-          "-gencode arch=compute_90a,code=sm_90a")
+          "-gencode arch=compute_90a,code=sm_90a -Wno-psabi")
   endif()
 
 endif()
