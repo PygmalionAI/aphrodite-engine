@@ -11,7 +11,6 @@ from aphrodite.common.config import CacheConfig, MultiModalConfig
 from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceData)
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
-from aphrodite.modeling.layers.linear import ColumnParallelLinear
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
@@ -130,12 +129,10 @@ class PaliGemmaMultiModalProjector(nn.Module):
     def __init__(self, vision_hidden_size: int, projection_dim: int):
         super().__init__()
 
-        self.linear = ColumnParallelLinear(vision_hidden_size,
-                                           projection_dim,
-                                           bias=True)
+        self.linear = nn.Linear(vision_hidden_size, projection_dim, bias=True)
 
     def forward(self, image_features: torch.Tensor) -> torch.Tensor:
-        hidden_states, _ = self.linear(image_features)
+        hidden_states = self.linear(image_features)
         return hidden_states
 
 
