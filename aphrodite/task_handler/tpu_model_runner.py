@@ -28,7 +28,9 @@ from aphrodite.task_handler.model_runner_base import (
 if TYPE_CHECKING:
     from aphrodite.attention.backends.abstract import AttentionBackend
 
-_PAD_SLOT_ID = -1  # NOTE: In PyTorch XLA, index -1 is ignored.
+# Here we utilize the behavior that out-of-bound index is ignored.
+# FIXME: Find a more reliable way to prevent possible bugs.
+_PAD_SLOT_ID = 1_000_000_000
 # FIXME: Temporarily disabled top-p sampling since it's too slow.
 _ENABLE_TOP_P = False
 # FIXME: A temporary hack to support `n > 1`.
@@ -413,10 +415,7 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
         best_of = []
         for seq_group_metadata in seq_group_metadata_list:
             sampling_params = seq_group_metadata.sampling_params
-            # NOTE: Here we mimic argmax sampling by applying a very
-            # low temperature. This is not accurate.
-            t.append(sampling_params.temperature
-                     if sampling_params.temperature >= 1e-5 else 1e-5)
+            t.append(sampling_params.temperature)
             if sampling_params.top_p != 1 and not _ENABLE_TOP_P:
                 raise NotImplementedError(
                     "Top-p sampling is currently disabled for the TPU backend "
@@ -677,13 +676,23 @@ class ModelWrapper(nn.Module):
         hidden_states = hidden_states.flatten(0, 1)
         logits = self.model.compute_logits(hidden_states, sampling_metadata)
 
-        logits = logits / t.unsqueeze(dim=1)
+        # Argmax sampling.
+        argmax_token_ids = torch.argmax(logits, dim=-1, keepdim=True)
+        argmax_token_ids = argmax_token_ids.repeat(1, num_samples)
+
+        # Zero temperature means greedy decoding. Avoid division by zero.
+        nonzero_t = torch.where(t != 0, t, 1.0)
+        logits = logits / nonzero_t.unsqueeze(dim=1)
         if _ENABLE_TOP_P:
             logits = _apply_top_p(logits, p.unsqueeze(dim=1))
+
+        # Random sampling.
         probs = torch.softmax(logits, dim=-1, dtype=torch.float32)
-        next_token_ids = torch.multinomial(probs,
-                                           num_samples,
-                                           replacement=True)
+        sampled_token_ids = torch.multinomial(probs,
+                                              num_samples,
+                                              replacement=True)
+        next_token_ids = torch.where(t != 0, sampled_token_ids,
+                                     argmax_token_ids)
         return next_token_ids
 
 
