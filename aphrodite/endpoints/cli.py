@@ -3,9 +3,11 @@ import argparse
 import asyncio
 import os
 import signal
+import subprocess
 import sys
 from typing import Optional
 
+import yaml
 from openai import OpenAI
 
 from aphrodite.common.utils import FlexibleArgumentParser
@@ -83,6 +85,50 @@ def chat(system_prompt: Optional[str], model_name: str,
         print(output)
 
 
+STR_BOOLS = ['enforce_eager', 'enable_chunked_prefill']
+ADAPTERS = ['lora_modules', 'prompt_adapters']
+
+
+# TODO: refactor this to directly call run_server with the config file
+def serve_yaml(args: argparse.Namespace) -> None:
+
+    def append_cmd_args(cmd, key, value):
+        if value:  # Skip appending if value is empty
+            if key in ADAPTERS and isinstance(value, list):
+                adapters = [f"{k}={v}" for k, v in value[0].items() if v]
+                if adapters:
+                    cmd.append(f"--{key}")
+                    cmd.extend(adapters)
+            else:
+                cmd.append(f"--{key}")
+                if isinstance(value, bool):
+                    if key in STR_BOOLS:
+                        cmd.append(str(value).lower())
+                    elif value:
+                        cmd.append(str(value))
+                else:
+                    cmd.append(str(value))
+
+    with open(args.config_file, 'r') as f:
+        config = yaml.safe_load(f)
+
+    cmd = ["python", "-m", "aphrodite.endpoints.openai.api_server"]
+    for key, value in config.items():
+        if isinstance(value, list):
+            for item in value:
+                for sub_key, sub_value in item.items():
+                    append_cmd_args(cmd, sub_key, sub_value)
+        else:
+            append_cmd_args(cmd, key, value)
+
+    process = subprocess.Popen(cmd)
+    try:
+        process.wait()
+    except KeyboardInterrupt:
+        process.terminate()
+        process.wait()
+
+
 def _add_query_options(
         parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
     parser.add_argument(
@@ -142,6 +188,16 @@ def main():
         help=("The system prompt to be added to the chat template, "
               "used for models that support system prompts."))
     chat_parser.set_defaults(dispatch_function=interactive_cli, command="chat")
+
+    yaml_parser = subparsers.add_parser(
+        "yaml",
+        help="Start the Aphrodite OpenAI Compatible API server with a YAML "
+        "config file",
+        usage="aphrodite yaml <config.yaml>")
+    yaml_parser.add_argument("config_file",
+                             type=str,
+                             help="The YAML configuration file to use")
+    yaml_parser.set_defaults(dispatch_function=serve_yaml)
 
     args = parser.parse_args()
     # One of the sub commands should be executed.
