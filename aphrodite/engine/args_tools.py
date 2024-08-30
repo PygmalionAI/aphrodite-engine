@@ -131,9 +131,6 @@ class EngineArgs:
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
         """Shared CLI arguments for the Aphrodite engine."""
 
-        # NOTE: If you update any of the arguments below, please also
-        # make sure to update docs/source/models/engine_args.rst
-        # Device Options
         # Model Options
         parser.add_argument(
             "--model",
