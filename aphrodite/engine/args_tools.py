@@ -109,7 +109,6 @@ class EngineArgs:
     long_lora_scaling_factors: Optional[Tuple[float]] = None
     fully_sharded_loras: bool = False
     qlora_adapter_name_or_path: Optional[str] = None
-    # Soft Prompt Options
     enable_prompt_adapter: bool = False
     max_prompt_adapters: int = 1
     max_prompt_adapter_token: int = 0
