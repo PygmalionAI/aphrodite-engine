@@ -31,6 +31,7 @@ if HAS_TRITON:
     from outlines.fsm.guide import CFGGuide, Generate, Guide, RegexGuide, Write
     from outlines.fsm.json_schema import build_regex_from_schema
 
+
 class BaseLogitsProcessor:
 
     def __init__(self, guide: Guide):
