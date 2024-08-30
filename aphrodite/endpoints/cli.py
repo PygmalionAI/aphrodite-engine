@@ -86,6 +86,7 @@ def chat(system_prompt: Optional[str], model_name: str,
 
 
 STR_BOOLS = ['enforce_eager', 'enable_chunked_prefill']
+ADAPTERS = ['lora_modules', 'prompt_adapters']
 
 
 # TODO: refactor this to directly call run_server with the config file
@@ -93,11 +94,11 @@ def serve_yaml(args: argparse.Namespace) -> None:
 
     def append_cmd_args(cmd, key, value):
         if value:  # Skip appending if value is empty
-            if key == 'lora_modules' and isinstance(value, list):
-                lora_modules = [f"{k}={v}" for k, v in value[0].items() if v]
-                if lora_modules:
+            if key in ADAPTERS and isinstance(value, list):
+                adapters = [f"{k}={v}" for k, v in value[0].items() if v]
+                if adapters:
                     cmd.append(f"--{key}")
-                    cmd.extend(lora_modules)
+                    cmd.extend(adapters)
             else:
                 cmd.append(f"--{key}")
                 if isinstance(value, bool):
