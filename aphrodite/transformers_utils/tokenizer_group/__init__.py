@@ -1,15 +1,15 @@
 from typing import Optional, Type
 
 from aphrodite.common.config import TokenizerPoolConfig
-from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import (
-    BaseTokenizerGroup)
-from aphrodite.transformers_utils.tokenizer_group.tokenizer_group import (
-    TokenizerGroup)
 from aphrodite.executor.ray_utils import ray
+from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import \
+    BaseTokenizerGroup
+from aphrodite.transformers_utils.tokenizer_group.tokenizer_group import \
+    TokenizerGroup
 
 if ray:
-    from aphrodite.transformers_utils.tokenizer_group.ray_tokenizer_group import (  # noqa: E501
-        RayTokenizerGroupPool)
+    from aphrodite.transformers_utils.tokenizer_group.ray_tokenizer_group import \
+        RayTokenizerGroupPool  # noqa: E501
 else:
     RayTokenizerGroupPool = None
 

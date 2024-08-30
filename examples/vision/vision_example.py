@@ -6,8 +6,8 @@ on HuggingFace model repository.
 """
 import os
 
-from transformers import AutoTokenizer
 from PIL import Image
+from transformers import AutoTokenizer
 
 from aphrodite import LLM, SamplingParams
 from aphrodite.common.utils import FlexibleArgumentParser

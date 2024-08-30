@@ -6,11 +6,16 @@ import torch.nn.functional as F
 from loguru import logger
 from torch.nn.parameter import Parameter
 
-from aphrodite.distributed import (
-    divide, get_current_tp_rank_partition_offset,
-    get_current_tp_rank_partition_size, get_tensor_model_parallel_rank,
-    get_tensor_model_parallel_world_size, split_tensor_along_last_dim,
-    tensor_model_parallel_all_gather, tensor_model_parallel_all_reduce)
+# yapf: disable
+from aphrodite.distributed import (divide,
+                                   get_current_tp_rank_partition_offset,
+                                   get_current_tp_rank_partition_size,
+                                   get_tensor_model_parallel_rank,
+                                   get_tensor_model_parallel_world_size,
+                                   split_tensor_along_last_dim,
+                                   tensor_model_parallel_all_gather,
+                                   tensor_model_parallel_all_reduce)
+# yapf: enable
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import (QuantizationConfig,
                                                 QuantizeMethodBase)

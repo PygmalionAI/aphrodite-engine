@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Mapping, Optional, MutableMapping
+from typing import Mapping, MutableMapping, Optional
 from urllib.parse import urlparse
 
 import aiohttp

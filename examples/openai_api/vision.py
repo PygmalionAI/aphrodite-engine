@@ -4,8 +4,8 @@ Launch the Aphrodite server with the following command:
 aphrodite run llava-hf/llava-1.5-7b-hf \
     --chat-template template_llava.jinja
 """
-import os
 import base64
+import os
 
 from openai import OpenAI
 

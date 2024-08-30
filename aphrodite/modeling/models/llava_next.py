@@ -10,9 +10,9 @@ from typing_extensions import NotRequired
 
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
+from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
-from aphrodite.quantization.base_config import (QuantizationConfig)
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
@@ -20,7 +20,7 @@ from aphrodite.modeling.models.clip import CLIPVisionModel
 from aphrodite.modeling.models.llama import LlamaModel
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import MULTIMODAL_REGISTRY, BatchedTensors
-from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
+from aphrodite.quantization.base_config import QuantizationConfig
 
 from .clip import (dummy_image_for_clip, dummy_seq_data_for_clip,
                    get_clip_patch_grid_length, input_processor_for_clip)

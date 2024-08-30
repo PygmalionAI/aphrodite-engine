@@ -4,8 +4,8 @@ from typing import Optional, Union
 # ===================== import region =====================
 import torch
 import torch.distributed as dist
-from torch.distributed import ProcessGroup, ReduceOp
 from loguru import logger
+from torch.distributed import ProcessGroup, ReduceOp
 
 from aphrodite.distributed.device_communicators.pynccl_wrapper import (
     NCCLLibrary, buffer_type, cudaStream_t, ncclComm_t, ncclDataTypeEnum,

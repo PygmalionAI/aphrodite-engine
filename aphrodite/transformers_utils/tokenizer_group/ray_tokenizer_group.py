@@ -7,9 +7,10 @@ try:
 except ImportError:
     # For older versions of Ray
     from ray.exceptions import RayActorError as ActorDiedError
+
+from loguru import logger
 from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 from transformers import PreTrainedTokenizer
-from loguru import logger
 
 from aphrodite.common.config import TokenizerPoolConfig
 from aphrodite.executor.ray_utils import ray

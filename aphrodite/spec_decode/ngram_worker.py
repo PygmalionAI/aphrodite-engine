@@ -13,7 +13,7 @@ class NGramWorker(NonLLMProposerWorkerBase):
     """NGramWorker provides a light drafter without need for model.
 
     Current NGramWorker only implement prompt lookup decoding,
-    and in future we may also do RAG type drafter and other scenerios
+    and in future we may also do RAG type drafter and other scenarios
     which don't rely on LLM model to give proposals.
     """
 

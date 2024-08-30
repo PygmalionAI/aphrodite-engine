@@ -10,10 +10,10 @@ import torch
 from tqdm import tqdm
 
 from aphrodite import LLM, SamplingParams
+from aphrodite.common.utils import FlexibleArgumentParser
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.inputs import PromptStrictInputs
 from aphrodite.quantization import QUANTIZATION_METHODS
-from aphrodite.common.utils import FlexibleArgumentParser
 
 
 def main(args: argparse.Namespace):

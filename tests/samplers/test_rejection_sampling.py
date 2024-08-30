@@ -1,13 +1,12 @@
 """Tests for rejection sampling."""
-import pytest
 from typing import List, Tuple
 
+import pytest
 import torch
 import torch.nn.functional as F
 
-from aphrodite.modeling.utils import set_random_seed
-
 from aphrodite.modeling.layers.rejection_sampler import RejectionSampler
+from aphrodite.modeling.utils import set_random_seed
 
 
 def mock_causal_accepted_tensor(

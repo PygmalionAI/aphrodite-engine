@@ -1,5 +1,5 @@
-from typing import List, Set, Tuple
 import os
+from typing import List, Set, Tuple
 
 import openvino as ov
 import openvino.properties.hint as hints

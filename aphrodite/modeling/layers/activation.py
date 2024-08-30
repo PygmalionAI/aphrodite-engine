@@ -8,9 +8,9 @@ import torch.nn.functional as F
 
 from aphrodite.distributed import (divide, get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size)
+from aphrodite.modeling._custom_op import CustomOp
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization import QuantizationConfig
-from aphrodite.modeling._custom_op import CustomOp
 
 
 class SiluAndMul(CustomOp):

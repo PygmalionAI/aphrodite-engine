@@ -8,15 +8,10 @@ from typing import Tuple, Union
 from pydantic import BaseModel
 from transformers import PreTrainedTokenizerBase
 
-from aphrodite.endpoints.openai.protocol import (
-    ChatCompletionRequest,
-    CompletionRequest,
-)
+from aphrodite.endpoints.openai.protocol import (ChatCompletionRequest,
+                                                 CompletionRequest)
 from aphrodite.modeling.guided_decoding.outlines_logits_processors import (
-    CFGLogitsProcessor,
-    JSONLogitsProcessor,
-    RegexLogitsProcessor,
-)
+    CFGLogitsProcessor, JSONLogitsProcessor, RegexLogitsProcessor)
 
 
 class GuidedDecodingMode(Enum):

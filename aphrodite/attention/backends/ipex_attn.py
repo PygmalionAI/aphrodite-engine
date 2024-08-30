@@ -10,9 +10,9 @@ from aphrodite.attention.backends.abstract import (AttentionBackend,
                                                    AttentionImpl,
                                                    AttentionMetadata,
                                                    AttentionType)
+from aphrodite.attention.backends.utils import CommonMetadataBuilder
 from aphrodite.attention.ops.paged_attn import (PagedAttention,
                                                 PagedAttentionMetadata)
-from aphrodite.attention.backends.utils import CommonMetadataBuilder
 
 _PARTITION_SIZE = 512
 

@@ -5,8 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
-from aphrodite.quantization.base_config import (QuantizationConfig)
 from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.quantization.base_config import QuantizationConfig
 
 
 class DeepSpeedFPConfig(QuantizationConfig):
