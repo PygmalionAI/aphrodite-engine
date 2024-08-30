@@ -36,15 +36,16 @@ class EngineArgs:
     tokenizer_mode: str = "auto"
     trust_remote_code: bool = False
     download_dir: Optional[str] = None
-    load_format: str = "auto"
-    dtype: str = "auto"
     max_model_len: Optional[int] = None
     max_context_len_to_capture: Optional[int] = None
     rope_scaling: Optional[dict] = None
     rope_theta: Optional[float] = None
     model_loader_extra_config: Optional[dict] = None
-    ignore_patterns: Optional[Union[str, List[str]]] = None
     enforce_eager: Optional[bool] = True
+    # Load Options
+    load_format: str = "auto"
+    dtype: str = "auto"
+    ignore_patterns: Optional[Union[str, List[str]]] = None
     # Parallel Options
     worker_use_ray: Optional[bool] = False
     tensor_parallel_size: int = 1
@@ -217,52 +218,6 @@ class EngineArgs:
             "huggingface",
         )
         parser.add_argument(
-            '--load-format',
-            type=str,
-            default=EngineArgs.load_format,
-            choices=[
-                'auto',
-                'pt',
-                'safetensors',
-                'npcache',
-                'dummy',
-                'tensorizer',
-                'sharded_state',
-                'bitsandbytes',
-            ],
-            help='Category: Model Options\n'
-            'The format of the model weights to load.\n\n'
-            '* "auto" will try to load the weights in the safetensors format '
-            'and fall back to the pytorch bin format if safetensors format '
-            'is not available.\n'
-            '* "pt" will load the weights in the pytorch bin format.\n'
-            '* "safetensors" will load the weights in the safetensors format.\n'
-            '* "npcache" will load the weights in pytorch format and store '
-            'a numpy cache to speed up the loading.\n'
-            '* "dummy" will initialize the weights with random values, '
-            'which is mainly for profiling.\n'
-            '* "tensorizer" will load the weights using tensorizer from '
-            'CoreWeave. See the Tensorize Aphrodite Model script in the '
-            'Examples section for more information.\n'
-            '* "bitsandbytes" will load the weights using bitsandbytes '
-            'quantization.\n')
-        parser.add_argument(
-            '--dtype',
-            type=str,
-            default=EngineArgs.dtype,
-            choices=[
-                'auto', 'half', 'float16', 'bfloat16', 'float', 'float32'
-            ],
-            help='Category: Model Options\n'
-            'Data type for model weights and activations.\n\n'
-            '* "auto" will use FP16 precision for FP32 and FP16 models, and '
-            'BF16 precision for BF16 models.\n'
-            '* "half" for FP16. Recommended for AWQ quantization.\n'
-            '* "float16" is the same as "half".\n'
-            '* "bfloat16" for a balance between precision and range.\n'
-            '* "float" is shorthand for FP32 precision.\n'
-            '* "float32" for FP32 precision.')
-        parser.add_argument(
             "--max-model-len",
             type=int,
             default=EngineArgs.max_model_len,
@@ -309,15 +264,6 @@ class EngineArgs:
                             "This should be a JSON string that will be "
                             "parsed into a dictionary.")
         parser.add_argument(
-            '--ignore-patterns',
-            action="append",
-            type=str,
-            default=[],
-            help="Category: Model Options\n"
-            "The pattern(s) to ignore when loading the model."
-            "Defaults to 'original/**/*' to avoid repeated loading of llama's "
-            "checkpoints.")
-        parser.add_argument(
             "--enforce-eager",
             action=StoreBoolean,
             default=EngineArgs.enforce_eager,
@@ -328,6 +274,62 @@ class EngineArgs:
             "will use eager mode and CUDA graph in hybrid "
             "for maximal performance and flexibility.",
         )
+        # Load Options
+        parser.add_argument(
+            '--load-format',
+            type=str,
+            default=EngineArgs.load_format,
+            choices=[
+                'auto',
+                'pt',
+                'safetensors',
+                'npcache',
+                'dummy',
+                'tensorizer',
+                'sharded_state',
+                'bitsandbytes',
+            ],
+            help='Category: Model Options\n'
+            'The format of the model weights to load.\n\n'
+            '* "auto" will try to load the weights in the safetensors format '
+            'and fall back to the pytorch bin format if safetensors format '
+            'is not available.\n'
+            '* "pt" will load the weights in the pytorch bin format.\n'
+            '* "safetensors" will load the weights in the safetensors format.\n'
+            '* "npcache" will load the weights in pytorch format and store '
+            'a numpy cache to speed up the loading.\n'
+            '* "dummy" will initialize the weights with random values, '
+            'which is mainly for profiling.\n'
+            '* "tensorizer" will load the weights using tensorizer from '
+            'CoreWeave. See the Tensorize Aphrodite Model script in the '
+            'Examples section for more information.\n'
+            '* "bitsandbytes" will load the weights using bitsandbytes '
+            'quantization.\n')
+        parser.add_argument(
+            '--dtype',
+            type=str,
+            default=EngineArgs.dtype,
+            choices=[
+                'auto', 'half', 'float16', 'bfloat16', 'float', 'float32'
+            ],
+            help='Category: Model Options\n'
+            'Data type for model weights and activations.\n\n'
+            '* "auto" will use FP16 precision for FP32 and FP16 models, and '
+            'BF16 precision for BF16 models.\n'
+            '* "half" for FP16. Recommended for AWQ quantization.\n'
+            '* "float16" is the same as "half".\n'
+            '* "bfloat16" for a balance between precision and range.\n'
+            '* "float" is shorthand for FP32 precision.\n'
+            '* "float32" for FP32 precision.')
+        parser.add_argument(
+            '--ignore-patterns',
+            action="append",
+            type=str,
+            default=[],
+            help="Category: Model Options\n"
+            "The pattern(s) to ignore when loading the model."
+            "Defaults to 'original/**/*' to avoid repeated loading of llama's "
+            "checkpoints.")
         # Parallel Options
         parser.add_argument(
             '--worker-use-ray',
