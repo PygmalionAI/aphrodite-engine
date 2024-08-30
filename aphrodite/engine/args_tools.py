@@ -27,6 +27,7 @@ class EngineArgs:
     # Device Options
     device: str = "auto"
     # Model Options
+    seed: int = 0
     model: str
     served_model_name: Optional[Union[List[str]]] = None
     tokenizer: Optional[str] = None
@@ -42,6 +43,14 @@ class EngineArgs:
     rope_theta: Optional[float] = None
     model_loader_extra_config: Optional[dict] = None
     enforce_eager: Optional[bool] = True
+    skip_tokenizer_init: bool = False
+    tokenizer_pool_size: int = 0
+    # Note: Specifying a tokenizer pool by passing a class
+    # is intended for expert use only. The API may change without
+    # notice.
+    tokenizer_pool_type: Union[str, Type["BaseTokenizerGroup"]] = "ray"
+    tokenizer_pool_extra_config: Optional[dict] = None
+    max_logprobs: int = 10  # OpenAI default is 5, setting to 10 because ST
     # Load Options
     load_format: str = "auto"
     dtype: str = "auto"
@@ -66,7 +75,7 @@ class EngineArgs:
     quantization_param_path: Optional[str] = None
     preemption_mode: Optional[str] = None
     deepspeed_fp_bits: Optional[int] = None
-    # KV Cache Options
+    # Cache Options
     kv_cache_dtype: str = "auto"
     block_size: int = 16
     enable_prefix_caching: Optional[bool] = False
@@ -75,19 +84,13 @@ class EngineArgs:
     gpu_memory_utilization: float = 0.90
     swap_space: int = 4  # GiB
     cpu_offload_gb: int = 0  # GiB
-    # Tokenizer Options
-    skip_tokenizer_init: bool = False
-    tokenizer_pool_size: int = 0
-    # Note: Specifying a tokenizer pool by passing a class
-    # is intended for expert use only. The API may change without
-    # notice.
-    tokenizer_pool_type: Union[str, Type["BaseTokenizerGroup"]] = "ray"
-    tokenizer_pool_extra_config: Optional[dict] = None
     # Scheduler Options
     use_v2_block_manager: bool = False
     scheduler_delay_factor: float = 0.0
     enable_chunked_prefill: bool = False
     guided_decoding_backend: str = 'outlines'
+    max_num_batched_tokens: Optional[int] = None
+    max_num_seqs: int = 256
     # Speculative Decoding Options
     num_lookahead_slots: int = 0
     speculative_model: Optional[str] = None
@@ -114,11 +117,6 @@ class EngineArgs:
     enable_prompt_adapter: bool = False
     max_prompt_adapters: int = 1
     max_prompt_adapter_token: int = 0
-    # Inference Options
-    seed: int = 0
-    max_num_batched_tokens: Optional[int] = None
-    max_num_seqs: int = 256
-    max_logprobs: int = 10  # OpenAI default is 5, setting to 10 because ST
     # Log Options
     disable_log_stats: bool = False
 
@@ -146,6 +144,11 @@ class EngineArgs:
                   "Device to use for model execution."),
         )
         # Model Options
+        parser.add_argument("--seed",
+                            type=int,
+                            default=EngineArgs.seed,
+                            help="Category: Model Options\n"
+                            "random seed")
         parser.add_argument(
             "--model",
             type=str,
@@ -283,6 +286,40 @@ class EngineArgs:
             "Always use eager-mode PyTorch. If False, "
             "will use eager mode and CUDA graph in hybrid "
             "for maximal performance and flexibility.",
+        )
+        parser.add_argument("--skip-tokenizer-init",
+                            action="store_true",
+                            help="Category: Model Options\n"
+                            "Skip initialization of tokenizer and detokenizer")
+        parser.add_argument("--tokenizer-pool-size",
+                            type=int,
+                            default=EngineArgs.tokenizer_pool_size,
+                            help="Category: Model Options\n"
+                            "Size of tokenizer pool to use for "
+                            "asynchronous tokenization. If 0, will "
+                            "use synchronous tokenization.")
+        parser.add_argument("--tokenizer-pool-type",
+                            type=str,
+                            default=EngineArgs.tokenizer_pool_type,
+                            help="Category: Model Options\n"
+                            "The type of tokenizer pool to use for "
+                            "asynchronous tokenization. Ignored if "
+                            "tokenizer_pool_size is 0.")
+        parser.add_argument("--tokenizer-pool-extra-config",
+                            type=str,
+                            default=EngineArgs.tokenizer_pool_extra_config,
+                            help="Category: Model Options\n"
+                            "Extra config for tokenizer pool. "
+                            "This should be a JSON string that will be "
+                            "parsed into a dictionary. Ignored if "
+                            "tokenizer_pool_size is 0.")
+        parser.add_argument(
+            "--max-logprobs",
+            type=int,
+            default=EngineArgs.max_logprobs,
+            help="Category: Model Options\n"
+            "maximum number of log probabilities to "
+            "return.",
         )
         # Load Options
         parser.add_argument(
@@ -454,13 +491,13 @@ class EngineArgs:
                             help="Category: Quantization Options\n"
                             "Number of floating bits to use for the deepseed "
                             "quantization. Supported bits are: 4, 6, 8, 12. ")
-        # KV Cache Options
+        # Cache Options
         parser.add_argument(
             '--kv-cache-dtype',
             type=str,
             choices=['auto', 'fp8', 'fp8_e5m2', 'fp8_e4m3'],
             default=EngineArgs.kv_cache_dtype,
-            help='Category: Quantization Options\n'
+            help='Category: Cache Options\n'
             'Data type for kv cache storage. If "auto", will use model '
             'data type. CUDA 11.8+ supports fp8 (=fp8_e4m3) and fp8_e5m2. '
             'ROCm (AMD GPU) supports fp8 (=fp8_e4m3)')
@@ -469,21 +506,21 @@ class EngineArgs:
             type=int,
             default=EngineArgs.block_size,
             choices=[8, 16, 32],
-            help="Category: KV Cache Options\n"
+            help="Category: Cache Options\n"
             "token block size",
         )
         parser.add_argument(
             "--enable-prefix-caching",
             "--context-shift",
             action="store_true",
-            help="Category: KV Cache Options\n"
+            help="Category: Cache Options\n"
             "Enable automatic prefix caching.",
         )
         parser.add_argument(
             "--num-gpu-blocks-override",
             type=int,
             default=None,
-            help="Category: KV Cache Options Options\n"
+            help="Category: Cache Options Options\n"
             "If specified, ignore GPU profiling result and use this "
             "number of GPU blocks. Used for testing preemption.")
         parser.add_argument('--disable-sliding-window',
@@ -505,14 +542,14 @@ class EngineArgs:
             "--swap-space",
             type=int,
             default=EngineArgs.swap_space,
-            help="Category: KV Cache Options\n"
+            help="Category: Cache Options\n"
             "CPU swap space size (GiB) per GPU",
         )
         parser.add_argument(
             '--cpu-offload-gb',
             type=float,
             default=0,
-            help='Category: KV Cache Options\n'
+            help='Category: Cache Options\n'
             'The space in GiB to offload to CPU, per GPU. '
             'Default is 0, which means no offloading. Intuitively, '
             'this argument can be seen as a virtual way to increase '
@@ -523,33 +560,6 @@ class EngineArgs:
             'requires fast CPU-GPU interconnect, as part of the model is'
             'loaded from CPU memory to GPU memory on the fly in each '
             'model forward pass.')
-        # Tokenizer Options
-        parser.add_argument("--skip-tokenizer-init",
-                            action="store_true",
-                            help="Category: Tokenizer Options\n"
-                            "Skip initialization of tokenizer and detokenizer")
-        parser.add_argument("--tokenizer-pool-size",
-                            type=int,
-                            default=EngineArgs.tokenizer_pool_size,
-                            help="Category: Tokenizer Options\n"
-                            "Size of tokenizer pool to use for "
-                            "asynchronous tokenization. If 0, will "
-                            "use synchronous tokenization.")
-        parser.add_argument("--tokenizer-pool-type",
-                            type=str,
-                            default=EngineArgs.tokenizer_pool_type,
-                            help="Category: Tokenizer Options\n"
-                            "The type of tokenizer pool to use for "
-                            "asynchronous tokenization. Ignored if "
-                            "tokenizer_pool_size is 0.")
-        parser.add_argument("--tokenizer-pool-extra-config",
-                            type=str,
-                            default=EngineArgs.tokenizer_pool_extra_config,
-                            help="Category: Tokenizer Options\n"
-                            "Extra config for tokenizer pool. "
-                            "This should be a JSON string that will be "
-                            "parsed into a dictionary. Ignored if "
-                            "tokenizer_pool_size is 0.")
         # Scheduler Options
         parser.add_argument("--use-v2-block-manager",
                             action="store_true",
@@ -584,6 +594,21 @@ class EngineArgs:
             'https://github.com/noamgat/lm-format-enforcer.'
             ' Can be overridden per request via guided_decoding_backend'
             ' parameter.')
+        parser.add_argument(
+            "--max-num-batched-tokens",
+            type=int,
+            default=EngineArgs.max_num_batched_tokens,
+            help="Category: KV Cache Options\n"
+            "maximum number of batched tokens per "
+            "iteration",
+        )
+        parser.add_argument(
+            "--max-num-seqs",
+            type=int,
+            default=EngineArgs.max_num_seqs,
+            help="Category: API Options\n"
+            "maximum number of sequences per iteration",
+        )
         # Speculative Decoding Options
         parser.add_argument("--num-lookahead-slots",
                             type=int,
@@ -692,28 +717,28 @@ class EngineArgs:
         parser.add_argument(
             "--enable-lora",
             action="store_true",
-            help="Category: LoRA Options\n"
+            help="Category: Adapter Options\n"
             "If True, enable handling of LoRA adapters.",
         )
         parser.add_argument(
             "--max-loras",
             type=int,
             default=EngineArgs.max_loras,
-            help="Category: LoRA Options\n"
+            help="Category: Adapter Options\n"
             "Max number of LoRAs in a single batch.",
         )
         parser.add_argument(
             "--max-lora-rank",
             type=int,
             default=EngineArgs.max_lora_rank,
-            help="Category: LoRA Options\n"
+            help="Category: Adapter Options\n"
             "Max LoRA rank.",
         )
         parser.add_argument(
             "--lora-extra-vocab-size",
             type=int,
             default=EngineArgs.lora_extra_vocab_size,
-            help=("Category: LoRA Options\n"
+            help=("Category: Adapter Options\n"
                   "Maximum size of extra vocabulary that can be "
                   "present in a LoRA adapter (added to the base "
                   "model vocabulary)."),
@@ -723,7 +748,7 @@ class EngineArgs:
             type=str,
             default=EngineArgs.lora_dtype,
             choices=["auto", "float16", "bfloat16", "float32"],
-            help=("Category: LoRA Options\n"
+            help=("Category: Adapter Options\n"
                   "Data type for LoRA. If auto, will default to "
                   "base model dtype."),
         )
@@ -731,7 +756,7 @@ class EngineArgs:
             "--max-cpu-loras",
             type=int,
             default=EngineArgs.max_cpu_loras,
-            help=("Category: LoRA Options\n"
+            help=("Category: Adapter Options\n"
                   "Maximum number of LoRAs to store in CPU memory. "
                   "Must be >= than max_num_seqs. "
                   "Defaults to max_num_seqs."),
@@ -740,7 +765,7 @@ class EngineArgs:
             "--long-lora-scaling-factors",
             type=str,
             default=EngineArgs.long_lora_scaling_factors,
-            help=("Category: LoRA Options\n"
+            help=("Category: Adapter Options\n"
                   "Specify multiple scaling factors (which can "
                   "be different from base model scaling factor "
                   "- see eg. Long LoRA) to allow for multiple "
@@ -751,7 +776,7 @@ class EngineArgs:
         parser.add_argument(
             "--fully-sharded-loras",
             action='store_true',
-            help=("Category: LoRA Options\n"
+            help=("Category: Adapter Options\n"
                   "By default, only half of the LoRA computation is sharded "
                   "with tensor parallelism. Enabling this will use the fully "
                   "sharded layers. At high sequence length, max rank or "
@@ -759,51 +784,22 @@ class EngineArgs:
         parser.add_argument("--qlora-adapter-name-or-path",
                             type=str,
                             default=None,
-                            help="Category: LoRA Options\n"
+                            help="Category: Adapter Options\n"
                             "Name or path of the LoRA adapter to use.")
         parser.add_argument('--enable-prompt-adapter',
                             action='store_true',
-                            help='Category: Soft Prompt Options\n'
+                            help='Category: Adapter Options\n'
                             'If True, enable handling of PromptAdapters.')
         parser.add_argument('--max-prompt-adapters',
                             type=int,
                             default=EngineArgs.max_prompt_adapters,
-                            help='Category: Soft Prompt Options\n'
+                            help='Category: Adapter Options\n'
                             'Max number of PromptAdapters in a batch.')
         parser.add_argument('--max-prompt-adapter-token',
                             type=int,
                             default=EngineArgs.max_prompt_adapter_token,
-                            help='Category: Soft Prompt Options\n'
+                            help='Category: Adapter Options\n'
                             'Max number of PromptAdapters tokens')
-        # Inference Options
-        parser.add_argument("--seed",
-                            type=int,
-                            default=EngineArgs.seed,
-                            help="Category: Model Options\n"
-                            "random seed")
-        parser.add_argument(
-            "--max-num-batched-tokens",
-            type=int,
-            default=EngineArgs.max_num_batched_tokens,
-            help="Category: KV Cache Options\n"
-            "maximum number of batched tokens per "
-            "iteration",
-        )
-        parser.add_argument(
-            "--max-num-seqs",
-            type=int,
-            default=EngineArgs.max_num_seqs,
-            help="Category: API Options\n"
-            "maximum number of sequences per iteration",
-        )
-        parser.add_argument(
-            "--max-logprobs",
-            type=int,
-            default=EngineArgs.max_logprobs,
-            help="Category: API Options\n"
-            "maximum number of log probabilities to "
-            "return.",
-        )
         # Log Options
         parser.add_argument(
             "--disable-log-stats",
