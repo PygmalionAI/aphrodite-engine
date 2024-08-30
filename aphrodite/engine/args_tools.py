@@ -24,11 +24,9 @@ if TYPE_CHECKING:
 @dataclass
 class EngineArgs:
     """Arguments for Aphrodite engine."""
-    # Device Options
-    device: str = "auto"
     # Model Options
-    seed: int = 0
     model: str
+    seed: int = 0
     served_model_name: Optional[Union[List[str]]] = None
     tokenizer: Optional[str] = None
     revision: Optional[str] = None
@@ -51,6 +49,8 @@ class EngineArgs:
     tokenizer_pool_type: Union[str, Type["BaseTokenizerGroup"]] = "ray"
     tokenizer_pool_extra_config: Optional[dict] = None
     max_logprobs: int = 10  # OpenAI default is 5, setting to 10 because ST
+    # Device Options
+    device: str = "auto"
     # Load Options
     load_format: str = "auto"
     dtype: str = "auto"
