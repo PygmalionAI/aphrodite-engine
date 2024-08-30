@@ -24,96 +24,102 @@ if TYPE_CHECKING:
 @dataclass
 class EngineArgs:
     """Arguments for Aphrodite engine."""
-
+    # Model Options
     model: str
+    seed: int = 0
     served_model_name: Optional[Union[List[str]]] = None
     tokenizer: Optional[str] = None
-    skip_tokenizer_init: bool = False
+    revision: Optional[str] = None
+    code_revision: Optional[str] = None
+    tokenizer_revision: Optional[str] = None
     tokenizer_mode: str = "auto"
     trust_remote_code: bool = False
     download_dir: Optional[str] = None
-    load_format: str = "auto"
-    dtype: str = "auto"
-    kv_cache_dtype: str = "auto"
-    quantization_param_path: Optional[str] = None
-    seed: int = 0
     max_model_len: Optional[int] = None
-    worker_use_ray: Optional[bool] = False
-    # Note: Specifying a custom executor backend by passing a class
-    # is intended for expert use only. The API may change without
-    # notice.
-    distributed_executor_backend: Optional[Union[str,
-                                                 Type[ExecutorBase]]] = None
-    pipeline_parallel_size: int = 1
-    tensor_parallel_size: int = 1
-    max_parallel_loading_workers: Optional[int] = None
-    block_size: int = 16
-    enable_prefix_caching: Optional[bool] = False
-    disable_sliding_window: bool = False
-    use_v2_block_manager: bool = False
-    swap_space: int = 4  # GiB
-    cpu_offload_gb: int = 0  # GiB
-    gpu_memory_utilization: float = 0.90
-    max_num_batched_tokens: Optional[int] = None
-    max_num_seqs: int = 256
-    max_logprobs: int = 10  # OpenAI default is 5, setting to 10 because ST
-    disable_log_stats: bool = False
-    revision: Optional[str] = None
-    code_revision: Optional[str] = None
-    rope_scaling: Optional[dict] = None
-    rope_theta: Optional[float] = None
-    tokenizer_revision: Optional[str] = None
-    quantization: Optional[str] = None
-    load_in_4bit: bool = False
-    load_in_8bit: bool = False
-    load_in_smooth: bool = False
-    deepspeed_fp_bits: Optional[int] = None
-    enforce_eager: Optional[bool] = True
     max_context_len_to_capture: Optional[int] = None
     max_seq_len_to_capture: int = 8192
-    disable_custom_all_reduce: bool = False
+    rope_scaling: Optional[dict] = None
+    rope_theta: Optional[float] = None
+    model_loader_extra_config: Optional[dict] = None
+    enforce_eager: Optional[bool] = True
+    skip_tokenizer_init: bool = False
     tokenizer_pool_size: int = 0
     # Note: Specifying a tokenizer pool by passing a class
     # is intended for expert use only. The API may change without
     # notice.
     tokenizer_pool_type: Union[str, Type["BaseTokenizerGroup"]] = "ray"
     tokenizer_pool_extra_config: Optional[dict] = None
-    enable_lora: bool = False
-    max_loras: int = 1
-    max_lora_rank: int = 16
-    enable_prompt_adapter: bool = False
-    max_prompt_adapters: int = 1
-    max_prompt_adapter_token: int = 0
-    fully_sharded_loras: bool = False
-    lora_extra_vocab_size: int = 256
-    long_lora_scaling_factors: Optional[Tuple[float]] = None
-    lora_dtype: str = "auto"
-    max_cpu_loras: Optional[int] = None
+    max_logprobs: int = 10  # OpenAI default is 5, setting to 10 because ST
+    # Device Options
     device: str = "auto"
-    ray_workers_use_nsight: bool = False
-    num_gpu_blocks_override: Optional[int] = None
-    num_lookahead_slots: int = 0
-    model_loader_extra_config: Optional[dict] = None
+    # Load Options
+    load_format: str = "auto"
+    dtype: str = "auto"
     ignore_patterns: Optional[Union[str, List[str]]] = None
+    # Parallel Options
+    worker_use_ray: Optional[bool] = False
+    tensor_parallel_size: int = 1
+    pipeline_parallel_size: int = 1
+    ray_workers_use_nsight: bool = False
+    disable_custom_all_reduce: bool = False
+    # Note: Specifying a custom executor backend by passing a class
+    # is intended for expert use only. The API may change without
+    # notice.
+    distributed_executor_backend: Optional[Union[str,
+                                                 Type[ExecutorBase]]] = None
+    max_parallel_loading_workers: Optional[int] = None
+    # Quantization Options
+    quantization: Optional[str] = None
+    load_in_4bit: bool = False
+    load_in_smooth: bool = False
+    load_in_8bit: bool = False
+    quantization_param_path: Optional[str] = None
     preemption_mode: Optional[str] = None
-    # Scheduler config
+    deepspeed_fp_bits: Optional[int] = None
+    # Cache Options
+    kv_cache_dtype: str = "auto"
+    block_size: int = 16
+    enable_prefix_caching: Optional[bool] = False
+    num_gpu_blocks_override: Optional[int] = None
+    disable_sliding_window: bool = False
+    gpu_memory_utilization: float = 0.90
+    swap_space: int = 4  # GiB
+    cpu_offload_gb: int = 0  # GiB
+    # Scheduler Options
+    use_v2_block_manager: bool = False
     scheduler_delay_factor: float = 0.0
     enable_chunked_prefill: bool = False
     guided_decoding_backend: str = 'outlines'
-    # Speculative decoding config
+    max_num_batched_tokens: Optional[int] = None
+    max_num_seqs: int = 256
+    # Speculative Decoding Options
+    num_lookahead_slots: int = 0
     speculative_model: Optional[str] = None
-    speculative_draft_tensor_parallel_size: Optional[int] = None
     num_speculative_tokens: Optional[int] = None
     speculative_max_model_len: Optional[int] = None
-    speculative_disable_by_batch_size: Optional[int] = None
     ngram_prompt_lookup_max: Optional[int] = None
     ngram_prompt_lookup_min: Optional[int] = None
+    speculative_draft_tensor_parallel_size: Optional[int] = None
+    speculative_disable_by_batch_size: Optional[int] = None
     spec_decoding_acceptance_method: str = 'rejection_sampler'
     typical_acceptance_sampler_posterior_threshold: Optional[float] = None
     typical_acceptance_sampler_posterior_alpha: Optional[float] = None
     disable_logprobs_during_spec_decoding: Optional[bool] = None
-
+    # Adapter Options
+    enable_lora: bool = False
+    max_loras: int = 1
+    max_lora_rank: int = 16
+    lora_extra_vocab_size: int = 256
+    lora_dtype: str = "auto"
+    max_cpu_loras: Optional[int] = None
+    long_lora_scaling_factors: Optional[Tuple[float]] = None
+    fully_sharded_loras: bool = False
     qlora_adapter_name_or_path: Optional[str] = None
+    enable_prompt_adapter: bool = False
+    max_prompt_adapters: int = 1
+    max_prompt_adapter_token: int = 0
+    # Log Options
+    disable_log_stats: bool = False
 
     def __post_init__(self):
         if self.tokenizer is None:
@@ -125,31 +131,47 @@ class EngineArgs:
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
         """Shared CLI arguments for the Aphrodite engine."""
 
-        # NOTE: If you update any of the arguments below, please also
-        # make sure to update docs/source/models/engine_args.rst
-
-        # Model arguments
+        # Model Options
         parser.add_argument(
             "--model",
             type=str,
             default="EleutherAI/pythia-70m-deduped",
-            help="name or path of the huggingface model to use",
+            help="Category: Model Options\n"
+            "name or path of the huggingface model to use",
         )
+        parser.add_argument("--seed",
+                            type=int,
+                            default=EngineArgs.seed,
+                            help="Category: Model Options\n"
+                            "random seed")
+        parser.add_argument(
+            "--served-model-name",
+            nargs="+",
+            type=str,
+            default=None,
+            help="Category: API Options\n"
+            "The model name(s) used in the API. If multiple "
+            "names are provided, the server will respond to any "
+            "of the provided names. The model name in the model "
+            "field of a response will be the first name in this "
+            "list. If not specified, the model name will be the "
+            "same as the `--model` argument. Noted that this name(s)"
+            "will also be used in `model_name` tag content of "
+            "prometheus metrics, if multiple names provided, metrics"
+            "tag will take the first one.")
         parser.add_argument(
             "--tokenizer",
             type=str,
             default=EngineArgs.tokenizer,
-            help="name or path of the huggingface tokenizer to use",
+            help="Category: Model Options\n"
+            "name or path of the huggingface tokenizer to use",
         )
-        parser.add_argument(
-            "--skip-tokenizer-init",
-            action="store_true",
-            help="Skip initialization of tokenizer and detokenizer")
         parser.add_argument(
             "--revision",
             type=str,
             default=None,
-            help="the specific model version to use. It can be a branch "
+            help="Category: Model Options\n"
+            "the specific model version to use. It can be a branch "
             "name, a tag name, or a commit id. If unspecified, will use "
             "the default version.",
         )
@@ -157,7 +179,8 @@ class EngineArgs:
             "--code-revision",
             type=str,
             default=None,
-            help="the specific revision to use for the model code on "
+            help="Category: Model Options\n"
+            "the specific revision to use for the model code on "
             "Hugging Face Hub. It can be a branch name, a tag name, or a "
             "commit id. If unspecified, will use the default version.",
         )
@@ -165,7 +188,8 @@ class EngineArgs:
             "--tokenizer-revision",
             type=str,
             default=None,
-            help="the specific tokenizer version to use. It can be a branch "
+            help="Category: Model Options\n"
+            "the specific tokenizer version to use. It can be a branch "
             "name, a tag name, or a commit id. If unspecified, will use "
             "the default version.",
         )
@@ -174,23 +198,129 @@ class EngineArgs:
             type=str,
             default=EngineArgs.tokenizer_mode,
             choices=["auto", "slow"],
-            help='tokenizer mode. "auto" will use the fast '
+            help='Category: Model Options\n'
+            'tokenizer mode. "auto" will use the fast '
             'tokenizer if available, and "slow" will '
             "always use the slow tokenizer.",
         )
         parser.add_argument(
             "--trust-remote-code",
             action="store_true",
-            help="trust remote code from huggingface",
+            help="Category: Model Options\n"
+            "trust remote code from huggingface",
         )
         parser.add_argument(
             "--download-dir",
             type=str,
             default=EngineArgs.download_dir,
-            help="directory to download and load the weights, "
+            help="Category: Model Options\n"
+            "directory to download and load the weights, "
             "default to the default cache dir of "
             "huggingface",
         )
+        parser.add_argument(
+            "--max-model-len",
+            type=int,
+            default=EngineArgs.max_model_len,
+            help="Category: Model Options\n"
+            "model context length. If unspecified, "
+            "will be automatically derived from the model.",
+        )
+        parser.add_argument("--max-context-len-to-capture",
+                            type=int,
+                            default=EngineArgs.max_context_len_to_capture,
+                            help="Category: Model Options\n"
+                            "Maximum context length covered by CUDA "
+                            "graphs. When a sequence has context length "
+                            "larger than this, we fall back to eager mode. "
+                            "(DEPRECATED. Use --max-seq_len-to-capture instead"
+                            ")")
+        parser.add_argument("--max-seq_len-to-capture",
+                            type=int,
+                            default=EngineArgs.max_seq_len_to_capture,
+                            help="Category: Model Options\n"
+                            "Maximum sequence length covered by CUDA "
+                            "graphs. When a sequence has context length "
+                            "larger than this, we fall back to eager mode.")
+        parser.add_argument('--rope-scaling',
+                            default=None,
+                            type=json.loads,
+                            help='Category: Model Options\n'
+                            'RoPE scaling configuration in JSON format. '
+                            'For example, {"type":"dynamic","factor":2.0}')
+        parser.add_argument('--rope-theta',
+                            default=None,
+                            type=float,
+                            help='Category: Model Options\n'
+                            'RoPE theta. Use with `rope_scaling`. In '
+                            'some cases, changing the RoPE theta improves the '
+                            'performance of the scaled model.')
+        parser.add_argument("--model-loader-extra-config",
+                            type=str,
+                            default=EngineArgs.model_loader_extra_config,
+                            help="Category: Model Options\n"
+                            "Extra config for model loader. "
+                            "This will be passed to the model loader "
+                            "corresponding to the chosen load_format. "
+                            "This should be a JSON string that will be "
+                            "parsed into a dictionary.")
+        parser.add_argument(
+            "--enforce-eager",
+            action=StoreBoolean,
+            default=EngineArgs.enforce_eager,
+            nargs="?",
+            const="True",
+            help="Category: Model Options\n"
+            "Always use eager-mode PyTorch. If False, "
+            "will use eager mode and CUDA graph in hybrid "
+            "for maximal performance and flexibility.",
+        )
+        parser.add_argument("--skip-tokenizer-init",
+                            action="store_true",
+                            help="Category: Model Options\n"
+                            "Skip initialization of tokenizer and detokenizer")
+        parser.add_argument("--tokenizer-pool-size",
+                            type=int,
+                            default=EngineArgs.tokenizer_pool_size,
+                            help="Category: Model Options\n"
+                            "Size of tokenizer pool to use for "
+                            "asynchronous tokenization. If 0, will "
+                            "use synchronous tokenization.")
+        parser.add_argument("--tokenizer-pool-type",
+                            type=str,
+                            default=EngineArgs.tokenizer_pool_type,
+                            help="Category: Model Options\n"
+                            "The type of tokenizer pool to use for "
+                            "asynchronous tokenization. Ignored if "
+                            "tokenizer_pool_size is 0.")
+        parser.add_argument("--tokenizer-pool-extra-config",
+                            type=str,
+                            default=EngineArgs.tokenizer_pool_extra_config,
+                            help="Category: Model Options\n"
+                            "Extra config for tokenizer pool. "
+                            "This should be a JSON string that will be "
+                            "parsed into a dictionary. Ignored if "
+                            "tokenizer_pool_size is 0.")
+        parser.add_argument(
+            "--max-logprobs",
+            type=int,
+            default=EngineArgs.max_logprobs,
+            help="Category: Model Options\n"
+            "maximum number of log probabilities to "
+            "return.",
+        )
+        # Device Options
+        parser.add_argument(
+            "--device",
+            type=str,
+            default=EngineArgs.device,
+            choices=[
+                "auto", "cuda", "neuron", "cpu", "openvino", "tpu", "xpu"
+            ],
+            help=("Category: Model Options\n"
+                  "Device to use for model execution."),
+        )
+        # Load Options
         parser.add_argument(
             '--load-format',
             type=str,
@@ -205,7 +335,8 @@ class EngineArgs:
                 'sharded_state',
                 'bitsandbytes',
             ],
-            help='The format of the model weights to load.\n\n'
+            help='Category: Model Options\n'
+            'The format of the model weights to load.\n\n'
             '* "auto" will try to load the weights in the safetensors format '
             'and fall back to the pytorch bin format if safetensors format '
             'is not available.\n'
@@ -227,7 +358,8 @@ class EngineArgs:
             choices=[
                 'auto', 'half', 'float16', 'bfloat16', 'float', 'float32'
             ],
-            help='Data type for model weights and activations.\n\n'
+            help='Category: Model Options\n'
+            'Data type for model weights and activations.\n\n'
             '* "auto" will use FP16 precision for FP32 and FP16 models, and '
             'BF16 precision for BF16 models.\n'
             '* "half" for FP16. Recommended for AWQ quantization.\n'
@@ -236,181 +368,74 @@ class EngineArgs:
             '* "float" is shorthand for FP32 precision.\n'
             '* "float32" for FP32 precision.')
         parser.add_argument(
-            '--kv-cache-dtype',
+            '--ignore-patterns',
+            action="append",
             type=str,
-            choices=['auto', 'fp8', 'fp8_e5m2', 'fp8_e4m3'],
-            default=EngineArgs.kv_cache_dtype,
-            help='Data type for kv cache storage. If "auto", will use model '
-            'data type. CUDA 11.8+ supports fp8 (=fp8_e4m3) and fp8_e5m2. '
-            'ROCm (AMD GPU) supports fp8 (=fp8_e4m3)')
-        parser.add_argument(
-            '--quantization-param-path',
-            type=str,
-            default=None,
-            help='Path to the JSON file containing the KV cache '
-            'scaling factors. This should generally be supplied, when '
-            'KV cache dtype is FP8. Otherwise, KV cache scaling factors '
-            'default to 1.0, which may cause accuracy issues. '
-            'FP8_E5M2 (without scaling) is only supported on cuda version'
-            'greater than 11.8. On ROCm (AMD GPU), FP8_E4M3 is instead '
-            'supported for common inference criteria. ')
-        parser.add_argument(
-            "--max-model-len",
-            type=int,
-            default=EngineArgs.max_model_len,
-            help="model context length. If unspecified, "
-            "will be automatically derived from the model.",
-        )
-        parser.add_argument(
-            '--guided-decoding-backend',
-            type=str,
-            default='outlines',
-            choices=['outlines', 'lm-format-enforcer'],
-            help='Which engine will be used for guided decoding'
-            ' (JSON schema / regex etc) by default. Currently support '
-            'https://github.com/outlines-dev/outlines and '
-            'https://github.com/noamgat/lm-format-enforcer.'
-            ' Can be overridden per request via guided_decoding_backend'
-            ' parameter.')
-        # Parallel arguments
-        parser.add_argument(
-            '--distributed-executor-backend',
-            choices=['ray', 'mp'],
-            default=EngineArgs.distributed_executor_backend,
-            help='Backend to use for distributed serving. When more than 1 GPU '
-            'is used, will be automatically set to "ray" if installed '
-            'or "mp" (multiprocessing) otherwise.')
+            default=[],
+            help="Category: Model Options\n"
+            "The pattern(s) to ignore when loading the model."
+            "Defaults to 'original/**/*' to avoid repeated loading of llama's "
+            "checkpoints.")
+        # Parallel Options
         parser.add_argument(
             '--worker-use-ray',
             action='store_true',
-            help='Deprecated, use --distributed-executor-backend=ray.')
-        parser.add_argument(
-            "--pipeline-parallel-size",
-            "-pp",
-            type=int,
-            default=EngineArgs.pipeline_parallel_size,
-            help="number of pipeline stages. Currently not supported.")
+            help='Category: Parallel Options\n'
+            'Deprecated, use --distributed-executor-backend=ray.')
         parser.add_argument(
             "--tensor-parallel-size",
             "-tp",
             type=int,
             default=EngineArgs.tensor_parallel_size,
-            help="number of tensor parallel replicas, i.e. the number of GPUs "
+            help="Category: Parallel Options\n"
+            "number of tensor parallel replicas, i.e. the number of GPUs "
             "to use.")
+        parser.add_argument(
+            "--pipeline-parallel-size",
+            "-pp",
+            type=int,
+            default=EngineArgs.pipeline_parallel_size,
+            help="Category: Parallel Options\n"
+            "number of pipeline stages. Currently not supported.")
+        parser.add_argument(
+            "--ray-workers-use-nsight",
+            action="store_true",
+            help="Category: Parallel Options\n"
+            "If specified, use nsight to profile ray workers",
+        )
+        parser.add_argument(
+            "--disable-custom-all-reduce",
+            action="store_true",
+            default=EngineArgs.disable_custom_all_reduce,
+            help="Category: Model Options\n"
+            "See ParallelConfig",
+        )
+        parser.add_argument(
+            '--distributed-executor-backend',
+            choices=['ray', 'mp'],
+            default=EngineArgs.distributed_executor_backend,
+            help='Category: Parallel Options\n'
+            'Backend to use for distributed serving. When more than 1 GPU '
+            'is used, will be automatically set to "ray" if installed '
+            'or "mp" (multiprocessing) otherwise.')
         parser.add_argument(
             "--max-parallel-loading-workers",
             type=int,
             default=EngineArgs.max_parallel_loading_workers,
-            help="load model sequentially in multiple batches, "
+            help="Category: Parallel Options\n"
+            "load model sequentially in multiple batches, "
             "to avoid RAM OOM when using tensor "
             "parallel and large models",
         )
-        parser.add_argument(
-            "--ray-workers-use-nsight",
-            action="store_true",
-            help="If specified, use nsight to profile ray workers",
-        )
-        # KV cache arguments
-        parser.add_argument(
-            "--block-size",
-            type=int,
-            default=EngineArgs.block_size,
-            choices=[8, 16, 32],
-            help="token block size",
-        )
-        parser.add_argument(
-            "--enable-prefix-caching",
-            "--context-shift",
-            action="store_true",
-            help="Enable automatic prefix caching.",
-        )
-        parser.add_argument('--disable-sliding-window',
-                            action='store_true',
-                            help='Disables sliding window, '
-                            'capping to sliding window size')
-        parser.add_argument("--use-v2-block-manager",
-                            action="store_true",
-                            help="Use the v2 block manager.")
-        parser.add_argument(
-            "--num-lookahead-slots",
-            type=int,
-            default=EngineArgs.num_lookahead_slots,
-            help="Experimental scheduling config necessary for "
-            "speculative decoding. This will be replaced by "
-            "speculative decoding config in the future; it is "
-            "present for testing purposes until then.")
-        parser.add_argument("--seed",
-                            type=int,
-                            default=EngineArgs.seed,
-                            help="random seed")
-        parser.add_argument(
-            "--swap-space",
-            type=int,
-            default=EngineArgs.swap_space,
-            help="CPU swap space size (GiB) per GPU",
-        )
-        parser.add_argument(
-            '--cpu-offload-gb',
-            type=float,
-            default=0,
-            help='The space in GiB to offload to CPU, per GPU. '
-            'Default is 0, which means no offloading. Intuitively, '
-            'this argument can be seen as a virtual way to increase '
-            'the GPU memory size. For example, if you have one 24 GB '
-            'GPU and set this to 10, virtually you can think of it as '
-            'a 34 GB GPU. Then you can load a 13B model with BF16 weight,'
-            'which requires at least 26GB GPU memory. Note that this '
-            'requires fast CPU-GPU interconnect, as part of the model is'
-            'loaded from CPU memory to GPU memory on the fly in each '
-            'model forward pass.')
-        parser.add_argument(
-            "--gpu-memory-utilization",
-            "-gmu",
-            type=float,
-            default=EngineArgs.gpu_memory_utilization,
-            help="the fraction of GPU memory to be used for "
-            "the model executor, which can range from 0 to 1."
-            "If unspecified, will use the default value of 0.9.",
-        )
-        parser.add_argument(
-            "--num-gpu-blocks-override",
-            type=int,
-            default=None,
-            help="If specified, ignore GPU profiling result and use this "
-            "number of GPU blocks. Used for testing preemption.")
-        parser.add_argument(
-            "--max-num-batched-tokens",
-            type=int,
-            default=EngineArgs.max_num_batched_tokens,
-            help="maximum number of batched tokens per "
-            "iteration",
-        )
-        parser.add_argument(
-            "--max-num-seqs",
-            type=int,
-            default=EngineArgs.max_num_seqs,
-            help="maximum number of sequences per iteration",
-        )
-        parser.add_argument(
-            "--max-logprobs",
-            type=int,
-            default=EngineArgs.max_logprobs,
-            help="maximum number of log probabilities to "
-            "return.",
-        )
-        parser.add_argument(
-            "--disable-log-stats",
-            action="store_true",
-            help="disable logging statistics",
-        )
-        # Quantization settings.
+        # Quantization Options
         parser.add_argument(
             "--quantization",
             "-q",
             type=str,
             choices=[*QUANTIZATION_METHODS, None],
             default=EngineArgs.quantization,
-            help="Method used to quantize the weights. If "
+            help="Category: Quantization Options\n"
+            "Method used to quantize the weights. If "
             "None, we first check the `quantization_config` "
             "attribute in the model config file. If that is "
             "None, we assume the model weights are not "
@@ -420,126 +445,300 @@ class EngineArgs:
         parser.add_argument(
             "--load-in-4bit",
             action="store_true",
-            help="Load the FP16 model in 4-bit format. Also "
+            help="Category: Quantization Options\n"
+            "Load the FP16 model in 4-bit format. Also "
             "works with AWQ models. Throughput at 2.5x of "
             "FP16.",
         )
         parser.add_argument(
-            "--load-in-8bit",
-            action="store_true",
-            help="Load the FP16 model in 8-bit format. "
-            "Throughput at 0.3x of FP16.",
-        )
-        parser.add_argument(
             "--load-in-smooth",
             action="store_true",
-            help="Load the FP16 model in smoothquant "
+            help="Category: Quantization Options\n"
+            "Load the FP16 model in smoothquant "
             "8bit format. Throughput at 0.7x of FP16. ",
         )
         parser.add_argument(
-            "--deepspeed-fp-bits",
-            type=int,
-            default=None,
-            help="Number of floating bits to use for the deepseed "
-            "quantization. Supported bits are: 4, 6, 8, 12. ")
-        parser.add_argument('--rope-scaling',
-                            default=None,
-                            type=json.loads,
-                            help='RoPE scaling configuration in JSON format. '
-                            'For example, {"type":"dynamic","factor":2.0}')
-        parser.add_argument('--rope-theta',
-                            default=None,
-                            type=float,
-                            help='RoPE theta. Use with `rope_scaling`. In '
-                            'some cases, changing the RoPE theta improves the '
-                            'performance of the scaled model.')
-        parser.add_argument(
-            "--enforce-eager",
-            action=StoreBoolean,
-            default=EngineArgs.enforce_eager,
-            nargs="?",
-            const="True",
-            help="Always use eager-mode PyTorch. If False, "
-            "will use eager mode and CUDA graph in hybrid "
-            "for maximal performance and flexibility.",
-        )
-        parser.add_argument("--max-context-len-to-capture",
-                            type=int,
-                            default=EngineArgs.max_context_len_to_capture,
-                            help="Maximum context length covered by CUDA "
-                            "graphs. When a sequence has context length "
-                            "larger than this, we fall back to eager mode. "
-                            "(DEPRECATED. Use --max-seq_len-to-capture instead"
-                            ")")
-        parser.add_argument("--max-seq_len-to-capture",
-                            type=int,
-                            default=EngineArgs.max_seq_len_to_capture,
-                            help="Maximum sequence length covered by CUDA "
-                            "graphs. When a sequence has context length "
-                            "larger than this, we fall back to eager mode.")
-        parser.add_argument(
-            "--disable-custom-all-reduce",
+            "--load-in-8bit",
             action="store_true",
-            default=EngineArgs.disable_custom_all_reduce,
-            help="See ParallelConfig",
+            help="Category: Quantization Options\n"
+            "Load the FP16 model in 8-bit format. "
+            "Throughput at 0.3x of FP16.",
         )
-        parser.add_argument("--tokenizer-pool-size",
-                            type=int,
-                            default=EngineArgs.tokenizer_pool_size,
-                            help="Size of tokenizer pool to use for "
-                            "asynchronous tokenization. If 0, will "
-                            "use synchronous tokenization.")
-        parser.add_argument("--tokenizer-pool-type",
-                            type=str,
-                            default=EngineArgs.tokenizer_pool_type,
-                            help="The type of tokenizer pool to use for "
-                            "asynchronous tokenization. Ignored if "
-                            "tokenizer_pool_size is 0.")
-        parser.add_argument("--tokenizer-pool-extra-config",
-                            type=str,
-                            default=EngineArgs.tokenizer_pool_extra_config,
-                            help="Extra config for tokenizer pool. "
-                            "This should be a JSON string that will be "
-                            "parsed into a dictionary. Ignored if "
-                            "tokenizer_pool_size is 0.")
         parser.add_argument(
-            '--ignore-patterns',
-            action="append",
+            '--quantization-param-path',
             type=str,
-            default=[],
-            help="The pattern(s) to ignore when loading the model."
-            "Defaults to 'original/**/*' to avoid repeated loading of llama's "
-            "checkpoints.")
+            default=None,
+            help='Category: Quantization Options\n'
+            'Path to the JSON file containing the KV cache '
+            'scaling factors. This should generally be supplied, when '
+            'KV cache dtype is FP8. Otherwise, KV cache scaling factors '
+            'default to 1.0, which may cause accuracy issues. '
+            'FP8_E5M2 (without scaling) is only supported on cuda version'
+            'greater than 11.8. On ROCm (AMD GPU), FP8_E4M3 is instead '
+            'supported for common inference criteria. ')
         parser.add_argument(
             '--preemption-mode',
             type=str,
             default=None,
-            help='If \'recompute\', the engine performs preemption by block '
+            help='Category: Scheduler Options\n'
+            'If \'recompute\', the engine performs preemption by block '
             'swapping; If \'swap\', the engine performs preemption by block '
             'swapping.')
-        # LoRA related configs
+        parser.add_argument("--deepspeed-fp-bits",
+                            type=int,
+                            default=None,
+                            help="Category: Quantization Options\n"
+                            "Number of floating bits to use for the deepseed "
+                            "quantization. Supported bits are: 4, 6, 8, 12. ")
+        # Cache Options
+        parser.add_argument(
+            '--kv-cache-dtype',
+            type=str,
+            choices=['auto', 'fp8', 'fp8_e5m2', 'fp8_e4m3'],
+            default=EngineArgs.kv_cache_dtype,
+            help='Category: Cache Options\n'
+            'Data type for kv cache storage. If "auto", will use model '
+            'data type. CUDA 11.8+ supports fp8 (=fp8_e4m3) and fp8_e5m2. '
+            'ROCm (AMD GPU) supports fp8 (=fp8_e4m3)')
+        parser.add_argument(
+            "--block-size",
+            type=int,
+            default=EngineArgs.block_size,
+            choices=[8, 16, 32],
+            help="Category: Cache Options\n"
+            "token block size",
+        )
+        parser.add_argument(
+            "--enable-prefix-caching",
+            "--context-shift",
+            action="store_true",
+            help="Category: Cache Options\n"
+            "Enable automatic prefix caching.",
+        )
+        parser.add_argument(
+            "--num-gpu-blocks-override",
+            type=int,
+            default=None,
+            help="Category: Cache Options Options\n"
+            "If specified, ignore GPU profiling result and use this "
+            "number of GPU blocks. Used for testing preemption.")
+        parser.add_argument('--disable-sliding-window',
+                            action='store_true',
+                            help='Category: KV Cache Options\n'
+                            'Disables sliding window, '
+                            'capping to sliding window size')
+        parser.add_argument(
+            "--gpu-memory-utilization",
+            "-gmu",
+            type=float,
+            default=EngineArgs.gpu_memory_utilization,
+            help="Category: Cache Options\n"
+            "The fraction of GPU memory to be used for "
+            "the model executor, which can range from 0 to 1."
+            "If unspecified, will use the default value of 0.9.",
+        )
+        parser.add_argument(
+            "--swap-space",
+            type=int,
+            default=EngineArgs.swap_space,
+            help="Category: Cache Options\n"
+            "CPU swap space size (GiB) per GPU",
+        )
+        parser.add_argument(
+            '--cpu-offload-gb',
+            type=float,
+            default=0,
+            help='Category: Cache Options\n'
+            'The space in GiB to offload to CPU, per GPU. '
+            'Default is 0, which means no offloading. Intuitively, '
+            'this argument can be seen as a virtual way to increase '
+            'the GPU memory size. For example, if you have one 24 GB '
+            'GPU and set this to 10, virtually you can think of it as '
+            'a 34 GB GPU. Then you can load a 13B model with BF16 weight,'
+            'which requires at least 26GB GPU memory. Note that this '
+            'requires fast CPU-GPU interconnect, as part of the model is'
+            'loaded from CPU memory to GPU memory on the fly in each '
+            'model forward pass.')
+        # Scheduler Options
+        parser.add_argument("--use-v2-block-manager",
+                            action="store_true",
+                            help="Category: Scheduler Options\n"
+                            "Use the v2 block manager.")
+        parser.add_argument(
+            "--scheduler-delay-factor",
+            "-sdf",
+            type=float,
+            default=EngineArgs.scheduler_delay_factor,
+            help="Category: Scheduler Options\n"
+            "Apply a delay (of delay factor multiplied by previous "
+            "prompt latency) before scheduling next prompt.")
+        parser.add_argument(
+            "--enable-chunked-prefill",
+            action=StoreBoolean,
+            default=EngineArgs.enable_chunked_prefill,
+            nargs="?",
+            const="True",
+            help="Category: Scheduler Options\n"
+            "If True, the prefill requests can be chunked based on the "
+            "max_num_batched_tokens.")
+        parser.add_argument(
+            '--guided-decoding-backend',
+            type=str,
+            default='outlines',
+            choices=['outlines', 'lm-format-enforcer'],
+            help='Category: Scheduler Options\n'
+            'Which engine will be used for guided decoding'
+            ' (JSON schema / regex etc) by default. Currently support '
+            'https://github.com/outlines-dev/outlines and '
+            'https://github.com/noamgat/lm-format-enforcer.'
+            ' Can be overridden per request via guided_decoding_backend'
+            ' parameter.')
+        parser.add_argument(
+            "--max-num-batched-tokens",
+            type=int,
+            default=EngineArgs.max_num_batched_tokens,
+            help="Category: KV Cache Options\n"
+            "maximum number of batched tokens per "
+            "iteration",
+        )
+        parser.add_argument(
+            "--max-num-seqs",
+            type=int,
+            default=EngineArgs.max_num_seqs,
+            help="Category: API Options\n"
+            "maximum number of sequences per iteration",
+        )
+        # Speculative Decoding Options
+        parser.add_argument("--num-lookahead-slots",
+                            type=int,
+                            default=EngineArgs.num_lookahead_slots,
+                            help="Category: Speculative Decoding Options\n"
+                            "Experimental scheduling config necessary for "
+                            "speculative decoding. This will be replaced by "
+                            "speculative decoding config in the future; it is "
+                            "present for testing purposes until then.")
+
+        parser.add_argument(
+            "--speculative-model",
+            type=str,
+            default=EngineArgs.speculative_model,
+            help="Category: Speculative Decoding Options\n"
+            "The name of the draft model to be used in speculative decoding.")
+        parser.add_argument("--num-speculative-tokens",
+                            type=int,
+                            default=EngineArgs.num_speculative_tokens,
+                            help="Category: Speculative Decoding Options\n"
+                            "The number of speculative tokens to sample from "
+                            "the draft model in speculative decoding")
+        parser.add_argument(
+            "--speculative-max-model-len",
+            type=str,
+            default=EngineArgs.speculative_max_model_len,
+            help="Category: Speculative Decoding Options\n"
+            "The maximum sequence length supported by the "
+            "draft model. Sequences over this length will skip "
+            "speculation.")
+        parser.add_argument(
+            "--ngram-prompt-lookup-max",
+            type=int,
+            default=EngineArgs.ngram_prompt_lookup_max,
+            help="Category: Speculative Decoding Options\n"
+            "Max size of window for ngram prompt lookup in speculative "
+            "decoding.")
+        parser.add_argument(
+            "--ngram-prompt-lookup-min",
+            type=int,
+            default=EngineArgs.ngram_prompt_lookup_min,
+            help="Category: Speculative Decoding Options\n"
+            "Min size of window for ngram prompt lookup in speculative "
+            "decoding.")
+
+        parser.add_argument(
+            "--speculative-draft-tensor-parallel-size",
+            "-spec-draft-tp",
+            type=int,
+            default=EngineArgs.speculative_draft_tensor_parallel_size,
+            help="Category: Speculative Decoding Options\n"
+            "Number of tensor parallel replicas for "
+            "the draft model in speculative decoding.")
+        parser.add_argument(
+            "--speculative-disable-by-batch-size",
+            type=int,
+            default=EngineArgs.speculative_disable_by_batch_size,
+            help="Category: Speculative Decoding Options\n"
+            "Disable speculative decoding for new incoming requests "
+            "if the number of enqueue requests is larger than this value.")
+        parser.add_argument(
+            '--spec-decoding-acceptance-method',
+            type=str,
+            default=EngineArgs.spec_decoding_acceptance_method,
+            choices=['rejection_sampler', 'typical_acceptance_sampler'],
+            help='Category: Speculative Decoding Options\n'
+            'Specify the acceptance method to use during draft token '
+            'verification in speculative decoding. Two types of acceptance '
+            'routines are supported: '
+            '1) RejectionSampler which does not allow changing the '
+            'acceptance rate of draft tokens, '
+            '2) TypicalAcceptanceSampler which is configurable, allowing for '
+            'a higher acceptance rate at the cost of lower quality, '
+            'and vice versa.')
+        parser.add_argument(
+            '--typical-acceptance-sampler-posterior-threshold',
+            type=float,
+            default=EngineArgs.typical_acceptance_sampler_posterior_threshold,
+            help='Category: Speculative Decoding Options\n'
+            'Set the lower bound threshold for the posterior '
+            'probability of a token to be accepted. This threshold is '
+            'used by the TypicalAcceptanceSampler to make sampling decisions '
+            'during speculative decoding. Defaults to 0.09')
+        parser.add_argument(
+            '--typical-acceptance-sampler-posterior-alpha',
+            type=float,
+            default=EngineArgs.typical_acceptance_sampler_posterior_alpha,
+            help='Category: Speculative Decoding Options\n'
+            'A scaling factor for the entropy-based threshold for token '
+            'acceptance in the TypicalAcceptanceSampler. Typically defaults '
+            'to sqrt of --typical-acceptance-sampler-posterior-threshold '
+            'i.e. 0.3')
+        parser.add_argument(
+            '--disable-logprobs-during-spec-decoding',
+            type=bool,
+            default=EngineArgs.disable_logprobs_during_spec_decoding,
+            help='Category: Speculative Decoding Options\n'
+            'If set to True, token log probabilities are not returned '
+            'during speculative decoding. If set to False, log probabilities '
+            'are returned according to the settings in SamplingParams. If '
+            'not specified, it defaults to True. Disabling log probabilities '
+            'during speculative decoding reduces latency by skipping logprob '
+            'calculation in proposal sampling, target sampling, and after '
+            'accepted tokens are determined.')
+        # Adapter Options
         parser.add_argument(
             "--enable-lora",
             action="store_true",
-            help="If True, enable handling of LoRA adapters.",
+            help="Category: Adapter Options\n"
+            "If True, enable handling of LoRA adapters.",
         )
         parser.add_argument(
             "--max-loras",
             type=int,
             default=EngineArgs.max_loras,
-            help="Max number of LoRAs in a single batch.",
+            help="Category: Adapter Options\n"
+            "Max number of LoRAs in a single batch.",
         )
         parser.add_argument(
             "--max-lora-rank",
             type=int,
             default=EngineArgs.max_lora_rank,
-            help="Max LoRA rank.",
+            help="Category: Adapter Options\n"
+            "Max LoRA rank.",
         )
         parser.add_argument(
             "--lora-extra-vocab-size",
             type=int,
             default=EngineArgs.lora_extra_vocab_size,
-            help=("Maximum size of extra vocabulary that can be "
+            help=("Category: Adapter Options\n"
+                  "Maximum size of extra vocabulary that can be "
                   "present in a LoRA adapter (added to the base "
                   "model vocabulary)."),
         )
@@ -548,14 +747,25 @@ class EngineArgs:
             type=str,
             default=EngineArgs.lora_dtype,
             choices=["auto", "float16", "bfloat16", "float32"],
-            help=("Data type for LoRA. If auto, will default to "
+            help=("Category: Adapter Options\n"
+                  "Data type for LoRA. If auto, will default to "
                   "base model dtype."),
+        )
+        parser.add_argument(
+            "--max-cpu-loras",
+            type=int,
+            default=EngineArgs.max_cpu_loras,
+            help=("Category: Adapter Options\n"
+                  "Maximum number of LoRAs to store in CPU memory. "
+                  "Must be >= than max_num_seqs. "
+                  "Defaults to max_num_seqs."),
         )
         parser.add_argument(
             "--long-lora-scaling-factors",
             type=str,
             default=EngineArgs.long_lora_scaling_factors,
-            help=("Specify multiple scaling factors (which can "
+            help=("Category: Adapter Options\n"
+                  "Specify multiple scaling factors (which can "
                   "be different from base model scaling factor "
                   "- see eg. Long LoRA) to allow for multiple "
                   "LoRA adapters trained with those scaling "
@@ -563,168 +773,39 @@ class EngineArgs:
                   "specified, only adapters trained with the "
                   "base model scaling factor are allowed."))
         parser.add_argument(
-            "--max-cpu-loras",
-            type=int,
-            default=EngineArgs.max_cpu_loras,
-            help=("Maximum number of LoRAs to store in CPU memory. "
-                  "Must be >= than max_num_seqs. "
-                  "Defaults to max_num_seqs."),
-        )
-        parser.add_argument(
             "--fully-sharded-loras",
             action='store_true',
-            help=("By default, only half of the LoRA computation is sharded "
+            help=("Category: Adapter Options\n"
+                  "By default, only half of the LoRA computation is sharded "
                   "with tensor parallelism. Enabling this will use the fully "
                   "sharded layers. At high sequence length, max rank or "
                   "tensor parallel size, this is likely faster."))
-        parser.add_argument('--enable-prompt-adapter',
-                            action='store_true',
-                            help='If True, enable handling of PromptAdapters.')
-        parser.add_argument('--max-prompt-adapters',
-                            type=int,
-                            default=EngineArgs.max_prompt_adapters,
-                            help='Max number of PromptAdapters in a batch.')
-        parser.add_argument('--max-prompt-adapter-token',
-                            type=int,
-                            default=EngineArgs.max_prompt_adapter_token,
-                            help='Max number of PromptAdapters tokens')
-        parser.add_argument(
-            "--device",
-            type=str,
-            default=EngineArgs.device,
-            choices=[
-                "auto", "cuda", "neuron", "cpu", "openvino", "tpu", "xpu"
-            ],
-            help=("Device to use for model execution."),
-        )
-        parser.add_argument(
-            "--scheduler-delay-factor",
-            "-sdf",
-            type=float,
-            default=EngineArgs.scheduler_delay_factor,
-            help="Apply a delay (of delay factor multiplied by previous "
-            "prompt latency) before scheduling next prompt.")
-        parser.add_argument(
-            "--enable-chunked-prefill",
-            action=StoreBoolean,
-            default=EngineArgs.enable_chunked_prefill,
-            nargs="?",
-            const="True",
-            help="If True, the prefill requests can be chunked based on the "
-            "max_num_batched_tokens.")
-        parser.add_argument(
-            "--speculative-model",
-            type=str,
-            default=EngineArgs.speculative_model,
-            help=
-            "The name of the draft model to be used in speculative decoding.")
-        parser.add_argument(
-            "--speculative-draft-tensor-parallel-size",
-            "-spec-draft-tp",
-            type=int,
-            default=EngineArgs.speculative_draft_tensor_parallel_size,
-            help="Number of tensor parallel replicas for "
-            "the draft model in speculative decoding.")
-        parser.add_argument(
-            "--num-speculative-tokens",
-            type=int,
-            default=EngineArgs.num_speculative_tokens,
-            help="The number of speculative tokens to sample from "
-            "the draft model in speculative decoding")
-        parser.add_argument(
-            "--speculative-max-model-len",
-            type=str,
-            default=EngineArgs.speculative_max_model_len,
-            help="The maximum sequence length supported by the "
-            "draft model. Sequences over this length will skip "
-            "speculation.")
-        parser.add_argument(
-            "--speculative-disable-by-batch-size",
-            type=int,
-            default=EngineArgs.speculative_disable_by_batch_size,
-            help="Disable speculative decoding for new incoming requests "
-            "if the number of enqueue requests is larger than this value.")
-        parser.add_argument(
-            "--ngram-prompt-lookup-max",
-            type=int,
-            default=EngineArgs.ngram_prompt_lookup_max,
-            help="Max size of window for ngram prompt lookup in speculative "
-            "decoding.")
-        parser.add_argument(
-            "--ngram-prompt-lookup-min",
-            type=int,
-            default=EngineArgs.ngram_prompt_lookup_min,
-            help="Min size of window for ngram prompt lookup in speculative "
-            "decoding.")
-
-        parser.add_argument(
-            '--spec-decoding-acceptance-method',
-            type=str,
-            default=EngineArgs.spec_decoding_acceptance_method,
-            choices=['rejection_sampler', 'typical_acceptance_sampler'],
-            help='Specify the acceptance method to use during draft token '
-            'verification in speculative decoding. Two types of acceptance '
-            'routines are supported: '
-            '1) RejectionSampler which does not allow changing the '
-            'acceptance rate of draft tokens, '
-            '2) TypicalAcceptanceSampler which is configurable, allowing for '
-            'a higher acceptance rate at the cost of lower quality, '
-            'and vice versa.')
-
-        parser.add_argument(
-            '--typical-acceptance-sampler-posterior-threshold',
-            type=float,
-            default=EngineArgs.typical_acceptance_sampler_posterior_threshold,
-            help='Set the lower bound threshold for the posterior '
-            'probability of a token to be accepted. This threshold is '
-            'used by the TypicalAcceptanceSampler to make sampling decisions '
-            'during speculative decoding. Defaults to 0.09')
-
-        parser.add_argument(
-            '--typical-acceptance-sampler-posterior-alpha',
-            type=float,
-            default=EngineArgs.typical_acceptance_sampler_posterior_alpha,
-            help='A scaling factor for the entropy-based threshold for token '
-            'acceptance in the TypicalAcceptanceSampler. Typically defaults '
-            'to sqrt of --typical-acceptance-sampler-posterior-threshold '
-            'i.e. 0.3')
-        parser.add_argument(
-            '--disable-logprobs-during-spec-decoding',
-            type=bool,
-            default=EngineArgs.disable_logprobs_during_spec_decoding,
-            help='If set to True, token log probabilities are not returned '
-            'during speculative decoding. If set to False, log probabilities '
-            'are returned according to the settings in SamplingParams. If '
-            'not specified, it defaults to True. Disabling log probabilities '
-            'during speculative decoding reduces latency by skipping logprob '
-            'calculation in proposal sampling, target sampling, and after '
-            'accepted tokens are determined.')
-        parser.add_argument("--model-loader-extra-config",
-                            type=str,
-                            default=EngineArgs.model_loader_extra_config,
-                            help="Extra config for model loader. "
-                            "This will be passed to the model loader "
-                            "corresponding to the chosen load_format. "
-                            "This should be a JSON string that will be "
-                            "parsed into a dictionary.")
-        parser.add_argument(
-            "--served-model-name",
-            nargs="+",
-            type=str,
-            default=None,
-            help="The model name(s) used in the API. If multiple "
-            "names are provided, the server will respond to any "
-            "of the provided names. The model name in the model "
-            "field of a response will be the first name in this "
-            "list. If not specified, the model name will be the "
-            "same as the `--model` argument. Noted that this name(s)"
-            "will also be used in `model_name` tag content of "
-            "prometheus metrics, if multiple names provided, metrics"
-            "tag will take the first one.")
         parser.add_argument("--qlora-adapter-name-or-path",
                             type=str,
                             default=None,
-                            help="Name or path of the LoRA adapter to use.")
+                            help="Category: Adapter Options\n"
+                            "Name or path of the LoRA adapter to use.")
+        parser.add_argument('--enable-prompt-adapter',
+                            action='store_true',
+                            help='Category: Adapter Options\n'
+                            'If True, enable handling of PromptAdapters.')
+        parser.add_argument('--max-prompt-adapters',
+                            type=int,
+                            default=EngineArgs.max_prompt_adapters,
+                            help='Category: Adapter Options\n'
+                            'Max number of PromptAdapters in a batch.')
+        parser.add_argument('--max-prompt-adapter-token',
+                            type=int,
+                            default=EngineArgs.max_prompt_adapter_token,
+                            help='Category: Adapter Options\n'
+                            'Max number of PromptAdapters tokens')
+        # Log Options
+        parser.add_argument(
+            "--disable-log-stats",
+            action="store_true",
+            help="Category: Log Options\n"
+            "disable logging statistics",
+        )
 
         return parser
 
