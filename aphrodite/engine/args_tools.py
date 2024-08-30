@@ -24,8 +24,9 @@ if TYPE_CHECKING:
 @dataclass
 class EngineArgs:
     """Arguments for Aphrodite engine."""
-    # Model Options
+    # Device Options
     device: str = "auto"
+    # Model Options
     seed: int = 0
     model: str
     tokenizer: Optional[str] = None
@@ -132,8 +133,7 @@ class EngineArgs:
 
         # NOTE: If you update any of the arguments below, please also
         # make sure to update docs/source/models/engine_args.rst
-
-        # Model Options
+        # Device Options
         parser.add_argument(
             "--device",
             type=str,
@@ -144,6 +144,7 @@ class EngineArgs:
             help=("Category: Model Options\n"
                   "Device to use for model execution."),
         )
+        # Model Options
         parser.add_argument("--seed",
                             type=int,
                             default=EngineArgs.seed,
@@ -572,7 +573,6 @@ class EngineArgs:
             ' Can be overridden per request via guided_decoding_backend'
             ' parameter.')
         # Speculative Decoding Options
-
         parser.add_argument("--num-lookahead-slots",
                             type=int,
                             default=EngineArgs.num_lookahead_slots,
@@ -676,7 +676,7 @@ class EngineArgs:
             'during speculative decoding reduces latency by skipping logprob '
             'calculation in proposal sampling, target sampling, and after '
             'accepted tokens are determined.')
-        # LoRA Options
+        # Adapter Options
         parser.add_argument(
             "--enable-lora",
             action="store_true",
@@ -749,7 +749,6 @@ class EngineArgs:
                             default=None,
                             help="Category: LoRA Options\n"
                             "Name or path of the LoRA adapter to use.")
-        # Soft Prompt Options
         parser.add_argument('--enable-prompt-adapter',
                             action='store_true',
                             help='Category: Soft Prompt Options\n'
@@ -764,9 +763,7 @@ class EngineArgs:
                             default=EngineArgs.max_prompt_adapter_token,
                             help='Category: Soft Prompt Options\n'
                             'Max number of PromptAdapters tokens')
-
         # API Options
-
         parser.add_argument(
             "--served-model-name",
             nargs="+",
