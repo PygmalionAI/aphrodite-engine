@@ -99,7 +99,7 @@ class EngineArgs:
     typical_acceptance_sampler_posterior_threshold: Optional[float] = None
     typical_acceptance_sampler_posterior_alpha: Optional[float] = None
     disable_logprobs_during_spec_decoding: Optional[bool] = None
-    # LoRA Options
+    # Adapter Options
     enable_lora: bool = False
     max_loras: int = 1
     max_lora_rank: int = 16
