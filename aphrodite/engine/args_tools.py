@@ -134,16 +134,6 @@ class EngineArgs:
         # NOTE: If you update any of the arguments below, please also
         # make sure to update docs/source/models/engine_args.rst
         # Device Options
-        parser.add_argument(
-            "--device",
-            type=str,
-            default=EngineArgs.device,
-            choices=[
-                "auto", "cuda", "neuron", "cpu", "openvino", "tpu", "xpu"
-            ],
-            help=("Category: Model Options\n"
-                  "Device to use for model execution."),
-        )
         # Model Options
         parser.add_argument("--seed",
                             type=int,
@@ -321,6 +311,17 @@ class EngineArgs:
             help="Category: Model Options\n"
             "maximum number of log probabilities to "
             "return.",
+        )
+        # Device Options
+        parser.add_argument(
+            "--device",
+            type=str,
+            default=EngineArgs.device,
+            choices=[
+                "auto", "cuda", "neuron", "cpu", "openvino", "tpu", "xpu"
+            ],
+            help=("Category: Model Options\n"
+                  "Device to use for model execution."),
         )
         # Load Options
         parser.add_argument(
