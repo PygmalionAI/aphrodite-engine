@@ -135,11 +135,6 @@ class EngineArgs:
         # make sure to update docs/source/models/engine_args.rst
         # Device Options
         # Model Options
-        parser.add_argument("--seed",
-                            type=int,
-                            default=EngineArgs.seed,
-                            help="Category: Model Options\n"
-                            "random seed")
         parser.add_argument(
             "--model",
             type=str,
@@ -147,6 +142,11 @@ class EngineArgs:
             help="Category: Model Options\n"
             "name or path of the huggingface model to use",
         )
+        parser.add_argument("--seed",
+                            type=int,
+                            default=EngineArgs.seed,
+                            help="Category: Model Options\n"
+                            "random seed")
         parser.add_argument(
             "--served-model-name",
             nargs="+",
