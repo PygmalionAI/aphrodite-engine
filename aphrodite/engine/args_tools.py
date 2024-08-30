@@ -27,8 +27,8 @@ class EngineArgs:
     # Device Options
     device: str = "auto"
     # Model Options
-    seed: int = 0
     model: str
+    served_model_name: Optional[Union[List[str]]] = None
     tokenizer: Optional[str] = None
     revision: Optional[str] = None
     code_revision: Optional[str] = None
@@ -114,8 +114,8 @@ class EngineArgs:
     enable_prompt_adapter: bool = False
     max_prompt_adapters: int = 1
     max_prompt_adapter_token: int = 0
-    # API Options
-    served_model_name: Optional[Union[List[str]]] = None
+    # Inference Options
+    seed: int = 0
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: int = 256
     max_logprobs: int = 10  # OpenAI default is 5, setting to 10 because ST
@@ -146,11 +146,6 @@ class EngineArgs:
                   "Device to use for model execution."),
         )
         # Model Options
-        parser.add_argument("--seed",
-                            type=int,
-                            default=EngineArgs.seed,
-                            help="Category: Model Options\n"
-                            "random seed")
         parser.add_argument(
             "--model",
             type=str,
@@ -158,6 +153,21 @@ class EngineArgs:
             help="Category: Model Options\n"
             "name or path of the huggingface model to use",
         )
+        parser.add_argument(
+            "--served-model-name",
+            nargs="+",
+            type=str,
+            default=None,
+            help="Category: API Options\n"
+            "The model name(s) used in the API. If multiple "
+            "names are provided, the server will respond to any "
+            "of the provided names. The model name in the model "
+            "field of a response will be the first name in this "
+            "list. If not specified, the model name will be the "
+            "same as the `--model` argument. Noted that this name(s)"
+            "will also be used in `model_name` tag content of "
+            "prometheus metrics, if multiple names provided, metrics"
+            "tag will take the first one.")
         parser.add_argument(
             "--tokenizer",
             type=str,
@@ -765,22 +775,12 @@ class EngineArgs:
                             default=EngineArgs.max_prompt_adapter_token,
                             help='Category: Soft Prompt Options\n'
                             'Max number of PromptAdapters tokens')
-        # API Options
-        parser.add_argument(
-            "--served-model-name",
-            nargs="+",
-            type=str,
-            default=None,
-            help="Category: API Options\n"
-            "The model name(s) used in the API. If multiple "
-            "names are provided, the server will respond to any "
-            "of the provided names. The model name in the model "
-            "field of a response will be the first name in this "
-            "list. If not specified, the model name will be the "
-            "same as the `--model` argument. Noted that this name(s)"
-            "will also be used in `model_name` tag content of "
-            "prometheus metrics, if multiple names provided, metrics"
-            "tag will take the first one.")
+        # Inference Options
+        parser.add_argument("--seed",
+                            type=int,
+                            default=EngineArgs.seed,
+                            help="Category: Model Options\n"
+                            "random seed")
         parser.add_argument(
             "--max-num-batched-tokens",
             type=int,
