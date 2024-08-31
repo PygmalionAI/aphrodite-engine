@@ -11,11 +11,8 @@ except ImportError as e:
     logger.warning(f"Failed to import from aphrodite._C with {e}")
 
 with contextlib.suppress(ImportError):
-    import aphrodite._moe_C
-
-with contextlib.suppress(ImportError):
     # ruff: noqa: F401
-    import aphrodite._punica_C
+    import aphrodite._moe_C
 
 
 def is_custom_op_supported(op_name: str) -> bool:
@@ -558,43 +555,6 @@ def get_graph_buffer_ipc_meta(fa: int) -> Tuple[List[str], List[int]]:
 def register_graph_buffers(fa: int, handles: List[str],
                            offsets: List[List[int]]) -> None:
     torch.ops._C_custom_ar.register_graph_buffers(fa, handles, offsets)
-
-
-# punica
-def dispatch_bgmv(
-    y: torch.Tensor,
-    x: torch.Tensor,
-    w_t_all: torch.Tensor,
-    indicies: torch.Tensor,
-    layer_idx: int,
-    scale: float,
-) -> None:
-    torch.ops._punica_C.dispatch_bgmv(y, x, w_t_all, indicies, layer_idx,
-                                      scale)
-
-
-def dispatch_bgmv_low_level(
-    y: torch.Tensor,
-    x: torch.Tensor,
-    w_t_all: torch.Tensor,
-    indicies: torch.Tensor,
-    layer_idx: int,
-    scale: float,
-    h_in: int,
-    h_out: int,
-    y_offset: int,
-) -> None:
-    torch.ops._punica_C.dispatch_bgmv_low_level(
-        y,
-        x,
-        w_t_all,
-        indicies,
-        layer_idx,
-        scale,
-        h_in,
-        h_out,
-        y_offset,
-    )
 
 
 # TODO: remove this later
