@@ -1,3 +1,4 @@
+import os
 from typing import Any, Dict, List, Optional
 
 import torch
@@ -24,6 +25,8 @@ from aphrodite.quantization.utils.w8a8_utils import (
     per_tensor_dequantize, requantize_with_max_scale)
 
 ACTIVATION_SCHEMES = ["static", "dynamic"]
+APHRODITE_TEST_FORCE_FP8_MARLIN = os.environ.get(
+    "APHRODITE_TEST_FORCE_FP8_MARLIN", "0").strip().lower() in ("1", "true")
 
 
 class Fp8Config(QuantizationConfig):
@@ -116,7 +119,7 @@ class Fp8LinearMethod(LinearMethodBase):
         # kernel for fast weight-only FP8 quantization
         capability = current_platform.get_device_capability()
         capability = capability[0] * 10 + capability[1]
-        self.use_marlin = capability < 89
+        self.use_marlin = capability < 89 or APHRODITE_TEST_FORCE_FP8_MARLIN
 
     def create_weights(
         self,
@@ -171,6 +174,14 @@ class Fp8LinearMethod(LinearMethodBase):
         if not self.quant_config.is_checkpoint_fp8_serialized:
             qweight, weight_scale = ops.scaled_fp8_quant(layer.weight,
                                                          scale=None)
+
+            # If using marlin (w8a16), kernel uses channelwise weights,
+            # so extend the weight scales to be channelwise.
+            if self.use_marlin:
+                assert weight_scale.numel() == 1
+                weight_scale = convert_to_channelwise(
+                    weight_scale.expand(len(layer.logical_widths)),
+                    layer.logical_widths)
 
             # Update the layer with the new values.
             layer.weight = Parameter(qweight.t(), requires_grad=False)
