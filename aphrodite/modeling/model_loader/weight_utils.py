@@ -21,6 +21,7 @@ from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 from aphrodite.common.config import LoadConfig, ModelConfig
 from aphrodite.common.utils import print_warning_once
 from aphrodite.distributed import get_tensor_model_parallel_rank
+from aphrodite.platforms import current_platform
 from aphrodite.quantization import QuantizationConfig, get_quantization_config
 from aphrodite.quantization.schema import QuantParamSchema
 
@@ -476,6 +477,10 @@ def initialize_dummy_weights(
     """
     for param in model.state_dict().values():
         if torch.is_floating_point(param):
+            if current_platform.is_tpu():
+                # XLA device does not support torch.Generator()
+                param.uniform_(low, high)
+                continue
             generator = torch.Generator(device=param.data.device)
             generator.manual_seed(seed)
             if torch.finfo(param.data.dtype).bits < 16:
