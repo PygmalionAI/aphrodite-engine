@@ -379,6 +379,7 @@ def get_open_port() -> int:
         while True:
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     s.bind(("", port))
                     return port
             except OSError:
@@ -388,11 +389,13 @@ def get_open_port() -> int:
     # try ipv4
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind(("", 0))
             return s.getsockname()[1]
     except OSError:
         # try ipv6
         with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind(("", 0))
             return s.getsockname()[1]
 
