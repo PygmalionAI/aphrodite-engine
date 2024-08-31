@@ -20,7 +20,7 @@ from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.models import ModelRegistry
 from aphrodite.modeling.models.intern_vit import InternVisionModel
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.multimodal import MULTIMODAL_REGISTRY, BatchedTensors
+from aphrodite.multimodal import MULTIMODAL_REGISTRY
 from aphrodite.multimodal.base import MultiModalInputs
 from aphrodite.multimodal.image import cached_get_tokenizer
 from aphrodite.quantization import QuantizationConfig
@@ -43,7 +43,7 @@ MAX_IMAGE_FEATURE_SIZE_HEIGHT = 500
 
 class InternVLImagePixelInputs(TypedDict):
     type: Literal["pixel_values"]
-    data: BatchedTensors
+    data: Union[torch.Tensor, List[torch.Tensor]]
     """
     Shape: `(batch_size, 1 + num_patches, num_channels, height, width)`
     Note that `num_patches` may be different for each batch, in which case
@@ -192,7 +192,7 @@ def input_processor_for_internvl(ctx: InputContext, llm_inputs: LLMInputs):
     tokenizer = cached_get_tokenizer(model_config.tokenizer,
                                      trust_remote_code=True)
 
-    prompt = llm_inputs["prompt"]
+    prompt = llm_inputs.get("prompt")
     prompt_token_ids = llm_inputs["prompt_token_ids"]
     if prompt is None:
         prompt = tokenizer.decode(prompt_token_ids)

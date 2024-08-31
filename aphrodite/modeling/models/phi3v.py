@@ -36,7 +36,7 @@ from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.models.clip import CLIPVisionModel
 from aphrodite.modeling.models.llama import LlamaModel
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.multimodal import MULTIMODAL_REGISTRY, BatchedTensors
+from aphrodite.multimodal import MULTIMODAL_REGISTRY
 from aphrodite.multimodal.image import cached_get_tokenizer
 from aphrodite.quantization.base_config import QuantizationConfig
 
@@ -258,7 +258,7 @@ class Phi3HDImageEmbedding(Phi3ImageEmbeddingBase):
 
 class Phi3VImagePixelInputs(TypedDict):
     type: Literal["pixel_values"]
-    data: BatchedTensors
+    data: Union[torch.Tensor, List[torch.Tensor]]
     """
     Shape: `(batch_size, 1 + num_patches, num_channels, height, width)`
 
