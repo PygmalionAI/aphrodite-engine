@@ -736,7 +736,7 @@ class LoadConfig:
                 "Ignoring the following patterns when downloading weights: "
                 f"{self.ignore_patterns}")
         else:
-            self.ignore_patterns = ["original/**/*"]
+            self.ignore_patterns = ["original/**/*", "consolidated*"]
 
     def _verify_load_format(self) -> None:
         if not isinstance(self.load_format, str):
