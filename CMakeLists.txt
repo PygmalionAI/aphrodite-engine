@@ -173,6 +173,7 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     "kernels/quantization/quip/origin_order.cu"
     "kernels/quantization/marlin/dense/marlin_cuda_kernel.cu"
     "kernels/quantization/marlin/sparse/marlin_24_cuda_kernel.cu"
+    "kernels/quantization/marlin/qqq/marlin_qqq_gemm_kernel.cu"
     "kernels/quantization/gptq_marlin/gptq_marlin.cu"
     "kernels/quantization/gptq_marlin/gptq_marlin_repack.cu"
     "kernels/quantization/gptq_marlin/awq_marlin_repack.cu"
