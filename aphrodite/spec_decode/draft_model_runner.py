@@ -18,6 +18,7 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      SchedulerConfig)
 from aphrodite.common.sequence import (ExecuteModelRequest,
                                        IntermediateTensors, SamplerOutput)
+from aphrodite.multimodal import MultiModalInputs
 from aphrodite.task_handler.model_runner import (
     ModelInputForGPUWithSamplingMetadata, ModelRunner)
 
@@ -324,7 +325,8 @@ class TP1DraftModelRunner(ModelRunner):
                 kv_caches=kv_caches,
                 attn_metadata=model_input.attn_metadata,
                 intermediate_tensors=intermediate_tensors,
-                **multi_modal_kwargs,
+                **MultiModalInputs.as_kwargs(multi_modal_kwargs,
+                                             device=self.device),
             )
 
             # Compute the logits.

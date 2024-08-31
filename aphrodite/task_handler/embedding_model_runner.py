@@ -11,6 +11,7 @@ from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sequence import (IntermediateTensors, PoolerOutput,
                                        SequenceData, SequenceGroupMetadata)
 from aphrodite.modeling.pooling_metadata import PoolingMetadata
+from aphrodite.multimodal import MultiModalInputs
 from aphrodite.task_handler.model_runner import (GPUModelRunnerBase,
                                                  ModelInputForGPU,
                                                  ModelInputForGPUBuilder)
@@ -100,11 +101,16 @@ class EmbeddingModelRunner(
         kv_caches = [None] * num_layers
 
         execute_model_kwargs = {
-            "input_ids": model_input.input_tokens,
-            "positions": model_input.input_positions,
-            "kv_caches": kv_caches,
-            "attn_metadata": model_input.attn_metadata,
-            **(model_input.multi_modal_kwargs or {}),
+            "input_ids":
+            model_input.input_tokens,
+            "positions":
+            model_input.input_positions,
+            "kv_caches":
+            kv_caches,
+            "attn_metadata":
+            model_input.attn_metadata,
+            **MultiModalInputs.as_kwargs(model_input.multi_modal_kwargs or {},
+                                         device=self.device),
         }
         hidden_states = model_executable(**execute_model_kwargs)
 

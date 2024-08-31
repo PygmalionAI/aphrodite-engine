@@ -1,4 +1,4 @@
-from typing import List, Mapping, NamedTuple, Optional, Tuple
+from typing import List, NamedTuple, Optional, Tuple
 
 import openvino as ov
 import torch
@@ -12,7 +12,7 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 from aphrodite.modeling import SamplingMetadata
 from aphrodite.modeling.model_loader.openvino import get_model
-from aphrodite.multimodal import (MULTIMODAL_REGISTRY, BatchedTensors,
+from aphrodite.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                                   MultiModalInputs)
 
 
@@ -22,7 +22,7 @@ class ModelInput(NamedTuple):
     attn_metadata: Optional[OpenVINOAttentionMetadata]
     seq_lens: List[int]
     query_lens: List[int]
-    multi_modal_kwargs: Mapping[str, BatchedTensors]
+    multi_modal_kwargs: BatchedTensorInputs
 
     @classmethod
     def empty(cls, device):
@@ -258,8 +258,7 @@ class OpenVINOModelRunner:
             max_context_len=max_context_len_tensor,
         )
 
-        multi_modal_kwargs = MultiModalInputs.batch(multi_modal_inputs_list,
-                                                    device=self.device)
+        multi_modal_kwargs = MultiModalInputs.batch(multi_modal_inputs_list)
 
         return ModelInput(
             input_tokens,
@@ -274,7 +273,7 @@ class OpenVINOModelRunner:
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[torch.Tensor, torch.Tensor, OpenVINOAttentionMetadata,
-               SamplingMetadata, Mapping[str, BatchedTensors]]:
+               SamplingMetadata, BatchedTensorInputs]:
         # Prepare input tensors.
         (
             input_tokens,
@@ -317,11 +316,16 @@ class OpenVINOModelRunner:
 
         model_executable = self.model
         execute_model_kwargs = {
-            "input_ids": input_tokens,
-            "positions": input_positions,
-            "kv_caches": kv_caches,
-            "attn_metadata": attn_metadata,
-            **(multi_modal_kwargs or {}),
+            "input_ids":
+            input_tokens,
+            "positions":
+            input_positions,
+            "kv_caches":
+            kv_caches,
+            "attn_metadata":
+            attn_metadata,
+            **MultiModalInputs.as_kwargs(multi_modal_kwargs or {},
+                                         device=self.device),
         }
 
         hidden_states = model_executable(**execute_model_kwargs)

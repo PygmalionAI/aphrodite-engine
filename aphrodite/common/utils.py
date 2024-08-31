@@ -17,23 +17,18 @@ from functools import lru_cache, partial, wraps
 from platform import uname
 from typing import (Any, AsyncIterator, Awaitable, Callable, Dict, Generic,
                     Hashable, List, Optional, OrderedDict, Set, Tuple, TypeVar,
-                    Union)
+                    Union, overload)
 
 import numpy as np
+import numpy.typing as npt
 import psutil
 import torch
+import torch.types
 from loguru import logger
+from typing_extensions import ParamSpec
 
+from aphrodite import _custom_ops as ops
 from aphrodite.common.logger import enable_trace_function_call
-
-T = TypeVar("T")
-
-
-class _Sentinel:
-    ...
-
-
-ALL_PINNED_SENTINEL = _Sentinel()
 
 STR_DTYPE_TO_TORCH_DTYPE = {
     "half": torch.half,
@@ -43,6 +38,27 @@ STR_DTYPE_TO_TORCH_DTYPE = {
     "fp8_e4m3": torch.uint8,
     "fp8_e5m2": torch.uint8,
 }
+
+TORCH_DTYPE_TO_NUMPY_DTYPE = {
+    torch.float16: np.float16,
+    torch.float32: np.float32,
+    torch.float64: np.float64,
+    torch.uint8: np.uint8,
+    torch.int32: np.int32,
+    torch.int64: np.int64,
+}
+
+P = ParamSpec('P')
+K = TypeVar("K")
+T = TypeVar("T")
+U = TypeVar("U")
+
+
+class _Sentinel:
+    ...
+
+
+ALL_PINNED_SENTINEL = _Sentinel()
 
 
 class Device(enum.Enum):
@@ -77,8 +93,10 @@ class LRUCache(Generic[T]):
     def __len__(self) -> int:
         return len(self.cache)
 
-    def __getitem__(self, key: Hashable) -> Optional[T]:
-        return self.get(key)
+    def __getitem__(self, key: Hashable) -> T:
+        value = self.cache[key]  # Raise KeyError if not exists
+        self.cache.move_to_end(key)
+        return value
 
     def __setitem__(self, key: Hashable, value: T) -> None:
         self.put(key, value)
@@ -92,8 +110,9 @@ class LRUCache(Generic[T]):
     def get(self,
             key: Hashable,
             default_value: Optional[T] = None) -> Optional[T]:
+        value: Optional[T]
         if key in self.cache:
-            value: Optional[T] = self.cache[key]
+            value = self.cache[key]
             self.cache.move_to_end(key)
         else:
             value = default_value
@@ -220,10 +239,6 @@ def is_xpu() -> bool:
 @lru_cache(maxsize=None)
 def get_max_shared_memory_bytes(gpu: int = 0) -> int:
     """Returns the maximum shared memory per thread block in bytes."""
-    # NOTE: This import statement should be executed lazily since
-    # the Neuron-X backend does not have the `cuda_utils` module.
-    from aphrodite import _custom_ops as ops
-
     max_shared_mem = (
         ops.get_max_shared_memory_per_block_device_attribute(gpu))
     # value 0 will cause MAX_SEQ_LEN become negative and test_attention.py
@@ -259,7 +274,7 @@ def in_wsl() -> bool:
     return "microsoft" in " ".join(uname()).lower()
 
 
-def make_async(func: Callable[..., T]) -> Callable[..., Awaitable[T]]:
+def make_async(func: Callable[P, T]) -> Callable[P, Awaitable[T]]:
     """Take a blocking function, and run it on in an executor thread.
 
     This function prevents the blocking function from blocking the
@@ -267,7 +282,7 @@ def make_async(func: Callable[..., T]) -> Callable[..., Awaitable[T]]:
     The code in this function needs to be thread safe.
     """
 
-    def _async_wrapper(*args, **kwargs) -> asyncio.Future:
+    def _async_wrapper(*args: P.args, **kwargs: P.kwargs) -> asyncio.Future:
         loop = asyncio.get_event_loop()
         p_func = partial(func, *args, **kwargs)
         return loop.run_in_executor(executor=None, func=p_func)
@@ -359,6 +374,17 @@ def get_distributed_init_method(ip: str, port: int) -> str:
 
 
 def get_open_port() -> int:
+    port = int(os.getenv("APHRODITE_PORT", 2242))
+    if port is not None:
+        while True:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(("", port))
+                    return port
+            except OSError:
+                port += 1  # Increment port number if already in use
+                logger.info(f"Port {port - 1} is already in use, trying port "
+                            f"{port}")
     # try ipv4
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -391,7 +417,7 @@ def cdiv(a: int, b: int) -> int:
 
 
 def _generate_random_fp8(
-    tensor: torch.tensor,
+    tensor: torch.Tensor,
     low: float,
     high: float,
 ) -> None:
@@ -452,7 +478,10 @@ def create_kv_caches_with_random_flash(
     torch_dtype = get_kv_cache_torch_dtype(cache_dtype, model_dtype)
     key_value_cache_shape = (num_blocks, 2, block_size, num_heads, head_size)
     scale = head_size**-0.5
-    key_caches, value_caches = [], []
+
+    key_caches: List[torch.Tensor] = []
+    value_caches: List[torch.Tensor] = []
+
     for _ in range(num_layers):
         key_value_cache = torch.empty(size=key_value_cache_shape,
                                       dtype=torch_dtype,
@@ -480,9 +509,11 @@ def create_kv_caches_with_random(
     seed: int = 0,
     device: Optional[str] = "cuda",
 ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+
     if cache_dtype == "fp8" and head_size % 16:
         raise ValueError(
-            f"kv_cache_dtype with head_size {head_size} is not supported.")
+            f"Does not support key cache of type fp8 with head_size "
+            f"{head_size}")
 
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
@@ -493,7 +524,7 @@ def create_kv_caches_with_random(
     scale = head_size**-0.5
     x = 16 // torch.tensor([], dtype=torch_dtype).element_size()
     key_cache_shape = (num_blocks, num_heads, head_size // x, block_size, x)
-    key_caches = []
+    key_caches: List[torch.Tensor] = []
     for _ in range(num_layers):
         key_cache = torch.empty(size=key_cache_shape,
                                 dtype=torch_dtype,
@@ -508,7 +539,7 @@ def create_kv_caches_with_random(
         key_caches.append(key_cache)
 
     value_cache_shape = (num_blocks, num_heads, head_size, block_size)
-    value_caches = []
+    value_caches: List[torch.Tensor] = []
     for _ in range(num_layers):
         value_cache = torch.empty(size=value_cache_shape,
                                   dtype=torch_dtype,
@@ -551,7 +582,7 @@ def is_pin_memory_available() -> bool:
 
 class CudaMemoryProfiler:
 
-    def __init__(self, device=None):
+    def __init__(self, device: Optional[torch.types.Device] = None):
         self.device = device
 
     def current_memory_usage(self) -> float:
@@ -560,8 +591,8 @@ class CudaMemoryProfiler:
             torch.cuda.reset_peak_memory_stats(self.device)
             mem = torch.cuda.max_memory_allocated(self.device)
         elif is_xpu():
-            torch.xpu.reset_peak_memory_stats(self.device)
-            mem = torch.xpu.max_memory_allocated(self.device)
+            torch.xpu.reset_peak_memory_stats(self.device)  # type: ignore
+            mem = torch.xpu.max_memory_allocated(self.device)  # type: ignore
         return mem
 
     def __enter__(self):
@@ -587,23 +618,54 @@ def str_to_int_tuple(s: str) -> Tuple[int, ...]:
             f"(e.g., 1, 2, 3). Given input: {s}") from e
 
 
-def make_tensor_with_pad(
-    x: List[List[int]],
-    max_len: int,
-    pad: int,
-    dtype: torch.dtype,
-    device: Optional[Union[str, torch.device]],
-) -> torch.Tensor:
-    """Make a padded tensor of a 2D inputs.
+def make_ndarray_with_pad(
+    x: List[List[T]],
+    pad: T,
+    dtype: npt.DTypeLike,
+    *,
+    max_len: Optional[int] = None,
+) -> npt.NDArray:
+    """
+    Make a padded array from 2D inputs.
 
     The padding is applied to the end of each inner list until it reaches
     `max_len`.
     """
-    padded_x = np.zeros([len(x), max_len], dtype=np.int32) + pad
+    if max_len is None:
+        # Unlike for most functions, map is faster than a genexpr over `len`
+        max_len = max(map(len, x), default=0)
+
+    padded_x = np.full((len(x), max_len), pad, dtype=dtype)
     for ind, blocktb in enumerate(x):
         assert len(blocktb) <= max_len
         padded_x[ind, :len(blocktb)] = blocktb
-    return torch.tensor(padded_x, dtype=dtype, device=device)
+
+    return padded_x
+
+
+def make_tensor_with_pad(
+    x: List[List[T]],
+    pad: T,
+    dtype: torch.dtype,
+    *,
+    max_len: Optional[int] = None,
+    device: Optional[Union[str, torch.device]] = None,
+    pin_memory: bool = False,
+) -> torch.Tensor:
+    """
+    Make a padded tensor from 2D inputs.
+
+    The padding is applied to the end of each inner list until it reaches
+    `max_len`.
+    """
+    np_dtype = TORCH_DTYPE_TO_NUMPY_DTYPE[dtype]
+    padded_x = make_ndarray_with_pad(x, pad, np_dtype, max_len=max_len)
+
+    tensor = torch.from_numpy(padded_x).to(device)
+    if pin_memory:
+        tensor = tensor.pin_memory()
+
+    return tensor
 
 
 def async_tensor_h2d(
@@ -631,13 +693,13 @@ def get_dtype_size(dtype: torch.dtype) -> int:
     return torch.tensor([], dtype=dtype).element_size()
 
 
-def merge_dicts(dict1: Dict[Any, List[Any]],
-                dict2: Dict[Any, List[Any]]) -> Dict[Any, List[Any]]:
+def merge_dicts(dict1: Dict[K, List[T]],
+                dict2: Dict[K, List[T]]) -> Dict[K, List[T]]:
     """Merge 2 dicts that have key -> List of items.
-    
+
     When a key conflicts, the values in dict1 is prioritized.
     """
-    merged_dict = defaultdict(list)
+    merged_dict: Dict[K, List[T]] = defaultdict(list)
 
     for key, value in dict1.items():
         merged_dict[key].extend(value)
@@ -648,12 +710,60 @@ def merge_dicts(dict1: Dict[Any, List[Any]],
     return dict(merged_dict)
 
 
+JSONTree = Union[Dict[str, "JSONTree[T]"], List["JSONTree[T]"],
+                 Tuple["JSONTree[T]", ...], T]
+"""A nested JSON structure where the leaves need not be JSON-serializable."""
+
+
+@overload
+def json_map_leaves(
+    func: Callable[[T], U],
+    value: Dict[str, JSONTree[T]],
+) -> Dict[str, JSONTree[U]]:
+    ...
+
+
+@overload
+def json_map_leaves(
+    func: Callable[[T], U],
+    value: List[JSONTree[T]],
+) -> List[JSONTree[U]]:
+    ...
+
+
+@overload
+def json_map_leaves(
+    func: Callable[[T], U],
+    value: Tuple[JSONTree[T], ...],
+) -> Tuple[JSONTree[U], ...]:
+    ...
+
+
+@overload
+def json_map_leaves(
+    func: Callable[[T], U],
+    value: JSONTree[T],
+) -> JSONTree[U]:
+    ...
+
+
+def json_map_leaves(func: Callable[[T], U], value: JSONTree[T]) -> JSONTree[U]:
+    if isinstance(value, dict):
+        return {k: json_map_leaves(func, v) for k, v in value.items()}
+    elif isinstance(value, list):
+        return [json_map_leaves(func, v) for v in value]
+    elif isinstance(value, tuple):
+        return tuple(json_map_leaves(func, v) for v in value)
+    else:
+        return func(value)
+
+
 def flatten_2d_lists(lists: List[List[T]]) -> List[T]:
     """Flatten a list of lists to a single list."""
     return [item for sublist in lists for item in sublist]
 
 
-def init_cached_hf_modules():
+def init_cached_hf_modules() -> None:
     """
     Lazy initialization of the Hugging Face modules.
     """
@@ -689,7 +799,7 @@ def find_library(lib_name: str) -> str:
     return locs[0]
 
 
-def find_nccl_library():
+def find_nccl_library() -> str:
     """
     We either use the library file specified by the `APHRODITE_NCCL_SO_PATH`
     environment variable, or we find the library file brought by PyTorch.
@@ -872,6 +982,18 @@ def is_full_nvlink(device_ids: List[int]) -> bool:
                         exc_info=error)
                     return False
     return True
+
+
+#From: https://stackoverflow.com/a/4104188/2749989
+def run_once(f):
+
+    def wrapper(*args, **kwargs) -> Any:
+        if not wrapper.has_run:  # type: ignore[attr-defined]
+            wrapper.has_run = True  # type: ignore[attr-defined]
+            return f(*args, **kwargs)
+
+    wrapper.has_run = False  # type: ignore[attr-defined]
+    return wrapper
 
 
 class FlexibleArgumentParser(argparse.ArgumentParser):
