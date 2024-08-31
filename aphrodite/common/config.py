@@ -736,7 +736,7 @@ class LoadConfig:
                 "Ignoring the following patterns when downloading weights: "
                 f"{self.ignore_patterns}")
         else:
-            self.ignore_patterns = ["original/**/*"]
+            self.ignore_patterns = ["original/**/*", "consolidated*"]
 
     def _verify_load_format(self) -> None:
         if not isinstance(self.load_format, str):
@@ -1400,8 +1400,9 @@ class LoRAConfig:
     long_lora_scaling_factors: Optional[Tuple[float]] = None
 
     def __post_init__(self):
-        # Keep this in sync with kernels/punica/bgmv/bgmv_config.h
-        possible_max_ranks = (8, 16, 32, 64)
+        # Setting the maximum rank to 256 should be able to satisfy the vast
+        # majority of applications.
+        possible_max_ranks = (8, 16, 32, 64, 128, 256)
         possible_lora_extra_vocab_size = (0, 256, 512)
         if self.max_lora_rank not in possible_max_ranks:
             raise ValueError(

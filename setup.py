@@ -172,15 +172,6 @@ class cmake_build_ext(build_ext):
             '-DAPHRODITE_PYTHON_EXECUTABLE={}'.format(sys.executable)
         ]
 
-        if _install_punica():
-            cmake_args += ['-DAPHRODITE_INSTALL_PUNICA_KERNELS=ON']
-
-        # if _install_hadamard():
-        #     cmake_args += ['-DAPHRODITE_INSTALL_HADAMARD_KERNELS=ON']
-
-        #
-        # Setup parallelism and build tool
-        #
         num_jobs, nvcc_threads = self.compute_num_jobs()
 
         if nvcc_threads:
@@ -267,30 +258,6 @@ def _is_xpu() -> bool:
 
 def _build_custom_ops() -> bool:
     return _is_cuda() or _is_hip() or _is_cpu()
-
-
-def _install_punica() -> bool:
-    install_punica = bool(
-        int(os.getenv("APHRODITE_INSTALL_PUNICA_KERNELS", "1")))
-    device_count = torch.cuda.device_count()
-    for i in range(device_count):
-        major, minor = torch.cuda.get_device_capability(i)
-        if major < 8:
-            install_punica = False
-            break
-    return install_punica
-
-
-# def _install_hadamard() -> bool:
-#     install_hadamard = bool(
-#         int(os.getenv("APHRODITE_INSTALL_HADAMARD_KERNELS", "1")))
-#     device_count = torch.cuda.device_count()
-#     for i in range(device_count):
-#         major, minor = torch.cuda.get_device_capability(i)
-#         if major <= 6:
-#             install_hadamard = False
-#             break
-#     return install_hadamard
 
 
 def get_hipcc_rocm_version():
@@ -459,11 +426,6 @@ if _is_cuda() or _is_hip():
 
 if _build_custom_ops():
     ext_modules.append(CMakeExtension(name="aphrodite._C"))
-    if _install_punica() and _is_cuda() or _is_hip():
-        ext_modules.append(CMakeExtension(name="aphrodite._punica_C"))
-    # TODO: see if hadamard kernels work with HIP
-    # if _install_hadamard() and _is_cuda():
-    #     ext_modules.append(CMakeExtension(name="aphrodite._hadamard_C"))
 
 package_data = {
     "aphrodite": [
