@@ -43,6 +43,8 @@ _PP_SUPPORTED_MODELS = [
     "Phi3ForCausalLM",
     "MixtralForCausalLM",
     "NemotronForCausalLM",
+    "Qwen2ForCausalLM",
+    "Qwen2MoeForCausalLM",
 ]
 
 _OPTIMIZED_QUANTS = [
