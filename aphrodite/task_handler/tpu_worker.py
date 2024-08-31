@@ -104,8 +104,10 @@ class TPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # overhead because dynamo does not cache the compiled results.
         APHRODITE_XLA_CACHE_PATH = os.getenv("APHRODITE_XLA_CACHE_PATH",
                                              "~/.aphrodite/xla_cache/")
+        # NOTE: Set readonly=False only for the rank 0 process to avoid
+        # race conditions.
         xr.initialize_cache(os.path.expanduser(APHRODITE_XLA_CACHE_PATH),
-                            readonly=False)
+                            readonly=not self.is_driver_worker)
 
     def load_model(self):
         self.model_runner.load_model()
