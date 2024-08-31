@@ -11,7 +11,8 @@ from aphrodite.common.sequence import (ExecuteModelRequest,
                                        IntermediateTensors, SamplerOutput)
 from aphrodite.common.utils import (enable_trace_function_call_for_thread,
                                     update_environment_variables)
-from aphrodite.distributed import broadcast_tensor_dict, get_pp_group
+from aphrodite.distributed import (broadcast_tensor_dict, get_pp_group,
+                                   get_tp_group)
 from aphrodite.lora.request import LoRARequest
 from aphrodite.platforms import current_platform
 from aphrodite.task_handler.model_runner_base import (ModelRunnerBase,
@@ -263,7 +264,8 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         intermediate_tensors = None
         if not get_pp_group().is_first_rank:
             intermediate_tensors = IntermediateTensors(
-                get_pp_group().recv_tensor_dict())
+                get_pp_group().recv_tensor_dict(
+                    all_gather_group=get_tp_group()))
 
         output = self.model_runner.execute_model(
             model_input, self.kv_cache[worker_input.virtual_engine]
@@ -272,7 +274,8 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
         if not get_pp_group().is_last_rank:
             # output is IntermediateTensors
-            get_pp_group().send_tensor_dict(output.tensors)
+            get_pp_group().send_tensor_dict(output.tensors,
+                                            all_gather_group=get_tp_group())
             return [None]
 
         # output is List[SamplerOutput]
