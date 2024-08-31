@@ -18,6 +18,7 @@ from aphrodite.quantization.gptq import GPTQConfig
 from aphrodite.quantization.gptq_marlin import GPTQMarlinConfig
 from aphrodite.quantization.gptq_marlin_24 import GPTQMarlin24Config
 from aphrodite.quantization.marlin import MarlinConfig
+from aphrodite.quantization.qqq import QQQConfig
 from aphrodite.quantization.quip import QuipConfig
 from aphrodite.quantization.squeezellm import SqueezeLLMConfig
 
@@ -42,6 +43,7 @@ QUANTIZATION_METHODS = {
     "squeezellm": SqueezeLLMConfig,
     "compressed-tensors": CompressedTensorsConfig,
     "bitsandbytes": BitsAndBytesConfig,
+    "qqq": QQQConfig,
 }
 
 
