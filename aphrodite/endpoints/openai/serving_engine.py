@@ -10,7 +10,8 @@ from typing_extensions import Annotated
 
 from aphrodite.common.config import ModelConfig
 from aphrodite.common.pooling_params import PoolingParams
-from aphrodite.common.sampling_params import SamplingParams
+from aphrodite.common.sampling_params import (LogitsProcessorFunc,
+                                              SamplingParams)
 from aphrodite.common.sequence import Logprob
 from aphrodite.endpoints.logger import RequestLogger
 # yapf conflicts with isort here
@@ -28,6 +29,8 @@ from aphrodite.endpoints.openai.protocol import (ChatCompletionRequest,
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.inputs import parse_and_batch_prompt
 from aphrodite.lora.request import LoRARequest
+from aphrodite.modeling.guided_decoding import \
+    get_guided_decoding_logits_processor
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
 
 
@@ -149,6 +152,15 @@ class OpenAIServing:
         })
         return json_str
 
+    async def _guided_decode_logits_processor(
+            self, request: Union[ChatCompletionRequest, CompletionRequest],
+            tokenizer: AnyTokenizer) -> Optional[LogitsProcessorFunc]:
+        decoding_config = await self.engine.get_decoding_config()
+        guided_decoding_backend = request.guided_decoding_backend \
+            or decoding_config.guided_decoding_backend
+        return await get_guided_decoding_logits_processor(
+            guided_decoding_backend, request, tokenizer)
+
     async def _check_model(
         self,
         request: AnyRequest,
@@ -257,9 +269,7 @@ class OpenAIServing:
                     f"{self.max_model_len} tokens. However, you requested "
                     f"{token_num} tokens in the messages, "
                     f"Please reduce the length of the messages.")
-            request.max_tokens = self.max_model_len - token_num
-
-        if token_num + request.max_tokens > self.max_model_len:
+        elif token_num + request.max_tokens > self.max_model_len:
             raise ValueError(
                 f"This model's maximum context length is "
                 f"{self.max_model_len} tokens. However, you requested "
