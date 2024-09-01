@@ -22,7 +22,7 @@ from aphrodite.endpoints.openai.protocol import (
 from aphrodite.endpoints.openai.serving_engine import (LoRAModulePath,
                                                        OpenAIServing,
                                                        PromptAdapterPath)
-from aphrodite.engine.async_aphrodite import AsyncAphrodite
+from aphrodite.engine.protocol import AsyncEngineClient
 
 TypeTokenIDs = List[int]
 TypeTopLogProbs = List[Optional[Dict[int, float]]]
@@ -34,7 +34,7 @@ class OpenAIServingCompletion(OpenAIServing):
 
     def __init__(
         self,
-        engine: AsyncAphrodite,
+        async_engine_client: AsyncEngineClient,
         model_config: ModelConfig,
         served_model_names: List[str],
         *,
@@ -43,7 +43,7 @@ class OpenAIServingCompletion(OpenAIServing):
         request_logger: Optional[RequestLogger],
         return_tokens_as_token_ids: bool = False,
     ):
-        super().__init__(engine=engine,
+        super().__init__(async_engine_client=async_engine_client,
                          model_config=model_config,
                          served_model_names=served_model_names,
                          lora_modules=lora_modules,
@@ -83,7 +83,8 @@ class OpenAIServingCompletion(OpenAIServing):
                 prompt_adapter_request,
             ) = self._maybe_get_adapters(request)
 
-            tokenizer = await self.engine.get_tokenizer(lora_request)
+            tokenizer = await self.async_engine_client.get_tokenizer(
+                lora_request)
 
             guided_decode_logits_processor = (
                 await self._guided_decode_logits_processor(request, tokenizer))
@@ -111,7 +112,7 @@ class OpenAIServingCompletion(OpenAIServing):
                                  lora_request=lora_request,
                                  prompt_adapter_request=prompt_adapter_request)
 
-                generator = self.engine.generate(
+                generator = self.async_engine_client.generate(
                     {"prompt_token_ids": prompt_inputs["prompt_token_ids"]},
                     sampling_params,
                     request_id_item,
@@ -151,7 +152,7 @@ class OpenAIServingCompletion(OpenAIServing):
             async for i, res in result_generator:
                 if await raw_request.is_disconnected():
                     # Abort the request if the client disconnects.
-                    await self.engine.abort(f"{request_id}-{i}")
+                    await self.async_engine_client.abort(f"{request_id}-{i}")
                     return self.create_error_response("Client disconnected")
                 final_res_batch[i] = res
 
@@ -212,7 +213,8 @@ class OpenAIServingCompletion(OpenAIServing):
 
                 # Abort the request if the client disconnects.
                 if await raw_request.is_disconnected():
-                    await self.engine.abort(f"{request_id}-{prompt_idx}")
+                    await self.async_engine_client.abort(
+                        f"{request_id}-{prompt_idx}")
                     raise StopAsyncIteration()
 
                 for output in res.outputs:
