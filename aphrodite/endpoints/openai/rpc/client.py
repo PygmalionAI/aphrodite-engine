@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from typing import Any, AsyncIterator, Mapping, Optional
+from typing import Any, AsyncIterator, Optional
 
 import cloudpickle
 import zmq
@@ -157,7 +157,6 @@ class AsyncEngineRPCClient:
             RPCUtilityRequest.GET_LORA_CONFIG,
             expected_type=LoRAConfig,
             error_message="Could not get LoRAConfig from RPC Server")
-
 
     async def abort(self, request_id: str):
         """Send an ABORT_REQUEST signal to the RPC Server"""

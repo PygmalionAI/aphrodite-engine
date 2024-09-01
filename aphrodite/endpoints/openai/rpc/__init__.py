@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping, Optional, Union
+from typing import Optional, Union
 
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.inputs import PromptInputs

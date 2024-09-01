@@ -18,8 +18,7 @@ from aphrodite.endpoints.openai.rpc import (APHRODITE_RPC_HEALTHY_STR,
 
 class AsyncEngineRPCServer:
 
-    def __init__(self, async_engine_args: AsyncEngineArgs,
-                 port: int):
+    def __init__(self, async_engine_args: AsyncEngineArgs, port: int):
         # Initialize engine first.
         self.engine = AsyncAphrodite.from_engine_args(async_engine_args)
 
@@ -117,7 +116,8 @@ class AsyncEngineRPCServer:
         try:
             await self.engine.check_health()
             await self.socket.send_multipart(
-                [identity, cloudpickle.dumps(APHRODITE_RPC_HEALTHY_STR)])
+                [identity,
+                 cloudpickle.dumps(APHRODITE_RPC_HEALTHY_STR)])
         except Exception as e:
             await self.socket.send_multipart([identity, cloudpickle.dumps(e)])
 
@@ -198,7 +198,6 @@ async def run_server(server: AsyncEngineRPCServer):
         server.cleanup()
 
 
-def run_rpc_server(async_engine_args: AsyncEngineArgs,
-                   port: int):
+def run_rpc_server(async_engine_args: AsyncEngineArgs, port: int):
     server = AsyncEngineRPCServer(async_engine_args, port)
     asyncio.run(run_server(server))
