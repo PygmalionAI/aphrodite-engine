@@ -3,7 +3,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type
 
 import torch
-from vllm_flash_attn import flash_attn_varlen_func, flash_attn_with_kvcache
+from aphrodite_flash_attn import (flash_attn_varlen_func,
+                                  flash_attn_with_kvcache)
 
 from aphrodite import _custom_ops as ops
 from aphrodite.attention.backends.abstract import (AttentionBackend,

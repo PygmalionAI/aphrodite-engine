@@ -7,4 +7,4 @@ torch == 2.4.0
 torchvision == 0.19  # for phi3v
 xformers == 0.0.27.post2  # Requires torch 2.4.0
 triton >= 2.2.1
-vllm-flash-attn == 2.6.0 # Requires PyTorch 2.4.0
+aphrodite-flash-attn == 2.6.1.post2 # Requires PyTorch 2.4.0
