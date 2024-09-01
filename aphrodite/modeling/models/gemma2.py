@@ -18,6 +18,7 @@
 from typing import Iterable, List, Optional, Set, Tuple
 
 import torch
+from loguru import logger
 from torch import nn
 from transformers import Gemma2Config
 
@@ -391,6 +392,6 @@ class Gemma2ForCausalLM(nn.Module, SupportsLoRA):
 
         unloaded_params = params_dict.keys() - loaded_params
         if unloaded_params:
-            raise RuntimeError(
+            logger.warning(
                 "Some weights are not initialized from checkpoints: "
                 f"{unloaded_params}")
