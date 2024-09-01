@@ -437,7 +437,6 @@ class SequenceGroup:
         embeddings: Optional[List[float]] = None,
         pooling_params: Optional[PoolingParams] = None,
         encoder_seq: Optional[Sequence] = None,
-        trace_headers: Optional[Dict[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
     ) -> None:
         self.request_id = request_id
@@ -455,7 +454,6 @@ class SequenceGroup:
         self.pooling_params = pooling_params
         self.prompt_adapter_request = prompt_adapter_request
         self.encoder_seq = encoder_seq
-        self.trace_headers = trace_headers
 
     @property
     def prompt(self) -> Optional[str]:

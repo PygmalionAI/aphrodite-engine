@@ -1,5 +1,4 @@
-from typing import (AsyncIterator, List, Mapping, Optional, Protocol,
-                    runtime_checkable)
+from typing import AsyncIterator, List, Optional, Protocol, runtime_checkable
 
 from transformers import PreTrainedTokenizer
 
@@ -36,10 +35,10 @@ class AsyncEngineClient(Protocol):
         sampling_params: SamplingParams,
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
-        trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None
     ) -> AsyncIterator[RequestOutput]:
         """Generates outputs for a request"""
+        ...
 
     async def encode(
         self,
@@ -47,30 +46,31 @@ class AsyncEngineClient(Protocol):
         pooling_params: PoolingParams,
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
-        trace_headers: Optional[Mapping[str, str]] = None,
     ) -> AsyncIterator[EmbeddingRequestOutput]:
         """Generate outputs for a request from an embedding model."""
+        ...
 
     async def abort(self, request_id: str) -> None:
         """Abort a request.
         Args:
             request_id: The unique id of the request.
         """
+        ...
 
     async def get_model_config(self) -> ModelConfig:
-        """Get the model configuration of the vLLM engine."""
+        """Get the model configuration of the Aphrodite engine."""
+        ...
 
     async def get_decoding_config(self) -> DecodingConfig:
-        """Get the decoding configuration of the vLLM engine."""
+        """Get the decoding configuration of the Aphrodite engine."""
+        ...
 
     async def get_tokenizer(
         self,
         lora_request: Optional[LoRARequest] = None,
     ) -> PreTrainedTokenizer:
         """Get the appropriate Tokenizer for the request"""
-
-    async def is_tracing_enabled(self) -> bool:
-        pass
+        ...
 
     async def do_log_stats(
         self,
