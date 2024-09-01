@@ -17,14 +17,14 @@ from aphrodite.endpoints.openai.protocol import (DetokenizeRequest,
 # yapf: enable
 from aphrodite.endpoints.openai.serving_engine import (LoRAModulePath,
                                                        OpenAIServing)
-from aphrodite.engine.async_aphrodite import AsyncAphrodite
+from aphrodite.engine.protocol import AsyncEngineClient
 
 
 class OpenAIServingTokenization(OpenAIServing):
 
     def __init__(
         self,
-        engine: AsyncAphrodite,
+        async_engine_client: AsyncEngineClient,
         model_config: ModelConfig,
         served_model_names: List[str],
         *,
@@ -32,7 +32,7 @@ class OpenAIServingTokenization(OpenAIServing):
         request_logger: Optional[RequestLogger],
         chat_template: Optional[str],
     ):
-        super().__init__(engine=engine,
+        super().__init__(async_engine_client=async_engine_client,
                          model_config=model_config,
                          served_model_names=served_model_names,
                          lora_modules=lora_modules,
@@ -57,7 +57,7 @@ class OpenAIServingTokenization(OpenAIServing):
             prompt_adapter_request,
         ) = self._maybe_get_adapters(request)
 
-        tokenizer = await self.engine.get_tokenizer(lora_request)
+        tokenizer = await self.async_engine_client.get_tokenizer(lora_request)
 
         if isinstance(request, TokenizeChatRequest):
             model_config = self.model_config
@@ -113,7 +113,7 @@ class OpenAIServingTokenization(OpenAIServing):
             prompt_adapter_request,
         ) = self._maybe_get_adapters(request)
 
-        tokenizer = await self.engine.get_tokenizer(lora_request)
+        tokenizer = await self.async_engine_client.get_tokenizer(lora_request)
 
         self._log_inputs(request_id,
                          request.tokens,
