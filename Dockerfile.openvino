@@ -13,6 +13,9 @@ COPY requirements-common.txt /workspace/aphrodite-engine/
 COPY requirements-openvino.txt /workspace/aphrodite-engine/
 
 COPY aphrodite/ /workspace/aphrodite-engine/aphrodite
+COPY kernels/core /workspace/aphrodite-engine/kernels/core
+COPY cmake/utils.cmake /workspace/aphrodite-engine/cmake/
+COPY CMakeLists.txt /workspace/aphrodite-engine/
 COPY setup.py /workspace/aphrodite-engine/
 
 # install build requirements

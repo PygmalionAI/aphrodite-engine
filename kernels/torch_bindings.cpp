@@ -1,7 +1,7 @@
 #include "cache.h"
 #include "cuda_utils.h"
 #include "ops.h"
-#include "registration.h"
+#include "core/registration.h"
 #include "quantization/quant_ops.h"
 
 #include <torch/library.h>

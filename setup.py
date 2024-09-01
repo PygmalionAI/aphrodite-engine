@@ -260,6 +260,10 @@ def _build_custom_ops() -> bool:
     return _is_cuda() or _is_hip() or _is_cpu()
 
 
+def _build_core_ext() -> bool:
+    return not _is_neuron() and not _is_tpu()
+
+
 def get_hipcc_rocm_version():
     # Run the hipcc --version command
     result = subprocess.run(['hipcc', '--version'],
@@ -421,6 +425,9 @@ def get_requirements() -> List[str]:
 
 ext_modules = []
 
+if _build_core_ext():
+    ext_modules.append(CMakeExtension(name="aphrodite._core_C"))
+
 if _is_cuda() or _is_hip():
     ext_modules.append(CMakeExtension(name="aphrodite._moe_C"))
 
@@ -466,7 +473,7 @@ setup(
         "ray": ["ray>=2.9"],
     },
     ext_modules=ext_modules,
-    cmdclass={"build_ext": cmake_build_ext} if _build_custom_ops() else {},
+    cmdclass={"build_ext": cmake_build_ext} if len(ext_modules) > 0 else {},
     package_data=package_data,
     entry_points={
         "console_scripts": [

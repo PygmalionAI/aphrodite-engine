@@ -67,6 +67,39 @@ endif()
 find_package(Torch REQUIRED)
 
 #
+# Add the `default` target which detects which extensions should be
+# built based on platform/architecture.  This is the same logic that
+# setup.py uses to select which extensions should be built and should
+# be kept in sync.
+#
+# The `default` target makes direct use of cmake easier since knowledge
+# of which extensions are supported has been factored in, e.g.
+#
+# mkdir build && cd build
+# cmake -G Ninja -DAPHRODITE_PYTHON_EXECUTABLE=`which python3` -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=../aphrodite ..
+# cmake --build . --target default
+#
+add_custom_target(default)
+message(STATUS "Enabling core extension.")
+
+# Define _core_C extension
+#  built for (almost) every target platform, (excludes TPU and Neuron)
+
+set(APHRODITE_EXT_SRC
+  "kernels/core/torch_bindings.cpp")
+
+define_gpu_extension_target(
+  _core_C
+  DESTINATION aphrodite
+  LANGUAGE CXX
+  SOURCES ${APHRODITE_EXT_SRC}
+  COMPILE_FLAGS ${CXX_COMPILE_FLAGS}
+  USE_SABI 3
+  WITH_SOABI)
+
+add_dependencies(default _core_C)
+
+#
 # Forward the non-CUDA device extensions to external CMake scripts.
 #
 if (NOT APHRODITE_TARGET_DEVICE STREQUAL "cuda" AND
@@ -74,7 +107,7 @@ if (NOT APHRODITE_TARGET_DEVICE STREQUAL "cuda" AND
     if (APHRODITE_TARGET_DEVICE STREQUAL "cpu")
         include(${CMAKE_CURRENT_LIST_DIR}/cmake/cpu_extension.cmake)
     else()
-        message(FATAL_ERROR "Unsupported Aphrodite target device: ${APHRODITE_TARGET_DEVICE}")
+        return()
     endif()
     return()
 endif()
@@ -132,7 +165,7 @@ if(NVCC_THREADS AND APHRODITE_GPU_LANG STREQUAL "CUDA")
 endif()
 
 #
-# Define extension targets
+# Define other extension targets
 #
 
 #
@@ -226,21 +259,6 @@ define_gpu_extension_target(
   ARCHITECTURES ${APHRODITE_GPU_ARCHES}
   USE_SABI 3
   WITH_SOABI)
-
-#
-# Add the `default` target which detects which extensions should be
-# built based on platform/architecture.  This is the same logic that
-# setup.py uses to select which extensions should be built and should
-# be kept in sync.
-#
-# The `default` target makes direct use of cmake easier since knowledge
-# of which extensions are supported has been factored in, e.g.
-#
-# mkdir build && cd build
-# cmake -G Ninja -DAPHRODITE_PYTHON_EXECUTABLE=`which python3` -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=../aphrodite ..
-# cmake --build . --target default
-#
-add_custom_target(default)
 
 if(APHRODITE_GPU_LANG STREQUAL "CUDA" OR APHRODITE_GPU_LANG STREQUAL "HIP")
   message(STATUS "Enabling C extension.")

@@ -8,7 +8,6 @@ from loguru import logger
 
 
 async def serve_http(app: FastAPI, **uvicorn_kwargs: Any) -> None:
-    logger.info("Available routes are:")
     for route in app.routes:
         methods = getattr(route, "methods", None)
         path = getattr(route, "path", None)
