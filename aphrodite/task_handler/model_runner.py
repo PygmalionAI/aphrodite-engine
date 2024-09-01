@@ -1,5 +1,6 @@
 import dataclasses
 import gc
+import os
 import time
 import warnings
 import weakref
@@ -73,6 +74,8 @@ _BATCH_SIZES_TO_CAPTURE = [1, 2, 4] + [
     _BATCH_SIZE_ALIGNMENT * i for i in range(1, 33)
 ]
 _NUM_WARMUP_ITERS = 2
+APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE = int(
+    os.environ.get("APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE", "0"))
 
 TModelInputForGPU = TypeVar('TModelInputForGPU', bound="ModelInputForGPU")
 
@@ -802,6 +805,16 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                     "Using FP8 KV cache but no scaling factors "
                     "provided. Defaulting to scaling factors of 1.0. "
                     "This may lead to less accurate results!")
+
+        if APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE:
+            logger.info("Compiling the model using torch.compile...")
+            start_time = time.time()
+            self.model = torch.compile(self.model,
+                                       fullgraph=True,
+                                       backend="eager")
+            end_time = time.time()
+            logger.info(
+                f"Model compiled in {end_time - start_time:.2f} seconds.")
 
     def get_model_memory_usage(self):
         return self.model_memory_usage
