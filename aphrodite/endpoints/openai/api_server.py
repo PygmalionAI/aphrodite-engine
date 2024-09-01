@@ -117,9 +117,9 @@ async def build_async_engine_client(args) -> AsyncIterator[AsyncEngineClient]:
         yield async_engine_client
         return
 
-    # Otherwise, use the multiprocessing AsyncLLMEngine.
+    # Otherwise, use the multiprocessing AsyncAphrodite.
     else:
-        # Start RPCServer in separate process (holds the AsyncLLMEngine).
+        # Start RPCServer in separate process (holds the AsyncAphrodite).
         port = get_open_port(APHRODITE_RPC_PORT)
         rpc_server_process = Process(target=run_rpc_server,
                                      args=(engine_args, port))

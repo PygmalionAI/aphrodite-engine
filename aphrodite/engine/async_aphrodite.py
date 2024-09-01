@@ -724,7 +724,7 @@ class AsyncAphrodite:
                                             for generation, if any.
 
         Yields:
-            The output `RequestOutput` objects from the LLMEngine
+            The output `RequestOutput` objects from the AphroditeEngine
             for the request.
 
         Details:
@@ -789,8 +789,8 @@ class AsyncAphrodite:
     ) -> AsyncIterator[EmbeddingRequestOutput]:
         """Generate outputs for a request from an embedding model.
         Generate outputs for a request. This method is a coroutine. It adds the
-        request into the waiting queue of the LLMEngine and streams the outputs
-        from the LLMEngine to the caller.
+        request into the waiting queue of the AphroditeEngine and streams the outputs
+        from the AphroditeEngine to the caller.
         Args:
             prompt: The prompt string. Can be None if prompt_token_ids is
                 provided.
@@ -801,7 +801,7 @@ class AsyncAphrodite:
             lora_request: LoRA request to use for generation, if any.
             multi_modal_data: Multi modal data per request.
         Yields:
-            The output `EmbeddingRequestOutput` objects from the LLMEngine 
+            The output `EmbeddingRequestOutput` objects from the AphroditeEngine 
             for the request.
         Details:
             - If the engine is not running, start the background loop,
