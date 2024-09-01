@@ -1,7 +1,7 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 from aphrodite.common.config import ParallelConfig
-from aphrodite.common.sequence import ExecuteModelRequest
+from aphrodite.common.sequence import ExecuteModelRequest, IntermediateTensors
 from aphrodite.common.utils import get_ip, is_hip, is_tpu, is_xpu
 from aphrodite.task_handler.worker_base import WorkerWrapperBase
 
@@ -28,9 +28,16 @@ try:
             gpu_ids = ray.get_gpu_ids()
             return node_id, gpu_ids
 
-        def execute_model_spmd(self, execute_model_req: ExecuteModelRequest):
-            """Used only when SPMD worker and compiled DAG are both
-            enabled."""
+        def execute_model_spmd(
+            self, req_or_tuple: Union[ExecuteModelRequest,
+                                      Tuple[ExecuteModelRequest,
+                                            IntermediateTensors]]):
+            """Execute model in SPMD fashion: used only when SPMD worker and
+            compiled DAG are both enabled.
+            Args:
+                req_or_tuple: The request to execute the model, or a tuple
+                    containing the request and intermediate tensors.
+            """
             # TODO: This is needed right now because Ray DAG executes
             # on a background thread, so we need to reset torch's current
             # device.
@@ -39,7 +46,17 @@ try:
                 torch.cuda.set_device(self.worker.device)
                 self.compiled_dag_cuda_device_set = True
 
-            return self.worker._execute_model_spmd(execute_model_req)
+            if isinstance(req_or_tuple, tuple):
+                execute_model_req, intermediate_tensors = req_or_tuple
+            else:
+                execute_model_req = req_or_tuple
+                intermediate_tensors = None
+
+            output = self.worker._execute_model_spmd(execute_model_req,
+                                                     intermediate_tensors)
+            if isinstance(output, IntermediateTensors):
+                return execute_model_req, output
+            return output
 
     ray_import_err = None
 
