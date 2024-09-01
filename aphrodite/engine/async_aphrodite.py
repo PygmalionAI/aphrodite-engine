@@ -8,7 +8,9 @@ from typing import (AsyncIterator, Callable, Dict, Iterable, List, Optional,
 from loguru import logger
 from transformers import PreTrainedTokenizer
 
-from aphrodite.common.config import DecodingConfig, EngineConfig, ModelConfig
+from aphrodite.common.config import (DecodingConfig, EngineConfig, LoRAConfig,
+                                     ModelConfig, ParallelConfig,
+                                     SchedulerConfig)
 from aphrodite.common.outputs import EmbeddingRequestOutput, RequestOutput
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
@@ -912,6 +914,14 @@ class AsyncAphrodite:
         else:
             return self.engine.get_model_config()
 
+    async def get_parallel_config(self) -> ParallelConfig:
+        """Get the parallel configuration of the Aphrodite engine."""
+        if self.engine_use_ray:
+            return await self.engine.get_parallel_config.remote(  # type: ignore
+            )
+        else:
+            return self.engine.get_parallel_config()
+
     async def get_decoding_config(self) -> DecodingConfig:
         """Get the decoding configuration of the Aphrodite engine."""
         if self.engine_use_ray:
@@ -919,6 +929,22 @@ class AsyncAphrodite:
             )
         else:
             return self.engine.get_decoding_config()
+
+    async def get_scheduler_config(self) -> SchedulerConfig:
+        """Get the scheduling configuration of the Aphrodite engine."""
+        if self.engine_use_ray:
+            return await self.engine.get_scheduler_config.remote(  # type: ignore
+            )
+        else:
+            return self.engine.get_scheduler_config()
+
+    async def get_lora_config(self) -> LoRAConfig:
+        """Get the lora configuration of the Aphrodite engine."""
+        if self.engine_use_ray:
+            return await self.engine.get_lora_config.remote(  # type: ignore
+            )
+        else:
+            return self.engine.get_lora_config()
 
     async def do_log_stats(
             self,
