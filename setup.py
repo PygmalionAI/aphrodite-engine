@@ -51,7 +51,7 @@ embed_commit_hash()
 assert sys.platform.startswith(
     "linux"), "Aphrodite only supports Linux platform (including WSL)."
 
-MAIN_CUDA_VERSION = "12.1"
+MAIN_CUDA_VERSION = "12.4"
 
 
 def is_sccache_available() -> bool:
@@ -453,10 +453,7 @@ setup(
         "Huggingface": "https://huggingface.co/PygmalionAI",
     },
     classifiers=[
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
-        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3",
         "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",  # noqa: E501
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
