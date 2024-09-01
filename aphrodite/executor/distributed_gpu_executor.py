@@ -15,7 +15,7 @@ class DistributedGPUExecutor(GPUExecutor):
 
     def __init__(self, *args, **kwargs):
         # This is non-None when the execute model loop is running
-        # in the parallel workers. It's a coroutine in the AsyncLLMEngine case.
+        # in the parallel workers. It's a coroutine in the AsyncAphrodite case.
         self.parallel_worker_tasks: Optional[Union[Any, Awaitable[Any]]] = None
         # Updated by implementations that require additional args to be passed
         # to the _run_workers execute_model call

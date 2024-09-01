@@ -292,7 +292,7 @@ def build_1_2_5_buckets(max_value: int) -> List[int]:
 
 @dataclass
 class Stats:
-    """Created by LLMEngine for use by StatLogger."""
+    """Created by AphroditeEngine for use by StatLogger."""
     now: float
 
     # System stats (should have _sys suffix)
@@ -368,13 +368,13 @@ class StatLoggerBase(ABC):
 
 
 class LoggingStatLogger(StatLoggerBase):
-    """LoggingStatLogger is used in LLMEngine to log to Stdout."""
+    """LoggingStatLogger is used in AphroditeEngine to log to Stdout."""
 
     def info(self, type: str, obj: SupportsMetricsInfo) -> None:
         raise NotImplementedError
 
     def log(self, stats: Stats) -> None:
-        """Called by LLMEngine.
+        """Called by AphroditeEngine.
            Logs to Stdout every self.local_interval seconds."""
 
         # Save tracked stats for token counters.
@@ -433,7 +433,7 @@ class LoggingStatLogger(StatLoggerBase):
 
 
 class PrometheusStatLogger(StatLoggerBase):
-    """PrometheusStatLogger is used LLMEngine to log to Promethus."""
+    """PrometheusStatLogger is used AphroditeEngine to log to Promethus."""
     _metrics_cls = Metrics
 
     def __init__(self, local_interval: float, labels: Dict[str, str],

@@ -26,7 +26,7 @@ from aphrodite.endpoints.openai.protocol import (ChatCompletionRequest,
                                                  TokenizeCompletionRequest,
                                                  TokenizeRequest)
 # yapf: enable
-from aphrodite.engine.async_aphrodite import AsyncAphrodite
+from aphrodite.engine.protocol import AsyncEngineClient
 from aphrodite.inputs import parse_and_batch_prompt
 from aphrodite.lora.request import LoRARequest
 from aphrodite.modeling.guided_decoding import \
@@ -61,7 +61,7 @@ class OpenAIServing:
 
     def __init__(
         self,
-        engine: AsyncAphrodite,
+        async_engine_client: AsyncEngineClient,
         model_config: ModelConfig,
         served_model_names: List[str],
         *,
@@ -72,7 +72,7 @@ class OpenAIServing:
     ):
         super().__init__()
 
-        self.engine = engine
+        self.async_engine_client = async_engine_client
         self.model_config = model_config
         self.max_model_len = model_config.max_model_len
 
@@ -155,7 +155,7 @@ class OpenAIServing:
     async def _guided_decode_logits_processor(
             self, request: Union[ChatCompletionRequest, CompletionRequest],
             tokenizer: AnyTokenizer) -> Optional[LogitsProcessorFunc]:
-        decoding_config = await self.engine.get_decoding_config()
+        decoding_config = await self.async_engine_client.get_decoding_config()
         guided_decoding_backend = request.guided_decoding_backend \
             or decoding_config.guided_decoding_backend
         return await get_guided_decoding_logits_processor(
