@@ -1,13 +1,14 @@
 from typing import List, Optional, Union
 
+from loguru import logger
+
 from aphrodite.common.config import ModelConfig
 from aphrodite.common.utils import random_uuid
-from aphrodite.endpoints.chat_utils import (ConversationMessage,
-                                            load_chat_template,
-                                            parse_chat_message_content)
-from aphrodite.endpoints.logger import RequestLogger
 # yapf conflicts with isort
 # yapf: disable
+from aphrodite.endpoints.chat_utils import (load_chat_template,
+                                            parse_chat_messages)
+from aphrodite.endpoints.logger import RequestLogger
 from aphrodite.endpoints.openai.protocol import (DetokenizeRequest,
                                                  DetokenizeResponse,
                                                  ErrorResponse,
@@ -62,12 +63,12 @@ class OpenAIServingTokenization(OpenAIServing):
         if isinstance(request, TokenizeChatRequest):
             model_config = self.model_config
 
-            conversation: List[ConversationMessage] = []
+            conversation, mm_futures = parse_chat_messages(
+                request.messages, model_config, tokenizer)
 
-            for message in request.messages:
-                result = parse_chat_message_content(message, model_config,
-                                                    tokenizer)
-                conversation.extend(result.messages)
+            if mm_futures:
+                logger.warning(
+                    "Multi-modal inputs are ignored during tokenization")
 
             prompt = tokenizer.apply_chat_template(
                 add_generation_prompt=request.add_generation_prompt,

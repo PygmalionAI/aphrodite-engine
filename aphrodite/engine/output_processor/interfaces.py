@@ -17,11 +17,11 @@ class SequenceGroupOutputProcessor(ABC):
     managing detokenization, stop checking, and freeing/forking sequences with
     the scheduler.
 
-    This is highly coupled with the AphroditeEngine and should be seen as an extension
-    of it. The logic is separated to simplify the AphroditeEngine class and allow
-    separate implementations for single-step decoding (which supports beam
-    search sequence forking) and multi-step decoding (which does not support
-    beam search, but does support speculative decoding).
+    This is highly coupled with the AphroditeEngine and should be seen as an
+    extension of it. The logic is separated to simplify the AphroditeEngine
+    class and allow separate implementations for single-step decoding
+    (which supports beam search sequence forking) and multi-step decoding
+    (which does not support beam search, but does support speculative decoding)
     """
 
     @staticmethod

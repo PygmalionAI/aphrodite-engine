@@ -1,6 +1,5 @@
 import time
-from typing import (AsyncGenerator, AsyncIterator, Awaitable, Dict, List,
-                    Optional)
+from typing import AsyncGenerator, AsyncIterator, Dict, List, Optional
 from typing import Sequence as GenericSequence
 from typing import Union
 
@@ -14,7 +13,7 @@ from aphrodite.common.sequence import Logprob
 from aphrodite.common.utils import random_uuid
 from aphrodite.endpoints.chat_utils import (ConversationMessage,
                                             load_chat_template,
-                                            parse_chat_message_content)
+                                            parse_chat_messages)
 from aphrodite.endpoints.logger import RequestLogger
 from aphrodite.endpoints.openai.protocol import (
     ChatCompletionLogProb, ChatCompletionLogProbs,
@@ -86,15 +85,8 @@ class OpenAIServingChat(OpenAIServing):
             model_config = self.model_config
             tokenizer = await self.async_engine_client.get_tokenizer(
                 lora_request)
-            conversation: List[ConversationMessage] = []
-            mm_futures: List[Awaitable[MultiModalDataDict]] = []
-
-            for msg in request.messages:
-                chat_parsed_result = parse_chat_message_content(
-                    msg, model_config, tokenizer)
-
-                conversation.extend(chat_parsed_result.messages)
-                mm_futures.extend(chat_parsed_result.mm_futures)
+            conversation, mm_futures = parse_chat_messages(
+                request.messages, model_config, tokenizer)
 
             tool_dicts = None if request.tools is None else [
                 tool.model_dump() for tool in request.tools
@@ -109,6 +101,7 @@ class OpenAIServingChat(OpenAIServing):
                 chat_template=request.chat_template or self.chat_template,
                 **(request.chat_template_kwargs or {}),
             )
+            assert isinstance(prompt, str)
         except Exception as e:
             logger.error(f"Error in applying chat template from request: {e}")
             return self.create_error_response(str(e))
@@ -122,7 +115,7 @@ class OpenAIServingChat(OpenAIServing):
                 ) == 1, "Multiple 'image_url' input is currently not supported."
                 mm_data = await mm_futures[0]
         except Exception as e:
-            logger.error("Error in loading multi-modal data: {e}")
+            logger.error(f"Error in loading multi-modal data: {e}")
             return self.create_error_response(str(e))
 
         request_id = f"chat-{random_uuid()}"
