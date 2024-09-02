@@ -65,10 +65,9 @@ def repeat_and_pad_image_tokens(
         image_token_count = prompt.count(image_token_str)
         # This is an arbitrary number to distinguish between the two cases
         if image_token_count > 16:
-            logger.warning(
-                "Please follow the prompt format that is "
-                "documented on HuggingFace which does not involve "
-                "repeating %s tokens.", image_token_str)
+            logger.warning("Please follow the prompt format that is "
+                           "documented on HuggingFace which does not involve "
+                           f"repeating {image_token_str} tokens.")
         elif image_token_count > 1:
             logger.warning("Multiple image input is not supported yet, "
                            "so any extra image tokens will be treated "
@@ -120,7 +119,7 @@ class ImagePlugin(MultiModalPlugin):
                     .preprocess(data, return_tensors="pt") \
                     .data
             except Exception:
-                logger.error("Failed to process image (%s)", data)
+                logger.error(f"Failed to process image ({data})")
                 raise
 
             return MultiModalInputs(batch_data)

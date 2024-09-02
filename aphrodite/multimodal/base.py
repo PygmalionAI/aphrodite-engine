@@ -1,22 +1,37 @@
 import sys
 from abc import ABC, abstractmethod
 from collections import UserDict, defaultdict
-from typing import (Any, Callable, Dict, List, Optional, Type, TypedDict,
-                    TypeVar, Union)
+from typing import Any, Callable, Dict, List, Optional
+from typing import Sequence as GenericSequence
+from typing import Type, TypedDict, TypeVar, Union, cast
 
 import torch
 import torch.types
 from loguru import logger
 from PIL import Image
 from torch import nn
+from typing_extensions import TypeAlias
 
 from aphrodite.common.config import ModelConfig
+from aphrodite.common.utils import JSONTree, json_map_leaves
 from aphrodite.inputs import InputContext
 
-BatchedTensors = Union[torch.Tensor, List[torch.Tensor]]
+NestedTensors = Union[GenericSequence[torch.Tensor], torch.Tensor]
 """
-If each input tensor in the batch has the same size, this is a single batched
-tensor; otherwise, this is a list of tensors with one element per batch.
+Use a list instead of a tensor if the dimensions of each element do not match.
+Currently only supports up to singly nested list of tensors.
+"""
+
+BatchedTensors: TypeAlias = JSONTree[torch.Tensor]
+"""
+A nested JSON structure of tensors which have been batched via
+:meth:`MultiModalInputs.batch`.
+"""
+
+BatchedTensorInputs: TypeAlias = Dict[str, JSONTree[torch.Tensor]]
+"""
+A dictionary containing nested tensors which have been batched via
+:meth:`MultiModalInputs.batch`.
 """
 
 if sys.version_info < (3, 9):
@@ -25,7 +40,7 @@ if sys.version_info < (3, 9):
         pass
 else:
 
-    class _MultiModalInputsBase(UserDict[str, torch.Tensor]):
+    class _MultiModalInputsBase(UserDict[str, NestedTensors]):
         pass
 
 
@@ -36,36 +51,45 @@ class MultiModalInputs(_MultiModalInputsBase):
     """
 
     @staticmethod
-    def try_concat(
-        tensors: List[torch.Tensor],
-        *,
-        device: torch.types.Device,
-    ) -> BatchedTensors:
-        # Avoid initializing CUDA too early
-        import torch
+    def _try_concat(
+        tensors: List[NestedTensors],
+    ) -> Union[GenericSequence[NestedTensors], NestedTensors]:
+        """
+        If each input tensor in the batch has the same shape, return a single
+        batched tensor; otherwise, return a list of :class:`NestedTensors` with
+        one element per item in the batch.
+        """
+        # may be list rather than tensors
+        if isinstance(tensors[0], list):
+            return [[t for t in tensor[0]]
+                    for tensor in cast(List[List[torch.Tensor]], tensors)]
 
-        unbatched_shape = tensors[0].shape[1:]
+        tensors_ = cast(List[torch.Tensor], tensors)
 
-        for tensor in tensors:
+        unbatched_shape = tensors_[0].shape[1:]
+
+        for tensor in tensors_:
             if tensor.shape[1:] != unbatched_shape:
-                return [
-                    tensor.squeeze(0).to(device=device) for tensor in tensors
-                ]
+                return [tensor.squeeze(0) for tensor in tensors_]
 
-        return torch.cat(tensors, dim=0).to(device=device)
+        return torch.cat(tensors_, dim=0)
 
     @staticmethod
-    def batch(
-        inputs_list: List["MultiModalInputs"],
-        device: torch.types.Device,
-    ) -> Dict[str, BatchedTensors]:
-        """Batch multiple inputs together into a dictionary."""
+    def batch(inputs_list: List["MultiModalInputs"]) -> BatchedTensorInputs:
+        """
+        Batch multiple inputs together into a dictionary.
+        The resulting dictionary has the same keys as the inputs.
+        If the corresponding value from each input is a tensor and they all
+        share the same shape, the output value is a single batched tensor;
+        otherwise, the output value is a list containing the original value
+        from each input.
+        """
         if len(inputs_list) == 0:
             return {}
 
         keys = inputs_list[0].keys()
 
-        item_lists: Dict[str, List[torch.Tensor]] = defaultdict(list)
+        item_lists: Dict[str, List[NestedTensors]] = defaultdict(list)
 
         for inputs in inputs_list:
             if inputs.keys() != keys:
@@ -76,9 +100,18 @@ class MultiModalInputs(_MultiModalInputsBase):
                 item_lists[k].append(v)
 
         return {
-            k: MultiModalInputs.try_concat(item_list, device=device)
+            k: MultiModalInputs._try_concat(item_list)
             for k, item_list in item_lists.items()
-        }
+        }  # type: ignore
+
+    @staticmethod
+    def as_kwargs(
+        batched_inputs: BatchedTensorInputs,
+        *,
+        device: torch.types.Device,
+    ) -> BatchedTensorInputs:
+        return json_map_leaves(lambda x: x.to(device, non_blocking=True),
+                               batched_inputs)
 
 
 class MultiModalDataBuiltins(TypedDict, total=False):
@@ -163,9 +196,8 @@ class MultiModalPlugin(ABC):
         def wrapper(model_cls: N) -> N:
             if model_cls in self._input_mappers:
                 logger.warning(
-                    "Model class %s already has an input mapper "
-                    "registered to %s. It is overwritten by the new one.",
-                    model_cls, self)
+                    f"Model class {model_cls} already has an input mapper "
+                    f"registered to {self}. It is overwritten by the new one.")
 
             self._input_mappers[model_cls] = mapper \
                 or self._default_input_mapper
@@ -227,9 +259,9 @@ class MultiModalPlugin(ABC):
         def wrapper(model_cls: N) -> N:
             if model_cls in self._max_mm_tokens:
                 logger.warning(
-                    "Model class %s already calculates maximum number of "
-                    "tokens in %s. It is overwritten by the new one.",
-                    model_cls, self)
+                    f"Model class {model_cls} already calculates maximum "
+                    f"number of tokens in {self}. It is overwritten by the "
+                    "new one.")
 
             if isinstance(max_mm_tokens, int):
                 self._validate_max_multimodal_tokens(max_mm_tokens)

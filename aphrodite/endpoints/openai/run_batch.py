@@ -6,6 +6,7 @@ import aiohttp
 from loguru import logger
 
 from aphrodite.common.utils import FlexibleArgumentParser, random_uuid
+from aphrodite.endpoints.logger import RequestLogger
 from aphrodite.endpoints.openai.protocol import (BatchRequestInput,
                                                  BatchRequestOutput,
                                                  BatchResponseData,
@@ -42,6 +43,12 @@ def parse_args():
                         default="assistant",
                         help="The role name to return if "
                         "`request.add_generation_prompt=true`.")
+    parser.add_argument("--max-log-len",
+                        type=int,
+                        default=0,
+                        help="Max number of prompt characters or prompt "
+                        "ID numbers being printed in log."
+                        "\n\nDefault: 0")
 
     parser = AsyncEngineArgs.add_cli_args(parser)
     return parser.parse_args()
@@ -111,11 +118,20 @@ async def main(args):
     # When using single Aphrodite without engine_use_ray
     model_config = await engine.get_model_config()
 
+    if args.disable_log_requests:
+        request_logger = None
+    else:
+        request_logger = RequestLogger(max_log_len=args.max_log_len)
+
     openai_serving_chat = OpenAIServingChat(
         engine,
         model_config,
         served_model_names,
         args.response_role,
+        lora_modules=None,
+        prompt_adapters=None,
+        request_logger=request_logger,
+        chat_template=None,
     )
 
     # Submit all requests in the file to the engine "concurrently".

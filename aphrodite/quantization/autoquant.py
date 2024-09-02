@@ -81,8 +81,8 @@ class AutoQuantConfig(QuantizationConfig):
             quant_mode = "weight_only"
         return cls(weight_bits, group_size, zero_point, from_float, quant_mode)
 
-    def get_quant_method(
-            self, layer: torch.nn.Module) -> Optional["AutoQuantLinearMethod"]:
+    def get_quant_method(self, layer: torch.nn.Module,
+                         prefix: str) -> Optional["AutoQuantLinearMethod"]:
         if isinstance(layer, LinearBase):
             return AutoQuantLinearMethod(self)
         return None

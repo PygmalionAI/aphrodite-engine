@@ -121,10 +121,14 @@ class TorchSDPABackendImpl(AttentionImpl[TorchSDPAMetadata]):
         alibi_slopes: Optional[List[float]],
         sliding_window: Optional[int],
         kv_cache_dtype: str,
-    blocksparse_params: Optional[Dict[str, Any]] = None,
+        blocksparse_params: Optional[Dict[str, Any]] = None,
+        logits_soft_cap: Optional[float] = None,
     ) -> None:
-        assert blocksparse_params is None, ValueError(
-            "Torch SDPA does not support block-sparse attention.")
+        if blocksparse_params is not None:
+            raise ValueError(
+                "Torch SPDA does not support block-sparse attention.")
+        if logits_soft_cap is not None:
+            raise ValueError("Torch SPDA does not support logits soft cap.")
         self.num_heads = num_heads
         self.head_size = head_size
         self.scale = float(scale)

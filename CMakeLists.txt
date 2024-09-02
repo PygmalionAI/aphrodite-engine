@@ -14,7 +14,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/cmake/utils.cmake)
 # Supported python versions.  These versions will be searched in order, the
 # first match will be selected.  These should be kept in sync with setup.py.
 #
-set(PYTHON_SUPPORTED_VERSIONS "3.8" "3.9" "3.10" "3.11")
+set(PYTHON_SUPPORTED_VERSIONS "3.8" "3.9" "3.10" "3.11" "3.12")
 
 # Supported NVIDIA architectures.
 set(CUDA_SUPPORTED_ARCHS "6.0;6.1;7.0;7.5;8.0;8.6;8.9;9.0")
@@ -32,7 +32,7 @@ set(HIP_SUPPORTED_ARCHS "gfx906;gfx908;gfx90a;gfx940;gfx941;gfx942;gfx1030;gfx11
 # requirements.txt files and should be kept consistent.  The ROCm torch
 # versions are derived from Dockerfile.rocm
 #
-set(TORCH_SUPPORTED_VERSION_CUDA "2.3.1")
+set(TORCH_SUPPORTED_VERSION_CUDA "2.4.0")
 set(TORCH_SUPPORTED_VERSION_ROCM "2.5.0")
 
 #
@@ -67,6 +67,39 @@ endif()
 find_package(Torch REQUIRED)
 
 #
+# Add the `default` target which detects which extensions should be
+# built based on platform/architecture.  This is the same logic that
+# setup.py uses to select which extensions should be built and should
+# be kept in sync.
+#
+# The `default` target makes direct use of cmake easier since knowledge
+# of which extensions are supported has been factored in, e.g.
+#
+# mkdir build && cd build
+# cmake -G Ninja -DAPHRODITE_PYTHON_EXECUTABLE=`which python3` -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=../aphrodite ..
+# cmake --build . --target default
+#
+add_custom_target(default)
+message(STATUS "Enabling core extension.")
+
+# Define _core_C extension
+#  built for (almost) every target platform, (excludes TPU and Neuron)
+
+set(APHRODITE_EXT_SRC
+  "kernels/core/torch_bindings.cpp")
+
+define_gpu_extension_target(
+  _core_C
+  DESTINATION aphrodite
+  LANGUAGE CXX
+  SOURCES ${APHRODITE_EXT_SRC}
+  COMPILE_FLAGS ${CXX_COMPILE_FLAGS}
+  USE_SABI 3
+  WITH_SOABI)
+
+add_dependencies(default _core_C)
+
+#
 # Forward the non-CUDA device extensions to external CMake scripts.
 #
 if (NOT APHRODITE_TARGET_DEVICE STREQUAL "cuda" AND
@@ -74,7 +107,7 @@ if (NOT APHRODITE_TARGET_DEVICE STREQUAL "cuda" AND
     if (APHRODITE_TARGET_DEVICE STREQUAL "cpu")
         include(${CMAKE_CURRENT_LIST_DIR}/cmake/cpu_extension.cmake)
     else()
-        message(FATAL_ERROR "Unsupported Aphrodite target device: ${APHRODITE_TARGET_DEVICE}")
+        return()
     endif()
     return()
 endif()
@@ -101,7 +134,7 @@ elseif(HIP_FOUND)
   # ROCm 5.X and 6.X
   if (ROCM_VERSION_DEV_MAJOR GREATER_EQUAL 5 AND
       NOT Torch_VERSION VERSION_EQUAL ${TORCH_SUPPORTED_VERSION_ROCM})
-    message(WARNING "Pytorch version ${TORCH_SUPPORTED_VERSION_ROCM} "
+      message(WARNING "Pytorch version >= ${TORCH_SUPPORTED_VERSION_ROCM} "
       "expected for ROCm build, saw ${Torch_VERSION} instead.")
   endif()
 else()
@@ -132,7 +165,7 @@ if(NVCC_THREADS AND APHRODITE_GPU_LANG STREQUAL "CUDA")
 endif()
 
 #
-# Define extension targets
+# Define other extension targets
 #
 
 #
@@ -160,8 +193,8 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
   FetchContent_Declare(
         cutlass
         GIT_REPOSITORY https://github.com/nvidia/cutlass.git
-        # CUTLASS 3.5.0
-        GIT_TAG 7d49e6c7e2f8896c47f586706e67e1fb215529dc
+        # CUTLASS 3.5.1
+        GIT_TAG 06b21349bcf6ddf6a1686a47a137ad1446579db9 
   )
   FetchContent_MakeAvailable(cutlass)
 
@@ -173,9 +206,11 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     "kernels/quantization/quip/origin_order.cu"
     "kernels/quantization/marlin/dense/marlin_cuda_kernel.cu"
     "kernels/quantization/marlin/sparse/marlin_24_cuda_kernel.cu"
+    "kernels/quantization/marlin/qqq/marlin_qqq_gemm_kernel.cu"
     "kernels/quantization/gptq_marlin/gptq_marlin.cu"
     "kernels/quantization/gptq_marlin/gptq_marlin_repack.cu"
     "kernels/quantization/gguf/gguf_kernel.cu"
+    "kernels/quantization/gptq_marlin/awq_marlin_repack.cu"
     "kernels/quantization/fp8/fp8_marlin.cu"
     "kernels/all_reduce/custom_all_reduce.cu"
     "kernels/quantization/cutlass_w8a8/scaled_mm_entry.cu"
@@ -188,10 +223,11 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
   # That adds an extra 17MB to compiled binary, so instead we selectively enable it.
   if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER 12.0)
     set_source_files_properties(
+          "kernels/quantization/cutlass_w8a8/scaled_mm_c2x.cu"
           "kernels/quantization/cutlass_w8a8/scaled_mm_c3x.cu"
           PROPERTIES
           COMPILE_FLAGS
-          "-gencode arch=compute_90a,code=sm_90a")
+          "-gencode arch=compute_90a,code=sm_90a -Wno-psabi")
   endif()
 
 endif()
@@ -203,7 +239,7 @@ define_gpu_extension_target(
   SOURCES ${APHRODITE_EXT_SRC}
   COMPILE_FLAGS ${APHRODITE_GPU_FLAGS}
   ARCHITECTURES ${APHRODITE_GPU_ARCHES}
-  INCLUDE_DIRECTORIES ${CUTLASS_INCLUDE_DIR};${CUTLASS_TOOLS_UTIL_INCLUDE_DIR}
+  INCLUDE_DIRECTORIES ${CUTLASS_INCLUDE_DIR}
   USE_SABI 3
   WITH_SOABI)
 
@@ -225,159 +261,10 @@ define_gpu_extension_target(
   USE_SABI 3
   WITH_SOABI)
 
-#
-# _punica_C extension
-#
-
-set(APHRODITE_PUNICA_EXT_SRC
-  "kernels/punica/bgmv/bgmv_bf16_bf16_bf16.cu"
-  "kernels/punica/bgmv/bgmv_bf16_bf16_fp16.cu"
-  "kernels/punica/bgmv/bgmv_bf16_fp16_bf16.cu"
-  "kernels/punica/bgmv/bgmv_bf16_fp16_fp16.cu"
-  "kernels/punica/bgmv/bgmv_bf16_fp32_bf16.cu"
-  "kernels/punica/bgmv/bgmv_bf16_fp32_fp16.cu"
-  "kernels/punica/bgmv/bgmv_fp16_bf16_bf16.cu"
-  "kernels/punica/bgmv/bgmv_fp16_bf16_fp16.cu"
-  "kernels/punica/bgmv/bgmv_fp16_fp16_bf16.cu"
-  "kernels/punica/bgmv/bgmv_fp16_fp16_fp16.cu"
-  "kernels/punica/bgmv/bgmv_fp16_fp32_bf16.cu"
-  "kernels/punica/bgmv/bgmv_fp16_fp32_fp16.cu"
-  "kernels/punica/bgmv/bgmv_fp32_bf16_bf16.cu"
-  "kernels/punica/bgmv/bgmv_fp32_bf16_fp16.cu"
-  "kernels/punica/bgmv/bgmv_fp32_fp16_bf16.cu"
-  "kernels/punica/bgmv/bgmv_fp32_fp16_fp16.cu"
-  "kernels/punica/bgmv/bgmv_fp32_fp32_bf16.cu"
-  "kernels/punica/bgmv/bgmv_fp32_fp32_fp16.cu"
-  "kernels/punica/punica_ops.cu"
-  "kernels/punica/torch_bindings.cpp")
-
-#
-# Copy GPU compilation flags+update for punica
-#
-set(APHRODITE_PUNICA_GPU_FLAGS ${APHRODITE_GPU_FLAGS})
-list(REMOVE_ITEM APHRODITE_PUNICA_GPU_FLAGS
-  "-D__CUDA_NO_HALF_OPERATORS__"
-  "-D__CUDA_NO_HALF_CONVERSIONS__"
-  "-D__CUDA_NO_BFLOAT16_CONVERSIONS__"
-  "-D__CUDA_NO_HALF2_OPERATORS__")
-
-#
-# Filter out CUDA architectures < 8.0 for punica.
-#
-if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
-  set(APHRODITE_PUNICA_GPU_ARCHES)
-  foreach(ARCH ${APHRODITE_GPU_ARCHES})
-    string_to_ver(CODE_VER ${ARCH})
-    if (CODE_VER GREATER_EQUAL 8.0)
-      list(APPEND APHRODITE_PUNICA_GPU_ARCHES ${ARCH})
-    endif()
-  endforeach()
-  message(STATUS "Punica target arches: ${APHRODITE_PUNICA_GPU_ARCHES}")
-elseif(${APHRODITE_GPU_LANG} STREQUAL "HIP")
-  set(APHRODITE_PUNICA_GPU_ARCHES ${APHRODITE_GPU_ARCHES})
-  message(STATUS "Punica target arches: ${APHRODITE_PUNICA_GPU_ARCHES}")
-endif()
-
-if (APHRODITE_PUNICA_GPU_ARCHES)
-  define_gpu_extension_target(
-    _punica_C
-    DESTINATION aphrodite
-    LANGUAGE ${APHRODITE_GPU_LANG}
-    SOURCES ${APHRODITE_PUNICA_EXT_SRC}
-    COMPILE_FLAGS ${APHRODITE_PUNICA_GPU_FLAGS}
-    ARCHITECTURES ${APHRODITE_PUNICA_GPU_ARCHES}
-    USE_SABI 3
-    WITH_SOABI)
-else()
-  message(WARNING "Unable to create _punica_C target because none of the "
-    "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 8.0")
-endif()
-
-# #
-# # _hadamard_C extension
-# #
-
-# set(APHRODITE_HADAMARD_EXT_SRC
-#   "kernels/hadamard/fast_hadamard_transform.cpp"
-#   "kernels/hadamard/fast_hadamard_transform_cuda.cu")
-
-# #
-# # Copy GPU compilation flags+update for hadamard
-# #
-# set(APHRODITE_HADAMARD_GPU_FLAGS ${APHRODITE_GPU_FLAGS})
-# list(APPEND APHRODITE_HADAMARD_GPU_FLAGS
-#   "-U__CUDA_NO_HALF_OPERATORS__"
-#   "-U__CUDA_NO_HALF_CONVERSIONS__"
-#   "-U__CUDA_NO_BFLOAT16_OPERATORS__"
-#   "-U__CUDA_NO_BFLOAT16_CONVERSIONS__"
-#   "-U__CUDA_NO_BFLOAT162_OPERATORS__"
-#   "-U__CUDA_NO_BFLOAT162_CONVERSIONS__"
-#   "--expt-relaxed-constexpr"
-#   "--expt-extended-lambda"
-#   "--use_fast_math"
-#   "-lineinfo")
-
-# #
-# # Filter out CUDA architectures < 7.0 for hadamard.
-# #
-# if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
-#   set(APHRODITE_HADAMARD_GPU_ARCHES)
-#   foreach(ARCH ${APHRODITE_GPU_ARCHES})
-#     string_to_ver(CODE_VER ${ARCH})
-#     if (CODE_VER GREATER_EQUAL 6.0)
-#       list(APPEND APHRODITE_HADAMARD_GPU_ARCHES ${ARCH})
-#     endif()
-#   endforeach()
-#   message(STATUS "Hadamard target arches: ${APHRODITE_HADAMARD_GPU_ARCHES}")
-# endif()
-
-# if (APHRODITE_HADAMARD_GPU_ARCHES)
-#   define_gpu_extension_target(
-#     _hadamard_C
-#     DESTINATION aphrodite
-#     LANGUAGE ${APHRODITE_GPU_LANG}
-#     SOURCES ${APHRODITE_HADAMARD_EXT_SRC}
-#     COMPILE_FLAGS ${APHRODITE_HADAMARD_GPU_FLAGS}
-#     ARCHITECTURES ${APHRODITE_HADAMARD_GPU_ARCHES}
-#     WITH_SOABI)
-# else()
-#   message(WARNING "Unable to create _hadamard_C target because none of the "
-#     "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 6.0")
-# endif()
-
-#
-# Add the `default` target which detects which extensions should be
-# built based on platform/architecture.  This is the same logic that
-# setup.py uses to select which extensions should be built and should
-# be kept in sync.
-#
-# The `default` target makes direct use of cmake easier since knowledge
-# of which extensions are supported has been factored in, e.g.
-#
-# mkdir build && cd build
-# cmake -G Ninja -DAPHRODITE_PYTHON_EXECUTABLE=`which python3` -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=../aphrodite ..
-# cmake --build . --target default
-#
-add_custom_target(default)
-
 if(APHRODITE_GPU_LANG STREQUAL "CUDA" OR APHRODITE_GPU_LANG STREQUAL "HIP")
   message(STATUS "Enabling C extension.")
   add_dependencies(default _C)
 
   message(STATUS "Enabling moe extension.")
   add_dependencies(default _moe_C)
-
-  # Enable punica if -DAPHRODITE_INSTALL_PUNICA_KERNELS=ON or
-  # APHRODITE_INSTALL_PUNICA_KERNELS is set in the environment and
-  # there are supported target arches.
-  if (APHRODITE_PUNICA_GPU_ARCHES AND
-      (ENV{APHRODITE_INSTALL_PUNICA_KERNELS} OR APHRODITE_INSTALL_PUNICA_KERNELS))
-    message(STATUS "Enabling punica extension.")
-    add_dependencies(default _punica_C)
-  endif()
-  # if (APHRODITE_HADAMARD_GPU_ARCHES AND
-  #     (ENV{APHRODITE_INSTALL_HADAMARD_KERNELS} OR APHRODITE_INSTALL_HADAMARD_KERNELS))
-  #   message(STATUS "Enabling hadamard extension.")
-  #   add_dependencies(default _hadamard_C)
-  # endif()
 endif()

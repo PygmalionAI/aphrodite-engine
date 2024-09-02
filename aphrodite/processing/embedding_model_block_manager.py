@@ -1,7 +1,7 @@
 from typing import List, Tuple
 
-from aphrodite.processing.interfaces import AllocStatus, BlockSpaceManager
 from aphrodite.common.sequence import Sequence, SequenceGroup
+from aphrodite.processing.interfaces import AllocStatus, BlockSpaceManager
 
 
 class EmbeddingModelBlockSpaceManager(BlockSpaceManager):

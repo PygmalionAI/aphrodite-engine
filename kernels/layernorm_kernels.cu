@@ -204,7 +204,8 @@ fused_add_rms_norm_kernel(
     const scalar_t* __restrict__ weight,  // [hidden_size]
     const float epsilon, const int num_tokens, const int hidden_size) {
   // Sanity checks on our vector struct and type-punned pointer arithmetic
-  static_assert(std::is_pod_v<_f16Vec<scalar_t, width>>);
+  static_assert(std::is_standard_layout_v<_f16Vec<scalar_t, width>> &&
+                std::is_trivial_v<_f16Vec<scalar_t, width>>);
   static_assert(sizeof(_f16Vec<scalar_t, width>) == sizeof(scalar_t) * width);
 
   const int vec_hidden_size = hidden_size / width;

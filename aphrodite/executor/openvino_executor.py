@@ -1,5 +1,5 @@
-from typing import List, Set, Tuple
 import os
+from typing import List, Set, Tuple
 
 import openvino as ov
 import openvino.properties.hint as hints
@@ -20,6 +20,8 @@ APHRODITE_OPENVINO_CPU_KV_CACHE_PRECISION = os.getenv(
 
 
 class OpenVINOExecutor(ExecutorBase):
+
+    uses_ray: bool = False
 
     def _init_executor(self) -> None:
         assert self.device_config.device_type == "openvino"

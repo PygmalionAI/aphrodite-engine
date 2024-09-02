@@ -25,6 +25,7 @@ YAPF_VERSION=$(yapf --version | awk '{print $2}')
 RUFF_VERSION=$(ruff --version | awk '{print $2}')
 MYPY_VERSION=$(mypy --version | awk '{print $2}')
 CODESPELL_VERSION=$(codespell --version)
+ISORT_VERSION=$(isort --vn)
 CLANGFORMAT_VERSION=$(clang-format --version | awk '{print $3}')
 
 # # params: tool name, tool version, required version
@@ -35,11 +36,11 @@ tool_version_check() {
     fi
 }
 
-tool_version_check "yapf" $YAPF_VERSION "$(grep yapf requirements-dev.txt | cut -d'=' -f3)"
-tool_version_check "ruff" $RUFF_VERSION "$(grep "ruff==" requirements-dev.txt | cut -d'=' -f3)"
-tool_version_check "mypy" "$MYPY_VERSION" "$(grep mypy requirements-dev.txt | cut -d'=' -f3)"
-tool_version_check "codespell" "$CODESPELL_VERSION" "$(grep codespell requirements-dev.txt | cut -d'=' -f3)"
-tool_version_check "clang-format" "$CLANGFORMAT_VERSION" "$(grep clang-format requirements-dev.txt | cut -d'=' -f3)"
+tool_version_check "yapf" $YAPF_VERSION "$(grep yapf requirements-lint.txt | cut -d'=' -f3)"
+tool_version_check "ruff" $RUFF_VERSION "$(grep "ruff==" requirements-lint.txt | cut -d'=' -f3)"
+tool_version_check "isort" "$ISORT_VERSION" "$(grep isort requirements-lint.txt | cut -d'=' -f3)"
+tool_version_check "codespell" "$CODESPELL_VERSION" "$(grep codespell requirements-lint.txt | cut -d'=' -f3)"
+tool_version_check "clang-format" "$CLANGFORMAT_VERSION" "$(grep clang-format requirements-lint.txt | cut -d'=' -f3)"
 
 YAPF_FLAGS=(
     '--recursive'
@@ -92,8 +93,12 @@ else
 fi
 echo 'Aphrodite yapf: Done'
 
+
+# If git diff returns a file that is in the skip list, the file may be checked anyway:
+# https://github.com/codespell-project/codespell/issues/1915
+# Avoiding the "./" prefix and using "/**" globs for directories appears to solve the problem
 CODESPELL_EXCLUDES=(
-    '--skip' '*docs/source/_build/**'
+    '--skip' './tests/benchmarks/sonnet.txt,build/**'
 )
 
 # check spelling of specified files
@@ -114,10 +119,9 @@ spell_check_changed() {
     # `diff-filter=ACM` and $MERGEBASE is to ensure we only lint files that
     # exist on both branches.
     MERGEBASE="$(git merge-base origin/main HEAD)"
-
     if ! git diff --diff-filter=ACM --quiet --exit-code "$MERGEBASE" -- '*.py' '*.pyi' &>/dev/null; then
         git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' | xargs \
-             codespell "${CODESPELL_EXCLUDES[@]}"
+            codespell "${CODESPELL_EXCLUDES[@]}"
     fi
 }
 
@@ -161,7 +165,6 @@ lint_changed() {
 }
 
 # Run Ruff
-echo 'Aphrodite ruff:'
 ### This flag lints individual files. --files *must* be the first command line
 ### arg to use this option.
 if [[ "$1" == '--files' ]]; then
@@ -174,14 +177,55 @@ else
    # Format only the files that changed in last commit.
    lint_changed
 fi
+echo 'Aphrodite ruff: Done'
+
+# check spelling of specified files
+isort_check() {
+    isort "$@"
+}
+
+isort_check_all(){
+  isort .
+}
+
+# Spelling  check of files that differ from main branch.
+isort_check_changed() {
+    # The `if` guard ensures that the list of filenames is not empty, which
+    # could cause ruff to receive 0 positional arguments, making it hang
+    # waiting for STDIN.
+    #
+    # `diff-filter=ACM` and $MERGEBASE is to ensure we only lint files that
+    # exist on both branches.
+    MERGEBASE="$(git merge-base origin/main HEAD)"
+
+    if ! git diff --diff-filter=ACM --quiet --exit-code "$MERGEBASE" -- '*.py' '*.pyi' &>/dev/null; then
+        git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' | xargs \
+             isort
+    fi
+}
+
+# Run Isort
+# This flag runs spell check of individual files. --files *must* be the first command line
+# arg to use this option.
+if [[ "$1" == '--files' ]]; then
+   isort_check "${@:2}"
+   # If `--all` is passed, then any further arguments are ignored and the
+   # entire python directory is linted.
+elif [[ "$1" == '--all' ]]; then
+   isort_check_all
+else
+   # Check spelling only of the files that changed in last commit.
+   isort_check_changed
+fi
+echo 'Aphrodite isort: Done'
 
 # Clang-format section
 # Exclude some files for formatting because they are vendored
 # NOTE: Keep up to date with .github/workflows/clang-format.yml
 CLANG_FORMAT_EXCLUDES=(
-    'kernels/moe/topk_softmax_kernels.cu'
-    'kerneks/punica/bgmv/bgmv_bf16_bf16_bf16.cu'
-    'kerneks/punica/bgmv/bgmv_config.h'
+    'kernels/moe/softmax.cu'
+    'kernels/punica/bgmv/bgmv_bf16_bf16_bf16.cu'
+    'kernels/punica/bgmv/bgmv_config.h'
     'kernels/punica/bgmv/bgmv_impl.cuh'
     'kernels/punica/bgmv/vec_dtypes.cuh'
     'kernels/punica/punica_ops.cu'
@@ -226,6 +270,7 @@ else
    clang_format_changed
 fi
 echo 'Aphrodite clang-format: Done'
+
 
 if ! git diff --quiet &>/dev/null; then
     echo 'Reformatted files. Please review and stage the changes.'

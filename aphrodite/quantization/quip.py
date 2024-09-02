@@ -52,8 +52,8 @@ class QuipConfig(QuantizationConfig):
         use_rand = cls.get_from_keys(config, ["use_rand"])
         return cls(codebook, use_rand)
 
-    def get_quant_method(
-            self, layer: torch.nn.Module) -> Optional["QuipLinearMethod"]:
+    def get_quant_method(self, layer: torch.nn.Module,
+                         prefix: str) -> Optional["QuipLinearMethod"]:
         if isinstance(layer, LinearBase):
             return QuipLinearMethod(self)
         return None

@@ -7,9 +7,10 @@ try:
 except ImportError:
     # For older versions of Ray
     from ray.exceptions import RayActorError as ActorDiedError
+
+from loguru import logger
 from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 from transformers import PreTrainedTokenizer
-from loguru import logger
 
 from aphrodite.common.config import TokenizerPoolConfig
 from aphrodite.executor.ray_utils import ray
@@ -27,8 +28,10 @@ class RayTokenizerGroupPool(BaseTokenizerGroup):
     _worker_cls = TokenizerGroup
 
     @classmethod
-    def from_config(cls, tokenizer_pool_config: TokenizerPoolConfig,
+    def from_config(cls, tokenizer_pool_config: Optional[TokenizerPoolConfig],
                     **init_kwargs) -> "RayTokenizerGroupPool":
+        if not tokenizer_pool_config:
+            raise ValueError("tokenizer_pool_config must not be None.")
         ray_actor_options = (tokenizer_pool_config.extra_config or {
             "num_cpus": 0
         })

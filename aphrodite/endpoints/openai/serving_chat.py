@@ -1,6 +1,5 @@
 import time
-from typing import (AsyncGenerator, AsyncIterator, Awaitable, Dict, List,
-                    Optional)
+from typing import AsyncGenerator, AsyncIterator, Dict, List, Optional
 from typing import Sequence as GenericSequence
 from typing import Union
 
@@ -12,9 +11,10 @@ from aphrodite.common.config import ModelConfig
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sequence import Logprob
 from aphrodite.common.utils import random_uuid
-from aphrodite.endpoints.openai.chat_utils import (ConversationMessage,
-                                                   load_chat_template,
-                                                   parse_chat_message_content)
+from aphrodite.endpoints.chat_utils import (ConversationMessage,
+                                            load_chat_template,
+                                            parse_chat_messages)
+from aphrodite.endpoints.logger import RequestLogger
 from aphrodite.endpoints.openai.protocol import (
     ChatCompletionLogProb, ChatCompletionLogProbs,
     ChatCompletionLogProbsContent, ChatCompletionNamedToolChoiceParam,
@@ -23,27 +23,35 @@ from aphrodite.endpoints.openai.protocol import (
     ChatCompletionStreamResponse, ChatMessage, DeltaMessage, ErrorResponse,
     FunctionCall, ToolCall, UsageInfo)
 from aphrodite.endpoints.openai.serving_engine import (LoRAModulePath,
-                                                       OpenAIServing)
-from aphrodite.engine.async_aphrodite import AsyncAphrodite
+                                                       OpenAIServing,
+                                                       PromptAdapterPath)
+from aphrodite.engine.protocol import AsyncEngineClient
 from aphrodite.inputs import PromptInputs
-from aphrodite.modeling.guided_decoding import \
-    get_guided_decoding_logits_processor
 from aphrodite.multimodal import MultiModalDataDict
 
 
 class OpenAIServingChat(OpenAIServing):
 
-    def __init__(self,
-                 engine: AsyncAphrodite,
-                 model_config: ModelConfig,
-                 served_model_names: List[str],
-                 response_role: str,
-                 lora_modules: Optional[List[LoRAModulePath]] = None,
-                 chat_template: Optional[str] = None):
-        super().__init__(engine=engine,
+    def __init__(
+        self,
+        async_engine_client: AsyncEngineClient,
+        model_config: ModelConfig,
+        served_model_names: List[str],
+        response_role: str,
+        *,
+        lora_modules: Optional[List[LoRAModulePath]],
+        prompt_adapters: Optional[List[PromptAdapterPath]],
+        request_logger: Optional[RequestLogger],
+        chat_template: Optional[str],
+        return_tokens_as_token_ids: bool = False,
+    ):
+        super().__init__(async_engine_client=async_engine_client,
                          model_config=model_config,
                          served_model_names=served_model_names,
-                         lora_modules=lora_modules)
+                         lora_modules=lora_modules,
+                         prompt_adapters=prompt_adapters,
+                         request_logger=request_logger,
+                         return_tokens_as_token_ids=return_tokens_as_token_ids)
 
         self.response_role = response_role
         # If this is None we use the tokenizer's default chat template
@@ -69,17 +77,16 @@ class OpenAIServingChat(OpenAIServing):
             return error_check_ret
 
         try:
-            _, lora_request = self._maybe_get_adapter(request)
-            tokenizer = await self.engine.get_tokenizer(lora_request)
-            conversation: List[ConversationMessage] = []
-            mm_futures: List[Awaitable[MultiModalDataDict]] = []
+            (
+                lora_request,
+                prompt_adapter_request,
+            ) = self._maybe_get_adapters(request)
 
-            for msg in request.messages:
-                chat_parsed_result = parse_chat_message_content(
-                    msg, self.model_config, tokenizer)
-
-                conversation.extend(chat_parsed_result.messages)
-                mm_futures.extend(chat_parsed_result.mm_futures)
+            model_config = self.model_config
+            tokenizer = await self.async_engine_client.get_tokenizer(
+                lora_request)
+            conversation, mm_futures = parse_chat_messages(
+                request.messages, model_config, tokenizer)
 
             tool_dicts = None if request.tools is None else [
                 tool.model_dump() for tool in request.tools
@@ -94,8 +101,9 @@ class OpenAIServingChat(OpenAIServing):
                 chat_template=request.chat_template or self.chat_template,
                 **(request.chat_template_kwargs or {}),
             )
+            assert isinstance(prompt, str)
         except Exception as e:
-            logger.error("Error in applying chat template from request: %s", e)
+            logger.error(f"Error in applying chat template from request: {e}")
             return self.create_error_response(str(e))
 
         mm_data: Optional[MultiModalDataDict] = None
@@ -107,46 +115,51 @@ class OpenAIServingChat(OpenAIServing):
                 ) == 1, "Multiple 'image_url' input is currently not supported."
                 mm_data = await mm_futures[0]
         except Exception as e:
-            logger.error("Error in loading multi-modal data: {e}")
+            logger.error(f"Error in loading multi-modal data: {e}")
             return self.create_error_response(str(e))
 
-        request_id = f"cmpl-{random_uuid()}"
+        request_id = f"chat-{random_uuid()}"
         try:
-            # Tokenize/detokenize depending on prompt format (string/token list)
-            prompt_ids, prompt_text = await self._validate_prompt_and_tokenize(
+            guided_decode_logits_processor = (
+                await self._guided_decode_logits_processor(request, tokenizer))
+
+            prompt_inputs = self._tokenize_prompt_input(
                 request,
                 tokenizer,
-                prompt=prompt,
-                add_special_tokens=request.add_special_tokens)
-            sampling_params = request.to_sampling_params()
-            decoding_config = await self.engine.get_decoding_config()
-            guided_decoding_backend = request.guided_decoding_backend \
-                or decoding_config.guided_decoding_backend
-            guided_decode_logits_processor = (
-                await
-                get_guided_decoding_logits_processor(guided_decoding_backend,
-                                                     request, tokenizer))
-            if guided_decode_logits_processor:
-                if sampling_params.logits_processors is None:
-                    sampling_params.logits_processors = []
-                sampling_params.logits_processors.append(
-                    guided_decode_logits_processor)
+                prompt,
+                truncate_prompt_tokens=request.truncate_prompt_tokens,
+                add_special_tokens=request.add_special_tokens,
+            )
+
+            sampling_params = request.to_sampling_params(
+                tokenizer,
+                guided_decode_logits_processor,
+                default_max_tokens=self.max_model_len -
+                len(prompt_inputs["prompt_token_ids"]))
+
+            self._log_inputs(request_id,
+                             prompt_inputs,
+                             params=sampling_params,
+                             lora_request=lora_request,
+                             prompt_adapter_request=prompt_adapter_request)
+
+            engine_inputs: PromptInputs = {
+                "prompt_token_ids": prompt_inputs["prompt_token_ids"],
+            }
+            if mm_data is not None:
+                engine_inputs["multi_modal_data"] = mm_data
+
+            result_generator = self.async_engine_client.generate(
+                engine_inputs,
+                sampling_params,
+                request_id,
+                lora_request=lora_request,
+                prompt_adapter_request=prompt_adapter_request,
+            )
         except ValueError as e:
+            # TODO: Use an aphrodite-specific Validation Error
             return self.create_error_response(str(e))
 
-        inputs: PromptInputs = {
-            "prompt": prompt_text,
-            "prompt_token_ids": prompt_ids,
-        }
-        if mm_data:
-            inputs["multi_modal_data"] = mm_data
-
-        result_generator = self.engine.generate(
-            inputs,
-            sampling_params,
-            request_id,
-            lora_request,
-        )
         # Streaming response
         if request.stream:
             return self.chat_completion_stream_generator(
@@ -180,10 +193,10 @@ class OpenAIServingChat(OpenAIServing):
         first_iteration = True
 
         # Send response for each token for each request.n (index)
-        assert request.n is not None
-        previous_texts = [""] * request.n
-        previous_num_tokens = [0] * request.n
-        finish_reason_sent = [False] * request.n
+        num_choices = 1 if request.n is None else request.n
+        previous_texts = [""] * num_choices
+        previous_num_tokens = [0] * num_choices
+        finish_reason_sent = [False] * num_choices
         try:
             async for res in result_generator:
                 # We need to do it here, because if there are exceptions in
@@ -193,7 +206,7 @@ class OpenAIServingChat(OpenAIServing):
                     # Send first response for each request.n (index) with
                     # the role
                     role = self.get_chat_request_role(request)
-                    for i in range(request.n):
+                    for i in range(num_choices):
                         choice_data = ChatCompletionResponseStreamChoice(
                             index=i,
                             delta=DeltaMessage(role=role),
@@ -207,7 +220,14 @@ class OpenAIServingChat(OpenAIServing):
                             model=model_name)
                         if (request.stream_options
                                 and request.stream_options.include_usage):
-                            chunk.usage = None
+                            if (request.stream_options.continuous_usage_stats):
+                                prompt_tokens = len(res.prompt_token_ids)
+                                usage = UsageInfo(prompt_tokens=prompt_tokens,
+                                                  completion_tokens=0,
+                                                  total_tokens=prompt_tokens)
+                                chunk.usage = usage
+                            else:
+                                chunk.usage = None
                         data = chunk.model_dump_json(exclude_unset=True)
                         yield f"data: {data}\n\n"
 
@@ -221,23 +241,33 @@ class OpenAIServingChat(OpenAIServing):
                             last_msg_content = conversation[-1]["content"]
 
                         if last_msg_content:
-                            for i in range(request.n):
+                            for i in range(num_choices):
                                 choice_data = (
                                     ChatCompletionResponseStreamChoice(
                                         index=i,
                                         delta=DeltaMessage(
                                             content=last_msg_content),
+                                        logprobs=None,
                                         finish_reason=None))
                                 chunk = ChatCompletionStreamResponse(
                                     id=request_id,
                                     object=chunk_object_type,
                                     created=created_time,
                                     choices=[choice_data],
-                                    logprobs=None,
                                     model=model_name)
                                 if (request.stream_options and
                                         request.stream_options.include_usage):
-                                    chunk.usage = None
+                                    if (request.stream_options.
+                                            continuous_usage_stats):
+                                        prompt_tokens = len(
+                                            res.prompt_token_ids)
+                                        usage = UsageInfo(
+                                            prompt_tokens=prompt_tokens,
+                                            completion_tokens=0,
+                                            total_tokens=prompt_tokens)
+                                        chunk.usage = usage
+                                    else:
+                                        chunk.usage = None
                                 data = chunk.model_dump_json(
                                     exclude_unset=True)
                                 yield f"data: {data}\n\n"
@@ -296,7 +326,18 @@ class OpenAIServingChat(OpenAIServing):
                             model=model_name)
                         if (request.stream_options
                                 and request.stream_options.include_usage):
-                            chunk.usage = None
+                            if (request.stream_options.continuous_usage_stats):
+                                prompt_tokens = len(res.prompt_token_ids)
+                                completion_tokens = len(output.token_ids)
+                                usage = UsageInfo(
+                                    prompt_tokens=prompt_tokens,
+                                    completion_tokens=completion_tokens,
+                                    total_tokens=prompt_tokens +
+                                    completion_tokens,
+                                )
+                                chunk.usage = usage
+                            else:
+                                chunk.usage = None
                         data = chunk.model_dump_json(exclude_unset=True)
                         yield f"data: {data}\n\n"
                     else:
@@ -316,7 +357,18 @@ class OpenAIServingChat(OpenAIServing):
                             model=model_name)
                         if (request.stream_options
                                 and request.stream_options.include_usage):
-                            chunk.usage = None
+                            if (request.stream_options.continuous_usage_stats):
+                                prompt_tokens = len(res.prompt_token_ids)
+                                completion_tokens = len(output.token_ids)
+                                usage = UsageInfo(
+                                    prompt_tokens=prompt_tokens,
+                                    completion_tokens=completion_tokens,
+                                    total_tokens=prompt_tokens +
+                                    completion_tokens,
+                                )
+                                chunk.usage = usage
+                            else:
+                                chunk.usage = None
                         data = chunk.model_dump_json(exclude_unset=True)
                         yield f"data: {data}\n\n"
                         finish_reason_sent[i] = True
@@ -364,7 +416,7 @@ class OpenAIServingChat(OpenAIServing):
         async for res in result_generator:
             if raw_request is not None and await raw_request.is_disconnected():
                 # Abort the request if the client disconnects.
-                await self.engine.abort(request_id)
+                await self.async_engine_client.abort(request_id)
                 return self.create_error_response("Client disconnected")
             final_res = res
         assert final_res is not None
@@ -440,11 +492,14 @@ class OpenAIServingChat(OpenAIServing):
             self, logprobs: Dict[int, Logprob], top_logprobs: Optional[int],
             tokenizer: PreTrainedTokenizer) -> List[ChatCompletionLogProb]:
         return [
-            ChatCompletionLogProb(
-                token=(token := self._get_decoded_token(p[1], p[0],
-                                                        tokenizer)),
-                logprob=max(p[1].logprob, -9999.0),
-                bytes=list(token.encode("utf-8", errors="replace")))
+            ChatCompletionLogProb(token=(token := self._get_decoded_token(
+                p[1],
+                p[0],
+                tokenizer,
+                return_as_token_id=self.return_tokens_as_token_ids)),
+                                  logprob=max(p[1].logprob, -9999.0),
+                                  bytes=list(
+                                      token.encode("utf-8", errors="replace")))
             for i, p in enumerate(logprobs.items())
             if top_logprobs and i < top_logprobs
         ]
@@ -464,6 +519,8 @@ class OpenAIServingChat(OpenAIServing):
             step_top_logprobs = top_logprobs[i]
             if step_top_logprobs is None:
                 token = tokenizer.decode(token_id)
+                if self.return_tokens_as_token_ids:
+                    token = f"token_id:{token_id}"
                 logprobs_content.append(
                     ChatCompletionLogProbsContent(
                         token=token,
@@ -471,7 +528,9 @@ class OpenAIServingChat(OpenAIServing):
             else:
                 logprobs_content.append(
                     ChatCompletionLogProbsContent(
-                        token=step_top_logprobs[token_id].decoded_token,
+                        token=self._get_decoded_token(
+                            step_top_logprobs[token_id], token_id, tokenizer,
+                            self.return_tokens_as_token_ids),
                         logprob=max(step_top_logprobs[token_id].logprob,
                                     -9999.0),
                         bytes=list(

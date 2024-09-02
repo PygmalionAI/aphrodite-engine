@@ -1,6 +1,6 @@
 import base64
 import time
-from typing import AsyncIterator, List, Optional, Tuple
+from typing import AsyncIterator, List, Optional, Tuple, cast
 
 import numpy as np
 from fastapi import Request
@@ -9,13 +9,13 @@ from loguru import logger
 from aphrodite.common.config import ModelConfig
 from aphrodite.common.outputs import EmbeddingRequestOutput
 from aphrodite.common.utils import merge_async_iterators, random_uuid
+from aphrodite.endpoints.logger import RequestLogger
 from aphrodite.endpoints.openai.protocol import (EmbeddingRequest,
                                                  EmbeddingResponse,
                                                  EmbeddingResponseData,
                                                  UsageInfo)
-from aphrodite.endpoints.openai.serving_completions import parse_prompt_format
 from aphrodite.endpoints.openai.serving_engine import OpenAIServing
-from aphrodite.engine.async_aphrodite import AsyncAphrodite
+from aphrodite.engine.protocol import AsyncEngineClient
 
 TypeTokenIDs = List[int]
 
@@ -27,11 +27,11 @@ def request_output_to_embedding_response(
     data: List[EmbeddingResponseData] = []
     num_prompt_tokens = 0
     for idx, final_res in enumerate(final_res_batch):
-        assert final_res is not None
         prompt_token_ids = final_res.prompt_token_ids
         embedding = final_res.outputs.embedding
         if encoding_format == "base64":
-            embedding = base64.b64encode(np.array(embedding))
+            embedding_bytes = np.array(embedding).tobytes()
+            embedding = base64.b64encode(embedding_bytes).decode("utf-8")
         embedding_data = EmbeddingResponseData(index=idx, embedding=embedding)
         data.append(embedding_data)
 
@@ -53,12 +53,20 @@ def request_output_to_embedding_response(
 
 class OpenAIServingEmbedding(OpenAIServing):
 
-    def __init__(self, engine: AsyncAphrodite, model_config: ModelConfig,
-                 served_model_names: List[str]):
-        super().__init__(engine=engine,
+    def __init__(
+        self,
+        async_engine_client: AsyncEngineClient,
+        model_config: ModelConfig,
+        served_model_names: List[str],
+        *,
+        request_logger: Optional[RequestLogger],
+    ):
+        super().__init__(async_engine_client=async_engine_client,
                          model_config=model_config,
                          served_model_names=served_model_names,
-                         lora_modules=None)
+                         lora_modules=None,
+                         prompt_adapters=None,
+                         request_logger=request_logger)
         self._check_embedding_mode(model_config.embedding_mode)
 
     async def create_embedding(self, request: EmbeddingRequest,
@@ -79,30 +87,47 @@ class OpenAIServingEmbedding(OpenAIServing):
                 "dimensions is currently not supported")
 
         model_name = request.model
-        request_id = f"cmpl-{random_uuid()}"
+        request_id = f"embd-{random_uuid()}"
         created_time = int(time.monotonic())
 
         # Schedule the request and get the result generator.
-        generators = []
+        generators: List[AsyncIterator[EmbeddingRequestOutput]] = []
         try:
-            prompt_is_tokens, prompts = parse_prompt_format(request.input)
+            (
+                lora_request,
+                prompt_adapter_request,
+            ) = self._maybe_get_adapters(request)
+
+            tokenizer = await self.async_engine_client.get_tokenizer(
+                lora_request)
             pooling_params = request.to_pooling_params()
 
-            tokenizer = await self.engine.get_tokenizer()
-            for i, prompt in enumerate(prompts):
-                prompt_arg = "prompt_ids" if prompt_is_tokens else "prompt"
-                prompt_formats = await self._validate_prompt_and_tokenize(
-                    request, tokenizer, **{prompt_arg: prompt})
+            prompts = list(
+                self._tokenize_prompt_input_or_inputs(
+                    request,
+                    tokenizer,
+                    request.input,
+                ))
 
-                prompt_ids, prompt_text = prompt_formats
+            for i, prompt_inputs in enumerate(prompts):
+                request_id_item = f"{request_id}-{i}"
 
-                generator = self.engine.encode(
-                    {
-                        "prompt": prompt_text,
-                        "prompt_token_ids": prompt_ids
-                    },
+                self._log_inputs(request_id_item,
+                                 prompt_inputs,
+                                 params=pooling_params,
+                                 lora_request=lora_request,
+                                 prompt_adapter_request=prompt_adapter_request)
+
+                if prompt_adapter_request is not None:
+                    raise NotImplementedError(
+                        "Prompt adapter is not supported "
+                        "for embedding models")
+
+                generator = self.async_engine_client.encode(
+                    {"prompt_token_ids": prompt_inputs["prompt_token_ids"]},
                     pooling_params,
-                    f"{request_id}-{i}",
+                    request_id_item,
+                    lora_request=lora_request,
                 )
 
                 generators.append(generator)
@@ -120,12 +145,17 @@ class OpenAIServingEmbedding(OpenAIServing):
             async for i, res in result_generator:
                 if await raw_request.is_disconnected():
                     # Abort the request if the client disconnects.
-                    await self.engine.abort(f"{request_id}-{i}")
-                    # TODO: Use an aphrodite-specific Validation Error
+                    await self.async_engine_client.abort(f"{request_id}-{i}")
                     return self.create_error_response("Client disconnected")
                 final_res_batch[i] = res
+
+            for final_res in final_res_batch:
+                assert final_res is not None
+
+            final_res_batch_checked = cast(List[EmbeddingRequestOutput],
+                                           final_res_batch)
             response = request_output_to_embedding_response(
-                final_res_batch, request_id, created_time, model_name,
+                final_res_batch_checked, request_id, created_time, model_name,
                 encoding_format)
         except ValueError as e:
             # TODO: Use an aphrodite-specific Validation Error

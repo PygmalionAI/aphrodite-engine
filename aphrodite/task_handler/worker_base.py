@@ -2,7 +2,7 @@ import dataclasses
 import importlib
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import torch
 from loguru import logger
@@ -11,8 +11,10 @@ from aphrodite.common.sequence import (ExecuteModelRequest,
                                        IntermediateTensors, SamplerOutput)
 from aphrodite.common.utils import (enable_trace_function_call_for_thread,
                                     update_environment_variables)
-from aphrodite.distributed import broadcast_tensor_dict, get_pp_group
+from aphrodite.distributed import (broadcast_tensor_dict, get_pp_group,
+                                   get_tp_group)
 from aphrodite.lora.request import LoRARequest
+from aphrodite.platforms import current_platform
 from aphrodite.task_handler.model_runner_base import (ModelRunnerBase,
                                                       ModelRunnerInputBase)
 
@@ -52,7 +54,7 @@ class WorkerBase(ABC):
         """
         raise NotImplementedError
 
-    @torch.inference_mode()
+    @current_platform.inference_mode()
     def start_worker_execution_loop(self) -> None:
         """Execute model loop in parallel worker.
 
@@ -262,7 +264,8 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         intermediate_tensors = None
         if not get_pp_group().is_first_rank:
             intermediate_tensors = IntermediateTensors(
-                get_pp_group().recv_tensor_dict())
+                get_pp_group().recv_tensor_dict(
+                    all_gather_group=get_tp_group()))
 
         output = self.model_runner.execute_model(
             model_input, self.kv_cache[worker_input.virtual_engine]
@@ -271,14 +274,17 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
         if not get_pp_group().is_last_rank:
             # output is IntermediateTensors
-            get_pp_group().send_tensor_dict(output.tensors)
+            get_pp_group().send_tensor_dict(output.tensors,
+                                            all_gather_group=get_tp_group())
             return [None]
 
         # output is List[SamplerOutput]
         return output
 
     def _execute_model_spmd(
-        self, execute_model_req: ExecuteModelRequest
+        self,
+        execute_model_req: ExecuteModelRequest,
+        intermediate_tensors: Optional[IntermediateTensors] = None
     ) -> Optional[List[SamplerOutput]]:
         """
         Execute model in Single Program Multiple Data (SPMD) fashion.
@@ -302,7 +308,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
         return self.model_runner.execute_model(
             model_input, self.kv_cache[worker_input.virtual_engine]
-            if self.kv_cache is not None else None)
+            if self.kv_cache is not None else None, intermediate_tensors)
 
 
 class WorkerWrapperBase:
@@ -311,14 +317,23 @@ class WorkerWrapperBase:
     We first instantiate the WorkerWrapper, which remembers the worker module
     and class name. Then, when we call `update_environment_variables`, and the
     real initialization happens in `init_worker`.
+
+    If worker_class_fn is specified, it will be executed to get the worker
+    class.
+    Otherwise, the worker class will be obtained by dynamically importing it
+    using worker_module_name and worker_class_name.
     """
 
-    def __init__(self,
-                 worker_module_name: str,
-                 worker_class_name: str,
-                 trust_remote_code: bool = False) -> None:
+    def __init__(
+        self,
+        worker_module_name: str,
+        worker_class_name: str,
+        trust_remote_code: bool = False,
+        worker_class_fn: Optional[Callable[[],
+                                           Type[WorkerBase]]] = None) -> None:
         self.worker_module_name = worker_module_name
         self.worker_class_name = worker_class_name
+        self.worker_class_fn = worker_class_fn
         self.worker: Optional[WorkerBase] = None
         if trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
@@ -344,8 +359,12 @@ class WorkerWrapperBase:
         # see https://github.com/NVIDIA/nccl/issues/1234
         os.environ['NCCL_CUMEM_ENABLE'] = '0'
 
-        mod = importlib.import_module(self.worker_module_name)
-        worker_class = getattr(mod, self.worker_class_name)
+        if self.worker_class_fn:
+            worker_class = self.worker_class_fn()
+        else:
+            mod = importlib.import_module(self.worker_module_name)
+            worker_class = getattr(mod, self.worker_class_name)
+
         self.worker = worker_class(*args, **kwargs)
         assert self.worker is not None
 

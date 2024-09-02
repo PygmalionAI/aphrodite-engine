@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Hashable, Optional, TypeVar
 
-from torch import nn
 from loguru import logger
+from torch import nn
 
 from aphrodite.common.utils import LRUCache
 

@@ -53,8 +53,8 @@ class Exl2Config(QuantizationConfig):
     def from_config(cls, config: Dict[str, Any]) -> "Exl2Config":
         return cls()
 
-    def get_quant_method(
-            self, layer: torch.nn.Module) -> Optional["Exl2LinearMethod"]:
+    def get_quant_method(self, layer: torch.nn.Module,
+                         prefix: str) -> Optional["Exl2LinearMethod"]:
         if isinstance(layer, LinearBase):
             return Exl2LinearMethod(self)
         return None

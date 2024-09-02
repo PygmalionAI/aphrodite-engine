@@ -1,0 +1,379 @@
+# Sample configuration file for Aphrodite Engine
+# You can launch the engine using a provided config file by running
+# `aphrodite yaml config.yaml` in the CLI
+
+# You can run `aphrodite run -h` to see the full list of options
+# that you can pass to the engine.
+
+# Uncomment and modify the following lines to configure the engine
+
+# The basic options. You will usually need to specify these
+basic_args:
+  # Your model name. Can be a local path or huggingface model ID
+  - model:
+
+  # If you want a custom model name for the API, specify it here
+  - served_model_name:
+
+  # Wether or not to launch the Kobold API server. Used for hosting
+  # on Kobold Horde. Takes a boolean value (true/false)
+  - launch_kobold_api:
+
+  # The maximum sequence length/context window for the model
+  # You can leave this blank to use the default value (recommended)
+  - max_model_len:
+
+  # The tensor parallelism degree. Set this to the number of GPUs you have
+  # Keep in mind that for **quantized** models, this will typically only work
+  # with values between 1, 2, 4, and 8.
+  - tensor_parallel_size:
+
+  # The pipeline parallelism degree. This is similar to tensor parallel,
+  # but splits the layers across GPUs rather than the tensors. Only use this
+  # if you're doing multi-node, or need 3, 5, 6, 7 GPUs for quantized models.
+  - pipeline_parallel_size:
+
+  # The data type to use for KV cache. You can set it to 'fp8' to reduce
+  # memory usage for large contexts.
+  - kv_cache_dtype:
+
+  # Enable chunking the prefill tokens. This greatly reduces memory usage
+  # at high contexts, but it mutually exclusive with kv_cache_dtype=fp8
+  # Takes a boolean value (true/false)
+  - enable_chunked_prefill:
+
+  # By default, Aphrodite Engine reserves 90% of VRAM for every GPU it's using.
+  # Pass a value between 0-1 (e.g. 0.95 for 95%) to increase or decrease this.
+  - gpu_memory_utilization:
+
+  # If your model doesn't fit on the GPU, use this. It takes values in GiB.
+  # e.g., if you pass `10`, it'll virtually add 10 GiB of VRAM to your GPU.
+  # Not recommended because CPU offloading is generally slow.
+  - cpu_offload_gb:
+
+  # This is essentially the maximum batch size. It's set to `256` by default.
+  # You can lower this to use less memory, but it doesn't affect things that much,
+  # unless `enforce_eager` is enabled.
+  - max_num_seqs:
+
+  # Whether to enable CUDA graphs. By default, CUDA graphs are disabled. Pass
+  # `false` here to enable them, and leave blank or pass `true` to keep it disabled.
+  - enforce_eager:
+
+  # The load format to use. You can usually leave this blank.
+  # If you want to use bitsandbytes on-the-fly quantization,
+  # pass `bitsandbytes`, along with `quantization=bitsandbytes`
+  # in the category below.
+  - load_format:
+
+  # Whether or not to enable prefix caching. This will cache
+  # previous prompts so that they're not recomputed. Helps
+  # with large prompts.
+  - enable_prefix_caching:
+
+  # Whether or not to trust remote code in the repository. Needed
+  # for some models that have custom code.
+  - trust_remote_code:
+
+  # The download directory if the `model` is a Hugging Face ID.
+  - download_dir:
+
+  # The data type to use for the model. Can be `auto`, `float16`, `bfloat16`,
+  # `float32`. Defaults to `auto`, which will use fp16 for fp32 and fp16 models,
+  # and bf16 for bf16 models.
+  - dtype:
+
+
+
+# Quantization options.
+quantization_args:
+
+  # The quantization type to use. You don't usually need to pass this,
+  # as the engine will figure out the quant from the model itself.
+  # You may need to use this if you want to perform online quantization,
+  # i.e., quantizing a 16-bit model on-the-fly.
+  # To use FP8 (only supported by Ampere and newer GPUs), pass `fp8`.
+  # To use bitsandbytes, pass `bitsandbytes`.
+  - quantization:
+
+  # Path to the JSON file containing the KV cache scaling factors.
+  # This should generally be supplied when KV cache dtype is FP8.
+  # Otherwise, KV cache scaling factors default to 1.0, which
+  # may cause accuracy issues. FP8_E5M2 (without scaling) is
+  # only supported on CUDA versions greater than 11.8. On ROCm,
+  # FP8_E4M3 is used instead.
+  # For most use cases, you can leave this blank. If you want to
+  # generate scales for your model, look at examples/fp8 directory.
+  - quantization_param_path:
+
+  # The number of floating point bits to use for deepspeed_fp
+  # on-the-fly quantization. Only pass this if you've set
+  # quantization to `deepspeedfp`. Takes 4, 6, 8, 12.
+  - deepspeed_fp_bits:
+
+
+
+# The API-specific options. These are decoupled from the engine.
+api_args:
+
+  # The API key to use for the server. Leave blank to disable API key.
+  - api_keys:
+
+  # The local path or http address to the chat template to use.
+  # This will override the model's existing chat template, if
+  # it has one.
+  - chat_template:
+
+  # When max_logprobs is specified, represents single tokens as
+  # strings of the form `token_ids:{token_id}` so that tokens
+  # that are not JSON-encodable can be identified.
+  - return_tokens_as_token_ids:
+
+
+# These are the options for speculative decoding. Spec Decoding
+# is a way to speed up inference by loading a smaller model
+# and letting it do the predictions, and your main model
+# will only verify its outputs. The outputs will match
+# 1:1 with your main model.
+
+# We currently support the following speculative decoding algorithms:
+# Draft Model, Ngram Prompt Lookup, MLPSpeculator, and Medusa.
+speculative_args:
+  
+  # Use the V2 block manager. Mandatory for speculative decoding.
+  # Takes a boolean value (true/false)
+  - use_v2_block_manager:
+
+  # The speculative model to use. Can take either a Hugging Face ID
+  # or a local path. You can also pass "[ngram]" to use ngram prompt
+  # lookup decoding without needing a draft model.
+  - speculative_model:
+
+  # The number of tokens for the speculative model to predict.
+  # Spec decoding can generate multiple tokens in single forward
+  # pass to speed up inference. Don't set this too high, a good
+  # value is between 3-10, depending on model size.
+  - num_speculative_tokens:
+
+  # The tensor parallel size to use for the speculative model.
+  # Usually, you want this set to 1.
+  - speculative_draft_tensor_parallel_size:
+
+  # The maximum window size for ngram prompt lookup
+  # This needs to be set if you're using ngram prompt lookup
+  - ngram_prompt_lookup_max:
+
+  # The minimum window size for ngram prompt lookup
+  - ngram_prompt_lookup_min:
+
+  # Disable speculative decoding if the number of queued
+  # requests is larger than this value. This is useful
+  # to prevent speculative decoding from using too much
+  # compute.
+  - speculative_disable_by_batch_size:
+
+  # The acceptance method to use for speculative decoding.
+  # Can be either `rejection_sampler` or `typical_acceptance_sampler`.
+  # The default is `rejection_sampler`.
+  # Rejection sampler does not allow changing the acceptance rate
+  # of draft tokens. More accurate but slower.
+  # Typical acceptance sampler allows changing the acceptance rate
+  # of draft tokens. Less accurate but faster.
+  - spec_decoding_acceptance_method:
+
+  # The lower bound threshold for the posterior probability
+  # of a token to be accepted. Only set this if you're using
+  # the typical acceptance sampler. Defaults to 0.09.
+  - typical_acceptance_sampler_posterior_threshold:
+
+  # A scaling factor for the entropy-based threshold for token
+  # acceptance in the typical acceptance sampler. Only set this
+  # if you're using the typical acceptance sampler. Defaults to
+  # sqrt of typical_acceptance_sampler_posterior_threshold, i.e. 0.3.
+  - typical_acceptance_sampler_posterior_alpha:
+
+  # Whether to disable logprobs during speculative decoding.
+  # If True, token log probabilities are not returned. If False,
+  # log probabilities are returned according to the settings
+  # in samplingParams. Defaults to True.
+  # Disabling this (setting to True) speeds up inference
+  # during speculative decoding by skipping log probability
+  # calculation in proposal and target sampling.
+  - disable_logprobs_during_spec_decoding:
+
+
+# The config options for LoRA adapters.
+# Each adapter is treated as a separate model in the API server,
+# and your requests will need to be sent to the specific model.
+lora_args:
+
+  # Whether or not to enable handling LoRA adapters.
+  # Takes a boolean value (true/false)
+  - enable_lora:
+
+
+  # The LoRA adapters to use for the API server.
+  # You can specify multiple adapters here.
+  - lora_modules:
+    # Change the name of the adapter to something more descriptive
+    # e.g. ` - my_sql_lora: /path/to/my_sql_lora`
+    - lora1: 
+    - lora2:
+
+  # The maximum number of LoRA adapters in a single batch.
+  - max_loras:
+
+  # The maximum rank of the LoRA adapters. We currently support
+  # up to 64.
+  - max_lora_rank:
+
+  # The maximum size of extra vocabulary that can be present
+  # in a LoRA adapter (added to the base model vocab)
+  - lora_extra_vocab_size:
+
+  # The data type for the LoRA adapter.
+  # Can take "auto", "float16", "bfloat16", and "float32"
+  - lora_dtype:
+
+  # The maximum number of LoRA adapters to store in CPU memory.
+  # This number must be larger or equal to max_num_seqs.
+  # Defaults to max_num_seqs.
+  - max_cpu_loras:
+
+  # Specify multiple scaling factors (which can be different from base
+  # model scaling factor) to allow for multiple LoRA adapters trained
+  # with those scaling factors to be used at the same time.
+  # If not specified, only adapters trained with the base model scaling
+  # factor are allowed.
+  - long_lora_scaling_factors:
+
+  # By default, only half of the LoRA computation is sharded with tensor
+  # parallelism. Enabling this will use the fully sharded layers. At high
+  # sequence length, max rank, or tensor parallel size, this is likely faster.
+  - fully_sharded_loras:
+
+  # The name or path of the QLoRA adapter to use.
+  - qlora_adapter_name_or_path:
+
+
+# The config options for the Soft Prompt adapters.
+# Soft prompts are a way to tune prompts for a specific task
+# and load them at a request-level.
+soft_prompt_args:
+
+  # Whether or not to enable handling Soft Prompt adapters.
+  # Takes a boolean value (true/false)
+  - enable_prompt_adapter:
+
+  # The Soft Prompt adapters to use for the API server.
+  # You can specify multiple adapters here.
+  - prompt_adapters:
+    # Change the name of the adapter to something more descriptive
+    # e.g. ` - my_sql_prompt: /path/to/my_sql_prompt`
+    - prompt1: 
+    - prompt2:
+
+  # The maximum number of Soft Prompt adapters in a single batch.
+  - max_prompt_adapters:
+
+  # The maximum number of PromptAdapter tokens.
+  - max_prompt_adapter_token:
+
+
+# These are advanced options. You usually don't need to modify these.
+advanced_args:
+
+  # The backend to use for distributed inference. Can be either `ray`
+  # or `mp` (multiprocessing). Defaults to `mp` for single-node,
+  # `ray` for multi-node.
+  # Note that specifying a custom backend by passing a custom class
+  # is intended for expert use only. The API may change without notice.
+  - distributed_executor_backend:
+
+  # The tokenizer to use. Defaults to the model's tokenizer.
+  - tokenizer:
+
+  # The model revision to use if pulling from HF. Defaults to main.
+  - revision:
+
+  # The revision for the remote code in the model repository.
+  - code_revision:
+
+  # The revision for the tokenizer.
+  - tokenizer_revision:
+
+  # The maximum number of tokens to be captured by CUDA graphs.
+  # This is set to 8192 by default. If your prompt exceeds this
+  # threshold, it'll fallback to eager execution.
+  - max_seq_len_to_capture:
+
+  # RoPE scaling config in JSON format.
+  # For example, `{"type": "dynamic", "factor": 2.0}`
+  - rope_scaling:
+
+  # The RoPE theta value. Use with `rope_scaling`. In some cases,
+  # changing the RoPE theta improves performance of the scaled
+  # model.
+  - rope_theta:
+
+  # Extra config for the model loader.
+  # This will be passed to the model loader corresponding
+  # to the chosen load_format. This should be a JSON string that
+  # will be parsed into a dictionary.
+  - model_loader_extra_config:
+
+  # Whether to skip tokenizer and detokenizer initialization.
+  - skip_tokenizer_init:
+
+  # The size of tokenizer pool to use for asynchronous tokenization.
+  # IF 0, will use synchronous tokenization.
+  - tokenizer_pool_size:
+
+  # The type of tokenizer pool to use for asynchronous tokenization.
+  # Ignored if tokenizer_pool_size is 0.
+  # Note that specifying a tokenizer pool by passing a custom class
+  # is intended for expert use only. The API may change without notice.
+  - tokenizer_pool_type:
+
+  # The extra config for tokenizer pool. This should be a JSON string
+  # that will be parsed into a dictionary. Ignored if tokenizer_pool_size
+  # is 0.
+  - tokenizer_pool_extra_config:
+
+  # The maximum log probabilities to return in the API. Defaults to 10.
+  - max_logprobs:
+
+  # The device to use for model execution. You usually don't
+  # need to modify this.
+  # We support `auto`, `cuda`, `neuron`, `cpu`, `openvino`, `tpu`, and `xpu.
+  - device:
+
+  # The pattern(s) to ignore when loading the model.
+  # Defaults to `original/**/*` to avoid repeated loading
+  # of llama's checkpoints.
+  - ignore_patterns:
+
+  # If specified, use nsight to profile ray workers.
+  - ray_workers_use_nsight:
+
+  # If specified, disable the custom all-reduce kernels.
+  # They're enabled by default for GPUs with P2P support.
+  - disable_custom_all_reduce:
+
+  # The preemption mode to use for the scheduler. If `recompute`,
+  # the engine performs preemption by block recomputation. If `swap`,
+  # the engine performs preemption by block swapping.
+  - preemption_mode:
+
+  # If specified, ignore GPU profiling result and use this
+  # number of GPU blocks. Only used for testing.
+  - num_gpu_blocks_override:
+
+  # The CPU swap space size (GiB) per GPU. Not related to CPU offloading.
+  - swap_space:
+
+  # Whether to disable sliding window.
+  - disable_sliding_window:
+
+  # The token block size. Takes values between 8, 16, 32.
+  - block_size:

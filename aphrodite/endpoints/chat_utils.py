@@ -1,20 +1,59 @@
 import codecs
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
-from typing import Awaitable, Iterable, List, Optional, TypedDict, cast, final
+from typing import (Awaitable, Iterable, List, Optional, Tuple, Union, cast,
+                    final)
 
 import requests
 from loguru import logger
-from openai.types.chat import (ChatCompletionContentPartImageParam,
-                               ChatCompletionContentPartTextParam)
+# yapf conflicts with isort for this block
+# yapf: disable
+from openai.types.chat import ChatCompletionContentPartImageParam
+from openai.types.chat import \
+    ChatCompletionContentPartParam as OpenAIChatCompletionContentPartParam
+from openai.types.chat import ChatCompletionContentPartTextParam
+from openai.types.chat import \
+    ChatCompletionMessageParam as OpenAIChatCompletionMessageParam
+# yapf: enable
+# pydantic needs the TypedDict from typing_extensions
+from pydantic import ConfigDict
 from transformers import PreTrainedTokenizer
+from typing_extensions import Required, TypedDict
 
 from aphrodite.common.config import ModelConfig
-from aphrodite.endpoints.openai.protocol import (
-    ChatCompletionContentPartParam, ChatCompletionMessageParam)
 from aphrodite.multimodal import MultiModalDataDict
 from aphrodite.multimodal.utils import async_get_and_parse_image
+
+
+class CustomChatCompletionContentPartParam(TypedDict, total=False):
+    __pydantic_config__ = ConfigDict(extra="allow")  # type: ignore
+
+    type: Required[str]
+    """The type of the content part."""
+
+
+ChatCompletionContentPartParam = Union[OpenAIChatCompletionContentPartParam,
+                                       CustomChatCompletionContentPartParam]
+
+
+class CustomChatCompletionMessageParam(TypedDict, total=False):
+    """Enables custom roles in the Chat Completion API."""
+    role: Required[str]
+    """The role of the message's author."""
+
+    content: Union[str, List[ChatCompletionContentPartParam]]
+    """The contents of the message."""
+
+    name: str
+    """An optional name for the participant.
+    Provides the model information to differentiate between participants of the
+    same role.
+    """
+
+
+ChatCompletionMessageParam = Union[OpenAIChatCompletionMessageParam,
+                                   CustomChatCompletionMessageParam]
 
 
 @final  # So that it should be compatible with Dict[str, str]
@@ -26,8 +65,7 @@ class ConversationMessage(TypedDict):
 @dataclass(frozen=True)
 class ChatMessageParseResult:
     messages: List[ConversationMessage]
-    mm_futures: List[Awaitable[MultiModalDataDict]] = field(
-        default_factory=list)
+    mm_futures: List[Awaitable[MultiModalDataDict]]
 
 
 def load_chat_template(chat_template: Optional[str]) -> Optional[str]:
@@ -68,11 +106,15 @@ def _image_token_str(model_config: ModelConfig,
     if model_type == "phi3_v":
         # Workaround since this token is not defined in the tokenizer
         return "<|image_1|>"
-    if model_type in ("blip-2", "chatglm", "fuyu", "minicpmv", "paligemma"):
+    if model_type == "minicpmv":
+        return "(<image>./</image>)"
+    if model_type in ("blip-2", "chatglm", "fuyu", "paligemma"):
         # These models do not use image tokens in the prompt
         return None
     if model_type.startswith("llava"):
         return tokenizer.decode(model_config.hf_config.image_token_index)
+    if model_type in ("chameleon", "internvl_chat"):
+        return "<image>"
 
     raise TypeError(f"Unknown model type: {model_type}")
 
@@ -139,7 +181,7 @@ def _parse_chat_message_content_parts(
     return ChatMessageParseResult(messages=messages, mm_futures=mm_futures)
 
 
-def parse_chat_message_content(
+def _parse_chat_message_content(
     message: ChatCompletionMessageParam,
     model_config: ModelConfig,
     tokenizer: PreTrainedTokenizer,
@@ -155,3 +197,21 @@ def parse_chat_message_content(
 
     return _parse_chat_message_content_parts(role, content, model_config,
                                              tokenizer)
+
+
+def parse_chat_messages(
+    messages: List[ChatCompletionMessageParam],
+    model_config: ModelConfig,
+    tokenizer: PreTrainedTokenizer,
+) -> Tuple[List[ConversationMessage], List[Awaitable[MultiModalDataDict]]]:
+    conversation: List[ConversationMessage] = []
+    mm_futures: List[Awaitable[MultiModalDataDict]] = []
+
+    for msg in messages:
+        parse_result = _parse_chat_message_content(msg, model_config,
+                                                   tokenizer)
+
+        conversation.extend(parse_result.messages)
+        mm_futures.extend(parse_result.mm_futures)
+
+    return conversation, mm_futures

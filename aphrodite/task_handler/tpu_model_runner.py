@@ -1,11 +1,13 @@
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type, Union
+from unittest.mock import patch
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch_xla.core.xla_model as xm
+import torch_xla.runtime as xr
 from loguru import logger
 
 from aphrodite.attention import AttentionMetadata, get_attn_backend
@@ -26,7 +28,9 @@ from aphrodite.task_handler.model_runner_base import (
 if TYPE_CHECKING:
     from aphrodite.attention.backends.abstract import AttentionBackend
 
-_PAD_SLOT_ID = -1  # NOTE: In PyTorch XLA, index -1 is ignored.
+# Here we utilize the behavior that out-of-bound index is ignored.
+# FIXME: Find a more reliable way to prevent possible bugs.
+_PAD_SLOT_ID = 1_000_000_000
 # FIXME: Temporarily disabled top-p sampling since it's too slow.
 _ENABLE_TOP_P = False
 # FIXME: A temporary hack to support `n > 1`.
@@ -55,6 +59,9 @@ class ModelInputForTPU(ModelRunnerInputBase):
             "t": self.t,
             "p": self.p,
             "num_samples": self.num_samples,
+            "best_of": self.best_of,
+            "seq_groups": self.seq_groups,
+            "virtual_engine": self.virtual_engine,
         }
         _add_attn_metadata_broadcastable_dict(tensor_dict, self.attn_metadata)
         return tensor_dict
@@ -113,21 +120,45 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
     def load_model(self) -> None:
         self.device = self.device_config.device
 
-        model = get_model(
-            model_config=self.model_config,
-            load_config=self.load_config,
-            device_config=self.device_config,
-            parallel_config=self.parallel_config,
-            cache_config=self.cache_config,
-            scheduler_config=self.scheduler_config,
-            multimodal_config=self.multimodal_config,
-            lora_config=None,
-        )
+        # NOTE: While the executor assigns the TP ranks to the worker
+        # process, the ranks can be different from the ranks internally assigned
+        # by the xm runtime. Therefore, there is a mismatch in the rank
+        # assignment between the gloo (cpu) runtime and the xm (tpu) runtime.
+        # This is not a problem in linear layers because all-reduce is
+        # rank-agnostic. However, it matters for all-gather as the ranks
+        # determine the order of concatenating the output tensors.
+        # As a workaround, we use the xm's rank assignment only when loading
+        # the embedding weights.
+        xm_tp_rank = xr.global_ordinal()
+        with patch(
+                "vllm.model_executor.layers.vocab_parallel_embedding."
+                "get_tensor_model_parallel_rank",
+                return_value=xm_tp_rank):
+            model = get_model(
+                model_config=self.model_config,
+                load_config=self.load_config,
+                device_config=self.device_config,
+                parallel_config=self.parallel_config,
+                cache_config=self.cache_config,
+                scheduler_config=self.scheduler_config,
+                multimodal_config=self.multimodal_config,
+                lora_config=None,
+            )
         model = model.eval()
         xm.wait_device_ops()
 
         model = ModelWrapper(model)
-        self.model = torch.compile(model, backend="openxla", fullgraph=True)
+        # NOTE: There are two stages of compilation: torch.compile and
+        # XLA compilation. Setting dynamic=True can reduce the torch.compile
+        # overhead by reusing the FX graph for different shapes.
+        # However, the XLA graph will still require static shapes and needs to
+        # be re-compiled for every different shapes. This overhead is inevitable
+        # in the first run, but can be skipped afterwards as we cache the XLA
+        # graphs in the disk (APHRODITE_XLA_CACHE_PATH).
+        self.model = torch.compile(model,
+                                   backend="openxla",
+                                   fullgraph=True,
+                                   dynamic=True)
 
     def _dummy_run(
         self,
@@ -207,7 +238,7 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
             while True:
                 self._dummy_run(batch_size, seq_len, kv_caches, is_prompt=True)
                 xm.wait_device_ops()
-                logger.info("batch_size: %d, seq_len: %d", batch_size, seq_len)
+                logger.info(f"batch_size: {batch_size}, seq_len: {seq_len}")
 
                 if seq_len >= self.model_config.max_model_len:
                     break
@@ -217,7 +248,7 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
                 seq_len = seq_len * 2
 
         end = time.time()
-        logger.info("Compilation for prefill done in %.2f s.", end - start)
+        logger.info(f"Compilation for prefill done in {end - start:.2f} s.")
 
         # Decode
         start = time.time()
@@ -226,14 +257,14 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
         while True:
             self._dummy_run(batch_size, seq_len, kv_caches, is_prompt=False)
             xm.wait_device_ops()
-            logger.info("batch_size: %d, seq_len: %d", batch_size, seq_len)
+            logger.info(f"batch_size: {batch_size}, seq_len: {seq_len}")
 
             if batch_size >= self.scheduler_config.max_num_seqs:
                 break
             batch_size = batch_size + 16 if batch_size >= 16 else batch_size * 2
 
         end = time.time()
-        logger.info("Compilation for decode done in %.2f s.", end - start)
+        logger.info(f"Compilation for decode done in {end - start:.2f} s.")
 
     def _prepare_prompt(
         self,
@@ -384,10 +415,7 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
         best_of = []
         for seq_group_metadata in seq_group_metadata_list:
             sampling_params = seq_group_metadata.sampling_params
-            # NOTE: Here we mimic argmax sampling by applying a very
-            # low temperature. This is not accurate.
-            t.append(sampling_params.temperature
-                     if sampling_params.temperature >= 1e-5 else 1e-5)
+            t.append(sampling_params.temperature)
             if sampling_params.top_p != 1 and not _ENABLE_TOP_P:
                 raise NotImplementedError(
                     "Top-p sampling is currently disabled for the TPU backend "
@@ -463,10 +491,11 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
             tensor_dict, attn_backend=self.attn_backend)
         return model_input
 
+    @torch.no_grad()
     def execute_model(
         self,
         model_input: ModelInputForTPU,
-        kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
+        kv_caches: Optional[List[Any]],
         intermediate_tensors: Optional[IntermediateTensors] = None,
         num_steps: int = 1,
     ) -> List[SamplerOutput]:
@@ -647,13 +676,23 @@ class ModelWrapper(nn.Module):
         hidden_states = hidden_states.flatten(0, 1)
         logits = self.model.compute_logits(hidden_states, sampling_metadata)
 
-        logits = logits / t.unsqueeze(dim=1)
+        # Argmax sampling.
+        argmax_token_ids = torch.argmax(logits, dim=-1, keepdim=True)
+        argmax_token_ids = argmax_token_ids.repeat(1, num_samples)
+
+        # Zero temperature means greedy decoding. Avoid division by zero.
+        nonzero_t = torch.where(t != 0, t, 1.0)
+        logits = logits / nonzero_t.unsqueeze(dim=1)
         if _ENABLE_TOP_P:
             logits = _apply_top_p(logits, p.unsqueeze(dim=1))
+
+        # Random sampling.
         probs = torch.softmax(logits, dim=-1, dtype=torch.float32)
-        next_token_ids = torch.multinomial(probs,
-                                           num_samples,
-                                           replacement=True)
+        sampled_token_ids = torch.multinomial(probs,
+                                              num_samples,
+                                              replacement=True)
+        next_token_ids = torch.where(t != 0, sampled_token_ids,
+                                     argmax_token_ids)
         return next_token_ids
 
 

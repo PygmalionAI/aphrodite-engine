@@ -51,7 +51,7 @@ embed_commit_hash()
 assert sys.platform.startswith(
     "linux"), "Aphrodite only supports Linux platform (including WSL)."
 
-MAIN_CUDA_VERSION = "12.1"
+MAIN_CUDA_VERSION = "12.4"
 
 
 def is_sccache_available() -> bool:
@@ -172,15 +172,6 @@ class cmake_build_ext(build_ext):
             '-DAPHRODITE_PYTHON_EXECUTABLE={}'.format(sys.executable)
         ]
 
-        if _install_punica():
-            cmake_args += ['-DAPHRODITE_INSTALL_PUNICA_KERNELS=ON']
-
-        # if _install_hadamard():
-        #     cmake_args += ['-DAPHRODITE_INSTALL_HADAMARD_KERNELS=ON']
-
-        #
-        # Setup parallelism and build tool
-        #
         num_jobs, nvcc_threads = self.compute_num_jobs()
 
         if nvcc_threads:
@@ -269,28 +260,8 @@ def _build_custom_ops() -> bool:
     return _is_cuda() or _is_hip() or _is_cpu()
 
 
-def _install_punica() -> bool:
-    install_punica = bool(
-        int(os.getenv("APHRODITE_INSTALL_PUNICA_KERNELS", "1")))
-    device_count = torch.cuda.device_count()
-    for i in range(device_count):
-        major, minor = torch.cuda.get_device_capability(i)
-        if major < 8:
-            install_punica = False
-            break
-    return install_punica
-
-
-# def _install_hadamard() -> bool:
-#     install_hadamard = bool(
-#         int(os.getenv("APHRODITE_INSTALL_HADAMARD_KERNELS", "1")))
-#     device_count = torch.cuda.device_count()
-#     for i in range(device_count):
-#         major, minor = torch.cuda.get_device_capability(i)
-#         if major <= 6:
-#             install_hadamard = False
-#             break
-#     return install_hadamard
+def _build_core_ext() -> bool:
+    return not _is_neuron() and not _is_tpu()
 
 
 def get_hipcc_rocm_version():
@@ -454,16 +425,14 @@ def get_requirements() -> List[str]:
 
 ext_modules = []
 
+if _build_core_ext():
+    ext_modules.append(CMakeExtension(name="aphrodite._core_C"))
+
 if _is_cuda() or _is_hip():
     ext_modules.append(CMakeExtension(name="aphrodite._moe_C"))
 
 if _build_custom_ops():
     ext_modules.append(CMakeExtension(name="aphrodite._C"))
-    if _install_punica() and _is_cuda() or _is_hip():
-        ext_modules.append(CMakeExtension(name="aphrodite._punica_C"))
-    # TODO: see if hadamard kernels work with HIP
-    # if _install_hadamard() and _is_cuda():
-    #     ext_modules.append(CMakeExtension(name="aphrodite._hadamard_C"))
 
 package_data = {
     "aphrodite": [
@@ -491,10 +460,7 @@ setup(
         "Huggingface": "https://huggingface.co/PygmalionAI",
     },
     classifiers=[
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
-        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3",
         "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",  # noqa: E501
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
@@ -507,7 +473,7 @@ setup(
         "ray": ["ray>=2.9"],
     },
     ext_modules=ext_modules,
-    cmdclass={"build_ext": cmake_build_ext} if _build_custom_ops() else {},
+    cmdclass={"build_ext": cmake_build_ext} if len(ext_modules) > 0 else {},
     package_data=package_data,
     entry_points={
         "console_scripts": [

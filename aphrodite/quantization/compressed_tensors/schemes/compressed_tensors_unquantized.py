@@ -4,9 +4,9 @@ import torch
 import torch.nn.functional as F
 from torch.nn import Parameter
 
-from aphrodite.quantization.compressed_tensors.schemes import (
-    CompressedTensorsScheme)
 from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.quantization.compressed_tensors.schemes import \
+    CompressedTensorsScheme
 
 __all__ = ["CompressedTensorsUnquantized"]
 
@@ -18,7 +18,8 @@ class CompressedTensorsUnquantized(CompressedTensorsScheme):
     in a linear transformation.
     """
 
-    def get_min_capability(self) -> int:
+    @classmethod
+    def get_min_capability(cls) -> int:
         # volta and up
         return 70
 

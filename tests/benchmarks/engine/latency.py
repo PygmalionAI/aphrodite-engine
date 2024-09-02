@@ -10,10 +10,10 @@ import torch
 from tqdm import tqdm
 
 from aphrodite import LLM, SamplingParams
+from aphrodite.common.utils import FlexibleArgumentParser
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.inputs import PromptStrictInputs
 from aphrodite.quantization import QUANTIZATION_METHODS
-from aphrodite.common.utils import FlexibleArgumentParser
 
 
 def main(args: argparse.Namespace):
@@ -213,8 +213,8 @@ if __name__ == '__main__':
         type=str,
         default="auto",
         choices=["auto", "cuda", "cpu", "openvino", "tpu", "xpu"],
-        help='device type for vLLM execution, supporting CUDA, OpenVINO and '
-        'CPU.')
+        help='device type for Aphrodite execution, supporting CUDA, OpenVINO '
+        'and CPU.')
     parser.add_argument('--block-size',
                         type=int,
                         default=16,
@@ -268,7 +268,7 @@ if __name__ == '__main__':
         '* "dummy" will initialize the weights with random values, '
         'which is mainly for profiling.\n'
         '* "tensorizer" will load the weights using tensorizer from '
-        'CoreWeave. See the Tensorize vLLM Model script in the Examples'
+        'CoreWeave. See the Tensorize Aphrodite Model script in the Examples'
         'section for more information.\n'
         '* "bitsandbytes" will load the weights using bitsandbytes '
         'quantization.\n')

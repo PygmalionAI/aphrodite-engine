@@ -18,6 +18,7 @@
 from typing import Iterable, List, Optional, Set, Tuple
 
 import torch
+from loguru import logger
 from torch import nn
 from transformers import Gemma2Config
 
@@ -87,7 +88,8 @@ class Gemma2Attention(nn.Module):
                  max_position_embeddings: int,
                  rope_theta: float,
                  cache_config: Optional[CacheConfig] = None,
-                 quant_config: Optional[QuantizationConfig] = None) -> None:
+                 quant_config: Optional[QuantizationConfig] = None,
+                 attn_logits_soft_cap: Optional[float] = None) -> None:
         super().__init__()
         self.layer_idx = layer_idx
         self.config = config
@@ -147,7 +149,8 @@ class Gemma2Attention(nn.Module):
                               self.scaling,
                               num_kv_heads=self.num_kv_heads,
                               cache_config=cache_config,
-                              quant_config=quant_config)
+                              quant_config=quant_config,
+                              logits_soft_cap=attn_logits_soft_cap)
 
     def forward(
         self,
@@ -186,6 +189,7 @@ class Gemma2DecoderLayer(nn.Module):
             rope_theta=config.rope_theta,
             cache_config=cache_config,
             quant_config=quant_config,
+            attn_logits_soft_cap=config.attn_logit_softcapping,
         )
         self.hidden_size = config.hidden_size
         self.mlp = Gemma2MLP(
@@ -375,7 +379,8 @@ class Gemma2ForCausalLM(nn.Module, SupportsLoRA):
                 weight_loader(param, loaded_weight, shard_id)
                 break
             else:
-                # lm_head is not used in vllm as it is tied with embed_token.
+                # lm_head is not used in Aphrodite as it is tied with
+                # embed_token.
                 # To prevent errors, skip loading lm_head.weight.
                 if "lm_head.weight" in name:
                     continue
@@ -390,6 +395,6 @@ class Gemma2ForCausalLM(nn.Module, SupportsLoRA):
 
         unloaded_params = params_dict.keys() - loaded_params
         if unloaded_params:
-            raise RuntimeError(
+            logger.warning(
                 "Some weights are not initialized from checkpoints: "
                 f"{unloaded_params}")

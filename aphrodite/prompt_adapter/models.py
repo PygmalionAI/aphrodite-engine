@@ -169,8 +169,9 @@ class PromptAdapterModelManager(AdapterModelManager):
         index, _ = first_free_slot
         self._active_adapters[prompt_adapter_id] = None
         prompt_adapter_model = (self._registered_adapters[prompt_adapter_id])
-        logger.debug("Activating prompt_adapter. int id: %d, slot index: %d",
-                     prompt_adapter_model.id, index)
+        logger.debug(f"Activating prompt_adapter. int id: "
+                     f"{prompt_adapter_model.id}, "
+                     f"slot index: {index}")
         self.prompt_adapter_index_to_id[index] = prompt_adapter_model.id
         for _, v in self.modules.items():
             v.set_prompt_adapter(index, prompt_adapter_model.prompt_embedding)

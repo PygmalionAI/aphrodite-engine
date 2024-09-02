@@ -13,11 +13,14 @@ client = OpenAI(
 models = client.models.list()
 model = models.data[0].id
 
-responses = client.embeddings.create(input=[
-    "Hello my name is",
-    "The weather is nice today",
-],
-                                     model=model)
+responses = client.embeddings.create(
+    input=[
+        "Hello my name is",
+        "The weather is nice today",
+    ],
+    model=model,
+    encoding_format="float",
+)
 
 for data in responses.data:
     print(data.embedding)  # list of float of len 4096
