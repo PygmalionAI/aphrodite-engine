@@ -31,7 +31,7 @@ from aphrodite.spec_decode.proposer_worker_base import ProposerWorkerBase
 from aphrodite.spec_decode.smaller_tp_proposer_worker import \
     SmallerTpProposerWorker
 from aphrodite.spec_decode.target_model_runner import TargetModelRunner
-from aphrodite.spec_decode.util import (create_sequence_group_output,
+from aphrodite.spec_decode.util import (Timer, create_sequence_group_output,
                                         get_all_num_logprobs,
                                         get_sampled_token_logprobs, nvtx_range,
                                         split_batch_by_proposal_len)
@@ -78,7 +78,9 @@ def create_spec_worker(*args, **kwargs) -> "SpecDecodeWorker":
         typical_acceptance_sampler_posterior_threshold,
         typical_acceptance_sampler_posterior_alpha=speculative_config.
         typical_acceptance_sampler_posterior_alpha,
-        disable_logprobs=speculative_config.disable_logprobs)
+        disable_logprobs=speculative_config.disable_logprobs,
+        disable_log_stats=speculative_config.disable_log_stats,
+    )
 
     return spec_decode_worker
 
@@ -115,6 +117,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         typical_acceptance_sampler_posterior_threshold: float,
         typical_acceptance_sampler_posterior_alpha: float,
         disable_logprobs: bool,
+        disable_log_stats: bool,
     ) -> "SpecDecodeWorker":
 
         allow_zero_draft_token_step = True
@@ -171,6 +174,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             scorer_worker,
             disable_logprobs=disable_logprobs,
             disable_by_batch_size=disable_by_batch_size,
+            disable_log_stats=disable_log_stats,
             spec_decode_sampler=spec_decode_sampler,
             allow_zero_draft_token_step=allow_zero_draft_token_step)
 
@@ -179,7 +183,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         proposer_worker: ProposerWorkerBase,
         scorer_worker: WorkerBase,
         spec_decode_sampler: SpecDecodeBaseSampler,
-        disable_logprobs: bool,
+        disable_logprobs: bool = False,
+        disable_log_stats: bool = False,
         metrics_collector: Optional[AsyncMetricsCollector] = None,
         disable_by_batch_size: Optional[int] = None,
         allow_zero_draft_token_step: Optional[bool] = True,
@@ -202,6 +207,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             disable_logprobs: If set to True, token log probabilities will
                 not be output in both the draft worker and the target worker.
                 If set to False, log probabilities will be output by both.
+            disable_log_stats: If set to True, disable periodic printing of
+                speculative stage times.
             disable_by_batch_size: If the batch size is larger than this,
                 disable speculative decoding for new incoming requests.
             metrics_collector: Helper class for collecting metrics; can be set
@@ -239,6 +246,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         # in the subsequent step.
         self.previous_hidden_states: Optional[HiddenStates] = None
         self._disable_logprobs = disable_logprobs
+        self._disable_log_stats = disable_log_stats
 
     def init_device(self) -> None:
         """Initialize both scorer and proposer models.
@@ -524,28 +532,37 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         execute_model_req.previous_hidden_states = self.previous_hidden_states
         self.previous_hidden_states = None
 
-        # Generate proposals using draft worker.
-        proposals = self.proposer_worker.get_spec_proposals(
-            execute_model_req, self._seq_with_bonus_token_in_last_step)
+        with Timer() as proposal_timer:
+            # Generate proposals using draft worker.
+            proposals = self.proposer_worker.get_spec_proposals(
+                execute_model_req, self._seq_with_bonus_token_in_last_step)
 
         if not self._allow_zero_draft_token_step and proposals.no_proposals:
             #TODO: Fix it #5814
             raise RuntimeError("Cannot handle cases where distributed draft "
                                "workers generate no tokens")
 
-        proposal_scores = self.scorer.score_proposals(
-            execute_model_req,
-            proposals,
-        )
-        accepted_token_ids, target_logprobs = self._verify_tokens(
-            execute_model_req.seq_group_metadata_list, proposal_scores,
-            proposals, execute_model_req.num_lookahead_slots)
+        with Timer() as scoring_timer:
+            proposal_scores = self.scorer.score_proposals(
+                execute_model_req,
+                proposals,
+            )
+
+        with Timer() as verification_timer:
+            accepted_token_ids, target_logprobs = self._verify_tokens(
+                execute_model_req.seq_group_metadata_list, proposal_scores,
+                proposals, execute_model_req.num_lookahead_slots)
+
+        stage_times = (proposal_timer.elapsed_time_ms / num_lookahead_slots,
+                       scoring_timer.elapsed_time_ms,
+                       verification_timer.elapsed_time_ms)
 
         return self._create_output_sampler_list(
             execute_model_req.seq_group_metadata_list,
             accepted_token_ids,
             target_logprobs=target_logprobs,
-            k=execute_model_req.num_lookahead_slots)
+            k=execute_model_req.num_lookahead_slots,
+            stage_times=stage_times)
 
     @nvtx_range("spec_decode_worker._verify_tokens")
     def _verify_tokens(
@@ -644,6 +661,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         accepted_token_ids: torch.Tensor,  # shape: [batch_size, k+1]
         target_logprobs: torch.Tensor,  # shape: [batch_size, k+1, vocab_size]
         k: int,
+        stage_times: Tuple[float, float, float],
     ) -> List[SamplerOutput]:
         """Given the accepted token ids, create a list of SamplerOutput.
 
@@ -721,7 +739,28 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         if maybe_rejsample_metrics is not None:
             sampler_output_list[
                 0].spec_decode_worker_metrics = maybe_rejsample_metrics
+
+            # Log time spent in each stage periodically.
+            # This is periodic because the rejection sampler emits metrics
+            # periodically.
+            self._maybe_log_stage_times(*stage_times)
+
         return sampler_output_list
+
+    def _maybe_log_stage_times(self, average_time_per_proposal_tok_ms: float,
+                               scoring_time_ms: float,
+                               verification_time_ms: float) -> None:
+        """Log the speculative stage times. If stat logging is disabled, do
+        nothing.
+        """
+        if self._disable_log_stats:
+            return
+
+        logger.info(f"SpecDecodeWorker stage times: "
+                    f"average_time_per_proposal_tok_ms="
+                    f"{average_time_per_proposal_tok_ms:.02f} "
+                    f"scoring_time_ms={scoring_time_ms:.02f} "
+                    f"verification_time_ms={verification_time_ms:.02f}")
 
     def _create_dummy_logprob_lists(
         self,
