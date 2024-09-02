@@ -1,17 +1,13 @@
 #!/usr/bin/env bash
-# YAPF formatter, adapted from ray and skypilot.
+# Ruff formatter.
 #
 # Usage:
 #    # Do work and commit your work.
 
 #    # Format files that differ from origin/main.
 #    bash formatting.sh
-
-#    # Commit changed files with message 'Run yapf and ruff'
 #
 #
-# YAPF + Clang formatter (if installed). This script formats all changed files from the last mergebase.
-# You are encouraged to run this locally before pushing changes for review.
 
 # Cause the script to exit if a single command fails
 set -eo pipefail
@@ -21,7 +17,6 @@ builtin cd "$(dirname "${BASH_SOURCE:-$0}")"
 ROOT="$(git rev-parse --show-toplevel)"
 builtin cd "$ROOT" || exit 1
 
-YAPF_VERSION=$(yapf --version | awk '{print $2}')
 RUFF_VERSION=$(ruff --version | awk '{print $2}')
 MYPY_VERSION=$(mypy --version | awk '{print $2}')
 CODESPELL_VERSION=$(codespell --version)
@@ -36,62 +31,10 @@ tool_version_check() {
     fi
 }
 
-tool_version_check "yapf" $YAPF_VERSION "$(grep yapf requirements-lint.txt | cut -d'=' -f3)"
 tool_version_check "ruff" $RUFF_VERSION "$(grep "ruff==" requirements-lint.txt | cut -d'=' -f3)"
 tool_version_check "isort" "$ISORT_VERSION" "$(grep isort requirements-lint.txt | cut -d'=' -f3)"
 tool_version_check "codespell" "$CODESPELL_VERSION" "$(grep codespell requirements-lint.txt | cut -d'=' -f3)"
 tool_version_check "clang-format" "$CLANGFORMAT_VERSION" "$(grep clang-format requirements-lint.txt | cut -d'=' -f3)"
-
-YAPF_FLAGS=(
-    '--recursive'
-    '--parallel'
-)
-
-YAPF_EXCLUDES=(
-    '--exclude' 'build/**'
-)
-
-# Format specified files
-format() {
-    yapf --in-place "${YAPF_FLAGS[@]}" "$@"
-}
-
-# Format files that differ from main branch. Ignores dirs that are not slated
-# for autoformat yet.
-format_changed() {
-    # The `if` guard ensures that the list of filenames is not empty, which
-    # could cause yapf to receive 0 positional arguments, making it hang
-    # waiting for STDIN.
-    #
-    # `diff-filter=ACM` and $MERGEBASE is to ensure we only format files that
-    # exist on both branches.
-    MERGEBASE="$(git merge-base origin/main HEAD)"
-
-    if ! git diff --diff-filter=ACM --quiet --exit-code "$MERGEBASE" -- '*.py' '*.pyi' &>/dev/null; then
-        git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' | xargs -P 5 \
-             yapf --in-place "${YAPF_EXCLUDES[@]}" "${YAPF_FLAGS[@]}"
-    fi
-
-}
-
-# Format all files
-format_all() {
-    yapf --in-place "${YAPF_FLAGS[@]}" "${YAPF_EXCLUDES[@]}" .
-}
-
-## This flag formats individual files. --files *must* be the first command line
-## arg to use this option.
-if [[ "$1" == '--files' ]]; then
-   format "${@:2}"
-   # If `--all` is passed, then any further arguments are ignored and the
-   # entire python directory is formatted.
-elif [[ "$1" == '--all' ]]; then
-   format_all
-else
-   # Format only the files that changed in last commit.
-   format_changed
-fi
-echo 'Aphrodite yapf: Done'
 
 
 # If git diff returns a file that is in the skip list, the file may be checked anyway:
