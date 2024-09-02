@@ -48,7 +48,11 @@ export default defineConfig({
 					{
 						text: "Debugging Instructions",
 						link: "/pages/usage/debugging",
-					}
+					},
+					{
+						text: "OpenAI API",
+						link: "/pages/usage/openai",
+					},
 				]
 			}
 		],
