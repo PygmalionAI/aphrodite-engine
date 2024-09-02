@@ -58,6 +58,14 @@ export default defineConfig({
 						text: "Distributed Inference",
 						link: "/pages/usage/distributed",
 					},
+					{
+						text: "Production Metrics",
+						link: "/pages/usage/metrics",
+					},
+					{
+						text: "Supported Models",
+						link: "/pages/usage/models",
+					},
 				]
 			}
 		],
