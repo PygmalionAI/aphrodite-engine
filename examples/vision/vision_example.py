@@ -68,7 +68,7 @@ def run_phi3v(question):
 # PaliGemma
 def run_paligemma(question):
 
-    prompt = question
+    prompt = "caption en"
     llm = LLM(model="google/paligemma-3b-mix-224")
 
     return llm, prompt
