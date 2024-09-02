@@ -37,6 +37,16 @@ export default defineConfig({
 					},
 				],
 			},
+			{
+				text: "Usage",
+				link: "/pages/usage",
+				items: [
+					{
+						text: "Quick Start",
+						link: "/pages/usage/getting-started",
+					}
+				]
+			}
 		],
 
 		socialLinks: [
