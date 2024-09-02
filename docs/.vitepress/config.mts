@@ -67,6 +67,20 @@ export default defineConfig({
 						link: "/pages/usage/models",
 					},
 				]
+			},
+			{
+				text: "Developer Documentation",
+				link: "/pages/developer",
+				items: [
+					{
+						text: "Adding a New Model",
+						link: "/pages/developer/adding-model",
+					},
+					{
+						text: "Ading a Multimodal Model",
+						link: "/pages/developer/multimodal",
+					},
+				]
 			}
 		],
 
