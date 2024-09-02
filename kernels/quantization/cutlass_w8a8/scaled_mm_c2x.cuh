@@ -10,8 +10,6 @@
 #include "cute/atom/mma_atom.hpp"
 #include "cutlass/numeric_types.h"
 
-#include "cutlass/util/device_memory.h"
-
 #include "cutlass/cutlass.h"
 #include "cutlass/gemm_coord.h"
 #include "cutlass/arch/mma_sm75.h"
@@ -93,12 +91,15 @@ struct ScaledEpilogueBase {
 /*
  This epilogue function defines a quantized GEMM operation similar to
  torch._scaled_mm.
+
  A and B may be both either int8 or fp8_e4m3. A can be quantized per-tensor or
  per-row. B can be quantized per-tensor or per-column.
  Any combination of per-tensor and per-row or column is supported.
  A and B must have symmetric quantization (zero point == 0).
+
  So the GEMM operation is D = (a_scales * A) (b_scales * B), where the
  scales are applied elementwise with numpy-style broadcasting.
+
  ScaleA and ScaleB define the epilogue functions that apply the scales for
  the A and B operands respectively. These scales may be either per-tensor or
  per row or column.
@@ -298,12 +299,14 @@ inline void cutlass_gemm_caller(torch::Tensor& out, torch::Tensor const& a,
   // Launch the CUTLASS GEMM kernel.
   typename Gemm::Op gemm_op;
   size_t workspace_size = gemm_op.get_workspace_size(args);
-  cutlass::device_memory::allocation<uint8_t> workspace(workspace_size);
+  auto const workspace_options =
+      torch::TensorOptions().dtype(torch::kUInt8).device(a.device());
+  auto workspace = torch::empty(workspace_size, workspace_options);
 
   auto stream = at::cuda::getCurrentCUDAStream(a.get_device());
 
   CUTLASS_CHECK(gemm_op.can_implement(args));
-  cutlass::Status status = gemm_op(args, workspace.get(), stream);
+  cutlass::Status status = gemm_op(args, workspace.data_ptr(), stream);
   CUTLASS_CHECK(status);
 }
 
