@@ -15,6 +15,7 @@ from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
 from aphrodite.common.utils import FlexibleArgumentParser, is_cpu
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.quantization import QUANTIZATION_METHODS
+from aphrodite.transformers_utils.utils import check_gguf_file
 
 if TYPE_CHECKING:
     from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import (  # noqa: E501
@@ -794,7 +795,7 @@ class EngineArgs:
 
     def create_engine_config(self, ) -> EngineConfig:
         # gguf file needs a specific model loader and doesn't use hf_repo
-        if self.model.endswith(".gguf"):
+        if check_gguf_file(self.model):
             self.quantization = self.load_format = "gguf"
 
         # bitsandbytes quantization needs a specific model loader

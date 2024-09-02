@@ -13,6 +13,7 @@ from aphrodite.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
                                                   JAISConfig, MedusaConfig,
                                                   MLPSpeculatorConfig,
                                                   MPTConfig, RWConfig)
+from aphrodite.transformers_utils.utils import check_gguf_file
 
 APHRODITE_USE_MODELSCOPE = os.getenv("APHRODITE_USE_MODELSCOPE", "0") == "1"
 
@@ -49,7 +50,7 @@ def get_config(
 ) -> PretrainedConfig:
 
     # Separate model folder from file path for GGUF models
-    is_gguf = Path(model).is_file() and Path(model).suffix == ".gguf"
+    is_gguf = check_gguf_file(model)
     if is_gguf:
         kwargs["gguf_file"] = Path(model).name
         model = Path(model).parent
