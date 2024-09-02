@@ -4,10 +4,11 @@ from aphrodite.common.sampling_params import LogitsProcessorFunc
 from aphrodite.endpoints.openai.protocol import (
     ChatCompletionNamedToolChoiceParam, ChatCompletionRequest,
     CompletionRequest)
-from aphrodite.modeling.guided_decoding.lm_format_enforcer_decoding import \
-    get_lm_format_enforcer_guided_decoding_logits_processor
-from aphrodite.modeling.guided_decoding.outlines_decoding import \
-    get_outlines_guided_decoding_logits_processor
+from aphrodite.modeling.guided_decoding.guided_fields import \
+    GuidedDecodingRequest
+from aphrodite.modeling.guided_decoding.outlines_decoding import (
+    get_local_outlines_guided_decoding_logits_processor,
+    get_outlines_guided_decoding_logits_processor)
 
 
 async def get_guided_decoding_logits_processor(
@@ -19,8 +20,29 @@ async def get_guided_decoding_logits_processor(
         return await get_outlines_guided_decoding_logits_processor(
             request, tokenizer)
     if guided_decoding_backend == 'lm-format-enforcer':
+        from aphrodite.modeling.guided_decoding.lm_format_enforcer_decoding import \
+            get_lm_format_enforcer_guided_decoding_logits_processor  # noqa
         return await get_lm_format_enforcer_guided_decoding_logits_processor(
             request, tokenizer)
+
+    raise ValueError(
+        f"Unknown guided decoding backend '{guided_decoding_backend}'. "
+        "Must be one of 'outlines, 'lm-format-enforcer'")
+
+
+def get_local_guided_decoding_logits_processor(
+        guided_decoding_backend: str, guided_options: GuidedDecodingRequest,
+        tokenizer) -> Optional[LogitsProcessorFunc]:
+    # request = _adapt_request_for_tool_use(request)
+
+    if guided_decoding_backend == 'outlines':
+        return get_local_outlines_guided_decoding_logits_processor(
+            guided_options, tokenizer)
+    if guided_decoding_backend == 'lm-format-enforcer':
+        from aphrodite.modeling.guided_decoding.lm_format_enforcer_decoding import \
+            get_local_lm_format_enforcer_guided_decoding_logits_processor  # noqa
+        return get_local_lm_format_enforcer_guided_decoding_logits_processor(
+            guided_options, tokenizer)
 
     raise ValueError(
         f"Unknown guided decoding backend '{guided_decoding_backend}'. "
