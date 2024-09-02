@@ -55,6 +55,7 @@ _OPTIMIZED_QUANTS = [
     "awq_marlin",
     "fbgemm_fp8",
     "compressed-tensors",
+    "compressed_tensors",
 ]
 
 
@@ -90,11 +91,6 @@ class ModelConfig:
             output). If None, will be derived from the model.
         quantization: Quantization method that was used to quantize the model
             weights. If None, we assume the model weights are not quantized.
-        load_in_4bit: Whether to load the FP16 model in AutoQuant 4bit
-            format. Works with AWQ models as well as FP16.
-        load_in_8bit: Whether to load the FP16 model in 8bit format. Slower
-            than load_in_smooth in terms of throughput.
-        load_in_smooth: Whether to load the FP16 model in smoothquant format.
         deepspeed_fp_bits: Number of bits to use for DeepSpeed FP quantization.
             Supported number of bits are: 4, 6, 8, 12.
         quantization_param_path: Path to JSON file containing scaling factors.
@@ -138,9 +134,6 @@ class ModelConfig:
         tokenizer_revision: Optional[str] = None,
         max_model_len: Optional[int] = None,
         quantization: Optional[str] = None,
-        load_in_4bit: bool = False,
-        load_in_8bit: bool = False,
-        load_in_smooth: bool = False,
         deepspeed_fp_bits: Optional[int] = None,
         quantization_param_path: Optional[str] = None,
         enforce_eager: bool = True,
@@ -167,9 +160,6 @@ class ModelConfig:
         else:
             self.tokenizer_revision = tokenizer_revision
         self.quantization = quantization
-        self.load_in_4bit = load_in_4bit
-        self.load_in_8bit = load_in_8bit
-        self.load_in_smooth = load_in_smooth
         self.deepspeed_fp_bits = deepspeed_fp_bits
         self.quantization_param_path = quantization_param_path
         self.enforce_eager = enforce_eager
@@ -265,65 +255,6 @@ class ModelConfig:
                     f"({quant_method}) does not match the quantization "
                     f"method specified in the `quantization` argument "
                     f"({self.quantization}).")
-        if self.load_in_4bit:
-            # the kernels seem to not work with 4bit weight_only
-            if torch.cuda.get_device_capability(0)[0] < 8:
-                raise ValueError(
-                    "load_in_4bit quantization is not supported on GPUs with "
-                    "compute capability less than 8.0.")
-            if self.quantization is None:
-                self.quantization = "autoquant"
-                self.hf_config.quantization_config = {
-                    "bits": 4,
-                    "quant_mode": "weight_only",
-                    "quant_method": "autoquant",
-                    "group_size": 128,
-                    "zero_point": True,
-                    "from_float": True
-                }
-            elif self.quantization == "awq":
-                logger.warning("AWQ model is being loaded in 4bit autoquant "
-                               "format.")
-                self.quantization = "autoquant"
-                self.hf_config.quantization_config = {
-                    "zero_point": True,
-                    "q_group_size": 128,
-                    "w_bit": 4,
-                    "version": "gemm"
-                }
-            elif self.quantization != "autoquant":
-                raise ValueError("4bit quantization is not supported in "
-                                 f"{self.quantization}.")
-        if self.load_in_8bit:
-            if self.quantization is None:
-                self.quantization = "autoquant"
-            elif self.quantization != "autoquant":
-                raise ValueError("8bit quantization is not supported in "
-                                 f"{self.quantization}.")
-            self.hf_config.quantization_config = {
-                "bits": 8,
-                "quant_mode": "llm_int8",
-                "quant_method": "autoquant",
-                "group_size": 128,
-                "zero_point": True,
-                "from_float": True
-            }
-            self.enforce_eager = True
-        if self.load_in_smooth:
-            if self.quantization is None:
-                self.quantization = "autoquant"
-            elif self.quantization != "autoquant":
-                raise ValueError("Smooth quantization is not supported in "
-                                 f"{self.quantization}.")
-            self.hf_config.quantization_config = {
-                "bits": 8,
-                "quant_mode": "smoothquant",
-                "quant_method": "autoquant",
-                "group_size": 128,
-                "zero_point": True,
-                "from_float": True
-            }
-            self.enforce_eager = True
 
         if self.quantization == "deepspeedfp":
             gs = 32 if self.deepspeed_fp_bits == 4 else 128

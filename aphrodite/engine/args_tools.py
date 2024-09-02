@@ -70,9 +70,6 @@ class EngineArgs:
     max_parallel_loading_workers: Optional[int] = None
     # Quantization Options
     quantization: Optional[str] = None
-    load_in_4bit: bool = False
-    load_in_smooth: bool = False
-    load_in_8bit: bool = False
     quantization_param_path: Optional[str] = None
     preemption_mode: Optional[str] = None
     deepspeed_fp_bits: Optional[int] = None
@@ -441,28 +438,6 @@ class EngineArgs:
             "None, we assume the model weights are not "
             "quantized and use `dtype` to determine the data "
             "type of the weights.",
-        )
-        parser.add_argument(
-            "--load-in-4bit",
-            action="store_true",
-            help="Category: Quantization Options\n"
-            "Load the FP16 model in 4-bit format. Also "
-            "works with AWQ models. Throughput at 2.5x of "
-            "FP16.",
-        )
-        parser.add_argument(
-            "--load-in-smooth",
-            action="store_true",
-            help="Category: Quantization Options\n"
-            "Load the FP16 model in smoothquant "
-            "8bit format. Throughput at 0.7x of FP16. ",
-        )
-        parser.add_argument(
-            "--load-in-8bit",
-            action="store_true",
-            help="Category: Quantization Options\n"
-            "Load the FP16 model in 8-bit format. "
-            "Throughput at 0.3x of FP16.",
         )
         parser.add_argument(
             '--quantization-param-path',
@@ -860,9 +835,6 @@ class EngineArgs:
             tokenizer_revision=self.tokenizer_revision,
             max_model_len=self.max_model_len,
             quantization=self.quantization,
-            load_in_4bit=self.load_in_4bit,
-            load_in_8bit=self.load_in_8bit,
-            load_in_smooth=self.load_in_smooth,
             deepspeed_fp_bits=self.deepspeed_fp_bits,
             quantization_param_path=self.quantization_param_path,
             enforce_eager=self.enforce_eager,

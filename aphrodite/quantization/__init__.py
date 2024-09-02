@@ -1,7 +1,6 @@
 from typing import Type
 
 from aphrodite.quantization.aqlm import AQLMConfig
-from aphrodite.quantization.autoquant import AutoQuantConfig
 from aphrodite.quantization.awq import AWQConfig
 from aphrodite.quantization.awq_marlin import AWQMarlinConfig
 from aphrodite.quantization.base_config import QuantizationConfig
@@ -10,7 +9,6 @@ from aphrodite.quantization.compressed_tensors.compressed_tensors import (
     CompressedTensorsConfig)
 from aphrodite.quantization.deepspeedfp import DeepSpeedFPConfig
 from aphrodite.quantization.eetq import EETQConfig
-from aphrodite.quantization.exl2 import Exl2Config
 from aphrodite.quantization.fbgemm_fp8 import FBGEMMFp8Config
 from aphrodite.quantization.fp8 import Fp8Config
 from aphrodite.quantization.gguf import GGUFConfig
@@ -25,10 +23,8 @@ from aphrodite.quantization.squeezellm import SqueezeLLMConfig
 QUANTIZATION_METHODS = {
     "aqlm": AQLMConfig,
     "awq": AWQConfig,
-    "autoquant": AutoQuantConfig,
     "deepspeedfp": DeepSpeedFPConfig,
     "eetq": EETQConfig,
-    "exl2": Exl2Config,
     "fp8": Fp8Config,
     "fbgemm_fp8": FBGEMMFp8Config,
     "gguf": GGUFConfig,
