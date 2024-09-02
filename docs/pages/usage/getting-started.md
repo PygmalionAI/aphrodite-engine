@@ -154,3 +154,6 @@ for output in outputs:
     generated_text = output.outputs[0].text
     print(f"Prompt: {prompt!r},\nGenerated text: {generated_text!r}")
 ```
+
+
+Please view the [examples/](https://github.com/PygmalionAI/aphrodite-engine/tree/main/examples) directory for a full list of examples, for various different use-cases.

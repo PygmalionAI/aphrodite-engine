@@ -44,6 +44,10 @@ export default defineConfig({
 					{
 						text: "Quick Start",
 						link: "/pages/usage/getting-started",
+					},
+					{
+						text: "Debugging Instructions",
+						link: "/pages/usage/debugging",
 					}
 				]
 			}
