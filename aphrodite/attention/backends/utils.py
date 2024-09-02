@@ -214,7 +214,6 @@ class CommonMetadataBuilder(AttentionMetadataBuilder[TAttentionMetadata]):
                      dtype=query_start_loc.dtype,
                      out=query_start_loc[1:])
 
-
         return self._metadata_cls(  # type: ignore
             num_prefills=self.num_prefills,
             slot_mapping=slot_mapping_tensor,
