@@ -15,7 +15,7 @@ basic_args:
   # If you want a custom model name for the API, specify it here
   - served_model_name:
 
-  # Wether or not to launch the Kobold API server. Used for hosting
+  # Whether or not to launch the Kobold API server. Used for hosting
   # on Kobold Horde. Takes a boolean value (true/false)
   - launch_kobold_api:
 
