@@ -135,6 +135,7 @@ class ModelConfig:
         max_model_len: Optional[int] = None,
         quantization: Optional[str] = None,
         deepspeed_fp_bits: Optional[int] = None,
+        quant_llm_fp_bits: Optional[int] = None,
         quantization_param_path: Optional[str] = None,
         enforce_eager: bool = True,
         max_context_len_to_capture: Optional[int] = None,
@@ -161,6 +162,7 @@ class ModelConfig:
             self.tokenizer_revision = tokenizer_revision
         self.quantization = quantization
         self.deepspeed_fp_bits = deepspeed_fp_bits
+        self.quant_llm_fp_bits = quant_llm_fp_bits
         self.quantization_param_path = quantization_param_path
         self.enforce_eager = enforce_eager
         self.max_context_len_to_capture = max_context_len_to_capture
@@ -263,6 +265,13 @@ class ModelConfig:
                 "group_size": int(os.environ.get("DEEPSPEED_GROUP_SIZE", gs)),
                 "quant_method": "deepspeedfp"
             }
+        if self.quantization == "quant_llm":
+            self.quant_llm_fp_exp_bits = {5:2, 6:2, 7:3}[self.quant_llm_fp_bits]
+            self.hf_config.quantization_config = {
+                "bits": self.quant_llm_fp_bits,
+                "exp_bits" : self.quant_llm_fp_exp_bits,
+                "quant_method": "quant_llm"
+            }
 
         if self.quantization is not None:
             if self.quantization not in supported_quantization:
@@ -284,6 +293,11 @@ class ModelConfig:
                 raise ValueError(
                     "deepspeed_fp_bits must be specified when using "
                     "deepspeedfp quantization.")
+            if self.quantization == "quant_llm" and self.quant_llm_fp_bits \
+                is None:
+                raise ValueError(
+                    "quant_llm_fp_bits must be specified when using "
+                    "quant_llm quantization.")
 
     def _verify_cuda_graph(self) -> None:
         if self.max_seq_len_to_capture is None:

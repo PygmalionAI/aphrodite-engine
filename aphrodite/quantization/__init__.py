@@ -8,6 +8,7 @@ from aphrodite.quantization.bitsandbytes import BitsAndBytesConfig
 from aphrodite.quantization.compressed_tensors.compressed_tensors import (
     CompressedTensorsConfig)
 from aphrodite.quantization.deepspeedfp import DeepSpeedFPConfig
+from aphrodite.quantization.quant_llm import QuantLLMFPConfig
 from aphrodite.quantization.eetq import EETQConfig
 from aphrodite.quantization.fbgemm_fp8 import FBGEMMFp8Config
 from aphrodite.quantization.fp8 import Fp8Config
@@ -24,6 +25,7 @@ QUANTIZATION_METHODS = {
     "aqlm": AQLMConfig,
     "awq": AWQConfig,
     "deepspeedfp": DeepSpeedFPConfig,
+    "quant_llm": QuantLLMFPConfig,
     "eetq": EETQConfig,
     "fp8": Fp8Config,
     "fbgemm_fp8": FBGEMMFp8Config,
