@@ -4,16 +4,14 @@ import inspect
 import json
 import os
 import re
-import signal
+from argparse import Namespace
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 from multiprocessing import Process
 from typing import AsyncGenerator, AsyncIterator, List, Set, Tuple
 
-import fastapi
-import uvicorn
 import uvloop
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (HTMLResponse, JSONResponse, Response,
@@ -52,6 +50,7 @@ from aphrodite.endpoints.openai.serving_tokenization import \
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.engine.protocol import AsyncEngineClient
+from aphrodite.server import serve_http
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.version import __version__ as APHRODITE_VERSION
 
@@ -84,7 +83,7 @@ def model_is_embedding(model_name: str) -> bool:
 
 
 @asynccontextmanager
-async def lifespan(app: fastapi.FastAPI):
+async def lifespan(app: FastAPI):
 
     async def _force_log():
         while True:
@@ -142,7 +141,7 @@ async def build_async_engine_client(args) -> AsyncIterator[AsyncEngineClient]:
             rpc_server_process.join()
 
 
-def mount_metrics(app: fastapi.FastAPI):
+def mount_metrics(app: FastAPI):
     # Add prometheus asgi middleware to route /metrics requests
     metrics_route = Mount("/metrics", make_asgi_app())
     # Workaround for 307 Redirect for /metrics
@@ -469,8 +468,8 @@ async def get_kobold_lite_ui():
 # ============ KoboldAI API ============ #
 
 
-def build_app(args):
-    app = fastapi.FastAPI(lifespan=lifespan)
+def build_app(args: Namespace) -> FastAPI:
+    app = FastAPI(lifespan=lifespan)
     app.include_router(router)
     # Add prometheus asgi middleware to route /metrics requests
     route = Mount("/metrics", make_asgi_app())
@@ -549,11 +548,10 @@ def build_app(args):
     return app
 
 
-async def build_server(
+async def init_app(
     async_engine_client: AsyncEngineClient,
-    args,
-    **uvicorn_kwargs,
-) -> uvicorn.Server:
+    args: Namespace,
+) -> FastAPI:
     app = build_app(args)
 
     logger.debug(f"args: {args}")
@@ -627,53 +625,29 @@ async def build_server(
     if args.launch_kobold_api:
         _set_badwords(tokenizer, model_config.hf_config)
 
-    config = uvicorn.Config(
-        app,
-        host=args.host,
-        port=args.port,
-        log_level=args.uvicorn_log_level,
-        timeout_keep_alive=TIMEOUT_KEEP_ALIVE,
-        ssl_keyfile=args.ssl_keyfile,
-        ssl_certfile=args.ssl_certfile,
-        ssl_ca_certs=args.ssl_ca_certs,
-        ssl_cert_reqs=args.ssl_cert_reqs,
-        **uvicorn_kwargs,
-    )
-
-    return uvicorn.Server(config)
+    return app
 
 
 async def run_server(args, **uvicorn_kwargs) -> None:
 
-    shutdown_task = None
     async with build_async_engine_client(args) as async_engine_client:
+        app = await init_app(async_engine_client, args)
 
-        server = await build_server(
-            async_engine_client,
-            args,
+        shutdown_task = await serve_http(
+            app,
+            host=args.host,
+            port=args.port,
+            log_level=args.uvicorn_log_level,
+            timeout_keep_alive=TIMEOUT_KEEP_ALIVE,
+            ssl_keyfile=args.ssl_keyfile,
+            ssl_certfile=args.ssl_certfile,
+            ssl_ca_certs=args.ssl_ca_certs,
+            ssl_cert_reqs=args.ssl_cert_reqs,
             **uvicorn_kwargs,
         )
 
-        loop = asyncio.get_running_loop()
-
-        server_task = loop.create_task(server.serve())
-
-        def signal_handler() -> None:
-            # prevents the uvicorn signal handler to exit early
-            server_task.cancel()
-
-        loop.add_signal_handler(signal.SIGINT, signal_handler)
-        loop.add_signal_handler(signal.SIGTERM, signal_handler)
-
-        try:
-            await server_task
-        except asyncio.CancelledError:
-            logger.info("Gracefully stopping http server")
-            shutdown_task = server.shutdown()
-
-    if shutdown_task:
-        # NB: Await server shutdown only after the backend context is exited
-        await shutdown_task
+    # NB: Await server shutdown only after the backend context is exited
+    await shutdown_task
 
 
 if __name__ == "__main__":

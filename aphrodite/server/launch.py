@@ -7,13 +7,7 @@ from fastapi import FastAPI
 from loguru import logger
 
 
-async def serve_http(app: FastAPI, **uvicorn_kwargs: Any) -> None:
-    for route in app.routes:
-        methods = getattr(route, "methods", None)
-        path = getattr(route, "path", None)
-
-        if methods is None or path is None:
-            continue
+async def serve_http(app: FastAPI, **uvicorn_kwargs: Any):
 
     config = uvicorn.Config(app, **uvicorn_kwargs)
     server = uvicorn.Server(config)
@@ -26,11 +20,15 @@ async def serve_http(app: FastAPI, **uvicorn_kwargs: Any) -> None:
         # prevents the uvicorn signal handler to exit early
         server_task.cancel()
 
+    async def dummy_shutdown() -> None:
+        pass
+
     loop.add_signal_handler(signal.SIGINT, signal_handler)
     loop.add_signal_handler(signal.SIGTERM, signal_handler)
 
     try:
         await server_task
+        return dummy_shutdown()
     except asyncio.CancelledError:
         logger.info("Gracefully stopping http server")
-        await server.shutdown()
+        return server.shutdown()
