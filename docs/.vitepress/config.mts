@@ -2,6 +2,7 @@ import { defineConfig } from 'vitepress';
 
 export default defineConfig({
   title: "Aphrodite Engine",
+  head: [['link', { rel: 'icon', href: '/favicon.ico' }]],
   description: "User and Developer Documentation",
   themeConfig: {
 		// nav: [{ text: "Home", link: "/" }],
@@ -52,6 +53,10 @@ export default defineConfig({
 					{
 						text: "OpenAI API",
 						link: "/pages/usage/openai",
+					},
+					{
+						text: "Distributed Inference",
+						link: "/pages/usage/distributed",
 					},
 				]
 			}
