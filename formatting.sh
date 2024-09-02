@@ -230,6 +230,11 @@ CLANG_FORMAT_EXCLUDES=(
     'kernels/punica/bgmv/vec_dtypes.cuh'
     'kernels/punica/punica_ops.cu'
     'kernels/punica/type_convert.h'
+    'kernels/quantization/gguf/ggml-common.h'
+    'kernels/quantization/gguf/dequantize.cuh'
+    'kernels/quantization/gguf/vecdotq.cuh'
+    'kernels/quantization/gguf/mmq.cuh'
+    'kernels/quantization/gguf/mmvq.cuh'
 )
 
 # Format specified files with clang-format

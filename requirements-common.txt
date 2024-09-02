@@ -26,3 +26,4 @@ scipy # for quip
 rich
 loguru
 hf_transfer # for faster downloads
+gguf == 0.9.1
