@@ -14,7 +14,8 @@ build-backend = "setuptools.build_meta"
 # Allow lines to be as long as 80.
 line-length = 80
 exclude = [
-    "examples/fp8/quantizer/quantize.py"
+    "examples/fp8/quantizer/quantize.py",
+    "kernels/hadamard/generator.py"
 ]
 
 [tool.ruff.lint]

@@ -41,6 +41,20 @@ jobs:
             'kernels/quantization/gguf/vecdotq.cuh'
             'kernels/quantization/gguf/mmq.cuh'
             'kernels/quantization/gguf/mmvq.cuh'
+            'kernels/hadamard/fast_hadamard_transform_common.h'
+            'kernels/hadamard/fast_hadamard_cuda.cu'
+            'kernels/hadamard/fast_hadamard_transform_special.h'
+            'kernels/hadamard/fast_hadamard_transform.cpp'
+            'kernels/hadamard/fast_hadamard_transform.h'
+            'kernels/hadamard/static_switch.h'
+            'kernels/backup/attention_dtypes.h'
+            'kernels/backup/attention_kernels.cu'
+            'kernels/backup/cache_kernels.cu'
+            'kernels/backup/cache.h'
+            'kernels/backup/dispatch_utils.h'
+            'kernels/backup/dtype_float32.cuh'
+            'kernels/backup/dtype_int8.cuh'
+            'kernels/backup/ops.h'
         )
         find kernels/ \( -name '*.h' -o -name '*.cpp' -o -name '*.cu' -o -name '*.cuh' \) -print \
             | grep -vFf <(printf "%s\n" "${EXCLUDES[@]}") \
