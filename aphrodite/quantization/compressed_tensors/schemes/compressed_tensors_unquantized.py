@@ -5,8 +5,8 @@ import torch.nn.functional as F
 from torch.nn import Parameter
 
 from aphrodite.modeling.utils import set_weight_attrs
-from aphrodite.quantization.compressed_tensors.schemes import \
-    CompressedTensorsScheme
+from aphrodite.quantization.compressed_tensors.schemes import (
+    CompressedTensorsScheme)
 
 __all__ = ["CompressedTensorsUnquantized"]
 

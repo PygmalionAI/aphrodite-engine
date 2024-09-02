@@ -3,10 +3,10 @@ from typing import Callable, List, Optional
 import torch
 
 from aphrodite.modeling.utils import set_weight_attrs
-from aphrodite.quantization.compressed_tensors.schemes import \
-    CompressedTensorsScheme
-from aphrodite.quantization.compressed_tensors.utils import \
-    QuantizationStrategy
+from aphrodite.quantization.compressed_tensors.schemes import (
+    CompressedTensorsScheme)
+from aphrodite.quantization.compressed_tensors.utils import (
+    QuantizationStrategy)
 from aphrodite.quantization.utils.marlin_utils_fp8 import (
     apply_fp8_marlin_linear, prepare_fp8_layer_for_marlin)
 from aphrodite.quantization.utils.w8a8_utils import (

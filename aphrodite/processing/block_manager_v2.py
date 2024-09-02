@@ -7,13 +7,13 @@ from typing import Tuple
 from aphrodite.common.sequence import Sequence, SequenceGroup, SequenceStatus
 from aphrodite.common.utils import Device
 from aphrodite.processing.block.block_table import BlockTable
-from aphrodite.processing.block.cpu_gpu_block_allocator import \
-    CpuGpuBlockAllocator
+from aphrodite.processing.block.cpu_gpu_block_allocator import (
+    CpuGpuBlockAllocator)
 from aphrodite.processing.block.interfaces import Block
 from aphrodite.processing.block.prefix_caching_block import (
     ComputedBlocksTracker, LastAccessBlocksTracker)
-from aphrodite.processing.block.utils import \
-    check_no_caching_or_swa_for_blockmgr_encdec
+from aphrodite.processing.block.utils import (
+    check_no_caching_or_swa_for_blockmgr_encdec)
 from aphrodite.processing.interfaces import AllocStatus, BlockSpaceManager
 
 SeqId = int

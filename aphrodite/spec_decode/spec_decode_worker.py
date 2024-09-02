@@ -15,8 +15,8 @@ from aphrodite.distributed.communication_op import broadcast_tensor_dict
 from aphrodite.modeling.layers.rejection_sampler import RejectionSampler
 from aphrodite.modeling.layers.spec_decode_base_sampler import (
     SpecDecodeBaseSampler, SpecDecodeStochasticBaseSampler)
-from aphrodite.modeling.layers.typical_acceptance_sampler import \
-    TypicalAcceptanceSampler
+from aphrodite.modeling.layers.typical_acceptance_sampler import (
+    TypicalAcceptanceSampler)
 from aphrodite.spec_decode.batch_expansion import BatchExpansionTop1Scorer
 from aphrodite.spec_decode.draft_model_runner import TP1DraftModelRunner
 from aphrodite.spec_decode.interfaces import (SpeculativeProposals,
@@ -28,8 +28,8 @@ from aphrodite.spec_decode.mlp_speculator_worker import MLPSpeculatorWorker
 from aphrodite.spec_decode.multi_step_worker import MultiStepWorker
 from aphrodite.spec_decode.ngram_worker import NGramWorker
 from aphrodite.spec_decode.proposer_worker_base import ProposerWorkerBase
-from aphrodite.spec_decode.smaller_tp_proposer_worker import \
-    SmallerTpProposerWorker
+from aphrodite.spec_decode.smaller_tp_proposer_worker import (
+    SmallerTpProposerWorker)
 from aphrodite.spec_decode.target_model_runner import TargetModelRunner
 from aphrodite.spec_decode.util import (Timer, create_sequence_group_output,
                                         get_all_num_logprobs,

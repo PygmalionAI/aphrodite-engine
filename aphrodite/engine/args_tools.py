@@ -17,8 +17,8 @@ from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.quantization import QUANTIZATION_METHODS
 
 if TYPE_CHECKING:
-    from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import \
-        BaseTokenizerGroup  # noqa: E501
+    from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import (  # noqa: E501
+        BaseTokenizerGroup)
 
 
 @dataclass

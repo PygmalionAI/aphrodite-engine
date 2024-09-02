@@ -41,6 +41,8 @@ ignore = [
     "E731",
     # Loop control variable not used within loop body
     "B007",
+    # f-strings in logger
+    "G004",
 ]
 
 [tool.codespell]

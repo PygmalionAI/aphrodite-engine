@@ -76,8 +76,8 @@ class Fp8Config(QuantizationConfig):
 
     def get_quant_method(self, layer: torch.nn.Module,
                          prefix: str) -> Optional["QuantizeMethodBase"]:
-        from aphrodite.attention.layer import \
-            Attention  # Avoid circular import
+        from aphrodite.attention.layer import (
+            Attention)  # Avoid circular import
 
         if isinstance(layer, LinearBase):
             if is_layer_skipped(prefix, self.ignored_layers):

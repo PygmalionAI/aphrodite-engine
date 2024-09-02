@@ -144,10 +144,10 @@ class GroupCoordinator:
         self.use_tpu_communicator = use_tpu_communicator
 
         # lazy import to avoid documentation build error
-        from aphrodite.distributed.device_communicators.custom_all_reduce import \
-            CustomAllreduce  # noqa: E501
-        from aphrodite.distributed.device_communicators.pynccl import \
-            PyNcclCommunicator
+        from aphrodite.distributed.device_communicators.custom_all_reduce import (  # noqa: E501
+            CustomAllreduce)
+        from aphrodite.distributed.device_communicators.pynccl import (
+            PyNcclCommunicator)
 
         self.pynccl_comm: Optional[PyNcclCommunicator]
         if use_pynccl and self.world_size > 1:
@@ -168,14 +168,14 @@ class GroupCoordinator:
         else:
             self.ca_comm = None
 
-        from aphrodite.distributed.device_communicators.tpu_communicator import \
-            TpuCommunicator  # noqa: E501
+        from aphrodite.distributed.device_communicators.tpu_communicator import (  # noqa: E501
+            TpuCommunicator)
         self.tpu_communicator: Optional[TpuCommunicator]
         if use_tpu_communicator and self.world_size > 1:
             self.tpu_communicator = TpuCommunicator(group=self.cpu_group)
 
-        from aphrodite.distributed.device_communicators.shm_broadcast import \
-            MessageQueue
+        from aphrodite.distributed.device_communicators.shm_broadcast import (
+            MessageQueue)
         self.mq_broadcaster: Optional[MessageQueue] = None
         if use_message_queue_broadcaster and self.world_size > 1:
             self.mq_broadcaster = MessageQueue.create_from_process_group(

@@ -6,8 +6,8 @@ from aphrodite.quantization.awq import AWQConfig
 from aphrodite.quantization.awq_marlin import AWQMarlinConfig
 from aphrodite.quantization.base_config import QuantizationConfig
 from aphrodite.quantization.bitsandbytes import BitsAndBytesConfig
-from aphrodite.quantization.compressed_tensors.compressed_tensors import \
-    CompressedTensorsConfig
+from aphrodite.quantization.compressed_tensors.compressed_tensors import (
+    CompressedTensorsConfig)
 from aphrodite.quantization.deepspeedfp import DeepSpeedFPConfig
 from aphrodite.quantization.eetq import EETQConfig
 from aphrodite.quantization.exl2 import Exl2Config

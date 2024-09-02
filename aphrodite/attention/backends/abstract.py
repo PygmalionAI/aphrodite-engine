@@ -7,8 +7,8 @@ from typing import (TYPE_CHECKING, Any, Dict, Generic, List, Optional, Set,
 import torch
 
 if TYPE_CHECKING:
-    from aphrodite.task_handler.model_runner_base import \
-        ModelRunnerInputBuilderBase
+    from aphrodite.task_handler.model_runner_base import (
+        ModelRunnerInputBuilderBase)
 
 
 class AttentionType(Enum):

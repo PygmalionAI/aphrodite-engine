@@ -4,8 +4,8 @@ from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
 from aphrodite.common.sequence import (Logprob, SamplingParams, Sequence,
                                        SequenceGroup)
-from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import \
-    BaseTokenizerGroup
+from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import (
+    BaseTokenizerGroup)
 
 # Used eg. for marking rejected tokens in spec decoding.
 INVALID_TOKEN_ID = -1

@@ -23,8 +23,8 @@ if TYPE_CHECKING:
 
     from aphrodite.executor.executor_base import ExecutorBase
     from aphrodite.modeling.model_loader.loader import BaseModelLoader
-    from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import \
-        BaseTokenizerGroup  # noqa: E501
+    from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import (  # noqa: E501
+        BaseTokenizerGroup)
 
 # If true, will load models from ModelScope instead of Hugging Face Hub.
 APHRODITE_USE_MODELSCOPE = os.environ.get("APHRODITE_USE_MODELSCOPE",

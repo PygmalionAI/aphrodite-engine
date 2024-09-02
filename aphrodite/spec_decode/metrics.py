@@ -5,8 +5,8 @@ from typing import Callable, Optional
 import torch
 
 from aphrodite.common.utils import is_pin_memory_available
-from aphrodite.modeling.layers.spec_decode_base_sampler import \
-    SpecDecodeBaseSampler
+from aphrodite.modeling.layers.spec_decode_base_sampler import (
+    SpecDecodeBaseSampler)
 
 
 @dataclass

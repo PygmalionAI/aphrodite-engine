@@ -57,8 +57,8 @@ class CompressedTensorsConfig(QuantizationConfig):
         layer: torch.nn.Module,
         prefix: str,
     ) -> Optional["QuantizeMethodBase"]:
-        from aphrodite.attention.layer import \
-            Attention  # Avoid circular import
+        from aphrodite.attention.layer import (
+            Attention)  # Avoid circular import
         if isinstance(layer, LinearBase):
             return CompressedTensorsLinearMethod(self)
         if isinstance(layer, Attention):

@@ -26,11 +26,11 @@ from aphrodite.common.utils import Counter
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.metrics import (LoggingStatLogger, PrometheusStatLogger,
                                       StatLoggerBase, Stats)
-from aphrodite.engine.output_processor.interfaces import \
-    SequenceGroupOutputProcessor
+from aphrodite.engine.output_processor.interfaces import (
+    SequenceGroupOutputProcessor)
 from aphrodite.engine.output_processor.stop_checker import StopChecker
-from aphrodite.engine.output_processor.util import \
-    create_output_by_sequence_group
+from aphrodite.engine.output_processor.util import (
+    create_output_by_sequence_group)
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.executor.ray_utils import initialize_ray_cluster
 from aphrodite.inputs import INPUT_REGISTRY, LLMInputs, PromptInputs
@@ -368,8 +368,8 @@ class AphroditeEngine:
             from aphrodite.executor.ray_gpu_executor import RayGPUExecutor
             executor_class = RayGPUExecutor
         elif distributed_executor_backend == "mp":
-            from aphrodite.executor.multiproc_gpu_executor import \
-                MultiprocessingGPUExecutor
+            from aphrodite.executor.multiproc_gpu_executor import (
+                MultiprocessingGPUExecutor)
             assert not APHRODITE_USE_RAY_SPMD_WORKER, (
                 "multiprocessing distributed executor backend does not "
                 "support APHRODITE_USE_RAY_SPMD_WORKER=1")

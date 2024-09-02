@@ -10,11 +10,11 @@ from loguru import logger
 # yapf conflicts with isort for this block
 # yapf: disable
 from openai.types.chat import ChatCompletionContentPartImageParam
-from openai.types.chat import \
-    ChatCompletionContentPartParam as OpenAIChatCompletionContentPartParam
+from openai.types.chat import (
+    ChatCompletionContentPartParam as OpenAIChatCompletionContentPartParam)
 from openai.types.chat import ChatCompletionContentPartTextParam
-from openai.types.chat import \
-    ChatCompletionMessageParam as OpenAIChatCompletionMessageParam
+from openai.types.chat import (
+    ChatCompletionMessageParam as OpenAIChatCompletionMessageParam)
 # yapf: enable
 # pydantic needs the TypedDict from typing_extensions
 from pydantic import ConfigDict

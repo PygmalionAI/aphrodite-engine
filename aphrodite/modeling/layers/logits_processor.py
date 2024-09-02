@@ -7,8 +7,8 @@ import torch.nn as nn
 
 from aphrodite.distributed import (tensor_model_parallel_all_gather,
                                    tensor_model_parallel_gather)
-from aphrodite.modeling.layers.vocab_parallel_embedding import \
-    VocabParallelEmbedding
+from aphrodite.modeling.layers.vocab_parallel_embedding import (
+    VocabParallelEmbedding)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.platforms import current_platform
 

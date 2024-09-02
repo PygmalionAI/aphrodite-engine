@@ -12,8 +12,8 @@ from aphrodite.adapter_commons.utils import (add_adapter, deactivate_adapter,
                                              remove_adapter,
                                              set_adapter_mapping)
 from aphrodite.common.config import PromptAdapterConfig
-from aphrodite.prompt_adapter.layers import \
-    VocabParallelEmbeddingWithPromptAdapter  # yapf: disable
+from aphrodite.prompt_adapter.layers import (
+    VocabParallelEmbeddingWithPromptAdapter)  # yapf: disable
 from aphrodite.prompt_adapter.layers import PromptAdapterMapping
 
 logger = logging.getLogger(__name__)

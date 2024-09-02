@@ -5,8 +5,8 @@ from typing import Dict, Optional, Type, Union
 
 from loguru import logger
 from transformers import GenerationConfig, PretrainedConfig
-from transformers.models.auto.modeling_auto import \
-    MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
+from transformers.models.auto.modeling_auto import (
+    MODEL_FOR_CAUSAL_LM_MAPPING_NAMES)
 
 from aphrodite.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
                                                   InternVLChatConfig,

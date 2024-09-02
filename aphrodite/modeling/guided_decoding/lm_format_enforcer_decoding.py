@@ -11,8 +11,8 @@ from transformers import PreTrainedTokenizerBase
 from aphrodite.common.sampling_params import LogitsProcessorFunc
 from aphrodite.endpoints.openai.protocol import (ChatCompletionRequest,
                                                  CompletionRequest)
-from aphrodite.modeling.guided_decoding.guided_fields import \
-    GuidedDecodingRequest
+from aphrodite.modeling.guided_decoding.guided_fields import (
+    GuidedDecodingRequest)
 from aphrodite.modeling.guided_decoding.lm_format_enforcer_logits_processors import (  # noqa: E501
     build_aphrodite_logits_processor,
     build_aphrodite_token_enforcer_tokenizer_data)

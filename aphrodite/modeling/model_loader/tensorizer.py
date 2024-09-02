@@ -16,8 +16,8 @@ from transformers import PretrainedConfig
 from aphrodite.common.config import ModelConfig, ParallelConfig
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.engine.args_tools import EngineArgs
-from aphrodite.modeling.layers.vocab_parallel_embedding import \
-    VocabParallelEmbedding
+from aphrodite.modeling.layers.vocab_parallel_embedding import (
+    VocabParallelEmbedding)
 from aphrodite.quantization.base_config import QuantizationConfig
 
 tensorizer_error_msg = None

@@ -9,8 +9,8 @@ try:
     from aphrodite.attention.backends.flash_attn import FlashAttentionMetadata
 except ModuleNotFoundError:
     # aphrodite_flash_attn is not installed, use the identical ROCm FA metadata
-    from aphrodite.attention.backends.rocm_flash_attn import \
-        ROCmFlashAttentionMetadata as FlashAttentionMetadata
+    from aphrodite.attention.backends.rocm_flash_attn import (
+        ROCmFlashAttentionMetadata as FlashAttentionMetadata)
 
 try:
     from flashinfer import BatchDecodeWithPagedKVCacheWrapper

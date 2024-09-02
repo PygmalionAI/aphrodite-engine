@@ -26,8 +26,8 @@ from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.rotary_embedding import (
     LinearScalingRotaryEmbedding, RotaryEmbedding)
-from aphrodite.modeling.layers.vocab_parallel_embedding import \
-    VocabParallelEmbedding
+from aphrodite.modeling.layers.vocab_parallel_embedding import (
+    VocabParallelEmbedding)
 
 if TYPE_CHECKING:
     pass

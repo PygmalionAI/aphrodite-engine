@@ -8,8 +8,8 @@ from .base_tokenizer_group import AnyTokenizer, BaseTokenizerGroup
 from .tokenizer_group import TokenizerGroup
 
 if ray:
-    from aphrodite.transformers_utils.tokenizer_group.ray_tokenizer_group import \
-        RayTokenizerGroupPool  # noqa E501
+    from aphrodite.transformers_utils.tokenizer_group.ray_tokenizer_group import (  # noqa E501
+        RayTokenizerGroupPool)
 else:
     RayTokenizerGroupPool = None  # type: ignore
 

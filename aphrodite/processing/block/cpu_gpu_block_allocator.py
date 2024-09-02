@@ -6,8 +6,8 @@ from aphrodite.processing.block.interfaces import (Block, BlockAllocator,
                                                    DeviceAwareBlockAllocator)
 from aphrodite.processing.block.naive_block import (NaiveBlock,
                                                     NaiveBlockAllocator)
-from aphrodite.processing.block.prefix_caching_block import \
-    PrefixCachingBlockAllocator
+from aphrodite.processing.block.prefix_caching_block import (
+    PrefixCachingBlockAllocator)
 
 
 class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):

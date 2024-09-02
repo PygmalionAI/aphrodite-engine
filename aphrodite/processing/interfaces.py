@@ -28,18 +28,18 @@ class BlockSpaceManager(ABC):
         version = version.lower()
 
         if version == "v1":
-            from aphrodite.processing.block_manager_v1 import \
-                BlockSpaceManagerV1
+            from aphrodite.processing.block_manager_v1 import (
+                BlockSpaceManagerV1)
             return BlockSpaceManagerV1
 
         if version == "v2":
-            from aphrodite.processing.block_manager_v2 import \
-                BlockSpaceManagerV2
+            from aphrodite.processing.block_manager_v2 import (
+                BlockSpaceManagerV2)
             return BlockSpaceManagerV2
 
         if version == "embedding":
-            from aphrodite.processing.embedding_model_block_manager import \
-                EmbeddingModelBlockSpaceManager
+            from aphrodite.processing.embedding_model_block_manager import (
+                EmbeddingModelBlockSpaceManager)
             return EmbeddingModelBlockSpaceManager
 
         raise ValueError(f"Unknown version {version=}")

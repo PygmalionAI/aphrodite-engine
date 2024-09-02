@@ -6,8 +6,8 @@ from torch import nn
 
 from aphrodite.adapter_commons.layers import AdapterMapping
 from aphrodite.common.config import PromptAdapterConfig
-from aphrodite.modeling.layers.vocab_parallel_embedding import \
-    VocabParallelEmbedding
+from aphrodite.modeling.layers.vocab_parallel_embedding import (
+    VocabParallelEmbedding)
 
 
 @dataclass

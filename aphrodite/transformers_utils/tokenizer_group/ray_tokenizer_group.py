@@ -15,10 +15,10 @@ from transformers import PreTrainedTokenizer
 from aphrodite.common.config import TokenizerPoolConfig
 from aphrodite.executor.ray_utils import ray
 from aphrodite.lora.request import LoRARequest
-from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import \
-    BaseTokenizerGroup
-from aphrodite.transformers_utils.tokenizer_group.tokenizer_group import \
-    TokenizerGroup
+from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import (
+    BaseTokenizerGroup)
+from aphrodite.transformers_utils.tokenizer_group.tokenizer_group import (
+    TokenizerGroup)
 
 
 class RayTokenizerGroupPool(BaseTokenizerGroup):

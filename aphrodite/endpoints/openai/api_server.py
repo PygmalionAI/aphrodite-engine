@@ -42,11 +42,11 @@ from aphrodite.endpoints.openai.rpc.client import AsyncEngineRPCClient
 from aphrodite.endpoints.openai.rpc.server import run_rpc_server
 # yapf: enable
 from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
-from aphrodite.endpoints.openai.serving_completions import \
-    OpenAIServingCompletion
+from aphrodite.endpoints.openai.serving_completions import (
+    OpenAIServingCompletion)
 from aphrodite.endpoints.openai.serving_embedding import OpenAIServingEmbedding
-from aphrodite.endpoints.openai.serving_tokenization import \
-    OpenAIServingTokenization
+from aphrodite.endpoints.openai.serving_tokenization import (
+    OpenAIServingTokenization)
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.engine.protocol import AsyncEngineClient

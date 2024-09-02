@@ -17,8 +17,8 @@ from aphrodite.endpoints.openai.rpc import (APHRODITE_RPC_HEALTHY_STR,
 from aphrodite.inputs import PromptInputs
 from aphrodite.lora.request import LoRARequest
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
-from aphrodite.transformers_utils.tokenizer_group import \
-    init_tokenizer_from_configs
+from aphrodite.transformers_utils.tokenizer_group import (
+    init_tokenizer_from_configs)
 
 
 class AsyncEngineRPCClient:

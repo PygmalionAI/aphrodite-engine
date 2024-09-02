@@ -4,8 +4,8 @@ from aphrodite.common.sampling_params import LogitsProcessorFunc
 from aphrodite.endpoints.openai.protocol import (
     ChatCompletionNamedToolChoiceParam, ChatCompletionRequest,
     CompletionRequest)
-from aphrodite.modeling.guided_decoding.guided_fields import \
-    GuidedDecodingRequest
+from aphrodite.modeling.guided_decoding.guided_fields import (
+    GuidedDecodingRequest)
 from aphrodite.modeling.guided_decoding.outlines_decoding import (
     get_local_outlines_guided_decoding_logits_processor,
     get_outlines_guided_decoding_logits_processor)
@@ -20,8 +20,8 @@ async def get_guided_decoding_logits_processor(
         return await get_outlines_guided_decoding_logits_processor(
             request, tokenizer)
     if guided_decoding_backend == 'lm-format-enforcer':
-        from aphrodite.modeling.guided_decoding.lm_format_enforcer_decoding import \
-            get_lm_format_enforcer_guided_decoding_logits_processor  # noqa
+        from aphrodite.modeling.guided_decoding.lm_format_enforcer_decoding import (  # noqa
+            get_lm_format_enforcer_guided_decoding_logits_processor)
         return await get_lm_format_enforcer_guided_decoding_logits_processor(
             request, tokenizer)
 
@@ -39,8 +39,8 @@ def get_local_guided_decoding_logits_processor(
         return get_local_outlines_guided_decoding_logits_processor(
             guided_options, tokenizer)
     if guided_decoding_backend == 'lm-format-enforcer':
-        from aphrodite.modeling.guided_decoding.lm_format_enforcer_decoding import \
-            get_local_lm_format_enforcer_guided_decoding_logits_processor  # noqa
+        from aphrodite.modeling.guided_decoding.lm_format_enforcer_decoding import (  # noqa
+            get_local_lm_format_enforcer_guided_decoding_logits_processor)
         return get_local_lm_format_enforcer_guided_decoding_logits_processor(
             guided_options, tokenizer)
 

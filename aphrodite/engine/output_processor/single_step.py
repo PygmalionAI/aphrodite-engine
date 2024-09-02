@@ -6,8 +6,8 @@ from aphrodite.common.sequence import (Sequence, SequenceGroup,
                                        SequenceGroupOutput, SequenceOutput,
                                        SequenceStatus)
 from aphrodite.common.utils import Counter
-from aphrodite.engine.output_processor.interfaces import \
-    SequenceGroupOutputProcessor
+from aphrodite.engine.output_processor.interfaces import (
+    SequenceGroupOutputProcessor)
 from aphrodite.engine.output_processor.stop_checker import StopChecker
 from aphrodite.processing.scheduler import Scheduler
 from aphrodite.transformers_utils.detokenizer import Detokenizer

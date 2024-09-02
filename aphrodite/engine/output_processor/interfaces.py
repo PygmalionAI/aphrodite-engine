@@ -40,8 +40,8 @@ class SequenceGroupOutputProcessor(ABC):
         """
         if scheduler_config.num_lookahead_slots == 0:
             # Importing here to avoid cycle.
-            from aphrodite.engine.output_processor.single_step import \
-                SingleStepOutputProcessor
+            from aphrodite.engine.output_processor.single_step import (
+                SingleStepOutputProcessor)
             return SingleStepOutputProcessor(
                 scheduler_config,
                 detokenizer,
@@ -51,8 +51,8 @@ class SequenceGroupOutputProcessor(ABC):
             )
         else:
             # Importing here to avoid cycle.
-            from aphrodite.engine.output_processor.multi_step import \
-                MultiStepOutputProcessor
+            from aphrodite.engine.output_processor.multi_step import (
+                MultiStepOutputProcessor)
             return MultiStepOutputProcessor(
                 detokenizer,
                 scheduler,

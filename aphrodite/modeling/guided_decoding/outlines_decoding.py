@@ -10,8 +10,8 @@ from transformers import PreTrainedTokenizerBase
 
 from aphrodite.endpoints.openai.protocol import (ChatCompletionRequest,
                                                  CompletionRequest)
-from aphrodite.modeling.guided_decoding.guided_fields import \
-    GuidedDecodingRequest
+from aphrodite.modeling.guided_decoding.guided_fields import (
+    GuidedDecodingRequest)
 from aphrodite.modeling.guided_decoding.outlines_logits_processors import (
     CFGLogitsProcessor, JSONLogitsProcessor, RegexLogitsProcessor)
 

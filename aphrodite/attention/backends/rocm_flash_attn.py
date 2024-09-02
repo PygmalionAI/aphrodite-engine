@@ -279,8 +279,8 @@ class ROCmFlashAttentionImpl(AttentionImpl):
             "APHRODITE_USE_TRITON_FLASH_ATTN", "True").lower()
                                       in ("true", "1"))
         if self.use_triton_flash_attn:
-            from aphrodite.attention.ops.triton_flash_attn import \
-                triton_attention  # noqa: F401
+            from aphrodite.attention.ops.triton_flash_attn import (  # noqa: F401
+                triton_attention)
             self.attn_func = triton_attention
             logger.debug("Using Triton FA in ROCmBackend")
             if self.sliding_window != (-1, -1):

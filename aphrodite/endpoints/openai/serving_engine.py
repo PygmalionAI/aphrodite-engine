@@ -29,8 +29,8 @@ from aphrodite.endpoints.openai.protocol import (ChatCompletionRequest,
 from aphrodite.engine.protocol import AsyncEngineClient
 from aphrodite.inputs import parse_and_batch_prompt
 from aphrodite.lora.request import LoRARequest
-from aphrodite.modeling.guided_decoding import \
-    get_guided_decoding_logits_processor
+from aphrodite.modeling.guided_decoding import (
+    get_guided_decoding_logits_processor)
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
 
 

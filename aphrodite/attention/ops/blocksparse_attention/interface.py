@@ -11,8 +11,8 @@ IS_COMPUTE_8_OR_ABOVE = (torch.cuda.is_available()
                          and current_platform.get_device_capability()[0] >= 8)
 
 if IS_COMPUTE_8_OR_ABOVE:
-    from aphrodite.attention.ops.blocksparse_attention.blocksparse_attention_kernel import \
-        blocksparse_flash_attn_varlen_fwd  # noqa: E501
+    from aphrodite.attention.ops.blocksparse_attention.blocksparse_attention_kernel import (  # noqa: E501
+        blocksparse_flash_attn_varlen_fwd)
 
 
 class LocalStridedBlockSparseAttn(torch.nn.Module):

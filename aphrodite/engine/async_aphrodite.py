@@ -408,8 +408,8 @@ class AsyncAphrodite:
         elif engine_config.device_config.device_type == "tpu":
             if distributed_executor_backend == "ray":
                 initialize_ray_cluster(engine_config.parallel_config)
-                from aphrodite.executor.ray_tpu_executor import \
-                    RayTPUExecutorAsync
+                from aphrodite.executor.ray_tpu_executor import (
+                    RayTPUExecutorAsync)
                 executor_class = RayTPUExecutorAsync
             else:
                 assert distributed_executor_backend is None
@@ -422,8 +422,8 @@ class AsyncAphrodite:
             assert distributed_executor_backend is None, (
                 "Distributed execution is not supported with the OpenVINO "
                 "backend.")
-            from aphrodite.executor.openvino_executor import \
-                OpenVINOExecutorAsync
+            from aphrodite.executor.openvino_executor import (
+                OpenVINOExecutorAsync)
             executor_class = OpenVINOExecutorAsync
         elif engine_config.device_config.device_type == "xpu":
             if distributed_executor_backend is None:
@@ -431,8 +431,8 @@ class AsyncAphrodite:
                 executor_class = XPUExecutorAsync
             elif distributed_executor_backend == "ray":
                 initialize_ray_cluster(engine_config.parallel_config)
-                from aphrodite.executor.ray_xpu_executor import \
-                    RayXPUExecutorAsync
+                from aphrodite.executor.ray_xpu_executor import (
+                    RayXPUExecutorAsync)
                 executor_class = RayXPUExecutorAsync
             else:
                 raise RuntimeError(
@@ -442,8 +442,8 @@ class AsyncAphrodite:
             from aphrodite.executor.ray_gpu_executor import RayGPUExecutorAsync
             executor_class = RayGPUExecutorAsync
         elif distributed_executor_backend == "mp":
-            from aphrodite.executor.multiproc_gpu_executor import \
-                MultiprocessingGPUExecutorAsync
+            from aphrodite.executor.multiproc_gpu_executor import (
+                MultiprocessingGPUExecutorAsync)
             executor_class = MultiprocessingGPUExecutorAsync
         else:
             from aphrodite.executor.gpu_executor import GPUExecutorAsync

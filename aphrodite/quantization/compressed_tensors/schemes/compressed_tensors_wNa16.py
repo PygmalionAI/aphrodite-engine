@@ -5,8 +5,8 @@ from torch.nn import Parameter
 
 from aphrodite import _custom_ops as ops
 from aphrodite.modeling.utils import set_weight_attrs
-from aphrodite.quantization.compressed_tensors.schemes import \
-    CompressedTensorsScheme
+from aphrodite.quantization.compressed_tensors.schemes import (
+    CompressedTensorsScheme)
 from aphrodite.quantization.utils.marlin_utils import (
     apply_gptq_marlin_linear, marlin_make_empty_g_idx, marlin_make_workspace,
     marlin_permute_scales, replace_tensor, verify_marlin_supported,

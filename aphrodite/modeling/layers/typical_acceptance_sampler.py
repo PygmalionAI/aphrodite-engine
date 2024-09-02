@@ -1,8 +1,8 @@
 import torch
 import torch.jit
 
-from aphrodite.modeling.layers.spec_decode_base_sampler import \
-    SpecDecodeDeterministicBaseSampler
+from aphrodite.modeling.layers.spec_decode_base_sampler import (
+    SpecDecodeDeterministicBaseSampler)
 
 
 class TypicalAcceptanceSampler(SpecDecodeDeterministicBaseSampler):

@@ -20,8 +20,8 @@ from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               QKVParallelLinear,
                                               RowParallelLinear)
-from aphrodite.modeling.layers.vocab_parallel_embedding import \
-    VocabParallelEmbedding
+from aphrodite.modeling.layers.vocab_parallel_embedding import (
+    VocabParallelEmbedding)
 from aphrodite.multimodal.image import (cached_get_tokenizer,
                                         repeat_and_pad_image_tokens)
 from aphrodite.quantization import QuantizationConfig

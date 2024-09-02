@@ -9,8 +9,8 @@ from torch.distributed import ProcessGroup
 
 from aphrodite import _custom_ops as ops
 from aphrodite.common.utils import cuda_device_count_stateless, is_full_nvlink
-from aphrodite.distributed.device_communicators.custom_all_reduce_utils import \
-    gpu_p2p_access_check
+from aphrodite.distributed.device_communicators.custom_all_reduce_utils import (
+    gpu_p2p_access_check)
 from aphrodite.distributed.parallel_state import in_the_same_node_as
 
 try:

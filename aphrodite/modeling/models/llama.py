@@ -53,8 +53,8 @@ from aphrodite.modeling.models.utils import (PPMissingLayer,
                                              make_layers)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.quantization.base_config import QuantizationConfig
-from aphrodite.quantization.compressed_tensors.utils import \
-    get_compressed_tensors_cache_scale
+from aphrodite.quantization.compressed_tensors.utils import (
+    get_compressed_tensors_cache_scale)
 
 
 class LlamaMLP(nn.Module):
