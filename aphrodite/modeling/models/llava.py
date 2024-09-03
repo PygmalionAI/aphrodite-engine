@@ -1,23 +1,28 @@
-from typing import List, Optional
+from typing import Iterable, List, Literal, Optional, Tuple, TypedDict
 
 import torch
-from torch import nn
-# TODO: We should port CLIPVisionModel's code over to not depend on
-# transformers' impl.
-from transformers import CLIPVisionModel, LlavaConfig
+import torch.nn as nn
+from transformers import CLIPVisionConfig, LlavaConfig
 
 from aphrodite.attention import AttentionMetadata
-from aphrodite.common.config import VisionLanguageConfig
+from aphrodite.common.config import CacheConfig, MultiModalConfig
+from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
+from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.layers.activation import get_act_fn
-from aphrodite.modeling.layers.linear import LinearMethodBase
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
+from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
+from aphrodite.modeling.models.clip import CLIPVisionModel
 from aphrodite.modeling.models.llama import LlamaModel
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.modeling.hf_downloader import (default_weight_loader,
-                                              hf_model_weights_iterator)
-from aphrodite.common.sequence import SamplerOutput
+from aphrodite.multimodal import MULTIMODAL_REGISTRY
+from aphrodite.quantization.base_config import QuantizationConfig
+
+from .clip import (dummy_image_for_clip, dummy_seq_data_for_clip,
+                   get_max_clip_image_tokens, input_processor_for_clip)
+from .interfaces import SupportsVision
+from .utils import merge_vision_embeddings
 
 _KEYS_TO_MODIFY_MAPPING = {
     "language_model.lm_head": "lm_head",
@@ -40,62 +45,183 @@ class LlavaMultiModalProjector(nn.Module):
                                   text_hidden_size,
                                   bias=True)
 
-    def forward(self, image_features):
+    def forward(self, image_features: torch.Tensor) -> torch.Tensor:
         hidden_states = self.linear_1(image_features)
         hidden_states = self.act(hidden_states)
         hidden_states = self.linear_2(hidden_states)
         return hidden_states
 
 
-def _merge_vision_embeddings(input_ids: torch.Tensor,
-                             inputs_embeds: torch.Tensor,
-                             vision_embeddings: torch.Tensor,
-                             image_token_id: int):
-    """In place merges in vision_embeddings with inputs_embeds."""
-    mask = (input_ids == image_token_id)
-    inputs_embeds[mask] = vision_embeddings.view(-1,
-                                                 vision_embeddings.shape[-1])
+class LlavaImagePixelInputs(TypedDict):
+    type: Literal["pixel_values"]
+    data: torch.Tensor
+    """Shape: `(batch_size, num_channels, height, width)`"""
 
 
-class LlavaForConditionalGeneration(nn.Module):
+LlavaImageInputs = LlavaImagePixelInputs
+
+
+def get_max_llava_image_tokens(ctx: InputContext):
+    hf_config = ctx.get_hf_config(LlavaConfig)
+    vision_config = hf_config.vision_config
+
+    if isinstance(vision_config, CLIPVisionConfig):
+        return get_max_clip_image_tokens(vision_config)
+
+    msg = f"Unsupported vision config: {type(vision_config)}"
+    raise NotImplementedError(msg)
+
+
+def dummy_data_for_llava(ctx: InputContext, seq_len: int):
+    hf_config = ctx.get_hf_config(LlavaConfig)
+    vision_config = hf_config.vision_config
+
+    if isinstance(vision_config, CLIPVisionConfig):
+        seq_data = dummy_seq_data_for_clip(
+            vision_config,
+            seq_len,
+            image_token_id=hf_config.image_token_index,
+        )
+
+        mm_data = dummy_image_for_clip(vision_config)
+        return seq_data, mm_data
+
+    msg = f"Unsupported vision config: {type(vision_config)}"
+    raise NotImplementedError(msg)
+
+
+def input_processor_for_llava(ctx: InputContext, llm_inputs: LLMInputs):
+    multi_modal_data = llm_inputs.get("multi_modal_data")
+    if multi_modal_data is None or "image" not in multi_modal_data:
+        return llm_inputs
+
+    model_config = ctx.model_config
+    hf_config = ctx.get_hf_config(LlavaConfig)
+    vision_config = hf_config.vision_config
+
+    if isinstance(vision_config, CLIPVisionConfig):
+        return input_processor_for_clip(
+            model_config,
+            vision_config,
+            llm_inputs,
+            image_token_id=hf_config.image_token_index,
+        )
+
+    msg = f"Unsupported vision config: {type(vision_config)}"
+    raise NotImplementedError(msg)
+
+
+@MULTIMODAL_REGISTRY.register_image_input_mapper()
+@MULTIMODAL_REGISTRY.register_max_image_tokens(get_max_llava_image_tokens)
+@INPUT_REGISTRY.register_dummy_data(dummy_data_for_llava)
+@INPUT_REGISTRY.register_input_processor(input_processor_for_llava)
+class LlavaForConditionalGeneration(nn.Module, SupportsVision):
 
     def __init__(self,
-                 config: "LlavaConfig",
-                 vision_language_config: VisionLanguageConfig,
-                 linear_method: Optional["LinearMethodBase"] = None) -> None:
+                 config: LlavaConfig,
+                 multimodal_config: MultiModalConfig,
+                 cache_config: Optional[CacheConfig] = None,
+                 quant_config: Optional[QuantizationConfig] = None) -> None:
         super().__init__()
+
         self.config = config
+        self.multimodal_config = multimodal_config
 
-        self.vision_language_config = vision_language_config
-
-        assert self.vision_language_config, (
-            "Provide `image_input_type` and other vision "
-            "related configurations through LLM entrypoint "
-            "or engine arguments.")
-
-        if self.vision_language_config.image_input_type == (
-                VisionLanguageConfig.ImageInputType.PIXEL_VALUES):
-            self.vision_tower = CLIPVisionModel(config.vision_config)
+        # Initialize the vision tower only up to the required feature layer
+        vision_feature_layer = config.vision_feature_layer
+        if vision_feature_layer < 0:
+            num_hidden_layers = config.vision_config.num_hidden_layers \
+                + vision_feature_layer + 1
         else:
-            self.vision_tower = None
+            num_hidden_layers = vision_feature_layer + 1
 
+        # TODO: Optionally initializes this for supporting embeddings.
+        self.vision_tower = CLIPVisionModel(
+            config.vision_config, num_hidden_layers_override=num_hidden_layers)
         self.multi_modal_projector = LlavaMultiModalProjector(
             vision_hidden_size=config.vision_config.hidden_size,
             text_hidden_size=config.text_config.hidden_size,
             projector_hidden_act=config.projector_hidden_act)
 
-        self.linear_method = linear_method
-        self.language_model = LlamaModel(config.text_config, linear_method)
+        self.quant_config = quant_config
+        self.language_model = LlamaModel(config.text_config, cache_config,
+                                         quant_config)
         self.unpadded_vocab_size = config.text_config.vocab_size
         self.lm_head = ParallelLMHead(
             self.unpadded_vocab_size,
             config.text_config.hidden_size,
-            org_num_embeddings=self.language_model.org_vocab_size)
+            org_num_embeddings=self.language_model.org_vocab_size,
+            quant_config=quant_config)
         logit_scale = getattr(config, "logit_scale", 1.0)
-        self.logits_processor = LogitsProcessor(
-            self.unpadded_vocab_size,
-            min(config.vocab_size, config.tokenizer_vocab_size), logit_scale)
+        self.logits_processor = LogitsProcessor(self.unpadded_vocab_size,
+                                                config.text_config.vocab_size,
+                                                logit_scale)
         self.sampler = Sampler()
+
+    def _validate_pixel_values(self, data: torch.Tensor) -> torch.Tensor:
+        h = w = self.config.vision_config.image_size
+        expected_dims = (3, h, w)
+        actual_dims = tuple(data.shape[1:])
+
+        if actual_dims != expected_dims:
+            expected_expr = ("batch_size", *map(str, expected_dims))
+            raise ValueError(
+                f"The expected shape of pixel values is {expected_expr}. "
+                f"You supplied {tuple(data.shape)}.")
+
+        return data
+
+    def _parse_and_validate_image_input(
+            self, **kwargs: object) -> Optional[LlavaImageInputs]:
+        pixel_values = kwargs.pop("pixel_values", None)
+
+        if pixel_values is None:
+            return None
+
+        if not isinstance(pixel_values, torch.Tensor):
+            raise ValueError("Incorrect type of pixel values. "
+                             f"Got type: {type(pixel_values)}")
+
+        return LlavaImagePixelInputs(
+            type="pixel_values",
+            data=self._validate_pixel_values(pixel_values),
+        )
+
+    def _select_image_features(self, image_features: torch.Tensor, *,
+                               strategy: str) -> torch.Tensor:
+        # Copied from https://github.com/huggingface/transformers/blob/39c3c0a72af6fbda5614dde02ff236069bb79827/src/transformers/models/llava/modeling_llava.py#L421  # noqa
+        if strategy == "default":
+            return image_features[:, 1:]
+        elif strategy == "full":
+            return image_features
+
+        raise ValueError(f"Unexpected select feature strategy: {strategy}")
+
+    def _image_pixels_to_features(self, vision_tower: CLIPVisionModel,
+                                  pixel_values: torch.Tensor) -> torch.Tensor:
+
+        # NOTE: we skip the step to select the vision feature layer since
+        # this is already done inside the vision tower
+        image_features = vision_tower(pixel_values)
+
+        return self._select_image_features(
+            image_features,
+            strategy=self.config.vision_feature_select_strategy,
+        )
+
+    def _process_image_pixels(self,
+                              inputs: LlavaImagePixelInputs) -> torch.Tensor:
+        assert self.vision_tower is not None
+
+        pixel_values = inputs["data"]
+
+        return self._image_pixels_to_features(self.vision_tower, pixel_values)
+
+    def _process_image_input(self,
+                             image_input: LlavaImageInputs) -> torch.Tensor:
+        assert self.vision_tower is not None
+        image_features = self._process_image_pixels(image_input)
+        return self.multi_modal_projector(image_features)
 
     def forward(
         self,
@@ -103,80 +229,58 @@ class LlavaForConditionalGeneration(nn.Module):
         positions: torch.Tensor,
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
-        image_input: Optional[torch.Tensor] = None
-    ) -> SamplerOutput:  # noqa: E501
-        """Run forward pass for Llava 1.5.
+        intermediate_tensors: Optional[IntermediateTensors] = None,
+        **kwargs: object,
+    ) -> SamplerOutput:
+        """Run forward pass for LLaVA-1.5.
         One key thing to understand is the `input_ids` already accounts for the
         positions of the to-be-inserted image embeddings.
         Concretely, consider a text prompt:
-        "<image>\nUSER: What's the content of the image?\nASSISTANT:".
+        `"USER: <image>\\nWhat's the content of the image?\\nASSISTANT:"`.
         Tokenizer outputs:
-        [1, 32000, 29871, 13, 11889, 29901, 1724, 29915, 29879, 278,
-        2793, 310, 278, 1967, 29973, 13, 22933, 9047, 13566, 29901].
-        The to-be-inserted image has a size of 576 (24 * 24) along the context
-        length dimension.
-        `input_ids` is thus [1, 32000, ..., 32000, 29871, 13, 11889, 29901,
-        1724, 29915, 29879, 278, 2793, 310, 278, 1967, 29973, 13, 22933,
-        9047, 13566, 29901].
-        There will be 576 `32000` in the `input_ids`.
-        (32000 is the token id for `<image>`.)
+        `[1, 3148, 1001, 29901, 29871, 32000, 29871, 13, 5618, 29915, 29879,
+        278, 2793, 310, 278, 1967, 29973, 13, 22933, 9047, 13566, 29901]`.
+        To reserve space in KV cache, we have to insert placeholder tokens
+        before they are inputted to the model, so the input processor prepends 
+        additional image tokens (denoted as `32000`), resulting in:
+        `[1, 3148, 1001, 29901, 29871, 32000, ..., 32000, 29871, 13, 5618,
+        29915, 29879, 278, 2793, 310, 278, 1967, 29973, 13, 22933, 9047, 13566,
+        29901]`.
+        We insert 575 tokens so that including the original image token in the
+        input, there are a total of 576 (24 * 24) image tokens, which
+        corresponds to the number of image tokens inputted to the language
+        model, i.e. the number of image tokens outputted by the visual encoder.
+
         This way, the `positions` and `attn_metadata` are consistent
         with the `input_ids`.
-        The model takes two types of image inputs: 
-        PIXEL_VALUES and IMAGE_FEATURES.
-        The following shows how each maps to huggingface implementation.
-        PIXEL_VALUES: 
-        - https://github.com/huggingface/transformers/blob/07bdbeb/src/transformers/models/llava/modeling_llava.py#L353
-        IMAGE_FEATURES:
-        - https://github.com/huggingface/transformers/blob/07bdbeb/src/transformers/models/llava/modeling_llava.py#L430
-        before going through the multi modal projector.
+
         Args:
             input_ids: Flattened (concatenated) input_ids corresponding to a
                 batch.
-            image_input: A batch of image inputs.
-                For PIXEL_VALUES, expecting [1, 3, 336, 336].
-                For IMAGE_FEATURES, expecting [1, 576, 1024].
+            pixel_values: The pixels in each input image.
+
+        See also:
+            :class:`LlavaImageInputs`
         """
+        image_input = self._parse_and_validate_image_input(**kwargs)
+
         if image_input is not None:
-            if list(image_input.shape[1:]) != list(
-                    self.vision_language_config.image_input_shape[1:]):
-                raise ValueError(
-                    f"The expected image tensor shape is batch dimension "
-                    f"plus "
-                    f"{self.vision_language_config.image_input_shape[1:]}."
-                    f" You supplied {image_input.shape}. "
-                    f"If you are using Aphrodite's endpoint, make sure your "
-                    f"supplied image input is consistent with "
-                    f"image_input_shape in engine args.")
-            if self.vision_tower is not None:
-                # TODO: Maybe port minimal CLIPVisionModel over.
-                image_outputs = self.vision_tower(image_input,
-                                                  output_hidden_states=True)
-                image_features = image_outputs.hidden_states[
-                    self.config.vision_feature_layer]
-                # Copied from https://github.com/huggingface/transformers/blob/39c3c0a72af6fbda5614dde02ff236069bb79827/src/transformers/models/llava/modeling_llava.py#L421  # noqa
-                if self.config.vision_feature_select_strategy == "default":
-                    image_features = image_features[:, 1:]
-                elif self.config.vision_feature_select_strategy == "full":
-                    image_features = image_features
-                else:
-                    raise ValueError(
-                        f"Unexpected select feature strategy: "
-                        f"{self.config.vision_feature_select_strategy}")
-            else:
-                image_features = image_input
-            vision_embeddings = self.multi_modal_projector(image_features)
+            vision_embeddings = self._process_image_input(image_input)
             inputs_embeds = self.language_model.get_input_embeddings(input_ids)
-            _merge_vision_embeddings(
+
+            inputs_embeds = merge_vision_embeddings(
                 input_ids, inputs_embeds, vision_embeddings,
-                self.vision_language_config.image_token_id)
+                self.config.image_token_index)
+
             input_ids = None
         else:
             inputs_embeds = None
+
         hidden_states = self.language_model(input_ids,
                                             positions,
                                             kv_caches,
                                             attn_metadata,
+                                            None,
                                             inputs_embeds=inputs_embeds)
 
         return hidden_states
@@ -195,11 +299,7 @@ class LlavaForConditionalGeneration(nn.Module):
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
-    def load_weights(self,
-                     model_name_or_path: str,
-                     cache_dir: Optional[str] = None,
-                     load_format: str = "auto",
-                     revision: Optional[str] = None):
+    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         # only doing this for language model part for now.
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
@@ -210,9 +310,11 @@ class LlavaForConditionalGeneration(nn.Module):
             ("gate_up_proj", "up_proj", 1),
         ]
         params_dict = dict(self.named_parameters())
-        for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision):
+        for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
+                continue
+            # post_layernorm is not needed in CLIPVisionModel
+            if "vision_model.post_layernorm" in name:
                 continue
             for key_to_modify, new_key in _KEYS_TO_MODIFY_MAPPING.items():
                 if key_to_modify in name:
@@ -234,7 +336,7 @@ class LlavaForConditionalGeneration(nn.Module):
                     break
                 else:
                     use_default_weight_loading = True
-            if use_default_weight_loading:
+            if use_default_weight_loading and name in params_dict:
                 param = params_dict[name]
                 weight_loader = getattr(param, "weight_loader",
                                         default_weight_loader)

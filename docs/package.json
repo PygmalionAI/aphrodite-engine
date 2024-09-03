@@ -1,0 +1,16 @@
+{
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
+  },
+  "dependencies": {
+    "vitepress": "^1.3.4",
+    "vitepress-plugin-auto-sidebar": "^1.2.0",
+    "vue": "^3.4.38"
+  },
+  "devDependencies": {
+    "markdown-it-mathjax3": "^4.3.2"
+  }
+}

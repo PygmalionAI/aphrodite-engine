@@ -18,27 +18,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only GPTBigCode model compatible with HuggingFace weights."""
-from typing import List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 import torch
 from torch import nn
 from transformers import GPTBigCodeConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
+from aphrodite.common.config import CacheConfig
+from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
+from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
-                                              LinearMethodBase,
                                               QKVParallelLinear,
                                               RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding, ParallelLMHead)
-from aphrodite.distributed import (get_tensor_model_parallel_world_size)
+    VocabParallelEmbedding)
+from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.modeling.hf_downloader import (default_weight_loader,
-                                              hf_model_weights_iterator)
-from aphrodite.common.sequence import SamplerOutput
+from aphrodite.quantization.base_config import QuantizationConfig
 
 
 class GPTBigCodeAttention(nn.Module):
@@ -46,7 +46,8 @@ class GPTBigCodeAttention(nn.Module):
     def __init__(
         self,
         config: GPTBigCodeConfig,
-        linear_method: Optional[LinearMethodBase] = None,
+        cache_config: Optional[CacheConfig] = None,
+        quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         self.hidden_size = config.hidden_size
@@ -73,19 +74,21 @@ class GPTBigCodeAttention(nn.Module):
             total_num_heads,
             total_num_kv_heads,
             bias=True,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
 
         self.c_proj = RowParallelLinear(
             self.hidden_size,
             self.hidden_size,
             bias=True,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
         self.attn = Attention(self.num_heads,
                               self.head_dim,
                               scale=self.scale,
-                              num_kv_heads=self.num_kv_heads)
+                              num_kv_heads=self.num_kv_heads,
+                              cache_config=cache_config,
+                              quant_config=quant_config)
 
     def forward(
         self,
@@ -112,7 +115,7 @@ class GPTBigMLP(nn.Module):
         self,
         intermediate_size: int,
         config: GPTBigCodeConfig,
-        linear_method: Optional[LinearMethodBase] = None,
+        quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         hidden_size = config.hidden_size
@@ -120,15 +123,14 @@ class GPTBigMLP(nn.Module):
             hidden_size,
             intermediate_size,
             bias=True,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
         self.c_proj = RowParallelLinear(
             intermediate_size,
             hidden_size,
             bias=True,
-            linear_method=linear_method,
+            quant_config=quant_config,
         )
-        quant_config = getattr(linear_method, "quant_config", None)
         self.act = get_act_fn(config.activation_function, quant_config,
                               intermediate_size)
 
@@ -144,7 +146,8 @@ class GPTBigCodeBlock(nn.Module):
     def __init__(
         self,
         config: GPTBigCodeConfig,
-        linear_method: Optional[LinearMethodBase] = None,
+        cache_config: Optional[CacheConfig] = None,
+        quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         hidden_size = config.hidden_size
@@ -152,9 +155,9 @@ class GPTBigCodeBlock(nn.Module):
                      hidden_size)
 
         self.ln_1 = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
-        self.attn = GPTBigCodeAttention(config, linear_method)
+        self.attn = GPTBigCodeAttention(config, cache_config, quant_config)
         self.ln_2 = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
-        self.mlp = GPTBigMLP(inner_dim, config, linear_method)
+        self.mlp = GPTBigMLP(inner_dim, config, quant_config)
 
     def forward(
         self,
@@ -185,7 +188,8 @@ class GPTBigCodeModel(nn.Module):
     def __init__(
         self,
         config: GPTBigCodeConfig,
-        linear_method: Optional[LinearMethodBase] = None,
+        cache_config: Optional[CacheConfig] = None,
+        quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         self.config = config
@@ -193,12 +197,10 @@ class GPTBigCodeModel(nn.Module):
 
         self.embed_dim = config.hidden_size
 
-        self.wte = VocabParallelEmbedding(config.vocab_size,
-                                          self.embed_dim,
-                                          linear_method=linear_method)
+        self.wte = VocabParallelEmbedding(config.vocab_size, self.embed_dim)
         self.wpe = nn.Embedding(config.max_position_embeddings, self.embed_dim)
         self.h = nn.ModuleList([
-            GPTBigCodeBlock(config, linear_method)
+            GPTBigCodeBlock(config, cache_config, quant_config)
             for _ in range(config.num_hidden_layers)
         ])
         self.ln_f = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
@@ -227,18 +229,15 @@ class GPTBigCodeForCausalLM(nn.Module):
     def __init__(
         self,
         config: GPTBigCodeConfig,
-        linear_method: Optional[LinearMethodBase] = None,
+        cache_config: Optional[CacheConfig] = None,
+        quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
         self.config = config
-        self.linear_method = linear_method
-        self.transformer = GPTBigCodeModel(config, linear_method)
-        # self.lm_head_weight = self.transformer.wte.weight
-        self.lm_head = ParallelLMHead(config.vocab_size,
-                                      config.hidden_size,
-                                      linear_method=linear_method)
-        self.logits_processor = LogitsProcessor(config.vocab_size,
-                                                config.tokenizer_vocab_size)
+        self.quant_config = quant_config
+        self.transformer = GPTBigCodeModel(config, cache_config, quant_config)
+        self.lm_head = self.transformer.wte
+        self.logits_processor = LogitsProcessor(config.vocab_size)
         self.sampler = Sampler()
 
     def forward(
@@ -247,6 +246,7 @@ class GPTBigCodeForCausalLM(nn.Module):
         positions: torch.Tensor,
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
+        intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> torch.Tensor:
         hidden_states = self.transformer(input_ids, positions, kv_caches,
                                          attn_metadata)
@@ -266,25 +266,11 @@ class GPTBigCodeForCausalLM(nn.Module):
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
-    def load_weights(self,
-                     model_name_or_path: str,
-                     cache_dir: Optional[str] = None,
-                     load_format: str = "auto",
-                     revision: Optional[str] = None):
+    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         params_dict = dict(self.named_parameters(remove_duplicate=False))
-        for name, loaded_weight in hf_model_weights_iterator(
-                model_name_or_path, cache_dir, load_format, revision,
-                self.config):
-            if "lm_head" in name and name not in params_dict:
+        for name, loaded_weight in weights:
+            if "lm_head.weight" in name:
                 continue
-            if "wte" in name:
-                # Copy word embedding to lm_head
-                head_name = name.replace("transformer.wte", "lm_head")
-                if head_name in params_dict:
-                    lm_head_param = params_dict[head_name]
-                    weight_loader = getattr(lm_head_param, "weight_loader",
-                                            default_weight_loader)
-                    weight_loader(lm_head_param, loaded_weight)
             if ".attn.bias" in name:
                 # Skip attention mask.
                 # NOTE: "c_attn.bias" should not be skipped.

@@ -1,6 +1,6 @@
 import argparse
 
-from aphrodite import EngineArgs, AphroditeEngine, SamplingParams
+from aphrodite import AphroditeEngine, EngineArgs, SamplingParams
 
 
 def main(args: argparse.Namespace):
@@ -12,14 +12,16 @@ def main(args: argparse.Namespace):
     test_prompts = [
         ("<|system|>Enter chat mode.<|user|>Hello!<|model|>",
          SamplingParams(temperature=0.0)),
-        ("<|system|>Enter RP mode.<|model|>Hello!<|user|>What are you doing?<|model|>",
-         SamplingParams(temperature=0.8, top_k=5, presence_penalty=0.2)),
-        ("<|system|>Enter chat mode.<|user|>What is the meaning of life?<|model|>",
-         SamplingParams(n=2,
-                        best_of=5,
-                        temperature=0.8,
-                        top_p=0.95,
-                        frequency_penalty=0.1)),
+        (
+            "<|system|>Enter RP mode.<|model|>Hello!<|user|>What are you doing?<|model|>",  # noqa: E501
+            SamplingParams(temperature=0.8, top_k=5, presence_penalty=0.2)),
+        (
+            "<|system|>Enter chat mode.<|user|>What is the meaning of life?<|model|>",  # noqa: E501
+            SamplingParams(n=2,
+                           best_of=5,
+                           temperature=0.8,
+                           top_p=0.95,
+                           frequency_penalty=0.1)),
         ("<|system|>Enter QA mode.<|user|>What is a man?<|model|>A miserable",
          SamplingParams(n=3, best_of=3, use_beam_search=True,
                         temperature=0.0)),

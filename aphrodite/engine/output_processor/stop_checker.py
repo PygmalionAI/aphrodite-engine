@@ -4,6 +4,7 @@ from transformers import PreTrainedTokenizer
 
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import Sequence, SequenceStatus
+from aphrodite.lora.request import LoRARequest
 
 
 class StopChecker:
@@ -16,12 +17,25 @@ class StopChecker:
     def __init__(self, max_model_len: int,
                  get_tokenizer_for_seq: Callable[[Sequence],
                                                  PreTrainedTokenizer]):
-        self.max_model_len = max_model_len
+        # Do not use it directly, but use `self._get_max_model_len`.
+        self._max_model_len = max_model_len
         self.get_tokenizer_for_seq = get_tokenizer_for_seq
 
-    def maybe_stop_sequence(self, seq: Sequence, new_char_count: int,
-                            sampling_params: SamplingParams) -> None:
+    def _get_max_model_len(self, lora_req: Optional[LoRARequest]):
+        if lora_req and lora_req.long_lora_max_len:
+            return lora_req.long_lora_max_len
+        else:
+            return self._max_model_len
+
+    def maybe_stop_sequence(
+        self,
+        seq: Sequence,
+        new_char_count: int,
+        sampling_params: SamplingParams,
+        lora_req: Optional[LoRARequest] = None,
+    ) -> None:
         """Stop the finished sequences.
+
        new_char_count is the number of chars added to the
            sequence's output text for the newly generated token
         """
@@ -34,6 +48,11 @@ class StopChecker:
         # Check if the sequence has generated the EOS token.
         if ((not sampling_params.ignore_eos)
                 and seq.get_last_token_id() == seq.eos_token_id):
+            # Remove the last EOS token unless explicitly specified
+            # This prevents unintended exposure of the EOS token
+            if new_char_count and (
+                    not sampling_params.include_stop_str_in_output):
+                seq.output_text = seq.output_text[:-new_char_count]
             seq.status = SequenceStatus.FINISHED_STOPPED
             return
 
@@ -58,7 +77,7 @@ class StopChecker:
             return
 
         # Check if the sequence has reached max_model_len.
-        if seq.get_len() > self.max_model_len:
+        if seq.get_len() > self._get_max_model_len(lora_req):
             seq.status = SequenceStatus.FINISHED_LENGTH_CAPPED
             return
 
@@ -72,6 +91,7 @@ class StopChecker:
                             sampling_params: SamplingParams) -> Optional[str]:
         """Check if any stop strings are matched and truncate sequence
         output text accordingly.
+
         Returns the stop string if matched or else None.
         """
         if not new_char_count:

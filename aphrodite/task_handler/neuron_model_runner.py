@@ -1,20 +1,53 @@
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from loguru import logger
+from torch import nn
 
 from aphrodite.common.config import (DeviceConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig)
-from aphrodite.modeling import SamplingMetadata
-from aphrodite.modeling.neuron_loader import get_neuron_model
-from aphrodite.common.sampling_params import SamplingParams, SamplingType
-from aphrodite.common.sequence import (SamplerOutput, SequenceData,
+from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceGroupMetadata)
-from aphrodite.common.utils import (async_tensor_h2d, is_pin_memory_available,
-                                    make_tensor_with_pad, maybe_expand_dim)
+from aphrodite.common.utils import (is_pin_memory_available,
+                                    make_tensor_with_pad)
+from aphrodite.modeling import SamplingMetadata
+from aphrodite.modeling.model_loader.neuron import get_neuron_model
+from aphrodite.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
+                                  MultiModalInputs)
+from aphrodite.task_handler.model_runner_base import (ModelRunnerBase,
+                                                      ModelRunnerInputBase)
+
+if TYPE_CHECKING:
+    from aphrodite.attention.backends.abstract import AttentionBackend
 
 
-class NeuronModelRunner:
+@dataclass(frozen=True)
+class ModelInputForNeuron(ModelRunnerInputBase):
+    """
+    Used by the NeuronModelRunner.
+    """
+    input_tokens: Optional[torch.Tensor] = None
+    input_positions: Optional[torch.Tensor] = None
+    input_block_ids: Optional[torch.Tensor] = None
+    sampling_metadata: Optional["SamplingMetadata"] = None
+    multi_modal_kwargs: Optional[BatchedTensorInputs] = None
+
+    def as_broadcastable_tensor_dict(
+            self) -> Dict[str, Union[int, torch.Tensor]]:
+        raise NotImplementedError("ModelInputForNeuron cannot be broadcast.")
+
+    @classmethod
+    def from_broadcasted_tensor_dict(
+        cls,
+        tensor_dict: Dict[str, Any],
+        attn_backend: Optional["AttentionBackend"] = None,
+    ) -> "ModelInputForNeuron":
+        assert attn_backend is None
+        return cls.from_broadcasted_tensor_dict(tensor_dict)
+
+
+class NeuronModelRunner(ModelRunnerBase[ModelInputForNeuron]):
 
     def __init__(
         self,
@@ -33,8 +66,14 @@ class NeuronModelRunner:
         self.device_config = (device_config
                               if device_config is not None else DeviceConfig())
         self.device = self.device_config.device
-        self.model = None
         self.pin_memory = is_pin_memory_available()
+
+        # Multi-modal data support
+        self.multi_modal_input_mapper = MULTIMODAL_REGISTRY \
+            .create_input_mapper(self.model_config)
+
+        # Lazy initialization.
+        self.model: nn.Module  # initialize after load_model.
 
     def load_model(self) -> None:
         self.model = get_neuron_model(self.model_config,
@@ -44,13 +83,15 @@ class NeuronModelRunner:
     def _prepare_prompt(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[int]]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[int],
+               BatchedTensorInputs]:
         assert len(seq_group_metadata_list) > 0
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
         input_block_ids: List[int] = []
 
-        prompt_lens: List[int] = []
+        seq_lens: List[int] = []
+        multi_modal_inputs_list: List[MultiModalInputs] = []
         for seq_group_metadata in seq_group_metadata_list:
             assert seq_group_metadata.is_prompt
             seq_ids = list(seq_group_metadata.seq_data.keys())
@@ -59,26 +100,32 @@ class NeuronModelRunner:
 
             seq_data = seq_group_metadata.seq_data[seq_id]
             prompt_tokens = seq_data.get_token_ids()
-            prompt_len = len(prompt_tokens)
-            prompt_lens.append(prompt_len)
+            seq_len = len(prompt_tokens)
+            seq_lens.append(seq_len)
 
             input_tokens.append(prompt_tokens)
-            input_positions.append(list(range(prompt_len)))
+            input_positions.append(list(range(seq_len)))
 
             assert seq_group_metadata.block_tables is not None
             block_table = seq_group_metadata.block_tables[seq_id]
             assert len(block_table) == 1
             input_block_ids.append(block_table[0])
 
-        max_prompt_len = max(prompt_lens)
-        assert max_prompt_len > 0
+            mm_data = seq_group_metadata.multi_modal_data
+            if mm_data:
+                # Process multi-modal data
+                mm_kwargs = self.multi_modal_input_mapper(mm_data)
+                multi_modal_inputs_list.append(mm_kwargs)
+
+        max_seq_len = max(seq_lens)
+        assert max_seq_len > 0
         input_tokens = make_tensor_with_pad(input_tokens,
-                                            max_prompt_len,
+                                            max_seq_len,
                                             pad=0,
                                             dtype=torch.long,
                                             device=self.device)
         input_positions = make_tensor_with_pad(input_positions,
-                                               max_prompt_len,
+                                               max_seq_len,
                                                pad=0,
                                                dtype=torch.long,
                                                device=self.device)
@@ -86,7 +133,10 @@ class NeuronModelRunner:
                                        dtype=torch.long,
                                        device=self.device)
 
-        return input_tokens, input_positions, input_block_ids, prompt_lens
+        multi_modal_kwargs = MultiModalInputs.batch(multi_modal_inputs_list)
+
+        return (input_tokens, input_positions, input_block_ids, seq_lens,
+                multi_modal_kwargs)
 
     def _prepare_decode(
         self,
@@ -137,147 +187,75 @@ class NeuronModelRunner:
 
         return input_tokens, input_positions, input_block_ids
 
-    def _prepare_sample(
+    def make_model_input_from_broadcasted_tensor_dict(
+            self, tensor_dict: Dict[str, Any]) -> ModelInputForNeuron:
+        return ModelInputForNeuron.from_broadcasted_tensor_dict(tensor_dict)
+
+    def prepare_model_input(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
-        prompt_lens: List[int],
-    ) -> SamplingMetadata:
-        seq_groups: List[Tuple[List[int], SamplingParams]] = []
-        selected_token_indices: List[int] = []
-        generators: List[torch.Generator] = []
-        selected_token_start_idx = 0
-        categorized_sample_indices = {t: [] for t in SamplingType}
-        categorized_sample_indices_start_idx = 0
-        categorized_sampled_token_indices_start_idx = 0
-
-        for i, seq_group_metadata in enumerate(seq_group_metadata_list):
-            seq_ids = list(seq_group_metadata.seq_data.keys())
-            sampling_params = seq_group_metadata.sampling_params
-            seq_groups.append((seq_ids, sampling_params))
-
-            if seq_group_metadata.is_prompt:
-                assert len(seq_ids) == 1
-                assert prompt_lens is not None
-                prompt_len = prompt_lens[i]
-                if sampling_params.prompt_logprobs is not None:
-                    # NOTE: prompt token positions do not need sample, skip
-                    categorized_sample_indices_start_idx += prompt_len - 1
-
-                categorized_sample_indices[
-                    sampling_params.sampling_type].append([
-                        categorized_sample_indices_start_idx,
-                        categorized_sampled_token_indices_start_idx
-                    ])
-                categorized_sample_indices_start_idx += 1
-                categorized_sampled_token_indices_start_idx += 1
-
-                if sampling_params.prompt_logprobs is not None:
-                    selected_token_indices.extend(
-                        range(selected_token_start_idx,
-                              selected_token_start_idx + prompt_len - 1))
-                selected_token_indices.append(selected_token_start_idx +
-                                              prompt_len - 1)
-                selected_token_start_idx += prompt_len
-
-                if sampling_params.seed is not None:
-                    seq_group_metadata.state.generator = torch.Generator(
-                        device=self.device).manual_seed(sampling_params.seed)
-            else:
-                num_seqs = len(seq_ids)
-                selected_token_indices.extend(
-                    range(selected_token_start_idx,
-                          selected_token_start_idx + num_seqs))
-                selected_token_start_idx += num_seqs
-
-                categorized_sample_indices[
-                    sampling_params.sampling_type].extend(
-                        zip(
-                            range(
-                                categorized_sample_indices_start_idx,
-                                categorized_sample_indices_start_idx +
-                                num_seqs),
-                            range(
-                                categorized_sampled_token_indices_start_idx,
-                                categorized_sampled_token_indices_start_idx +
-                                num_seqs)))
-                categorized_sample_indices_start_idx += num_seqs
-                categorized_sampled_token_indices_start_idx += num_seqs
-
-            if sampling_params.seed is not None:
-                generators.append(seq_group_metadata.state.generator)
-
-        selected_token_indices = async_tensor_h2d(selected_token_indices,
-                                                  dtype=torch.long,
-                                                  target_device=self.device,
-                                                  pin_memory=self.pin_memory)
-
-        categorized_sample_indices = {
-            t: maybe_expand_dim(
-                async_tensor_h2d(seq_ids,
-                                 dtype=torch.int,
-                                 target_device=self.device,
-                                 pin_memory=self.pin_memory), 2, 2)
-            for t, seq_ids in categorized_sample_indices.items()
-        }
-
-        seq_data: Dict[int, SequenceData] = {}
-        for seq_group_metadata in seq_group_metadata_list:
-            seq_data.update(seq_group_metadata.seq_data)
-
-        sampling_metadata = SamplingMetadata(
-            seq_groups=seq_groups,
-            seq_data=seq_data,
-            prompt_lens=prompt_lens,
-            selected_token_indices=selected_token_indices,
-            categorized_sample_indices=categorized_sample_indices,
-            generators=generators,
-        )
-        return sampling_metadata
-
-    def prepare_input_tensors(
-        self,
-        seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, SamplingMetadata]:
+        virtual_engine: int = 0,
+        finished_requests_ids: Optional[List[str]] = None
+    ) -> ModelInputForNeuron:
         # NOTE: We assume that all sequences in the group are all prompts or
         # all decodes.
         is_prompt = seq_group_metadata_list[0].is_prompt
         # Prepare input tensors.
         if is_prompt:
-            (input_tokens, input_positions, input_block_ids,
-             prompt_lens) = self._prepare_prompt(seq_group_metadata_list)
+            (input_tokens, input_positions, input_block_ids, seq_lens,
+             multi_modal_kwargs
+             ) = self._prepare_prompt(seq_group_metadata_list)
         else:
             (input_tokens, input_positions,
              input_block_ids) = self._prepare_decode(seq_group_metadata_list)
-            prompt_lens = []
-        sampling_metadata = self._prepare_sample(seq_group_metadata_list,
-                                                 prompt_lens)
+            seq_lens = []
+        sampling_metadata = SamplingMetadata.prepare(
+            seq_group_metadata_list,
+            seq_lens,
+            # query_lens is not needed if chunked prefill is not
+            # supported. Since neuron worker doesn't support chunked prefill
+            # just use seq_lens instead.
+            seq_lens,
+            self.device,
+            self.pin_memory,
+            generators=self.get_generators(finished_requests_ids))
 
-        return (input_tokens, input_positions, input_block_ids,
-                sampling_metadata)
+        return ModelInputForNeuron(input_tokens=input_tokens,
+                                   input_positions=input_positions,
+                                   input_block_ids=input_block_ids,
+                                   sampling_metadata=sampling_metadata,
+                                   multi_modal_kwargs=multi_modal_kwargs)
 
     @torch.inference_mode()
     def execute_model(
         self,
-        seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
-    ) -> Optional[SamplerOutput]:
-        (input_tokens, input_positions, input_block_ids, sampling_metadata
-         ) = self.prepare_input_tensors(seq_group_metadata_list)
+        model_input: ModelInputForNeuron,
+        kv_caches: Optional[List[torch.Tensor]] = None,
+        intermediate_tensors: Optional[IntermediateTensors] = None,
+        num_steps: int = 1,
+    ) -> Optional[List[SamplerOutput]]:
+        if num_steps > 1:
+            raise ValueError(
+                "NeuronModelRunner does not support multi-step execution.")
 
         hidden_states = self.model(
-            input_ids=input_tokens,
-            positions=input_positions,
-            input_block_ids=input_block_ids,
+            input_ids=model_input.input_tokens,
+            positions=model_input.input_positions,
+            input_block_ids=model_input.input_block_ids,
+            **MultiModalInputs.as_kwargs(model_input.multi_modal_kwargs or {},
+                                         device=self.device),
         )
 
         # Compute the logits.
-        logits = self.model.compute_logits(hidden_states, sampling_metadata)
+        logits = self.model.compute_logits(hidden_states,
+                                           model_input.sampling_metadata)
 
         # Sample the next token.
         output = self.model.sample(
             logits=logits,
-            sampling_metadata=sampling_metadata,
+            sampling_metadata=model_input.sampling_metadata,
         )
-        return output
+        return [output]
 
     @property
     def vocab_size(self) -> int:

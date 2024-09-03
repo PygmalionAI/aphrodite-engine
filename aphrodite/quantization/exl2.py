@@ -1,16 +1,11 @@
 from typing import Any, Dict, List, Optional
-from contextlib import suppress
 
 import torch
 
-from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              set_weight_attrs)
-from aphrodite.quantization.base_config import (QuantizationConfig)
-
-HAS_QUANTS = False
-with suppress(ImportError):
-    from aphrodite._quant_C import quant_ops as ops
-    HAS_QUANTS = True
+from aphrodite import _custom_ops as ops
+from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
+from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.quantization.base_config import QuantizationConfig
 
 
 def make_group_map(q_groups, num_qrows):
@@ -58,8 +53,11 @@ class Exl2Config(QuantizationConfig):
     def from_config(cls, config: Dict[str, Any]) -> "Exl2Config":
         return cls()
 
-    def get_linear_method(self) -> "Exl2LinearMethod":
-        return Exl2LinearMethod(self)
+    def get_quant_method(self, layer: torch.nn.Module,
+                         prefix: str) -> Optional["Exl2LinearMethod"]:
+        if isinstance(layer, LinearBase):
+            return Exl2LinearMethod(self)
+        return None
 
     def get_scaled_act_names(self) -> List[str]:
         return []
@@ -85,21 +83,20 @@ class Exl2LinearMethod(LinearMethodBase):
     """
 
     def __init__(self, quant_config: Exl2Config):
-        if not HAS_QUANTS:
-            raise ImportError("Could not find the quantization kernels.")
         self.quant_config = quant_config
 
-    def create_weights(self, input_size_per_partition: int,
+    def create_weights(self, layer: torch.nn.Module,
+                       input_size_per_partition: int,
                        output_partition_sizes: List[int], input_size: int,
-                       output_size: int,
-                       params_dtype: torch.dtype) -> Dict[str, Any]:
+                       output_size: int, params_dtype: torch.dtype,
+                       **extra_weight_attr):
         # The shape of weight is unknown until load state dict
         # q_groups, q_invperm, q_scale, q_scale_max, q_weight, q_groups
-        state_dict = {"exllama_state": 0}
+        layer.exllama_state = 0
         qweight = torch.nn.parameter.UninitializedParameter(
             requires_grad=False)
         set_weight_attrs(qweight, {"output_dim": 1, "ignore_warning": True})
-        state_dict["q_weight"] = qweight
+        layer.register_parameter("q_weight", qweight)
         qscale = torch.nn.parameter.UninitializedParameter(requires_grad=False)
         set_weight_attrs(
             qscale, {
@@ -108,45 +105,43 @@ class Exl2LinearMethod(LinearMethodBase):
                 "pack_factor": 8,
                 "ignore_warning": True
             })
-        state_dict["q_scale"] = qscale
+        layer.register_parameter("q_scale", qscale)
         for name in ["q_groups", "q_invperm", "q_scale_max"]:
             fake_weight = torch.nn.parameter.UninitializedParameter(
                 requires_grad=False)
             set_weight_attrs(fake_weight, {"ignore_warning": True})
-            state_dict[name] = fake_weight
-        return state_dict
+            layer.register_parameter(name, fake_weight)
 
-    def apply_weights(self,
-                      weights: Dict[str, Any],
-                      x: torch.Tensor,
-                      bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-        out_shape = x.shape[:-1] + (weights["q_weight"].shape[-1], )
+    def apply(self,
+              layer: torch.nn.Module,
+              x: torch.Tensor,
+              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+        out_shape = x.shape[:-1] + (layer.q_weight.shape[-1], )
         reshaped_x = x.reshape(-1, x.shape[-1])
 
-        if weights["exllama_state"] == 0:
-            weights["q_scale_max"] /= 256
-            weights["q_invperm"] = weights["q_invperm"].short()
-            if "q_perm" not in weights:
-                weights["q_perm"] = torch.argsort(weights["q_invperm"]).to(
-                    torch.short)
-            if "q_group_map" not in weights:
-                weights["q_group_map"] = make_group_map(
-                    weights["q_groups"], weights["q_weight"].shape[0])
-            weights["q_matrix"] = ops.exl2_make_q_matrix(
-                weights["q_weight"],
-                weights["q_perm"],
-                weights["q_invperm"],
-                weights["q_scale"],
-                weights["q_scale_max"],
-                weights["q_groups"],
-                weights["q_group_map"],
+        if layer.exllama_state == 0:
+            layer.q_scale_max /= 256
+            layer.q_invperm = layer.q_invperm.short()
+            if not hasattr(layer, 'q_perm'):
+                layer.q_perm = torch.argsort(layer.q_invperm).to(torch.short)
+            if not hasattr(layer, 'q_group_map'):
+                layer.q_group_map = make_group_map(layer.q_groups,
+                                                   layer.q_weight.shape[0])
+            layer.q_matrix = ops.exl2_make_q_matrix(
+                layer.q_weight,
+                layer.q_perm,
+                layer.q_invperm,
+                layer.q_scale,
+                layer.q_scale_max,
+                layer.q_groups,
+                layer.q_group_map,
             )
-            weights["exllama_state"] = 1
+            layer.exllama_state = 1
 
-        output = ops.exl2_gemm(reshaped_x, weights["q_matrix"])
+        output = ops.exl2_gemm(reshaped_x, layer.q_matrix)
 
         if bias is not None:
-            output = output + bias
+            output.add_(bias)
         return output.reshape(out_shape)
 
     def apply_moe_weights(self, w1: Dict[str,

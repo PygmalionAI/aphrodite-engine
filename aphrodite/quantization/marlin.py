@@ -1,17 +1,14 @@
 from typing import Any, Dict, List, Optional
-from contextlib import suppress
 
 import torch
+from loguru import logger
 from torch.nn.parameter import Parameter
 
-from aphrodite.modeling.layers.linear import (LinearMethodBase,
-                                              set_weight_attrs)
-from aphrodite.quantization.base_config import (QuantizationConfig)
-
-HAS_QUANTS = False
-with suppress(ImportError):
-    from aphrodite._quant_C import quant_ops as ops
-    HAS_QUANTS = True
+from aphrodite import _custom_ops as ops
+from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
+from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
+from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.quantization.base_config import QuantizationConfig
 
 
 class MarlinConfig(QuantizationConfig):
@@ -23,11 +20,11 @@ class MarlinConfig(QuantizationConfig):
     def __init__(
         self,
         group_size: int,
+        lm_head_quantized: bool,
     ) -> None:
-        if not HAS_QUANTS:
-            raise ImportError("Could not find the quantization kernels.")
         # Group size for the quantization.
         self.group_size = group_size
+        self.lm_head_quantized = lm_head_quantized
         if self.group_size != 128 and self.group_size != -1:
             raise ValueError(
                 "Currently, only group size 128 and -1 (channelwise) "
@@ -54,7 +51,8 @@ class MarlinConfig(QuantizationConfig):
         self.perm_len = 1024
 
     def __repr__(self) -> str:
-        return f"MarlinConfig(group_size={self.group_size})"
+        return (f"MarlinConfig(group_size={self.group_size}, "
+                f"lm_head_quantized={self.lm_head_quantized})")
 
     @classmethod
     def get_name(cls) -> str:
@@ -76,25 +74,38 @@ class MarlinConfig(QuantizationConfig):
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "MarlinConfig":
         group_size = cls.get_from_keys(config, ["group_size"])
-        return cls(group_size)
+        lm_head_quantized = cls.get_from_keys_or(config, ["lm_head"],
+                                                 default=False)
+        return cls(group_size, lm_head_quantized)
 
-    def get_linear_method(self) -> "MarlinLinearMethod":
-        return MarlinLinearMethod(self)
+    @classmethod
+    def override_quantization_method(cls, hf_quant_cfg,
+                                     user_quant) -> Optional[str]:
+        # compat: autogptq >=0.8.0 use checkpoint_format: str
+        # compat: autogptq <=0.7.1 is_marlin_format: bool
+        is_marlin_format = (hf_quant_cfg.get("checkpoint_format") == "marlin"
+                            or hf_quant_cfg.get("is_marlin_format", False))
+
+        is_valid_user_quant = (user_quant is None or user_quant == "gptq"
+                               or user_quant == "marlin")
+
+        if is_marlin_format and is_valid_user_quant:
+            msg = ("The model is serialized in {} format. Using {} kernel.".
+                   format(cls.get_name(), cls.get_name()))
+            logger.info(msg)
+            return cls.get_name()
+
+        return None
+
+    def get_quant_method(self, layer: torch.nn.Module,
+                         prefix: str) -> Optional["MarlinLinearMethod"]:
+        if (isinstance(layer, LinearBase) or
+            (isinstance(layer, ParallelLMHead) and self.lm_head_quantized)):
+            return MarlinLinearMethod(self)
+        return None
 
     def get_scaled_act_names(self) -> List[str]:
         return []
-
-    def merge_weight(self) -> bool:
-        return True
-
-    def quant_vocab(self) -> List[bool]:
-        return [False, False]
-
-    def support_fused_moe(self) -> bool:
-        return False
-
-    def rope_style(self) -> Optional[bool]:
-        return None
 
 
 class MarlinLinearMethod(LinearMethodBase):
@@ -109,20 +120,22 @@ class MarlinLinearMethod(LinearMethodBase):
 
     def create_weights(
         self,
+        layer: torch.nn.Module,
         input_size_per_partition: int,
         output_partition_sizes: List[int],
         input_size: int,
         output_size: int,
         params_dtype: torch.dtype,
-    ) -> Dict[str, Any]:
+        **extra_weight_attrs,
+    ):
         del output_size  # Unused.
 
         if params_dtype != torch.float16:
             raise ValueError(
                 f"The params dtype must be float16, but got {params_dtype}")
 
-        output_size_per_partition = sum(output_partition_sizes)
         # Validate output_size_per_partition
+        output_size_per_partition = sum(output_partition_sizes)
         if output_size_per_partition % self.quant_config.min_n_threads != 0:
             raise ValueError(
                 f"Weight output_size_per_partition = "
@@ -206,21 +219,22 @@ class MarlinLinearMethod(LinearMethodBase):
                                           dtype=torch.int),
                               requires_grad=False)
 
-        return {
-            "B": qweight,
-            "s": scales,
-            "workspace": workspace,
-        }
+        layer.register_parameter("B", qweight)
+        set_weight_attrs(qweight, extra_weight_attrs)
+        layer.register_parameter("s", scales)
+        set_weight_attrs(scales, extra_weight_attrs)
+        layer.register_parameter("workspace", workspace)
+        set_weight_attrs(workspace, extra_weight_attrs)
 
-    def apply_weights(
+    def apply(
         self,
-        weights: Dict[str, Any],
+        layer: torch.nn.Module,
         x: torch.Tensor,
         bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        qweight = weights["B"]
-        scales = weights["s"]
-        workspace = weights["workspace"]
+        qweight = layer.B
+        scales = layer.s
+        workspace = layer.workspace
 
         x_2d = x.view(-1, x.shape[-1])
 
@@ -237,10 +251,3 @@ class MarlinLinearMethod(LinearMethodBase):
             output.add_(bias)  # In-place add
 
         return output
-
-    def apply_moe_weights(self, w1: Dict[str,
-                                         torch.Tensor], w2: Dict[str,
-                                                                 torch.Tensor],
-                          x: torch.Tensor, gating_output: torch.Tensor,
-                          topk: int, renormalize: bool) -> torch.Tensor:
-        raise NotImplementedError

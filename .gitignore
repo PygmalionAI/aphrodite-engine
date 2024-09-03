@@ -6,12 +6,12 @@ repos
 *.so
 .conda
 build
-dist*
 .VSCodeCounter
 conda/
 umamba.exe
 bin/
 *.whl
+aphrodite/commit_id.py
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -199,3 +199,4 @@ _build/
 kv_cache_states/*
 quant_params/*
 .ruff_cache/
+images/

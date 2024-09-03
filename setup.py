@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import sys
+import warnings
 from shutil import which
 from typing import List
 
@@ -18,11 +19,39 @@ logger = logging.getLogger(__name__)
 # Target device of Aphrodite, supporting [cuda (by default), rocm, neuron, cpu]
 APHRODITE_TARGET_DEVICE = os.getenv("APHRODITE_TARGET_DEVICE", "cuda")
 
+
+def embed_commit_hash():
+    try:
+        commit_id = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                            encoding="utf-8").strip()
+        short_commit_id = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], encoding="utf-8").strip()
+
+        commit_contents = f'__commit__ = "{commit_id}"\n'
+        short_commit_contents = f'__short_commit__ = "{short_commit_id}"\n'
+
+        version_file = os.path.join(ROOT_DIR, "aphrodite", "commit_id.py")
+        with open(version_file, "w", encoding="utf-8") as f:
+            f.write(commit_contents)
+            f.write(short_commit_contents)
+
+    except subprocess.CalledProcessError as e:
+        warnings.warn(f"Failed to get commit hash:\n{e}",
+                      RuntimeWarning,
+                      stacklevel=2)
+    except Exception as e:
+        warnings.warn(f"Failed to embed commit hash:\n{e}",
+                      RuntimeWarning,
+                      stacklevel=2)
+
+
+embed_commit_hash()
+
 # Aphrodite only supports Linux platform
 assert sys.platform.startswith(
     "linux"), "Aphrodite only supports Linux platform (including WSL)."
 
-MAIN_CUDA_VERSION = "12.1"
+MAIN_CUDA_VERSION = "12.4"
 
 
 def is_sccache_available() -> bool:
@@ -46,7 +75,7 @@ def remove_prefix(text, prefix):
 class CMakeExtension(Extension):
 
     def __init__(self, name: str, cmake_lists_dir: str = '.', **kwa) -> None:
-        super().__init__(name, sources=[], **kwa)
+        super().__init__(name, sources=[], py_limited_api=True, **kwa)
         self.cmake_lists_dir = os.path.abspath(cmake_lists_dir)
 
 
@@ -69,8 +98,11 @@ class cmake_build_ext(build_ext):
                 # os.sched_getaffinity() isn't universally available, so fall
                 #  back to os.cpu_count() if we get an error here.
                 num_jobs = len(os.sched_getaffinity(0))
+                logger.info(f"Using {num_jobs} CPUs as the number of jobs.")
             except AttributeError:
                 num_jobs = os.cpu_count()
+                logger.info(f"Using os.cpu_count()={num_jobs} as the number of"
+                            " jobs.")
 
         nvcc_threads = None
         if _is_cuda() and get_nvcc_cuda_version() >= Version("11.2"):
@@ -126,11 +158,13 @@ class cmake_build_ext(build_ext):
                 '-DCMAKE_CXX_COMPILER_LAUNCHER=sccache',
                 '-DCMAKE_CUDA_COMPILER_LAUNCHER=sccache',
             ]
+            logger.info("Using sccache as the compiler launcher.")
         elif is_ccache_available():
             cmake_args += [
                 '-DCMAKE_CXX_COMPILER_LAUNCHER=ccache',
                 '-DCMAKE_CUDA_COMPILER_LAUNCHER=ccache',
             ]
+            logger.info("Using ccache as the compiler launcher.")
 
         # Pass the python executable to cmake so it can find an exact
         # match.
@@ -138,18 +172,6 @@ class cmake_build_ext(build_ext):
             '-DAPHRODITE_PYTHON_EXECUTABLE={}'.format(sys.executable)
         ]
 
-        if _install_quants():
-            cmake_args += ['-DAPHRODITE_INSTALL_QUANT_KERNELS=ON']
-
-        if _install_punica():
-            cmake_args += ['-DAPHRODITE_INSTALL_PUNICA_KERNELS=ON']
-
-        if _install_hadamard():
-            cmake_args += ['-DAPHRODITE_INSTALL_HADAMARD_KERNELS=ON']
-
-        #
-        # Setup parallelism and build tool
-        #
         num_jobs, nvcc_threads = self.compute_num_jobs()
 
         if nvcc_threads:
@@ -175,30 +197,32 @@ class cmake_build_ext(build_ext):
             subprocess.check_output(['cmake', '--version'])
         except OSError as e:
             raise RuntimeError('Cannot find CMake executable') from e
-
         # Create build directory if it does not exist.
         if not os.path.exists(self.build_temp):
             os.makedirs(self.build_temp)
 
+        targets = []
         # Build all the extensions
         for ext in self.extensions:
             self.configure(ext)
+            targets.append(remove_prefix(ext.name, "aphrodite."))
 
-            ext_target_name = remove_prefix(ext.name, "aphrodite.")
-            num_jobs, _ = self.compute_num_jobs()
+        num_jobs, _ = self.compute_num_jobs()
 
-            build_args = [
-                '--build', '.', '--target', ext_target_name, '-j',
-                str(num_jobs)
-            ]
+        build_args = [
+            "--build",
+            ".",
+            f"-j={num_jobs}",
+            *[f"--target={name}" for name in targets],
+        ]
 
-            subprocess.check_call(['cmake', *build_args], cwd=self.build_temp)
+        subprocess.check_call(["cmake", *build_args], cwd=self.build_temp)
 
 
 def _is_cuda() -> bool:
-    return APHRODITE_TARGET_DEVICE == "cuda" \
-            and torch.version.cuda is not None \
-            and not _is_neuron()
+    has_cuda = torch.version.cuda is not None
+    return (APHRODITE_TARGET_DEVICE == "cuda" and has_cuda
+            and not (_is_neuron() or _is_tpu()))
 
 
 def _is_hip() -> bool:
@@ -216,44 +240,28 @@ def _is_neuron() -> bool:
     return torch_neuronx_installed
 
 
+def _is_tpu() -> bool:
+    return APHRODITE_TARGET_DEVICE == "tpu"
+
+
 def _is_cpu() -> bool:
     return APHRODITE_TARGET_DEVICE == "cpu"
 
 
-def _install_quants() -> bool:
-    install_quants = bool(
-        int(os.getenv("APHRODITE_INSTALL_QUANT_KERNELS", "1")))
-    device_count = torch.cuda.device_count()
-    for i in range(device_count):
-        major, minor = torch.cuda.get_device_capability(i)
-        if major < 6:
-            install_quants = False
-            break
-    return install_quants
+def _is_openvino() -> bool:
+    return APHRODITE_TARGET_DEVICE == "openvino"
 
 
-def _install_punica() -> bool:
-    install_punica = bool(
-        int(os.getenv("APHRODITE_INSTALL_PUNICA_KERNELS", "1")))
-    device_count = torch.cuda.device_count()
-    for i in range(device_count):
-        major, minor = torch.cuda.get_device_capability(i)
-        if major <= 8:
-            install_punica = False
-            break
-    return install_punica
+def _is_xpu() -> bool:
+    return APHRODITE_TARGET_DEVICE == "xpu"
 
 
-def _install_hadamard() -> bool:
-    install_hadamard = bool(
-        int(os.getenv("APHRODITE_INSTALL_HADAMARD_KERNELS", "1")))
-    device_count = torch.cuda.device_count()
-    for i in range(device_count):
-        major, minor = torch.cuda.get_device_capability(i)
-        if major <= 6:
-            install_hadamard = False
-            break
-    return install_hadamard
+def _build_custom_ops() -> bool:
+    return _is_cuda() or _is_hip() or _is_cpu()
+
+
+def _build_core_ext() -> bool:
+    return not _is_neuron() and not _is_tpu()
 
 
 def get_hipcc_rocm_version():
@@ -328,7 +336,7 @@ def find_version(filepath: str) -> str:
 
 
 def get_aphrodite_version() -> str:
-    version = find_version(get_path("aphrodite", "__init__.py"))
+    version = find_version(get_path("aphrodite", "version.py"))
 
     if _is_cuda():
         cuda_version = str(get_nvcc_cuda_version())
@@ -347,8 +355,14 @@ def get_aphrodite_version() -> str:
         if neuron_version != MAIN_CUDA_VERSION:
             neuron_version_str = neuron_version.replace(".", "")[:3]
             version += f"+neuron{neuron_version_str}"
+    elif _is_openvino():
+        version += "+openvino"
+    elif _is_tpu():
+        version += "+tpu"
     elif _is_cpu():
         version += "+cpu"
+    elif _is_xpu():
+        version += "+xpu"
     else:
         raise RuntimeError("Unknown runtime environment, "
                            "must be either CUDA, ROCm, CPU, or Neuron.")
@@ -381,36 +395,44 @@ def get_requirements() -> List[str]:
 
     if _is_cuda():
         requirements = _read_requirements("requirements-cuda.txt")
+        cuda_major, cuda_minor = torch.version.cuda.split(".")
+        modified_requirements = []
+        for req in requirements:
+            if ("vllm-flash-attn" in req
+                    and not (cuda_major == "12" and cuda_minor == "1")):
+                # vllm-flash-attn is built only for CUDA 12.1.
+                # Skip for other versions.
+                continue
+            modified_requirements.append(req)
     elif _is_hip():
         requirements = _read_requirements("requirements-rocm.txt")
     elif _is_neuron():
         requirements = _read_requirements("requirements-neuron.txt")
+    elif _is_openvino():
+        requirements = _read_requirements("requirements-openvino.txt")
+    elif _is_tpu():
+        requirements = _read_requirements("requirements-tpu.txt")
     elif _is_cpu():
         requirements = _read_requirements("requirements-cpu.txt")
+    elif _is_xpu():
+        requirements = _read_requirements("requirements-xpu.txt")
     else:
         raise ValueError(
-            "Unsupported platform, please use CUDA, ROCm, Neuron, or CPU.")
+            "Unsupported platform, please use CUDA, ROCm, Neuron, CPU or "
+            "OpenVINO.")
     return requirements
 
 
 ext_modules = []
 
-if _is_cuda():
+if _build_core_ext():
+    ext_modules.append(CMakeExtension(name="aphrodite._core_C"))
+
+if _is_cuda() or _is_hip():
     ext_modules.append(CMakeExtension(name="aphrodite._moe_C"))
 
-    if _install_quants():
-        ext_modules.append(CMakeExtension(name="aphrodite._quant_C"))
-
-    if _install_punica():
-        ext_modules.append(CMakeExtension(name="aphrodite._punica_C"))
-
-    if _install_hadamard():
-        ext_modules.append(CMakeExtension(name="aphrodite._hadamard_C"))
-
-if not _is_neuron():
+if _build_custom_ops():
     ext_modules.append(CMakeExtension(name="aphrodite._C"))
-    if _install_quants():
-        ext_modules.append(CMakeExtension(name="aphrodite._quant_C"))
 
 package_data = {
     "aphrodite": [
@@ -419,6 +441,7 @@ package_data = {
     ]
 }
 if os.environ.get("APHRODITE_USE_PRECOMPILED"):
+    ext_modules = []
     package_data["aphrodite"].append("*.so")
 
 setup(
@@ -437,21 +460,20 @@ setup(
         "Huggingface": "https://huggingface.co/PygmalionAI",
     },
     classifiers=[
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
-        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3",
         "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",  # noqa: E501
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
-    packages=find_packages(exclude=("kernels", "examples", "tests")),
+    packages=find_packages(exclude=("kernels", "examples", "tests*")),
     python_requires=">=3.8",
     install_requires=get_requirements(),
-    extras_require={"flash-attn": [
-        "flash-attn==2.5.8",
-    ]},
+    extras_require={
+        "flash-attn": ["flash-attn==2.5.8"],
+        "tensorizer": ["tensorizer>=2.9.0"],
+        "ray": ["ray>=2.9"],
+    },
     ext_modules=ext_modules,
-    cmdclass={"build_ext": cmake_build_ext} if not _is_neuron() else {},
+    cmdclass={"build_ext": cmake_build_ext} if len(ext_modules) > 0 else {},
     package_data=package_data,
     entry_points={
         "console_scripts": [

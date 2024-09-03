@@ -48,9 +48,9 @@ jobs:
       fail-fast: false
       matrix:
           os: ['ubuntu-20.04']
-          python-version: ['3.8', '3.9', '3.10', '3.11']
-          pytorch-version: ['2.3.0']  # Must be the most recent version that meets requirements-cuda.txt.
-          cuda-version: ['11.8', '12.1']
+          python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+          pytorch-version: ['2.4.0']  # Must be the most recent version that meets requirements-cuda.txt.
+          cuda-version: ['12.4', '12.1', '11.8']
 
     steps:
       - name: Checkout
@@ -76,6 +76,8 @@ jobs:
 
       - name: Build wheel
         shell: bash
+        env:
+          CMAKE_BUILD_TYPE: Release
         run: |
           bash -x .github/workflows/scripts/build.sh ${{ matrix.python-version }} ${{ matrix.cuda-version }}
           wheel_name=$(ls dist/*whl | xargs -n 1 basename)

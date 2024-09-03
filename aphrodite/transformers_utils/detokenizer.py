@@ -1,15 +1,11 @@
-from typing import List, Dict, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
-from aphrodite.common.sequence import (
-    Sequence,
-    Logprob,
-    SequenceGroup,
-    SamplingParams,
-)
+from aphrodite.common.sequence import (Logprob, SamplingParams, Sequence,
+                                       SequenceGroup)
 from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import (
-    BaseTokenizerGroup, )
+    BaseTokenizerGroup)
 
 # Used eg. for marking rejected tokens in spec decoding.
 INVALID_TOKEN_ID = -1
@@ -26,22 +22,24 @@ class Detokenizer:
         """Returns the HF tokenizer to use for a given sequence."""
         return self.tokenizer_group.get_lora_tokenizer(sequence.lora_request)
 
-    def decode_prompt_logprobs_inplace(
-        self,
-        seq_group: SequenceGroup,
-        prompt_logprobs: List[Optional[Dict[int, Logprob]]],
-    ) -> None:
+    def decode_prompt_logprobs_inplace(self, seq_group: SequenceGroup,
+                                       prompt_logprobs: List[Optional[Dict[
+                                           int, Logprob]]],
+                                       position_offset: int) -> None:
         """Decodes the logprobs for the prompt of a sequence group.
+
         Args:
             seq_group: The sequence group to decode.
             prompt_logprobs: The logprobs to decode.
-
+            position_offset: Offset of the first index of the logprobs 
+                relative to the start of the sequence (for chunked prefill).
+        
         Returns:
             The prompt logprobs with the decoded tokens.
         """
         prms = seq_group.sampling_params
         # We can pick any sequence for the prompt.
-        seq = next(iter(seq_group.seqs_dict.values()))
+        seq = seq_group.get_seqs()[0]
         # Only prompt, without the generated token.
         all_token_ids = seq.get_token_ids()
         prompt_token_ids = all_token_ids[:-1]
@@ -53,32 +51,31 @@ class Detokenizer:
         next_iter_tokens = []
         prev_tokens = None
 
-        for token_position, prompt_logprobs_for_token in enumerate(
+        for token_position_in_logprob, prompt_logprobs_for_token in enumerate(
                 prompt_logprobs):
+
+            # Absolute token position equals the index in the logprobs
+            # list plus the offset of the entire logprobs list relative
+            # to the start of the sequence.
+            token_position = token_position_in_logprob + position_offset
             if not prompt_logprobs_for_token:
                 continue
             for token_id, sample_logprob in prompt_logprobs_for_token.items():
                 if (sample_logprob.decoded_token is None
                         and token_id != INVALID_TOKEN_ID):
-                    prompt_token_ids_with_token = prompt_token_ids[:
-                                                                   token_position] + [  # noqa: E501
-                                                                       token_id
-                                                                   ]
-                    (
-                        new_tokens,
-                        new_text,
-                        new_prefix_offset,
-                        new_read_offset,
-                    ) = detokenize_incrementally(
-                        tokenizer=tokenizer,
-                        all_input_ids=prompt_token_ids_with_token,
-                        prev_tokens=prev_tokens,
-                        prefix_offset=prefix_offset,
-                        read_offset=read_offset,
-                        skip_special_tokens=prms.skip_special_tokens,
-                        spaces_between_special_tokens=prms.
-                        spaces_between_special_tokens,
-                    )
+                    prompt_token_ids_with_token = (
+                        prompt_token_ids[:token_position] + [token_id])
+                    (new_tokens, new_text, new_prefix_offset,
+                     new_read_offset) = detokenize_incrementally(
+                         tokenizer=tokenizer,
+                         all_input_ids=prompt_token_ids_with_token,
+                         prev_tokens=prev_tokens,
+                         prefix_offset=prefix_offset,
+                         read_offset=read_offset,
+                         skip_special_tokens=prms.skip_special_tokens,
+                         spaces_between_special_tokens=prms.
+                         spaces_between_special_tokens,
+                     )
 
                     sample_logprob.decoded_token = new_text
 
@@ -101,10 +98,11 @@ class Detokenizer:
     def decode_sequence_inplace(self, seq: Sequence,
                                 prms: SamplingParams) -> int:
         """Decodes the new token for a sequence. In-place operation.
+
         Args:
             seq: The sequence to decode.
             prms: The sampling parameters used to generate the sequence.
-        
+
         Returns:
             The number of characters added to the output text.
         """
@@ -116,30 +114,23 @@ class Detokenizer:
         # Do it here so that we don't have to repeat this
         # computation for each logprob.
         if seq.tokens is None:
-            (
-                seq.tokens,
-                seq.prefix_offset,
-                seq.read_offset,
-            ) = convert_prompt_ids_to_tokens(
-                tokenizer=tokenizer,
-                prompt_ids=all_input_ids[:-1],
-                skip_special_tokens=prms.skip_special_tokens,
-            )
+            (seq.tokens, seq.prefix_offset,
+             seq.read_offset) = convert_prompt_ids_to_tokens(
+                 tokenizer=tokenizer,
+                 prompt_ids=all_input_ids[:-1],
+                 skip_special_tokens=prms.skip_special_tokens,
+             )
 
-        (
-            new_tokens,
-            new_decoded_token_text,
-            prefix_offset,
-            read_offset,
-        ) = detokenize_incrementally(
-            tokenizer=tokenizer,
-            all_input_ids=all_input_ids,
-            prev_tokens=seq.tokens,
-            prefix_offset=seq.prefix_offset,
-            read_offset=seq.read_offset,
-            skip_special_tokens=prms.skip_special_tokens,
-            spaces_between_special_tokens=prms.spaces_between_special_tokens,
-        )
+        (new_tokens, new_decoded_token_text, prefix_offset,
+         read_offset) = detokenize_incrementally(
+             tokenizer=tokenizer,
+             all_input_ids=all_input_ids,
+             prev_tokens=seq.tokens,
+             prefix_offset=seq.prefix_offset,
+             read_offset=seq.read_offset,
+             skip_special_tokens=prms.skip_special_tokens,
+             spaces_between_special_tokens=prms.spaces_between_special_tokens,
+         )
 
         # Decode logprobs
         logprobs = seq.output_logprobs[-1]
@@ -172,7 +163,13 @@ class Detokenizer:
         seq.read_offset = read_offset
         seq.output_text += new_decoded_token_text
 
-        return len(new_decoded_token_text)
+        len(new_decoded_token_text)
+
+
+def _replace_none_with_empty(tokens: List[Optional[str]]):
+    for i, token in enumerate(tokens):
+        if token is None:
+            tokens[i] = ""
 
 
 def _convert_tokens_to_string_with_added_encoders(
@@ -183,11 +180,11 @@ def _convert_tokens_to_string_with_added_encoders(
 ) -> str:
     # Adapted from
     # https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/tokenization_utils.py#L921
-    # NOTE: The following code is slow because it runs a for loop over
+    # NOTE(woosuk): The following code is slow because it runs a for loop over
     # the output_tokens. In Python, running a for loop over a list can be slow
     # even when the loop body is very simple.
-    sub_texts = []
-    current_sub_text = []
+    sub_texts: List[str] = []
+    current_sub_text: List[str] = []
     all_special_tokens = set(tokenizer.all_special_tokens)
     for token in output_tokens:
         if skip_special_tokens and token in all_special_tokens:
@@ -221,6 +218,7 @@ def convert_prompt_ids_to_tokens(
 ) -> Tuple[List[str], int, int]:
     """Converts the prompt ids to tokens and returns the tokens and offsets
     for incremental detokenization.
+
     Note that not all tokens are converted to strings. Only the tokens that
     are necessary for incremental detokenization are converted to strings.
     """
@@ -232,6 +230,8 @@ def convert_prompt_ids_to_tokens(
     read_offset = len(new_tokens)
     prefix_offset = max(
         read_offset - INITIAL_INCREMENTAL_DETOKENIZATION_OFFSET, 0)
+    # This is required to guard against out-of-vocab prompt token ids
+    _replace_none_with_empty(new_tokens)
     return new_tokens, prefix_offset, read_offset
 
 
@@ -249,13 +249,17 @@ def detokenize_incrementally(
 ) -> Tuple[List[str], str, int, int]:
     """Detokenizes the input ids incrementally and returns the new tokens
     and the new text.
+
     If `prev_tokens` is None, this function will convert the input ids to
     tokens and return the tokens and the new text. Otherwise, it will return the
     new tokens and the new text.
+
     This function will also return the new prefix offset and the new read
     offset to be used in the next iteration.
+
     The offsets are necessary to defeat cleanup algorithms in the decode which
     decide to add a space or not depending on the surrounding ids.
+
     Args:
         tokenizer: The tokenizer to use.
         all_input_ids: The input ids. The last id is the new token id.
@@ -276,6 +280,7 @@ def detokenize_incrementally(
              tokenizer,
              all_input_ids[:-1],
              skip_special_tokens=skip_special_tokens)
+    assert prev_tokens is not None
 
     # If the new token id is out of bounds, return an empty string.
     if new_token_id >= len(tokenizer):
@@ -284,6 +289,8 @@ def detokenize_incrementally(
         # Put new_token_id in a list so skip_special_tokens is respected
         new_tokens = tokenizer.convert_ids_to_tokens(
             [new_token_id], skip_special_tokens=skip_special_tokens)
+        if isinstance(new_tokens, str):
+            new_tokens = [new_tokens]
     output_tokens = prev_tokens + new_tokens
 
     # If this is the first iteration, return all tokens.

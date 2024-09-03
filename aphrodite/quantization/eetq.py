@@ -1,12 +1,12 @@
-from typing import Any, Dict, List, Optional
 from contextlib import suppress
+from typing import Any, Dict, List, Optional
 
 import torch
 from torch.nn.parameter import Parameter
 
-from aphrodite.modeling.layers.linear import LinearMethodBase, set_weight_attrs
-from aphrodite.quantization.base_config import \
-    QuantizationConfig
+from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
+from aphrodite.modeling.utils import set_weight_attrs
+from aphrodite.quantization.base_config import QuantizationConfig
 
 HAS_EETQ = False
 with suppress(ImportError):
@@ -41,7 +41,8 @@ class EETQConfig(QuantizationConfig):
     def get_supported_act_dtypes(self) -> List[torch.dtype]:
         return [torch.half]
 
-    def get_min_capability(self) -> int:
+    @classmethod
+    def get_min_capability(cls) -> int:
         # The EETQ kernel only supports Turing or newer GPUs.
         return 70
 
@@ -58,23 +59,14 @@ class EETQConfig(QuantizationConfig):
         zero_point = cls.get_from_keys(config, ["zero_point"])
         return cls(weight_bits, zero_point)
 
-    def get_linear_method(self) -> "EETQLinearMethod":
-        return EETQLinearMethod(self)
+    def get_quant_method(self, layer: torch.nn.Module,
+                         prefix: str) -> Optional["EETQLinearMethod"]:
+        if isinstance(layer, LinearBase):
+            return EETQLinearMethod(self)
+        return None
 
     def get_scaled_act_names(self) -> List[str]:
         return []
-
-    def merge_weight(self) -> bool:
-        return True
-
-    def quant_vocab(self) -> List[bool]:
-        return [False, False]
-
-    def support_fused_moe(self) -> bool:
-        return False
-
-    def rope_style(self) -> Optional[bool]:
-        return None
 
 
 class EETQLinearMethod(LinearMethodBase):
@@ -86,10 +78,11 @@ class EETQLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: EETQConfig):
         self.quant_config = quant_config
 
-    def create_weights(self, input_size_per_partition: int,
+    def create_weights(self, layer: torch.nn.Module,
+                       input_size_per_partition: int,
                        output_partition_sizes: List[int], input_size: int,
-                       output_size: int,
-                       params_dtype: torch.dtype) -> Dict[str, Any]:
+                       output_size: int, params_dtype: torch.dtype,
+                       **extra_weight_attrs):
         output_size_per_partition = sum(output_partition_sizes)
         qweight = Parameter(torch.empty(input_size_per_partition,
                                         output_size_per_partition,
@@ -103,14 +96,17 @@ class EETQLinearMethod(LinearMethodBase):
             "output_dim": 1,
         })
         set_weight_attrs(weight_scales, {"input_dim": 0, "output_dim": 0})
-        return {"qweight": qweight, "weight_scales": weight_scales}
+        layer.register_parameter("qweight", qweight)
+        set_weight_attrs(qweight, extra_weight_attrs)
+        layer.register_parameter("weight_scales", weight_scales)
+        set_weight_attrs(weight_scales, extra_weight_attrs)
 
-    def apply_weights(self,
-                      weights: Dict[str, Any],
-                      x: torch.Tensor,
-                      bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-        qweight = weights["qweight"].data
-        weight_scales = weights["weight_scales"].data
+    def apply(self,
+              layer: torch.nn.Module,
+              x: torch.Tensor,
+              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+        qweight = layer.qweight.data
+        weight_scales = layer.weight_scales.data
 
         if HAS_EETQ:
             output = w8_a16_gemm(x, qweight, weight_scales)

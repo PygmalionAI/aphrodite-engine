@@ -2,62 +2,76 @@ import asyncio
 import os
 import time
 from functools import partial
-from typing import (Callable, Dict, Iterable, List, Optional, Set, Tuple, Type,
-                    Union, AsyncIterator)
+from typing import (AsyncIterator, Callable, Dict, Iterable, List, Optional,
+                    Set, Tuple, Type, Union)
+
 from loguru import logger
 from transformers import PreTrainedTokenizer
 
-from aphrodite.lora.request import LoRARequest
-from aphrodite.common.config import ModelConfig
-from aphrodite.engine.args_tools import AsyncEngineArgs
-from aphrodite.engine.aphrodite_engine import AphroditeEngine
-from aphrodite.engine.ray_tools import initialize_ray_cluster, ray
-from aphrodite.common.outputs import RequestOutput
+from aphrodite.common.config import (DecodingConfig, EngineConfig, LoRAConfig,
+                                     ModelConfig, ParallelConfig,
+                                     SchedulerConfig)
+from aphrodite.common.outputs import EmbeddingRequestOutput, RequestOutput
+from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.common.sequence import MultiModalData
+from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
+from aphrodite.engine.aphrodite_engine import AphroditeEngine
+from aphrodite.engine.args_tools import AsyncEngineArgs
+from aphrodite.engine.async_timeout import asyncio_timeout
+from aphrodite.engine.metrics import StatLoggerBase
+from aphrodite.executor.executor_base import ExecutorAsyncBase
+from aphrodite.executor.ray_utils import initialize_ray_cluster, ray
+from aphrodite.inputs import LLMInputs, PromptInputs
+from aphrodite.lora.request import LoRARequest
+from aphrodite.processing.scheduler import SchedulerOutputs
+from aphrodite.prompt_adapter.request import PromptAdapterRequest
 
 ENGINE_ITERATION_TIMEOUT_S = int(
-    os.environ.get("APHRODITE_ENGINE_ITERATION_TIMEOUT_S", "120"))
+    os.environ.get("APHRODITE_ENGINE_ITERATION_TIMEOUT_S", "60"))
 
 
 class AsyncEngineDeadError(RuntimeError):
     pass
 
 
-def _raise_exception_on_finish(
-        task: asyncio.Task, error_callback: Callable[[Exception],
-                                                     None]) -> None:
-    msg = ("Task finished unexpectedly. This should never happen! "
-           "Please open an issue on Github. Include your full error "
-           "log after killing the process with Ctrl+C.")
+def _log_task_completion(task: asyncio.Task,
+                         error_callback: Callable[[Exception], None]) -> None:
+    """This function is only intended for the `engine.run_engine_loop()` task.
+    In particular, that task runs a `while True` loop that can only exit if
+    there is an exception.
+    """
 
     exception = None
     try:
-        task.result()
-        # NOTE: This will be thrown if task exits normally (which it should not)
-        raise AsyncEngineDeadError(msg)
+        return_value = task.result()
+        raise AssertionError(
+            f"The engine background task should never finish without an "
+            f"exception. {return_value}")
     except asyncio.exceptions.CancelledError:
-        pass
-    except KeyboardInterrupt:
-        raise
+        # We assume that if the task is cancelled, we are gracefully shutting
+        # down. This should only happen on program exit.
+        logger.info("Engine is gracefully shutting down.")
     except Exception as e:
         exception = e
         logger.error("Engine background task failed", exc_info=e)
         error_callback(exception)
         raise AsyncEngineDeadError(
-            msg + " See stack trace above for the actual cause.") from e
+            "Task finished unexpectedly. This should never happen! "
+            "Please open an issue on Github. See stack trace above for the"
+            "actual cause.") from e
 
 
 class AsyncStream:
-    """A stream of RequestOutputs for a request that can be
-    iterated over asynchronously."""
+    """A stream of RequestOutputs or EmbeddingRequestOutputs for a request
+    that can be iterated over asynchronously."""
 
     def __init__(self, request_id: str) -> None:
         self.request_id = request_id
-        self._queue = asyncio.Queue()
+        self._queue: asyncio.Queue = asyncio.Queue()
         self._finished = False
 
-    def put(self, item: Union[RequestOutput, Exception]) -> None:
+    def put(self, item: Union[RequestOutput, EmbeddingRequestOutput,
+                              Exception]) -> None:
         if self._finished:
             return
         self._queue.put_nowait(item)
@@ -73,7 +87,7 @@ class AsyncStream:
     def __aiter__(self):
         return self
 
-    async def __anext__(self) -> RequestOutput:
+    async def __anext__(self) -> Union[RequestOutput, EmbeddingRequestOutput]:
         result = await self._queue.get()
         if isinstance(result, Exception):
             raise result
@@ -110,13 +124,17 @@ class RequestTracker:
                 self.abort_request(rid)
 
     def process_request_output(self,
-                               request_output: RequestOutput,
+                               request_output: Union[RequestOutput,
+                                                     EmbeddingRequestOutput],
                                *,
                                verbose: bool = False) -> None:
         """Process a request output from the engine."""
         request_id = request_output.request_id
 
-        self._request_streams[request_id].put(request_output)
+        # Guard against a KeyError which can occur if the request was aborted
+        # while the output was generated
+        if (stream := self._request_streams.get(request_id)) is not None:
+            stream.put(request_output)
         if request_output.finished:
             if verbose:
                 logger.info(f"Finished request {request_id}.")
@@ -133,7 +151,10 @@ class RequestTracker:
             logger.info(f"Finished request {request_id}.")
         self.abort_request(request_id)
 
-    def add_request(self, request_id: str,
+    def add_request(self,
+                    request_id: str,
+                    *,
+                    verbose: bool = False,
                     **engine_add_request_kwargs) -> AsyncStream:
         """Add a request to be sent to the engine on the next background
         loop iteration."""
@@ -147,6 +168,9 @@ class RequestTracker:
         }))
 
         self.new_requests_event.set()
+
+        if verbose:
+            logger.info(f"Added request {request_id}.")
 
         return stream
 
@@ -198,7 +222,9 @@ class RequestTracker:
 class _AsyncAphrodite(AphroditeEngine):
     """Extension of AphroditeEngine to add async methods."""
 
-    async def step_async(self) -> List[RequestOutput]:
+    async def step_async(
+        self, virtual_engine: int
+    ) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Performs one decoding iteration and returns newly generated results.
         The workers are ran asynchronously if possible.
 
@@ -208,73 +234,107 @@ class _AsyncAphrodite(AphroditeEngine):
         and updates the scheduler with the model outputs. Finally, it decodes
         the sequences and returns the newly generated results.
         """
-        seq_group_metadata_list, scheduler_outputs = self.scheduler.schedule()
+        seq_group_metadata_list, scheduler_outputs = self.scheduler[
+            virtual_engine].schedule()
 
         if not scheduler_outputs.is_empty():
             # Execute the model.
+            finished_requests_ids = self.scheduler[
+                virtual_engine].get_and_reset_finished_requests_ids()
+            execute_model_req = ExecuteModelRequest(
+                seq_group_metadata_list=seq_group_metadata_list,
+                blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,
+                blocks_to_swap_out=scheduler_outputs.blocks_to_swap_out,
+                blocks_to_copy=scheduler_outputs.blocks_to_copy,
+                virtual_engine=virtual_engine,
+                num_lookahead_slots=scheduler_outputs.num_lookahead_slots,
+                running_queue_size=scheduler_outputs.running_queue_size,
+                finished_requests_ids=finished_requests_ids,
+            )
             output = await self.model_executor.execute_model_async(
-                seq_group_metadata_list, scheduler_outputs.blocks_to_swap_in,
-                scheduler_outputs.blocks_to_swap_out,
-                scheduler_outputs.blocks_to_copy,
-                scheduler_outputs.num_lookahead_slots)
+                execute_model_req)
         else:
             output = []
 
         request_outputs = self._process_model_outputs(
             output, scheduler_outputs.scheduled_seq_groups,
-            scheduler_outputs.ignored_seq_groups)
+            scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)
 
         # Log stats.
-        if self.log_stats:
-            self.stat_logger.log(self._get_stats(scheduler_outputs))
+        self.do_log_stats(scheduler_outputs, output)
 
         return request_outputs
 
-    async def encode_request_async(
+    async def stop_remote_worker_execution_loop_async(self) -> None:
+        """Stop the remote worker execution loop."""
+        await self.model_executor.stop_remote_worker_execution_loop_async()
+
+    async def process_model_inputs_async(
         self,
-        request_id: str,  # pylint: disable=unused-argument
-        prompt: Optional[str],
-        prompt_token_ids: Optional[List[int]] = None,
+        request_id: str,
+        inputs: PromptInputs,
         lora_request: Optional[LoRARequest] = None,
-    ):
-        if prompt_token_ids is None:
-            assert prompt is not None
-            prompt_token_ids = await self.tokenizer.encode_async(
+        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+    ) -> LLMInputs:
+        if isinstance(inputs, str):
+            inputs = {"prompt": inputs}
+
+        if "prompt_token_ids" not in inputs:
+            tokenizer = self.get_tokenizer_group("prompts must be None if "
+                                                 "skip_tokenizer_init is True")
+
+            prompt_token_ids = await tokenizer.encode_async(
                 request_id=request_id,
-                prompt=prompt,
+                prompt=inputs["prompt"],
                 lora_request=lora_request)
-        return prompt_token_ids
+        else:
+            prompt_token_ids = inputs["prompt_token_ids"]
+
+        if prompt_adapter_request:
+            prompt_token_ids = [
+                0
+            ] * prompt_adapter_request.prompt_adapter_num_virtual_tokens + \
+                prompt_token_ids
+
+        llm_inputs = LLMInputs(prompt_token_ids=prompt_token_ids,
+                               prompt=inputs.get("prompt"),
+                               multi_modal_data=inputs.get("multi_modal_data"))
+
+        return self.input_processor(llm_inputs)
 
     async def add_request_async(
         self,
         request_id: str,
-        prompt: Optional[str],
-        sampling_params: SamplingParams,
-        prompt_token_ids: Optional[List[int]] = None,
+        inputs: PromptInputs,
+        params: Union[SamplingParams, PoolingParams],
         arrival_time: Optional[float] = None,
         lora_request: Optional[LoRARequest] = None,
-        multi_modal_data: Optional[MultiModalData] = None,
+        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
     ) -> None:
         if lora_request is not None and not self.lora_config:
             raise ValueError(f"Got lora_request {lora_request} but LoRA is "
                              "not enabled!")
         if arrival_time is None:
             arrival_time = time.time()
-        prompt_token_ids = await self.encode_request_async(
-            request_id=request_id,
-            prompt=prompt,
-            prompt_token_ids=prompt_token_ids,
-            lora_request=lora_request)
 
-        return self.add_request(request_id,
-                                prompt=prompt,
-                                prompt_token_ids=prompt_token_ids,
-                                sampling_params=sampling_params,
-                                arrival_time=arrival_time,
-                                lora_request=lora_request,
-                                multi_modal_data=multi_modal_data)
+        processed_inputs = await self.process_model_inputs_async(
+            request_id=request_id,
+            inputs=inputs,
+            lora_request=lora_request,
+            prompt_adapter_request=prompt_adapter_request)
+
+        self._add_processed_request(
+            request_id=request_id,
+            processed_inputs=processed_inputs,
+            params=params,
+            arrival_time=arrival_time,
+            lora_request=lora_request,
+            prompt_adapter_request=prompt_adapter_request,
+        )
 
     async def check_health_async(self) -> None:
+        if self.tokenizer:
+            self.tokenizer.check_health()
         self.model_executor.check_health()
 
 
@@ -298,8 +358,6 @@ class AsyncAphrodite:
             async frontend will be executed in a separate process as the
             model workers.
         log_requests: Whether to log the requests.
-        max_log_len: Maximum number of prompt characters or prompt ID numbers
-            being printed in log.
         start_engine_loop: If True, the background task to run the engine
             will be automatically started in the generate call.
         *args: Arguments for AphroditeEngine.
@@ -313,66 +371,124 @@ class AsyncAphrodite:
                  engine_use_ray: bool,
                  *args,
                  log_requests: bool = True,
-                 max_log_len: int = 0,
                  start_engine_loop: bool = True,
                  **kwargs) -> None:
         self.worker_use_ray = worker_use_ray
         self.engine_use_ray = engine_use_ray
         self.log_requests = log_requests
-        self.max_log_len = max_log_len
         self.engine = self._init_engine(*args, **kwargs)
 
-        self.background_loop = None
+        self.background_loop: Optional[asyncio.Future] = None
         # We need to keep a reference to unshielded
         # task as well to prevent it from being garbage
         # collected
-        self._background_loop_unshielded = None
+        self._background_loop_unshielded: Optional[asyncio.Task] = None
         self.start_engine_loop = start_engine_loop
-        self._request_tracker: Optional[RequestTracker] = None
         self._errored_with: Optional[BaseException] = None
 
+        # Lazy initialized fields
+        self._request_tracker: RequestTracker
+
     @classmethod
-    def from_engine_args(cls,
-                         engine_args: AsyncEngineArgs,
-                         start_engine_loop: bool = True) -> "AsyncAphrodite":
+    def _get_executor_cls(
+            cls, engine_config: EngineConfig) -> Type[ExecutorAsyncBase]:
+        distributed_executor_backend = (
+            engine_config.parallel_config.distributed_executor_backend)
+        if isinstance(distributed_executor_backend, type):
+            if not issubclass(distributed_executor_backend, ExecutorAsyncBase):
+                raise TypeError(
+                    "distributed_executor_backend must be a subclass of "
+                    f"ExecutorAsyncBase. Got {distributed_executor_backend}.")
+            if distributed_executor_backend.uses_ray:  # type: ignore
+                initialize_ray_cluster(engine_config.parallel_config)
+            executor_class = distributed_executor_backend
+        elif engine_config.device_config.device_type == "neuron":
+            from aphrodite.executor.neuron_executor import NeuronExecutorAsync
+            executor_class = NeuronExecutorAsync
+        elif engine_config.device_config.device_type == "tpu":
+            if distributed_executor_backend == "ray":
+                initialize_ray_cluster(engine_config.parallel_config)
+                from aphrodite.executor.ray_tpu_executor import (
+                    RayTPUExecutorAsync)
+                executor_class = RayTPUExecutorAsync
+            else:
+                assert distributed_executor_backend is None
+                from aphrodite.executor.tpu_executor import TPUExecutorAsync
+                executor_class = TPUExecutorAsync
+        elif engine_config.device_config.device_type == "cpu":
+            from aphrodite.executor.cpu_executor import CPUExecutorAsync
+            executor_class = CPUExecutorAsync
+        elif engine_config.device_config.device_type == "openvino":
+            assert distributed_executor_backend is None, (
+                "Distributed execution is not supported with the OpenVINO "
+                "backend.")
+            from aphrodite.executor.openvino_executor import (
+                OpenVINOExecutorAsync)
+            executor_class = OpenVINOExecutorAsync
+        elif engine_config.device_config.device_type == "xpu":
+            if distributed_executor_backend is None:
+                from aphrodite.executor.xpu_executor import XPUExecutorAsync
+                executor_class = XPUExecutorAsync
+            elif distributed_executor_backend == "ray":
+                initialize_ray_cluster(engine_config.parallel_config)
+                from aphrodite.executor.ray_xpu_executor import (
+                    RayXPUExecutorAsync)
+                executor_class = RayXPUExecutorAsync
+            else:
+                raise RuntimeError(
+                    "Unsupported distributed executor backend for XPU.")
+        elif distributed_executor_backend == "ray":
+            initialize_ray_cluster(engine_config.parallel_config)
+            from aphrodite.executor.ray_gpu_executor import RayGPUExecutorAsync
+            executor_class = RayGPUExecutorAsync
+        elif distributed_executor_backend == "mp":
+            from aphrodite.executor.multiproc_gpu_executor import (
+                MultiprocessingGPUExecutorAsync)
+            executor_class = MultiprocessingGPUExecutorAsync
+        else:
+            from aphrodite.executor.gpu_executor import GPUExecutorAsync
+            executor_class = GPUExecutorAsync
+        return executor_class
+
+    @classmethod
+    def from_engine_args(
+        cls,
+        engine_args: AsyncEngineArgs,
+        start_engine_loop: bool = True,
+        stat_loggers: Optional[Dict[str, StatLoggerBase]] = None,
+    ) -> "AsyncAphrodite":
         """Creates an async LLM engine from the engine arguments."""
         # Create the engine configs.
         engine_config = engine_args.create_engine_config()
 
-        if engine_config.device_config.device_type == "neuron":
-            raise NotImplementedError("Neuron is not supported for "
-                                      "async engine yet.")
-        elif engine_config.device_config.device_type == "cpu":
-            from aphrodite.executor.cpu_executor import CPUExecutor
-            executor_class = CPUExecutor
-        elif engine_config.parallel_config.worker_use_ray:
-            initialize_ray_cluster(engine_config.parallel_config)
-            from aphrodite.executor.ray_gpu_executor import RayGPUExecutorAsync
-            executor_class = RayGPUExecutorAsync
-        else:
-            assert engine_config.parallel_config.world_size == 1, (
-                "Ray is required if parallel_config.world_size > 1.")
-            from aphrodite.executor.gpu_executor import GPUExecutorAsync
-            executor_class = GPUExecutorAsync
+        if engine_args.engine_use_ray:
+            from aphrodite.executor import ray_utils
+            ray_utils.assert_ray_available()
+
+        executor_class = cls._get_executor_cls(engine_config)
         # Create the async LLM engine.
-        engine = cls(engine_config.parallel_config.worker_use_ray,
-                     engine_args.engine_use_ray,
-                     **engine_config.to_dict(),
-                     executor_class=executor_class,
-                     log_requests=not engine_args.disable_log_requests,
-                     log_stats=not engine_args.disable_log_stats,
-                     max_log_len=engine_args.max_log_len,
-                     start_engine_loop=start_engine_loop)
+        engine = cls(
+            executor_class.uses_ray,
+            engine_args.engine_use_ray,
+            **engine_config.to_dict(),
+            executor_class=executor_class,
+            log_requests=not engine_args.disable_log_requests,
+            log_stats=not engine_args.disable_log_stats,
+            start_engine_loop=start_engine_loop,
+            stat_loggers=stat_loggers,
+        )
         return engine
 
     @property
     def is_running(self) -> bool:
         return (self.background_loop is not None
+                and self._background_loop_unshielded is not None
                 and not self._background_loop_unshielded.done())
 
     @property
     def is_stopped(self) -> bool:
-        return self.errored or (self.background_loop is not None
+        return self.errored or (self.background_loop is not None and
+                                self._background_loop_unshielded is not None
                                 and self._background_loop_unshielded.done())
 
     @property
@@ -386,11 +502,16 @@ class AsyncAphrodite:
         self.set_errored(exc)
         self._request_tracker.propagate_exception(exc)
 
-    async def get_tokenizer(self) -> "PreTrainedTokenizer":
+    async def get_tokenizer(
+        self,
+        lora_request: Optional[LoRARequest] = None,
+    ) -> "PreTrainedTokenizer":
         if self.engine_use_ray:
-            return await self.engine.get_tokenizer.remote()
-        else:
-            return self.engine.get_tokenizer()
+            return await self.engine.get_tokenizer.remote(  # type: ignore
+                lora_request)
+
+        return await (self.engine.get_tokenizer_group().
+                      get_lora_tokenizer_async(lora_request))
 
     def start_background_loop(self) -> None:
         """Start the background loop."""
@@ -405,8 +526,7 @@ class AsyncAphrodite:
         self._background_loop_unshielded = asyncio.get_event_loop(
         ).create_task(self.run_engine_loop())
         self._background_loop_unshielded.add_done_callback(
-            partial(_raise_exception_on_finish,
-                    error_callback=self._error_callback))
+            partial(_log_task_completion, error_callback=self._error_callback))
         self.background_loop = asyncio.shield(self._background_loop_unshielded)
 
     def _init_engine(self, *args,
@@ -420,7 +540,8 @@ class AsyncAphrodite:
             # order of the arguments.
             cache_config = kwargs["cache_config"]
             parallel_config = kwargs["parallel_config"]
-            if parallel_config.tensor_parallel_size == 1:
+            if (parallel_config.tensor_parallel_size == 1
+                    and parallel_config.pipeline_parallel_size == 1):
                 num_gpus = cache_config.gpu_memory_utilization
             else:
                 num_gpus = 1
@@ -428,7 +549,7 @@ class AsyncAphrodite:
                 self._engine_class).remote
         return engine_class(*args, **kwargs)
 
-    async def engine_step(self) -> bool:
+    async def engine_step(self, virtual_engine: int) -> bool:
         """Kick the engine to process the waiting requests.
 
         Returns True if there are in-progress requests."""
@@ -441,7 +562,8 @@ class AsyncAphrodite:
             # TODO: Maybe add add_request_batch to reduce Ray overhead
             try:
                 if self.engine_use_ray:
-                    await self.engine.add_request.remote(**new_request)
+                    await self.engine.add_request.remote(  # type: ignore
+                        **new_request)
                 else:
                     await self.engine.add_request_async(**new_request)
             except ValueError as e:
@@ -456,69 +578,101 @@ class AsyncAphrodite:
             await self._engine_abort(finished_requests)
 
         if self.engine_use_ray:
-            request_outputs = await self.engine.step.remote()
+            request_outputs = await self.engine.step.remote()  # type: ignore
         else:
-            request_outputs = await self.engine.step_async()
+            request_outputs = await self.engine.step_async(virtual_engine)
 
         # Put the outputs into the corresponding streams.
+        finished = True
         for request_output in request_outputs:
             self._request_tracker.process_request_output(
                 request_output, verbose=self.log_requests)
+            finished = finished and request_output.finished
 
-        return len(request_outputs) > 0
+        return not finished
 
     async def _engine_abort(self, request_ids: Iterable[str]):
         if self.engine_use_ray:
-            await self.engine.abort_request.remote(request_ids)
+            await self.engine.abort_request.remote(request_ids)  # type: ignore
         else:
             self.engine.abort_request(request_ids)
 
     async def run_engine_loop(self):
-        has_requests_in_progress = False
-        try:
-            while True:
-                if not has_requests_in_progress:
-                    logger.debug("Waiting for new requests...")
-                    await self._request_tracker.wait_for_new_requests()
-                    logger.debug("Got new requests!")
+        if self.engine_use_ray:
+            pipeline_parallel_size = 1  # type: ignore
+        else:
+            pipeline_parallel_size = \
+                self.engine.parallel_config.pipeline_parallel_size
+        has_requests_in_progress = [False] * pipeline_parallel_size
+        while True:
+            if not any(has_requests_in_progress):
+                logger.debug("Waiting for new requests...")
+                # Stop the execute model loop in parallel workers until there
+                # are more requests to process. This avoids waiting
+                # indefinitely in torch.distributed ops which may otherwise
+                # timeout, and unblocks the RPC thread in the workers so that
+                # they can process any other queued control plane messages,
+                # such as add/remove lora adapters.
+                if self.engine_use_ray:
+                    await (self.engine.stop_remote_worker_execution_loop.
+                           remote()  # type: ignore
+                           )
+                else:
+                    await self.engine.stop_remote_worker_execution_loop_async()
+                await self._request_tracker.wait_for_new_requests()
+                logger.debug("Got new requests!")
+                requests_in_progress = [
+                    asyncio.create_task(self.engine_step(ve))
+                    for ve in range(pipeline_parallel_size)
+                ]
+                has_requests_in_progress = [True] * pipeline_parallel_size
 
-                # Abort if iteration takes too long due to unrecoverable errors
-                # (eg. NCCL timeouts).
-                try:
-                    has_requests_in_progress = await asyncio.wait_for(
-                        self.engine_step(), ENGINE_ITERATION_TIMEOUT_S)
-                except asyncio.TimeoutError as exc:
-                    logger.error(
-                        "Engine iteration timed out. This should never happen!"
-                    )
-                    self.set_errored(exc)
-                    raise
-                await asyncio.sleep(0)
-        except KeyboardInterrupt:
-            logger.info("Engine loop interrupted. Exiting gracefully.")
+            # Abort if iteration takes too long due to unrecoverable errors
+            # (eg. NCCL timeouts).
+            try:
+                async with asyncio_timeout(ENGINE_ITERATION_TIMEOUT_S):
+                    done, _ = await asyncio.wait(
+                        requests_in_progress,
+                        return_when=asyncio.FIRST_COMPLETED)
+                    for _ in range(pipeline_parallel_size):
+                        await asyncio.sleep(0)
+                for task in done:
+                    result = task.result()
+                    virtual_engine = requests_in_progress.index(task)
+                    if self.engine_use_ray:
+                        has_unfinished_requests = (
+                            await (self.engine.
+                                   has_unfinished_requests_for_virtual_engine.
+                                   remote(  # type: ignore
+                                       virtual_engine)))
+                    else:
+                        has_unfinished_requests = (
+                            self.engine.
+                            has_unfinished_requests_for_virtual_engine(
+                                virtual_engine))
+                    if result or has_unfinished_requests:
+                        requests_in_progress[virtual_engine] = (
+                            asyncio.create_task(
+                                self.engine_step(virtual_engine)))
+                        has_requests_in_progress[virtual_engine] = True
+                    else:
+                        has_requests_in_progress[virtual_engine] = False
+            except asyncio.TimeoutError as exc:
+                logger.error(
+                    "Engine iteration timed out. This should never happen!")
+                self.set_errored(exc)
+                raise
+            await asyncio.sleep(0)
 
     async def add_request(
         self,
         request_id: str,
-        prompt: Optional[str],
-        sampling_params: SamplingParams,
-        prompt_token_ids: Optional[List[int]] = None,
+        inputs: PromptInputs,
+        params: Union[SamplingParams, PoolingParams],
         arrival_time: Optional[float] = None,
         lora_request: Optional[LoRARequest] = None,
+        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
     ) -> AsyncStream:
-        if self.log_requests:
-            shortened_prompt = prompt
-            shortened_token_ids = prompt_token_ids
-            if self.max_log_len is not None:
-                if shortened_prompt is not None:
-                    shortened_prompt = shortened_prompt[:self.max_log_len]
-                if shortened_token_ids is not None:
-                    shortened_token_ids = shortened_token_ids[:self.
-                                                              max_log_len]
-            logger.info(f"Received request {request_id}: "
-                        f"prompt: {shortened_prompt!r}, "
-                        f"sampling_params: {sampling_params}, "
-                        f"lora_request: {lora_request}.")
 
         if not self.is_running:
             if self.start_engine_loop:
@@ -533,36 +687,24 @@ class AsyncAphrodite:
         if arrival_time is None:
             arrival_time = time.time()
 
-        if self.engine_use_ray:
-            prompt_token_ids = await self.engine.encode_request_async.remote(
-                request_id=request_id,
-                prompt=prompt,
-                prompt_token_ids=prompt_token_ids,
-                lora_request=lora_request)
-        else:
-            prompt_token_ids = await self.engine.encode_request_async(
-                request_id=request_id,
-                prompt=prompt,
-                prompt_token_ids=prompt_token_ids,
-                lora_request=lora_request)
-
         stream = self._request_tracker.add_request(
             request_id,
-            prompt=prompt,
-            sampling_params=sampling_params,
-            prompt_token_ids=prompt_token_ids,
+            verbose=self.log_requests,
+            inputs=inputs,
+            params=params,
             arrival_time=arrival_time,
-            lora_request=lora_request)
+            lora_request=lora_request,
+            prompt_adapter_request=prompt_adapter_request)
 
         return stream
 
     async def generate(
         self,
-        prompt: Optional[str],
+        inputs: PromptInputs,
         sampling_params: SamplingParams,
         request_id: str,
-        prompt_token_ids: Optional[List[int]] = None,
         lora_request: Optional[LoRARequest] = None,
+        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
     ) -> AsyncIterator[RequestOutput]:
         """Generate outputs for a request.
 
@@ -578,10 +720,12 @@ class AsyncAphrodite:
             prompt_token_ids: The token IDs of the prompt. If None, we
                 use the tokenizer to convert the prompts to token IDs.
             lora_request: LoRA request to use for generation, if any.
+            prompt_adapter_request: Prompt Adapter request to use 
+                                            for generation, if any.
 
         Yields:
-            The output `RequestOutput` objects from the AphroditeEngine for the
-            request.
+            The output `RequestOutput` objects from the AphroditeEngine
+            for the request.
 
         Details:
             - If the engine is not running, start the background loop,
@@ -627,29 +771,109 @@ class AsyncAphrodite:
             >>> # Process and return the final output
             >>> ...
         """
-        # Preprocess the request.
-        # This should not be used for logging, as it is monotonic time.
-        arrival_time = time.monotonic()
+        async for output in self._process_request(
+                request_id,
+                inputs,
+                sampling_params,
+                lora_request=lora_request,
+                prompt_adapter_request=prompt_adapter_request,
+        ):
+            yield AphroditeEngine.validate_output(output, RequestOutput)
+
+    async def encode(
+        self,
+        inputs: PromptInputs,
+        pooling_params: PoolingParams,
+        request_id: str,
+        lora_request: Optional[LoRARequest] = None,
+    ) -> AsyncIterator[EmbeddingRequestOutput]:
+        """Generate outputs for a request from an embedding model.
+        Generate outputs for a request. This method is a coroutine. It adds the
+        request into the waiting queue of the AphroditeEngine and streams the
+        outputs from the AphroditeEngine to the caller.
+        Args:
+            prompt: The prompt string. Can be None if prompt_token_ids is
+                provided.
+            pooling_params: The pooling parameters of the request.
+            request_id: The unique id of the request.
+            prompt_token_ids: The token IDs of the prompt. If None, we
+                use the tokenizer to convert the prompts to token IDs.
+            lora_request: LoRA request to use for generation, if any.
+            multi_modal_data: Multi modal data per request.
+        Yields:
+            The output `EmbeddingRequestOutput` objects from the
+            AphroditeEngine for the request.
+        Details:
+            - If the engine is not running, start the background loop,
+              which iteratively invokes
+              :meth:`~aphrodite.engine.async_aphrodite.AsyncAphrodite.engine_step`
+              to process the waiting requests.
+            - Add the request to the engine's `RequestTracker`.
+              On the next background loop, this request will be sent to
+              the underlying engine.
+              Also, a corresponding `AsyncStream` will be created.
+            - Wait for the request outputs from `AsyncStream` and yield them.
+        Example:
+            >>> # initialize the engine and the example input
+            >>> engine = AsyncAphrodite.from_engine_args(engine_args)
+            >>> example_input = {
+            >>>     "input": "What is LLM?",
+            >>>     "request_id": 0,
+            >>> }
+            >>>
+            >>> # start the generation
+            >>> results_generator = engine.encode(
+            >>>    example_input["input"],
+            >>>    PoolingParams(),
+            >>>    example_input["request_id"])
+            >>>
+            >>> # get the results
+            >>> final_output = None
+            >>> async for request_output in results_generator:
+            >>>     if await request.is_disconnected():
+            >>>         # Abort the request if the client disconnects.
+            >>>         await engine.abort(request_id)
+            >>>         # Return or raise an error
+            >>>         ...
+            >>>     final_output = request_output
+            >>>
+            >>> # Process and return the final output
+            >>> ...
+        """
+        async for output in self._process_request(
+                request_id,
+                inputs,
+                pooling_params,
+                lora_request=lora_request,
+        ):
+            yield AphroditeEngine.validate_output(output,
+                                                  EmbeddingRequestOutput)
+
+    async def _process_request(
+        self,
+        request_id: str,
+        inputs: PromptInputs,
+        params: Union[SamplingParams, PoolingParams],
+        *,
+        lora_request: Optional[LoRARequest] = None,
+        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+    ) -> AsyncIterator[Union[RequestOutput, EmbeddingRequestOutput]]:
+        """Common logic to process requests with SamplingParams or
+        PoolingParams."""
+        arrival_time = time.time()
+
+        stream = await self.add_request(
+            request_id,
+            inputs,
+            params,
+            arrival_time=arrival_time,
+            lora_request=lora_request,
+            prompt_adapter_request=prompt_adapter_request)
 
         try:
-            stream = await self.add_request(
-                request_id,
-                prompt,
-                sampling_params,
-                prompt_token_ids=prompt_token_ids,
-                arrival_time=arrival_time,
-                lora_request=lora_request,
-            )
-
             async for request_output in stream:
                 yield request_output
-        except asyncio.exceptions.CancelledError:
-            logger.info(f"Request {request_id} cancelled.")
-            self._abort(request_id)
-            raise
         except (Exception, asyncio.CancelledError) as e:
-            # If there is an exception or coroutine is cancelled, abort the
-            # request.
             self._abort(request_id)
             raise e
 
@@ -686,13 +910,49 @@ class AsyncAphrodite:
     async def get_model_config(self) -> ModelConfig:
         """Get the model configuration of the Aphrodite engine."""
         if self.engine_use_ray:
-            return await self.engine.get_model_config.remote()
+            return await self.engine.get_model_config.remote()  # type: ignore
         else:
             return self.engine.get_model_config()
 
-    async def do_log_stats(self) -> None:
+    async def get_parallel_config(self) -> ParallelConfig:
+        """Get the parallel configuration of the Aphrodite engine."""
         if self.engine_use_ray:
-            await self.engine.do_log_stats.remote()
+            return await self.engine.get_parallel_config.remote(  # type: ignore
+            )
+        else:
+            return self.engine.get_parallel_config()
+
+    async def get_decoding_config(self) -> DecodingConfig:
+        """Get the decoding configuration of the Aphrodite engine."""
+        if self.engine_use_ray:
+            return await self.engine.get_decoding_config.remote(  # type: ignore
+            )
+        else:
+            return self.engine.get_decoding_config()
+
+    async def get_scheduler_config(self) -> SchedulerConfig:
+        """Get the scheduling configuration of the Aphrodite engine."""
+        if self.engine_use_ray:
+            return await self.engine.get_scheduler_config.remote(  # type: ignore
+            )
+        else:
+            return self.engine.get_scheduler_config()
+
+    async def get_lora_config(self) -> LoRAConfig:
+        """Get the lora configuration of the Aphrodite engine."""
+        if self.engine_use_ray:
+            return await self.engine.get_lora_config.remote(  # type: ignore
+            )
+        else:
+            return self.engine.get_lora_config()
+
+    async def do_log_stats(
+            self,
+            scheduler_outputs: Optional[SchedulerOutputs] = None,
+            model_output: Optional[List[SamplerOutput]] = None) -> None:
+        if self.engine_use_ray:
+            await self.engine.do_log_stats.remote(  # type: ignore
+                scheduler_outputs, model_output)
         else:
             self.engine.do_log_stats()
 
@@ -705,7 +965,7 @@ class AsyncAphrodite:
 
         if self.engine_use_ray:
             try:
-                await self.engine.check_health.remote()
+                await self.engine.check_health.remote()  # type: ignore
             except ray.exceptions.RayActorError as e:
                 raise RuntimeError("Engine is dead.") from e
         else:

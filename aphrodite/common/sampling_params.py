@@ -1,13 +1,19 @@
 """Sampling parameters for text generation."""
 import copy
+import os
 from enum import IntEnum
 from functools import cached_property
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
-from pydantic import conint
+from loguru import logger
+from pydantic import Field
+from typing_extensions import Annotated
 
 _SAMPLING_EPS = 1e-5
+
+APHRODITE_NO_DEPRECATION_WARNING = bool(
+    int(os.environ.get("APHRODITE_NO_DEPRECATION_WARNING", "0")))
 
 
 class SamplingType(IntEnum):
@@ -17,9 +23,14 @@ class SamplingType(IntEnum):
     BEAM = 3
 
 
-LogitsProcessorFunc = Callable[[torch.Tensor, List[List[int]]], None]
-"""LogitsProcessorFunc takes a logits tensor and corresponding lists of
-previously generated output tokens, and modifies the logits tensor."""
+LogitsProcessorFunc = Union[Callable[[List[int], torch.Tensor], torch.Tensor],
+                            Callable[[List[int], List[int], torch.Tensor],
+                                     torch.Tensor]]
+"""LogitsProcessor is a function that takes a list
+of previously generated tokens, the logits tensor
+for the next token and, optionally, prompt tokens as a
+first argument, and returns a modified tensor of logits
+to sample from."""
 
 
 class SamplingParams:
@@ -110,11 +121,12 @@ class SamplingParams:
         min_tokens: Minimum number of tokens to generate per output sequence
             before EOS or stop tokens are generated.
         logprobs: Number of log probabilities to return per output token.
-            Note that the implementation follows the OpenAI API: The return
-            result includes the log probabilities on the `logprobs` most likely
-            tokens, as well the chosen tokens. The API will always return the
-            log probability of the sampled token, so there  may be up to
-            `logprobs+1` elements in the response.
+            When set to None, no probability is returned. If set to a non-None
+            value, the result includes the log probabilities of the specified
+            number of most likely tokens, as well as the chosen tokens.
+            Note that the implementation follows the OpenAI API: The API will
+            always return the log probability of the sampled token, so there
+            may be up to `logprobs+1` elements in the response.
         prompt_logprobs: Number of log probabilities to return per prompt token.
         detokenize: Whether to detokenize the output. Defaults to True.
         custom_token_bans: List of token IDs to ban from generating
@@ -122,8 +134,9 @@ class SamplingParams:
             defaults to true.
         spaces_between_special_tokens: Whether to add spaces between special
             tokens in the output. Defaults to True.
-        logits_processors: List of LogitsProcessors to change the probability
-            of token prediction at runtime.
+        logits_processors: List of functions that modify logits based on
+            previously generated tokens, and optionally prompt tokens as
+            a first argument.
         truncate_prompt_tokens: If set to an integer k, will use only the last
             k tokens from the prompt (i.e. left-truncation). Defaults to None
             (i.e. no truncation).
@@ -145,12 +158,6 @@ class SamplingParams:
         eta_cutoff: float = 0.0,
         epsilon_cutoff: float = 0.0,
         typical_p: float = 1.0,
-        mirostat_mode: int = 0,
-        mirostat_tau: float = 0,
-        mirostat_eta: float = 0,
-        dynatemp_min: float = 0,
-        dynatemp_max: float = 0,
-        dynatemp_exponent: float = 1,
         smoothing_factor: float = 0.0,
         smoothing_curve: float = 1.0,
         seed: Optional[int] = None,
@@ -170,7 +177,7 @@ class SamplingParams:
         skip_special_tokens: bool = True,
         spaces_between_special_tokens: bool = True,
         logits_processors: Optional[List[LogitsProcessorFunc]] = None,
-        truncate_prompt_tokens: Optional[conint(ge=1)] = None,
+        truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None,
     ) -> None:
         self.n = n
         self.best_of = best_of if best_of is not None else n
@@ -186,15 +193,12 @@ class SamplingParams:
         self.eta_cutoff = eta_cutoff
         self.epsilon_cutoff = epsilon_cutoff
         self.typical_p = typical_p
-        self.mirostat_mode = mirostat_mode
-        self.mirostat_tau = mirostat_tau
-        self.mirostat_eta = mirostat_eta
-        self.dynatemp_min = dynatemp_min
-        self.dynatemp_max = dynatemp_max
-        self.dynatemp_exponent = dynatemp_exponent
         self.smoothing_factor = smoothing_factor
         self.smoothing_curve = smoothing_curve
-        self.seed = seed
+        if seed == -1:
+            self.seed = None
+        else:
+            self.seed = seed
         self.use_beam_search = use_beam_search
         self.length_penalty = length_penalty
         self.early_stopping = early_stopping
@@ -208,8 +212,8 @@ class SamplingParams:
         self.ignore_eos = ignore_eos
         self.max_tokens = max_tokens
         self.min_tokens = min_tokens
-        self.logprobs = logprobs
-        self.prompt_logprobs = prompt_logprobs
+        self.logprobs = 1 if logprobs is True else logprobs
+        self.prompt_logprobs = 1 if prompt_logprobs is True else prompt_logprobs
         # NOTE: This parameter is only exposed at the engine level for now.
         # It is not exposed in the OpenAI API server, as the OpenAI API does
         # not support returning only a list of token IDs.
@@ -220,6 +224,12 @@ class SamplingParams:
         self.logits_processors = logits_processors or []
         self.include_stop_str_in_output = include_stop_str_in_output
         self.truncate_prompt_tokens = truncate_prompt_tokens
+        # Number of characters to hold back for stop string evaluation
+        # until sequence is finished.
+        if self.stop and not include_stop_str_in_output:
+            self.output_text_buffer_length = max(len(s) for s in self.stop) - 1
+        else:
+            self.output_text_buffer_length = 0
 
         self.default_values = {
             "n": 1,
@@ -236,12 +246,6 @@ class SamplingParams:
             "eta_cutoff": 0.0,
             "epsilon_cutoff": 0.0,
             "typical_p": 1.0,
-            "mirostat_mode": 0,
-            "mirostat_tau": 0,
-            "mirostat_eta": 0,
-            "dynatemp_min": 0,
-            "dynatemp_max": 0,
-            "dynatemp_exponent": 1,
             "smoothing_factor": 0.0,
             "smoothing_curve": 1.0,
             "seed": None,
@@ -272,6 +276,12 @@ class SamplingParams:
 
         self._verify_args()
         if self.use_beam_search:
+            if not APHRODITE_NO_DEPRECATION_WARNING:
+                logger.warning(
+                    "[IMPORTANT] We plan to discontinue the support for beam "
+                    "search in the next major release. Set "
+                    "APHRODITE_NO_DEPRECATION_WARNING=1 to "
+                    "suppress this warning.")
             self._verify_beam_search()
         else:
             self._verify_non_beam_search()
@@ -282,8 +292,8 @@ class SamplingParams:
                 self.min_p = 0.0
                 self.top_a = 0.0
                 self._verify_greedy_sampling()
-        # injected by the engine
-        self.eos_token_id = None
+        # eos_token_id is added to this by the engine
+        self.all_stop_token_ids = set(self.stop_token_ids)
 
     def _verify_args(self) -> None:
         if self.n < 1:
@@ -324,32 +334,6 @@ class SamplingParams:
         if not 0.0 <= self.typical_p <= 1.0:
             raise ValueError(
                 f"typical_p must be in (0, 1], got {self.typical_p}.")
-        if not self.dynatemp_min >= 0:
-            raise ValueError(
-                f"dynatemp_min must be non negative, got {self.dynatemp_min}.")
-        if not self.dynatemp_max >= 0:
-            raise ValueError(
-                f"dynatemp_max must be non negative, got {self.dynatemp_max}.")
-        if not self.dynatemp_exponent >= 0:
-            raise ValueError(f"dynatemp_exponent must be non negative, got "
-                             f"{self.dynatemp_exponent}.")
-        if not self.smoothing_factor >= 0:
-            raise ValueError(f"smoothing_factor must be non negative, got "
-                             f"{self.smoothing_factor}.")
-        if not self.smoothing_curve >= 1.0:
-            raise ValueError(f"smoothing_curve must larger than 1, got "
-                             f"{self.smoothing_curve}.")
-        if self.mirostat_mode:
-            if not self.mirostat_mode == 2:
-                raise ValueError(
-                    "Only Mirostat v2 (2) and disabled (0) supported, "
-                    f"got {self.mirostat_mode}")
-            if not self.mirostat_eta >= 0:
-                raise ValueError(
-                    f"mirostat_eta must be positive, got {self.mirostat_eta}")
-            if not self.mirostat_tau >= 0:
-                raise ValueError(
-                    f"mirostat_tau must be positive, got {self.mirostat_tau}")
         if self.max_tokens is not None and self.max_tokens < 1:
             raise ValueError(
                 f"max_tokens must be at least 1, got {self.max_tokens}.")
@@ -412,16 +396,30 @@ class SamplingParams:
             raise ValueError("top_k must be -1 when using greedy sampling.")
 
     def update_from_generation_config(
-            self, generation_config: Dict[str, Any]) -> None:
+            self,
+            generation_config: Dict[str, Any],
+            model_eos_token_id: Optional[int] = None) -> None:
         """Update if there are non-default values from generation_config"""
+
+        if model_eos_token_id is not None:
+            # Add the eos token id into the sampling_params to support
+            # min_tokens processing.
+            self.all_stop_token_ids.add(model_eos_token_id)
+
         # Update eos_token_id for generation
-        if eos_ids := generation_config.get("eos_token_id"):
+        if (eos_ids := generation_config.get("eos_token_id")) is not None:
             # it can be either int or list of int
-            if isinstance(eos_ids, int):
-                eos_ids = [eos_ids]
-            original_stop_token_ids = set(self.stop_token_ids)
-            original_stop_token_ids.update(eos_ids)
-            self.stop_token_ids = list(original_stop_token_ids)
+            eos_ids = {eos_ids} if isinstance(eos_ids, int) else set(eos_ids)
+            if model_eos_token_id is not None:
+                # We don't need to include the primary eos_token_id in
+                # stop_token_ids since it's handled separately for stopping
+                # purposes.
+                eos_ids.discard(model_eos_token_id)
+            if eos_ids:
+                self.all_stop_token_ids.update(eos_ids)
+                if not self.ignore_eos:
+                    eos_ids.update(self.stop_token_ids)
+                    self.stop_token_ids = list(eos_ids)
 
     @cached_property
     def sampling_type(self) -> SamplingType:

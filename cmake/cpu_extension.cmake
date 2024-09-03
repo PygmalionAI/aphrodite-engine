@@ -12,7 +12,7 @@ include_directories("${CMAKE_SOURCE_DIR}/kernels")
 #
 # Check the compile flags
 #
-list(APPEND CXX_COMPILE_FLAGS 
+list(APPEND CXX_COMPILE_FLAGS
     "-fopenmp"
     "-DAPHRODITE_CPU_EXTENSION")
 
@@ -33,9 +33,23 @@ function (find_isa CPUINFO TARGET OUT)
     endif()
 endfunction()
 
-find_isa(${CPUINFO} "avx512f" AVX512_FOUND)
+function (is_avx512_disabled OUT)
+    set(DISABLE_AVX512 $ENV{APHRODITE_CPU_DISABLE_AVX512})
+    if(DISABLE_AVX512 AND DISABLE_AVX512 STREQUAL "true")
+        set(${OUT} ON PARENT_SCOPE)
+    else()
+        set(${OUT} OFF PARENT_SCOPE)
+    endif()
+endfunction()
 
-if (AVX512_FOUND)
+is_avx512_disabled(AVX512_DISABLED)
+
+find_isa(${CPUINFO} "avx2" AVX2_FOUND)
+find_isa(${CPUINFO} "avx512f" AVX512_FOUND)
+find_isa(${CPUINFO} "POWER10" POWER10_FOUND)
+find_isa(${CPUINFO} "POWER9" POWER9_FOUND)
+
+if (AVX512_FOUND AND NOT AVX512_DISABLED)
     list(APPEND CXX_COMPILE_FLAGS
         "-mavx512f"
         "-mavx512vl"
@@ -44,8 +58,8 @@ if (AVX512_FOUND)
 
     find_isa(${CPUINFO} "avx512_bf16" AVX512BF16_FOUND)
     if (AVX512BF16_FOUND OR ENABLE_AVX512BF16)
-        if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND 
-            CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12.3) 
+        if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+            CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12.3)
             list(APPEND CXX_COMPILE_FLAGS "-mavx512bf16")
         else()
             message(WARNING "Disable AVX512-BF16 ISA support, requires gcc/g++ >= 12.3")
@@ -53,11 +67,23 @@ if (AVX512_FOUND)
     else()
         message(WARNING "Disable AVX512-BF16 ISA support, no avx512_bf16 found in local CPU flags." " If cross-compilation is required, please set env APHRODITE_CPU_AVX512BF16=1.")
     endif()
+elseif (AVX2_FOUND)
+    list(APPEND CXX_COMPILE_FLAGS "-mavx2")
+    message(WARNING "Aphrodite CPU backend using AVX2 ISA")
+elseif (POWER9_FOUND OR POWER10_FOUND)
+    message(STATUS "PowerPC detected")
+    # Check for PowerPC VSX support
+    list(APPEND CXX_COMPILE_FLAGS
+        "-mvsx"
+        "-mcpu=native"
+        "-mtune=native")
 else()
-    message(FATAL_ERROR "Aphrodite CPU backend requires AVX512 ISA support.")
+    message(FATAL_ERROR "Aphrodite CPU backend requires AVX512 or AVX2 or Power9+ ISA support.")
 endif()
 
 message(STATUS "CPU extension compile flags: ${CXX_COMPILE_FLAGS}")
+
+list(APPEND LIBS "numa")
 
 
 #
@@ -71,19 +97,21 @@ set(APHRODITE_EXT_SRC
     "kernels/cpu/activation.cpp"
     "kernels/cpu/attention.cpp"
     "kernels/cpu/cache.cpp"
+    "kernels/cpu/utils.cpp"
     "kernels/cpu/layernorm.cpp"
     "kernels/cpu/pos_encoding.cpp"
-    "kernels/cpu/pybind.cpp")
+    "kernels/cpu/torch_bindings.cpp")
 
 define_gpu_extension_target(
     _C
     DESTINATION aphrodite
     LANGUAGE CXX
     SOURCES ${APHRODITE_EXT_SRC}
+    LIBRARIES ${LIBS}
     COMPILE_FLAGS ${CXX_COMPILE_FLAGS}
-    WITH_SOABI 
+    USE_SABI 3
+    WITH_SOABI
 )
 
-add_custom_target(default)
 message(STATUS "Enabling C extension.")
 add_dependencies(default _C)

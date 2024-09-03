@@ -1,0 +1,32 @@
+# The Aphrodite Dockerfile is used to construct Aphrodite image that can be directly used
+# to run the OpenAI compatible server.
+
+FROM ubuntu:22.04 AS dev
+
+RUN apt-get update -y && \
+    apt-get install -y python3-pip git
+WORKDIR /workspace
+
+# copy requirements
+COPY requirements-build.txt /workspace/aphrodite-engine/
+COPY requirements-common.txt /workspace/aphrodite-engine/
+COPY requirements-openvino.txt /workspace/aphrodite-engine/
+
+COPY aphrodite/ /workspace/aphrodite-engine/aphrodite
+COPY kernels/core /workspace/aphrodite-engine/kernels/core
+COPY cmake/utils.cmake /workspace/aphrodite-engine/cmake/
+COPY CMakeLists.txt /workspace/aphrodite-engine/
+COPY setup.py /workspace/aphrodite-engine/
+
+# install build requirements
+RUN PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cpu" python3 -m pip install -r /workspace/aphrodite-engine/requirements-build.txt
+# build Aphrodite with OpenVINO backend
+RUN PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cpu https://storage.openvinotoolkit.org/simple/wheels/pre-release" APHRODITE_TARGET_DEVICE="openvino" python3 -m pip install -e /workspace/aphrodite-engine/
+
+# temporary hack until the dependencies are upgraded
+RUN pip install 'transformers==4.43.0'
+
+COPY examples/ /workspace/aphrodite-engine/examples
+COPY tests/benchmarks/ /workspace/aphrodite-engine/tests/benchmarks
+
+CMD ["/bin/bash"]
