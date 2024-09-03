@@ -4,7 +4,6 @@ export default defineConfig({
   title: "Aphrodite Engine",
   head: [['link', { rel: 'icon', href: '/favicon.ico' }]],
   description: "User and Developer Documentation",
-  base: "/aphrodite-engine/",
   themeConfig: {
 		// nav: [{ text: "Home", link: "/" }],
 
