@@ -45,7 +45,7 @@ Reference:
 - [GitHub](https://github.com/hao-ai-lab/LookaheadDecoding)
 - Blog: [Break the Sequential Dependency of LLM Inference Using Lookahead Decoding](https://lmsys.org/blog/2023-11-21-lookahead-decoding/)
 
-This method is implemented using the [Jacobi method](https://en.wikipedia.org/wiki/Jacobi_method). We break the sequential dependency in autoregressive decoding by concurrently extracting and verifying n-grams directly witht eh LLM. This method functions without the need for a draft model or a data sore. It linearly decreases the number of decoding steps directly correlating with the log(FLOPs) used per decoding step.
+This method is implemented using the [Jacobi method](https://en.wikipedia.org/wiki/Jacobi_method). We break the sequential dependency in autoregressive decoding by concurrently extracting and verifying n-grams directly with the LLM. This method functions without the need for a draft model or a data sore. It linearly decreases the number of decoding steps directly correlating with the log(FLOPs) used per decoding step.
 
 The key observation enabling lookahead decoding is that, although decoding multiple next tokens in one step is infeasible, an LLM can indeed generate multiple disjoint [n-grams](https://en.wikipedia.org/wiki/N-gram) in parallel. These n-grams could potentially fit into future parts of the generated sequence. This is achieved by viewing [autoregressive decoding as solving nonlinear equations](https://proceedings.mlr.press/v139/song21a/song21a.pdf) and adapting the classic [Jacobi iteration method](https://en.wikipedia.org/wiki/Jacobi_method) for parallel decoding. The generated n-grams are captured and later verified, if suitable, integrated into the sequence.
 

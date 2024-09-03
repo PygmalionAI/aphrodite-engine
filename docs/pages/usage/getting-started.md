@@ -144,7 +144,7 @@ Now, initialize the engine using the `LLM` class with your model of choice. We w
 llm = LLM(model="meta-llama/Meta-Llama-3.1-8B-Instruct", tensor_parallel_size=2)
 ```
 
-The `LLM` class has a `generate()` method that we can use now. It adds the input prompts to the engine's wating queue and executes them to generate outputs with high throughput, in parallel. The outputs are returned as a list of `RequestOutput` objects, which include all the output tokens.
+The `LLM` class has a `generate()` method that we can use now. It adds the input prompts to the engine's waiting queue and executes them to generate outputs with high throughput, in parallel. The outputs are returned as a list of `RequestOutput` objects, which include all the output tokens.
 
 ```py
 outputs = llm.generate(prompts, sampling_params)

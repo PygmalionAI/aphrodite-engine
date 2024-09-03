@@ -90,7 +90,7 @@ Unlike `q_ptr`, `k_ptr` in each thread will point to different key tokens at dif
 ![key](/attention/key.webp)
 <p align="center"><small>Key data of all context tokens at one head.</small></p>
 
-The diagram above illustrates the memory layout for key data. It assumes that the `BLOCK_SIZE` is 16, `HEAD_SIZE` is 128, `x` is 8, `THREAD_GROUP_SIZE` is 2, and there are a total of 4 warps. Each rectangle represents all the elements for one key token at one head, which will be processed by one thread group. The left half shows the  total 16 blocks of key token data for wapr 0, while the right half represents the remaining key token data for other warps or iterations. Inside each rectangle, there are a total of 32 vecs (128 elements for one token) that will be procesed by 2 threads (one thread group) separately.
+The diagram above illustrates the memory layout for key data. It assumes that the `BLOCK_SIZE` is 16, `HEAD_SIZE` is 128, `x` is 8, `THREAD_GROUP_SIZE` is 2, and there are a total of 4 warps. Each rectangle represents all the elements for one key token at one head, which will be processed by one thread group. The left half shows the  total 16 blocks of key token data for warp 0, while the right half represents the remaining key token data for other warps or iterations. Inside each rectangle, there are a total of 32 vecs (128 elements for one token) that will be processed by 2 threads (one thread group) separately.
 
 ![k_vecs](/attention/k_vecs.webp)
 <p align="center"><small>k_vecs for one thread</small></p>
@@ -99,7 +99,7 @@ The diagram above illustrates the memory layout for key data. It assumes that th
 K_vec k_vecs[NUM_VECS_PER_THREAD];
 ```
 
-Next, we need to read the key token data from `k_ptr` and store them on registery memory as `k_vecs`. We use register memory for `k_vecs` because it'll only be accessed by one thread once, whereas `q_vecs` will be accessed by multiple threads multiple times. Each `k_vecs` will contain multiple vectors for later calculation. Each vec will be set at each inner iteration. The assignment of vecs allows neighbouring threads in a warp to read neighbouring memory together, which again promotes the memory coalescing. For instance, thread 0 will read vec 0, while thread 1 will read vec 1. In the next inner loop, thread 0 will read vec 2, while thread 1 will read vec 3, and so on.
+Next, we need to read the key token data from `k_ptr` and store them on registry memory as `k_vecs`. We use register memory for `k_vecs` because it'll only be accessed by one thread once, whereas `q_vecs` will be accessed by multiple threads multiple times. Each `k_vecs` will contain multiple vectors for later calculation. Each vec will be set at each inner iteration. The assignment of vecs allows neighbouring threads in a warp to read neighbouring memory together, which again promotes the memory coalescing. For instance, thread 0 will read vec 0, while thread 1 will read vec 1. In the next inner loop, thread 0 will read vec 2, while thread 1 will read vec 3, and so on.
 
 You may still be a little confused about the overall flow. Don't worry, please keep reading the next "QK" section. It'll illustrate the query/key calculation flow in a clearer and higher-level manner.
 
@@ -118,7 +118,7 @@ for ... {
 }
 ```
 
-As mentioned before, for each thread, it only fetches part of the query and key token data at a time. However, there will be a cross thread group reduction happening in the `Qk_dot<>::dot`. So `qk` returned here is not just between part of the query and key token dot multiplication, but actually a full result between entire query and key token datas.
+As mentioned before, for each thread, it only fetches part of the query and key token data at a time. However, there will be a cross thread group reduction happening in the `Qk_dot<>::dot`. So `qk` returned here is not just between part of the query and key token dot multiplication, but actually a full result between entire query and key token data.
 
 For example, if the value of `HEAD_SIZE` is 128 and `THREAD_GROUP_SIZE` is 2, each thread's `k_vecs` will contain 64 total elements. However, the returned `qk` is actually the result dot multiplication between 128 query elements and 128 key elements. If you want to learn more about the details of the dot product and reduction, you may refer to the implementation of `Qk_dot<>::dot` in `kernels/attention/attention_utils.cuh`. However, for the sake of simplicity, we won't cover it in this document.
 
@@ -206,7 +206,7 @@ Finally, with the reduced `qk_max` and `exp_sum`, we can obtain the final normal
 
 Now we need to retrieve the value data and perform dot product with `logits`. Unlike query and key, there's no thread group concept for value data. As shown in diagram, different from key token memory layout, elements from the same column correspond to the same value token. For one block of value data, there are `HEAD_SIZE`of rows and `BLOCK_SIZE` of columns that are split into multiple `v_vecs`.
 
-Each thread always fetches `V_VEC_SIZE` elements from the same `V_VEC_SIZE` of tokens at a time. As a result, a single thread retrieves multiple `v_vec` from different rows and the same columns through multiple inner iterations. For each `v_vec`, it needs to do be dot multplied with the corresponding `logits_vec`, which is also `V_VEC_SIZE` elements from `logits`. Overall with multiple inner iterations, each warp will process one block of value tokens. And with multiple outer iterations, the whole context value tokens are processed.
+Each thread always fetches `V_VEC_SIZE` elements from the same `V_VEC_SIZE` of tokens at a time. As a result, a single thread retrieves multiple `v_vec` from different rows and the same columns through multiple inner iterations. For each `v_vec`, it needs to do be dot multiplied with the corresponding `logits_vec`, which is also `V_VEC_SIZE` elements from `logits`. Overall with multiple inner iterations, each warp will process one block of value tokens. And with multiple outer iterations, the whole context value tokens are processed.
 
 ```cpp
 float ccs[NUM_ROWS_PER_THREAD]; // [!code focus]
@@ -220,7 +220,7 @@ for ... {
 }
 ```
 
-As shown in the psuedocode above, in the outer loop, similar to `k_ptr`, `logits_vec` iterates over different blocks and reads `V_VEC_SIZE` elements from `logits`. In the inner loop, each thread reads `V_VEC_SIZE` elements from the same tokens as a `v_vec` and performs dot product. We should note that in each inner iteration, the thread fetches different head position elements for the same tokens. The dot result  is then accumulated in `accs`. Therefore, each entry of `accs` is mapped to a head position assigned to the current thread.
+As shown in the pseudocode above, in the outer loop, similar to `k_ptr`, `logits_vec` iterates over different blocks and reads `V_VEC_SIZE` elements from `logits`. In the inner loop, each thread reads `V_VEC_SIZE` elements from the same tokens as a `v_vec` and performs dot product. We should note that in each inner iteration, the thread fetches different head position elements for the same tokens. The dot result  is then accumulated in `accs`. Therefore, each entry of `accs` is mapped to a head position assigned to the current thread.
 
 For example, if `BLOCK_SIZE` is 16, `V_VEC_SIZE` is 8, each thread fetches 8 value elements for 8 tokens at a time. Each element is from different tokens at the same head position. If `HEAD_SIZE` is 128 and `WARP_SIZE` is 32, for each inner loop, a warp needs to fetch `WARP_SIZE * V_VEC_SIZE = 256` elements. This means there are a total of `128 * 16 / 256 = 8` inner iterations for a warp to handle a whole block of value tokens. And each `accs` in each thread contains 8 elements that accumulated at 8 different head positions. For the thread 0, the `accs` variable will contain 8 elements, which are 0th, 32th ... 224th elements of a value head that are accumulated from all assigned 8 tokens.
 
@@ -240,7 +240,7 @@ Now, we need to perform reduction for `accs` within each warp. This process allo
   }
 ```
 
-Next, we perform reduction for `accs` across all warps, allowing each thread to have the accumulation of `accs` for the assigned head positions of all context tokens. Please note that each `accs` in every thread oly stores the accumulation for a portion of elements of the entire head for all context tokens. However, overall, all results for output have been calculated but are just stored in different thread register memory.
+Next, we perform reduction for `accs` across all warps, allowing each thread to have the accumulation of `accs` for the assigned head positions of all context tokens. Please note that each `accs` in every thread only stores the accumulation for a portion of elements of the entire head for all context tokens. However, overall, all results for output have been calculated but are just stored in different thread register memory.
 
 ```cpp
   float* out_smem = reinterpret_cast<float*>(shared_mem); // [!code focus]

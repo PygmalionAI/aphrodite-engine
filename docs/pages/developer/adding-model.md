@@ -6,7 +6,7 @@ outline: deep
 
 This document provides a high-level guide on integrating a Hugging Face transformers model into Aphrodite Engine.
 
-The complexity of adding a new model depends heavily on the model's architecture. The process is straightforward if the model shares a similar architecture with an existing model in Aphrodite. Howeever, for models that include new operators (e.g. a new attention mechanism), the process can be a bit more complex.
+The complexity of adding a new model depends heavily on the model's architecture. The process is straightforward if the model shares a similar architecture with an existing model in Aphrodite. However, for models that include new operators (e.g. a new attention mechanism), the process can be a bit more complex.
 
 By default, Aphrodite models do not support multi-modal inputs. We have separate guide for enabling that after implementing the model here.
 
@@ -15,7 +15,7 @@ If you're having problems implementing the model, feel free to open an issue on 
 :::
 
 ## Step 0: Fork the Aphrodite Repository
-Start by forking our [GitHub repository](https://github.com/PygmalionAI/aphrodite-engine) and the build it from source. This gives you the abilitiy to modify the source code and test your model.
+Start by forking our [GitHub repository](https://github.com/PygmalionAI/aphrodite-engine) and the build it from source. This gives you the ability to modify the source code and test your model.
 
 ## Step 1: Bring your model code
 Clone the PyTorch model code from the Hugging Face Transformers repository and put it into the `aphrodite/modeling/models` directory. For instance, Aphrodite's `OPT` model was adapted from Hugging Face's [modeling_opt.py](https://github.com/huggingface/transformers/blob/main/src/transformers/models/opt/modeling_opt.py) file.

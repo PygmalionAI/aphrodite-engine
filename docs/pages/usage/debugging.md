@@ -9,7 +9,7 @@ This page will walk you through debugging your issues with Aphrodite. It's recom
 
 ## Debugging hang/crash issues
 
-Wehn an Aphrodite instance hangs or crashes unexpectedly, debugging might be quite difficult. It's certainly possible that Aphrodite is doing something that takes a long time:
+When an Aphrodite instance hangs or crashes unexpectedly, debugging might be quite difficult. It's certainly possible that Aphrodite is doing something that takes a long time:
 
 - **Downloading a model**: If you don't have the model already downloaded on disk, Aphrodite will download it from Hugging Face or Modelscope first. Depending on your network connection, or whether or not you're using `hf-transfer`, this may take a while. It's recommended to download the model beforehand using [huggingface-cli](https://huggingface.co/docs/huggingface_hub/en/guides/cli), then use the local path to the model. This way, we can further isolate the issue.
 

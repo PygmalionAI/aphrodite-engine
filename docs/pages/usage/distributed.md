@@ -12,7 +12,7 @@ Before going into the details, let's make it clear when to use distributed infer
 
 - **Single GPU**: If your model fits on a single GPU, you probably don't need to use distributed inference. However, if you have two GPUs connected via P2P link, it might be faster to run it distributed.
 - **Single-Node Multi-GPU**: If your model is too large to fit in a single GPU, but it can fit on a single node with multiple GPUs, you can use tensor parallelism. The tensor parallel size is the number of GPUs you want to use. For example, if you have 3 GPUs in a single node, you can set the tensor parallel size to 3. **However**, keep in mind that for quantized models, you're limited to Tensor Parallel sizes of 2, 4, and 8. If you need to run a quantized model on 3 GPUs, you may need to use Pipeline Parallelism, which is significantly slower than Tensor Parallel.
-- **Multi-Node Multi-GPU**: If your model is too large to fit in a single node, you can use Tensor Parallel + Pipeline Parallel. The Tensor Parallel size is the number of GPUs within each node, and the Pipeline Paralle size is the number of nodes to use. For example, if you have 16 GPUs across 2 nodes (8 each), you can set `--tensor-parallel-size 8 --pipeline-parallel-size 2`.
+- **Multi-Node Multi-GPU**: If your model is too large to fit in a single node, you can use Tensor Parallel + Pipeline Parallel. The Tensor Parallel size is the number of GPUs within each node, and the Pipeline Parallel size is the number of nodes to use. For example, if you have 16 GPUs across 2 nodes (8 each), you can set `--tensor-parallel-size 8 --pipeline-parallel-size 2`.
 
 In short, you should increase the number of GPUs and the number of nodes until you have enough GPU memory to hold the model. You can also opt to use quantization if needed.
 
@@ -22,7 +22,7 @@ After adding enough GPUs and nodes to hold the model, you can run Aphrodite. It 
 
 Aphrodite supports distributed tensor parallel and pipeline parallel strategies. We implemented [Megatron-LM's tensor parallel algorithm](https://arxiv.org/pdf/1909.08053.pdf), which is also implemented by vLLM. We add extra features such as support for serving models on asymmetric number of GPUs. We manage the distributed runtime with either [Ray](https://github.com/ray-project/ray) or python-native multiprocessing. Multiprocessing is the default for single nodes, and Ray for multi-node configurations.
 
-Multiprocessing will be used by default when not running in a Ray placement group and if there are sufficient GPUs available on the same node for the configured `tensor_parallel_size`, otherwise Ray will be used. The default can be overriden via the `LLM` class argument `distributed_executor_backend` or the `--distributed-executor-backend` CLI arg in the API server. Set it to `mp` for multiprocessing and `ray` for Ray. It's not required to install the `ray` python package if using multiprocessing.
+Multiprocessing will be used by default when not running in a Ray placement group and if there are sufficient GPUs available on the same node for the configured `tensor_parallel_size`, otherwise Ray will be used. The default can be overridden via the `LLM` class argument `distributed_executor_backend` or the `--distributed-executor-backend` CLI arg in the API server. Set it to `mp` for multiprocessing and `ray` for Ray. It's not required to install the `ray` python package if using multiprocessing.
 
 To run multi-GPU inference with the LLM class, set the `tensor_parallel_size` to the number of GPUs you want to use. For example, on 4 GPUs you'd run:
 
@@ -76,7 +76,7 @@ bash run_cluster.sh \
   /path/to/the/huggingface/home/in/this/node
 ```
 
-Then you get a ray cluster of containers. Note that you need to keep the shells running these commands alive to hold the cluster. Any shell disconnect will terminate the cluster. You can use `tmux` to help with this. In addition, please note that the argument `ip_of_head_node` should be thw IP address of the head node, which is accessible by all the worker nodes. A common misunderstanding is to use the IP address of the worker, which is not correct.
+Then you get a ray cluster of containers. Note that you need to keep the shells running these commands alive to hold the cluster. Any shell disconnect will terminate the cluster. You can use `tmux` to help with this. In addition, please note that the argument `ip_of_head_node` should be the IP address of the head node, which is accessible by all the worker nodes. A common misunderstanding is to use the IP address of the worker, which is not correct.
 
 Then, on any node, use `docker exec -it node /bin/bash` to enter the container, execute `ray status` to check the status of the Ray cluster. You should see the right number of nodes and GPUs.
 

@@ -20,7 +20,7 @@ Please see  the [OpenAI API Reference](https://platform.openai.com/docs/api-refe
 
 Otherwise, we support everything, plus many other parameters.
 
-Aphrodite also provides experimental support fro the OpenAI Vision API.
+Aphrodite also provides experimental support for the OpenAI Vision API.
 
 ## Extra Parameters
 If using the `openai` python library, you cannot pass extra parameters such as `min_p`, `guided_choice`, etc. Thankfully, the library allows you to extend the body as needed:
@@ -649,6 +649,6 @@ options:
 
 Aphrodite supports only named function calling in the chat completions API. The `tool_choice` options `auto` and `required` are **not yet supported** but on the development roadmap.
 
-To use a named function, you need to define the function in the `tools` parameter and call it in the `tools_choice` paramter. It's the caller's responsibility to prompt the model with the tool info; Aphrodite will not automatically manipulate the prompt. **This may change in the future!**
+To use a named function, you need to define the function in the `tools` parameter and call it in the `tools_choice` parameter. It's the caller's responsibility to prompt the model with the tool info; Aphrodite will not automatically manipulate the prompt. **This may change in the future!**
 
-Aphrodite will use guided decoding to ensure the response mathces the tool parameter object defined by the JSON schema in the `tools` parameter. Please refer to the OpenAI API reference for more info.
+Aphrodite will use guided decoding to ensure the response matches the tool parameter object defined by the JSON schema in the `tools` parameter. Please refer to the OpenAI API reference for more info.
