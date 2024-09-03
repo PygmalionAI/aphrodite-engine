@@ -55,6 +55,10 @@ export default defineConfig({
 						link: "/pages/usage/openai",
 					},
 					{
+						text: "Vision Language Models",
+						link: "/pages/usage/vlm",
+					},
+					{
 						text: "Distributed Inference",
 						link: "/pages/usage/distributed",
 					},
