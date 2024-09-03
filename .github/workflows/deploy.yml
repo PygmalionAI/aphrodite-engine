@@ -40,8 +40,9 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 18.18.2
           cache: pnpm # or pnpm / yarn
+          cache-dependency-path: docs/pnpm-lock.yaml
       - name: Setup Pages
         uses: actions/configure-pages@v4
       - name: Install dependencies and build
