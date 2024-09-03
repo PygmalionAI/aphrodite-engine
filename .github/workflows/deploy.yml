@@ -35,6 +35,7 @@ jobs:
       - uses: pnpm/action-setup@v3 # Uncomment this if you're using pnpm
         with:
           package_json_file: docs/package.json
+          version: 8.15.1
       # - uses: oven-sh/setup-bun@v1 # Uncomment this if you're using Bun
       - name: Setup Node
         uses: actions/setup-node@v4
