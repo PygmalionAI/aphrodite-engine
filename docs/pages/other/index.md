@@ -1,3 +1,0 @@
-# Other
-
-NOTHING HERE YET
