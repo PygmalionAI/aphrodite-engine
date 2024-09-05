@@ -17,7 +17,7 @@ import torch
 from huggingface_hub import HfApi, hf_hub_download
 from loguru import logger
 from torch import nn
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, PretrainedConfig
 
 from aphrodite.common.config import (APHRODITE_USE_MODELSCOPE, CacheConfig,
                                      DeviceConfig, LoadConfig, LoadFormat,
@@ -139,6 +139,22 @@ def _get_model_initialization_kwargs(
     return extra_kwargs
 
 
+def build_model(model_class: Type[nn.Module], hf_config: PretrainedConfig,
+                cache_config: Optional[CacheConfig],
+                quant_config: Optional[QuantizationConfig], *,
+                lora_config: Optional[LoRAConfig],
+                multimodal_config: Optional[MultiModalConfig],
+                scheduler_config: Optional[SchedulerConfig]) -> nn.Module:
+    extra_kwargs = _get_model_initialization_kwargs(model_class, lora_config,
+                                                    multimodal_config,
+                                                    scheduler_config)
+
+    return model_class(config=hf_config,
+                       cache_config=cache_config,
+                       quant_config=quant_config,
+                       **extra_kwargs)
+
+
 def _initialize_model(
         model_config: ModelConfig,
         load_config: LoadConfig,
@@ -147,15 +163,17 @@ def _initialize_model(
         cache_config: CacheConfig,
         scheduler_config: Optional[SchedulerConfig] = None) -> nn.Module:
     """Initialize a model with the given configurations."""
-    model_class = get_model_architecture(model_config)[0]
-    quant_config = _get_quantization_config(model_config, load_config)
+    model_class, _ = get_model_architecture(model_config)
 
-    return model_class(config=model_config.hf_config,
-                       cache_config=cache_config,
-                       quant_config=quant_config,
-                       **_get_model_initialization_kwargs(
-                           model_class, lora_config, multimodal_config,
-                           scheduler_config))
+    return build_model(
+        model_class,
+        model_config.hf_config,
+        quant_config=_get_quantization_config(model_config, load_config),
+        lora_config=lora_config,
+        multimodal_config=multimodal_config,
+        cache_config=cache_config,
+        scheduler_config=scheduler_config,
+    )
 
 
 class BaseModelLoader(ABC):

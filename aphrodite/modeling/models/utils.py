@@ -1,10 +1,57 @@
-from typing import Dict, List, Protocol, Tuple
+from typing import Dict, Iterable, List, Optional, Protocol, Tuple
 
 import torch
+import torch.nn as nn
 from torch.func import functional_call
+from transformers import PretrainedConfig
 
+from aphrodite.common.config import (CacheConfig, LoRAConfig, MultiModalConfig,
+                                     SchedulerConfig)
 from aphrodite.common.utils import is_pin_memory_available
+from aphrodite.modeling.model_loader.loader import build_model
+from aphrodite.modeling.models import ModelRegistry
 from aphrodite.multimodal import BatchedTensors
+from aphrodite.quantization import QuantizationConfig
+
+
+def filter_weights(weights: Iterable[Tuple[str, torch.Tensor]], prefix: str):
+    """
+    Helper function to load weights for inner aphrodite models.
+
+    See also:
+        :ref:`init_aphrodite_registered_model`
+    """
+    for name, loaded_weight in weights:
+        name = name.split(".")
+        if prefix == name.pop(0):
+            name = ".".join(name)
+            yield name, loaded_weight
+
+
+def init_aphrodite_registered_model(
+    hf_config: PretrainedConfig,
+    cache_config: Optional[CacheConfig],
+    quant_config: Optional[QuantizationConfig],
+    *,
+    lora_config: Optional[LoRAConfig] = None,
+    multimodal_config: Optional[MultiModalConfig] = None,
+    scheduler_config: Optional[SchedulerConfig] = None,
+) -> nn.Module:
+    """
+    Helper function to initialize an inner model registered to aphrodite,
+    based on the arguments passed to the outer aphrodite model.
+    """
+    model_class, _ = ModelRegistry.resolve_model_cls(hf_config.architectures)
+
+    return build_model(
+        model_class,
+        hf_config,
+        cache_config,
+        quant_config,
+        lora_config=lora_config,
+        multimodal_config=multimodal_config,
+        scheduler_config=scheduler_config,
+    )
 
 
 def merge_vision_embeddings(input_ids: torch.Tensor,
@@ -12,11 +59,12 @@ def merge_vision_embeddings(input_ids: torch.Tensor,
                             vision_embeddings: BatchedTensors,
                             image_token_id: int) -> torch.Tensor:
     """
-    Merge `vision_embeddings` into `inputs_embeds` by overwriting the positions
-    in `inputs_embeds` corresponding to placeholder image tokens in `input_ids`.
+    Merge ``vision_embeddings`` into ``inputs_embeds`` by overwriting the
+    positions in ``inputs_embeds`` corresponding to placeholder image tokens in
+    ``input_ids``.
 
     Note:
-        This updates `inputs_embeds` in place.
+        This updates ``inputs_embeds`` in place.
     """
     mask = (input_ids == image_token_id)
     num_expected_tokens = mask.sum()
@@ -75,11 +123,14 @@ def set_cpu_offload_max_bytes(max_bytes: int) -> None:
 
 def maybe_offload_to_cpu(module: torch.nn.Module) -> torch.nn.Module:
     device = next(module.parameters()).device
+
     if device == torch.device("cpu"):
         return module
+
     global _CPU_OFFLOAD_MAX_BYTES, _CPU_OFFLOAD_BYTES
     if _CPU_OFFLOAD_BYTES >= _CPU_OFFLOAD_MAX_BYTES:
         return module
+
     pin_memory = is_pin_memory_available()
 
     # offload parameters to CPU
