@@ -161,6 +161,10 @@ export default defineConfig({
 						text: "Paged Attention",
 						link: "/pages/developer/paged-attention",
 					},
+					{
+						text: "NVIDIA CUTLASS Epilogues",
+						link: "/pages/developer/cutlass-epilogue",
+					},
 				],
 			},
 		],
