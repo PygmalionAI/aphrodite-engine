@@ -22,12 +22,13 @@ void cutlass_scaled_mm_sm75_epilogue(torch::Tensor& out, torch::Tensor const& a,
   TORCH_CHECK(b.dtype() == torch::kInt8);
 
   if (out.dtype() == torch::kBFloat16) {
-    return vllm::cutlass_gemm_sm75_dispatch<int8_t, cutlass::bfloat16_t,
-                                            Epilogue>(
+    return aphrodite::cutlass_gemm_sm75_dispatch<int8_t, cutlass::bfloat16_t,
+                                                 Epilogue>(
         out, a, b, std::forward<EpilogueArgs>(epilogue_args)...);
   } else {
     TORCH_CHECK(out.dtype() == torch::kFloat16);
-    return vllm::cutlass_gemm_sm75_dispatch<int8_t, cutlass::half_t, Epilogue>(
+    return aphrodite::cutlass_gemm_sm75_dispatch<int8_t, cutlass::half_t,
+                                                 Epilogue>(
         out, a, b, std::forward<EpilogueArgs>(epilogue_args)...);
   }
 }
@@ -42,10 +43,10 @@ void cutlass_scaled_mm_sm75(torch::Tensor& out, torch::Tensor const& a,
   if (bias) {
     TORCH_CHECK(bias->dtype() == out.dtype(),
                 "currently bias dtype must match output dtype ", out.dtype());
-    return cutlass_scaled_mm_sm75_epilogue<vllm::ScaledEpilogueBias>(
+    return cutlass_scaled_mm_sm75_epilogue<aphrodite::ScaledEpilogueBias>(
         out, a, b, a_scales, b_scales, *bias);
   } else {
-    return cutlass_scaled_mm_sm75_epilogue<vllm::ScaledEpilogue>(
+    return cutlass_scaled_mm_sm75_epilogue<aphrodite::ScaledEpilogue>(
         out, a, b, a_scales, b_scales);
   }
 }
@@ -61,10 +62,11 @@ void cutlass_scaled_mm_azp_sm75(torch::Tensor& out, torch::Tensor const& a,
   TORCH_CHECK(b_scales.dtype() == torch::kFloat32);
 
   if (azp) {
-    return cutlass_scaled_mm_sm75_epilogue<vllm::ScaledEpilogueBiasAzpToken>(
-        out, a, b, a_scales, b_scales, azp_adj, *azp, bias);
+    return cutlass_scaled_mm_sm75_epilogue<
+        aphrodite::ScaledEpilogueBiasAzpToken>(out, a, b, a_scales, b_scales,
+                                               azp_adj, *azp, bias);
   } else {
-    return cutlass_scaled_mm_sm75_epilogue<vllm::ScaledEpilogueBiasAzp>(
+    return cutlass_scaled_mm_sm75_epilogue<aphrodite::ScaledEpilogueBiasAzp>(
         out, a, b, a_scales, b_scales, azp_adj, bias);
   }
 }
@@ -78,12 +80,13 @@ void cutlass_scaled_mm_sm80_epilogue(torch::Tensor& out, torch::Tensor const& a,
   TORCH_CHECK(b.dtype() == torch::kInt8);
 
   if (out.dtype() == torch::kBFloat16) {
-    return vllm::cutlass_gemm_sm80_dispatch<int8_t, cutlass::bfloat16_t,
-                                            Epilogue>(
+    return aphrodite::cutlass_gemm_sm80_dispatch<int8_t, cutlass::bfloat16_t,
+                                                 Epilogue>(
         out, a, b, std::forward<EpilogueArgs>(epilogue_args)...);
   } else {
     TORCH_CHECK(out.dtype() == torch::kFloat16);
-    return vllm::cutlass_gemm_sm80_dispatch<int8_t, cutlass::half_t, Epilogue>(
+    return aphrodite::cutlass_gemm_sm80_dispatch<int8_t, cutlass::half_t,
+                                                 Epilogue>(
         out, a, b, std::forward<EpilogueArgs>(epilogue_args)...);
   }
 }
@@ -98,10 +101,10 @@ void cutlass_scaled_mm_sm80(torch::Tensor& out, torch::Tensor const& a,
   if (bias) {
     TORCH_CHECK(bias->dtype() == out.dtype(),
                 "currently bias dtype must match output dtype ", out.dtype());
-    return cutlass_scaled_mm_sm80_epilogue<vllm::ScaledEpilogueBias>(
+    return cutlass_scaled_mm_sm80_epilogue<aphrodite::ScaledEpilogueBias>(
         out, a, b, a_scales, b_scales, *bias);
   } else {
-    return cutlass_scaled_mm_sm80_epilogue<vllm::ScaledEpilogue>(
+    return cutlass_scaled_mm_sm80_epilogue<aphrodite::ScaledEpilogue>(
         out, a, b, a_scales, b_scales);
   }
 }
@@ -117,10 +120,11 @@ void cutlass_scaled_mm_azp_sm80(torch::Tensor& out, torch::Tensor const& a,
   TORCH_CHECK(b_scales.dtype() == torch::kFloat32);
 
   if (azp) {
-    return cutlass_scaled_mm_sm80_epilogue<vllm::ScaledEpilogueBiasAzpToken>(
-        out, a, b, a_scales, b_scales, azp_adj, *azp, bias);
+    return cutlass_scaled_mm_sm80_epilogue<
+        aphrodite::ScaledEpilogueBiasAzpToken>(out, a, b, a_scales, b_scales,
+                                               azp_adj, *azp, bias);
   } else {
-    return cutlass_scaled_mm_sm80_epilogue<vllm::ScaledEpilogueBiasAzp>(
+    return cutlass_scaled_mm_sm80_epilogue<aphrodite::ScaledEpilogueBiasAzp>(
         out, a, b, a_scales, b_scales, azp_adj, bias);
   }
 }
@@ -134,13 +138,13 @@ void cutlass_scaled_mm_sm89_epilogue(torch::Tensor& out, torch::Tensor const& a,
     TORCH_CHECK(b.dtype() == torch::kInt8);
 
     if (out.dtype() == torch::kBFloat16) {
-      return vllm::cutlass_gemm_sm89_int8_dispatch<int8_t, cutlass::bfloat16_t,
-                                                   Epilogue>(
+      return aphrodite::cutlass_gemm_sm89_int8_dispatch<
+          int8_t, cutlass::bfloat16_t, Epilogue>(
           out, a, b, std::forward<EpilogueArgs>(epilogue_args)...);
     } else {
       assert(out.dtype() == torch::kFloat16);
-      return vllm::cutlass_gemm_sm89_int8_dispatch<int8_t, cutlass::half_t,
-                                                   Epilogue>(
+      return aphrodite::cutlass_gemm_sm89_int8_dispatch<int8_t, cutlass::half_t,
+                                                        Epilogue>(
           out, a, b, std::forward<EpilogueArgs>(epilogue_args)...);
     }
   } else {
@@ -148,13 +152,13 @@ void cutlass_scaled_mm_sm89_epilogue(torch::Tensor& out, torch::Tensor const& a,
     TORCH_CHECK(b.dtype() == torch::kFloat8_e4m3fn);
 
     if (out.dtype() == torch::kBFloat16) {
-      return vllm::cutlass_gemm_sm89_fp8_dispatch<
+      return aphrodite::cutlass_gemm_sm89_fp8_dispatch<
           cutlass::float_e4m3_t, cutlass::bfloat16_t, Epilogue>(
           out, a, b, std::forward<EpilogueArgs>(epilogue_args)...);
     } else {
       TORCH_CHECK(out.dtype() == torch::kFloat16);
-      return vllm::cutlass_gemm_sm89_fp8_dispatch<cutlass::float_e4m3_t,
-                                                  cutlass::half_t, Epilogue>(
+      return aphrodite::cutlass_gemm_sm89_fp8_dispatch<
+          cutlass::float_e4m3_t, cutlass::half_t, Epilogue>(
           out, a, b, std::forward<EpilogueArgs>(epilogue_args)...);
     }
   }
@@ -170,10 +174,10 @@ void cutlass_scaled_mm_sm89(torch::Tensor& out, torch::Tensor const& a,
   if (bias) {
     TORCH_CHECK(bias->dtype() == out.dtype(),
                 "currently bias dtype must match output dtype ", out.dtype());
-    return cutlass_scaled_mm_sm89_epilogue<vllm::ScaledEpilogueBias>(
+    return cutlass_scaled_mm_sm89_epilogue<aphrodite::ScaledEpilogueBias>(
         out, a, b, a_scales, b_scales, *bias);
   } else {
-    return cutlass_scaled_mm_sm89_epilogue<vllm::ScaledEpilogue>(
+    return cutlass_scaled_mm_sm89_epilogue<aphrodite::ScaledEpilogue>(
         out, a, b, a_scales, b_scales);
   }
 }
@@ -189,10 +193,11 @@ void cutlass_scaled_mm_azp_sm89(torch::Tensor& out, torch::Tensor const& a,
   TORCH_CHECK(b_scales.dtype() == torch::kFloat32);
 
   if (azp) {
-    return cutlass_scaled_mm_sm89_epilogue<vllm::ScaledEpilogueBiasAzpToken>(
-        out, a, b, a_scales, b_scales, azp_adj, *azp, bias);
+    return cutlass_scaled_mm_sm89_epilogue<
+        aphrodite::ScaledEpilogueBiasAzpToken>(out, a, b, a_scales, b_scales,
+                                               azp_adj, *azp, bias);
   } else {
-    return cutlass_scaled_mm_sm89_epilogue<vllm::ScaledEpilogueBiasAzp>(
+    return cutlass_scaled_mm_sm89_epilogue<aphrodite::ScaledEpilogueBiasAzp>(
         out, a, b, a_scales, b_scales, azp_adj, bias);
   }
 }
