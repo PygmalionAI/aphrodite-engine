@@ -62,7 +62,7 @@ docker run --runtime nvidia --gpus all \
     --api-keys "sk-empty"
 ```
 
-This will pull the Aphrodite Engine image (~8GiB download), and launch the engine with the Mistral-7B model at port 2242.
+This will pull the Aphrodite Engine image (~8GiB download), and launch the engine with the Llama-3.1-8B-Instruct model at port 2242.
 
 ## Requirements
 
