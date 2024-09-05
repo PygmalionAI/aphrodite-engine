@@ -51,6 +51,26 @@ void cutlass_scaled_mm_sm75(torch::Tensor& out, torch::Tensor const& a,
   }
 }
 
+void cutlass_scaled_mm_azp_sm75(torch::Tensor& out, torch::Tensor const& a,
+                                torch::Tensor const& b,
+                                torch::Tensor const& a_scales,
+                                torch::Tensor const& b_scales,
+                                torch::Tensor const& azp_adj,
+                                c10::optional<torch::Tensor> const& azp,
+                                c10::optional<torch::Tensor> const& bias) {
+  TORCH_CHECK(a_scales.dtype() == torch::kFloat32);
+  TORCH_CHECK(b_scales.dtype() == torch::kFloat32);
+
+  if (azp) {
+    return cutlass_scaled_mm_sm75_epilogue<
+        aphrodite::ScaledEpilogueBiasAzpToken>(out, a, b, a_scales, b_scales,
+                                               azp_adj, *azp, bias);
+  } else {
+    return cutlass_scaled_mm_sm75_epilogue<aphrodite::ScaledEpilogueBiasAzp>(
+        out, a, b, a_scales, b_scales, azp_adj, bias);
+  }
+}
+
 template <template <typename, typename> typename Epilogue,
           typename... EpilogueArgs>
 void cutlass_scaled_mm_sm80_epilogue(torch::Tensor& out, torch::Tensor const& a,
@@ -86,6 +106,26 @@ void cutlass_scaled_mm_sm80(torch::Tensor& out, torch::Tensor const& a,
   } else {
     return cutlass_scaled_mm_sm80_epilogue<aphrodite::ScaledEpilogue>(
         out, a, b, a_scales, b_scales);
+  }
+}
+
+void cutlass_scaled_mm_azp_sm80(torch::Tensor& out, torch::Tensor const& a,
+                                torch::Tensor const& b,
+                                torch::Tensor const& a_scales,
+                                torch::Tensor const& b_scales,
+                                torch::Tensor const& azp_adj,
+                                c10::optional<torch::Tensor> const& azp,
+                                c10::optional<torch::Tensor> const& bias) {
+  TORCH_CHECK(a_scales.dtype() == torch::kFloat32);
+  TORCH_CHECK(b_scales.dtype() == torch::kFloat32);
+
+  if (azp) {
+    return cutlass_scaled_mm_sm80_epilogue<
+        aphrodite::ScaledEpilogueBiasAzpToken>(out, a, b, a_scales, b_scales,
+                                               azp_adj, *azp, bias);
+  } else {
+    return cutlass_scaled_mm_sm80_epilogue<aphrodite::ScaledEpilogueBiasAzp>(
+        out, a, b, a_scales, b_scales, azp_adj, bias);
   }
 }
 
@@ -139,5 +179,25 @@ void cutlass_scaled_mm_sm89(torch::Tensor& out, torch::Tensor const& a,
   } else {
     return cutlass_scaled_mm_sm89_epilogue<aphrodite::ScaledEpilogue>(
         out, a, b, a_scales, b_scales);
+  }
+}
+
+void cutlass_scaled_mm_azp_sm89(torch::Tensor& out, torch::Tensor const& a,
+                                torch::Tensor const& b,
+                                torch::Tensor const& a_scales,
+                                torch::Tensor const& b_scales,
+                                torch::Tensor const& azp_adj,
+                                c10::optional<torch::Tensor> const& azp,
+                                c10::optional<torch::Tensor> const& bias) {
+  TORCH_CHECK(a_scales.dtype() == torch::kFloat32);
+  TORCH_CHECK(b_scales.dtype() == torch::kFloat32);
+
+  if (azp) {
+    return cutlass_scaled_mm_sm89_epilogue<
+        aphrodite::ScaledEpilogueBiasAzpToken>(out, a, b, a_scales, b_scales,
+                                               azp_adj, *azp, bias);
+  } else {
+    return cutlass_scaled_mm_sm89_epilogue<aphrodite::ScaledEpilogueBiasAzp>(
+        out, a, b, a_scales, b_scales, azp_adj, bias);
   }
 }
