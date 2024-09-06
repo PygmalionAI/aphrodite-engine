@@ -53,6 +53,11 @@ Aphrodite supports a large variety of generative Transformer models in [Hugging 
 On ROCm platforms, Mistral and Mixtral are capped to 4096 max context length due to sliding window issues.
 :::
 
+## Encoder-Decoder Language Models
+| Architecture                   |             Example Model |
+| ------------------------------ | ------------------------: |
+| `BartForConditionalGeneration` | `facebook/bart-large-cnn` |
+
 ## Multimodal Language Models
 
 | Architecture                        | Supported Modalities |                       Example Model |

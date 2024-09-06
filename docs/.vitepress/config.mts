@@ -59,6 +59,10 @@ export default defineConfig({
 						link: "/pages/usage/vlm",
 					},
 					{
+						text: "Encoder-Decoder Models",
+						link: "/pages/usage/encoder-decoder",
+					},
+					{
 						text: "Distributed Inference",
 						link: "/pages/usage/distributed",
 					},

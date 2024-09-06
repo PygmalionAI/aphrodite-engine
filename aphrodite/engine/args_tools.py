@@ -42,7 +42,7 @@ class EngineArgs:
     rope_scaling: Optional[dict] = None
     rope_theta: Optional[float] = None
     model_loader_extra_config: Optional[dict] = None
-    enforce_eager: Optional[bool] = True
+    enforce_eager: Optional[bool] = None
     skip_tokenizer_init: bool = False
     tokenizer_pool_size: int = 0
     # Note: Specifying a tokenizer pool by passing a class
