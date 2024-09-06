@@ -6,7 +6,8 @@ from aphrodite.common.config import ModelConfig
 from aphrodite.common.utils import random_uuid
 # yapf conflicts with isort
 # yapf: disable
-from aphrodite.endpoints.chat_utils import (load_chat_template,
+from aphrodite.endpoints.chat_utils import (apply_chat_template,
+                                            load_chat_template,
                                             parse_chat_messages)
 from aphrodite.endpoints.logger import RequestLogger
 from aphrodite.endpoints.openai.protocol import (DetokenizeRequest,
@@ -70,12 +71,12 @@ class OpenAIServingTokenization(OpenAIServing):
                 logger.warning(
                     "Multi-modal inputs are ignored during tokenization")
 
-            prompt = tokenizer.apply_chat_template(
-                add_generation_prompt=request.add_generation_prompt,
+            prompt = apply_chat_template(
+                tokenizer,
                 conversation=conversation,
-                tokenize=False,
-                chat_template=self.chat_template)
-            assert isinstance(prompt, str)
+                chat_template=self.chat_template,
+                add_generation_prompt=request.add_generation_prompt,
+            )
         else:
             prompt = request.prompt
 
