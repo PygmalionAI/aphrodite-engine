@@ -24,10 +24,13 @@ import psutil
 import torch
 import torch.types
 from loguru import logger
+from rich.progress import (BarColumn, MofNCompleteColumn, Progress,
+                           SpinnerColumn, TextColumn, TimeElapsedColumn)
 from typing_extensions import ParamSpec
 
 from aphrodite import _custom_ops as ops
 from aphrodite.common.logger import enable_trace_function_call
+from aphrodite.distributed import get_tensor_model_parallel_rank
 from aphrodite.inputs import (ExplicitEncoderDecoderPrompt, PromptInputs,
                               SingletonPromptInputs)
 
@@ -1156,3 +1159,22 @@ def to_enc_dec_tuple_list(
     return [(enc_dec_prompt['encoder_prompt'],
              enc_dec_prompt['decoder_prompt'])
             for enc_dec_prompt in enc_dec_prompts]
+
+
+def progress_bar(iterable, desc="Processing"):
+    show_progress = get_tensor_model_parallel_rank() == 0
+    if show_progress:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TimeElapsedColumn(),
+        ) as progress:
+            task = progress.add_task(f"[cyan]{desc}", total=len(iterable))
+            for item in iterable:
+                yield item
+                progress.update(task, advance=1)
+    else:
+        yield from iterable
