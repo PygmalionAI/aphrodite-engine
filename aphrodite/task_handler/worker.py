@@ -215,13 +215,11 @@ class Worker(LocalOrDistributedWorkerBase):
         # log peak memory usage in GB
         if world_size > 1:
             if tp_rank == 0:
-                logger.info(f"KV Cache memory usage for "
-                            f"{self.model_config.max_model_len} tokens: "
+                logger.info(f"Estimated KV Cache memory usage: "
                             f"{(kv_cache_memory) / 1e9:.2f} x {world_size} = "
                             f"{(kv_cache_memory * world_size) / 1e9:.2f} GB")
         else:
-            logger.info(f"KV Cache memory usage for "
-                        f"{self.model_config.max_model_len} tokens: "
+            logger.info(f"Estimated KV Cache memory usage: "
                         f"{(kv_cache_memory) / 1e9:.2f} GB")
         assert peak_memory > 0, (
             "Error in memory profiling. This happens when the GPU memory was "
