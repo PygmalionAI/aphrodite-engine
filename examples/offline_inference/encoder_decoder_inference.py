@@ -70,7 +70,7 @@ zipped_prompt_list = zip_enc_dec_prompt_lists(
 prompts = [
     single_text_prompt_raw, single_text_prompt, single_tokens_prompt,
     enc_dec_prompt1, enc_dec_prompt2, enc_dec_prompt3
-] + zipped_prompt_list * 100
+] + zipped_prompt_list
 
 print(prompts)
 
