@@ -9,7 +9,8 @@ import torch
 from loguru import logger
 from transformers import PretrainedConfig
 
-from aphrodite.common.utils import (cuda_device_count_stateless,
+from aphrodite.common.utils import (STR_NOT_IMPL_ENC_DEC_CUDAGRAPH,
+                                    cuda_device_count_stateless,
                                     get_cpu_memory, is_cpu, is_hip, is_neuron,
                                     is_openvino, is_tpu, is_xpu,
                                     print_warning_once)
@@ -101,6 +102,9 @@ class ModelConfig:
         enforce_eager: Whether to enforce eager execution. If True, we will
             disable CUDA graph and always execute the model in eager mode.
             If False, we will use CUDA graph and eager execution in hybrid.
+            If None, the user did not specify, so default to False -
+            except for encoder/decoder models, which currently require
+            eager mode.
         max_context_len_to_capture: Maximum context len covered by CUDA graphs.
             When a sequence has context length larger than this, we fall back
             to eager mode (DEPRECATED. Use max_seq_len_to_capture instead).
@@ -136,7 +140,7 @@ class ModelConfig:
         quantization: Optional[str] = None,
         deepspeed_fp_bits: Optional[int] = None,
         quantization_param_path: Optional[str] = None,
-        enforce_eager: bool = True,
+        enforce_eager: Optional[bool] = None,
         max_context_len_to_capture: Optional[int] = None,
         max_seq_len_to_capture: Optional[int] = None,
         max_logprobs: int = 5,
@@ -177,6 +181,34 @@ class ModelConfig:
                                     code_revision, rope_scaling, rope_theta)
         self.hf_text_config = get_hf_text_config(self.hf_config)
         self.dtype = _get_and_verify_dtype(self.hf_text_config, dtype)
+
+        # Choose a default enforce_eager value if the user did not specify
+        # a value (enforce_eager is None)
+        if getattr(self.hf_config, 'is_encoder_decoder', False):
+            if self.enforce_eager is None:
+                # *Only for encoder/decoder models* and
+                # *only if enforce_eager is unset*, override
+                # to enforce_eager=True
+                #
+                # Add a logger message since it is *somewhat* non-intuitive that
+                # enforce_eager is True when the user has not specified its
+                # value.
+                logger.info("Forcing enforce_eager == True because "
+                            "enforce_eager setting was unspecified and "
+                            "CUDAGraph is not supported with encoder/ "
+                            "decoder models.")
+                self.enforce_eager = True
+
+            if not self.enforce_eager:
+                # Eager mode explicitly disabled by user for an encoder/
+                # decoder model; however CUDAGRAPH + encoder/decoder is
+                # not currently supported
+                raise ValueError(STR_NOT_IMPL_ENC_DEC_CUDAGRAPH)
+        elif self.enforce_eager is None:
+            # *Only for decoder-only models*, enforce_eager
+            # defaults to False if unset. This is intuitive
+            # so no logging message needed.
+            self.enforce_eager = False
 
         if (not self.disable_sliding_window
                 and self.hf_text_config.model_type == "gemma2"

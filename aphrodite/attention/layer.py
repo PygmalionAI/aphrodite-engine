@@ -4,8 +4,7 @@ from typing import Any, Dict, List, Optional
 import torch
 import torch.nn as nn
 
-from aphrodite.attention.backends.abstract import (AttentionMetadata,
-                                                   AttentionType)
+from aphrodite.attention import AttentionMetadata, AttentionType
 from aphrodite.attention.selector import get_attn_backend
 from aphrodite.common.config import CacheConfig
 from aphrodite.quantization.base_config import QuantizationConfig
