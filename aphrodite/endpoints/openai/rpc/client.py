@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 import cloudpickle
 import zmq
@@ -179,35 +179,37 @@ class AsyncEngineRPCClient:
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None
-    ) -> AsyncIterator[RequestOutput]:
+    ) -> AsyncGenerator[RequestOutput, None]:
         """Send an RPCGenerateRequest to the RPCServer and stream responses."""
 
-        with self.socket() as socket:
+        finished = False
+        try:
+            with self.socket() as socket:
 
-            # Send RPCGenerateRequest to the RPCServer.
-            await socket.send_multipart([
-                cloudpickle.dumps(
-                    RPCGenerateRequest(
-                        inputs=inputs,
-                        sampling_params=sampling_params,
-                        request_id=request_id,
-                        lora_request=lora_request,
-                        prompt_adapter_request=prompt_adapter_request))
-            ])
+                # Send RPCGenerateRequest to the RPCServer.
+                await socket.send_multipart([
+                    cloudpickle.dumps(
+                        RPCGenerateRequest(
+                            inputs=inputs,
+                            sampling_params=sampling_params,
+                            request_id=request_id,
+                            lora_request=lora_request,
+                            prompt_adapter_request=prompt_adapter_request))
+                ])
 
-            # Stream back the results from the RPC Server.
-            while True:
-                message = await socket.recv()
-                request_output = cloudpickle.loads(message)
+                # Stream back the results from the RPC Server.
+                while not finished:
+                    message = await socket.recv()
+                    request_output = cloudpickle.loads(message)
 
-                if isinstance(request_output, Exception):
-                    raise request_output
+                    if isinstance(request_output, Exception):
+                        raise request_output
 
-                if request_output.finished:
-                    break
-                yield request_output
-
-            yield request_output
+                    finished = request_output.finished
+                    yield request_output
+        finally:
+            if not finished:
+                await self.abort(request_id)
 
     async def check_health(self) -> None:
         """Raise if unhealthy"""
@@ -231,6 +233,6 @@ class AsyncEngineRPCClient:
                              f"{health_message}")
 
     async def encode(self, *args,
-                     **kwargs) -> AsyncIterator[EmbeddingRequestOutput]:
+                     **kwargs) -> AsyncGenerator[EmbeddingRequestOutput, None]:
         raise NotImplementedError(
             "Embeddings not supported with multiprocessing backend")

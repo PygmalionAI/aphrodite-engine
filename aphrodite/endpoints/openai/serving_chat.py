@@ -1,3 +1,4 @@
+import asyncio
 import time
 from typing import AsyncGenerator, AsyncIterator, Dict, List, Optional
 from typing import Sequence as GenericSequence
@@ -10,7 +11,7 @@ from transformers import PreTrainedTokenizer
 from aphrodite.common.config import ModelConfig
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sequence import Logprob
-from aphrodite.common.utils import random_uuid
+from aphrodite.common.utils import iterate_with_cancellation, random_uuid
 from aphrodite.endpoints.chat_utils import (ConversationMessage,
                                             load_chat_template,
                                             parse_chat_messages)
@@ -160,18 +161,20 @@ class OpenAIServingChat(OpenAIServing):
             # TODO: Use an aphrodite-specific Validation Error
             return self.create_error_response(str(e))
 
+        if raw_request:
+            result_generator = iterate_with_cancellation(
+                result_generator, raw_request.is_disconnected)
+
         # Streaming response
         if request.stream:
             return self.chat_completion_stream_generator(
                 request, result_generator, request_id, conversation, tokenizer)
-        else:
-            try:
-                return await self.chat_completion_full_generator(
-                    request, raw_request, result_generator, request_id,
-                    conversation, tokenizer)
-            except ValueError as e:
-                # TODO: Use an aphrodite-specific Validation Error
-                return self.create_error_response(str(e))
+        try:
+            return await self.chat_completion_full_generator(
+                request, result_generator, request_id, conversation, tokenizer)
+        except ValueError as e:
+            # TODO: Use an aphrodite-specific Validation Error
+            return self.create_error_response(str(e))
 
     def get_chat_request_role(self, request: ChatCompletionRequest) -> str:
         if request.add_generation_prompt:
@@ -402,7 +405,6 @@ class OpenAIServingChat(OpenAIServing):
     async def chat_completion_full_generator(
         self,
         request: ChatCompletionRequest,
-        raw_request: Optional[Request],
         result_generator: AsyncIterator[RequestOutput],
         request_id: str,
         conversation: List[ConversationMessage],
@@ -413,12 +415,12 @@ class OpenAIServingChat(OpenAIServing):
         created_time = int(time.time())
         final_res: Optional[RequestOutput] = None
 
-        async for res in result_generator:
-            if raw_request is not None and await raw_request.is_disconnected():
-                # Abort the request if the client disconnects.
-                await self.async_engine_client.abort(request_id)
-                return self.create_error_response("Client disconnected")
-            final_res = res
+        try:
+            async for res in result_generator:
+                final_res = res
+        except asyncio.CancelledError:
+            return self.create_error_response("Client disconnected")
+
         assert final_res is not None
 
         choices: List[ChatCompletionResponseChoice] = []
