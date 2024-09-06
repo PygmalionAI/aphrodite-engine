@@ -472,7 +472,8 @@ def get_distributed_init_method(ip: str, port: int) -> str:
 def get_open_port(port: Optional[int] = None) -> int:
     if port is None:
         # Default behavior here is to return a port for multi-gpu communication
-        port = int(os.getenv("APHRODITE_PORT", 2242))
+        port = int(os.getenv("APHRODITE_PORT", 0)
+                   ) if "APHRODITE_PORT" in os.environ else None
     if port is not None:
         while True:
             try:
