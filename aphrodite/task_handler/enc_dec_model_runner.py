@@ -83,6 +83,7 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
         is_driver_worker: bool = False,
         prompt_adapter_config: Optional[PromptAdapterConfig] = None,
         multimodal_config: Optional[MultiModalConfig] = None,
+        **kwargs,
     ):
         '''
         EncoderDecoderModelRunner constructor.
@@ -104,6 +105,7 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
             lora_config=None,
             kv_cache_dtype=kv_cache_dtype,
             is_driver_worker=is_driver_worker,
+            **kwargs,
         )
 
         # Crash for unsupported encoder/scenarios
