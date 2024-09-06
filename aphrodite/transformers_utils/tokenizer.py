@@ -13,10 +13,10 @@ from aphrodite.lora.request import LoRARequest
 from aphrodite.transformers_utils.tokenizers import BaichuanTokenizer
 from aphrodite.transformers_utils.utils import check_gguf_file
 
+from .tokenizer_group import AnyTokenizer
 
-def get_cached_tokenizer(
-    tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast]
-) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
+
+def get_cached_tokenizer(tokenizer: AnyTokenizer) -> AnyTokenizer:
     """Get tokenizer with cached properties.
 
     This will patch the tokenizer object in place.
@@ -62,7 +62,7 @@ def get_tokenizer(
     revision: Optional[str] = None,
     download_dir: Optional[str] = None,
     **kwargs,
-) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
+) -> AnyTokenizer:
     """Gets a tokenizer for the given model name via Huggingface/modelscope."""
     if APHRODITE_USE_MODELSCOPE:
         # download model from ModelScope hub,
