@@ -7,7 +7,7 @@ from transformers import PretrainedConfig
 
 from aphrodite.common.config import (CacheConfig, LoRAConfig, MultiModalConfig,
                                      SchedulerConfig)
-from aphrodite.common.utils import is_pin_memory_available
+from aphrodite.common.utils import is_pin_memory_available, progress_bar
 from aphrodite.modeling.model_loader.loader import build_model
 from aphrodite.modeling.models import ModelRegistry
 from aphrodite.multimodal import BatchedTensors
@@ -21,7 +21,9 @@ def filter_weights(weights: Iterable[Tuple[str, torch.Tensor]], prefix: str):
     See also:
         :ref:`init_aphrodite_registered_model`
     """
-    for name, loaded_weight in weights:
+    weights_list = list(weights)
+    for name, loaded_weight in progress_bar(weights_list,
+                                desc="Loading modules..."):
         name = name.split(".")
         if prefix == name.pop(0):
             name = ".".join(name)

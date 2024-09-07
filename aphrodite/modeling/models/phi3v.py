@@ -28,6 +28,7 @@ from transformers import CLIPVisionConfig, PretrainedConfig
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, ModelConfig, MultiModalConfig
 from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
+from aphrodite.common.utils import progress_bar
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.sampler import Sampler
@@ -566,7 +567,9 @@ class Phi3VForCausalLM(nn.Module, SupportsVision):
             (".gate_up_proj", ".up_proj", 1),
         ]
         params_dict = dict(self.named_parameters())
-        for name, loaded_weight in weights:
+        weights_list = list(weights)
+        for name, loaded_weight in progress_bar(weights_list,
+                                                desc="Loading modules..."):
             if "rotary_emb.inv_freq" in name:
                 continue
             # post_layernorm is not needed in CLIPVisionModel
