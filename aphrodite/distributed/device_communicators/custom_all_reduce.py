@@ -8,10 +8,11 @@ from loguru import logger
 from torch.distributed import ProcessGroup
 
 from aphrodite import _custom_ops as ops
-from aphrodite.common.utils import cuda_device_count_stateless, is_full_nvlink
+from aphrodite.common.utils import cuda_device_count_stateless
 from aphrodite.distributed.device_communicators.custom_all_reduce_utils import (
     gpu_p2p_access_check)
 from aphrodite.distributed.parallel_state import in_the_same_node_as
+from aphrodite.platforms import current_platform
 
 try:
     assert ops.is_custom_op_supported("_C_custom_ar::meta_size")
@@ -113,7 +114,10 @@ class CustomAllreduce:
         # test nvlink first, this will filter out most of the cases
         # where custom allreduce is not supported
         # this checks hardware and driver support for NVLink
-        full_nvlink = is_full_nvlink(physical_device_ids)
+        assert current_platform.is_cuda()
+        from aphrodite.platforms.cuda import CudaPlatform
+        cuda_platform: CudaPlatform = current_platform
+        full_nvlink = cuda_platform.is_full_nvlink(physical_device_ids)
         if world_size > 2 and not full_nvlink:
             logger.warning(
                 "Custom allreduce is disabled because it's not supported on"
