@@ -261,7 +261,7 @@ def _apply_temperatures(
     dynatemp_mins: torch.Tensor,
     dynatemp_maxs: torch.Tensor,
     dynatemp_exps: torch.Tensor,
-) -> torch.Tensor:
+) -> None:
     dynatemp_mask = dynatemp_exps != 0
     dynatemp_mins = dynatemp_mins[dynatemp_mask]
     dynatemp_maxs = dynatemp_maxs[dynatemp_mask]
@@ -281,7 +281,6 @@ def _apply_temperatures(
     temperatures[dynatemp_mask] = dyn_temp
     temperatures[temperatures <= 0.0] = 1.0
     logits.div_(temperatures.unsqueeze(dim=1))
-    return logits
 
 
 
