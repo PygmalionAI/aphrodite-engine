@@ -308,6 +308,9 @@ class SamplingTensors:
     """Tensors for sampling."""
 
     temperatures: torch.Tensor
+    dynatemp_mins: torch.Tensor
+    dynatemp_maxs: torch.Tensor
+    dynatemp_exps: torch.Tensor
     top_ps: torch.Tensor
     top_ks: torch.Tensor
     top_as: torch.Tensor
@@ -348,6 +351,9 @@ class SamplingTensors:
         output_tokens: List[array] = []
         top_ks: List[int] = []
         temperatures: List[float] = []
+        dynatemp_mins: List[float] = []
+        dynatemp_maxs: List[float] = []
+        dynatemp_exps: List[float] = []
         top_ps: List[float] = []
         top_as: List[float] = []
         min_ps: List[float] = []
@@ -436,6 +442,10 @@ class SamplingTensors:
                 assert query_len is not None
                 prefill_len = len(seq_group.prompt_logprob_indices)
                 temperatures += [temperature] * prefill_len
+                dynatemp_mins += [sampling_params.dynatemp_min] * prefill_len
+                dynatemp_maxs += [sampling_params.dynatemp_max] * prefill_len
+                dynatemp_exps += ([sampling_params.dynatemp_exponent] * 
+                                  prefill_len)
                 top_ps += [top_p] * prefill_len
                 top_ks += [top_k] * prefill_len
                 top_as += [top_a] * prefill_len
@@ -454,6 +464,10 @@ class SamplingTensors:
                 sample_lens = len(seq_group.sample_indices)
                 assert sample_lens == len(seq_ids)
                 temperatures += [temperature] * len(seq_ids)
+                dynatemp_mins += [sampling_params.dynatemp_min] * len(seq_ids)
+                dynatemp_maxs += [sampling_params.dynatemp_max] * len(seq_ids)
+                dynatemp_exps += ([sampling_params.dynatemp_exponent] * 
+                                  len(seq_ids))
                 top_ps += [top_p] * len(seq_ids)
                 top_ks += [top_k] * len(seq_ids)
                 top_as += [top_a] * len(seq_ids)
@@ -507,7 +521,8 @@ class SamplingTensors:
                         output_tokens.append(seq_data.output_token_ids_array)
 
         sampling_tensors = SamplingTensors.from_lists(
-            temperatures, top_ps, top_ks, top_as, min_ps, presence_penalties,
+            temperatures, dynatemp_mins, dynatemp_maxs, dynatemp_exps,
+            top_ps, top_ks, top_as, min_ps, presence_penalties,
             frequency_penalties, repetition_penalties, tfss, eta_cutoffs,
             epsilon_cutoffs, typical_ps, smoothing_factors, smoothing_curves,
             sampling_seeds, sample_indices, prompt_tokens, output_tokens,
@@ -517,9 +532,10 @@ class SamplingTensors:
                 do_typical_ps, do_quadratic)
 
     @classmethod
-    def from_lists(cls, temperatures: List[float], top_ps: List[float],
-                   top_ks: List[int], top_as: List[float], min_ps: List[float],
-                   presence_penalties: List[float],
+    def from_lists(cls, temperatures: List[float], dynatemp_mins: List[float],
+                   dynatemp_maxs: List[float], dynatemp_exps: List[float],
+                   top_ps: List[float], top_ks: List[int], top_as: List[float],
+                   min_ps: List[float], presence_penalties: List[float],
                    frequency_penalties: List[float],
                    repetition_penalties: List[float], tfss: List[float],
                    eta_cutoffs: List[float], epsilon_cutoffs: List[float],
@@ -556,6 +572,24 @@ class SamplingTensors:
 
         temperatures_t = torch.tensor(
             temperatures,
+            device="cpu",
+            dtype=dtype,
+            pin_memory=pin_memory,
+        )
+        dynatemp_mins_t = torch.tensor(
+            dynatemp_mins,
+            device="cpu",
+            dtype=dtype,
+            pin_memory=pin_memory,
+        )
+        dynatemp_maxs_t = torch.tensor(
+            dynatemp_maxs,
+            device="cpu",
+            dtype=dtype,
+            pin_memory=pin_memory,
+        )
+        dynatemp_exps_t = torch.tensor(
+            dynatemp_exps,
             device="cpu",
             dtype=dtype,
             pin_memory=pin_memory,
@@ -654,6 +688,9 @@ class SamplingTensors:
 
         return cls(
             temperatures=temperatures_t.to(device=device, non_blocking=True),
+            dynatemp_mins=dynatemp_mins_t.to(device=device, non_blocking=True),
+            dynatemp_maxs=dynatemp_maxs_t.to(device=device, non_blocking=True),
+            dynatemp_exps=dynatemp_exps_t.to(device=device, non_blocking=True),
             top_ps=top_ps_t.to(device=device, non_blocking=True),
             top_ks=top_ks_t.to(device=device, non_blocking=True),
             top_as=top_as_t.to(device=device, non_blocking=True),
@@ -683,7 +720,7 @@ class SamplingTensors:
 
     @staticmethod
     def _get_sequence_seeds(
-        seed: int,
+        seed: int|None,
         *extra_entropy: int,
         seeds_to_generate: int,
         is_greedy: bool,
