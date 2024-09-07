@@ -508,20 +508,22 @@ def _apply_quadratic_sampling(
         torch.Tensor: The transformed logits.
     Credits: @kalomaze
     """
-    max_logits = logits.max(dim=-1, keepdim=True).values
-    diff = logits - max_logits
+    mask = smoothing_factor != 0
+
     smoothing_factor.unsqueeze_(dim=1)
     smoothing_curve.unsqueeze_(dim=1)
+    k = smoothing_factor * (3 - smoothing_curve) / 2
+    s = smoothing_factor * (smoothing_curve - 1) / 2
 
-    k = (3 - smoothing_curve) / 2
-    s = (smoothing_curve - 1) / 2
+    quadlogits = logits[mask]  # limit to logits using this sampler
+    max_logits = quadlogits.max(dim=-1, keepdim=True).values
 
-    mask = smoothing_factor > 0
-    mask = mask.flatten()
-    transformed_logits = torch.where(
-        logits != float('-inf'), -(k * smoothing_factor * diff**2) +
-        (s * smoothing_factor * diff**3) + max_logits, logits)
-    logits[mask, :] = transformed_logits[mask, :]
+    # Construct the delta from each logit to its new value
+    diff = quadlogits - max_logits
+    diff -= diff**2 * (s[mask] * diff - k[mask])
+    diff[diff != diff] = 0  # Eliminate NaNs due to infs
+
+    logits[mask] -= diff
     return logits
 
 
