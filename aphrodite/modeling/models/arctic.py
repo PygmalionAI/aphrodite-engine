@@ -12,7 +12,6 @@ from aphrodite.common.utils import progress_bar
 from aphrodite.distributed import (get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size,
                                    tensor_model_parallel_all_reduce)
-
 from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.modeling.layers.fused_moe import fused_experts, fused_topk
 from aphrodite.modeling.layers.layernorm import RMSNorm
