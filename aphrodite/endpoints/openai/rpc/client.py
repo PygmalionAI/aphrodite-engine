@@ -20,6 +20,8 @@ from aphrodite.prompt_adapter.request import PromptAdapterRequest
 from aphrodite.transformers_utils.tokenizer_group import (
     init_tokenizer_from_configs)
 
+# Time to wait before checking if the server process is alive
+SERVER_START_TIMEOUT_MS = 1000
 
 class AsyncEngineRPCClient:
 
@@ -62,7 +64,16 @@ class AsyncEngineRPCClient:
             socket.connect(self.rpc_path)
             yield socket
         finally:
-            socket.close()
+            # linger == 0 means discard unsent messages
+            # when the socket is closed. This is necessary
+            # because otherwise self.context.destroy() will
+            # wait for 30 seconds until unsent messages are
+            # received, which is impossible if the server
+            # crashed. In the absence of a server crash we
+            # always expect a response before closing the
+            # socket anyway.
+            # Reference: http://api.zeromq.org/4-2:zmq-setsockopt#toc24
+            socket.close(linger=0)
 
     async def _send_get_data_rpc_request(self, request: RPCUtilityRequest,
                                          expected_type: Any,
