@@ -134,6 +134,9 @@ class ChatCompletionRequest(OpenAIBaseModel):
     typical_p: Optional[float] = 1.0
     smoothing_factor: Optional[float] = 0.0
     smoothing_curve: Optional[float] = 1.0
+    dynatemp_min: Optional[float] = 0.0
+    dynatemp_max: Optional[float] = 0.0
+    dynatemp_exponent: Optional[float] = 1.0
     repetition_penalty: Optional[float] = 1.0
     length_penalty: Optional[float] = 1.0
     early_stopping: Optional[bool] = False
@@ -270,6 +273,9 @@ class ChatCompletionRequest(OpenAIBaseModel):
             typical_p=self.typical_p,
             smoothing_factor=self.smoothing_factor,
             smoothing_curve=self.smoothing_curve,
+            dynatemp_min=self.dynatemp_min,
+            dynatemp_max=self.dynatemp_max,
+            dynatemp_exponent=self.dynatemp_exponent,
             ignore_eos=self.ignore_eos,
             use_beam_search=self.use_beam_search,
             early_stopping=self.early_stopping,
@@ -369,6 +375,9 @@ class CompletionRequest(OpenAIBaseModel):
     typical_p: Optional[float] = 1.0
     smoothing_factor: Optional[float] = 0.0
     smoothing_curve: Optional[float] = 1.0
+    dynatemp_min: Optional[float] = 0.0
+    dynatemp_max: Optional[float] = 0.0
+    dynatemp_exponent: Optional[float] = 1.0
     repetition_penalty: Optional[float] = 1.0
     length_penalty: Optional[float] = 1.0
     early_stopping: Optional[bool] = False
@@ -459,6 +468,9 @@ class CompletionRequest(OpenAIBaseModel):
             typical_p=self.typical_p,
             smoothing_factor=self.smoothing_factor,
             smoothing_curve=self.smoothing_curve,
+            dynatemp_min=self.dynatemp_min,
+            dynatemp_max=self.dynatemp_max,
+            dynatemp_exponent=self.dynatemp_exponent,
             seed=self.seed,
             stop=self.stop,
             stop_token_ids=self.stop_token_ids,
