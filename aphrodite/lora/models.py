@@ -28,6 +28,7 @@ from aphrodite.lora.utils import (from_layer, from_layer_logits_processor,
                                   parse_fine_tuned_lora_name,
                                   replace_submodule)
 from aphrodite.modeling.models.interfaces import SupportsLoRA
+from aphrodite.modeling.models.utils import PPMissingLayer
 
 _GLOBAL_LORA_ID = 0
 
@@ -433,6 +434,8 @@ class LoRAModelManager(AdapterModelManager):
     def _create_lora_modules(self):
         for module_name, module in self.model.named_modules(
                 remove_duplicate=False):
+            if isinstance(module, PPMissingLayer):
+                continue
             if not self._match_target_modules(module_name):
                 continue
             parts = module_name.split(".")[-1]
