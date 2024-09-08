@@ -18,7 +18,7 @@ from aphrodite.endpoints.openai.rpc import (APHRODITE_RPC_HEALTHY_STR,
 
 class AsyncEngineRPCServer:
 
-    def __init__(self, async_engine_args: AsyncEngineArgs, port: int):
+    def __init__(self, async_engine_args: AsyncEngineArgs, rpc_path: str):
         # Initialize engine first.
         self.engine = AsyncAphrodite.from_engine_args(async_engine_args)
 
@@ -27,9 +27,7 @@ class AsyncEngineRPCServer:
 
         # Init socket for readiness state.
         self.socket = self.context.socket(zmq.constants.ROUTER)
-        # NOTE numeric form of localhost should be used for zmq bind(),
-        # see https://stackoverflow.com/a/8958414
-        self.socket.bind(f"tcp://127.0.0.1:{port}")
+        self.socket.bind(rpc_path)
 
     def cleanup(self):
         """Cleanup all resources."""
@@ -200,6 +198,6 @@ async def run_server(server: AsyncEngineRPCServer):
         server.cleanup()
 
 
-def run_rpc_server(async_engine_args: AsyncEngineArgs, port: int):
-    server = AsyncEngineRPCServer(async_engine_args, port)
+def run_rpc_server(async_engine_args: AsyncEngineArgs, rpc_path: str):
+    server = AsyncEngineRPCServer(async_engine_args, rpc_path)
     asyncio.run(run_server(server))

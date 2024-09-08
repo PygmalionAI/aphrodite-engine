@@ -23,9 +23,9 @@ from aphrodite.transformers_utils.tokenizer_group import (
 
 class AsyncEngineRPCClient:
 
-    def __init__(self, port: int):
+    def __init__(self, rpc_path: str):
         self.context = zmq.asyncio.Context()
-        self.path = f"tcp://localhost:{port}"
+        self.rpc_path = rpc_path
 
     async def setup(self):
         """Setup the client before it starts sending server requests."""
@@ -59,7 +59,7 @@ class AsyncEngineRPCClient:
         # to enable streaming.
         socket = self.context.socket(zmq.constants.DEALER)
         try:
-            socket.connect(self.path)
+            socket.connect(self.rpc_path)
             yield socket
         finally:
             socket.close()
