@@ -19,9 +19,13 @@ body:
       python env.py
       ```
     value: |
+      <details>
+      <summary>The output of `python env.py`</summary>
       ```text
-      The output of `python env.py`
+      Your output of `python env.py` here
       ```
+      
+      </details>
   validations:
     required: true
 - type: textarea
