@@ -19,6 +19,7 @@ from platform import uname
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Dict, Generic,
                     Hashable, List, Optional, OrderedDict, Set, Tuple, TypeVar,
                     Union, overload)
+from uuid import uuid4
 
 import numpy as np
 import numpy.typing as npt
@@ -479,12 +480,15 @@ def get_distributed_init_method(ip: str, port: int) -> str:
     # see https://github.com/python/cpython/issues/103848
     return f"tcp://[{ip}]:{port}" if ":" in ip else f"tcp://{ip}:{port}"
 
+def get_open_zmq_ipc_path() -> str:
+    APHRODITE_RPC_BASE_PATH = os.getenv("APHRODITE_RPC_BASE_PATH",
+                                    tempfile.gettempdir())
+    base_rpc_path = APHRODITE_RPC_BASE_PATH
+    return f"ipc://{base_rpc_path}/{uuid4()}"
 
 def get_open_port(port: Optional[int] = None) -> int:
-    if port is None:
-        # Default behavior here is to return a port for multi-gpu communication
-        port = int(os.getenv("APHRODITE_PORT", 0)
-                   ) if "APHRODITE_PORT" in os.environ else None
+    port = int(os.getenv("APHRODITE_PORT", 0)
+                ) if "APHRODITE_PORT" in os.environ else None
     if port is not None:
         while True:
             try:

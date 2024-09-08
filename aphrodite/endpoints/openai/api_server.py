@@ -23,8 +23,8 @@ from starlette.routing import Mount
 from aphrodite.common.config import ModelConfig
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import _SAMPLING_EPS, SamplingParams
-from aphrodite.common.utils import (FlexibleArgumentParser, get_open_port,
-                                    random_uuid)
+from aphrodite.common.utils import (FlexibleArgumentParser,
+                                    get_open_zmq_ipc_path, random_uuid)
 from aphrodite.endpoints.logger import RequestLogger
 from aphrodite.endpoints.openai.args import make_arg_parser
 # yapf: disable
@@ -55,7 +55,6 @@ from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.version import __version__ as APHRODITE_VERSION
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
-APHRODITE_RPC_PORT = int(os.getenv("APHRODITE_RPC_PORT", '5570'))
 
 async_engine_client: AsyncEngineClient
 engine_args: AsyncEngineArgs
@@ -118,14 +117,17 @@ async def build_async_engine_client(args) -> AsyncIterator[AsyncEngineClient]:
 
     # Otherwise, use the multiprocessing AsyncAphrodite.
     else:
+        # Select random path for IPC.
+        rpc_path = get_open_zmq_ipc_path()
+        logger.info(f"Multiprocessing frontend to use {rpc_path} for RPC Path."
+                    )
         # Start RPCServer in separate process (holds the AsyncAphrodite).
-        port = get_open_port(APHRODITE_RPC_PORT)
         rpc_server_process = Process(target=run_rpc_server,
-                                     args=(engine_args, port))
+                                     args=(engine_args, rpc_path))
         rpc_server_process.start()
 
         # Build RPCClient, which conforms to AsyncEngineClient Protocol.
-        async_engine_client = AsyncEngineRPCClient(port)
+        async_engine_client = AsyncEngineRPCClient(rpc_path)
         await async_engine_client.setup()
 
         try:
