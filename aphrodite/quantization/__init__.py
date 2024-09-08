@@ -19,11 +19,13 @@ from aphrodite.quantization.marlin import MarlinConfig
 from aphrodite.quantization.qqq import QQQConfig
 from aphrodite.quantization.quip import QuipConfig
 from aphrodite.quantization.squeezellm import SqueezeLLMConfig
+from aphrodite.quantization.tpu_int8 import Int8TpuConfig
 
 QUANTIZATION_METHODS = {
     "aqlm": AQLMConfig,
     "awq": AWQConfig,
     "deepspeedfp": DeepSpeedFPConfig,
+    "tpu_int8": Int8TpuConfig,
     "eetq": EETQConfig,
     "fp8": Fp8Config,
     "fbgemm_fp8": FBGEMMFp8Config,

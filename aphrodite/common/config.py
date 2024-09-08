@@ -260,6 +260,7 @@ class ModelConfig:
     def _verify_quantization(self) -> None:
         supported_quantization = [*QUANTIZATION_METHODS]
         rocm_supported_quantization = ["gptq", "squeezellm"]
+        tpu_supported_quantization = ["tpu_int8"]
         if self.quantization is not None:
             self.quantization = self.quantization.lower()
 
@@ -306,6 +307,11 @@ class ModelConfig:
                 raise ValueError(
                     f"{self.quantization} quantization is currently not "
                     "supported in ROCm.")
+            if is_tpu(
+            ) and self.quantization not in tpu_supported_quantization:
+                raise ValueError(
+                    f"{self.quantization} quantization is currently not "
+                    f"supported in TPU Backend.")
             if self.quantization not in _OPTIMIZED_QUANTS:
                 logger.warning(
                     f"{self.quantization} quantization is not fully "
