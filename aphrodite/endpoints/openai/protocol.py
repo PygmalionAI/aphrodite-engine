@@ -143,6 +143,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
     skip_special_tokens: Optional[bool] = True
     spaces_between_special_tokens: Optional[bool] = True
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None
+    temperature_last: Optional[bool] = False
     # doc: end-chat-completion-sampling-params
 
     # doc: begin-chat-completion-extra-params
@@ -278,6 +279,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
             include_stop_str_in_output=self.include_stop_str_in_output,
             length_penalty=self.length_penalty,
             logits_processors=logits_processors,
+            temperature_last=self.temperature_last,
         )
 
     @model_validator(mode='before')
@@ -381,6 +383,7 @@ class CompletionRequest(OpenAIBaseModel):
     allowed_token_ids: Optional[List[int]] = None
     include_stop_str_in_output: Optional[bool] = False
     add_special_tokens: Optional[bool] = False
+    temperature_last: Optional[bool] = False
     # doc: end-completion-sampling-params
 
     # doc: begin-completion-extra-params
@@ -475,6 +478,7 @@ class CompletionRequest(OpenAIBaseModel):
             length_penalty=self.length_penalty,
             logits_processors=logits_processors,
             truncate_prompt_tokens=self.truncate_prompt_tokens,
+            temperature_last=self.temperature_last,
         )
 
     @model_validator(mode="before")
