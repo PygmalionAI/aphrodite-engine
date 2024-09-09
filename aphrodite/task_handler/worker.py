@@ -13,8 +13,6 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      ParallelConfig, PromptAdapterConfig,
                                      SchedulerConfig, SpeculativeConfig)
 from aphrodite.common.sequence import ExecuteModelRequest
-from aphrodite.common.utils import (is_embedding_model_config,
-                                    is_encoder_decoder_model_config)
 from aphrodite.distributed import (ensure_model_parallel_initialized,
                                    get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size,
@@ -121,10 +119,10 @@ class Worker(LocalOrDistributedWorkerBase):
         self.gpu_cache: Optional[List[List[torch.Tensor]]] = None
 
     def _is_encoder_decoder_model(self):
-        return is_encoder_decoder_model_config(self.model_config)
+        return self.model_config.is_encoder_decoder_model
 
     def _is_embedding_model(self):
-        return is_embedding_model_config(self.model_config)
+        return self.model_config.is_embedding_model
 
     def init_device(self) -> None:
         if self.device_config.device.type == "cuda":
