@@ -16,6 +16,7 @@ from aphrodite.common.utils import (STR_NOT_IMPL_ENC_DEC_CUDAGRAPH,
                                     print_warning_once)
 from aphrodite.distributed import get_current_tp_rank_partition_size
 from aphrodite.modeling.models import ModelRegistry
+from aphrodite.platforms import current_platform
 from aphrodite.quantization import QUANTIZATION_METHODS
 from aphrodite.transformers_utils.config import get_config, get_hf_text_config
 
@@ -589,10 +590,17 @@ class CacheConfig:
             raise NotImplementedError(
                 "Prefix caching is not supported with sliding window. "
                 "Run with --disable-sliding-window to use prefix caching.")
+    
         if self.cache_dtype == "fp8":
-            raise NotImplementedError(
-                "Prefix caching is not supported for fp8 cache_dtype. "
-                "Run with --kv-cache-dtype auto to use prefix caching.")
+            capability = current_platform.get_device_capability()
+            capability = capability[0] * 10 + capability[1]
+            if capability < 89:
+                raise NotImplementedError(
+                    "FP8 KV cache with prefix caching is only supported on "
+                    "GPUs with compute capability 8.9 or higher (e.g., "
+                    "4090, H100). Your GPU has compute capability "
+                    f"{capability}")
+
 
     def verify_with_parallel_config(
         self,
