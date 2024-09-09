@@ -592,13 +592,14 @@ class CacheConfig:
                 "Run with --disable-sliding-window to use prefix caching.")
     
         if self.cache_dtype == "fp8":
-            device_capability = current_platform.get_device_capability()
-            if device_capability < (8, 9):
+            capability = current_platform.get_device_capability()
+            capability = capability[0] * 10 + capability[1]
+            if capability < 89:
                 raise NotImplementedError(
                     "FP8 KV cache with prefix caching is only supported on "
                     "GPUs with compute capability 8.9 or higher (e.g., "
                     "4090, H100). Your GPU has compute capability "
-                    f"{device_capability[0]}.{device_capability[1]}.")
+                    f"{capability}")
 
 
     def verify_with_parallel_config(
