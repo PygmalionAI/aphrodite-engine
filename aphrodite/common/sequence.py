@@ -12,7 +12,7 @@ import torch
 
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.inputs import is_valid_encoder_decoder_llm_inputs
+from aphrodite.inputs.parse import is_valid_encoder_decoder_llm_inputs
 from aphrodite.lora.request import LoRARequest
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
 
