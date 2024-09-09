@@ -10,8 +10,8 @@ from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.utils import Counter, deprecate_kwargs
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.engine.args_tools import EngineArgs
-from aphrodite.inputs import (PromptInputs, TextPrompt, TokensPrompt,
-                              parse_and_batch_prompt)
+from aphrodite.inputs import PromptInputs, TextPrompt, TokensPrompt
+from aphrodite.inputs.parse import parse_and_batch_prompt
 from aphrodite.lora.request import LoRARequest
 from aphrodite.modeling.guided_decoding import (
     GuidedDecodingRequest, get_local_guided_decoding_logits_processor)
