@@ -71,7 +71,7 @@ class Sampler(nn.Module):
         # Initialize new sampling tensors
         (sampling_tensors, do_penalties, do_top_p_top_k, do_top_as, do_min_p,
          do_tfss, do_eta_cutoffs, do_epsilon_cutoffs, do_typical_ps,
-         do_quadratic) = SamplingTensors.from_sampling_metadata(
+         do_quadratic, do_temp_last) = SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype)
 
         self._sampling_tensors = sampling_tensors
@@ -84,6 +84,7 @@ class Sampler(nn.Module):
         self._do_epsilon_cutoffs = do_epsilon_cutoffs
         self._do_typical_ps = do_typical_ps
         self._do_quadratic = do_quadratic
+        self._do_temp_last = do_temp_last
 
     def forward(
         self,
@@ -119,6 +120,7 @@ class Sampler(nn.Module):
         do_epsilon_cutoffs = self._do_epsilon_cutoffs
         do_typical_ps = self._do_typical_ps
         do_quadratic = self._do_quadratic
+        do_temp_last = self._do_temp_last
 
         logits = _apply_min_tokens_penalty(logits, sampling_metadata)
 
@@ -130,9 +132,10 @@ class Sampler(nn.Module):
                                       sampling_tensors.frequency_penalties,
                                       sampling_tensors.repetition_penalties)
 
-        # Apply temperature scaling.
-        # Use in-place division to avoid creating a new tensor.
-        logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
+        # Apply temperature scaling if not doing temp_last.
+        if not do_temp_last:
+            # Use in-place division to avoid creating a new tensor.
+            logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
 
         if do_top_p_top_k:
             logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
@@ -162,6 +165,10 @@ class Sampler(nn.Module):
             logits = _apply_quadratic_sampling(
                 logits, sampling_tensors.smoothing_factors,
                 sampling_tensors.smoothing_curves)
+
+        if do_temp_last:
+            # Use in-place division to avoid creating a new tensor.
+            logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
 
         # banned_tokens = _get_custom_token_bans(sampling_metadata)
         # logits = _apply_token_bans(logits, banned_tokens)

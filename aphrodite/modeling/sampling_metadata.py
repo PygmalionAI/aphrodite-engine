@@ -367,6 +367,7 @@ class SamplingTensors:
     """Tensors for sampling."""
 
     temperatures: torch.Tensor
+    temperature_lasts: torch.Tensor
     top_ps: torch.Tensor
     top_ks: torch.Tensor
     top_as: torch.Tensor
@@ -397,7 +398,7 @@ class SamplingTensors:
         extra_seeds_to_generate: int = 0,
         extra_entropy: Optional[Tuple[int, ...]] = None
     ) -> Tuple["SamplingTensors", bool, bool, bool, bool, bool, bool, bool,
-               bool, bool]:
+               bool, bool, bool]:
         """
         extra_seeds_to_generate: extra seeds to generate using the
             user-defined seed for each sequence.
@@ -407,6 +408,7 @@ class SamplingTensors:
         output_tokens: List[array] = []
         top_ks: List[int] = []
         temperatures: List[float] = []
+        temperature_lasts: List[bool] = []
         top_ps: List[float] = []
         top_as: List[float] = []
         min_ps: List[float] = []
@@ -430,6 +432,7 @@ class SamplingTensors:
         do_epsilon_cutoffs = False
         do_typical_ps = False
         do_quadratic = False
+        do_temp_last = False
 
         if _USE_TRITON_SAMPLER:
             prompt_best_of: List[int] = []
@@ -443,6 +446,7 @@ class SamplingTensors:
             seq_ids = seq_group.seq_ids
             sampling_params = seq_group.sampling_params
             temperature = sampling_params.temperature
+            temperature_last = sampling_params.temperature_last
             p = sampling_params.presence_penalty
             f = sampling_params.frequency_penalty
             r = sampling_params.repetition_penalty
@@ -486,6 +490,8 @@ class SamplingTensors:
             if do_quadratic is False and (smoothing_factor > _SAMPLING_EPS
                                           or smoothing_curve > 1.0):
                 do_quadratic = True
+            if do_temp_last is False and temperature_last:
+                do_temp_last = True
 
             is_prompt = seq_group.is_prompt
             if (is_prompt and sampling_params.prompt_logprobs is not None):
@@ -495,6 +501,7 @@ class SamplingTensors:
                 assert query_len is not None
                 prefill_len = len(seq_group.prompt_logprob_indices)
                 temperatures += [temperature] * prefill_len
+                temperature_lasts += [temperature_last] * prefill_len
                 top_ps += [top_p] * prefill_len
                 top_ks += [top_k] * prefill_len
                 top_as += [top_a] * prefill_len
@@ -513,6 +520,7 @@ class SamplingTensors:
                 sample_lens = len(seq_group.sample_indices)
                 assert sample_lens == len(seq_ids)
                 temperatures += [temperature] * len(seq_ids)
+                temperature_lasts += [temperature_last] * len(seq_ids)
                 top_ps += [top_p] * len(seq_ids)
                 top_ks += [top_k] * len(seq_ids)
                 top_as += [top_a] * len(seq_ids)
@@ -566,19 +574,20 @@ class SamplingTensors:
                         output_tokens.append(seq_data.output_token_ids_array)
 
         sampling_tensors = SamplingTensors.from_lists(
-            temperatures, top_ps, top_ks, top_as, min_ps, presence_penalties,
-            frequency_penalties, repetition_penalties, tfss, eta_cutoffs,
-            epsilon_cutoffs, typical_ps, smoothing_factors, smoothing_curves,
-            sampling_seeds, sample_indices, prompt_tokens, output_tokens,
-            vocab_size, extra_seeds_to_generate, device, dtype)
+            temperatures, temperature_lasts, top_ps, top_ks, top_as, min_ps,
+            presence_penalties, frequency_penalties, repetition_penalties,
+            tfss, eta_cutoffs, epsilon_cutoffs, typical_ps, smoothing_factors,
+            smoothing_curves, sampling_seeds, sample_indices, prompt_tokens,
+            output_tokens, vocab_size, extra_seeds_to_generate, device, dtype)
         return (sampling_tensors, do_penalties, do_top_p_top_k, do_top_as,
                 do_min_p, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
-                do_typical_ps, do_quadratic)
+                do_typical_ps, do_quadratic, do_temp_last)
 
     @classmethod
-    def from_lists(cls, temperatures: List[float], top_ps: List[float],
-                   top_ks: List[int], top_as: List[float], min_ps: List[float],
-                   presence_penalties: List[float],
+    def from_lists(cls, temperatures: List[float],
+                   temperature_lasts: List[bool], top_ps: List[float],
+                   top_ks: List[int], top_as: List[float],
+                   min_ps: List[float], presence_penalties: List[float],
                    frequency_penalties: List[float],
                    repetition_penalties: List[float], tfss: List[float],
                    eta_cutoffs: List[float], epsilon_cutoffs: List[float],
@@ -617,6 +626,12 @@ class SamplingTensors:
             temperatures,
             device="cpu",
             dtype=dtype,
+            pin_memory=pin_memory,
+        )
+        temp_lasts_t = torch.tensor(
+            temperature_lasts,
+            device="cpu",
+            dtype=torch.bool,
             pin_memory=pin_memory,
         )
         top_ps_t = torch.tensor(
@@ -713,6 +728,7 @@ class SamplingTensors:
 
         return cls(
             temperatures=temperatures_t.to(device=device, non_blocking=True),
+            temperature_lasts=temp_lasts_t.to(device=device, non_blocking=True),
             top_ps=top_ps_t.to(device=device, non_blocking=True),
             top_ks=top_ks_t.to(device=device, non_blocking=True),
             top_as=top_as_t.to(device=device, non_blocking=True),

@@ -150,6 +150,7 @@ class SamplingParams:
         frequency_penalty: float = 0.0,
         repetition_penalty: float = 1.0,
         temperature: float = 1.0,
+        temperature_last: bool = False,
         top_p: float = 1.0,
         top_k: int = -1,
         top_a: float = 0.0,
@@ -185,6 +186,7 @@ class SamplingParams:
         self.frequency_penalty = frequency_penalty
         self.repetition_penalty = repetition_penalty
         self.temperature = temperature
+        self.temperature_last = temperature_last
         self.top_p = top_p
         self.top_k = top_k
         self.top_a = top_a
@@ -238,6 +240,7 @@ class SamplingParams:
             "frequency_penalty": 0.0,
             "repetition_penalty": 1.0,
             "temperature": 1.0,
+            "temperature_last": False,
             "top_p": 1.0,
             "top_k": -1,
             "top_a": 0.0,
