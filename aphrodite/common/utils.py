@@ -17,8 +17,8 @@ from collections import defaultdict
 from functools import lru_cache, partial, wraps
 from platform import uname
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Dict, Generic,
-                    Hashable, List, Optional, OrderedDict, Set, Tuple, TypeVar,
-                    Union, overload)
+                    Hashable, List, Literal, Optional, OrderedDict, Set, Tuple,
+                    Type, TypeVar, Union, overload)
 from uuid import uuid4
 
 import numpy as np
@@ -27,12 +27,10 @@ import psutil
 import torch
 import torch.types
 from loguru import logger
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, TypeIs, assert_never
 
 from aphrodite import _custom_ops as ops
 from aphrodite.common.logger import enable_trace_function_call
-from aphrodite.inputs import (ExplicitEncoderDecoderPrompt, PromptInputs,
-                              SingletonPromptInputs)
 
 # Exception strings for non-implemented encoder/decoder scenarios
 
@@ -811,6 +809,24 @@ def get_dtype_size(dtype: torch.dtype) -> int:
     return torch.tensor([], dtype=dtype).element_size()
 
 
+# `collections` helpers
+def is_list_of(
+    value: object,
+    typ: Type[T],
+    *,
+    check: Literal["first", "all"] = "first",
+) -> TypeIs[List[T]]:
+    if not isinstance(value, list):
+        return False
+
+    if check == "first":
+        return len(value) == 0 or isinstance(value[0], typ)
+    elif check == "all":
+        return all(isinstance(v, typ) for v in value)
+
+    assert_never(check)
+
+
 def merge_dicts(dict1: Dict[K, List[T]],
                 dict2: Dict[K, List[T]]) -> Dict[K, List[T]]:
     """Merge 2 dicts that have key -> List of items.
@@ -1075,50 +1091,3 @@ async def _run_task_with_lock(task: Callable, lock: asyncio.Lock, *args,
     """Utility function to run async task in a lock"""
     async with lock:
         return await task(*args, **kwargs)
-
-
-def is_encoder_decoder_model_config(model_config) -> bool:
-    '''
-    Extract the HF encoder/decoder model flag from the ModelConfig instance.
-    Return False if model_config is None.
-    '''
-    return model_config is not None and \
-                getattr(model_config.hf_config,
-                        "is_encoder_decoder",
-                        False)
-
-
-def is_embedding_model_config(model_config) -> bool:
-    '''
-    Extract the embedding model flag from the ModelConfig instance.
-    Return False if model_config is None.
-    '''
-    return model_config is not None and \
-                model_config.embedding_mode
-
-
-def build_explicit_enc_dec_prompt(
-    encoder_prompt: SingletonPromptInputs,
-    decoder_prompt: SingletonPromptInputs,
-) -> ExplicitEncoderDecoderPrompt:
-    return ExplicitEncoderDecoderPrompt(encoder_prompt=encoder_prompt,
-                                        decoder_prompt=decoder_prompt)
-
-
-def zip_enc_dec_prompt_lists(
-    enc_prompt_list: List[SingletonPromptInputs],
-    dec_prompt_list: List[SingletonPromptInputs],
-) -> List[ExplicitEncoderDecoderPrompt]:
-    return [
-        build_explicit_enc_dec_prompt(encoder_prompt, decoder_prompt)
-        for (encoder_prompt,
-             decoder_prompt) in zip(enc_prompt_list, dec_prompt_list)
-    ]
-
-
-def to_enc_dec_tuple_list(
-    enc_dec_prompts: List[ExplicitEncoderDecoderPrompt],
-) -> List[Tuple[PromptInputs, PromptInputs]]:
-    return [(enc_dec_prompt['encoder_prompt'],
-             enc_dec_prompt['decoder_prompt'])
-            for enc_dec_prompt in enc_dec_prompts]

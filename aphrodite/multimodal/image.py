@@ -7,6 +7,7 @@ from PIL import Image
 from transformers import PreTrainedTokenizerBase
 
 from aphrodite.common.config import ModelConfig
+from aphrodite.common.utils import is_list_of
 from aphrodite.inputs.registry import InputContext
 from aphrodite.transformers_utils.image_processor import get_image_processor
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
@@ -109,7 +110,8 @@ class ImagePlugin(MultiModalPlugin):
     def _default_input_mapper(self, ctx: InputContext,
                               data: object) -> MultiModalInputs:
         model_config = ctx.model_config
-        if isinstance(data, (Image.Image, list)):
+
+        if isinstance(data, Image.Image) or is_list_of(data, Image.Image):
             image_processor = self._get_hf_image_processor(model_config)
             if image_processor is None:
                 raise RuntimeError("No HuggingFace processor is available"
@@ -123,7 +125,7 @@ class ImagePlugin(MultiModalPlugin):
                 raise
 
             return MultiModalInputs(batch_data)
-        elif isinstance(data, torch.Tensor):
+        elif isinstance(data, torch.Tensor) or is_list_of(data, torch.Tensor):
             raise NotImplementedError("Embeddings input is not supported yet")
 
         raise TypeError(f"Invalid image type: {type(data)}")

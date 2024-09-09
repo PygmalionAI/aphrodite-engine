@@ -27,7 +27,7 @@ from aphrodite.endpoints.openai.protocol import (ChatCompletionRequest,
                                                  TokenizeRequest)
 # yapf: enable
 from aphrodite.engine.protocol import AsyncEngineClient
-from aphrodite.inputs import parse_and_batch_prompt
+from aphrodite.inputs.parse import parse_and_batch_prompt
 from aphrodite.lora.request import LoRARequest
 from aphrodite.modeling.guided_decoding import (
     get_guided_decoding_logits_processor)
