@@ -29,6 +29,10 @@ class ProposerWorkerBase(LoraNotSupportedWorkerBase, SpeculativeProposer):
         """Implementation optional"""
         pass
 
+    def set_should_modify_greedy_probs_inplace(self) -> None:
+        """Implementation optional"""
+        pass
+
     def add_lora(self, lora_request: LoRARequest) -> bool:
         raise ValueError(f"{type(self)} does not support LoRA")
 
