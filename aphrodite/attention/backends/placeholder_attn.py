@@ -3,9 +3,10 @@ from typing import TYPE_CHECKING, List, Optional, Tuple, Type
 
 import torch
 
-from aphrodite.attention.backends.abstract import (AttentionBackend, AttentionImpl,
-                                              AttentionMetadata,
-                                              AttentionMetadataBuilder)
+from aphrodite.attention.backends.abstract import (AttentionBackend,
+                                                   AttentionImpl,
+                                                   AttentionMetadata,
+                                                   AttentionMetadataBuilder)
 
 if TYPE_CHECKING:
     from aphrodite.task_handler.model_runner import ModelInputForGPUBuilder
