@@ -15,7 +15,9 @@ from aphrodite.distributed import (divide,
                                    split_tensor_along_last_dim,
                                    tensor_model_parallel_all_gather,
                                    tensor_model_parallel_all_reduce)
-from aphrodite.modeling import BaseAphroditeParameter, PackedAphroditeParameter
+from aphrodite.modeling.parameter import (BaseAphroditeParameter,
+                                          PackedAphroditeParameter,
+                                          PerTensorScaleParameter)
 # yapf: enable
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import (QuantizationConfig,
@@ -602,11 +604,13 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                          param: BaseAphroditeParameter,
                          loaded_weight: torch.Tensor,
                          loaded_shard_id: Optional[int] = None):
-        param_data = param.data
         if loaded_shard_id is None:
-            if param.output_dim is None:
-                assert param_data.shape == loaded_weight.shape
-                param_data.copy_(loaded_weight)
+            if isinstance(param, PerTensorScaleParameter):
+                param.load_merged_column_weight(loaded_weight=loaded_weight,
+                                                shard_id=0)
+                return
+            elif type(param) is BaseAphroditeParameter:
+                param.load_merged_column_weight(loaded_weight=loaded_weight)
                 return
             self._load_fused_module_from_checkpoint(param, loaded_weight)
             return
@@ -758,11 +762,13 @@ class QKVParallelLinear(ColumnParallelLinear):
                          param: BaseAphroditeParameter,
                          loaded_weight: torch.Tensor,
                          loaded_shard_id: Optional[str] = None):
-        param_data = param.data
         if loaded_shard_id is None:  # special case for certain models
-            if param.output_dim is None:
-                assert param_data.shape == loaded_weight.shape
-                param_data.copy_(loaded_weight)
+            if isinstance(param, PerTensorScaleParameter):
+                param.load_merged_column_weight(loaded_weight=loaded_weight,
+                                                shard_id=0)
+                return
+            elif type(param) is BaseAphroditeParameter:
+                param.load_merged_column_weight(loaded_weight=loaded_weight)
                 return
             self._load_fused_module_from_checkpoint(param, loaded_weight)
             return
