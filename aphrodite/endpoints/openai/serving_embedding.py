@@ -1,7 +1,8 @@
 import asyncio
 import base64
 import time
-from typing import AsyncGenerator, AsyncIterator, List, Optional, Tuple, cast
+from typing import (AsyncGenerator, AsyncIterator, List, Optional, Tuple,
+                    Union, cast)
 
 import numpy as np
 from fastapi import Request
@@ -14,7 +15,7 @@ from aphrodite.endpoints.logger import RequestLogger
 from aphrodite.endpoints.openai.protocol import (EmbeddingRequest,
                                                  EmbeddingResponse,
                                                  EmbeddingResponseData,
-                                                 UsageInfo)
+                                                 ErrorResponse, UsageInfo)
 from aphrodite.endpoints.openai.serving_engine import OpenAIServing
 from aphrodite.engine.protocol import AsyncEngineClient
 
@@ -70,8 +71,11 @@ class OpenAIServingEmbedding(OpenAIServing):
                          request_logger=request_logger)
         self._check_embedding_mode(model_config.embedding_mode)
 
-    async def create_embedding(self, request: EmbeddingRequest,
-                               raw_request: Request):
+    async def create_embedding(
+        self,
+        request: EmbeddingRequest,
+        raw_request: Optional[Request] = None
+    ) -> Union[ErrorResponse, EmbeddingResponse]:
         """Completion API similar to OpenAI's API.
 
         See https://platform.openai.com/docs/api-reference/embeddings/create
@@ -138,7 +142,9 @@ class OpenAIServingEmbedding(OpenAIServing):
 
         result_generator: AsyncIterator[Tuple[
             int, EmbeddingRequestOutput]] = merge_async_iterators(
-                *generators, is_cancelled=raw_request.is_disconnected)
+                *generators,
+                is_cancelled=raw_request.is_disconnected
+                if raw_request else None)
 
         # Non-streaming response
         final_res_batch: List[Optional[EmbeddingRequestOutput]]
