@@ -14,7 +14,7 @@
 
  ## Pre-requisites
 
-* Ensure you are using `aphrodite > 0.5.2`. You can check by running `python -c "import aphrodite; print(aphrodite.__version__)"`.
+* Ensure you are using `aphrodite-engine > 0.6.0`. You can check by running `python -c "import aphrodite; print(aphrodite.__version__)"`.
 * The examples in this document use `NousResearch/Meta-Llama-3.1-8B-Instruct`.
 
 
@@ -162,4 +162,37 @@ Your results are now on S3. You can view them in your terminal by running
 
 ```
 aws s3 cp s3://MY_BUCKET/MY_OUTPUT_FILE.jsonl -
+```
+
+## Example 4: Using embeddings endpoint
+
+### Additional prerequisites
+
+* Ensure you are using `aphrodite-engine >= 0.6.0.post2`.
+
+### Step 1: Create your batch file
+
+ Add embedding requests to your batch file. The following is an example:
+
+ ```
+ {"custom_id": "request-1", "method": "POST", "url": "/v1/embeddings", "body": {"model": "intfloat/e5-mistral-7b-instruct", "input": "You are a helpful assistant."}}
+{"custom_id": "request-2", "method": "POST", "url": "/v1/embeddings", "body": {"model": "intfloat/e5-mistral-7b-instruct", "input": "You are an unhelpful assistant."}}
+```
+
+ You can even mix chat completion and embedding requests in the batch file, as long as the model you are using supports both chat completion and embeddings (note that all requests must use the same model).
+
+
+ ### Step 2: Run the batch
+
+You can run the batch using the same command as in earlier examples.
+
+
+### Step 3: Check your results
+
+You can check your results by running `cat results.jsonl`
+
+```
+$ cat results.jsonl
+{"id":"aphrodite-db0f71f7dec244e6bce530e0b4ef908b","custom_id":"request-1","response":{"status_code":200,"request_id":"aphrodite-batch-3580bf4d4ae54d52b67eee266a6eab20","body":{"id":"embd-33ac2efa7996430184461f2e38529746","object":"list","created":444647,"model":"intfloat/e5-mistral-7b-instruct","data":[{"index":0,"object":"embedding","embedding":[0.016204833984375,0.0092010498046875,0.0018358230590820312,-0.0028228759765625,0.001422882080078125,-0.0031147003173828125,...]}],"usage":{"prompt_tokens":8,"total_tokens":8,"completion_tokens":0}}},"error":null}
+...```
 ```
