@@ -130,7 +130,7 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
         # the embedding weights.
         xm_tp_rank = xr.global_ordinal()
         with patch(
-                "vllm.model_executor.layers.vocab_parallel_embedding."
+                "aphrodite.modeling.layers.vocab_parallel_embedding."
                 "get_tensor_model_parallel_rank",
                 return_value=xm_tp_rank):
             model = get_model(
@@ -145,19 +145,7 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
             )
         model = model.eval()
         xm.wait_device_ops()
-
-        model = ModelWrapper(model)
-        # NOTE: There are two stages of compilation: torch.compile and
-        # XLA compilation. Setting dynamic=True can reduce the torch.compile
-        # overhead by reusing the FX graph for different shapes.
-        # However, the XLA graph will still require static shapes and needs to
-        # be re-compiled for every different shapes. This overhead is inevitable
-        # in the first run, but can be skipped afterwards as we cache the XLA
-        # graphs in the disk (APHRODITE_XLA_CACHE_PATH).
-        self.model = torch.compile(model,
-                                   backend="openxla",
-                                   fullgraph=True,
-                                   dynamic=True)
+        self.model = CompiledModelWrapper(model)
 
     def _dummy_run(
         self,
@@ -693,6 +681,52 @@ class ModelWrapper(nn.Module):
         next_token_ids = torch.where(t != 0, sampled_token_ids,
                                      argmax_token_ids)
         return next_token_ids
+
+
+class CompiledModelWrapper:
+
+    def __init__(self, model: nn.Module):
+        model = ModelWrapper(model)
+        self.model = torch.compile(model,
+                                   backend="openxla",
+                                   fullgraph=True,
+                                   dynamic=False)
+
+    def __call__(
+        self,
+        token_ids: torch.Tensor,
+        position_ids: torch.Tensor,
+        attn_metadata: AttentionMetadata,
+        input_lens: torch.Tensor,
+        t: torch.Tensor,
+        p: torch.Tensor,
+        num_samples: int,
+        kv_caches: List[Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]],
+    ) -> torch.Tensor:
+        # NOTE: There are two stages of compilation: torch.compile and
+        # XLA compilation. Using `mark_dynamic` can reduce the torch.compile
+        # overhead by reusing the FX graph for different shapes.
+        # However, the XLA graph will still require static shapes and needs to
+        # be re-compiled for every different shapes. This overhead is inevitable
+        # in the first run, but can be skipped afterwards as we cache the XLA
+        # graphs in the disk (APHRODITE_XLA_CACHE_PATH).
+        if attn_metadata.num_prefills > 0:
+            # Prefll
+            torch._dynamo.mark_dynamic(token_ids, 1)
+            torch._dynamo.mark_dynamic(position_ids, 1)
+            torch._dynamo.mark_dynamic(attn_metadata.slot_mapping, 1)
+        else:
+            # Decode
+            torch._dynamo.mark_dynamic(token_ids, 0)
+            torch._dynamo.mark_dynamic(position_ids, 0)
+            torch._dynamo.mark_dynamic(input_lens, 0)
+            torch._dynamo.mark_dynamic(attn_metadata.slot_mapping, 0)
+            torch._dynamo.mark_dynamic(attn_metadata.context_lens, 0)
+            torch._dynamo.mark_dynamic(attn_metadata.block_tables, 0)
+            torch._dynamo.mark_dynamic(t, 0)
+            torch._dynamo.mark_dynamic(p, 0)
+        return self.model(token_ids, position_ids, attn_metadata, input_lens,
+                          t, p, num_samples, kv_caches)
 
 
 def _get_padded_prefill_len(x: int) -> int:
