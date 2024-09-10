@@ -1264,7 +1264,10 @@ class AphroditeEngine:
             num_free_gpu = sum(
                 scheduler.block_manager.get_num_free_gpu_blocks()
                 for scheduler in self.scheduler)
-            gpu_cache_usage_sys = 1.0 - (num_free_gpu / num_total_gpu)
+            if not self.model_config.is_attention_free():
+                gpu_cache_usage_sys = 1.0 - (num_free_gpu / num_total_gpu)
+            else:
+                gpu_cache_usage_sys = 0.0
 
         num_total_cpu = self.cache_config.num_cpu_blocks
         cpu_cache_usage_sys = 0.
@@ -1272,7 +1275,10 @@ class AphroditeEngine:
             num_free_cpu = sum(
                 scheduler.block_manager.get_num_free_cpu_blocks()
                 for scheduler in self.scheduler)
-            cpu_cache_usage_sys = 1.0 - (num_free_cpu / num_total_cpu)
+            if not self.model_config.is_attention_free():
+                cpu_cache_usage_sys = 1.0 - (num_free_cpu / num_total_cpu)
+            else:
+                cpu_cache_usage_sys = 0.0
 
         # Iteration stats
         num_prompt_tokens_iter = 0
