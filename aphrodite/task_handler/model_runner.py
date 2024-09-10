@@ -840,18 +840,14 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         self.graph_block_tables = np.zeros(
             (max(_BATCH_SIZES_TO_CAPTURE), self.get_max_block_per_batch()),
             dtype=np.int32)
-        num_attn_heads = self.model_config.get_num_attention_heads(
-            self.parallel_config, self.tp_rank)
         self.attn_backend = get_attn_backend(
-            num_attn_heads,
             self.model_config.get_head_size(),
-            self.model_config.get_num_kv_heads(self.parallel_config,
-                                               self.tp_rank),
             self.model_config.get_sliding_window(),
             self.model_config.dtype,
             self.kv_cache_dtype,
             self.block_size,
-        ) if num_attn_heads else None
+            self.model_config.is_attention_free(),
+        )
 
         # Multi-modal data support
         self.multi_modal_input_mapper = MULTIMODAL_REGISTRY \
@@ -1723,8 +1719,9 @@ class CUDAGraphRunner:
         # Copy the input tensors to the input buffers.
         self.input_buffers["input_ids"].copy_(input_ids, non_blocking=True)
         self.input_buffers["positions"].copy_(positions, non_blocking=True)
-        self.input_buffers["slot_mapping"].copy_(attn_metadata.slot_mapping,
-                                                 non_blocking=True)
+        if self.backend_name != "No attention":
+            self.input_buffers["slot_mapping"].copy_(
+                attn_metadata.slot_mapping, non_blocking=True)
         if self.backend_name != "flashinfer":
             self.input_buffers["seq_lens_tensor"].copy_(
                 attn_metadata.decode_metadata.seq_lens_tensor,

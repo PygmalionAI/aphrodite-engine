@@ -70,6 +70,7 @@ _GENERATION_MODELS = {
     "Phi3SmallForCausalLM": ("phi3_small", "Phi3SmallForCausalLM"),
     "MLPSpeculatorPreTrainedModel": ("mlp_speculator", "MLPSpeculator"),
     "JambaForCausalLM": ("jamba", "JambaForCausalLM"),
+    "MambaForCausalLM": ("mamba", "MambaForCausalLM"),
     "MedusaModel": ("medusa", "Medusa"),
     "FuyuForCausalLM": ("fuyu", "FuyuForCausalLM"),
     "PersimmonForCausalLM": ("persimmon", "PersimmonForCausalLM"),

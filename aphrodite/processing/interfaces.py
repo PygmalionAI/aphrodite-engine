@@ -37,10 +37,10 @@ class BlockSpaceManager(ABC):
                 BlockSpaceManagerV2)
             return BlockSpaceManagerV2
 
-        if version == "embedding":
-            from aphrodite.processing.embedding_model_block_manager import (
-                EmbeddingModelBlockSpaceManager)
-            return EmbeddingModelBlockSpaceManager
+        if version == "placeholder":
+            from aphrodite.processing.placeholder_block_space_manager import (
+                PlaceholderBlockSpaceManager)
+            return PlaceholderBlockSpaceManager
 
         raise ValueError(f"Unknown version {version=}")
 
