@@ -23,7 +23,9 @@ from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import (QuantizationConfig,
                                                 QuantizeMethodBase)
 
-WEIGHT_LOADER_V2_SUPPORTED = ["CompressedTensorsLinearMethod"]
+WEIGHT_LOADER_V2_SUPPORTED = [
+    "CompressedTensorsLinearMethod", "GPTQMarlinLinearMethod"
+]
 
 
 def adjust_marlin_shard(param, shard_size, shard_offset):
