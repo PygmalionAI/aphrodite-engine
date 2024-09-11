@@ -25,6 +25,7 @@ RUN PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cpu https://storage.op
 
 # temporary hack until the dependencies are upgraded
 RUN pip install 'transformers==4.43.0'
+RUN pip install triton
 
 COPY examples/ /workspace/aphrodite-engine/examples
 COPY tests/benchmarks/ /workspace/aphrodite-engine/tests/benchmarks

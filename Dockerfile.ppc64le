@@ -17,6 +17,7 @@ WORKDIR /workspace/aphrodite-engine
 RUN pip install -v -r requirements-cpu.txt --prefer-binary --extra-index-url https://repo.fury.io/mgiessing
 
 RUN APHRODITE_TARGET_DEVICE=cpu python3 setup.py install
+RUN pip install triton
 
 WORKDIR /aphrodite-workspace
 ENTRYPOINT ["/opt/conda/bin/python3", "-m", "aphrodite.endpoints.openai.api_server"]
