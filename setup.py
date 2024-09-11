@@ -47,9 +47,12 @@ def embed_commit_hash():
 
 embed_commit_hash()
 
-# Aphrodite only supports Linux platform
-assert sys.platform.startswith(
-    "linux"), "Aphrodite only supports Linux platform (including WSL)."
+if not sys.platform.startswith("linux"):
+    logger.warning(
+        "Aphrodite only supports Linux platform (including WSL). "
+        f"Building on {sys.platform}, "
+        "so APhrodite may not be able to run correctly")
+    APHRODITE_TARGET_DEVICE = "empty"
 
 MAIN_CUDA_VERSION = "12.4"
 
@@ -219,6 +222,9 @@ class cmake_build_ext(build_ext):
         subprocess.check_call(["cmake", *build_args], cwd=self.build_temp)
 
 
+def _no_device() -> bool:
+    return APHRODITE_TARGET_DEVICE == "empty"
+
 def _is_cuda() -> bool:
     has_cuda = torch.version.cuda is not None
     return (APHRODITE_TARGET_DEVICE == "cuda" and has_cuda
@@ -338,7 +344,9 @@ def find_version(filepath: str) -> str:
 def get_aphrodite_version() -> str:
     version = find_version(get_path("aphrodite", "version.py"))
 
-    if _is_cuda():
+    if _no_device():
+        version += "+empty"
+    elif _is_cuda():
         cuda_version = str(get_nvcc_cuda_version())
         if cuda_version != MAIN_CUDA_VERSION:
             cuda_version_str = cuda_version.replace(".", "")[:3]
@@ -393,7 +401,9 @@ def get_requirements() -> List[str]:
                 resolved_requirements.append(line)
         return resolved_requirements
 
-    if _is_cuda():
+    if _no_device():
+        requirements = _read_requirements("requirements-cuda.txt")
+    elif _is_cuda():
         requirements = _read_requirements("requirements-cuda.txt")
         cuda_major, cuda_minor = torch.version.cuda.split(".")
         modified_requirements = []
@@ -443,6 +453,9 @@ package_data = {
 if os.environ.get("APHRODITE_USE_PRECOMPILED"):
     ext_modules = []
     package_data["aphrodite"].append("*.so")
+
+if _no_device():
+    ext_modules = []
 
 setup(
     name="aphrodite-engine",
