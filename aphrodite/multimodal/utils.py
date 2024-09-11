@@ -21,7 +21,7 @@ APHRODITE_AUDIO_FETCH_TIMEOUT = int(
     os.getenv("APHRODITE_AUDIO_FETCH_TIMEOUT", 10))
 
 
-cahed_get_tokenizer = lru_cache(get_tokenizer)
+cached_get_tokenizer = lru_cache(get_tokenizer)
 
 
 def _load_image_from_bytes(b: bytes):
