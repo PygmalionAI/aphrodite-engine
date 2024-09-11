@@ -7,6 +7,7 @@ import torch.nn as nn
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig
 from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
+from aphrodite.common.utils import progress_bar
 from aphrodite.distributed import (get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size,
                                    tensor_model_parallel_all_reduce)
@@ -407,7 +408,9 @@ class DbrxForCausalLM(nn.Module):
             f"experts.mlp.{weight_name}",
         ) for weight_name in ["w1", "v1", "w2"]]
         params_dict = dict(self.named_parameters(remove_duplicate=False))
-        for name, loaded_weight in weights:
+        weights_list = list(weights)
+        for name, loaded_weight in progress_bar(weights_list,
+                                                desc="Loading modules..."):
             for param_name, weight_name in expert_params_mapping:
                 if weight_name not in name:
                     continue

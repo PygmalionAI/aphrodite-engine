@@ -14,6 +14,7 @@ from xformers.ops import memory_efficient_attention
 
 from aphrodite.common.config import ModelConfig
 from aphrodite.common.sequence import SequenceData
+from aphrodite.common.utils import progress_bar
 from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.inputs import LLMInputs
 from aphrodite.modeling.layers.activation import get_act_fn
@@ -641,7 +642,9 @@ class SiglipVisionModel(nn.Module):
         params_dict = dict(self.named_parameters())
         layer_count = len(self.vision_model.encoder.layers)
 
-        for name, loaded_weight in weights:
+        weights_list = list(weights)
+        for name, loaded_weight in progress_bar(weights_list,
+                                                desc="Loading modules..."):
             # omit layers when num_hidden_layers_override is set
             if "vision_model.encoder.layers." in name:
                 layer_idx = int(name.split(".")[3])

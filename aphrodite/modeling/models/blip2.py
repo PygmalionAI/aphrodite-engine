@@ -9,6 +9,7 @@ from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
 from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceData)
+from aphrodite.common.utils import progress_bar
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
@@ -656,7 +657,9 @@ class Blip2ForConditionalGeneration(nn.Module, SupportsVision):
         ]
         params_dict = dict(self.named_parameters())
 
-        for name, loaded_weight in weights:
+        weights_list = list(weights)
+        for name, loaded_weight in progress_bar(weights_list,
+                                                desc="Loading modules..."):
             if "lm_head.weight" in name:
                 continue
             if "rotary_emb.inv_freq" in name:

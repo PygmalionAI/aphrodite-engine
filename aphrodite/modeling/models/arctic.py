@@ -8,6 +8,7 @@ from torch import nn
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig
 from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
+from aphrodite.common.utils import progress_bar
 from aphrodite.distributed import (get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size,
                                    tensor_model_parallel_all_reduce)
@@ -487,7 +488,9 @@ class ArcticForCausalLM(nn.Module):
             "It will take ~10 minutes loading from the 16-bit weights. "
             "Alternatively, use the prequantized 8-bit weights of arctic "
             "and set load-format to `sharded_state` will accelerate loading.")
-        for name, loaded_weight in weights:
+        weights_list = list(weights)
+        for name, loaded_weight in progress_bar(weights_list,
+                                                desc="Loading modules..."):
             for (param_name, weight_name, shard_id) in stacked_params_mapping:
                 if weight_name not in name:
                     continue
