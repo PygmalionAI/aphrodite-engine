@@ -45,6 +45,7 @@ from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
 from aphrodite.endpoints.openai.serving_completions import (
     OpenAIServingCompletion)
 from aphrodite.endpoints.openai.serving_embedding import OpenAIServingEmbedding
+from aphrodite.endpoints.openai.serving_engine import LoRAModulePath
 from aphrodite.endpoints.openai.serving_tokenization import (
     OpenAIServingTokenization)
 from aphrodite.engine.args_tools import AsyncEngineArgs
@@ -239,6 +240,22 @@ async def create_embedding(request: EmbeddingRequest, raw_request: Request):
                             status_code=generator.code)
     else:
         return JSONResponse(content=generator.model_dump())
+    
+
+@router.post("/v1/lora/load")
+async def load_lora(lora: LoRAModulePath):
+    openai_serving_completion.add_lora(lora)
+    if engine_args.enable_lora is False:
+        logger.error("LoRA is not enabled in the engine. "
+                     "Please start the server with the "
+                     "--enable-lora flag!")
+    return JSONResponse(content={"status": "success"})
+
+
+@router.delete("/v1/lora/unload")
+async def unload_lora(lora_name: str):
+    openai_serving_completion.remove_lora(lora_name)
+    return JSONResponse(content={"status": "success"})
 
 
 # ============ KoboldAI API ============ #
@@ -538,6 +555,12 @@ def build_app(args: Namespace) -> FastAPI:
 
             auth_header = request.headers.get("Authorization")
             api_key_header = request.headers.get("x-api-key")
+
+            if request.url.path.startswith("/v1/lora"):
+                if admin_key is not None and api_key_header == admin_key:
+                    return await call_next(request)
+                return JSONResponse(content={"error": "Unauthorized"},
+                                    status_code=401)
 
             if auth_header != "Bearer " + token and api_key_header != token:
                 return JSONResponse(content={"error": "Unauthorized"},
