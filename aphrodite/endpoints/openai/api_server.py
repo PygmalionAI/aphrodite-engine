@@ -45,7 +45,8 @@ from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
 from aphrodite.endpoints.openai.serving_completions import (
     OpenAIServingCompletion)
 from aphrodite.endpoints.openai.serving_embedding import OpenAIServingEmbedding
-from aphrodite.endpoints.openai.serving_engine import LoRAModulePath
+from aphrodite.endpoints.openai.serving_engine import (LoRAModulePath,
+                                                       PromptAdapterPath)
 from aphrodite.endpoints.openai.serving_tokenization import (
     OpenAIServingTokenization)
 from aphrodite.engine.args_tools import AsyncEngineArgs
@@ -258,6 +259,21 @@ async def unload_lora(lora_name: str):
     return JSONResponse(content={"status": "success"})
 
 
+@router.post("/v1/soft_prompt/load")
+async def load_soft_prompt(soft_prompt: PromptAdapterPath):
+    openai_serving_completion.add_prompt_adapter(soft_prompt)
+    if engine_args.enable_prompt_adapter is False:
+        logger.error("Prompt Adapter is not enabled in the engine. "
+                     "Please start the server with the "
+                     "--enable-prompt-adapter flag!")
+    return JSONResponse(content={"status": "success"})
+
+@router.delete("/v1/soft_prompt/unload")
+async def unload_soft_prompt(soft_prompt_name: str):
+    openai_serving_completion.remove_prompt_adapter(soft_prompt_name)
+    return JSONResponse(content={"status": "success"})
+
+
 # ============ KoboldAI API ============ #
 
 
@@ -373,14 +389,10 @@ async def generate_stream(
 
     async def stream_kobold() -> AsyncGenerator[bytes, None]:
         previous_output = ""
-        async for res in results_generator:
-            new_chunk = res.outputs[0].text[len(previous_output):]
+        async for             if request.url.path.startswith(("/v1/lora", "/v1/soft_prompt")):utputs[0].text[len(previous_output):]
             previous_output += new_chunk
             yield b"event: message\n"
-            yield f"data: {json.dumps({'token': new_chunk})}\n\n".encode()
-
-    return StreamingResponse(stream_kobold(),
-                             headers={
+            yield f"data: {json.dumps({'token': new_chunk})}\n\n".encode(            if request.url.path.startswith(("/v1/lora", "/v1/soft_prompt")):                       headers={
                                  "Cache-Control": "no-cache",
                                  "Connection": "keep-alive",
                              },
@@ -556,7 +568,7 @@ def build_app(args: Namespace) -> FastAPI:
             auth_header = request.headers.get("Authorization")
             api_key_header = request.headers.get("x-api-key")
 
-            if request.url.path.startswith("/v1/lora"):
+            if request.url.path.startswith(("/v1/lora", "/v1/soft_prompt")):
                 if admin_key is not None and api_key_header == admin_key:
                     return await call_next(request)
                 return JSONResponse(content={"error": "Unauthorized"},

@@ -217,6 +217,31 @@ class OpenAIServing:
             lora for lora in self.lora_requests if lora.lora_name != lora_name
         ]
 
+    def add_prompt_adapter(self, prompt_adapter: PromptAdapterPath):
+        if prompt_adapter.name in [
+                prompt_adapter.prompt_adapter_name
+                for prompt_adapter in self.prompt_adapter_requests
+        ]:
+            logger.error(
+                f"Prompt adapter {prompt_adapter.name} already exists.")
+            return
+        with pathlib.Path(prompt_adapter.local_path,
+                          "adapter_config.json").open() as f:
+            adapter_config = json.load(f)
+            num_virtual_tokens = adapter_config["num_virtual_tokens"]
+        self.prompt_adapter_requests.append(
+            PromptAdapterRequest(
+                prompt_adapter_name=prompt_adapter.name,
+                prompt_adapter_id=len(self.prompt_adapter_requests) + 1,
+                prompt_adapter_local_path=prompt_adapter.local_path,
+                prompt_adapter_num_virtual_tokens=num_virtual_tokens))
+        
+    def remove_prompt_adapter(self, prompt_adapter_name: str):
+        self.prompt_adapter_requests = [
+            prompt_adapter for prompt_adapter in self.prompt_adapter_requests
+            if prompt_adapter.prompt_adapter_name != prompt_adapter_name
+        ]
+
     def _normalize_prompt_text_to_input(
         self,
         request: AnyRequest,
