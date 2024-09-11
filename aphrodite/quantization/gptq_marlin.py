@@ -2,12 +2,16 @@ from typing import Any, Dict, List, Optional
 
 import torch
 from loguru import logger
-from torch.nn.parameter import Parameter
+from torch.nn import Parameter
 
 from aphrodite import _custom_ops as ops
-from aphrodite.modeling.layers.linear import (LinearBase, LinearMethodBase,
-                                              set_weight_attrs)
+from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
 from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
+from aphrodite.modeling.parameter import (ChannelQuantScaleParameter,
+                                          GroupQuantScaleParameter,
+                                          PackedAphroditeParameter,
+                                          PackedColumnParameter,
+                                          RowAphroditeParameter)
 from aphrodite.quantization.base_config import QuantizationConfig
 from aphrodite.quantization.utils.marlin_utils import (
     apply_gptq_marlin_linear, check_marlin_supported, marlin_is_k_full,
@@ -156,9 +160,11 @@ class GPTQMarlinLinearMethod(LinearMethodBase):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ) -> None:
+
         del output_size
         output_size_per_partition = sum(output_partition_sizes)
         is_row_parallel = input_size != input_size_per_partition
+        weight_loader = extra_weight_attrs.get("weight_loader")
 
         # Normalize group_size
         if self.quant_config.group_size != -1:
@@ -187,79 +193,66 @@ class GPTQMarlinLinearMethod(LinearMethodBase):
             scales_and_zp_size = input_size_per_partition // group_size
 
         # Quantized weights
-        qweight = Parameter(
-            torch.empty(
+        qweight = PackedAphroditeParameter(
+            data=torch.empty(
                 input_size_per_partition // self.quant_config.pack_factor,
                 output_size_per_partition,
                 dtype=torch.int32,
             ),
-            requires_grad=False,
-        )
-        set_weight_attrs(
-            qweight,
-            {
-                **extra_weight_attrs,
-                "input_dim": 0,
-                "output_dim": 1,
-                "packed_dim": 0,
-                "pack_factor": self.quant_config.pack_factor,
-            },
-        )
+            input_dim=0,
+            output_dim=1,
+            packed_dim=0,
+            packed_factor=self.quant_config.pack_factor,
+            weight_loader=weight_loader)
 
         # Activation order
-        g_idx = Parameter(
-            torch.empty(
-                input_size_per_partition,
-                dtype=torch.int32,
-            ),
-            requires_grad=False,
-        )
-        # Ignore warning from fused linear layers such as QKVParallelLinear.
-        set_weight_attrs(
-            g_idx,
-            {
-                **extra_weight_attrs, "input_dim": 0,
-                "ignore_warning": True
-            },
-        )
+        g_idx = RowAphroditeParameter(data=torch.empty(
+            input_size_per_partition,
+            dtype=torch.int32,
+        ),
+                                 input_dim=0,
+                                 weight_loader=weight_loader)
 
-        # Scales
-        scales = Parameter(
-            torch.empty(
-                scales_and_zp_size,
-                output_size_per_partition,
-                dtype=params_dtype,
-            ),
-            requires_grad=False,
-        )
-        set_weight_attrs(
-            scales,
-            {
-                **extra_weight_attrs,
-                "input_dim": scales_and_zp_input_dim,
-                "output_dim": 1,
-            },
-        )
-
-        # Quantized zero-points
-        qzeros = Parameter(
+        qzeros_args = {
+            "data":
             torch.empty(
                 scales_and_zp_size,
                 output_size_per_partition // self.quant_config.pack_factor,
                 dtype=torch.int32,
             ),
-            requires_grad=False,
-        )
-        set_weight_attrs(
-            qzeros,
-            {
-                **extra_weight_attrs,
-                "input_dim": scales_and_zp_input_dim,
-                "output_dim": 1,
-                "packed_dim": 1,
-                "pack_factor": self.quant_config.pack_factor,
-            },
-        )
+            "weight_loader":
+            weight_loader
+        }
+        weight_scale_args = {
+            "data":
+            torch.empty(
+                scales_and_zp_size,
+                output_size_per_partition,
+                dtype=params_dtype,
+            ),
+            "weight_loader":
+            weight_loader
+        }
+
+        if scales_and_zp_input_dim is None:
+            scales = ChannelQuantScaleParameter(output_dim=1,
+                                                **weight_scale_args)
+            qzeros = PackedColumnParameter(
+                output_dim=1,
+                packed_dim=1,
+                packed_factor=self.quant_config.pack_factor,
+                **qzeros_args)
+
+        else:
+            scales = GroupQuantScaleParameter(output_dim=1,
+                                              input_dim=0,
+                                              **weight_scale_args)
+            qzeros = PackedAphroditeParameter(
+                input_dim=0,
+                output_dim=1,
+                packed_dim=1,
+                packed_factor=self.quant_config.pack_factor,
+                **qzeros_args)
 
         layer.register_parameter("qweight", qweight)
         layer.register_parameter("g_idx", g_idx)
@@ -276,6 +269,10 @@ class GPTQMarlinLinearMethod(LinearMethodBase):
     # Here, we handle the repacking, including the activation reordering case.
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         device = layer.qweight.device
+
+        # required by torch.compile
+        layer.qweight = Parameter(layer.qweight.data, requires_grad=False)
+        layer.scales = Parameter(layer.scales.data, requires_grad=False)
 
         # Allocate marlin workspace
         layer.workspace = marlin_make_workspace(
