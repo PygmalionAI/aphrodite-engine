@@ -9,7 +9,7 @@ from loguru import logger
 
 from aphrodite.attention.backends.abstract import AttentionBackend
 from aphrodite.common.utils import (STR_BACKEND_ENV_VAR, is_cpu, is_hip,
-                                    is_openvino, is_tpu, is_xpu)
+                                    is_openvino, is_xpu)
 from aphrodite.platforms import current_platform
 
 APHRODITE_ATTENTION_BACKEND = os.getenv("APHRODITE_ATTENTION_BACKEND", None)
@@ -201,7 +201,7 @@ def which_attn_to_use(
             logger.info(f"Cannot use {selected_backend} backend on XPU.")
         return _Backend.IPEX
 
-    if is_tpu():
+    if current_platform.is_tpu():
         if selected_backend != _Backend.PALLAS:
             logger.info(f"Cannot use {selected_backend} backend on TPU.")
         return _Backend.PALLAS

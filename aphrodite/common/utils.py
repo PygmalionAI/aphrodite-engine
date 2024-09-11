@@ -31,7 +31,6 @@ from rich.progress import (BarColumn, MofNCompleteColumn, Progress,
                            SpinnerColumn, TextColumn, TimeElapsedColumn)
 from typing_extensions import ParamSpec, TypeIs, assert_never
 
-from aphrodite import _custom_ops as ops
 from aphrodite.common.logger import enable_trace_function_call
 from aphrodite.distributed import get_tensor_model_parallel_rank
 
@@ -335,15 +334,6 @@ def is_neuron() -> bool:
 
 
 @lru_cache(maxsize=None)
-def is_tpu() -> bool:
-    try:
-        import libtpu
-    except ImportError:
-        libtpu = None
-    return libtpu is not None
-
-
-@lru_cache(maxsize=None)
 def is_xpu() -> bool:
     from importlib.metadata import version
     is_xpu_flag = "xpu" in version("aphrodite-engine")
@@ -366,6 +356,7 @@ def is_xpu() -> bool:
 @lru_cache(maxsize=None)
 def get_max_shared_memory_bytes(gpu: int = 0) -> int:
     """Returns the maximum shared memory per thread block in bytes."""
+    from aphrodite import _custom_ops as ops
     max_shared_mem = (
         ops.get_max_shared_memory_per_block_device_attribute(gpu))
     # value 0 will cause MAX_SEQ_LEN become negative and test_attention.py

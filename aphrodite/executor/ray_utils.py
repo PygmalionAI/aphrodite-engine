@@ -2,7 +2,8 @@ from typing import List, Optional, Tuple, Union
 
 from aphrodite.common.config import ParallelConfig
 from aphrodite.common.sequence import ExecuteModelRequest, IntermediateTensors
-from aphrodite.common.utils import get_ip, is_hip, is_tpu, is_xpu
+from aphrodite.common.utils import get_ip, is_hip, is_xpu
+from aphrodite.platforms import current_platform
 from aphrodite.task_handler.worker_base import WorkerWrapperBase
 
 try:
@@ -107,7 +108,7 @@ def initialize_ray_cluster(
         # Placement group is already set.
         return
 
-    device_str = "GPU" if not is_tpu() else "TPU"
+    device_str = "GPU" if not current_platform.is_tpu() else "TPU"
     # Create placement group for worker processes
     current_placement_group = ray.util.get_current_placement_group()
     if current_placement_group:

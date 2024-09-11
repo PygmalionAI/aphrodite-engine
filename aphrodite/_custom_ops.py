@@ -6,11 +6,13 @@ import torch
 from loguru import logger
 
 from aphrodite._core_ext import ScalarType
+from aphrodite.platforms import current_platform
 
-try:
-    import aphrodite._C
-except ImportError as e:
-    logger.warning(f"Failed to import from aphrodite._C with {e}")
+if not current_platform.is_tpu():
+    try:
+        import aphrodite._C
+    except ImportError as e:
+        logger.warning(f"Failed to import from aphrodite._C with {e}")
 
 with contextlib.suppress(ImportError):
     # ruff: noqa: F401
