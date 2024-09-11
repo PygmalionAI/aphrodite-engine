@@ -30,7 +30,7 @@ from torch import nn
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig, LoRAConfig
 from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
-from aphrodite.common.utils import is_hip
+from aphrodite.common.utils import is_hip, progress_bar
 from aphrodite.distributed import (get_pp_group,
                                    get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size)
@@ -322,7 +322,8 @@ class SolarModel(nn.Module):
         bskcn_h_2 = None
         bskcn_r_1 = None
         bskcn_r_2 = None
-        bskcn_tv = self.config.bskcn_tv[0] if self.training else self.config.bskcn_tv[1]
+        bskcn_tv = (self.config.bskcn_tv[0] \
+                    if self.training else self.config.bskcn_tv[1])
 
         for i in range(self.start_layer, self.end_layer):
             if i in self.config.bskcn_1:
@@ -480,7 +481,9 @@ class SolarForCausalLM(nn.Module, SupportsLoRA):
             (".gate_up_proj", ".up_proj", 1),
         ]
         params_dict = dict(self.named_parameters())
-        for name, loaded_weight in weights:
+        weights_list = list(weights)
+        for name, loaded_weight in progress_bar(weights_list,
+                                                desc="Loading modules..."):
             if "rotary_emb.inv_freq" in name:
                 continue
             if ("rotary_emb.cos_cached" in name
