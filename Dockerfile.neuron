@@ -33,4 +33,6 @@ RUN cd /app/aphrodite-engine \
     && pip install -e . \
     && cd ..
 
+RUN pip install triton
+
 CMD ["/bin/bash"]
