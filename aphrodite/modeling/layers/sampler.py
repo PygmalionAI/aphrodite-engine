@@ -135,7 +135,9 @@ class Sampler(nn.Module):
 
         # Apply temperature scaling if not doing temp_last.
         if not do_temp_last:
+            # Use float32 to apply temp.
             # Use in-place division to avoid creating a new tensor.
+            logits = logits.to(torch.float)
             logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
 
         if do_top_p_top_k:
@@ -168,7 +170,9 @@ class Sampler(nn.Module):
                 sampling_tensors.smoothing_curves)
 
         if do_temp_last:
+            # Use float32 to apply temp.
             # Use in-place division to avoid creating a new tensor.
+            logits = logits.to(torch.float)
             logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
 
         # banned_tokens = _get_custom_token_bans(sampling_metadata)
