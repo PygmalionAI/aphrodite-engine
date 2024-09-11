@@ -389,10 +389,14 @@ async def generate_stream(
 
     async def stream_kobold() -> AsyncGenerator[bytes, None]:
         previous_output = ""
-        async for             if request.url.path.startswith(("/v1/lora", "/v1/soft_prompt")):utputs[0].text[len(previous_output):]
+        async for res in results_generator:
+            new_chunk = res.outputs[0].text[len(previous_output):]
             previous_output += new_chunk
             yield b"event: message\n"
-            yield f"data: {json.dumps({'token': new_chunk})}\n\n".encode(            if request.url.path.startswith(("/v1/lora", "/v1/soft_prompt")):                       headers={
+            yield f"data: {json.dumps({'token': new_chunk})}\n\n".encode()
+
+    return StreamingResponse(stream_kobold(),
+                             headers={
                                  "Cache-Control": "no-cache",
                                  "Connection": "keep-alive",
                              },
