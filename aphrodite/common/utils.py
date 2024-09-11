@@ -33,6 +33,7 @@ from typing_extensions import ParamSpec, TypeIs, assert_never
 
 from aphrodite import _custom_ops as ops
 from aphrodite.common.logger import enable_trace_function_call
+from aphrodite.distributed import get_tensor_model_parallel_rank
 
 # Exception strings for non-implemented encoder/decoder scenarios
 

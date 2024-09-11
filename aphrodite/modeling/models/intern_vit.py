@@ -12,7 +12,6 @@ import torch.nn.functional as F
 from transformers import PretrainedConfig
 
 from aphrodite.common.utils import progress_bar
-
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
