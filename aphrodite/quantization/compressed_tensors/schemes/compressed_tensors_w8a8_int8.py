@@ -1,7 +1,6 @@
 from typing import Callable, List, Optional
 
 import torch
-from compressed_tensors.quantization import QuantizationStrategy
 from torch.nn import Parameter
 
 from aphrodite.modeling.parameter import (BaseAphroditeParameter,
@@ -10,6 +9,8 @@ from aphrodite.modeling.parameter import (BaseAphroditeParameter,
                                           PerTensorScaleParameter)
 from aphrodite.quantization.compressed_tensors.schemes import (
     CompressedTensorsScheme)
+from aphrodite.quantization.compressed_tensors.utils import (
+    QuantizationStrategy)
 from aphrodite.quantization.utils.w8a8_utils import (apply_int8_linear,
                                                      convert_to_channelwise)
 
