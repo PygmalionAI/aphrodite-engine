@@ -1,6 +1,7 @@
 from typing import Callable, List, Optional
 
 import torch
+from compressed_tensors.quantization import QuantizationStrategy
 from torch.nn import Parameter
 
 from aphrodite.modeling.parameter import (ChannelQuantScaleParameter,
@@ -8,8 +9,6 @@ from aphrodite.modeling.parameter import (ChannelQuantScaleParameter,
                                           PerTensorScaleParameter)
 from aphrodite.quantization.compressed_tensors.schemes import (
     CompressedTensorsScheme)
-from aphrodite.quantization.compressed_tensors.utils import (
-    QuantizationStrategy)
 from aphrodite.quantization.utils.w8a8_utils import (apply_fp8_linear,
                                                      cutlass_fp8_supported,
                                                      requantize_with_max_scale)
