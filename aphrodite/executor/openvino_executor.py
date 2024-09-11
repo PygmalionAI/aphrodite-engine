@@ -8,8 +8,8 @@ from loguru import logger
 
 from aphrodite.common.config import CacheConfig, ModelConfig
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
-from aphrodite.common.utils import (get_distributed_init_method, get_ip,
-                                    get_open_port, make_async)
+from aphrodite.common.utils import (GiB_bytes, get_distributed_init_method,
+                                    get_ip, get_open_port, make_async)
 from aphrodite.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from aphrodite.lora.request import LoRARequest
 
@@ -171,14 +171,13 @@ def _verify_and_get_cache_config(config: CacheConfig) -> CacheConfig:
 
     kv_cache_space = APHRODITE_OPENVINO_KVCACHE_SPACE
     if kv_cache_space >= 0:
-        _GB = 1 << 30
         if kv_cache_space == 0:
-            config.openvino_kvcache_space_bytes = 4 * _GB  # type: ignore
+            config.openvino_kvcache_space_bytes = 4 * GiB_bytes  # type: ignore
             logger.warning(
                 "Environment variable APHRODITE_OPENVINO_KVCACHE_SPACE (GB) "
                 "for OpenVINO backend is not set, using 4 by default.")
         else:
-            config.openvino_kvcache_space_bytes = kv_cache_space * _GB  # type: ignore
+            config.openvino_kvcache_space_bytes = kv_cache_space * GiB_bytes  # type: ignore
     else:
         raise RuntimeError(
             "Invalid environment variable APHRODITE_OPENVINO_KVCACHE_SPACE"

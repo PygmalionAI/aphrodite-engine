@@ -81,8 +81,8 @@ class EngineArgs:
     num_gpu_blocks_override: Optional[int] = None
     disable_sliding_window: bool = False
     gpu_memory_utilization: float = 0.90
-    swap_space: int = 4  # GiB
-    cpu_offload_gb: int = 0  # GiB
+    swap_space: float = 4  # GiB
+    cpu_offload_gb: float = 0  # GiB
     # Scheduler Options
     use_v2_block_manager: bool = False
     scheduler_delay_factor: float = 0.0
@@ -515,7 +515,7 @@ class EngineArgs:
         )
         parser.add_argument(
             "--swap-space",
-            type=int,
+            type=float,
             default=EngineArgs.swap_space,
             help="Category: Cache Options\n"
             "CPU swap space size (GiB) per GPU",
