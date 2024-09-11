@@ -2,12 +2,12 @@ import asyncio
 import importlib
 import inspect
 import json
+import multiprocessing
 import os
 import re
 from argparse import Namespace
 from contextlib import asynccontextmanager
 from http import HTTPStatus
-from multiprocessing import Process
 from typing import AsyncGenerator, AsyncIterator, List, Set, Tuple
 
 import uvloop
@@ -124,9 +124,15 @@ async def build_async_engine_client(args) -> AsyncIterator[AsyncEngineClient]:
         logger.info(f"Multiprocessing frontend to use {rpc_path} for RPC Path."
                     )
         # Start RPCServer in separate process (holds the AsyncAphrodite).
-        rpc_server_process = Process(target=run_rpc_server,
-                                     args=(engine_args, rpc_path))
+        context = multiprocessing.get_context("spawn")
+        # the current process might have CUDA context,
+        # so we need to spawn a new process
+        rpc_server_process = context.Process(
+            target=run_rpc_server,
+            args=(engine_args, rpc_path))
         rpc_server_process.start()
+        logger.info(
+            f"Started engine process with PID {rpc_server_process.pid}")
 
         # Build RPCClient, which conforms to AsyncEngineClient Protocol.
         async_engine_client = AsyncEngineRPCClient(rpc_path)
