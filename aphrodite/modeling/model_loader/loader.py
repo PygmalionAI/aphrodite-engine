@@ -37,7 +37,7 @@ from aphrodite.modeling.model_loader.weight_utils import (
     safetensors_weights_iterator)
 from aphrodite.modeling.models.interfaces import (has_inner_state,
                                                   supports_lora,
-                                                  supports_vision)
+                                                  supports_multimodal)
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.platforms import current_platform
 from aphrodite.quantization.base_config import QuantizationConfig
@@ -127,7 +127,7 @@ def _get_model_initialization_kwargs(
             "be added in the future. If this is important to you, "
             "please open an issue on github.")
 
-    if supports_vision(model_class):
+    if supports_multimodal(model_class):
         if multimodal_config is None:
             raise ValueError("Provide vision related configurations "
                              "through LLM entrypoint or engine arguments.")

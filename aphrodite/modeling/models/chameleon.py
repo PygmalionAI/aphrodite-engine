@@ -34,7 +34,7 @@ from aphrodite.multimodal.image import (cached_get_tokenizer,
                                         repeat_and_pad_image_tokens)
 from aphrodite.quantization.base_config import QuantizationConfig
 
-from .interfaces import SupportsVision
+from .interfaces import SupportsMultiModal
 
 # These configs are not part of the model config but the preprocessor
 # and processor files, so we hardcode them in the model file for now.
@@ -883,7 +883,7 @@ class ChameleonModel(nn.Module):
 @MULTIMODAL_REGISTRY.register_max_image_tokens(get_max_chameleon_image_tokens)
 @INPUT_REGISTRY.register_dummy_data(dummy_data_for_chameleon)
 @INPUT_REGISTRY.register_input_processor(input_processor_for_chameleon)
-class ChameleonForConditionalGeneration(nn.Module, SupportsVision):
+class ChameleonForConditionalGeneration(nn.Module, SupportsMultiModal):
 
     def __init__(
         self,

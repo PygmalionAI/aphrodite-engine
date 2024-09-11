@@ -3,8 +3,9 @@ from abc import ABC, abstractmethod
 from collections import UserDict, defaultdict
 from typing import Any, Callable, Dict, List, Optional
 from typing import Sequence as GenericSequence
-from typing import Type, TypedDict, TypeVar, Union, cast
+from typing import Tuple, Type, TypedDict, TypeVar, Union, cast
 
+import numpy as np
 import torch
 import torch.types
 from loguru import logger
@@ -115,7 +116,12 @@ class MultiModalInputs(_MultiModalInputsBase):
 
 
 class MultiModalDataBuiltins(TypedDict, total=False):
+    """Modality types that are pre-defined by Aphrodite."""
     image: Image.Image
+    """The input image."""
+
+    audio: Tuple[np.ndarray, Union[int, float]]
+    """THe input audio and its sampling rate."""
 
 
 MultiModalDataDict = Union[MultiModalDataBuiltins, Dict[str, Any]]

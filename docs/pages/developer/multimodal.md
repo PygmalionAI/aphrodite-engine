@@ -13,13 +13,13 @@ See also: [Adding a New Model](/pages/developer/adding-model).
 ## Step 1: Update the base Aphrodite model
 We assume that you have already created a new model by following the steps in the [Adding a New Model](/pages/developer/adding-model) guide. If not, please do so before proceeding.
 
-1. Implement the `aphrodite.modeling.models.interfaces.SupportsVision` interface:
+1. Implement the `aphrodite.modeling.models.interfaces.SupportsMultiModal` interface:
 
 ```py
-from aphrodite.modeling.models.interfaces import SupportsVision  # [!code ++]
+from aphrodite.modeling.models.interfaces import SupportsMultiModal  # [!code ++]
 
 class YourModelForImage2Seq(nn.Module):  # [!code --]
-class YourModelForImage2Seq(nn.Module, SupportsVision):  # [!code ++]
+class YourModelForImage2Seq(nn.Module, SupportsMultiModal):  # [!code ++]
 ```
 
 :::info
@@ -43,11 +43,11 @@ The model class does not have to be named `*ForCausalLM`. Check out the[ Hugging
 For each modality type that the model accepts as input, decorate the model class with `aphrodite.multimodal.MultiModalRegistry.register_input_mapper`. This decorator accepts a function that maps multi-modal inputs to the keyword arguments you have previously defined in `forward()`.
 
 ```py
-from aphrodite.modeling.models.interfaces import SupportsVision
+from aphrodite.modeling.models.interfaces import SupportsMultiModal
 from aphrodite.multimodal import MULTIMODAL_REGISTRY  # [!code ++]
 
 @MULTIMODAL_REGISTRY.register_image_input_mapper()  # [!code ++]
-class YourModelForImage2Seq(nn.Module, SupportsVision):
+class YourModelForImage2Seq(nn.Module, SupportsMultiModal):
 ```
 
 A default mapper is available for each modality in the core Aphrodite library. This input mapper will be used if you do not provide your own function.
@@ -62,13 +62,13 @@ For each modality type that the model accepts as input, calculate the maximum po
 
 ```py
 from aphrodite.inputs import INPUT_REGISTRY  # [!code ++]
-from aphrodite.modeling.models.interfaces import SupportsVision
+from aphrodite.modeling.models.interfaces import SupportsMultiModal
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
 
 @MULTIMODAL_REGISTRY.register_image_input_mapper()
 @MULTIMODAL_REGISTRY.register_max_image_tokens(<your_calculation>)
 @INPUT_REGISTRY.register_dummy_data(<your_dummy_data_factory>)  # [!code ++]
-class YourModelForImage2Seq(nn.Module, SupportsVision):
+class YourModelForImage2Seq(nn.Module, SupportsMultiModal):
 ```
 
 Here are some examples:
@@ -85,13 +85,13 @@ During startup, dummy data is passed to the Aphrodite model to allocate memory. 
 
 ```py
 from aphrodite.inputs import INPUT_REGISTRY
-from aphrodite.modeling.models.interfaces import SupportsVision
+from aphrodite.modeling.models.interfaces import SupportsMultiModal
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
 
 @MULTIMODAL_REGISTRY.register_image_input_mapper()
 @MULTIMODAL_REGISTRY.register_max_image_tokens(<your_calculation>)
 @INPUT_REGISTRY.register_dummy_data(<your_dummy_data_factory>)  # [!code ++]
-class YourModelForImage2Seq(nn.Module, SupportsVision):
+class YourModelForImage2Seq(nn.Module, SupportsMultiModal):
 ```
 
 :::info
@@ -111,14 +111,14 @@ Sometimes, there's a need to process inputs at the `aphrodite.AphroditeEngine` l
 
 ```py
 from aphrodite.inputs import INPUT_REGISTRY
-from aphrodite.modeling.models.interfaces import SupportsVision
+from aphrodite.modeling.models.interfaces import SupportsMultiModal
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
 
 @MULTIMODAL_REGISTRY.register_image_input_mapper()
 @MULTIMODAL_REGISTRY.register_max_image_tokens(<your_calculation>)
 @INPUT_REGISTRY.register_dummy_data(<your_dummy_data_factory>)
 @INPUT_REGISTRY.register_input_processor(<your_input_processor>)  # [!code ++]
-class YourModelForImage2Seq(nn.Module, SupportsVision):
+class YourModelForImage2Seq(nn.Module, SupportsMultiModal):
 ```
 
 A common use case of input processors is inserting placeholder tokens to leverage the Aphrodite framework for attention mask generation. Here are some examples:

@@ -6,6 +6,7 @@ from loguru import logger
 
 from aphrodite.common.config import ModelConfig
 
+from .audio import AudioPlugin
 from .base import (MultiModalDataDict, MultiModalInputMapper, MultiModalInputs,
                    MultiModalPlugin, MultiModalTokensCalc)
 from .image import ImagePlugin
@@ -19,7 +20,7 @@ class MultiModalRegistry:
     The registry handles both external and internal data input.
     """
 
-    DEFAULT_PLUGINS = (ImagePlugin(), )
+    DEFAULT_PLUGINS = (ImagePlugin(), AudioPlugin())
 
     def __init__(
             self,

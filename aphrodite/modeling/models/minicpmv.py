@@ -48,7 +48,7 @@ from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
 from aphrodite.modeling.model_loader.utils import set_default_torch_dtype
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
-from aphrodite.modeling.models.interfaces import SupportsVision
+from aphrodite.modeling.models.interfaces import SupportsMultiModal
 from aphrodite.modeling.models.llama import LlamaModel
 from aphrodite.modeling.models.minicpm import MiniCPMModel
 from aphrodite.modeling.models.qwen2 import Qwen2Model
@@ -480,7 +480,7 @@ def input_processor_for_minicpmv(ctx: InputContext, llm_inputs: LLMInputs):
     return llm_inputs
 
 
-class MiniCPMVBaseModel(nn.Module, SupportsVision):
+class MiniCPMVBaseModel(nn.Module, SupportsMultiModal):
     """
     The abstract class of MiniCPMV can only be inherited, but cannot be
     instantiated.

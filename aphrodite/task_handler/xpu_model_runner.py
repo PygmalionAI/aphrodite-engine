@@ -17,7 +17,7 @@ from aphrodite.common.utils import CudaMemoryProfiler, make_tensor_with_pad
 from aphrodite.distributed import broadcast_tensor_dict
 from aphrodite.inputs import INPUT_REGISTRY
 from aphrodite.modeling.model_loader import get_model
-from aphrodite.modeling.models.interfaces import supports_vision
+from aphrodite.modeling.models.interfaces import supports_multimodal
 from aphrodite.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                                   MultiModalInputs)
 from aphrodite.task_handler.model_runner import (AttentionMetadata,
@@ -166,7 +166,7 @@ class XPUModelRunner(ModelRunnerBase[ModelInputForXPU]):
         # the number of seqs (batch_size) is chosen to maximize the number
         # of images processed.
         model_config = self.model_config
-        if supports_vision(self.model):
+        if supports_multimodal(self.model):
             max_mm_tokens = MULTIMODAL_REGISTRY \
                 .get_max_multimodal_tokens(model_config)
             max_num_seqs_orig = max_num_seqs
