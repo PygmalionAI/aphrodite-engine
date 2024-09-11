@@ -1,6 +1,7 @@
 import torch.nn as nn
 
-from aphrodite.common.utils import is_cpu, is_hip, is_tpu, is_xpu
+from aphrodite.common.utils import is_cpu, is_hip, is_xpu
+from aphrodite.platforms import current_platform
 
 
 class CustomOp(nn.Module):
@@ -53,7 +54,7 @@ class CustomOp(nn.Module):
             return self.forward_hip
         elif is_cpu():
             return self.forward_cpu
-        elif is_tpu():
+        elif current_platform.is_tpu():
             return self.forward_tpu
         elif is_xpu():
             return self.forward_xpu
