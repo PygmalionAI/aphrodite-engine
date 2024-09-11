@@ -1,8 +1,6 @@
 import os
-from typing import List
 
 from loguru import logger
-
 
 APHRODITE_PLUGINS = None if "APHRODITE_PLUGINS" not in os.environ else \
     os.environ["APHRODITE_PLUGINS"].split(",")
@@ -29,4 +27,5 @@ def load_general_plugins():
                 func()
                 logger.info(f"Loaded general plugin: {plugin.name}")
             except Exception:
-                logger.exception(f"Failed to load general plugin: {plugin.name}")
+                logger.exception("Failed to load general plugin: "
+                                 f"{plugin.name}")
