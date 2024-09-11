@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Iterable, Iterator, List, Optional, Tuple, TypedDict, Union
 
+from loguru import logger
 from pydantic import Field
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 from typing_extensions import Annotated
@@ -197,6 +198,24 @@ class OpenAIServing:
                 return None, prompt_adapter
         # if _check_model has been called earlier, this will be unreachable
         raise ValueError(f"The model `{request.model}` does not exist.")
+    
+    def add_lora(self, lora: LoRAModulePath):
+        if lora.name in [
+                lora.lora_name for lora in self.lora_requests
+        ]:
+            logger.error(f"LoRA module {lora.name} already exists.")
+            return
+        self.lora_requests.append(
+            LoRARequest(
+                lora_name=lora.name,
+                lora_int_id=len(self.lora_requests) + 1,
+                lora_path=lora.path,
+            ))
+        
+    def remove_lora(self, lora_name: str):
+        self.lora_requests = [
+            lora for lora in self.lora_requests if lora.lora_name != lora_name
+        ]
 
     def _normalize_prompt_text_to_input(
         self,
