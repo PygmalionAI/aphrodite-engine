@@ -195,12 +195,11 @@ class EngineArgs:
             "--tokenizer-mode",
             type=str,
             default=EngineArgs.tokenizer_mode,
-            choices=["auto", "slow"],
-            help='Category: Model Options\n'
-            'tokenizer mode. "auto" will use the fast '
-            'tokenizer if available, and "slow" will '
-            "always use the slow tokenizer.",
-        )
+            choices=['auto', 'slow', 'mistral'],
+            help='The tokenizer mode.\n\n* "auto" will use the '
+            'fast tokenizer if available.\n* "slow" will '
+            'always use the slow tokenizer. \n* '
+            '"mistral" will always use the `mistral_common` tokenizer.')
         parser.add_argument(
             "--trust-remote-code",
             action="store_true",
