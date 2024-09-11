@@ -18,5 +18,6 @@ WORKDIR /workspace/aphrodite-engine
 RUN pip install -v -r requirements-xpu.txt
 
 RUN APHRODITE_TARGET_DEVICE=xpu python3 setup.py develop
+RUN pip install triton
 
 CMD ["/bin/bash"]
