@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 import cloudpickle
 import zmq
@@ -20,18 +20,21 @@ from aphrodite.prompt_adapter.request import PromptAdapterRequest
 from aphrodite.transformers_utils.tokenizer_group import (
     init_tokenizer_from_configs)
 
+# Time to wait before checking if the server process is alive
+SERVER_START_TIMEOUT_MS = 1000
 
 class AsyncEngineRPCClient:
 
-    def __init__(self, port: int):
+    def __init__(self, rpc_path: str):
         self.context = zmq.asyncio.Context()
-        self.path = f"tcp://localhost:{port}"
+        self.rpc_path = rpc_path
 
     async def setup(self):
         """Setup the client before it starts sending server requests."""
 
         # Wait until server is ready.
         await self.wait_for_server()
+        self._errored = False
 
         # Get the configs.
         self.model_config = await self._get_model_config_rpc()
@@ -59,10 +62,19 @@ class AsyncEngineRPCClient:
         # to enable streaming.
         socket = self.context.socket(zmq.constants.DEALER)
         try:
-            socket.connect(self.path)
+            socket.connect(self.rpc_path)
             yield socket
         finally:
-            socket.close()
+            # linger == 0 means discard unsent messages
+            # when the socket is closed. This is necessary
+            # because otherwise self.context.destroy() will
+            # wait for 30 seconds until unsent messages are
+            # received, which is impossible if the server
+            # crashed. In the absence of a server crash we
+            # always expect a response before closing the
+            # socket anyway.
+            # Reference: http://api.zeromq.org/4-2:zmq-setsockopt#toc24
+            socket.close(linger=0)
 
     async def _send_get_data_rpc_request(self, request: RPCUtilityRequest,
                                          expected_type: Any,
@@ -150,7 +162,7 @@ class AsyncEngineRPCClient:
             expected_type=SchedulerConfig,
             error_message="Could not get SchedulerConfig from RPC Server")
 
-    async def _get_lora_config_rpc(self):
+    async def _get_lora_config_rpc(self) -> LoRAConfig:
         """Get LoRAConfig from the RPCServer"""
 
         return await self._send_get_data_rpc_request(
@@ -172,6 +184,18 @@ class AsyncEngineRPCClient:
             request=RPCUtilityRequest.DO_LOG_STATS,
             error_message="RPCRequest DO_LOG_STATS failed.")
 
+    @property
+    def is_running(self) -> bool:
+        return not self._errored
+
+    @property
+    def is_stopped(self) -> bool:
+        return self._errored
+
+    @property
+    def errored(self) -> bool:
+        return self._errored
+
     async def generate(
         self,
         inputs: PromptInputs,
@@ -179,35 +203,46 @@ class AsyncEngineRPCClient:
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None
-    ) -> AsyncIterator[RequestOutput]:
+    ) -> AsyncGenerator[RequestOutput, None]:
         """Send an RPCGenerateRequest to the RPCServer and stream responses."""
 
-        with self.socket() as socket:
+        finished = False
+        try:
+            with self.socket() as socket:
 
-            # Send RPCGenerateRequest to the RPCServer.
-            await socket.send_multipart([
-                cloudpickle.dumps(
-                    RPCGenerateRequest(
-                        inputs=inputs,
-                        sampling_params=sampling_params,
-                        request_id=request_id,
-                        lora_request=lora_request,
-                        prompt_adapter_request=prompt_adapter_request))
-            ])
+                # Send RPCGenerateRequest to the RPCServer.
+                await socket.send_multipart([
+                    cloudpickle.dumps(
+                        RPCGenerateRequest(
+                            inputs=inputs,
+                            sampling_params=sampling_params,
+                            request_id=request_id,
+                            lora_request=lora_request,
+                            prompt_adapter_request=prompt_adapter_request))
+                ])
 
-            # Stream back the results from the RPC Server.
-            while True:
-                message = await socket.recv()
-                request_output = cloudpickle.loads(message)
+                # Stream back the results from the RPC Server.
+                while not finished:
+                    message = await socket.recv()
+                    request_output = cloudpickle.loads(message)
 
-                if isinstance(request_output, Exception):
-                    raise request_output
+                    if isinstance(request_output, Exception):
+                        # On exception, check if the server is still healthy.
+                        # Use this to set the sync `is_running` and `errored`
+                        # properties.
+                        try:
+                            await self.check_health()
+                        except Exception:
+                            self._errored = True
+                        # NB: do before raising here so that the flag is set
+                        # by the time the caller receives this exception
+                        raise request_output
 
-                if request_output.finished:
-                    break
-                yield request_output
-
-            yield request_output
+                    finished = request_output.finished
+                    yield request_output
+        finally:
+            if not finished:
+                await self.abort(request_id)
 
     async def check_health(self) -> None:
         """Raise if unhealthy"""
@@ -231,6 +266,6 @@ class AsyncEngineRPCClient:
                              f"{health_message}")
 
     async def encode(self, *args,
-                     **kwargs) -> AsyncIterator[EmbeddingRequestOutput]:
+                     **kwargs) -> AsyncGenerator[EmbeddingRequestOutput, None]:
         raise NotImplementedError(
             "Embeddings not supported with multiprocessing backend")

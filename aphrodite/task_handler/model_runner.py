@@ -1,5 +1,6 @@
 import dataclasses
 import gc
+import itertools
 import os
 import time
 import warnings
@@ -33,9 +34,10 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceGroupMetadata)
-from aphrodite.common.utils import (CudaMemoryProfiler, async_tensor_h2d,
-                                    flatten_2d_lists, get_kv_cache_torch_dtype,
-                                    is_hip, is_pin_memory_available)
+from aphrodite.common.utils import (CudaMemoryProfiler, PyObjectCache,
+                                    async_tensor_h2d, flatten_2d_lists,
+                                    get_kv_cache_torch_dtype, is_hip,
+                                    is_pin_memory_available)
 from aphrodite.distributed import get_pp_group
 from aphrodite.distributed.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size,
@@ -44,7 +46,7 @@ from aphrodite.inputs import INPUT_REGISTRY
 from aphrodite.lora.layers import LoRAMapping
 from aphrodite.lora.request import LoRARequest
 from aphrodite.lora.worker_manager import LRUCacheWorkerLoRAManager
-from aphrodite.modeling import SamplingMetadata
+from aphrodite.modeling import SamplingMetadata, SamplingMetadataCache
 from aphrodite.modeling.model_loader import get_model
 from aphrodite.modeling.model_loader.tensorizer import TensorizerConfig
 from aphrodite.modeling.models.interfaces import supports_lora, supports_vision
@@ -178,6 +180,21 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
     # here, so that this can be subclassed easily, but kw_only
     # is not supported in python<3.10.
     class InterDataForSeqGroup:
+        """Intermediate data for the current sequence group."""
+
+        def simple_reinit(self):
+            self.input_tokens[0].clear()  # type: ignore
+            self.input_positions[0].clear()  # type: ignore
+            self.seq_lens[0] = 0  # type: ignore
+            self.orig_seq_lens[0] = 0  # type: ignore
+            self.query_lens[0] = 0  # type: ignore
+            self.context_lens[0] = 0  # type: ignore
+            self.curr_sliding_window_blocks[0] = 0  # type: ignore
+            self.lora_index_mapping.clear()  # type: ignore
+            self.lora_prompt_mapping.clear()  # type: ignore
+            self.lora_requests.clear()  # type: ignore
+            self.prompt_adapter_index_mapping.clear()  # type: ignore
+            self.prompt_adapter_prompt_mapping.clear()  # type: ignore
 
         def __init__(
             self,
@@ -221,35 +238,122 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
 
             # Whether the prefix cache is hit (prefill only).
             prefix_cache_hit: bool = False,
+            reinit: bool = False,
+            reinit_use_defaults: bool = False,
         ):
+            if reinit:
+                assert len(self.seq_ids) == len(seq_ids)  # type: ignore
+                for i, seq_id in enumerate(seq_ids):
+                    self.seq_ids[i] = seq_id  # type: ignore
+            else:
+                self.seq_ids = seq_ids
             self.request_id = request_id
-            self.seq_ids = seq_ids
             self.is_prompt = is_prompt
             self.block_tables = block_tables
             self.computed_block_nums = computed_block_nums
             self.n_seqs = n_seqs
-            self.input_tokens = input_tokens or []
-            self.input_positions = input_positions or []
-            self.seq_lens = seq_lens or []
-            self.orig_seq_lens = orig_seq_lens or []
-            self.query_lens = query_lens or []
-            self.context_lens = context_lens or []
-            self.curr_sliding_window_blocks = curr_sliding_window_blocks or []
 
-            self.lora_index_mapping = lora_index_mapping or []
-            self.lora_prompt_mapping = lora_prompt_mapping or []
-            self.lora_requests = lora_requests or set()
+            if reinit:
+                if len(self.seq_ids) == 1 and reinit_use_defaults:
+                    self.simple_reinit()
+                else:
+                    if input_tokens:
+                        self.input_tokens = input_tokens
+                    else:
+                        for seq_id in range(len(self.seq_ids)):
+                            self.input_tokens[seq_id].clear()
 
-            self.prompt_adapter_index_mapping = (prompt_adapter_index_mapping
-                                                 or [])
-            self.prompt_adapter_prompt_mapping = (prompt_adapter_prompt_mapping
-                                                  or [])
+                    if input_positions:
+                        self.input_positions = input_positions
+                    else:
+                        for seq_id in range(len(self.seq_ids)):
+                            self.input_positions[seq_id].clear()
+
+                    if seq_lens:
+                        self.seq_lens = seq_lens
+                    else:
+                        for seq_id in range(len(self.seq_ids)):
+                            self.seq_lens[seq_id] = 0
+
+                    if orig_seq_lens:
+                        self.orig_seq_lens = orig_seq_lens
+                    else:
+                        for seq_id in range(len(self.seq_ids)):
+                            self.orig_seq_lens[seq_id] = 0
+
+                    if query_lens:
+                        self.query_lens = query_lens
+                    else:
+                        for seq_id in range(len(self.seq_ids)):
+                            self.query_lens[seq_id] = 0
+
+                    if context_lens:
+                        self.context_lens = context_lens
+                    else:
+                        for seq_id in range(len(self.seq_ids)):
+                            self.context_lens[seq_id] = 0
+
+                    if curr_sliding_window_blocks:
+                        self.curr_sliding_window_blocks = \
+                            curr_sliding_window_blocks
+                    else:
+                        for seq_id in range(len(self.seq_ids)):
+                            self.curr_sliding_window_blocks[seq_id] = 0
+
+                    if lora_index_mapping:
+                        self.lora_index_mapping = lora_index_mapping
+                    else:
+                        self.lora_index_mapping.clear()
+
+                    if lora_prompt_mapping:
+                        self.lora_prompt_mapping = lora_prompt_mapping
+                    else:
+                        self.lora_prompt_mapping.clear()
+
+                    if lora_requests:
+                        self.lora_requests = lora_requests
+                    else:
+                        self.lora_requests.clear()
+
+                    if prompt_adapter_index_mapping:
+                        self.prompt_adapter_index_mapping = \
+                            prompt_adapter_index_mapping
+                    else:
+                        self.prompt_adapter_index_mapping.clear()
+
+                    if prompt_adapter_prompt_mapping:
+                        self.prompt_adapter_prompt_mapping = \
+                            prompt_adapter_prompt_mapping
+                    else:
+                        self.prompt_adapter_prompt_mapping.clear()
+
+            else:
+                self.input_tokens = input_tokens or []
+                self.input_positions = input_positions or []
+                self.seq_lens = seq_lens or []
+                self.orig_seq_lens = orig_seq_lens or []
+                self.query_lens = query_lens or []
+                self.context_lens = context_lens or []
+                self.curr_sliding_window_blocks = \
+                    curr_sliding_window_blocks or []
+
+                self.lora_index_mapping = lora_index_mapping or []
+                self.lora_prompt_mapping = lora_prompt_mapping or []
+                self.lora_requests = lora_requests or set()
+
+                self.prompt_adapter_index_mapping = (
+                    prompt_adapter_index_mapping or [])
+                self.prompt_adapter_prompt_mapping = (
+                    prompt_adapter_prompt_mapping or [])
+
             self.prompt_adapter_request = prompt_adapter_request
-
             self.multi_modal_inputs = multi_modal_inputs
             self.prefix_cache_hit = prefix_cache_hit
 
-            self.__post_init__()
+            self.n_seqs = len(self.seq_ids)
+
+            if not reinit:
+                self.__post_init__()
 
         def __post_init__(self):
             self.n_seqs = len(self.seq_ids)
@@ -262,8 +366,36 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             self.context_lens = [0] * self.n_seqs
             self.curr_sliding_window_blocks = [0] * self.n_seqs
 
-            self.lora_index_mapping = [[] for _ in range(self.n_seqs)]
-            self.lora_prompt_mapping = [[] for _ in range(self.n_seqs)]
+            self.lora_index_mapping = []
+            self.lora_prompt_mapping = []
+
+    def gen_inter_data_builder(self, num_seqs: int):
+        return lambda: ModelInputForGPUBuilder.InterDataForSeqGroup(
+            request_id="",
+            seq_ids=[0] * num_seqs,
+            is_prompt=True,
+            block_tables=None,
+            computed_block_nums=[])
+
+    def init_cached_inter_data(self, *args, **kwargs):
+        assert len(args) == 0
+        assert "seq_ids" in kwargs
+        seq_ids = kwargs["seq_ids"]
+        num_seqs = len(seq_ids)
+
+        # The inter-data cache is per model_runner
+        inter_data_cache = self.runner.inter_data_cache
+        if num_seqs not in inter_data_cache:
+            inter_data_cache[num_seqs] = PyObjectCache(
+                self.gen_inter_data_builder(num_seqs))
+
+        obj = inter_data_cache[num_seqs].get_object()
+        obj.__init__(*args, **kwargs)
+        return obj
+
+    def reset_cached_inter_data(self):
+        for cache in self.runner.inter_data_cache.values():
+            cache.reset()
 
     def __init__(self,
                  runner: "GPUModelRunnerBase",
@@ -331,23 +463,35 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         else:
             # get_num_computed_tokens is incorrect for spec decoding.
             # So, we should have a special logic here.
-            # TODO(sang): Fix it.
+            # TODO: Fix it.
             context_len = seq_len - 1
         seq_len = min(seq_len, context_len + token_chunk_size)
 
         # Compute tokens.
         if inter_data.is_prompt:
-            tokens = seq_data.get_token_ids()[context_len:seq_len]
+            tokens = seq_data.get_token_ids()
+            if context_len != 0 or seq_len < len(tokens):
+                tokens = tokens[context_len:seq_len]
         else:
             # Optimization. get_token_ids requires the entire copy of
             # tokens.
-            tokens = [seq_data.get_last_token_id()]
+            tokens = seq_data.get_last_token_id()
 
         inter_data.seq_lens[seq_idx] = seq_len
         inter_data.orig_seq_lens[seq_idx] = seq_len
         inter_data.context_lens[seq_idx] = context_len
-        inter_data.input_tokens[seq_idx] = tokens
-        inter_data.input_positions[seq_idx] = list(range(context_len, seq_len))
+
+        if isinstance(tokens, list):
+            inter_data.input_tokens[seq_idx].extend(tokens)
+        else:
+            inter_data.input_tokens[seq_idx].append(tokens)
+
+        if (seq_len - context_len) == 1:
+            inter_data.input_positions[seq_idx].append(seq_len - 1)
+        else:
+            inter_data.input_positions[seq_idx].extend(
+                range(context_len, seq_len))
+
         inter_data.query_lens[
             seq_idx] = seq_len - context_len if inter_data.is_prompt else 1
 
@@ -393,7 +537,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         curr_sliding_window_block = 0
         sliding_seq_len = inter_data.seq_lens[seq_idx]
         if not inter_data.is_prompt and self.sliding_window is not None:
-            # TODO(sang): This is a hack to make sliding window work with
+            # TODO: This is a hack to make sliding window work with
             # paged attn. We can remove it if we make paged attn kernel
             # to properly handle slinding window attn.
             curr_sliding_window_block = self.sliding_window_blocks
@@ -471,7 +615,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
 
     def add_seq_group(self, seq_group_metadata: SequenceGroupMetadata):
         """Add a sequence group to the builder."""
-        seq_ids = list(seq_group_metadata.seq_data.keys())
+        seq_ids = seq_group_metadata.seq_data.keys()
         n_seqs = len(seq_ids)
         is_prompt = seq_group_metadata.is_prompt
 
@@ -479,12 +623,14 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             assert n_seqs == 1
             self.decode_only = False
 
-        inter_data = self.InterDataForSeqGroup(
+        inter_data = self.init_cached_inter_data(
             request_id=seq_group_metadata.request_id,
             seq_ids=seq_ids,
             is_prompt=is_prompt,
             block_tables=seq_group_metadata.block_tables,
-            computed_block_nums=seq_group_metadata.computed_block_nums)
+            computed_block_nums=seq_group_metadata.computed_block_nums,
+            reinit=True,
+            reinit_use_defaults=True)
         self.inter_data_list.append(inter_data)
 
         for seq_idx in range(n_seqs):
@@ -504,18 +650,19 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         create on-device tensors.
         """
         # Combine and flatten intermediate data.
-        input_tokens = flatten_2d_lists([
-            flatten_2d_lists(inter_data.input_tokens)
-            for inter_data in self.inter_data_list
-        ])
+        input_tokens = []
+        for inter_data in self.inter_data_list:
+            for cur_input_tokens in inter_data.input_tokens:
+                input_tokens.extend(cur_input_tokens)
         if not input_tokens:
             # This may happen when all prefill requests hit
             # prefix caching and there is no decode request.
             return self.model_input_cls()
-        input_positions = flatten_2d_lists([
-            flatten_2d_lists(inter_data.input_positions)
-            for inter_data in self.inter_data_list
-        ])
+
+        input_positions = []
+        for inter_data in self.inter_data_list:
+            for cur_input_positions in inter_data.input_positions:
+                input_positions.extend(cur_input_positions)
         seq_lens = []
         max_decode_seq_len = 0
         for inter_data in self.inter_data_list:
@@ -523,8 +670,9 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             if not inter_data.is_prompt:
                 max_decode_seq_len = max(max_decode_seq_len,
                                          max(inter_data.seq_lens))
-        query_lens = flatten_2d_lists(
-            [inter_data.query_lens for inter_data in self.inter_data_list])
+        query_lens = []
+        for inter_data in self.inter_data_list:
+            query_lens.extend(inter_data.query_lens)
         # Mapping from request IDs to sequence IDs. Used for Jamba models
         # that manages the cache by itself.
         request_ids_to_seq_ids = {
@@ -547,8 +695,9 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             batch_size = graph_batch_size
 
         # Tokens and positions.
-        input_tokens.extend([0] * cuda_graph_pad_size)
-        input_positions.extend([0] * cuda_graph_pad_size)
+        if cuda_graph_pad_size:
+            input_tokens.extend(itertools.repeat(0, cuda_graph_pad_size))
+            input_positions.extend(itertools.repeat(0, cuda_graph_pad_size))
         assert self.runner.device is not None
         input_tokens_tensor = async_tensor_h2d(input_tokens, torch.long,
                                                self.runner.device,
@@ -558,7 +707,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
                                                   self.runner.pin_memory)
 
         # Sequence and query lengths.
-        seq_lens.extend([1] * cuda_graph_pad_size)
+        if cuda_graph_pad_size:
+            seq_lens.extend(itertools.repeat(1, cuda_graph_pad_size))
 
         # Attention metadata.
         attn_metadata = self.attn_metadata_builder.build(
@@ -574,7 +724,9 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
                 flatten_2d_lists(inter_data.lora_index_mapping)
                 for inter_data in self.inter_data_list
             ])
-            lora_index_mapping.extend([0] * cuda_graph_pad_size)
+            if cuda_graph_pad_size:
+                lora_index_mapping.extend(
+                    itertools.repeat(0, cuda_graph_pad_size))
             lora_prompt_mapping = flatten_2d_lists([
                 flatten_2d_lists(inter_data.lora_prompt_mapping)
                 for inter_data in self.inter_data_list
@@ -595,7 +747,9 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
                 inter_data.prompt_adapter_index_mapping
                 for inter_data in self.inter_data_list
             ])
-            prompt_adapter_index_mapping.extend([0] * cuda_graph_pad_size)
+            if cuda_graph_pad_size:
+                prompt_adapter_index_mapping.extend(
+                    itertools.repeat(0, cuda_graph_pad_size))
             prompt_adapter_prompt_mapping = flatten_2d_lists([
                 inter_data.prompt_adapter_prompt_mapping
                 for inter_data in self.inter_data_list
@@ -688,18 +842,14 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         self.graph_block_tables = np.zeros(
             (max(_BATCH_SIZES_TO_CAPTURE), self.get_max_block_per_batch()),
             dtype=np.int32)
-        num_attn_heads = self.model_config.get_num_attention_heads(
-            self.parallel_config, self.tp_rank)
         self.attn_backend = get_attn_backend(
-            num_attn_heads,
             self.model_config.get_head_size(),
-            self.model_config.get_num_kv_heads(self.parallel_config,
-                                               self.tp_rank),
             self.model_config.get_sliding_window(),
             self.model_config.dtype,
             self.kv_cache_dtype,
             self.block_size,
-        ) if num_attn_heads else None
+            self.model_config.is_attention_free(),
+        )
 
         # Multi-modal data support
         self.multi_modal_input_mapper = MULTIMODAL_REGISTRY \
@@ -718,6 +868,11 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
 
         set_cpu_offload_max_bytes(
             int(self.cache_config.cpu_offload_gb * 1024**3))
+
+        # Used to cache python objects
+        self.inter_data_cache: Dict[int, PyObjectCache] = {}
+        self.sampling_metadata_cache: SamplingMetadataCache = \
+            SamplingMetadataCache()
 
     def load_model(self) -> None:
         tp = get_tensor_model_parallel_world_size()
@@ -870,6 +1025,8 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         builder = self._builder_cls(weakref.proxy(self), finished_requests_ids)
         for seq_group_metadata in seq_group_metadata_list:
             builder.add_seq_group(seq_group_metadata)
+
+        builder.reset_cached_inter_data()
         return builder.build()  # type: ignore
 
     @torch.inference_mode()
@@ -1309,7 +1466,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
             sampling_metadata = SamplingMetadata.prepare(
                 seq_group_metadata_list, model_input.seq_lens,
                 model_input.query_lens, self.device, self.pin_memory,
-                generators)
+                generators, self.sampling_metadata_cache)
         else:
             sampling_metadata = None
         is_prompt = (seq_group_metadata_list[0].is_prompt
@@ -1564,8 +1721,9 @@ class CUDAGraphRunner:
         # Copy the input tensors to the input buffers.
         self.input_buffers["input_ids"].copy_(input_ids, non_blocking=True)
         self.input_buffers["positions"].copy_(positions, non_blocking=True)
-        self.input_buffers["slot_mapping"].copy_(attn_metadata.slot_mapping,
-                                                 non_blocking=True)
+        if self.backend_name != "No attention":
+            self.input_buffers["slot_mapping"].copy_(
+                attn_metadata.slot_mapping, non_blocking=True)
         if self.backend_name != "flashinfer":
             self.input_buffers["seq_lens_tensor"].copy_(
                 attn_metadata.decode_metadata.seq_lens_tensor,
@@ -1581,9 +1739,6 @@ class CUDAGraphRunner:
                                               non_blocking=True)
         # Run the graph.
         self.graph.replay()
-        if "seqlen_agnostic_capture_inputs" in self.input_buffers:
-            self.model.copy_outputs_after_cuda_graphs(self.input_buffers,
-                                                      **kwargs)
 
         # Return the output tensor.
         if get_pp_group().is_last_rank:

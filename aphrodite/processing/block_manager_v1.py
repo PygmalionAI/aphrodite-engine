@@ -171,7 +171,7 @@ class UncachedBlockAllocator(BlockAllocatorBase):
         self.num_blocks = num_blocks
 
         # Initialize the free blocks.
-        self.free_blocks: BlockTable = []
+        self.free_blocks: List[PhysicalTokenBlock] = []
         for i in range(num_blocks):
             block = PhysicalTokenBlock(device=device,
                                        block_number=i,
@@ -257,6 +257,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                 Device.CPU, block_size, num_cpu_blocks)
         # Mapping: seq_id -> BlockTable.
         self.block_tables: Dict[int, BlockTable] = {}
+
         # Mapping: req_id -> BlockTable
         # Note that each SequenceGroup has a unique
         # request ID
@@ -279,6 +280,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                               cross_num_required_blocks
 
         if self.block_sliding_window is not None:
+
             num_required_blocks = min(num_required_blocks,
                                       self.block_sliding_window)
         num_free_gpu_blocks = self.gpu_allocator.get_num_free_blocks()
@@ -296,11 +298,10 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                            seq: Sequence, \
                            ref_count: int, \
                            is_encoder_decoder: bool = True) -> BlockTable:
-
         # Allocate new physical token blocks that will store the prompt tokens.
         num_prompt_blocks = seq.n_blocks
 
-        block_table: BlockTable = []
+        block_table: BlockTable = BlockTable()
         for logical_idx in range(num_prompt_blocks):
             if (self.block_sliding_window is not None
                     and logical_idx >= self.block_sliding_window):
@@ -327,15 +328,19 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         #
         # NOTE: Here we assume that all sequences in the group have the same
         # decoder prompt.
-        seq = seq_group.get_seqs(status=SequenceStatus.WAITING)[0]
+        wait_seqs = seq_group.get_seqs(status=SequenceStatus.WAITING)
+        seq = wait_seqs[0]
         block_table: BlockTable = \
             self._allocate_sequence(seq,
                                     seq_group.num_seqs(),
                                     is_encoder_decoder)
 
         # Assign the self-attention block tables for each sequence.
-        for seq in seq_group.get_seqs(status=SequenceStatus.WAITING):
-            self.block_tables[seq.seq_id] = block_table.copy()
+        if len(wait_seqs) == 1:
+            self.block_tables[seq.seq_id] = block_table
+        else:
+            for seq in wait_seqs:
+                self.block_tables[seq.seq_id] = block_table.copy()
 
         # Allocate encoder sequence
         if is_encoder_decoder:
@@ -477,6 +482,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
             return
         src_block_table = self.block_tables[parent_seq.seq_id]
         self.block_tables[child_seq.seq_id] = src_block_table.copy()
+
         # When using a sliding window, blocks will be eventually reused.
         # In this case the block tables will contain repeated blocks.
         # When forking, we must make sure that each block's `ref_count`
@@ -487,6 +493,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
 
     def _get_physical_blocks(
             self, seq_group: SequenceGroup) -> List[PhysicalTokenBlock]:
+
         # NOTE: Here, we assume that the physical blocks are only shared by
         # the sequences in the same group.
         request_id = seq_group.request_id
@@ -505,6 +512,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                     num_lookahead_slots: int = 0) -> AllocStatus:
         assert (num_lookahead_slots == 0
                 ), "BlockSpaceManagerV1 does not support lookahead allocation"
+
         blocks = self._get_physical_blocks(seq_group)
         num_swapped_seqs = seq_group.num_seqs(status=SequenceStatus.SWAPPED)
         if seq_group.is_encoder_decoder():
@@ -526,7 +534,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
             dest_allocator: BlockAllocatorBase,
             mapping: Dict[PhysicalTokenBlock,
                           PhysicalTokenBlock]) -> BlockTable:
-        new_block_table = []
+        new_block_table: BlockTable = BlockTable()
 
         for from_block in block_table:
             if from_block in mapping:
@@ -552,8 +560,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         for seq in seq_group.get_seqs(status=SequenceStatus.SWAPPED):
             self.block_tables[seq.seq_id] = \
                 self._swap_block_table(self.block_tables[seq.seq_id],
-                                       self.cpu_allocator,
-                                       self.gpu_allocator,
+                                       self.cpu_allocator, self.gpu_allocator,
                                        mapping)
 
         if seq_group.is_encoder_decoder():
@@ -572,14 +579,14 @@ class BlockSpaceManagerV1(BlockSpaceManager):
 
     def swap_out(self, seq_group: SequenceGroup) -> List[Tuple[int, int]]:
         request_id = seq_group.request_id
+
         # GPU block -> CPU block.
         # dict is efficient in lookup `if gpu_block in mapping`
         mapping: Dict[PhysicalTokenBlock, PhysicalTokenBlock] = {}
         for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
             self.block_tables[seq.seq_id] = \
                 self._swap_block_table(self.block_tables[seq.seq_id],
-                                       self.gpu_allocator,
-                                       self.cpu_allocator,
+                                       self.gpu_allocator, self.cpu_allocator,
                                        mapping)
 
         if seq_group.is_encoder_decoder():
@@ -634,8 +641,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         self.cross_block_tables.clear()
 
     def get_block_table(self, seq: Sequence) -> List[int]:
-        block_table = self.block_tables[seq.seq_id]
-        return [block.block_number for block in block_table]
+        return self.block_tables[seq.seq_id].ids()
 
     def get_cross_block_table(self, seq_group: SequenceGroup) -> List[int]:
         block_table = self.cross_block_tables[seq_group.request_id]

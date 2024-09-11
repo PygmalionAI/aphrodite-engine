@@ -7,7 +7,8 @@ import torch
 
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
 from aphrodite.common.sequence import SequenceData, SequenceGroupMetadata
-from aphrodite.common.utils import (async_tensor_h2d, is_pin_memory_available,
+from aphrodite.common.utils import (PyObjectCache, async_tensor_h2d,
+                                    is_pin_memory_available,
                                     make_tensor_with_pad, maybe_expand_dim)
 from aphrodite.triton_utils.sample import get_num_triton_sampler_splits
 
@@ -59,6 +60,39 @@ class SequenceGroupToSample:
         if self.is_prompt:
             assert self.seq_len is not None
             assert self.query_len is not None
+
+
+def gen_seq_group_to_sample_builder(num_seqs: int):
+    return lambda: SequenceGroupToSample(
+        seq_ids=[0] * num_seqs,
+        sampling_params=None,
+        seq_data=None,  # type: ignore
+        seq_len=0,
+        query_len=0,
+        generator=None,
+        is_prompt=True,
+        prompt_logprob_indices=[],
+        sample_indices=[])
+
+
+class SamplingMetadataCache:
+    """Used to cache SamplingMetadata objects between scheduler iterations
+    """
+
+    def __init__(self):
+        self._seq_group_to_sample_cache: Dict[int, PyObjectCache] = {}
+
+    def get_cached_seq_group_to_sample(self, num_seqs):
+        if num_seqs not in self._seq_group_to_sample_cache:
+            self._seq_group_to_sample_cache[num_seqs] = PyObjectCache(
+                gen_seq_group_to_sample_builder(num_seqs))
+
+        obj = self._seq_group_to_sample_cache[num_seqs].get_object()
+        return obj
+
+    def reset(self):
+        for cache in self._seq_group_to_sample_cache.values():
+            cache.reset()
 
 
 class SamplingMetadata:
@@ -119,6 +153,7 @@ class SamplingMetadata:
         device: str,
         pin_memory: bool,
         generators: Optional[Dict[str, torch.Generator]] = None,
+        cache: Optional[SamplingMetadataCache] = None
     ) -> "SamplingMetadata":
         (
             seq_groups,
@@ -126,7 +161,7 @@ class SamplingMetadata:
             categorized_sample_indices,
             num_prompts,
         ) = _prepare_seq_groups(seq_group_metadata_list, seq_lens, query_lens,
-                                device, generators)
+                                device, generators, cache)
         selected_token_indices = async_tensor_h2d(selected_token_indices,
                                                   dtype=torch.long,
                                                   target_device=device,
@@ -162,6 +197,7 @@ def _prepare_seq_groups(
     query_lens: Optional[List[int]],
     device: str,
     generators: Optional[Dict[str, torch.Generator]] = None,
+    cache: Optional[SamplingMetadataCache] = None,
 ) -> Tuple[List[SequenceGroupToSample], List[int], Dict[
         SamplingType, List[Tuple[int, int]]], int]:
     """Prepare sequence groups and indices for sampling.
@@ -208,15 +244,26 @@ def _prepare_seq_groups(
     num_prompts = 0
 
     for i, seq_group_metadata in enumerate(seq_group_metadata_list):
-        seq_ids = list(seq_group_metadata.seq_data.keys())
+        seq_ids = seq_group_metadata.seq_data.keys()
+
+        if cache is not None:
+            sample_obj = cache.get_cached_seq_group_to_sample(len(seq_ids))
+
+            for j, seq_id in enumerate(seq_ids):
+                sample_obj.seq_ids[j] = seq_id
+
+            sample_obj.prompt_logprob_indices.clear()
+            sample_obj.sample_indices.clear()
         sampling_params = seq_group_metadata.sampling_params
         is_prompt = seq_group_metadata.is_prompt
         generator: Optional[torch.Generator] = None
         # If the current seq group is in decode stage, it is None.
         seq_len: Optional[int] = None
         query_len: Optional[int] = None
-        prompt_logprob_indices: List[int] = []
-        sample_indices: List[int] = []
+        prompt_logprob_indices: List[int] = \
+            sample_obj.prompt_logprob_indices if cache is not None else []
+        sample_indices: List[int] = \
+            sample_obj.sample_indices if cache is not None else []
         do_sample = seq_group_metadata.do_sample
 
         if seq_group_metadata.is_prompt:
@@ -288,9 +335,16 @@ def _prepare_seq_groups(
             logit_idx += sample_len
             sample_idx += sample_len
 
-        seq_groups.append(
-            SequenceGroupToSample(
-                seq_ids=seq_ids,
+        if cache is not None:
+            sample_obj.sampling_params = sampling_params
+            sample_obj.seq_data = seq_group_metadata.seq_data
+            sample_obj.seq_len = seq_len
+            sample_obj.query_len = query_len
+            sample_obj.generator = generator
+            sample_obj.is_prompt = is_prompt
+        else:
+            sample_obj = SequenceGroupToSample(
+                seq_ids=list(seq_ids),
                 sampling_params=sampling_params,
                 seq_data=seq_group_metadata.seq_data,
                 seq_len=seq_len,
@@ -298,7 +352,12 @@ def _prepare_seq_groups(
                 generator=generator,
                 is_prompt=is_prompt,
                 prompt_logprob_indices=list(prompt_logprob_indices),
-                sample_indices=list(sample_indices)))
+                sample_indices=list(sample_indices))
+
+        seq_groups.append(sample_obj)
+
+    if cache is not None:
+        cache.reset()
     return (seq_groups, selected_token_indices, categorized_sample_indices,
             num_prompts)
 
@@ -308,6 +367,7 @@ class SamplingTensors:
     """Tensors for sampling."""
 
     temperatures: torch.Tensor
+    temperature_lasts: torch.Tensor
     top_ps: torch.Tensor
     top_ks: torch.Tensor
     top_as: torch.Tensor
@@ -338,7 +398,7 @@ class SamplingTensors:
         extra_seeds_to_generate: int = 0,
         extra_entropy: Optional[Tuple[int, ...]] = None
     ) -> Tuple["SamplingTensors", bool, bool, bool, bool, bool, bool, bool,
-               bool, bool]:
+               bool, bool, bool]:
         """
         extra_seeds_to_generate: extra seeds to generate using the
             user-defined seed for each sequence.
@@ -348,6 +408,7 @@ class SamplingTensors:
         output_tokens: List[array] = []
         top_ks: List[int] = []
         temperatures: List[float] = []
+        temperature_lasts: List[bool] = []
         top_ps: List[float] = []
         top_as: List[float] = []
         min_ps: List[float] = []
@@ -371,6 +432,7 @@ class SamplingTensors:
         do_epsilon_cutoffs = False
         do_typical_ps = False
         do_quadratic = False
+        do_temp_last = False
 
         if _USE_TRITON_SAMPLER:
             prompt_best_of: List[int] = []
@@ -384,6 +446,7 @@ class SamplingTensors:
             seq_ids = seq_group.seq_ids
             sampling_params = seq_group.sampling_params
             temperature = sampling_params.temperature
+            temperature_last = sampling_params.temperature_last
             p = sampling_params.presence_penalty
             f = sampling_params.frequency_penalty
             r = sampling_params.repetition_penalty
@@ -427,6 +490,8 @@ class SamplingTensors:
             if do_quadratic is False and (smoothing_factor > _SAMPLING_EPS
                                           or smoothing_curve > 1.0):
                 do_quadratic = True
+            if do_temp_last is False and temperature_last:
+                do_temp_last = True
 
             is_prompt = seq_group.is_prompt
             if (is_prompt and sampling_params.prompt_logprobs is not None):
@@ -436,6 +501,7 @@ class SamplingTensors:
                 assert query_len is not None
                 prefill_len = len(seq_group.prompt_logprob_indices)
                 temperatures += [temperature] * prefill_len
+                temperature_lasts += [temperature_last] * prefill_len
                 top_ps += [top_p] * prefill_len
                 top_ks += [top_k] * prefill_len
                 top_as += [top_a] * prefill_len
@@ -454,6 +520,7 @@ class SamplingTensors:
                 sample_lens = len(seq_group.sample_indices)
                 assert sample_lens == len(seq_ids)
                 temperatures += [temperature] * len(seq_ids)
+                temperature_lasts += [temperature_last] * len(seq_ids)
                 top_ps += [top_p] * len(seq_ids)
                 top_ks += [top_k] * len(seq_ids)
                 top_as += [top_a] * len(seq_ids)
@@ -507,19 +574,20 @@ class SamplingTensors:
                         output_tokens.append(seq_data.output_token_ids_array)
 
         sampling_tensors = SamplingTensors.from_lists(
-            temperatures, top_ps, top_ks, top_as, min_ps, presence_penalties,
-            frequency_penalties, repetition_penalties, tfss, eta_cutoffs,
-            epsilon_cutoffs, typical_ps, smoothing_factors, smoothing_curves,
-            sampling_seeds, sample_indices, prompt_tokens, output_tokens,
-            vocab_size, extra_seeds_to_generate, device, dtype)
+            temperatures, temperature_lasts, top_ps, top_ks, top_as, min_ps,
+            presence_penalties, frequency_penalties, repetition_penalties,
+            tfss, eta_cutoffs, epsilon_cutoffs, typical_ps, smoothing_factors,
+            smoothing_curves, sampling_seeds, sample_indices, prompt_tokens,
+            output_tokens, vocab_size, extra_seeds_to_generate, device, dtype)
         return (sampling_tensors, do_penalties, do_top_p_top_k, do_top_as,
                 do_min_p, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
-                do_typical_ps, do_quadratic)
+                do_typical_ps, do_quadratic, do_temp_last)
 
     @classmethod
-    def from_lists(cls, temperatures: List[float], top_ps: List[float],
-                   top_ks: List[int], top_as: List[float], min_ps: List[float],
-                   presence_penalties: List[float],
+    def from_lists(cls, temperatures: List[float],
+                   temperature_lasts: List[bool], top_ps: List[float],
+                   top_ks: List[int], top_as: List[float],
+                   min_ps: List[float], presence_penalties: List[float],
                    frequency_penalties: List[float],
                    repetition_penalties: List[float], tfss: List[float],
                    eta_cutoffs: List[float], epsilon_cutoffs: List[float],
@@ -558,6 +626,12 @@ class SamplingTensors:
             temperatures,
             device="cpu",
             dtype=dtype,
+            pin_memory=pin_memory,
+        )
+        temp_lasts_t = torch.tensor(
+            temperature_lasts,
+            device="cpu",
+            dtype=torch.bool,
             pin_memory=pin_memory,
         )
         top_ps_t = torch.tensor(
@@ -654,6 +728,7 @@ class SamplingTensors:
 
         return cls(
             temperatures=temperatures_t.to(device=device, non_blocking=True),
+            temperature_lasts=temp_lasts_t.to(device=device, non_blocking=True),
             top_ps=top_ps_t.to(device=device, non_blocking=True),
             top_ks=top_ks_t.to(device=device, non_blocking=True),
             top_as=top_as_t.to(device=device, non_blocking=True),

@@ -13,8 +13,6 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      ParallelConfig, PromptAdapterConfig,
                                      SchedulerConfig, SpeculativeConfig)
 from aphrodite.common.sequence import ExecuteModelRequest
-from aphrodite.common.utils import (is_embedding_model_config,
-                                    is_encoder_decoder_model_config)
 from aphrodite.distributed import (ensure_model_parallel_initialized,
                                    get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size,
@@ -121,10 +119,10 @@ class Worker(LocalOrDistributedWorkerBase):
         self.gpu_cache: Optional[List[List[torch.Tensor]]] = None
 
     def _is_encoder_decoder_model(self):
-        return is_encoder_decoder_model_config(self.model_config)
+        return self.model_config.is_encoder_decoder_model
 
     def _is_embedding_model(self):
-        return is_embedding_model_config(self.model_config)
+        return self.model_config.is_embedding_model
 
     def init_device(self) -> None:
         if self.device_config.device.type == "cuda":
@@ -226,11 +224,15 @@ class Worker(LocalOrDistributedWorkerBase):
             "not properly cleaned up before initializing Aphrodite.")
 
         cache_block_size = self.get_cache_block_size_bytes()
-        num_gpu_blocks = int(
-            (total_gpu_memory * self.cache_config.gpu_memory_utilization -
-             peak_memory) // cache_block_size)
-        num_cpu_blocks = int(self.cache_config.swap_space_bytes //
-                             cache_block_size)
+        if cache_block_size == 0:
+            num_gpu_blocks = 0
+            num_cpu_blocks = 0
+        else:
+            num_gpu_blocks = int(
+                (total_gpu_memory * self.cache_config.gpu_memory_utilization -
+                 peak_memory) // cache_block_size)
+            num_cpu_blocks = int(self.cache_config.swap_space_bytes //
+                                 cache_block_size)
         num_gpu_blocks = max(num_gpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
         if self.model_runner.lora_manager:
@@ -247,6 +249,7 @@ class Worker(LocalOrDistributedWorkerBase):
         """
         raise_if_cache_size_invalid(num_gpu_blocks,
                                     self.cache_config.block_size,
+                                    self.cache_config.is_attention_free,
                                     self.model_config.max_model_len)
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
@@ -286,6 +289,7 @@ class Worker(LocalOrDistributedWorkerBase):
     def prepare_worker_input(
             self, execute_model_req: ExecuteModelRequest) -> WorkerInput:
         virtual_engine = execute_model_req.virtual_engine
+        num_steps = execute_model_req.num_steps
         num_seq_groups = len(execute_model_req.seq_group_metadata_list)
         # `blocks_to_swap_in` and `blocks_to_swap_out` are cpu tensors.
         # they contain parameters to launch cudamemcpyasync.
@@ -306,7 +310,8 @@ class Worker(LocalOrDistributedWorkerBase):
                            blocks_to_swap_in=blocks_to_swap_in,
                            blocks_to_swap_out=blocks_to_swap_out,
                            blocks_to_copy=blocks_to_copy,
-                           virtual_engine=virtual_engine)
+                           virtual_engine=virtual_engine,
+                           num_steps=num_steps)
 
     @torch.inference_mode()
     def execute_worker(self, worker_input: WorkerInput) -> None:
@@ -395,18 +400,22 @@ def _check_if_gpu_supports_dtype(torch_dtype: torch.dtype):
                 "`dtype` flag in CLI, for example: --dtype=half.")
 
 
-def raise_if_cache_size_invalid(num_gpu_blocks, block_size,
+def raise_if_cache_size_invalid(num_gpu_blocks, block_size, is_attention_free,
                                 max_model_len) -> None:
-    rank = get_tensor_model_parallel_rank()
-    if num_gpu_blocks <= 0:
+    if is_attention_free and num_gpu_blocks != 0:
+        raise ValueError("No memory should be allocated for the cache blocks "
+                         f"for an attention-free model, but {num_gpu_blocks}"
+                         "blocks are allocated.")
+    if not is_attention_free and num_gpu_blocks <= 0:
         raise ValueError("No available memory for the cache blocks. "
                          "Try increasing `gpu_memory_utilization` when "
                          "initializing the engine.")
     max_seq_len = block_size * num_gpu_blocks
+    rank = get_tensor_model_parallel_rank()
     if rank == 0:
         logger.info(f"Maximum sequence length allowed in the cache: "
                     f"{max_seq_len}")
-    if max_model_len > max_seq_len:
+    if not is_attention_free and max_model_len > max_seq_len:
         original_max_model_len = max_model_len
         max_model_len = max_seq_len
         # raise ValueError(

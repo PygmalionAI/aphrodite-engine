@@ -1,38 +1,31 @@
 # coding=utf-8
-"""Inference-only Jamba model."""
+"""PyTorch MAMBA model."""
 from dataclasses import dataclass
 from typing import Iterable, List, Optional, Tuple
 
 import torch
 from torch import nn
 from torch.nn.parameter import Parameter
-from transformers import JambaConfig
+from transformers import MambaConfig
 
 from aphrodite.attention.backends.abstract import AttentionMetadata
-from aphrodite.attention.layer import Attention
 from aphrodite.common.config import CacheConfig, LoRAConfig, SchedulerConfig
 from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
-from aphrodite.common.utils import progress_bar
-# yapf: disable
 from aphrodite.distributed import (get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size)
-# yapf: enable
 from aphrodite.modeling.layers.activation import SiluAndMul
-from aphrodite.modeling.layers.fused_moe import FusedMoE
 from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               MergedColumnParallelLinear,
-                                              QKVParallelLinear,
-                                              ReplicatedLinear,
                                               RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
-from aphrodite.modeling.layers.mamba import (causal_conv1d_fn,
-                                             causal_conv1d_update,
-                                             selective_scan_fn,
-                                             selective_state_update)
+from aphrodite.modeling.layers.mamba.ops.causal_conv1d import (
+    causal_conv1d_fn, causal_conv1d_update)
+from aphrodite.modeling.layers.mamba.ops.mamba_ssm import (
+    selective_scan_fn, selective_state_update)
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
-    DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, VocabParallelEmbedding)
+    VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.models.interfaces import HasInnerState
 from aphrodite.modeling.models.mamba_cache import MambaCacheManager
@@ -53,7 +46,7 @@ class MambaCacheParams:
 
 
 # Adapted from transformers.models.mamba.modeling_mamba.MambaMixer
-class JambaMambaMixer(nn.Module):
+class MambaMixer(nn.Module):
     """
     Compute ∆, A, B, C, and D the state space parameters and compute
     the `contextualized_states`. A, D are input independent
@@ -64,17 +57,21 @@ class JambaMambaMixer(nn.Module):
     **selective** state spaces)
     """
 
-    def __init__(self, config: JambaConfig, layer_idx):
+    def __init__(self, config: MambaConfig, layer_idx):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
         self.hidden_size = config.hidden_size
-        self.ssm_state_size = config.mamba_d_state
-        self.conv_kernel_size = config.mamba_d_conv
-        self.intermediate_size = config.mamba_expand * config.hidden_size
-        self.time_step_rank = config.mamba_dt_rank
-        self.use_conv_bias = config.mamba_conv_bias
-        self.use_bias = config.mamba_proj_bias
+        self.ssm_state_size = config.state_size
+        self.conv_kernel_size = config.conv_kernel
+        self.intermediate_size = config.intermediate_size
+        self.time_step_rank = int(config.time_step_rank)
+        self.use_conv_bias = config.use_conv_bias
+
+        # TODO: ??
+        #self.use_bias = config.mamba_proj_bias
+        self.use_bias = False
+
         self.conv1d = ColumnParallelLinear(
             input_size=self.conv_kernel_size,
             output_size=self.intermediate_size,
@@ -133,16 +130,10 @@ class JambaMambaMixer(nn.Module):
         )
         self.activation = config.hidden_act
 
-        self.dt_layernorm = RMSNorm(self.time_step_rank,
-                                    eps=config.rms_norm_eps)
-        self.b_layernorm = RMSNorm(self.ssm_state_size,
-                                   eps=config.rms_norm_eps)
-        self.c_layernorm = RMSNorm(self.ssm_state_size,
-                                   eps=config.rms_norm_eps)
-
     def mamba_forward(self,
                       hidden_states: torch.Tensor,
                       cache_params: MambaCacheParams = None):
+
         # 1. Gated MLP's linear projection
         projected_states = self.in_proj(hidden_states)[0].transpose(1, 2)
         hidden_states, gate = projected_states.chunk(2, dim=1)
@@ -182,9 +173,8 @@ class JambaMambaMixer(nn.Module):
             [self.time_step_rank, self.ssm_state_size, self.ssm_state_size],
             dim=-1,
         )
-        time_step = self.dt_layernorm(time_step.contiguous())
-        B = self.b_layernorm(B.contiguous())
-        C = self.c_layernorm(C.contiguous())
+
+        # Note that Jamba normalizes B, C, and time_step here but Mamba doesn't.
 
         discrete_time_step = self.dt_proj(time_step)[0].transpose(1, 2)
         # 3.c perform the recurrence y ← SSM(A, B, C)(x)
@@ -253,11 +243,11 @@ class JambaMambaMixer(nn.Module):
         return hidden_states
 
 
-class JambaMLP(nn.Module):
+class MambaMLP(nn.Module):
 
     def __init__(
         self,
-        config: JambaConfig,
+        config: MambaConfig,
         quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
         super().__init__()
@@ -284,72 +274,22 @@ class JambaMLP(nn.Module):
         return x
 
 
-class JambaMoE(nn.Module):
+class MambaDecoderLayer(nn.Module):
 
     def __init__(self,
-                 config: JambaConfig,
-                 num_experts: Optional[int] = None,
-                 top_k: Optional[int] = None,
-                 params_dtype: Optional[torch.dtype] = None,
-                 tp_size: Optional[int] = None,
-                 quant_config: Optional[QuantizationConfig] = None):
-        super().__init__()
-        self.num_total_experts = num_experts or config.num_experts
-        self.top_k = top_k or config.num_experts_per_tok
-        self.hidden_size = config.hidden_size
-        self.intermediate_size = config.intermediate_size
-
-        if self.num_total_experts > 1:
-            self.router = ReplicatedLinear(self.hidden_size,
-                                           self.num_total_experts,
-                                           bias=False,
-                                           quant_config=None,
-                                           params_dtype=params_dtype)
-
-        self.experts = FusedMoE(self.num_total_experts,
-                                self.top_k,
-                                self.hidden_size,
-                                self.intermediate_size,
-                                tp_size=tp_size,
-                                params_dtype=params_dtype,
-                                reduce_results=True,
-                                renormalize=False,
-                                use_grouped_topk=False,
-                                quant_config=quant_config)
-
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        orig_shape = hidden_states.shape
-        hidden_states = hidden_states.view(-1, self.hidden_size)
-        # router_logits: (batch * sequence_length, n_experts)
-        if self.num_total_experts > 1:
-            router_logits, _ = self.router(hidden_states)
-        else:
-            router_logits = torch.ones((hidden_states.shape[0], 1),
-                                       device=hidden_states.device,
-                                       dtype=hidden_states.dtype)
-        hidden_states = self.experts(hidden_states, router_logits)
-        return hidden_states.view(orig_shape)
-
-
-class JambaMambaDecoderLayer(nn.Module):
-
-    def __init__(self,
-                 config: JambaConfig,
+                 config: MambaConfig,
                  layer_idx: int,
                  cache_config: Optional[CacheConfig] = None,
                  quant_config: Optional[QuantizationConfig] = None) -> None:
         super().__init__()
         self.layer_idx = layer_idx
         self.config = config
-        self.mamba = JambaMambaMixer(config, layer_idx)
+        self.mixer = MambaMixer(config, layer_idx)
 
-        num_experts = config.layers_num_experts[layer_idx]
-        ffn_layer_class = JambaMoE if num_experts > 1 else JambaMLP
-        self.feed_forward = ffn_layer_class(config, quant_config=quant_config)
-        self.input_layernorm = RMSNorm(config.hidden_size,
-                                       eps=config.rms_norm_eps)
+        self.feed_forward = MambaMLP(config, quant_config=quant_config)
+        self.norm = RMSNorm(config.hidden_size, eps=config.layer_norm_epsilon)
         self.pre_ff_layernorm = RMSNorm(config.hidden_size,
-                                        eps=config.rms_norm_eps)
+                                        eps=config.layer_norm_epsilon)
 
     def forward(
         self,
@@ -362,12 +302,11 @@ class JambaMambaDecoderLayer(nn.Module):
     ):
         if residual is None:
             residual = hidden_states
-            hidden_states = self.input_layernorm(hidden_states)
+            hidden_states = self.norm(hidden_states)
         else:
-            hidden_states, residual = self.input_layernorm(
-                hidden_states, residual)
+            hidden_states, residual = self.norm(hidden_states, residual)
 
-        hidden_states = self.mamba(hidden_states, attn_metadata, conv_state,
+        hidden_states = self.mixer(hidden_states, attn_metadata, conv_state,
                                    ssm_state)
         # Fully Connected
         hidden_states, residual = self.pre_ff_layernorm(
@@ -376,119 +315,11 @@ class JambaMambaDecoderLayer(nn.Module):
         return hidden_states, residual
 
 
-class JambaAttentionDecoderLayer(nn.Module):
+class MambaModel(nn.Module):
 
     def __init__(
         self,
-        config: JambaConfig,
-        layer_idx: int,
-        cache_config: Optional[CacheConfig] = None,
-        quant_config: Optional[QuantizationConfig] = None,
-    ) -> None:
-        super().__init__()
-        self.hidden_size = config.hidden_size
-        tp_size = get_tensor_model_parallel_world_size()
-        self.total_num_heads = config.num_attention_heads
-        assert self.total_num_heads % tp_size == 0
-        self.num_heads = self.total_num_heads // tp_size
-        self.total_num_kv_heads = config.num_key_value_heads
-        if self.total_num_kv_heads >= tp_size:
-            # Number of KV heads is greater than TP size, so we partition
-            # the KV heads across multiple tensor parallel GPUs.
-            assert self.total_num_kv_heads % tp_size == 0
-        else:
-            # Number of KV heads is less than TP size, so we replicate
-            # the KV heads across multiple tensor parallel GPUs.
-            assert tp_size % self.total_num_kv_heads == 0
-        self.num_kv_heads = max(1, self.total_num_kv_heads // tp_size)
-        self.head_dim = config.hidden_size // self.total_num_heads
-        self.q_size = self.num_heads * self.head_dim
-        self.kv_size = self.num_kv_heads * self.head_dim
-        self.scaling = self.head_dim**-0.5
-
-        self.qkv_proj = QKVParallelLinear(
-            config.hidden_size,
-            self.head_dim,
-            self.total_num_heads,
-            self.total_num_kv_heads,
-            bias=False,
-            quant_config=quant_config,
-        )
-        self.o_proj = RowParallelLinear(self.total_num_heads * self.head_dim,
-                                        config.hidden_size,
-                                        bias=False,
-                                        quant_config=quant_config)
-
-        self.attn = Attention(
-            self.num_heads,
-            self.head_dim,
-            self.scaling,
-            num_kv_heads=self.num_kv_heads,
-            cache_config=cache_config,
-        )
-
-        num_experts = config.layers_num_experts[layer_idx]
-        ffn_layer_class = JambaMoE if num_experts > 1 else JambaMLP
-        self.feed_forward = ffn_layer_class(config, quant_config=quant_config)
-        self.input_layernorm = RMSNorm(config.hidden_size,
-                                       eps=config.rms_norm_eps)
-        self.pre_ff_layernorm = RMSNorm(config.hidden_size,
-                                        eps=config.rms_norm_eps)
-
-    def self_attention(
-        self,
-        positions: torch.Tensor,
-        hidden_states: torch.Tensor,
-        kv_cache: torch.Tensor,
-        attn_metadata: AttentionMetadata,
-        **kwargs,
-    ) -> torch.Tensor:
-        qkv, _ = self.qkv_proj(hidden_states)
-        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
-        attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
-        output, _ = self.o_proj(attn_output)
-        return output
-
-    def forward(
-        self,
-        positions: torch.Tensor,
-        hidden_states: torch.Tensor,
-        kv_cache: torch.Tensor,
-        attn_metadata: AttentionMetadata,
-        residual: Optional[torch.Tensor],
-        **kwargs,
-    ):
-        if residual is None:
-            residual = hidden_states
-            hidden_states = self.input_layernorm(hidden_states)
-        else:
-            hidden_states, residual = self.input_layernorm(
-                hidden_states, residual)
-
-        hidden_states = self.self_attention(
-            positions=positions,
-            hidden_states=hidden_states,
-            kv_cache=kv_cache,
-            attn_metadata=attn_metadata,
-        )
-        # Fully Connected
-        hidden_states, residual = self.pre_ff_layernorm(
-            hidden_states, residual)
-        hidden_states = self.feed_forward(hidden_states)
-        return hidden_states, residual
-
-
-ALL_DECODER_LAYER_TYPES = {
-    "attention": JambaAttentionDecoderLayer,
-    "mamba": JambaMambaDecoderLayer
-}
-
-
-class JambaModel(nn.Module):
-
-    def __init__(
-        self,
-        config: JambaConfig,
+        config: MambaConfig,
         quant_config: Optional[QuantizationConfig] = None,
         cache_config: Optional[CacheConfig] = None,
         lora_config: Optional[LoRAConfig] = None,
@@ -501,7 +332,7 @@ class JambaModel(nn.Module):
         self.vocab_size = config.vocab_size + lora_vocab
         self.org_vocab_size = config.vocab_size
 
-        self.embed_tokens = VocabParallelEmbedding(
+        self.embeddings = VocabParallelEmbedding(
             self.vocab_size,
             config.hidden_size,
             org_num_embeddings=config.vocab_size,
@@ -509,15 +340,14 @@ class JambaModel(nn.Module):
 
         decoder_layers = []
         for i in range(config.num_hidden_layers):
-            layer_class = ALL_DECODER_LAYER_TYPES[config.layers_block_type[i]]
             decoder_layers.append(
-                layer_class(config,
-                            layer_idx=i,
-                            cache_config=cache_config,
-                            quant_config=quant_config))
+                MambaDecoderLayer(config,
+                                  layer_idx=i,
+                                  cache_config=cache_config,
+                                  quant_config=quant_config))
         self.layers = nn.ModuleList(decoder_layers)
-        self.final_layernorm = RMSNorm(config.hidden_size,
-                                       eps=config.rms_norm_eps)
+        self.norm_f = RMSNorm(config.hidden_size,
+                              eps=config.layer_norm_epsilon)
 
     def forward(
         self,
@@ -528,38 +358,28 @@ class JambaModel(nn.Module):
         conv_state: torch.Tensor,
         ssm_state: torch.Tensor,
     ) -> torch.Tensor:
-        hidden_states = self.embed_tokens(input_ids)
+        hidden_states = self.embeddings(input_ids)
         residual = None
 
         for i in range(len(self.layers)):
             layer = self.layers[i]
-            kv_cache = None
-            current_ssm_state = None
-            current_conv_state = None
-            if isinstance(layer, JambaAttentionDecoderLayer):
-                kv_cache = kv_caches[(i - self.config.attn_layer_offset) //
-                                     self.config.attn_layer_period]
-            if isinstance(layer, JambaMambaDecoderLayer):
-                current_state_layer = i - (1 +
-                                           (i - self.config.attn_layer_offset)
-                                           // self.config.attn_layer_period)
-                current_ssm_state = ssm_state[current_state_layer]
-                current_conv_state = conv_state[current_state_layer]
+            current_ssm_state = ssm_state[i]
+            current_conv_state = conv_state[i]
 
             hidden_states, residual = layer(
                 positions=positions,
                 hidden_states=hidden_states,
-                kv_cache=kv_cache,
                 attn_metadata=attn_metadata,
                 residual=residual,
                 conv_state=current_conv_state,
                 ssm_state=current_ssm_state,
             )
-        hidden_states, _ = self.final_layernorm(hidden_states, residual)
+        hidden_states, _ = self.norm_f(hidden_states, residual)
+
         return hidden_states
 
 
-class JambaForCausalLM(nn.Module, HasInnerState):
+class MambaForCausalLM(nn.Module, HasInnerState):
     packed_modules_mapping = {
         "qkv_proj": [
             "q_proj",
@@ -576,45 +396,35 @@ class JambaForCausalLM(nn.Module, HasInnerState):
         "lm_head",
     ]
     embedding_modules = {
-        "embed_tokens": "input_embeddings",
+        "embeddings": "input_embeddings",
         "lm_head": "output_embeddings",
     }
     embedding_padding_modules = ["lm_head"]
 
     def __init__(
         self,
-        config: JambaConfig,
+        config: MambaConfig,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         lora_config: Optional[LoRAConfig] = None,
         scheduler_config: Optional[SchedulerConfig] = None,
     ) -> None:
-        assert not scheduler_config.chunked_prefill_enabled, \
-            "Jamba currently does not support chunked prefill"
-        assert not cache_config.enable_prefix_caching, \
-            "Jamba currently does not support prefix caching"
-
         super().__init__()
         self.config = config
         self.scheduler_config = scheduler_config
-        self.model = JambaModel(config,
-                                cache_config=cache_config,
-                                quant_config=quant_config,
-                                lora_config=lora_config)
+        self.backbone = MambaModel(config,
+                                   cache_config=cache_config,
+                                   quant_config=quant_config,
+                                   lora_config=lora_config)
         self.unpadded_vocab_size = config.vocab_size
         if lora_config:
             self.unpadded_vocab_size += lora_config.lora_extra_vocab_size
-        self.lm_head = ParallelLMHead(
-            self.unpadded_vocab_size,
-            config.hidden_size,
-            org_num_embeddings=config.vocab_size,
-            padding_size=DEFAULT_VOCAB_PADDING_SIZE
-            # We need bigger padding if using lora for kernel
-            # compatibility
-            if not lora_config else lora_config.lora_vocab_padding_size,
-        )
+
+        self.lm_head = self.backbone.embeddings
+
         # Used to track and store by the Mamba cache between steps.
         self.mamba_cache: Optional[MambaCacheManager] = None
+
         self.logits_processor = LogitsProcessor(self.unpadded_vocab_size,
                                                 config.vocab_size)
         self.sampler = Sampler()
@@ -630,14 +440,9 @@ class JambaForCausalLM(nn.Module, HasInnerState):
             max_batch_size = (_get_graph_batch_size(
                 self.scheduler_config.max_num_seqs) if self.scheduler_config
                               else max(_BATCH_SIZES_TO_CAPTURE) + 2)
-
-            layers_type = self.config.layers_block_type
-            num_mamba_layers = sum(
-                [layer_type == "mamba" for layer_type in layers_type])
-
             self.mamba_cache = MambaCacheManager(
-                self.lm_head.weight.dtype, num_mamba_layers, max_batch_size,
-                *self._get_mamba_cache_shape())
+                self.lm_head.weight.dtype, self.config.num_hidden_layers,
+                max_batch_size, *self._get_mamba_cache_shape())
 
         if "seqlen_agnostic_capture_inputs" not in kwargs:
             # We get here only on Prefill/Eager mode runs
@@ -648,20 +453,22 @@ class JambaForCausalLM(nn.Module, HasInnerState):
             request_ids_to_seq_ids = kwargs["request_ids_to_seq_ids"]
             finished_requests_ids = kwargs["finished_requests_ids"]
             self.mamba_cache.release_finished_requests(finished_requests_ids)
+
             batch_size = input_ids.shape[0]
             if attn_metadata.prefill_metadata:
                 batch_size = len(request_ids_to_seq_ids)
             mamba_cache_tensors = self.mamba_cache.prepare_current_run_state(
                 request_ids_to_seq_ids, batch_size, finished_requests_ids)
+
         else:
             # CUDA graph capturing runs
             mamba_cache_tensors = kwargs["seqlen_agnostic_capture_inputs"]
 
-        hidden_states = self.model(input_ids, positions, kv_caches,
-                                   attn_metadata, mamba_cache_tensors[0],
-                                   mamba_cache_tensors[1])
-        return hidden_states
+        hidden_states = self.backbone(input_ids, positions, kv_caches,
+                                      attn_metadata, mamba_cache_tensors[0],
+                                      mamba_cache_tensors[1])
 
+        return hidden_states
 
     def copy_inputs_before_cuda_graphs(self, input_buffers, **kwargs):
         return self.mamba_cache.copy_inputs_before_cuda_graphs(
@@ -673,14 +480,13 @@ class JambaForCausalLM(nn.Module, HasInnerState):
     def _get_mamba_cache_shape(
             self) -> Tuple[Tuple[int, int], Tuple[int, int]]:
         world_size = get_tensor_model_parallel_world_size()
-        hidden_size = self.config.hidden_size
         conv_state_shape = (
-            self.config.mamba_expand * hidden_size // world_size,
-            self.config.mamba_d_conv,
+            self.config.intermediate_size // world_size,
+            self.config.conv_kernel,
         )
         temporal_state_shape = (
-            self.config.mamba_expand * hidden_size // world_size,
-            self.config.mamba_d_state,
+            self.config.intermediate_size // world_size,
+            self.config.state_size,
         )
         return conv_state_shape, temporal_state_shape
 
@@ -708,18 +514,8 @@ class JambaForCausalLM(nn.Module, HasInnerState):
             ("gate_up_proj", "up_proj", 1),
         ]
 
-        # Params for weights, fp8 weight scales, fp8 activation scales
-        # (param_name, weight_name, expert_id, shard_id)
-        expert_params_mapping = FusedMoE.make_expert_params_mapping(
-            ckpt_gate_proj_name="gate_proj",
-            ckpt_down_proj_name="down_proj",
-            ckpt_up_proj_name="up_proj",
-            num_experts=self.config.num_experts)
-
         params_dict = dict(self.named_parameters())
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
                 continue
 
@@ -732,8 +528,6 @@ class JambaForCausalLM(nn.Module, HasInnerState):
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
-                if 'experts' in name:
-                    continue
                 name = name.replace(weight_name, param_name)
                 # Skip loading extra bias for GPTQ models.
                 if name.endswith(".bias") and name not in params_dict:
@@ -743,25 +537,11 @@ class JambaForCausalLM(nn.Module, HasInnerState):
                 weight_loader(param, loaded_weight, shard_id)
                 break
             else:
-                for mapping in expert_params_mapping:
-                    param_name, weight_name, expert_id, shard_id = mapping
-                    if weight_name not in name:
-                        continue
-                    name = name.replace(weight_name, param_name)
-                    param = params_dict[name]
-                    weight_loader = param.weight_loader
-                    weight_loader(param,
-                                  loaded_weight,
-                                  weight_name,
-                                  shard_id=shard_id,
-                                  expert_id=expert_id)
-                    break
-                else:
-                    # Skip loading extra bias for GPTQ models.
-                    if name.endswith(".bias") and name not in params_dict:
-                        continue
+                # Skip loading extra bias for GPTQ models.
+                if name.endswith(".bias") and name not in params_dict:
+                    continue
 
-                    param = params_dict[name]
-                    weight_loader = getattr(param, "weight_loader",
-                                            default_weight_loader)
-                    weight_loader(param, loaded_weight)
+                param = params_dict[name]
+                weight_loader = getattr(param, "weight_loader",
+                                        default_weight_loader)
+                weight_loader(param, loaded_weight)

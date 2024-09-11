@@ -460,6 +460,7 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                     query,
                     key,
                     value,
+                    self.kv_cache_dtype,
                     key_cache,
                     value_cache,
                     prefill_meta.block_tables,
@@ -469,6 +470,8 @@ class ROCmFlashAttentionImpl(AttentionImpl):
                     prefill_meta.max_query_len,
                     self.alibi_slopes,
                     self.sliding_window[0],
+                    k_scale,
+                    v_scale,
                 )
 
         if decode_meta := attn_metadata.decode_metadata:

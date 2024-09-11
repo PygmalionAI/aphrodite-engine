@@ -1,9 +1,16 @@
+# ruff: noqa
+# code borrowed from https://github.com/pytorch/pytorch/blob/main/torch/utils/collect_env.py
+# and https://github.com/vllm-project/vllm/blob/e14fb22e59a1a9aa745b2a72211973838f6a5993/collect_env.py
+
+# Unlike the rest of the PyTorch this file must be python2 compliant.
+# This script outputs relevant system environment info
+# Run it with `python collect_env.py` or `python -m torch.utils.collect_env`
 import datetime
 import locale
+import os
 import re
 import subprocess
 import sys
-import os
 from collections import namedtuple
 
 try:
@@ -41,9 +48,11 @@ SystemEnv = namedtuple(
         'caching_allocator_config',
         'is_xnnpack_available',
         'cpu_info',
-        'rocm_version',
-        'aphrodite_version',
-        'aphrodite_build_flags',
+        'rocm_version',  # aphrodite specific field
+        'neuron_sdk_version',  # aphrodite specific field
+        'aphrodite_version',  # aphrodite specific field
+        'aphrodite_build_flags',  # aphrodite specific field
+        'gpu_topo',  # aphrodite specific field
     ])
 
 DEFAULT_CONDA_PATTERNS = {
@@ -55,6 +64,9 @@ DEFAULT_CONDA_PATTERNS = {
     "magma",
     "triton",
     "optree",
+    "nccl",
+    "transformers",
+    "zmq",
 }
 
 DEFAULT_PIP_PATTERNS = {
@@ -65,28 +77,32 @@ DEFAULT_PIP_PATTERNS = {
     "triton",
     "optree",
     "onnx",
+    "nccl",
+    "transformers",
+    "zmq",
 }
 
 
 def run(command):
     """Return (return-code, stdout, stderr)."""
-    shell = isinstance(command, str)
+    shell = True if type(command) is str else False
     p = subprocess.Popen(command,
                          stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE,
                          shell=shell)
     raw_output, raw_err = p.communicate()
     rc = p.returncode
-    enc = 'oem' if get_platform() == 'win32' else locale.getpreferredencoding()
+    if get_platform() == 'win32':
+        enc = 'oem'
+    else:
+        enc = locale.getpreferredencoding()
     output = raw_output.decode(enc)
     err = raw_err.decode(enc)
     return rc, output.strip(), err.strip()
 
 
 def run_and_read_all(run_lambda, command):
-    """
-    Run command using run_lambda; reads and returns entire output if rc is 0.
-    """
+    """Run command using run_lambda; reads and returns entire output if rc is 0."""
     rc, out, _ = run_lambda(command)
     if rc != 0:
         return None
@@ -94,9 +110,7 @@ def run_and_read_all(run_lambda, command):
 
 
 def run_and_parse_first_match(run_lambda, command, regex):
-    """
-    Run command using run_lambda, returns the first regex match if it exists.
-    """
+    """Run command using run_lambda, returns the first regex match if it exists."""
     rc, out, _ = run_lambda(command)
     if rc != 0:
         return None
@@ -107,9 +121,7 @@ def run_and_parse_first_match(run_lambda, command, regex):
 
 
 def run_and_return_first_line(run_lambda, command):
-    """
-    Run command using run_lambda and returns first line if output is not empty.
-    """
+    """Run command using run_lambda and returns first line if output is not empty."""
     rc, out, _ = run_lambda(command)
     if rc != 0:
         return None
@@ -182,9 +194,7 @@ def get_running_cuda_version(run_lambda):
 
 
 def get_cudnn_version(run_lambda):
-    """
-    Return a list of libcudnn.so; it's hard to tell which one is being used.
-    """
+    """Return a list of libcudnn.so; it's hard to tell which one is being used."""
     if get_platform() == 'win32':
         system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
         cuda_path = os.environ.get('CUDA_PATH', "%CUDA_PATH%")
@@ -201,9 +211,9 @@ def get_cudnn_version(run_lambda):
     rc, out, _ = run_lambda(cudnn_cmd)
     # find will return 1 if there are permission errors or if not found
     if len(out) == 0 or (rc != 1 and rc != 0):
-        length = os.environ.get('CUDNN_LIBRARY')
-        if length is not None and os.path.isfile(length):
-            return os.path.realpath(length)
+        l = os.environ.get('CUDNN_LIBRARY')
+        if l is not None and os.path.isfile(l):
+            return os.path.realpath(l)
         return None
     files_set = set()
     for fn in out.split('\n'):
@@ -244,6 +254,15 @@ def get_rocm_version(run_lambda):
                                      r'HIP version: (\S+)')
 
 
+def get_neuron_sdk_version(run_lambda):
+    # Adapted from your install script
+    try:
+        result = run_lambda(["neuron-ls"])
+        return result if result[0] == 0 else 'N/A'
+    except Exception:
+        return 'N/A'
+
+
 def get_aphrodite_version():
     try:
         import aphrodite
@@ -253,12 +272,94 @@ def get_aphrodite_version():
 
 
 def summarize_aphrodite_build_flags():
-    # This could be a static method if the flags are constant, or dynamic if
-    # you need to check environment variables, etc.
-    return 'CUDA Archs: {}; ROCm: {}'.format(
+    # This could be a static method if the flags are constant, or dynamic if you need to check environment variables, etc.
+    return 'CUDA Archs: {}; ROCm: {}; Neuron: {}'.format(
         os.environ.get('TORCH_CUDA_ARCH_LIST', 'Not Set'),
         'Enabled' if os.environ.get('ROCM_HOME') else 'Disabled',
+        'Enabled' if os.environ.get('NEURON_CORES') else 'Disabled',
     )
+
+
+def get_gpu_topo(run_lambda):
+    if get_platform() == 'linux':
+        return run_and_read_all(run_lambda, 'nvidia-smi topo -m')
+    return None
+
+
+# example outputs of CPU infos
+#  * linux
+#    Architecture:            x86_64
+#      CPU op-mode(s):        32-bit, 64-bit
+#      Address sizes:         46 bits physical, 48 bits virtual
+#      Byte Order:            Little Endian
+#    CPU(s):                  128
+#      On-line CPU(s) list:   0-127
+#    Vendor ID:               GenuineIntel
+#      Model name:            Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz
+#        CPU family:          6
+#        Model:               106
+#        Thread(s) per core:  2
+#        Core(s) per socket:  32
+#        Socket(s):           2
+#        Stepping:            6
+#        BogoMIPS:            5799.78
+#        Flags:               fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr
+#                             sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl
+#                             xtopology nonstop_tsc cpuid aperfmperf tsc_known_freq pni pclmulqdq monitor ssse3 fma cx16
+#                             pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand
+#                             hypervisor lahf_lm abm 3dnowprefetch invpcid_single ssbd ibrs ibpb stibp ibrs_enhanced
+#                             fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap
+#                             avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1
+#                             xsaves wbnoinvd ida arat avx512vbmi pku ospke avx512_vbmi2 gfni vaes vpclmulqdq
+#                             avx512_vnni avx512_bitalg tme avx512_vpopcntdq rdpid md_clear flush_l1d arch_capabilities
+#    Virtualization features:
+#      Hypervisor vendor:     KVM
+#      Virtualization type:   full
+#    Caches (sum of all):
+#      L1d:                   3 MiB (64 instances)
+#      L1i:                   2 MiB (64 instances)
+#      L2:                    80 MiB (64 instances)
+#      L3:                    108 MiB (2 instances)
+#    NUMA:
+#      NUMA node(s):          2
+#      NUMA node0 CPU(s):     0-31,64-95
+#      NUMA node1 CPU(s):     32-63,96-127
+#    Vulnerabilities:
+#      Itlb multihit:         Not affected
+#      L1tf:                  Not affected
+#      Mds:                   Not affected
+#      Meltdown:              Not affected
+#      Mmio stale data:       Vulnerable: Clear CPU buffers attempted, no microcode; SMT Host state unknown
+#      Retbleed:              Not affected
+#      Spec store bypass:     Mitigation; Speculative Store Bypass disabled via prctl and seccomp
+#      Spectre v1:            Mitigation; usercopy/swapgs barriers and __user pointer sanitization
+#      Spectre v2:            Mitigation; Enhanced IBRS, IBPB conditional, RSB filling, PBRSB-eIBRS SW sequence
+#      Srbds:                 Not affected
+#      Tsx async abort:       Not affected
+#  * win32
+#    Architecture=9
+#    CurrentClockSpeed=2900
+#    DeviceID=CPU0
+#    Family=179
+#    L2CacheSize=40960
+#    L2CacheSpeed=
+#    Manufacturer=GenuineIntel
+#    MaxClockSpeed=2900
+#    Name=Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz
+#    ProcessorType=3
+#    Revision=27142
+#
+#    Architecture=9
+#    CurrentClockSpeed=2900
+#    DeviceID=CPU1
+#    Family=179
+#    L2CacheSize=40960
+#    L2CacheSpeed=
+#    Manufacturer=GenuineIntel
+#    MaxClockSpeed=2900
+#    Name=Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz
+#    ProcessorType=3
+#    Revision=27142
 
 
 def get_cpu_info(run_lambda):
@@ -267,12 +368,16 @@ def get_cpu_info(run_lambda):
         rc, out, err = run_lambda('lscpu')
     elif get_platform() == 'win32':
         rc, out, err = run_lambda(
-            'wmic cpu get Name,Manufacturer,Family,Architecture,ProcessorType, \
-                DeviceID,CurrentClockSpeed,MaxClockSpeed,L2CacheSize, \
-                    L2CacheSpeed,Revision /VALUE')
+            'wmic cpu get Name,Manufacturer,Family,Architecture,ProcessorType,DeviceID, \
+        CurrentClockSpeed,MaxClockSpeed,L2CacheSize,L2CacheSpeed,Revision /VALUE'
+        )
     elif get_platform() == 'darwin':
         rc, out, err = run_lambda("sysctl -n machdep.cpu.brand_string")
-    cpu_info = out if rc == 0 else err
+    cpu_info = 'None'
+    if rc == 0:
+        cpu_info = out
+    else:
+        cpu_info = err
     return cpu_info
 
 
@@ -356,10 +461,7 @@ def get_libc_version():
 
 
 def get_pip_packages(run_lambda, patterns=None):
-    """
-    Return `pip list` output. Note: will also find conda-installed pytorch and
-    numpy packages.
-    """
+    """Return `pip list` output. Note: will also find conda-installed pytorch and numpy packages."""
     if patterns is None:
         patterns = DEFAULT_PIP_PATTERNS
 
@@ -410,9 +512,7 @@ def get_env_info():
         cuda_version_str = torch.version.cuda
         if not hasattr(torch.version,
                        'hip') or torch.version.hip is None:  # cuda version
-            hip_compiled_version = 'N/A'
-            hip_runtime_version = 'N/A'
-            miopen_runtime_version = 'N/A'
+            hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'
         else:  # HIP version
 
             def get_version_or_na(cfg, prefix):
@@ -425,21 +525,18 @@ def get_env_info():
             cuda_version_str = 'N/A'
             hip_compiled_version = torch.version.hip
     else:
-        version_str = 'N/A'
-        debug_mode_str = 'N/A'
-        cuda_available_str = 'N/A'
-        cuda_version_str = 'N/A'
-        hip_compiled_version = 'N/A'
-        hip_runtime_version = 'N/A'
-        miopen_runtime_version = 'N/A'
+        version_str = debug_mode_str = cuda_available_str = cuda_version_str = 'N/A'
+        hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'
 
     sys_version = sys.version.replace("\n", " ")
 
     conda_packages = get_conda_packages(run_lambda)
 
     rocm_version = get_rocm_version(run_lambda)
+    neuron_sdk_version = get_neuron_sdk_version(run_lambda)
     aphrodite_version = get_aphrodite_version()
     aphrodite_build_flags = summarize_aphrodite_build_flags()
+    gpu_topo = get_gpu_topo(run_lambda)
 
     return SystemEnv(
         torch_version=version_str,
@@ -470,8 +567,10 @@ def get_env_info():
         is_xnnpack_available=is_xnnpack_available(),
         cpu_info=get_cpu_info(run_lambda),
         rocm_version=rocm_version,
+        neuron_sdk_version=neuron_sdk_version,
         aphrodite_version=aphrodite_version,
         aphrodite_build_flags=aphrodite_build_flags,
+        gpu_topo=gpu_topo,
     )
 
 
@@ -480,11 +579,13 @@ PyTorch version: {torch_version}
 Is debug build: {is_debug_build}
 CUDA used to build PyTorch: {cuda_compiled_version}
 ROCM used to build PyTorch: {hip_compiled_version}
+
 OS: {os}
 GCC version: {gcc_version}
 Clang version: {clang_version}
 CMake version: {cmake_version}
 Libc version: {libc_version}
+
 Python version: {python_version}
 Python platform: {python_platform}
 Is CUDA available: {is_cuda_available}
@@ -496,32 +597,42 @@ cuDNN version: {cudnn_version}
 HIP runtime version: {hip_runtime_version}
 MIOpen runtime version: {miopen_runtime_version}
 Is XNNPACK available: {is_xnnpack_available}
+
 CPU:
 {cpu_info}
+
 Versions of relevant libraries:
 {pip_packages}
 {conda_packages}
 """.strip()
 
+# both the above code and the following code use `strip()` to
+# remove leading/trailing whitespaces, so we need to add a newline
+# in between to separate the two sections
+env_info_fmt += "\n"
+
 env_info_fmt += """
 ROCM Version: {rocm_version}
+Neuron SDK Version: {neuron_sdk_version}
 Aphrodite Version: {aphrodite_version}
 Aphrodite Build Flags:
 {aphrodite_build_flags}
+GPU Topology:
+{gpu_topo}
 """.strip()
 
 
 def pretty_str(envinfo):
 
-    def replace_nones(dct, replacement='Could not collect '):
-        for key in dct:
+    def replace_nones(dct, replacement='Could not collect'):
+        for key in dct.keys():
             if dct[key] is not None:
                 continue
             dct[key] = replacement
         return dct
 
     def replace_bools(dct, true='Yes', false='No'):
-        for key in dct:
+        for key in dct.keys():
             if dct[key] is True:
                 dct[key] = true
             elif dct[key] is False:
@@ -533,7 +644,7 @@ def pretty_str(envinfo):
         updated_lines = [tag + line for line in lines]
         return '\n'.join(updated_lines)
 
-    def replace_if_empty(text, replacement='No relevant packages '):
+    def replace_if_empty(text, replacement='No relevant packages'):
         if text is not None and len(text) == 0:
             return replacement
         return text
@@ -579,8 +690,7 @@ def pretty_str(envinfo):
         mutable_dict['conda_packages'])
 
     # Tag conda and pip packages with a prefix
-    # If they were previously None, they'll show up as ie '[conda] Could not
-    # collect'
+    # If they were previously None, they'll show up as ie '[conda] Could not collect'
     if mutable_dict['pip_packages']:
         mutable_dict['pip_packages'] = prepend(
             mutable_dict['pip_packages'], '[{}] '.format(envinfo.pip_version))
@@ -612,10 +722,8 @@ def main():
             ctime = os.path.getctime(latest)
             creation_time = datetime.datetime.fromtimestamp(ctime).strftime(
                 '%Y-%m-%d %H:%M:%S')
-            msg = "\n*** Detected a minidump at {} created on {}, ".format( \
-                latest, creation_time) + \
-                  "if this is related to your bug please include it when you " \
-                    "file a report ***"
+            msg = "\n*** Detected a minidump at {} created on {}, ".format(latest, creation_time) + \
+                  "if this is related to your bug please include it when you file a report ***"
             print(msg, file=sys.stderr)
 
 
