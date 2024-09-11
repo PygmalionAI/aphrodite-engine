@@ -241,6 +241,14 @@ class AphroditeEngine:
         else:
             self.tokenizer = None
             self.detokenizer = None
+            tokenizer_group = None
+
+        # Ensure that the function doesn't contain a reference to self,
+        # to avoid engine GC issues
+        def get_tokenizer_for_seq(sequence: Sequence) -> PreTrainedTokenizer:
+            assert tokenizer_group, ("tokenizer_group cannot be None, "
+                                     "make sure skip_tokenizer_init is False")
+            return tokenizer_group.get_lora_tokenizer(sequence.lora_request)
 
         self.seq_counter = Counter()
         self.generation_config_fields = _load_generation_config_dict(
@@ -305,10 +313,10 @@ class AphroditeEngine:
                 self.detokenizer,
                 self.scheduler,
                 self.seq_counter,
-                self.get_tokenizer_for_seq,
+                get_tokenizer_for_seq,
                 stop_checker=StopChecker(
                     self.scheduler_config.max_model_len,
-                    self.get_tokenizer_for_seq,
+                    get_tokenizer_for_seq,
                 ),
             ))
 
@@ -436,10 +444,6 @@ class AphroditeEngine:
     ) -> "PreTrainedTokenizer":
         return self.get_tokenizer_group().get_lora_tokenizer(lora_request)
 
-    def get_tokenizer_for_seq(self,
-                              sequence: Sequence) -> "PreTrainedTokenizer":
-        return self.get_tokenizer_group().get_lora_tokenizer(
-            sequence.lora_request)
 
     def _init_tokenizer(self) -> BaseTokenizerGroup:
         return init_tokenizer_from_configs(

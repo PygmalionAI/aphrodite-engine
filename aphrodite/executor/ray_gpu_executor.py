@@ -71,6 +71,14 @@ class RayGPUExecutor(DistributedGPUExecutor):
         # Create the parallel GPU workers.
         self._init_workers_ray(placement_group)
 
+    def shutdown(self) -> None:
+        if hasattr(self, "forward_dag") and self.forward_dag is not None:
+            self.forward_dag.teardown()
+            import ray
+            for worker in self.workers:
+                ray.kill(worker)
+            self.forward_dag = None
+
     def _configure_ray_workers_use_nsight(self,
                                           ray_remote_kwargs) -> Dict[str, Any]:
         # If nsight profiling is enabled, we need to set the profiling
@@ -455,11 +463,7 @@ class RayGPUExecutor(DistributedGPUExecutor):
         return forward_dag.experimental_compile(enable_asyncio=enable_asyncio)
 
     def __del__(self):
-        if self.forward_dag is not None:
-            self.forward_dag.teardown()
-            import ray
-            for worker in self.workers:
-                ray.kill(worker)
+        self.shutdown()
 
 
 class RayGPUExecutorAsync(RayGPUExecutor, DistributedGPUExecutorAsync):
@@ -532,8 +536,4 @@ class RayGPUExecutorAsync(RayGPUExecutor, DistributedGPUExecutorAsync):
         return await asyncio.gather(*coros)
 
     def __del__(self):
-        if self.forward_dag is not None:
-            self.forward_dag.teardown()
-            import ray
-            for worker in self.workers:
-                ray.kill(worker)
+        self.shutdown()

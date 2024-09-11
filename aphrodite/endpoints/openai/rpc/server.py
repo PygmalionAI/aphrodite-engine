@@ -33,6 +33,7 @@ class AsyncEngineRPCServer:
         """Cleanup all resources."""
         self.socket.close()
         self.context.destroy()
+        self.engine.shutdown_background_loop()
 
     async def get_model_config(self, identity):
         """Send the ModelConfig"""
