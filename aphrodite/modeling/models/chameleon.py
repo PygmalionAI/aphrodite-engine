@@ -25,8 +25,10 @@ from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
-from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
+from aphrodite.modeling.model_loader.weight_utils import (
+    default_weight_loader, row_parallel_weight_loader)
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
+from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
 from aphrodite.multimodal.image import (cached_get_tokenizer,
                                         repeat_and_pad_image_tokens)
@@ -137,6 +139,11 @@ class ChameleonLayerNorm(nn.LayerNorm):
     def __init__(self, hidden_size, *args, **kwargs):
         super().__init__(hidden_size, *args, **kwargs)
         self.normalized_shape = (hidden_size[-1], )
+
+        set_weight_attrs(self.weight,
+                         {"weight_loader": row_parallel_weight_loader})
+        set_weight_attrs(self.bias,
+                         {"weight_loader": row_parallel_weight_loader})
 
     def forward(self, hidden_states):
         hidden_states = F.layer_norm(hidden_states,
@@ -694,6 +701,8 @@ class ChameleonVQVAEEncoder(nn.Module):
         )
 
     def forward(self, pixel_values: torch.Tensor):
+        pixel_values = pixel_values.to(self.conv_in.weight.dtype)
+
         # downsampling
         hidden_states = [self.conv_in(pixel_values)]
         for i_level in range(self.num_resolutions):
@@ -956,15 +965,19 @@ class ChameleonForConditionalGeneration(nn.Module, SupportsVision):
                                    attn_metadata)
         return hidden_states
 
-    def compute_logits(self, hidden_states: torch.Tensor,
-                       sampling_metadata: SamplingMetadata) -> torch.Tensor:
+    def compute_logits(
+        self,
+        hidden_states: torch.Tensor,
+        sampling_metadata: SamplingMetadata,
+    ) -> Optional[torch.Tensor]:
         logits = self.logits_processor(self.lm_head, hidden_states,
                                        sampling_metadata)
 
         # Disallow image tokens which does not include special
         # begin-image and end-image tokens
-        image_tokens = self.model.vocabulary_mapping.image_tokens
-        logits[:, image_tokens] = torch.finfo(logits.dtype).min
+        if logits is not None:
+            image_tokens = self.model.vocabulary_mapping.image_tokens
+            logits[:, image_tokens] = torch.finfo(logits.dtype).min
 
         return logits
 

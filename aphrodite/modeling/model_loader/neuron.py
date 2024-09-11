@@ -62,8 +62,11 @@ class NeuronCasualLM(nn.Module):
                             start_ids=input_block_ids)
         return logits
 
-    def compute_logits(self, hidden_states: torch.Tensor,
-                       sampling_metadata: SamplingMetadata) -> torch.Tensor:
+    def compute_logits(
+        self,
+        hidden_states: torch.Tensor,
+        sampling_metadata: SamplingMetadata,
+    ) -> Optional[torch.Tensor]:
         logits = self.logits_processor(None, hidden_states, sampling_metadata)
         return logits
 

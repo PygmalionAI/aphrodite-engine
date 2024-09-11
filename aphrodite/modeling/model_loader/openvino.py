@@ -179,8 +179,11 @@ class OpenVINOCasualLM(nn.Module):
         # TODO: remove 'view' once OpenVINO PA will drop 'seq_len' dimension
         return logits.view(-1, logits.shape[-1])
 
-    def compute_logits(self, hidden_states: torch.Tensor,
-                       sampling_metadata: SamplingMetadata) -> torch.Tensor:
+    def compute_logits(
+        self,
+        hidden_states: torch.Tensor,
+        sampling_metadata: SamplingMetadata,
+    ) -> Optional[torch.Tensor]:
         hidden_states = _prune_hidden_states(hidden_states, sampling_metadata)
         logits = self.logits_processor(None, hidden_states, sampling_metadata)
         return logits
