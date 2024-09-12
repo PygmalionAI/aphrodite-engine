@@ -1,4 +1,5 @@
-from typing import Iterable, List, Literal, Optional, Tuple, TypedDict, Union
+from typing import (Iterable, List, Literal, Mapping, Optional, Tuple,
+                    TypedDict, Union)
 
 import torch
 from loguru import logger
@@ -54,17 +55,20 @@ def get_max_paligemma_image_tokens(ctx: InputContext):
     return get_max_siglip_image_tokens(vision_config)
 
 
-def dummy_data_for_paligemma(ctx: InputContext, seq_len: int):
+def dummy_data_for_paligemma(ctx: InputContext, seq_len: int,
+                             mm_counts: Mapping[str, int]):
     hf_config = ctx.get_hf_config(PaliGemmaConfig)
     vision_config = hf_config.vision_config
+    num_images = mm_counts["image"]
 
     seq_data = dummy_seq_data_for_siglip(
         vision_config,
         seq_len,
+        num_images,
         image_token_id=hf_config.image_token_index,
     )
 
-    mm_data = dummy_image_for_siglip(vision_config)
+    mm_data = dummy_image_for_siglip(vision_config, num_images)
     return seq_data, mm_data
 
 

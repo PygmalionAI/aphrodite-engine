@@ -10,14 +10,11 @@ from aphrodite.common.config import (LoRAConfig, MultiModalConfig,
 
 @runtime_checkable
 class SupportsMultiModal(Protocol):
-    """
-    The interface required for all multimodal (vision or audio) language
-    models.
-    """
+    """The interface required for all multi-modal models."""
 
     supports_multimodal: ClassVar[Literal[True]] = True
     """
-    A flag that indicates this model supports multimodal inputs.
+    A flag that indicates this model supports multi-modal inputs.
 
     Note:
         There is no need to redefine this flag if this class is in the
