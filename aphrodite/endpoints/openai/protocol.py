@@ -12,6 +12,7 @@ from typing_extensions import Annotated
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import (LogitsProcessorFunc,
                                               SamplingParams)
+from aphrodite.common.sequence import Logprob
 from aphrodite.common.utils import random_uuid
 from aphrodite.endpoints.chat_utils import ChatCompletionMessageParam
 from aphrodite.endpoints.openai.logits_processors import get_logits_processors
@@ -144,6 +145,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
     spaces_between_special_tokens: Optional[bool] = True
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None
     temperature_last: Optional[bool] = False
+    prompt_logprobs: Optional[int] = None
     # doc: end-chat-completion-sampling-params
 
     # doc: begin-chat-completion-extra-params
@@ -261,7 +263,8 @@ class ChatCompletionRequest(OpenAIBaseModel):
             max_tokens=max_tokens,
             min_tokens=self.min_tokens,
             logprobs=self.top_logprobs if self.logprobs else None,
-            prompt_logprobs=self.top_logprobs if self.echo else None,
+            prompt_logprobs=self.prompt_logprobs if self.prompt_logprobs else
+            (self.top_logprobs if self.echo else None),
             best_of=self.best_of,
             top_k=self.top_k,
             top_a=self.top_a,
@@ -384,6 +387,7 @@ class CompletionRequest(OpenAIBaseModel):
     include_stop_str_in_output: Optional[bool] = False
     add_special_tokens: Optional[bool] = False
     temperature_last: Optional[bool] = False
+    prompt_logprobs: Optional[int] = None
     # doc: end-completion-sampling-params
 
     # doc: begin-completion-extra-params
@@ -469,9 +473,10 @@ class CompletionRequest(OpenAIBaseModel):
             max_tokens=max_tokens if not echo_without_generation else 1,
             min_tokens=self.min_tokens,
             logprobs=self.logprobs,
+            prompt_logprobs=self.prompt_logprobs
+            if self.prompt_logprobs else self.logprobs if self.echo else None,
             use_beam_search=self.use_beam_search,
             early_stopping=self.early_stopping,
-            prompt_logprobs=self.logprobs if self.echo else None,
             skip_special_tokens=self.skip_special_tokens,
             spaces_between_special_tokens=(self.spaces_between_special_tokens),
             include_stop_str_in_output=self.include_stop_str_in_output,
@@ -550,6 +555,7 @@ class CompletionResponseChoice(OpenAIBaseModel):
             "to stop, None if the completion finished for some other reason "
             "including encountering the EOS token"),
     )
+    prompt_logprobs: Optional[List[Optional[Dict[int, Logprob]]]] = None
 
 
 class CompletionResponse(OpenAIBaseModel):
@@ -645,6 +651,7 @@ class ChatCompletionResponse(OpenAIBaseModel):
     model: str
     choices: List[ChatCompletionResponseChoice]
     usage: UsageInfo
+    prompt_logprobs: Optional[List[Optional[Dict[int, Logprob]]]] = None
 
 
 class DeltaMessage(OpenAIBaseModel):
