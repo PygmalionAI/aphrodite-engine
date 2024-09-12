@@ -90,6 +90,7 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
         load_config: LoadConfig,
         multimodal_config: Optional[MultiModalConfig] = None,
         is_driver_worker: bool = False,
+        **kwargs,
     ):
         self.model_config = model_config
         self.parallel_config = parallel_config
