@@ -12,7 +12,7 @@ from aphrodite.inputs.registry import InputContext
 from aphrodite.transformers_utils.image_processor import get_image_processor
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 
-from .base import MultiModalInputs, MultiModalPlugin
+from .base import MultiModalData, MultiModalInputs, MultiModalPlugin
 
 cached_get_image_processor = lru_cache(get_image_processor)
 cached_get_tokenizer = lru_cache(get_tokenizer)
@@ -107,8 +107,11 @@ class ImagePlugin(MultiModalPlugin):
             model_config.model,
             trust_remote_code=model_config.trust_remote_code)
 
-    def _default_input_mapper(self, ctx: InputContext,
-                              data: object) -> MultiModalInputs:
+    def _default_input_mapper(
+        self,
+        ctx: InputContext,
+        data: MultiModalData[object],
+    ) -> MultiModalInputs:
         model_config = ctx.model_config
 
         if isinstance(data, Image.Image) or is_list_of(data, Image.Image):
