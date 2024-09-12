@@ -20,8 +20,9 @@ from aphrodite.common.sequence import (IntermediateTensors, PoolerOutput,
                                        SamplerOutput, SequenceGroupMetadata)
 from aphrodite.common.utils import (STR_NOT_IMPL_ENC_DEC_BACKEND,
                                     make_tensor_with_pad)
-from aphrodite.inputs import INPUT_REGISTRY
+from aphrodite.inputs import INPUT_REGISTRY, InputRegistry
 from aphrodite.modeling import SamplingMetadata
+from aphrodite.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from aphrodite.task_handler.model_runner import (
     _PAD_SLOT_ID, GPUModelRunnerBase, ModelInputForGPUBuilder,
     ModelInputForGPUWithSamplingMetadata)
@@ -83,6 +84,8 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
         is_driver_worker: bool = False,
         prompt_adapter_config: Optional[PromptAdapterConfig] = None,
         multimodal_config: Optional[MultiModalConfig] = None,
+        input_registry: InputRegistry = INPUT_REGISTRY,
+        mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
         **kwargs,
     ):
         '''
@@ -270,6 +273,16 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
         seqs: List[SequenceGroupMetadata] = []
 
         model_config = self.model_config
+        mm_config = self.multimodal_config
+
+        input_registry = self.input_registry
+        mm_registry = self.mm_registry
+        mm_registry.init_mm_limits_per_prompt(model_config, mm_config)
+
+        max_mm_tokens = mm_registry.get_max_multimodal_tokens(model_config)
+        if max_mm_tokens > 0:
+            raise NotImplementedError(
+                "Multi-modal encoder-decoder models are not supported yet")
 
         batch_size = 0
         for group_id in range(max_num_seqs):
@@ -277,8 +290,8 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
                        (group_id < max_num_batched_tokens % max_num_seqs))
             batch_size += seq_len
 
-            seq_data, _ = INPUT_REGISTRY \
-                .dummy_data_for_profiling(model_config, seq_len)
+            seq_data, _ = input_registry \
+                .dummy_data_for_profiling(model_config, seq_len, mm_registry)
 
             # Having more tokens is over-conservative but otherwise fine
             assert len(seq_data.prompt_token_ids) >= seq_len, (

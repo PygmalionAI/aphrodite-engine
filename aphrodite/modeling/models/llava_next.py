@@ -1,5 +1,6 @@
 import itertools
-from typing import Iterable, List, Literal, Optional, Tuple, TypedDict, Union
+from typing import (Iterable, List, Literal, Mapping, Optional, Tuple,
+                    TypedDict, Union)
 
 import torch
 import torch.nn as nn
@@ -153,9 +154,11 @@ def get_max_llava_next_image_tokens(ctx: InputContext):
     )
 
 
-def dummy_data_for_llava_next(ctx: InputContext, seq_len: int):
+def dummy_data_for_llava_next(ctx: InputContext, seq_len: int,
+                              mm_counts: Mapping[str, int]):
     hf_config = ctx.get_hf_config(LlavaNextConfig)
     vision_config = hf_config.vision_config
+    num_images = mm_counts["image"]
 
     image_feature_size = get_max_llava_next_image_tokens(ctx)
 
@@ -163,27 +166,30 @@ def dummy_data_for_llava_next(ctx: InputContext, seq_len: int):
         seq_data = dummy_seq_data_for_clip(
             vision_config,
             seq_len,
+            num_images,
             image_token_id=hf_config.image_token_index,
             image_feature_size_override=image_feature_size,
         )
 
         mm_data = dummy_image_for_clip(
             vision_config,
+            num_images,
             image_width_override=MAX_IMAGE_FEATURE_SIZE_WIDTH,
             image_height_override=MAX_IMAGE_FEATURE_SIZE_HEIGHT,
         )
-
         return seq_data, mm_data
     elif isinstance(vision_config, SiglipVisionConfig):
         seq_data = dummy_seq_data_for_siglip(
             vision_config,
             seq_len,
+            num_images,
             image_token_id=hf_config.image_token_index,
             image_feature_size_override=image_feature_size,
         )
 
         mm_data = dummy_image_for_siglip(
             vision_config,
+            num_images,
             image_width_override=MAX_IMAGE_FEATURE_SIZE_WIDTH,
             image_height_override=MAX_IMAGE_FEATURE_SIZE_HEIGHT,
         )

@@ -2,7 +2,8 @@ import argparse
 import dataclasses
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, List, Optional, Tuple, Type, Union
+from typing import (TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Type,
+                    Union)
 
 from loguru import logger
 
@@ -18,9 +19,28 @@ from aphrodite.quantization import QUANTIZATION_METHODS
 from aphrodite.transformers_utils.utils import check_gguf_file
 
 if TYPE_CHECKING:
-    from aphrodite.transformers_utils.tokenizer_group.base_tokenizer_group import (  # noqa: E501
-        BaseTokenizerGroup)
+    from aphrodite.transformers_utils.tokenizer_group import BaseTokenizerGroup
 
+
+def nullable_kvs(val: str) -> Optional[Mapping[str, int]]:
+    if len(val) == 0:
+        return None
+
+    out_dict: Dict[str, int] = {}
+    for item in val.split(","):
+        try:
+            key, value = item.split("=")
+        except TypeError as exc:
+            msg = "Each item should be in the form KEY=VALUE"
+            raise ValueError(msg) from exc
+
+        try:
+            out_dict[key] = int(value)
+        except ValueError as exc:
+            msg = f"Failed to parse value of item {key}={value}"
+            raise ValueError(msg) from exc
+
+    return out_dict
 
 @dataclass
 class EngineArgs:
@@ -28,7 +48,7 @@ class EngineArgs:
     # Model Options
     model: str
     seed: int = 0
-    served_model_name: Optional[Union[List[str]]] = None
+    served_model_name: Optional[Union[str, List[str]]] = None
     tokenizer: Optional[str] = None
     revision: Optional[str] = None
     code_revision: Optional[str] = None
@@ -50,6 +70,7 @@ class EngineArgs:
     # notice.
     tokenizer_pool_type: Union[str, Type["BaseTokenizerGroup"]] = "ray"
     tokenizer_pool_extra_config: Optional[dict] = None
+    limit_mm_per_prompt: Optional[Mapping[str, int]] = None
     max_logprobs: int = 10  # OpenAI default is 5, setting to 10 because ST
     # Device Options
     device: str = "auto"
@@ -298,6 +319,19 @@ class EngineArgs:
                             "This should be a JSON string that will be "
                             "parsed into a dictionary. Ignored if "
                             "tokenizer_pool_size is 0.")
+        # Multimodal related configs
+        parser.add_argument(
+            '--limit-mm-per-prompt',
+            type=nullable_kvs,
+            default=EngineArgs.limit_mm_per_prompt,
+            # The default value is given in
+            # MultiModalRegistry.init_mm_limits_per_prompt
+            help=('For each multimodal plugin, limit how many '
+                  'input instances to allow for each prompt. '
+                  'Expects a comma-separated list of items, '
+                  'e.g.: `image=16,video=2` allows a maximum of 16 '
+                  'images and 2 videos per prompt. Defaults to 1 for '
+                  'each modality.'))
         parser.add_argument(
             "--max-logprobs",
             type=int,
@@ -817,7 +851,8 @@ class EngineArgs:
             "CPU offload space must be non-negative"
             f", but got {self.cpu_offload_gb}")
 
-        multimodal_config = MultiModalConfig()
+        multimodal_config = MultiModalConfig(
+            limit_per_prompt=self.limit_mm_per_prompt or {})
 
         device_config = DeviceConfig(device=self.device)
 

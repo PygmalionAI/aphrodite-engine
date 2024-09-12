@@ -35,7 +35,8 @@ from aphrodite.engine.output_processor.util import (
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.executor.ray_utils import initialize_ray_cluster
 from aphrodite.inputs import (INPUT_REGISTRY, EncoderDecoderLLMInputs,
-                              LLMInputs, PromptInputs, SingletonPromptInputs)
+                              InputRegistry, LLMInputs, PromptInputs,
+                              SingletonPromptInputs)
 from aphrodite.inputs.parse import is_explicit_encoder_decoder_prompt
 from aphrodite.lora.request import LoRARequest
 from aphrodite.multimodal import MultiModalDataDict
@@ -177,6 +178,7 @@ class AphroditeEngine:
         executor_class: Type[ExecutorBase],
         log_stats: bool,
         stat_loggers: Optional[Dict[str, StatLoggerBase]] = None,
+        input_registry: InputRegistry = INPUT_REGISTRY,
     ) -> None:
         try:
             import aphrodite.commit_id
@@ -257,8 +259,9 @@ class AphroditeEngine:
         self.generation_config_fields = _load_generation_config_dict(
             model_config)
 
-        self.input_processor = INPUT_REGISTRY.create_input_processor(
-            self.model_config)
+        self.input_registry = input_registry
+        self.input_processor = input_registry.create_input_processor(
+            model_config)
 
         self.model_executor = executor_class(
             model_config=model_config,
