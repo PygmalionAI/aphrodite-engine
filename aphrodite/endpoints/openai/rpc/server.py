@@ -3,6 +3,7 @@ import signal
 from typing import Any, Coroutine
 
 import cloudpickle
+import uvloop
 import zmq
 import zmq.asyncio
 from loguru import logger
@@ -204,4 +205,4 @@ async def run_server(server: AsyncEngineRPCServer):
 
 def run_rpc_server(async_engine_args: AsyncEngineArgs, rpc_path: str):
     server = AsyncEngineRPCServer(async_engine_args, rpc_path)
-    asyncio.run(run_server(server))
+    uvloop.run(run_server(server))
