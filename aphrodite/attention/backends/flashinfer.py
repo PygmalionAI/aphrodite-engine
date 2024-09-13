@@ -2,11 +2,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Type
 
 try:
-    from aphrodite_flash_attn import flash_attn_varlen_func
     from flashinfer import BatchDecodeWithPagedKVCacheWrapper
     from flashinfer.prefill import BatchPrefillWithPagedKVCacheWrapper
+
+    import aphrodite.attention.backends.flash_attn  # noqa
 except ImportError:
-    flash_attn_varlen_func = None
     BatchDecodeWithPagedKVCacheWrapper = None
     BatchPrefillWithPagedKVCacheWrapper = None
 
@@ -523,7 +523,7 @@ class FlashInferImpl(AttentionImpl):
             # This happens when Aphrodite runs the profiling to
             # determine the number of blocks.
             if kv_cache is None:
-                output = flash_attn_varlen_func(
+                output = torch.ops.aphrodite.flash_attn_varlen_func(
                     q=query,
                     k=key,
                     v=value,
