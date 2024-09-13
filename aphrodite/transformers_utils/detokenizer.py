@@ -163,7 +163,7 @@ class Detokenizer:
         seq.read_offset = read_offset
         seq.output_text += new_decoded_token_text
 
-        len(new_decoded_token_text)
+        return len(new_decoded_token_text)
 
 
 def _replace_none_with_empty(tokens: List[Optional[str]]):
