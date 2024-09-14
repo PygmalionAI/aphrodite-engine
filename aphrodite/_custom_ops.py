@@ -6,6 +6,7 @@ import torch
 from loguru import logger
 
 from aphrodite._core_ext import ScalarType
+from aphrodite.common.utils import is_hip
 from aphrodite.platforms import current_platform
 
 if not current_platform.is_tpu():
@@ -364,9 +365,12 @@ def scaled_fp8_quant(
     # This code assumes batch_dim and num_tokens are flattened
     assert (input.ndim == 2)
     shape = input.shape
+     # For rocm, the output fp8 dtype is torch.float_e3m3fnuz
+    out_dtype: torch.dtype = torch.float8_e4m3fnuz if \
+        is_hip() else torch.float8_e4m3fn
     if num_token_padding:
         shape = (max(num_token_padding, input.shape[0]), shape[1])
-    output = torch.empty(shape, device=input.device, dtype=torch.float8_e4m3fn)
+    output = torch.empty(shape, device=input.device, dtype=out_dtype)
 
     if scale is None:
         if use_per_token_if_dynamic:
