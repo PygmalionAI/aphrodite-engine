@@ -17,7 +17,6 @@ from aphrodite.common.utils import progress_bar
 from aphrodite.distributed import (get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size)
 # yapf: enable
-from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.modeling.layers.fused_moe import FusedMoE
 from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
@@ -253,37 +252,6 @@ class JambaMambaMixer(nn.Module):
         return hidden_states
 
 
-class JambaMLP(nn.Module):
-
-    def __init__(
-        self,
-        config: JambaConfig,
-        quant_config: Optional[QuantizationConfig] = None,
-    ) -> None:
-        super().__init__()
-        hidden_size = config.hidden_size
-        intermediate_size = config.intermediate_size
-        hidden_act = config.hidden_act
-        self.gate_up_proj = MergedColumnParallelLinear(
-            hidden_size, [intermediate_size] * 2,
-            bias=False,
-            quant_config=quant_config)
-        self.down_proj = RowParallelLinear(intermediate_size,
-                                           hidden_size,
-                                           bias=False,
-                                           quant_config=quant_config)
-        if hidden_act != "silu":
-            raise ValueError(f"Unsupported activation: {hidden_act}. "
-                             "Only silu is supported for now.")
-        self.act_fn = SiluAndMul()
-
-    def forward(self, x):
-        gate_up, _ = self.gate_up_proj(x)
-        x = self.act_fn(gate_up)
-        x, _ = self.down_proj(x)
-        return x
-
-
 class JambaMoE(nn.Module):
 
     def __init__(self,
@@ -329,6 +297,21 @@ class JambaMoE(nn.Module):
                                        dtype=hidden_states.dtype)
         hidden_states = self.experts(hidden_states, router_logits)
         return hidden_states.view(orig_shape)
+
+
+class JambaMLP(JambaMoE):
+
+    def __init__(self,
+                 config: JambaConfig,
+                 params_dtype: Optional[torch.dtype] = None,
+                 tp_size: Optional[int] = None,
+                 quant_config: Optional[QuantizationConfig] = None):
+        super().__init__(config,
+                         num_experts=1,
+                         top_k=1,
+                         params_dtype=params_dtype,
+                         tp_size=tp_size,
+                         quant_config=quant_config)
 
 
 class JambaMambaDecoderLayer(nn.Module):
@@ -707,8 +690,6 @@ class JambaForCausalLM(nn.Module, HasInnerState):
             ("qkv_proj", "q_proj", "q"),
             ("qkv_proj", "k_proj", "k"),
             ("qkv_proj", "v_proj", "v"),
-            ("gate_up_proj", "gate_proj", 0),
-            ("gate_up_proj", "up_proj", 1),
         ]
 
         # Params for weights, fp8 weight scales, fp8 activation scales
@@ -732,6 +713,10 @@ class JambaForCausalLM(nn.Module, HasInnerState):
             if ".self_attn." in name:
                 name = name.replace(".self_attn", "")
 
+            if "feed_forward" in name and not _is_moe_layer(name):
+                ## map MLP layers to expert with ID=0
+                name = name.replace("feed_forward", "feed_forward.experts.0")
+
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
@@ -746,8 +731,12 @@ class JambaForCausalLM(nn.Module, HasInnerState):
                 weight_loader(param, loaded_weight, shard_id)
                 break
             else:
-                for mapping in expert_params_mapping:
-                    param_name, weight_name, expert_id, shard_id = mapping
+                for (
+                        param_name,
+                        weight_name,
+                        expert_id,
+                        shard_id,
+                ) in expert_params_mapping:
                     if weight_name not in name:
                         continue
                     name = name.replace(weight_name, param_name)
@@ -755,7 +744,7 @@ class JambaForCausalLM(nn.Module, HasInnerState):
                     weight_loader = param.weight_loader
                     weight_loader(param,
                                   loaded_weight,
-                                  name,
+                                  weight_name,
                                   shard_id=shard_id,
                                   expert_id=expert_id)
                     break
@@ -768,3 +757,11 @@ class JambaForCausalLM(nn.Module, HasInnerState):
                     weight_loader = getattr(param, "weight_loader",
                                             default_weight_loader)
                     weight_loader(param, loaded_weight)
+
+
+def _is_moe_layer(name: str):
+    return any(
+        [experts_name in name for experts_name in [
+            "experts",
+            "router",
+        ]])

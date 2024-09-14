@@ -250,7 +250,7 @@ class FusedMoE(torch.nn.Module):
                        renormalize: bool,
                        topk_group: Optional[int] = None,
                        num_expert_group: Optional[int] = None):
-        from vllm.model_executor.layers.fused_moe.fused_moe import (
+        from aphrodite.modeling.layers.fused_moe.fused_moe import (
             fused_topk, grouped_topk)
 
         # DeekSeekv2 uses grouped_top_k
