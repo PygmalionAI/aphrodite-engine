@@ -56,6 +56,7 @@ _OPTIMIZED_QUANTS = [
     "fbgemm_fp8",
     "compressed-tensors",
     "compressed_tensors",
+    "experts_int8",
 ]
 
 

@@ -9,6 +9,7 @@ from aphrodite.quantization.compressed_tensors.compressed_tensors import (
     CompressedTensorsConfig)
 from aphrodite.quantization.deepspeedfp import DeepSpeedFPConfig
 from aphrodite.quantization.eetq import EETQConfig
+from aphrodite.quantization.experts_int8 import ExpertsInt8Config
 from aphrodite.quantization.fbgemm_fp8 import FBGEMMFp8Config
 from aphrodite.quantization.fp8 import Fp8Config
 from aphrodite.quantization.gguf import GGUFConfig
@@ -42,6 +43,7 @@ QUANTIZATION_METHODS = {
     "compressed-tensors": CompressedTensorsConfig,
     "bitsandbytes": BitsAndBytesConfig,
     "qqq": QQQConfig,
+    "experts_int8": ExpertsInt8Config,
 }
 
 
