@@ -228,8 +228,8 @@ return a + b
 # aot_autograd captured graph
 call_torchbind( tq, 'push', clone)
 sin = torch.ops.aten.sin.default(a);  clone = None
-poped = call_torchbind(tq, 'pop');  getitem = tq = None
-return sin + poped
+popped = call_torchbind(tq, 'pop');  getitem = tq = None
+return sin + popped
 ```
 
 `sin_` is replaced by `sin` as a result of functionalization but the mutation to the content of `tq` is not showing up in the graph, causing the captured graph to produce a different result than the original program.
