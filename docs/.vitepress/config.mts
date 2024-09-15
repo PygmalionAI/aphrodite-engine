@@ -169,6 +169,10 @@ export default defineConfig({
 						text: "NVIDIA CUTLASS Epilogues",
 						link: "/pages/developer/cutlass-epilogue",
 					},
+					{
+						text: "Adding a Custom Class in PyTorch",
+						link: "/pages/developer/torch-custom-class"
+					},
 				],
 			},
 		],
