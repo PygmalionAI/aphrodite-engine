@@ -571,7 +571,6 @@ def _apply_xtc_sampling(
     probs = torch.softmax(logits, dim=-1)
 
     sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
-    mask = torch.full_like(probs, False, dtype=torch.bool)
 
     # Find indices where the next probability is above the threshold
     # Skips the top choice, which later on becomes skipping the last choice.
@@ -585,9 +584,7 @@ def _apply_xtc_sampling(
             if indices_to_remove > 0:
                 # Implies the top logit and at least one other is >= threshold.
                 # Mask out above_thresh logits except the last/lowest one.
-                mask[i].scatter_(0, sorted_indices[i, :indices_to_remove], True)
-
-    logits[mask] = -float('inf')
+                logits[i].scatter_(0, sorted_indices[i, :indices_to_remove], -float('inf'))
 
     return logits
 
