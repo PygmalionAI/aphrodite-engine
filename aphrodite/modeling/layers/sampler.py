@@ -580,10 +580,11 @@ def _apply_xtc_sampling(
     # Apply XTC only to rows where it should be applied
     for i in range(logits.shape[0]):
         if apply_xtc[i]:
-            # Find the indices to remove for this row
+            # Count logits above the threshold (skipping the first)
             indices_to_remove = above_threshold[i].count_nonzero(dim=-1).item()
             if indices_to_remove > 0:
-                # Set the mask for this row
+                # Implies the top logit and at least one other is >= threshold.
+                # Mask out above_thresh logits except the last/lowest one.
                 mask[i].scatter_(0, sorted_indices[i, :indices_to_remove], True)
 
     logits[mask] = -float('inf')
