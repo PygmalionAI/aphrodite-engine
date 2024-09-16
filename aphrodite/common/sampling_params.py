@@ -141,6 +141,10 @@ class SamplingParams:
         truncate_prompt_tokens: If set to an integer k, will use only the last
             k tokens from the prompt (i.e. left-truncation). Defaults to None
             (i.e. no truncation).
+        xtc_threshold: In XTC sampling, if 2 or more tokens have probability
+            above this threshold, consider removing all but the last one.
+        xtc_probability: Probability that the removal will actually happen.
+            0 disables the sampler, 1 makes it always happen.
     """
 
     def __init__(
@@ -180,6 +184,8 @@ class SamplingParams:
         spaces_between_special_tokens: bool = True,
         logits_processors: Optional[List[LogitsProcessorFunc]] = None,
         truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None,
+        xtc_threshold: float = 0.1,
+        xtc_probability: float = 0,
     ) -> None:
         self.n = n
         self.best_of = best_of if best_of is not None else n
@@ -239,6 +245,8 @@ class SamplingParams:
             self.output_text_buffer_length = max(len(s) for s in self.stop) - 1
         else:
             self.output_text_buffer_length = 0
+        self.xtc_threshold = xtc_threshold
+        self.xtc_probability = xtc_probability
 
         self.default_values = {
             "n": 1,
@@ -275,6 +283,8 @@ class SamplingParams:
             "spaces_between_special_tokens": True,
             "include_stop_str_in_output": False,
             "truncate_prompt_tokens": None,
+            "xtc_threshold": 0.1,
+            "xtc_probability": 0,
         }
 
         # Number of characters to hold back for stop string evaluation
@@ -370,6 +380,14 @@ class SamplingParams:
             raise ValueError(
                 "stop strings are only supported when detokenize is True. "
                 "Set detokenize=True to use stop.")
+        if self.xtc_threshold < 0.0:
+            raise ValueError(
+                "xtc_threshold must be non-negative, got "
+                f"{self.xtc_threshold}.")
+        if not 0.0 <= self.xtc_probability <= 1.0:
+            raise ValueError(
+                "xtc_probability must be in [0, 1], got "
+                f"{self.xtc_probability}.")
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:

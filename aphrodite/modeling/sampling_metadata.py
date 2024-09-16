@@ -381,6 +381,8 @@ class SamplingTensors:
     typical_ps: torch.Tensor
     smoothing_factors: torch.Tensor
     smoothing_curves: torch.Tensor
+    xtc_thresholds: torch.Tensor
+    xtc_probabilities: torch.Tensor
     sampling_seeds: torch.Tensor
     sample_indices: torch.Tensor
     extra_seeds: Optional[torch.Tensor]
@@ -398,7 +400,7 @@ class SamplingTensors:
         extra_seeds_to_generate: int = 0,
         extra_entropy: Optional[Tuple[int, ...]] = None
     ) -> Tuple["SamplingTensors", bool, bool, bool, bool, bool, bool, bool,
-               bool, bool, bool]:
+               bool, bool, bool, bool]:
         """
         extra_seeds_to_generate: extra seeds to generate using the
             user-defined seed for each sequence.
@@ -421,6 +423,8 @@ class SamplingTensors:
         typical_ps: List[float] = []
         smoothing_factors: List[float] = []
         smoothing_curves: List[float] = []
+        xtc_thresholds: List[float] = []
+        xtc_probabilities: List[float] = []
         sampling_seeds: List[int] = []
         sample_indices: List[int] = []
         do_penalties = False
@@ -432,6 +436,7 @@ class SamplingTensors:
         do_epsilon_cutoffs = False
         do_typical_ps = False
         do_quadratic = False
+        do_xtc = False
         do_temp_last = False
 
         if _USE_TRITON_SAMPLER:
@@ -459,6 +464,8 @@ class SamplingTensors:
             typical_p = sampling_params.typical_p
             smoothing_factor = sampling_params.smoothing_factor
             smoothing_curve = sampling_params.smoothing_curve
+            xtc_threshold = sampling_params.xtc_threshold
+            xtc_probability = sampling_params.xtc_probability
 
             # k should not be greater than the vocab size.
             top_k = min(sampling_params.top_k, vocab_size)
@@ -490,6 +497,8 @@ class SamplingTensors:
             if do_quadratic is False and (smoothing_factor > _SAMPLING_EPS
                                           or smoothing_curve > 1.0):
                 do_quadratic = True
+            if do_xtc is False and xtc_probability > _SAMPLING_EPS:
+                do_xtc = True
             if do_temp_last is False and temperature_last:
                 do_temp_last = True
 
@@ -515,6 +524,8 @@ class SamplingTensors:
                 typical_ps += [1] * prefill_len
                 smoothing_factors += [smoothing_factor] * prefill_len
                 smoothing_curves += [smoothing_curve] * prefill_len
+                xtc_thresholds += [xtc_threshold] * prefill_len
+                xtc_probabilities += [xtc_probability] * prefill_len
 
             if seq_group.do_sample:
                 sample_lens = len(seq_group.sample_indices)
@@ -534,6 +545,8 @@ class SamplingTensors:
                 typical_ps += [typical_p] * len(seq_ids)
                 smoothing_factors += [smoothing_factor] * len(seq_ids)
                 smoothing_curves += [smoothing_curve] * len(seq_ids)
+                xtc_thresholds += [xtc_threshold] * len(seq_ids)
+                xtc_probabilities += [xtc_probability] * len(seq_ids)
 
             if _USE_TRITON_SAMPLER:
                 if is_prompt:
@@ -577,11 +590,12 @@ class SamplingTensors:
             temperatures, temperature_lasts, top_ps, top_ks, top_as, min_ps,
             presence_penalties, frequency_penalties, repetition_penalties,
             tfss, eta_cutoffs, epsilon_cutoffs, typical_ps, smoothing_factors,
-            smoothing_curves, sampling_seeds, sample_indices, prompt_tokens,
-            output_tokens, vocab_size, extra_seeds_to_generate, device, dtype)
+            smoothing_curves, xtc_thresholds, xtc_probabilities,sampling_seeds,
+            sample_indices, prompt_tokens, output_tokens, vocab_size,
+            extra_seeds_to_generate, device, dtype)
         return (sampling_tensors, do_penalties, do_top_p_top_k, do_top_as,
                 do_min_p, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
-                do_typical_ps, do_quadratic, do_temp_last)
+                do_typical_ps, do_quadratic, do_xtc, do_temp_last)
 
     @classmethod
     def from_lists(cls, temperatures: List[float],
@@ -592,7 +606,8 @@ class SamplingTensors:
                    repetition_penalties: List[float], tfss: List[float],
                    eta_cutoffs: List[float], epsilon_cutoffs: List[float],
                    typical_ps: List[float], smoothing_factors: List[float],
-                   smoothing_curves: List[float], sampling_seeds: List[int],
+                   smoothing_curves: List[float], xtc_thresholds: List[float],
+                   xtc_probabilities: List[float], sampling_seeds: List[int],
                    sample_indices: List[int], prompt_tokens: List[array],
                    output_tokens: List[array], vocab_size: int,
                    extra_seeds_to_generate: int, device: torch.device,
@@ -698,6 +713,14 @@ class SamplingTensors:
                                           device="cpu",
                                           dtype=dtype,
                                           pin_memory=pin_memory)
+        xtc_thresholds_t = torch.tensor(xtc_thresholds,
+                                        device="cpu",
+                                        dtype=dtype,
+                                        pin_memory=pin_memory)
+        xtc_probabilities_t = torch.tensor(xtc_probabilities,
+                                           device="cpu",
+                                           dtype=dtype,
+                                           pin_memory=pin_memory)
         sample_indices_t = torch.tensor(
             sample_indices,
             device="cpu",
@@ -747,6 +770,10 @@ class SamplingTensors:
                                                      non_blocking=True),
             smoothing_curves=smoothing_curves_t.to(device=device,
                                                    non_blocking=True),
+            xtc_thresholds=xtc_thresholds_t.to(device=device,
+                                               non_blocking=True),
+            xtc_probabilities=xtc_probabilities_t.to(device=device,
+                                                     non_blocking=True),
             typical_ps=typical_ps_t.to(device=device, non_blocking=True),
             prompt_tokens=prompt_t.to(device=device, non_blocking=True),
             output_tokens=output_t.to(device=device, non_blocking=True),

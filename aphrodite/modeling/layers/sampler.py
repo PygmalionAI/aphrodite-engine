@@ -72,7 +72,8 @@ class Sampler(nn.Module):
         # Initialize new sampling tensors
         (sampling_tensors, do_penalties, do_top_p_top_k, do_top_as, do_min_p,
          do_tfss, do_eta_cutoffs, do_epsilon_cutoffs, do_typical_ps,
-         do_quadratic, do_temp_last) = SamplingTensors.from_sampling_metadata(
+         do_quadratic, do_xtc,
+         do_temp_last) = SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype)
 
         self._sampling_tensors = sampling_tensors
@@ -85,6 +86,7 @@ class Sampler(nn.Module):
         self._do_epsilon_cutoffs = do_epsilon_cutoffs
         self._do_typical_ps = do_typical_ps
         self._do_quadratic = do_quadratic
+        self._do_xtc = do_xtc
         self._do_temp_last = do_temp_last
 
     def forward(
@@ -121,6 +123,7 @@ class Sampler(nn.Module):
         do_epsilon_cutoffs = self._do_epsilon_cutoffs
         do_typical_ps = self._do_typical_ps
         do_quadratic = self._do_quadratic
+        do_xtc = self._do_xtc
         do_temp_last = self._do_temp_last
 
         logits = _apply_min_tokens_penalty(logits, sampling_metadata)
@@ -168,6 +171,11 @@ class Sampler(nn.Module):
             logits = _apply_quadratic_sampling(
                 logits, sampling_tensors.smoothing_factors,
                 sampling_tensors.smoothing_curves)
+
+        if do_xtc:
+            logits = _apply_xtc_sampling(
+                logits, sampling_tensors.xtc_thresholds,
+                sampling_tensors.xtc_probabilities)
 
         if do_temp_last:
             # Use float32 to apply temp.
@@ -535,6 +543,52 @@ def _apply_quadratic_sampling(
     diff[diff != diff] = 0  # Eliminate NaNs due to infs
 
     logits[mask] -= diff
+    return logits
+
+
+def _apply_xtc_sampling(
+    logits: torch.Tensor,
+    xtc_thresholds: torch.Tensor,
+    xtc_probabilities: torch.Tensor,
+) -> torch.Tensor:
+    """Apply Exclude Top Choices (XTC) sampling to the logits.
+    Reference: https://github.com/oobabooga/text-generation-webui/pull/6335
+
+    Args:
+        logits: (num_tokens, vocab_size) The input logits.
+        xtc_thresholds: (num_tokens,) The threshold for each token.
+        xtc_probabilities: (num_tokens,) The probability of applying XTC
+            for each token.
+
+    Returns:
+        torch.Tensor: The modified logits.
+    """
+    apply_xtc = torch.rand_like(xtc_probabilities) < xtc_probabilities
+
+    if not apply_xtc.any():
+        return logits
+
+    probs = torch.softmax(logits, dim=-1)
+
+    sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
+    mask = torch.full_like(probs, False, dtype=torch.bool)
+
+    # Find indices where the next probability is above the threshold
+    above_threshold = sorted_probs[..., 1:] >= xtc_thresholds.unsqueeze(-1)
+    
+    # Apply XTC only to rows where it should be applied
+    for i in range(logits.shape[0]):
+        if apply_xtc[i]:
+            # Find the indices to remove for this row
+            indices_to_remove = above_threshold[i].nonzero().squeeze(-1)
+            if indices_to_remove.numel() > 0:
+                # Add 1 to skip the top choice
+                indices_to_remove += 1
+                # Set the mask for this row
+                mask[i].scatter_(0, sorted_indices[i, indices_to_remove], True)
+
+    logits[mask] = -float('inf')
+
     return logits
 
 
