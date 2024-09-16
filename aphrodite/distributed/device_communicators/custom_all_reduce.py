@@ -15,7 +15,7 @@ from aphrodite.distributed.parallel_state import in_the_same_node_as
 from aphrodite.platforms import current_platform
 
 try:
-    assert ops.is_custom_op_supported("_C_custom_ar::meta_size")
+    ops.meta_size()
 
     custom_ar = True
 except Exception:
