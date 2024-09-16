@@ -574,18 +574,17 @@ def _apply_xtc_sampling(
     mask = torch.full_like(probs, False, dtype=torch.bool)
 
     # Find indices where the next probability is above the threshold
+    # Skips the top choice, which later on becomes skipping the last choice.
     above_threshold = sorted_probs[..., 1:] >= xtc_thresholds.unsqueeze(-1)
     
     # Apply XTC only to rows where it should be applied
     for i in range(logits.shape[0]):
         if apply_xtc[i]:
             # Find the indices to remove for this row
-            indices_to_remove = above_threshold[i].nonzero().squeeze(-1)
-            if indices_to_remove.numel() > 0:
-                # Add 1 to skip the top choice
-                indices_to_remove += 1
+            indices_to_remove = above_threshold[i].count_nonzero(dim=-1).item()
+            if indices_to_remove > 0:
                 # Set the mask for this row
-                mask[i].scatter_(0, sorted_indices[i, indices_to_remove], True)
+                mask[i].scatter_(0, sorted_indices[i, :indices_to_remove], True)
 
     logits[mask] = -float('inf')
 
