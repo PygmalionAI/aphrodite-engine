@@ -1,4 +1,5 @@
 """Sampling parameters for text generation."""
+import ast
 import copy
 import os
 from enum import IntEnum
@@ -62,6 +63,16 @@ class SamplingParams:
             freq_pen is applied additively while
             rep_pen is applied multiplicatively.
             Must be in [1, inf). Set to 1 to disable the effect.
+        dry_multiplier: Float that controls the magnitude of the penalty for
+            the shortest penalized sequences in the DRY sampler. Set to values
+            greater than 0 to enable DRY sampling.
+        dry_base: Float that controls how fast the penalty grows with
+            increasing sequence length in the DRY sampler.
+        dry_allowed_length: Integer that controls the maximum length of
+            sequences that can be repeated without being penalized in the DRY
+            sampler.
+        dry_sequence_breakers: Tokens across which sequence matching is not
+            continued. Specified as a comma-separated list of quoted strings.
         temperature: Float that controls the randomness of the sampling. Lower
             values make the model more deterministic, while higher values make
             the model more random. Zero means greedy sampling.
@@ -150,6 +161,10 @@ class SamplingParams:
         presence_penalty: float = 0.0,
         frequency_penalty: float = 0.0,
         repetition_penalty: float = 1.0,
+        dry_multiplier: float = 0.0,
+        dry_base: float = 1.75,
+        dry_allowed_length: int = 2,
+        dry_sequence_breakers: Union[str, List[List[int]]] = '"\\n", ":", "\\"", "*"',
         temperature: float = 1.0,
         temperature_last: bool = False,
         top_p: float = 1.0,
@@ -186,6 +201,10 @@ class SamplingParams:
         self.presence_penalty = presence_penalty
         self.frequency_penalty = frequency_penalty
         self.repetition_penalty = repetition_penalty
+        self.dry_multiplier = dry_multiplier
+        self.dry_base = dry_base
+        self.dry_allowed_length = dry_allowed_length
+        self.dry_sequence_breakers = self._parse_dry_sequence_breakers(dry_sequence_breakers)
         if 0 < temperature < _MAX_TEMP:
             logger.warning(
                 f"temperature {temperature} is less than {_MAX_TEMP}, "
@@ -246,6 +265,10 @@ class SamplingParams:
             "presence_penalty": 0.0,
             "frequency_penalty": 0.0,
             "repetition_penalty": 1.0,
+            "dry_multiplier": 0.0,
+            "dry_base": 1.75,
+            "dry_allowed_length": 2,
+            "dry_sequence_breakers": '"\\n", ":", "\\"", "*"',
             "temperature": 1.0,
             "temperature_last": False,
             "top_p": 1.0,
@@ -305,6 +328,29 @@ class SamplingParams:
         # eos_token_id is added to this by the engine
         self.all_stop_token_ids = set(self.stop_token_ids)
 
+    def _parse_dry_sequence_breakers(self, dry_sequence_breakers: Union[str, List[List[int]]]) -> List[str]:
+        if isinstance(dry_sequence_breakers, list):
+            return dry_sequence_breakers
+        try:
+            # Use ast.literal_eval to safely evaluate the string as a Python expression
+            parsed = ast.literal_eval(f'[{dry_sequence_breakers}]')
+            return [str(item) for item in parsed]
+        except (SyntaxError, ValueError):
+            # If parsing fails, return the original string as a single-item list
+            return [dry_sequence_breakers]
+
+    def tokenize_dry_sequence_breakers(self, tokenizer):
+        if not isinstance(self.dry_sequence_breakers[0], str):
+            # Already tokenized
+            return
+        
+        tokenized_breakers = []
+        for breaker in self.dry_sequence_breakers:
+            tokenized_breaker = tokenizer.encode(breaker, add_special_tokens=False)
+            tokenized_breakers.append(tokenized_breaker)
+        
+        self.dry_sequence_breakers = tokenized_breakers
+
     def _verify_args(self) -> None:
         if self.n < 1:
             raise ValueError(f"n must be at least 1, got {self.n}.")
@@ -320,6 +366,18 @@ class SamplingParams:
         if self.repetition_penalty < 1.0:
             raise ValueError("repetition_penalty must be in [1, inf), got "
                              f"{self.repetition_penalty}.")
+        if self.dry_multiplier < 0.0:
+            raise ValueError("dry_multiplier must be non-negative, got "
+                             f"{self.dry_multiplier}.")
+        if self.dry_base < 1.0:
+            raise ValueError(
+                f"dry_base must be at least 1, got {self.dry_base}.")
+        if self.dry_allowed_length < 1:
+            raise ValueError("dry_allowed_length must be at least 1, got "
+                             f"{self.dry_allowed_length}.")
+        if not all(isinstance(s, str) for s in self.dry_sequence_breakers):
+            raise ValueError(
+                "dry_sequence_breakers must be a list of strings.")
         if self.temperature < 0.0:
             raise ValueError(
                 f"temperature must be non-negative, got {self.temperature}.")

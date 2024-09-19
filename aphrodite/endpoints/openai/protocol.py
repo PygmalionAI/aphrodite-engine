@@ -375,6 +375,10 @@ class CompletionRequest(OpenAIBaseModel):
     smoothing_factor: Optional[float] = 0.0
     smoothing_curve: Optional[float] = 1.0
     repetition_penalty: Optional[float] = 1.0
+    dry_multiplier: Optional[float] = 0.0
+    dry_base: Optional[float] = 1.75
+    dry_allowed_length: Optional[int] = 2
+    dry_sequence_breakers: Optional[List[str]] = Field(default_factory=list)
     length_penalty: Optional[float] = 1.0
     early_stopping: Optional[bool] = False
     stop_token_ids: Optional[List[int]] = Field(default_factory=list)
@@ -431,6 +435,16 @@ class CompletionRequest(OpenAIBaseModel):
 
     # doc: end-completion-extra-params
 
+    def _tokenize_dry_sequence_breakers(self, tokenizer: PreTrainedTokenizer):
+        if not self.dry_sequence_breakers:
+            return []
+        
+        tokenized_breakers = []
+        for breaker in self.dry_sequence_breakers:
+            tokenized_breaker = tokenizer.encode(breaker, add_special_tokens=False)
+            tokenized_breakers.extend(tokenized_breaker)
+        return tokenized_breakers
+
     def to_sampling_params(
             self, tokenizer: PreTrainedTokenizer,
             guided_decode_logits_processor: Optional[LogitsProcessorFunc],
@@ -448,6 +462,8 @@ class CompletionRequest(OpenAIBaseModel):
         )
         if guided_decode_logits_processor:
             logits_processors.append(guided_decode_logits_processor)
+
+        tokenized_dry_sequence_breakers = self._tokenize_dry_sequence_breakers(tokenizer)
 
         return SamplingParams(
             n=self.n,
@@ -484,6 +500,10 @@ class CompletionRequest(OpenAIBaseModel):
             logits_processors=logits_processors,
             truncate_prompt_tokens=self.truncate_prompt_tokens,
             temperature_last=self.temperature_last,
+            dry_multiplier=self.dry_multiplier,
+            dry_base=self.dry_base,
+            dry_allowed_length=self.dry_allowed_length,
+            dry_sequence_breakers=tokenized_dry_sequence_breakers,
         )
 
     @model_validator(mode="before")

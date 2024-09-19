@@ -70,13 +70,14 @@ class Sampler(nn.Module):
         self._sampling_tensors = None
 
         # Initialize new sampling tensors
-        (sampling_tensors, do_penalties, do_top_p_top_k, do_top_as, do_min_p,
-         do_tfss, do_eta_cutoffs, do_epsilon_cutoffs, do_typical_ps,
+        (sampling_tensors, do_penalties, do_dries, do_top_p_top_k, do_top_as,
+        do_min_p, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs, do_typical_ps,
          do_quadratic, do_temp_last) = SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype)
 
         self._sampling_tensors = sampling_tensors
         self._do_penalties = do_penalties
+        self._do_dries = do_dries
         self._do_top_p_top_k = do_top_p_top_k
         self._do_top_as = do_top_as
         self._do_min_p = do_min_p
@@ -113,6 +114,7 @@ class Sampler(nn.Module):
         assert self._sampling_tensors is not None
         sampling_tensors = self._sampling_tensors
         do_penalties = self._do_penalties
+        do_dries = self._do_dries
         do_top_p_top_k = self._do_top_p_top_k
         do_top_as = self._do_top_as
         do_min_p = self._do_min_p
@@ -132,6 +134,14 @@ class Sampler(nn.Module):
                                       sampling_tensors.presence_penalties,
                                       sampling_tensors.frequency_penalties,
                                       sampling_tensors.repetition_penalties)
+            
+        if do_dries:
+            logits = _apply_dry_penalty(logits, sampling_tensors.prompt_tokens,
+                                        sampling_tensors.output_tokens,
+                                        sampling_tensors.dry_multipliers,
+                                        sampling_tensors.dry_bases,
+                                        sampling_tensors.dry_allowed_lengths,
+                                        sampling_tensors.dry_sequence_breakerss)
 
         # Apply temperature scaling if not doing temp_last.
         if not do_temp_last:
@@ -283,6 +293,53 @@ def _apply_penalties(logits: torch.Tensor, prompt_tokens_tensor: torch.Tensor,
     # Refer to https://platform.openai.com/docs/api-reference/parameter-details
     logits -= frequency_penalties.unsqueeze_(dim=1) * output_bin_counts
     logits -= presence_penalties.unsqueeze_(dim=1) * output_mask
+    return logits
+
+
+def _apply_dry_penalty(
+    logits: torch.Tensor,
+    prompt_tokens: torch.Tensor,
+    output_tokens: torch.Tensor,
+    dry_multipliers: torch.Tensor,
+    dry_bases: torch.Tensor,
+    dry_allowed_lengths: torch.Tensor,
+    dry_sequence_breakerss: torch.Tensor,
+) -> torch.Tensor:
+    num_seqs, vocab_size = logits.shape
+    device = logits.device
+
+    for i in range(num_seqs):
+        input_ids = torch.cat([prompt_tokens[i], output_tokens[i]])
+        if input_ids.numel() == 0:
+            continue
+
+        last_token = input_ids[-1].item()
+        if any(last_token in breaker for breaker in dry_sequence_breakerss[i]):
+            continue
+
+        match_indices = (input_ids[:-1] == last_token).nonzero().squeeze()
+        match_lengths = {}
+
+        for idx in match_indices:
+            next_token = input_ids[idx + 1].item()
+            if any(next_token in breaker for breaker in dry_sequence_breakerss[i]):
+                continue
+
+            match_length = 1
+            while idx - match_length >= 0:
+                previous_token = input_ids[-(match_length + 1)].item()
+                if (input_ids[idx - match_length] != previous_token or
+                    any(previous_token in breaker for breaker in dry_sequence_breakerss[i])):
+                    break
+                match_length += 1
+
+            match_lengths[next_token] = max(match_lengths.get(next_token, 0), match_length)
+
+        for token, match_length in match_lengths.items():
+            if match_length >= dry_allowed_lengths[i]:
+                penalty = dry_multipliers[i] * (dry_bases[i] ** (match_length - dry_allowed_lengths[i]))
+                logits[i, token] -= penalty
+
     return logits
 
 
