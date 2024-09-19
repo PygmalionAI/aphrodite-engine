@@ -105,14 +105,14 @@ def serve_yaml(args: argparse.Namespace) -> None:
                     if key in STR_BOOLS:
                         cmd.append(str(value).lower())
                     elif value:
-                        cmd.append(str(value))
+                        cmd.append(f"--{key}")
                 else:
                     cmd.append(str(value))
 
     with open(args.config_file, 'r') as f:
         config = yaml.safe_load(f)
 
-    cmd = ["python", "-m", "aphrodite.endpoints.openai.api_server"]
+    cmd = ["python3", "-m", "aphrodite.endpoints.openai.api_server"]
     for key, value in config.items():
         if isinstance(value, list):
             for item in value:
