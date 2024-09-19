@@ -77,6 +77,7 @@ _GENERATION_MODELS = {
     "ChameleonForConditionalGeneration": ("chameleon",
                                           "ChameleonForConditionalGeneration"),
     "SolarForCausalLM": ("solar", "SolarForCausalLM"),
+    "ExaoneForCausalLM": ("exaone", "ExaoneForCausalLM"),
 }
 
 _EMBEDDING_MODELS = {
