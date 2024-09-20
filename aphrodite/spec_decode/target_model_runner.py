@@ -1,9 +1,8 @@
 from typing import List, Optional
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
-                                     LoRAConfig, ModelConfig, MultiModalConfig,
-                                     ParallelConfig, PromptAdapterConfig,
-                                     SchedulerConfig)
+                                     LoRAConfig, ModelConfig, ParallelConfig,
+                                     PromptAdapterConfig, SchedulerConfig)
 from aphrodite.common.sequence import SequenceGroupMetadata
 from aphrodite.task_handler.model_runner import (
     ModelInputForGPUWithSamplingMetadata, ModelRunner)
@@ -32,7 +31,6 @@ class TargetModelRunner(ModelRunner):
                  kv_cache_dtype: Optional[str] = "auto",
                  is_driver_worker: bool = False,
                  prompt_adapter_config: Optional[PromptAdapterConfig] = None,
-                 multimodal_config: Optional[MultiModalConfig] = None,
                  return_hidden_states: bool = False,
                  **kwargs):
         # An internal boolean member variable to indicate if token log
@@ -48,7 +46,6 @@ class TargetModelRunner(ModelRunner):
             lora_config=lora_config,
             kv_cache_dtype=kv_cache_dtype,
             is_driver_worker=is_driver_worker,
-            multimodal_config=multimodal_config,
             prompt_adapter_config=prompt_adapter_config,
             return_hidden_states=return_hidden_states,
             **kwargs,

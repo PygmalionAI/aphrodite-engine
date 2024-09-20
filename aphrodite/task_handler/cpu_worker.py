@@ -7,9 +7,8 @@ import torch.distributed
 
 from aphrodite.attention import get_attn_backend
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
-                                     LoRAConfig, ModelConfig, MultiModalConfig,
-                                     ParallelConfig, PromptAdapterConfig,
-                                     SchedulerConfig)
+                                     LoRAConfig, ModelConfig, ParallelConfig,
+                                     PromptAdapterConfig, SchedulerConfig)
 from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.common.utils import STR_DTYPE_TO_TORCH_DTYPE
 from aphrodite.distributed import (ensure_model_parallel_initialized,
@@ -133,7 +132,6 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         rank: int,
         distributed_init_method: str,
         lora_config: Optional[LoRAConfig] = None,
-        multimodal_config: Optional[MultiModalConfig] = None,
         kv_cache_dtype: Optional[str] = "auto",
         prompt_adapter_config: Optional[PromptAdapterConfig] = None,
         is_driver_worker: bool = False,
@@ -149,7 +147,6 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self.distributed_init_method = distributed_init_method
         self.lora_config = lora_config
         self.prompt_adapter_config = prompt_adapter_config
-        self.multimodal_config = multimodal_config
         self.is_driver_worker = is_driver_worker
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
@@ -174,7 +171,6 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             cache_config,
             load_config=self.load_config,
             lora_config=self.lora_config,
-            multimodal_config=self.multimodal_config,
             kv_cache_dtype=kv_cache_dtype,
             prompt_adapter_config=self.prompt_adapter_config,
             is_driver_worker=is_driver_worker)
