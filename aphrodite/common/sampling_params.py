@@ -62,6 +62,8 @@ class SamplingParams:
             freq_pen is applied additively while
             rep_pen is applied multiplicatively.
             Must be in [1, inf). Set to 1 to disable the effect.
+        rep_pen_range: Integer that controls the range of the repetition
+            penalty. Set to 0 to disable the effect.
         temperature: Float that controls the randomness of the sampling. Lower
             values make the model more deterministic, while higher values make
             the model more random. Zero means greedy sampling.
@@ -154,6 +156,7 @@ class SamplingParams:
         presence_penalty: float = 0.0,
         frequency_penalty: float = 0.0,
         repetition_penalty: float = 1.0,
+        rep_pen_range: int = 0,
         temperature: float = 1.0,
         temperature_last: bool = False,
         top_p: float = 1.0,
@@ -192,6 +195,7 @@ class SamplingParams:
         self.presence_penalty = presence_penalty
         self.frequency_penalty = frequency_penalty
         self.repetition_penalty = repetition_penalty
+        self.rep_pen_range = rep_pen_range
         if 0 < temperature < _MAX_TEMP:
             logger.warning(
                 f"temperature {temperature} is less than {_MAX_TEMP}, "
@@ -254,6 +258,7 @@ class SamplingParams:
             "presence_penalty": 0.0,
             "frequency_penalty": 0.0,
             "repetition_penalty": 1.0,
+            "rep_pen_range": 0,
             "temperature": 1.0,
             "temperature_last": False,
             "top_p": 1.0,
@@ -330,6 +335,9 @@ class SamplingParams:
         if self.repetition_penalty < 1.0:
             raise ValueError("repetition_penalty must be in [1, inf), got "
                              f"{self.repetition_penalty}.")
+        if self.rep_pen_range < 0:
+            raise ValueError("rep_pen_range must be non-negative, got "
+                             f"{self.rep_pen_range}.")
         if self.temperature < 0.0:
             raise ValueError(
                 f"temperature must be non-negative, got {self.temperature}.")

@@ -375,6 +375,7 @@ class SamplingTensors:
     presence_penalties: torch.Tensor
     frequency_penalties: torch.Tensor
     repetition_penalties: torch.Tensor
+    rep_pen_ranges: torch.Tensor
     tfss: torch.Tensor
     eta_cutoffs: torch.Tensor
     epsilon_cutoffs: torch.Tensor
@@ -417,6 +418,7 @@ class SamplingTensors:
         presence_penalties: List[float] = []
         frequency_penalties: List[float] = []
         repetition_penalties: List[float] = []
+        rep_pen_ranges: List[int] = []
         tfss: List[float] = []
         eta_cutoffs: List[float] = []
         epsilon_cutoffs: List[float] = []
@@ -455,6 +457,7 @@ class SamplingTensors:
             p = sampling_params.presence_penalty
             f = sampling_params.frequency_penalty
             r = sampling_params.repetition_penalty
+            rep_pen_range = sampling_params.rep_pen_range
             top_p = sampling_params.top_p
             top_a = sampling_params.top_a
             min_p = sampling_params.min_p
@@ -518,6 +521,7 @@ class SamplingTensors:
                 presence_penalties += [0] * prefill_len
                 frequency_penalties += [0] * prefill_len
                 repetition_penalties += [1] * prefill_len
+                rep_pen_ranges += [rep_pen_range] * prefill_len
                 tfss += [1] * prefill_len
                 eta_cutoffs += [0] * prefill_len
                 epsilon_cutoffs += [0] * prefill_len
@@ -539,6 +543,7 @@ class SamplingTensors:
                 presence_penalties += [p] * len(seq_ids)
                 frequency_penalties += [f] * len(seq_ids)
                 repetition_penalties += [r] * len(seq_ids)
+                rep_pen_ranges += [rep_pen_range] * len(seq_ids)
                 tfss += [tfs] * len(seq_ids)
                 eta_cutoffs += [eta_cutoff] * len(seq_ids)
                 epsilon_cutoffs += [epsilon_cutoff] * len(seq_ids)
@@ -589,10 +594,10 @@ class SamplingTensors:
         sampling_tensors = SamplingTensors.from_lists(
             temperatures, temperature_lasts, top_ps, top_ks, top_as, min_ps,
             presence_penalties, frequency_penalties, repetition_penalties,
-            tfss, eta_cutoffs, epsilon_cutoffs, typical_ps, smoothing_factors,
-            smoothing_curves, xtc_thresholds, xtc_probabilities,sampling_seeds,
-            sample_indices, prompt_tokens, output_tokens, vocab_size,
-            extra_seeds_to_generate, device, dtype)
+            rep_pen_ranges, tfss, eta_cutoffs, epsilon_cutoffs, typical_ps,
+            smoothing_factors, smoothing_curves, xtc_thresholds,
+            xtc_probabilities, sampling_seeds, sample_indices, prompt_tokens,
+            output_tokens, vocab_size, extra_seeds_to_generate, device, dtype)
         return (sampling_tensors, do_penalties, do_top_p_top_k, do_top_as,
                 do_min_p, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
                 do_typical_ps, do_quadratic, do_xtc, do_temp_last)
@@ -603,7 +608,8 @@ class SamplingTensors:
                    top_ks: List[int], top_as: List[float],
                    min_ps: List[float], presence_penalties: List[float],
                    frequency_penalties: List[float],
-                   repetition_penalties: List[float], tfss: List[float],
+                   repetition_penalties: List[float],
+                   rep_pen_ranges: List[int], tfss: List[float],
                    eta_cutoffs: List[float], epsilon_cutoffs: List[float],
                    typical_ps: List[float], smoothing_factors: List[float],
                    smoothing_curves: List[float], xtc_thresholds: List[float],
@@ -681,6 +687,12 @@ class SamplingTensors:
             repetition_penalties,
             device="cpu",
             dtype=dtype,
+            pin_memory=pin_memory,
+        )
+        rep_pen_ranges_t = torch.tensor(
+            rep_pen_ranges,
+            device="cpu",
+            dtype=torch.int,
             pin_memory=pin_memory,
         )
         top_ks_t = torch.tensor(
@@ -762,6 +774,8 @@ class SamplingTensors:
                                                          non_blocking=True),
             repetition_penalties=repetition_penalties_t.to(device=device,
                                                            non_blocking=True),
+            rep_pen_ranges=rep_pen_ranges_t.to(device=device,
+                                               non_blocking=True),
             tfss=tfss_t.to(device=device, non_blocking=True),
             eta_cutoffs=eta_cutoffs_t.to(device=device, non_blocking=True),
             epsilon_cutoffs=epsilon_cutoffs_t.to(device=device,
