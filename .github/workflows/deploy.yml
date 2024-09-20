@@ -42,7 +42,7 @@ jobs:
         with:
           package_json_file: docs/package.json
           version: 9
-          run_install:
+          run_install: |
             - recursive: true
             - args: [--frozen-lockfile]
             - cwd: docs
