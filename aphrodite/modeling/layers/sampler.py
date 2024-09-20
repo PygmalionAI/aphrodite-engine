@@ -183,8 +183,8 @@ class Sampler(nn.Module):
             logits = logits.to(torch.float)
             logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
 
-        # banned_tokens = _get_custom_token_bans(sampling_metadata)
-        # logits = _apply_token_bans(logits, banned_tokens)
+        banned_tokens = _get_custom_token_bans(sampling_metadata)
+        logits = _apply_token_bans(logits, banned_tokens)
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
