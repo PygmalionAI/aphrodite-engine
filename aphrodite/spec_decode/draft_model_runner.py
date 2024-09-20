@@ -24,9 +24,8 @@ except ImportError:
     FLASHINFER_WORKSPACE_BUFFER_SIZE = 0
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
-                                     LoRAConfig, ModelConfig, MultiModalConfig,
-                                     ParallelConfig, PromptAdapterConfig,
-                                     SchedulerConfig)
+                                     LoRAConfig, ModelConfig, ParallelConfig,
+                                     PromptAdapterConfig, SchedulerConfig)
 from aphrodite.common.sequence import (ExecuteModelRequest,
                                        IntermediateTensors, SamplerOutput)
 from aphrodite.multimodal import MultiModalInputs
@@ -65,7 +64,6 @@ class TP1DraftModelRunner(ModelRunner):
         lora_config: Optional[LoRAConfig],
         kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
-        multimodal_config: Optional[MultiModalConfig] = None,
         prompt_adapter_config: Optional[PromptAdapterConfig] = None,
         return_hidden_states: bool = False,
         **kwargs,
@@ -85,7 +83,6 @@ class TP1DraftModelRunner(ModelRunner):
             lora_config=lora_config,
             kv_cache_dtype=kv_cache_dtype,
             is_driver_worker=is_driver_worker,
-            multimodal_config=multimodal_config,
             prompt_adapter_config=prompt_adapter_config,
             return_hidden_states=return_hidden_states,
             **kwargs,  # needed for uneven TP

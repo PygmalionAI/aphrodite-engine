@@ -4,7 +4,7 @@ from typing import Dict, Mapping, Optional, Sequence
 
 from loguru import logger
 
-from aphrodite.common.config import ModelConfig, MultiModalConfig
+from aphrodite.common.config import ModelConfig
 
 from .audio import AudioPlugin
 from .base import (MultiModalDataDict, MultiModalInputMapper, MultiModalInputs,
@@ -166,7 +166,6 @@ class MultiModalRegistry:
     def init_mm_limits_per_prompt(
         self,
         model_config: ModelConfig,
-        multimodal_config: Optional[MultiModalConfig],
     ) -> None:
         """
         Initialize the maximum number of multi-modal input instances for each
@@ -178,6 +177,7 @@ class MultiModalRegistry:
                 f"{model_config.model}, and will be overwritten by the "
                 "new values.")
 
+        multimodal_config = model_config.multimodal_config
         if multimodal_config is None:
             limits_per_plugin = self._disabled_limits_per_plugin
         else:

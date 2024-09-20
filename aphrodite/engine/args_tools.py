@@ -9,10 +9,9 @@ from loguru import logger
 
 from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
                                      EngineConfig, LoadConfig, LoRAConfig,
-                                     ModelConfig, MultiModalConfig,
-                                     ParallelConfig, PromptAdapterConfig,
-                                     SchedulerConfig, SpeculativeConfig,
-                                     TokenizerPoolConfig)
+                                     ModelConfig, ParallelConfig,
+                                     PromptAdapterConfig, SchedulerConfig,
+                                     SpeculativeConfig, TokenizerPoolConfig)
 from aphrodite.common.utils import FlexibleArgumentParser, is_cpu
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.quantization import QUANTIZATION_METHODS
@@ -870,9 +869,6 @@ class EngineArgs:
             "CPU offload space must be non-negative"
             f", but got {self.cpu_offload_gb}")
 
-        multimodal_config = MultiModalConfig(
-            limit_per_prompt=self.limit_mm_per_prompt or {})
-
         device_config = DeviceConfig(device=self.device)
 
         model_config = ModelConfig(
@@ -898,7 +894,7 @@ class EngineArgs:
             disable_sliding_window=self.disable_sliding_window,
             skip_tokenizer_init=self.skip_tokenizer_init,
             served_model_name=self.served_model_name,
-            multimodal_config=multimodal_config,
+            limit_mm_per_prompt=self.limit_mm_per_prompt,
         )
 
         cache_config = CacheConfig(
@@ -1066,7 +1062,6 @@ class EngineArgs:
                             scheduler_config=scheduler_config,
                             device_config=device_config,
                             lora_config=lora_config,
-                            multimodal_config=multimodal_config,
                             speculative_config=speculative_config,
                             load_config=load_config,
                             decoding_config=decoding_config,

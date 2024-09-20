@@ -4,9 +4,9 @@ import torch
 from loguru import logger
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
-                                     LoRAConfig, ModelConfig, MultiModalConfig,
-                                     ParallelConfig, PromptAdapterConfig,
-                                     SchedulerConfig, SpeculativeConfig)
+                                     LoRAConfig, ModelConfig, ParallelConfig,
+                                     PromptAdapterConfig, SchedulerConfig,
+                                     SpeculativeConfig)
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.common.utils import make_async
 from aphrodite.executor.executor_base import ExecutorAsyncBase
@@ -27,7 +27,6 @@ class XPUExecutor(GPUExecutor):
         device_config: DeviceConfig,
         load_config: LoadConfig,
         lora_config: Optional[LoRAConfig],
-        multimodal_config: Optional[MultiModalConfig],
         prompt_adapter_config: Optional[PromptAdapterConfig],
         speculative_config: Optional[SpeculativeConfig],
     ) -> None:
@@ -44,7 +43,6 @@ class XPUExecutor(GPUExecutor):
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
         self.device_config = device_config
-        self.multimodal_config = multimodal_config
         self.prompt_adapter_config = prompt_adapter_config
         self.speculative_config = None
 
