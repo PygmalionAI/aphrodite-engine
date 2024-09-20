@@ -1,6 +1,7 @@
 import argparse
 import dataclasses
 import json
+import os
 from dataclasses import dataclass
 from typing import (TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Type,
                     Union)
@@ -19,6 +20,10 @@ from aphrodite.transformers_utils.utils import check_gguf_file
 
 if TYPE_CHECKING:
     from aphrodite.transformers_utils.tokenizer_group import BaseTokenizerGroup
+
+
+APHRODITE_USE_RAY_SPMD_WORKER = bool(
+    os.getenv("APHRODITE_USE_RAY_SPMD_WORKER", 0))
 
 
 def nullable_kvs(val: str) -> Optional[Mapping[str, int]]:
@@ -1016,6 +1021,8 @@ class EngineArgs:
             embedding_mode=model_config.embedding_mode,
             preemption_mode=self.preemption_mode,
             num_scheduler_steps=self.num_scheduler_steps,
+            send_delta_data=(APHRODITE_USE_RAY_SPMD_WORKER
+                             and parallel_config.use_ray),
         )
 
         lora_config = LoRAConfig(
