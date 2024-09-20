@@ -9,9 +9,9 @@ import torch.distributed
 from loguru import logger
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
-                                     LoRAConfig, ModelConfig, MultiModalConfig,
-                                     ParallelConfig, PromptAdapterConfig,
-                                     SchedulerConfig, SpeculativeConfig)
+                                     LoRAConfig, ModelConfig, ParallelConfig,
+                                     PromptAdapterConfig, SchedulerConfig,
+                                     SpeculativeConfig)
 from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.distributed import (ensure_model_parallel_initialized,
                                    get_tensor_model_parallel_rank,
@@ -52,7 +52,6 @@ class Worker(LocalOrDistributedWorkerBase):
         rank: int,
         distributed_init_method: str,
         lora_config: Optional[LoRAConfig] = None,
-        multimodal_config: Optional[MultiModalConfig] = None,
         speculative_config: Optional[SpeculativeConfig] = None,
         prompt_adapter_config: Optional[PromptAdapterConfig] = None,
         is_driver_worker: bool = False,
@@ -79,7 +78,6 @@ class Worker(LocalOrDistributedWorkerBase):
             # note: lazy import to avoid importing torch before initializing
             from aphrodite.common.utils import init_cached_hf_modules
             init_cached_hf_modules()
-        self.multimodal_config = multimodal_config
 
         # Return hidden states from target model if the draft model is an
         # mlp_speculator
@@ -108,7 +106,6 @@ class Worker(LocalOrDistributedWorkerBase):
             kv_cache_dtype=self.cache_config.cache_dtype,
             is_driver_worker=is_driver_worker,
             prompt_adapter_config=prompt_adapter_config,
-            multimodal_config=multimodal_config,
             tp_rank=self.rank,
             **speculative_args,
         )

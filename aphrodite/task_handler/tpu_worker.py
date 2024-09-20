@@ -6,8 +6,8 @@ import torch_xla.core.xla_model as xm
 import torch_xla.runtime as xr
 
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
-                                     ModelConfig, MultiModalConfig,
-                                     ParallelConfig, SchedulerConfig)
+                                     ModelConfig, ParallelConfig,
+                                     SchedulerConfig)
 from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.common.utils import STR_DTYPE_TO_TORCH_DTYPE, get_dtype_size
 from aphrodite.distributed import (ensure_model_parallel_initialized,
@@ -29,7 +29,6 @@ class TPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         device_config: DeviceConfig,
         cache_config: CacheConfig,
         load_config: LoadConfig,
-        multimodal_config: Optional[MultiModalConfig],
         local_rank: int,
         rank: int,
         distributed_init_method: str,
@@ -42,7 +41,6 @@ class TPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self.device_config = device_config
         self.cache_config = cache_config
         self.load_config = load_config
-        self.multimodal_config = multimodal_config
         self.local_rank = local_rank
         self.rank = rank
         self.distributed_init_method = distributed_init_method
@@ -62,7 +60,6 @@ class TPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             device_config,
             cache_config,
             load_config,
-            multimodal_config,
             is_driver_worker=is_driver_worker)
 
     def init_device(self) -> None:
