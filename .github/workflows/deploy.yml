@@ -38,6 +38,7 @@ jobs:
           package_json_file: docs/package.json
           version: 9
           run_install: |
+            - cwd: docs/
             - recursive: true
             - args: [--frozen-lockfile]
       - name: Setup Node
