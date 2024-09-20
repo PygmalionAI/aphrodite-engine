@@ -25,8 +25,7 @@ from aphrodite.common.sequence import (EmbeddingSequenceGroupOutput,
                                        SequenceGroupMetadata, SequenceStatus)
 from aphrodite.common.utils import Counter
 from aphrodite.engine.args_tools import EngineArgs
-from aphrodite.engine.metrics import (LoggingStatLogger, PrometheusStatLogger,
-                                      StatLoggerBase, Stats)
+from aphrodite.engine.metrics_types import StatLoggerBase, Stats
 from aphrodite.engine.output_processor.interfaces import (
     SequenceGroupOutputProcessor)
 from aphrodite.engine.output_processor.stop_checker import StopChecker
@@ -293,6 +292,12 @@ class AphroditeEngine:
             if stat_loggers is not None:
                 self.stat_loggers = stat_loggers
             else:
+                # Lazy import for prometheus multiprocessing.
+                # We need to set PROMETHEUS_MULTIPROC_DIR environment variable
+                # before prometheus_client is imported.
+                # See https://prometheus.github.io/client_python/multiprocess/
+                from aphrodite.engine.metrics import (LoggingStatLogger,
+                                                      PrometheusStatLogger)
                 self.stat_loggers = {
                     "logging":
                     LoggingStatLogger(
