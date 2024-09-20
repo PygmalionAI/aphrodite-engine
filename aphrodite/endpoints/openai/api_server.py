@@ -5,6 +5,7 @@ import json
 import multiprocessing
 import os
 import re
+import tempfile
 from argparse import Namespace
 from contextlib import asynccontextmanager
 from http import HTTPStatus
@@ -17,7 +18,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (HTMLResponse, JSONResponse, Response,
                                StreamingResponse)
 from loguru import logger
-from prometheus_client import make_asgi_app
 from starlette.routing import Mount
 
 from aphrodite.common.config import ModelConfig
@@ -70,6 +70,7 @@ extra_api = APIRouter()
 kobold_lite_ui = ""
 sampler_json = ""
 gen_cache: dict = {}
+prometheus_multiproc_dir: tempfile.TemporaryDirectory
 
 _running_tasks: Set[asyncio.Task] = set()
 
@@ -119,6 +120,20 @@ async def build_async_engine_client(args) -> AsyncIterator[AsyncEngineClient]:
 
     # Otherwise, use the multiprocessing AsyncAphrodite.
     else:
+        if "PROMETHEUS_MULTIPROC_DIR" not in os.environ:
+            # Make TemporaryDirectory for prometheus multiprocessing
+            # Note: global TemporaryDirectory will be automatically
+            #   cleaned up upon exit.
+            global prometheus_multiproc_dir
+            prometheus_multiproc_dir = tempfile.TemporaryDirectory()
+            os.environ[
+                "PROMETHEUS_MULTIPROC_DIR"] = prometheus_multiproc_dir.name
+        else:
+            logger.warning(
+                "Found PROMETHEUS_MULTIPROC_DIR was set by user. "
+                "This directory must be wiped between Aphrodite runs or "
+                "you will find inaccurate metrics. Unset the variable "
+                "and Aphrodite will properly handle cleanup.")
         # Select random path for IPC.
         rpc_path = get_open_zmq_ipc_path()
         logger.info(f"Multiprocessing frontend to use {rpc_path} for RPC Path."
@@ -158,10 +173,32 @@ async def build_async_engine_client(args) -> AsyncIterator[AsyncEngineClient]:
             # Wait for server process to join
             rpc_server_process.join()
 
+            # Lazy import for prometheus multiprocessing.
+            # We need to set PROMETHEUS_MULTIPROC_DIR environment variable
+            # before prometheus_client is imported.
+            # See https://prometheus.github.io/client_python/multiprocess/
+            from prometheus_client import multiprocess
+            multiprocess.mark_process_dead(rpc_server_process.pid)
+
 
 def mount_metrics(app: FastAPI):
-    # Add prometheus asgi middleware to route /metrics requests
-    metrics_route = Mount("/metrics", make_asgi_app())
+    # Lazy import for prometheus multiprocessing.
+    # We need to set PROMETHEUS_MULTIPROC_DIR environment variable
+    # before prometheus_client is imported.
+    # See https://prometheus.github.io/client_python/multiprocess/
+    from prometheus_client import (CollectorRegistry, make_asgi_app,
+                                   multiprocess)
+    prometheus_multiproc_dir_path = os.getenv("PROMETHEUS_MULTIPROC_DIR", None)
+    if prometheus_multiproc_dir_path is not None:
+        logger.info("vLLM to use %s as PROMETHEUS_MULTIPROC_DIR",
+                    prometheus_multiproc_dir_path)
+        registry = CollectorRegistry()
+        multiprocess.MultiProcessCollector(registry)
+        # Add prometheus asgi middleware to route /metrics requests
+        metrics_route = Mount("/metrics", make_asgi_app(registry=registry))
+    else:
+        # Add prometheus asgi middleware to route /metrics requests
+        metrics_route = Mount("/metrics", make_asgi_app())
     # Workaround for 307 Redirect for /metrics
     metrics_route.path_regex = re.compile('^/metrics(?P<path>.*)$')
     app.routes.append(metrics_route)
@@ -520,10 +557,6 @@ async def get_kobold_lite_ui():
 def build_app(args: Namespace) -> FastAPI:
     app = FastAPI(lifespan=lifespan)
     app.include_router(router)
-    # Add prometheus asgi middleware to route /metrics requests
-    route = Mount("/metrics", make_asgi_app())
-    route.path_regex = re.compile('^/metrics(?P<path>.*)$')
-    app.routes.append(route)
     app.root_path = args.root_path
     if args.launch_kobold_api:
         logger.warning("Launching Kobold API server in addition to OpenAI. "

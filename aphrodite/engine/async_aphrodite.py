@@ -21,7 +21,7 @@ from aphrodite.engine.aphrodite_engine import (AphroditeEngine,
                                                PromptComponents)
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_timeout import asyncio_timeout
-from aphrodite.engine.metrics import StatLoggerBase
+from aphrodite.engine.metrics_types import StatLoggerBase
 from aphrodite.executor.executor_base import ExecutorAsyncBase
 from aphrodite.executor.ray_utils import initialize_ray_cluster, ray
 from aphrodite.inputs import (EncoderDecoderLLMInputs, LLMInputs, PromptInputs,
