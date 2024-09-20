@@ -49,9 +49,8 @@ jobs:
         shell: bash
         run: |
           cd docs
-          pnpm install
+          pnpm install --frozen-lockfile
           pnpm run build
-          cd ..
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
