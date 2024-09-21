@@ -175,7 +175,7 @@ cudaError_t fpx_linear_kernel(
 // MODIFICATION NOTE: dtype of _weights is changed to uint8
 /*
 Computes FPx-FP16 GEMM (PyTorch interface).
-[Mathmatical Formula]
+[Mathematical Formula]
 Standard definition of linear layer:    Out = In * trans(W), where In, Out, and
 W are stored in row-major. After Equivalent transformation    :    trans(Out) =
 W * trans(In). Note that we do not perform "transpose" during runtime, we
@@ -183,7 +183,7 @@ instead interpret the In/Out as column-major matrices when calling our CUDA
 kernel. [Inputs] _in_feats:  tensor of shape [B, IC];                  // half
   _weights:   int tensor of shape [OC, IC // 8 * x];    // x UINT8 words
 contains 8 FPx weights. _scales:    tensor of shape [OC];                     //
-half splitK:     spliting the MatMul problem along K dimension for higher GPU
+half splitK:     splitting the MatMul problem along K dimension for higher GPU
 utilization, default 1. [Outputs] _out_feats: tensor of shape [B, OC]; // half
 */
 torch::Tensor fp_eXmY_linear_forward_cuda(int64_t EXPONENT, int64_t MANTISSA,

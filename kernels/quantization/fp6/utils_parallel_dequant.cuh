@@ -120,10 +120,10 @@ __device__ __forceinline__ void Dequant_32FP6_4Way(
     FPx_FP16_Cast_4Way<EXPONENT, MANTISSA>(&Packed_FP6, &out1, &out2);
     //
     *OutputRegs = MultScale<EXPONENT, MANTISSA>(
-        out1, Scale_RPTR[0]);  // Muliply FP16 scales
+        out1, Scale_RPTR[0]);  // Multiply FP16 scales
     OutputRegs += 1;
     *OutputRegs = MultScale<EXPONENT, MANTISSA>(
-        out2, Scale_RPTR[1]);  // Muliply FP16 scales
+        out2, Scale_RPTR[1]);  // Multiply FP16 scales
     OutputRegs += 1;
     // Updating offset for FP16 scales for every two iterations
     if (i % 2 == 1) Scale_RPTR += 2;

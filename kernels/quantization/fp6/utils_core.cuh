@@ -105,7 +105,7 @@ __device__ __forceinline__ void core_mma_slice(
                 2;  // 1 set = 4 registers, containing a 16*16 MMA block
   uint32_t(*c_uint_ptr)[REG_PER_THREAD_C_TENSOR_16_16] =
       reinterpret_cast<uint32_t(*)[REG_PER_THREAD_C_TENSOR_16_16]>(
-          c);  // Reigsters for accumulated FP32 results
+          c);  // GlobalRegisters for accumulated FP32 results
 
   // Setting RPTRs for double buffers
   uint32_t(*a_read)[4] = a;

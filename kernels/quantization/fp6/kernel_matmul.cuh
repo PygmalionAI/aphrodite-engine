@@ -54,7 +54,7 @@
 #define SMEM_SIZE_PER_TB_A_TILE                    \
   (SMEM_SIZE_PER_TB_1BIT + SMEM_SIZE_PER_TB_2BIT + \
    SMEM_SIZE_PER_TB_4BIT)  // used in fp6_linear.cu, Kernel_Ex().
-/******************** Gloabl Memory Layout For QUANTIZED DATA
+/******************** Global Memory Layout For QUANTIZED DATA
  * *******************/
 #define NUM_INT4_PER_WARP_1BIT (WEIGHT_PER_WARP * BIT_WIDTH_1 / 128)  // 32
 #define NUM_INT4_PER_WARP_2BIT (WEIGHT_PER_WARP * BIT_WIDTH_2 / 128)  // 64
