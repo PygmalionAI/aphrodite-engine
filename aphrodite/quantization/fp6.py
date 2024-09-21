@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn as nn
+from loguru import logger
 
 from aphrodite import _custom_ops as ops
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
@@ -13,12 +14,14 @@ from aphrodite.quantization.utils.fp6_utils import (_SPLIT_K_MAP,
 
 
 class QuantLLMFPConfig(QuantizationConfig):
-    """Config for QuantLLM FP quantizer. It supports fp5, fp6 and fp7.
+    """Config for QuantLLM FP quantizer. It supports fp2, fp3, fp4,
+    fp5, fp6, fp7.
     
     Reference: https://arxiv.org/abs/2401.14112
     
     Args: 
-        weight_bits: the target quantization bits, 4, 5, 6 or 7.
+        weight_bits: the target quantization bits, should be one of
+            2, 3, 4, 5, 6, 7.
     """
 
     def __init__(
@@ -33,12 +36,15 @@ class QuantLLMFPConfig(QuantizationConfig):
 
         self.valid_types = [torch.float16]
 
-        if self.weight_bits not in (4, 5, 6, 7):
+        if self.weight_bits not in [2, 3, 4, 5, 6, 7]:
             raise ValueError(
-                "Currently, only 4-bit, 5-bit, 6-bit, and 7-bit weight"
-                " quantization are "
+                "Currently, only 4-bit, 5-bit, 6-bit, and 7-bit "
+                "quantization are "
                 f"supported for QuantLLM FP quantizaiton, but got "
                 f"{self.weight_bits} bits.")
+        
+        logger.info(f"Loading model in FP{self.weight_bits}_E"
+                    f"{self.exponent_bits}M{self.mantissa_bits} format.")
 
     def __repr__(self) -> str:
         return (f"QuantLLMFPConfig(weight_bits={self.weight_bits}), "

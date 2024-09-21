@@ -66,6 +66,7 @@ def run_aphrodite(
     model: str,
     tokenizer: str,
     quantization: Optional[str],
+    quant_llm_fp_bits: Optional[int],
     tensor_parallel_size: int,
     seed: int,
     n: int,
@@ -90,6 +91,7 @@ def run_aphrodite(
         model=model,
         tokenizer=tokenizer,
         quantization=quantization,
+        quant_llm_fp_bits=quant_llm_fp_bits,
         tensor_parallel_size=tensor_parallel_size,
         seed=seed,
         trust_remote_code=trust_remote_code,
@@ -226,6 +228,7 @@ def main(args: argparse.Namespace):
     if args.backend == "aphrodite":
         elapsed_time = run_aphrodite(
             requests, args.model, args.tokenizer, args.quantization,
+            args.quant_llm_fp_bits,
             args.tensor_parallel_size, args.seed, args.n, args.use_beam_search,
             args.trust_remote_code, args.dtype, args.max_model_len,
             args.enforce_eager, args.kv_cache_dtype,
@@ -286,6 +289,12 @@ if __name__ == "__main__":
                         '-q',
                         choices=[*QUANTIZATION_METHODS, None],
                         default=None)
+    parser.add_argument('--quant-llm-fp-bits',
+                        type=int,
+                        default=None,
+                        choices=[4, 5, 6, 7],
+                        help="Number of bits for the FP quantization in "
+                        "QuantLLM")
     parser.add_argument("--tensor-parallel-size", "-tp", type=int, default=1)
     parser.add_argument("--n",
                         type=int,

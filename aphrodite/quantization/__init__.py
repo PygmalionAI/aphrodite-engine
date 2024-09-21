@@ -46,6 +46,13 @@ QUANTIZATION_METHODS = {
     "bitsandbytes": BitsAndBytesConfig,
     "qqq": QQQConfig,
     "experts_int8": ExpertsInt8Config,
+    # the quant_llm methods
+    "fp2": QuantLLMFPConfig,
+    "fp3": QuantLLMFPConfig,
+    "fp4": QuantLLMFPConfig,
+    "fp5": QuantLLMFPConfig,
+    "fp6": QuantLLMFPConfig,
+    "fp7": QuantLLMFPConfig,
 }
 
 
