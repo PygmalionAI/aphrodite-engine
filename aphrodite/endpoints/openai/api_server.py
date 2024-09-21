@@ -190,8 +190,8 @@ def mount_metrics(app: FastAPI):
                                    multiprocess)
     prometheus_multiproc_dir_path = os.getenv("PROMETHEUS_MULTIPROC_DIR", None)
     if prometheus_multiproc_dir_path is not None:
-        logger.info("vLLM to use %s as PROMETHEUS_MULTIPROC_DIR",
-                    prometheus_multiproc_dir_path)
+        logger.info(f"Aphrodite to use {prometheus_multiproc_dir_path} "
+                    "as PROMETHEUS_MULTIPROC_DIR")
         registry = CollectorRegistry()
         multiprocess.MultiProcessCollector(registry)
         # Add prometheus asgi middleware to route /metrics requests
