@@ -1,17 +1,15 @@
-from contextlib import suppress
 from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
+from aphrodite import _custom_ops as ops
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import QuantizationConfig
-
-from aphrodite import _custom_ops as ops
-from aphrodite.quantization.utils.fp6_utils import (
-                from_scaled_tc_fpx, to_scaled_tc_fpx, _SPLIT_K_MAP)
+from aphrodite.quantization.utils.fp6_utils import (_SPLIT_K_MAP,
+                                                    from_scaled_tc_fpx,
+                                                    to_scaled_tc_fpx)
 
 
 class QuantLLMFPConfig(QuantizationConfig):
@@ -122,7 +120,7 @@ class QuantLLMFPLinearMethod(LinearMethodBase):
         def quant_weight_loader(param, loaded_weight, *args, **kwargs):
             # Calls the original weight loader (if any), quantizes the result,
             # and then loads the quantized parameter.
-            if QuantLLMht_loader is not None:
+            if weight_loader is not None:
                 orig_param_data = param.data
                 param.data = param.quant_llmdequantize()
                 weight_loader(param, loaded_weight, *args, **kwargs)
@@ -141,13 +139,18 @@ class QuantLLMFPLinearMethod(LinearMethodBase):
         scales = weight.scales
         out_dim, in_dim = weights.shape
         bsize = x.shape[0]
-        splitK = _SPLIT_K_MAP[(bsize - 1) // 64].get(out_dim, 1) if bsize <= 768 else 1
+        splitK = _SPLIT_K_MAP[(bsize - 1) // 64].get(
+            out_dim, 1) if bsize <= 768 else 1
         if bias is None:
-            return ops.fp_eXmY_linear_forward_cuda(self.quant_config.exponent_bits,
-                self.quant_config.mantissa_bits, x, weights, scales, splitK)
+            return ops.fp_eXmY_linear_forward_cuda(
+                self.quant_config.exponent_bits,
+                self.quant_config.mantissa_bits,
+                x, weights, scales, splitK)
         else:
-            return ops.fp_eXmY_linear_forward_cuda(self.quant_config.exponent_bits,
-                self.quant_config.mantissa_bits, x, weights, scales, splitK) + bias
+            return ops.fp_eXmY_linear_forward_cuda(
+                self.quant_config.exponent_bits,
+                self.quant_config.mantissa_bits,
+                x, weights, scales, splitK) + bias
 
 class QuantLLMFPParameter(nn.Parameter):
     """
@@ -173,12 +176,14 @@ class QuantLLMFPParameter(nn.Parameter):
 
     def quant_llmquantize_(self, tensor: torch.Tensor):
         assert tensor.device.type == "cuda" and tensor.dtype != torch.int8
-        data, scales = to_scaled_tc_fpx(tensor.data, self.quant_config.exponent_bits,
-                                                   self.quant_config.mantissa_bits)
+        data, scales = to_scaled_tc_fpx(
+            tensor.data, self.quant_config.exponent_bits,
+            self.quant_config.mantissa_bits)
         self.data.copy_(data)
         self.scales.copy_(scales)
 
     def quant_llmdequantize(self, output_dtype=None):
         output_dtype = output_dtype or torch.get_default_dtype()
         return from_scaled_tc_fpx(self.data, self.quant_config.exponent_bits, 
-                        self.quant_config.mantissa_bits, self.scales).to(output_dtype)
+                        self.quant_config.mantissa_bits, self.scales
+                        ).to(output_dtype)
