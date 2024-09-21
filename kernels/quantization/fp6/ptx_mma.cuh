@@ -90,6 +90,7 @@ __device__ __forceinline__ void B_FromSharedToReg(
 __device__ __forceinline__ void MMA_FP16_M16N8K16(uint32_t* __restrict__ c,
                                                   uint32_t* __restrict__ a,
                                                   uint32_t* __restrict__ b) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   asm volatile(
       "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32"
       "{ %0, %1, %2, %3},"
@@ -99,6 +100,7 @@ __device__ __forceinline__ void MMA_FP16_M16N8K16(uint32_t* __restrict__ c,
       : "=r"(c[0]), "=r"(c[1]), "=r"(c[2]), "=r"(c[3])
       : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]),
         "r"(c[0]), "r"(c[1]), "r"(c[2]), "r"(c[3]));
+#endif
 }
 
-#endif
+#endif // PTX_MMA_CUH

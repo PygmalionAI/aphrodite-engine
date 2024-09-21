@@ -39,6 +39,7 @@
 template <int SizeInBytes>
 __device__ __forceinline__ void cp_async(half* smem_ptr, const half* global_ptr,
                                          bool pred_guard = true) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   static_assert(SizeInBytes == 16, "Size is not supported");
   unsigned smem_int_ptr = __cvta_generic_to_shared(smem_ptr);
   asm volatile(
@@ -48,19 +49,24 @@ __device__ __forceinline__ void cp_async(half* smem_ptr, const half* global_ptr,
       "  @p cp.async.cg.shared.global [%1], [%2], %3;\n"
       "}\n" ::"r"((int)pred_guard),
       "r"(smem_int_ptr), "l"(global_ptr), "n"(SizeInBytes));
+#endif
 }
 
 /// Establishes an ordering w.r.t previously issued cp.async instructions. Does
 /// not block.
 __device__ __forceinline__ void cp_async_group_commit() {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   asm volatile("cp.async.commit_group;\n" ::);
+#endif
 }
 
 /// Blocks until all but <N> previous cp.async.commit_group operations have
 /// committed.
 template <int N>
 __device__ __forceinline__ void cp_async_wait_group() {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   asm volatile("cp.async.wait_group %0;\n" ::"n"(N));
+#endif
 }
 
 /// Blocks until all previous cp.async.commit_group operations have committed.
@@ -68,7 +74,9 @@ __device__ __forceinline__ void cp_async_wait_group() {
 // cp.async.commit_group;
 // cp.async.wait_group 0;
 __device__ __forceinline__ void cp_async_wait_all() {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
   asm volatile("cp.async.wait_all;\n" ::);
+#endif
 }
 
 #endif
