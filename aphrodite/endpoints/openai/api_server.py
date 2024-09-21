@@ -190,8 +190,8 @@ def mount_metrics(app: FastAPI):
                                    multiprocess)
     prometheus_multiproc_dir_path = os.getenv("PROMETHEUS_MULTIPROC_DIR", None)
     if prometheus_multiproc_dir_path is not None:
-        logger.info("vLLM to use %s as PROMETHEUS_MULTIPROC_DIR",
-                    prometheus_multiproc_dir_path)
+        logger.info(f"Aphrodite to use {prometheus_multiproc_dir_path} "
+                    "as PROMETHEUS_MULTIPROC_DIR")
         registry = CollectorRegistry()
         multiprocess.MultiProcessCollector(registry)
         # Add prometheus asgi middleware to route /metrics requests
@@ -344,18 +344,17 @@ def prepare_engine_payload(
     if not kai_payload.genkey:
         kai_payload.genkey = f"kai-{random_uuid()}"
 
-    # if kai_payload.max_context_length > engine_args.max_model_len:
-    #     raise ValueError(
-    #         f"max_context_length ({kai_payload.max_context_length}) "
-    #         "must be less than or equal to "
-    #         f"max_model_len ({engine_args.max_model_len})")
-
     kai_payload.top_k = kai_payload.top_k if kai_payload.top_k != 0.0 else -1
     kai_payload.tfs = max(_SAMPLING_EPS, kai_payload.tfs)
     if kai_payload.temperature < _SAMPLING_EPS:
         kai_payload.n = 1
         kai_payload.top_p = 1.0
         kai_payload.top_k = -1
+
+    dynatemp_min = kai_payload.temperature - kai_payload.dynatemp_range / 2 \
+        if kai_payload.dynatemp_range else None
+    dynatemp_max = kai_payload.temperature + kai_payload.dynatemp_range / 2 \
+        if kai_payload.dynatemp_range else None
 
     sampling_params = SamplingParams(
         n=kai_payload.n,
@@ -378,6 +377,11 @@ def prepare_engine_payload(
         if kai_payload.use_default_badwordsids else [],
         max_tokens=kai_payload.max_length,
         seed=kai_payload.sampler_seed,
+        dynatemp_min=dynatemp_min,
+        dynatemp_max=dynatemp_max,
+        dynatemp_exponent=kai_payload.dynatemp_exponent,
+        xtc_probability=kai_payload.xtc_probability,
+        xtc_threshold=kai_payload.xtc_threshold,
     )
 
     max_input_tokens = max(
@@ -712,7 +716,7 @@ async def init_app(
 
     if args.launch_kobold_api:
         _set_badwords(tokenizer, model_config.hf_config)
-
+    
     return app
 
 
