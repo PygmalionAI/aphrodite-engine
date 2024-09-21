@@ -95,6 +95,8 @@ class ModelConfig:
             weights. If None, we assume the model weights are not quantized.
         deepspeed_fp_bits: Number of bits to use for DeepSpeed FP quantization.
             Supported number of bits are: 4, 6, 8, 12.
+        quant_llm_fp_bits: Number of bits to use for QuantLLM FP quantization.
+            Supported number of bits are: 5, 6, 7.
         quantization_param_path: Path to JSON file containing scaling factors.
             Used to load KV cache scaling factors into the model when KV cache
             type is FP8_E4M3 on ROCm (AMD GPU). In the future these will also
@@ -142,6 +144,7 @@ class ModelConfig:
         max_model_len: Optional[int] = None,
         quantization: Optional[str] = None,
         deepspeed_fp_bits: Optional[int] = None,
+        quant_llm_fp_bits: Optional[int] = None,
         quantization_param_path: Optional[str] = None,
         enforce_eager: Optional[bool] = None,
         max_context_len_to_capture: Optional[int] = None,
@@ -168,6 +171,7 @@ class ModelConfig:
             self.tokenizer_revision = tokenizer_revision
         self.quantization = quantization
         self.deepspeed_fp_bits = deepspeed_fp_bits
+        self.quant_llm_fp_bits = quant_llm_fp_bits
         self.quantization_param_path = quantization_param_path
         self.enforce_eager = enforce_eager
         self.max_context_len_to_capture = max_context_len_to_capture
@@ -314,6 +318,18 @@ class ModelConfig:
                 "bits": self.deepspeed_fp_bits,
                 "group_size": int(os.environ.get("DEEPSPEED_GROUP_SIZE", gs)),
                 "quant_method": "deepspeedfp"
+            }
+
+        if self.quantization == "quant_llm":
+            if self.quant_llm_fp_bits is None:
+                raise ValueError(
+                    "quant_llm_fp_bits must be specified when using "
+                    "quant_llm quantization.")
+            self.quant_llm_fp_exp_bits = {5:2, 6:2, 7:3}[self.quant_llm_fp_bits]
+            self.hf_config.quantization_config = {
+                "bits": self.quant_llm_fp_bits,
+                "exp_bits" : self.quant_llm_fp_exp_bits,
+                "quant_method": "quant_llm"
             }
 
         if self.quantization is not None:

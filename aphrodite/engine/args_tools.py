@@ -94,6 +94,7 @@ class EngineArgs:
     quantization_param_path: Optional[str] = None
     preemption_mode: Optional[str] = None
     deepspeed_fp_bits: Optional[int] = None
+    quant_llm_fp_bits: Optional[int] = None
     # Cache Options
     kv_cache_dtype: str = "auto"
     block_size: int = 16
@@ -498,8 +499,14 @@ class EngineArgs:
                             type=int,
                             default=None,
                             help="Category: Quantization Options\n"
-                            "Number of floating bits to use for the deepseed "
+                            "Number of floating bits to use for the deepspeed "
                             "quantization. Supported bits are: 4, 6, 8, 12. ")
+        parser.add_argument("--quant-llm-fp-bits",
+                            type=int,
+                            default=None,
+                            help="Category: Quantization Options\n"
+                            "Number of floating bits to use for the quant_llm "
+                            "quantization. Supported bits are: 5, 6, 7. ")
         # Cache Options
         parser.add_argument(
             '--kv-cache-dtype',
@@ -886,6 +893,7 @@ class EngineArgs:
             max_model_len=self.max_model_len,
             quantization=self.quantization,
             deepspeed_fp_bits=self.deepspeed_fp_bits,
+            quant_llm_fp_bits=self.quant_llm_fp_bits,
             quantization_param_path=self.quantization_param_path,
             enforce_eager=self.enforce_eager,
             max_context_len_to_capture=self.max_context_len_to_capture,
