@@ -47,10 +47,11 @@ __device__ __forceinline__ void B_FromSharedToReg(
     uint32_t (*__restrict__ Reg)[4],
     half (*__restrict__ read_SPTR)[WARP_K + PADDING_SHARED_MEM_FOR_B_8],
     int slice_id) {
-#ifdef DEBUG_MODE
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  #ifdef DEBUG_MODE
   static_assert((TilingConfig::WARP_COL_MMA_TENSORS == 1) ||
                 (TilingConfig::WARP_COL_MMA_TENSORS % 2 == 0));
-#endif
+  #endif
 
   const int warpId = threadIdx.x / WARP_SIZE;
   int lane_id = threadIdx.x % WARP_SIZE;
@@ -59,9 +60,9 @@ __device__ __forceinline__ void B_FromSharedToReg(
       TilingConfig::WARP_COL_MMA_TENSORS * MMA_8 *
       WARP_j;  // each warp may start from reading warp_start_col'th column of
                // the B tile in shared memory
-#ifdef DEBUG_MODE
+  #ifdef DEBUG_MODE
   assert(warp_start_col == 0);
-#endif
+  #endif
 
   int col = (lane_id % 8) + (lane_id / 16) * 8;
   int row = (lane_id % 16) / 8 * 8;
@@ -72,7 +73,7 @@ __device__ __forceinline__ void B_FromSharedToReg(
                  : "=r"(Reg[0][0]), "=r"(Reg[0][1])
                  : "r"(smem_local_ptr));
   } else {
-#pragma unroll
+  #pragma unroll
     for (int i = 0; i < TilingConfig::WARP_COL_MMA_TENSORS / 2; i++) {
       asm volatile(
           "ldmatrix.sync.aligned.x4.m8n8.shared.b16 {%0, %1, %2, %3}, [%4];\n"
@@ -82,6 +83,7 @@ __device__ __forceinline__ void B_FromSharedToReg(
           16 * (WARP_K + PADDING_SHARED_MEM_FOR_B_8) * sizeof(half);
     }
   }
+#endif
 }
 
 // MODIFICATION NOTE: to support MSVC, the function signature is changed from
@@ -103,4 +105,4 @@ __device__ __forceinline__ void MMA_FP16_M16N8K16(uint32_t* __restrict__ c,
 #endif
 }
 
-#endif // PTX_MMA_CUH
+#endif  // PTX_MMA_CUH
