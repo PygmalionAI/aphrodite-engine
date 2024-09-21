@@ -78,7 +78,8 @@ class QuantLLMFPConfig(QuantizationConfig):
 
     def get_quant_method(
             self,
-            layer: torch.nn.Module) -> Optional["QuantLLMFPLinearMethod"]:
+            layer: torch.nn.Module,
+            prefix: str) -> Optional["QuantLLMFPLinearMethod"]:
         if isinstance(layer, LinearBase):
             return QuantLLMFPLinearMethod(self)
         return None
