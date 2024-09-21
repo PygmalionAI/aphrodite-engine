@@ -155,6 +155,9 @@ class SamplingParams:
         frequency_penalty: float = 0.0,
         repetition_penalty: float = 1.0,
         temperature: float = 1.0,
+        dynatemp_min: float = 0.0,
+        dynatemp_max: float = 0.0,
+        dynatemp_exponent: float = 1.0,
         temperature_last: bool = False,
         top_p: float = 1.0,
         top_k: int = -1,
@@ -199,6 +202,9 @@ class SamplingParams:
                 f"We have capped the temperature to {_MAX_TEMP}.")
             temperature = min(temperature, _MAX_TEMP)
         self.temperature = temperature
+        self.dynatemp_min = dynatemp_min
+        self.dynatemp_max = dynatemp_max
+        self.dynatemp_exponent = dynatemp_exponent
         self.temperature_last = temperature_last
         self.top_p = top_p
         self.top_k = top_k
@@ -255,6 +261,9 @@ class SamplingParams:
             "frequency_penalty": 0.0,
             "repetition_penalty": 1.0,
             "temperature": 1.0,
+            "dynatemp_min": 0.0,
+            "dynatemp_max": 0.0,
+            "dynatemp_exponent": 1.0,
             "temperature_last": False,
             "top_p": 1.0,
             "top_k": -1,

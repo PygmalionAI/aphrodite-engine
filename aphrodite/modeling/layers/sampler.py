@@ -70,14 +70,15 @@ class Sampler(nn.Module):
         self._sampling_tensors = None
 
         # Initialize new sampling tensors
-        (sampling_tensors, do_penalties, do_top_p_top_k, do_top_as, do_min_p,
-         do_tfss, do_eta_cutoffs, do_epsilon_cutoffs, do_typical_ps,
-         do_quadratic, do_xtc,
-         do_temp_last) = SamplingTensors.from_sampling_metadata(
+        (sampling_tensors, do_penalties, do_temperatures, do_top_p_top_k,
+         do_top_as, do_min_p, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
+         do_typical_ps, do_quadratic, do_xtc, do_temp_last
+         ) = SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype)
 
         self._sampling_tensors = sampling_tensors
         self._do_penalties = do_penalties
+        self._do_temperatures = do_temperatures
         self._do_top_p_top_k = do_top_p_top_k
         self._do_top_as = do_top_as
         self._do_min_p = do_min_p
@@ -115,6 +116,7 @@ class Sampler(nn.Module):
         assert self._sampling_tensors is not None
         sampling_tensors = self._sampling_tensors
         do_penalties = self._do_penalties
+        do_temperatures = self._do_temperatures
         do_top_p_top_k = self._do_top_p_top_k
         do_top_as = self._do_top_as
         do_min_p = self._do_min_p
@@ -137,11 +139,11 @@ class Sampler(nn.Module):
                                       sampling_tensors.repetition_penalties)
 
         # Apply temperature scaling if not doing temp_last.
-        if not do_temp_last:
-            # Use float32 to apply temp.
-            # Use in-place division to avoid creating a new tensor.
-            logits = logits.to(torch.float)
-            logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
+        if do_temperatures and not do_temp_last:
+            _apply_temperatures(logits, sampling_tensors.temperatures,
+                                sampling_tensors.dynatemp_mins,
+                                sampling_tensors.dynatemp_maxs,
+                                sampling_tensors.dynatemp_exps)
 
         if do_top_p_top_k:
             logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
@@ -177,11 +179,11 @@ class Sampler(nn.Module):
                 logits, sampling_tensors.xtc_thresholds,
                 sampling_tensors.xtc_probabilities)
 
-        if do_temp_last:
-            # Use float32 to apply temp.
-            # Use in-place division to avoid creating a new tensor.
-            logits = logits.to(torch.float)
-            logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
+        if do_temperatures and do_temp_last:
+            _apply_temperatures(logits, sampling_tensors.temperatures,
+                                sampling_tensors.dynatemp_mins,
+                                sampling_tensors.dynatemp_maxs,
+                                sampling_tensors.dynatemp_exps)
 
         banned_tokens = _get_custom_token_bans(sampling_metadata)
         logits = _apply_token_bans(logits, banned_tokens)
@@ -292,6 +294,37 @@ def _apply_penalties(logits: torch.Tensor, prompt_tokens_tensor: torch.Tensor,
     logits -= frequency_penalties.unsqueeze_(dim=1) * output_bin_counts
     logits -= presence_penalties.unsqueeze_(dim=1) * output_mask
     return logits
+
+
+def _apply_temperatures(
+    logits: torch.Tensor,
+    temperatures: torch.Tensor,
+    dynatemp_mins: torch.Tensor,
+    dynatemp_maxs: torch.Tensor,
+    dynatemp_exps: torch.Tensor,
+) -> None:
+    dynatemp_mask = dynatemp_exps != 0
+    dynatemp_mins = dynatemp_mins[dynatemp_mask]
+    dynatemp_maxs = dynatemp_maxs[dynatemp_mask]
+    dynatemp_exps = dynatemp_exps[dynatemp_mask]
+
+    dynatemp_logits = logits[dynatemp_mask]
+    dynatemp_shifted_logits = torch.log_softmax(dynatemp_logits, dim=-1)
+    dynatemp_probs = dynatemp_shifted_logits.exp()
+    dynatemp_entropies = -(dynatemp_probs *
+                           dynatemp_shifted_logits).nansum(dim=-1)
+    dynatemp_max_entropies = torch.log_(
+        (dynatemp_logits > float("-inf")).sum(dim=-1).float())
+    normalized_entropies = dynatemp_entropies.div_(dynatemp_max_entropies)
+    dyn_temp = (dynatemp_mins + (dynatemp_maxs - dynatemp_mins) *
+                normalized_entropies.pow_(dynatemp_exps))
+
+    temperatures[dynatemp_mask] = dyn_temp
+    temperatures[temperatures <= 0.0] = 1.0
+    # Use float32 to apply temp.
+    # Use in-place division to avoid creating a new tensor.
+    logits = logits.to(torch.float)
+    logits.div_(temperatures.unsqueeze(dim=1))
 
 
 def _apply_token_bans(logits: torch.Tensor,
