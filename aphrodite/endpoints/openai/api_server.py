@@ -717,8 +717,6 @@ async def init_app(
     if args.launch_kobold_api:
         _set_badwords(tokenizer, model_config.hf_config)
     
-    global args
-
     return app
 
 
