@@ -325,7 +325,8 @@ class ModelConfig:
                 raise ValueError(
                     "quant_llm_fp_bits must be specified when using "
                     "quant_llm quantization.")
-            self.quant_llm_fp_exp_bits = {5:2, 6:2, 7:3}[self.quant_llm_fp_bits]
+            self.quant_llm_fp_exp_bits = (
+                {4:2, 5:2, 6:2, 7:3}[self.quant_llm_fp_bits])
             self.hf_config.quantization_config = {
                 "bits": self.quant_llm_fp_bits,
                 "exp_bits" : self.quant_llm_fp_exp_bits,

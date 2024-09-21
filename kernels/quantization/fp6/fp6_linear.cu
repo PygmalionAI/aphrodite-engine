@@ -245,6 +245,14 @@ torch::Tensor fp_eXmY_linear_forward_cuda(int64_t EXPONENT, int64_t MANTISSA,
     aphrodite::fpx_linear_kernel<3, 3>(stream, weight, scales, in_feats,
                                        out_feats, M, N, K, Reduction_Workspace,
                                        splitK);
+  else if (EXPONENT == 3 && MANTISSA == 0)
+    aphrodite::fpx_linear_kernel<3, 0>(stream, weight, scales, in_feats,
+                                       out_feats, M, N, K, Reduction_Workspace,
+                                       splitK);
+  else if (EXPONENT == 2 && MANTISSA == 1)
+    aphrodite::fpx_linear_kernel<2, 1>(stream, weight, scales, in_feats,
+                                       out_feats, M, N, K, Reduction_Workspace,
+                                       splitK);
 
   else
     TORCH_CHECK(false, "FP", NBITS, " E", EXPONENT, "M", MANTISSA,

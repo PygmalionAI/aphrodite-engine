@@ -18,7 +18,7 @@ class QuantLLMFPConfig(QuantizationConfig):
     Reference: https://arxiv.org/abs/2401.14112
     
     Args: 
-        weight_bits: the target quantization bits, 5, 6 or 7.
+        weight_bits: the target quantization bits, 4, 5, 6 or 7.
     """
 
     def __init__(
@@ -33,9 +33,9 @@ class QuantLLMFPConfig(QuantizationConfig):
 
         self.valid_types = [torch.float16]
 
-        if self.weight_bits not in (5, 6, 7):
+        if self.weight_bits not in (4, 5, 6, 7):
             raise ValueError(
-                "Currently, only 5-bit, 6-bit, and 7-bit weight"
+                "Currently, only 4-bit, 5-bit, 6-bit, and 7-bit weight"
                 " quantization are "
                 f"supported for QuantLLM FP quantizaiton, but got "
                 f"{self.weight_bits} bits.")
