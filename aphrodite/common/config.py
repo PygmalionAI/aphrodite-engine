@@ -48,6 +48,12 @@ _PP_SUPPORTED_MODELS = [
 ]
 
 _OPTIMIZED_QUANTS = [
+    "fp2",
+    "fp3",
+    "fp4",
+    "fp5",
+    "fp6",
+    "fp7",
     "fp8",
     "marlin",
     "gptq_marlin_24",
@@ -57,6 +63,7 @@ _OPTIMIZED_QUANTS = [
     "compressed-tensors",
     "compressed_tensors",
     "experts_int8",
+    "quant_llm",
 ]
 
 
@@ -95,6 +102,8 @@ class ModelConfig:
             weights. If None, we assume the model weights are not quantized.
         deepspeed_fp_bits: Number of bits to use for DeepSpeed FP quantization.
             Supported number of bits are: 4, 6, 8, 12.
+        quant_llm_fp_bits: Number of bits to use for QuantLLM FP quantization.
+            Supported number of bits are: 5, 6, 7.
         quantization_param_path: Path to JSON file containing scaling factors.
             Used to load KV cache scaling factors into the model when KV cache
             type is FP8_E4M3 on ROCm (AMD GPU). In the future these will also
@@ -142,6 +151,8 @@ class ModelConfig:
         max_model_len: Optional[int] = None,
         quantization: Optional[str] = None,
         deepspeed_fp_bits: Optional[int] = None,
+        quant_llm_fp_bits: Optional[int] = None,
+        quant_llm_exp_bits: Optional[int] = None,
         quantization_param_path: Optional[str] = None,
         enforce_eager: Optional[bool] = None,
         max_context_len_to_capture: Optional[int] = None,
@@ -168,6 +179,8 @@ class ModelConfig:
             self.tokenizer_revision = tokenizer_revision
         self.quantization = quantization
         self.deepspeed_fp_bits = deepspeed_fp_bits
+        self.quant_llm_fp_bits = quant_llm_fp_bits
+        self.quant_llm_exp_bits = quant_llm_exp_bits
         self.quantization_param_path = quantization_param_path
         self.enforce_eager = enforce_eager
         self.max_context_len_to_capture = max_context_len_to_capture
@@ -315,6 +328,68 @@ class ModelConfig:
                 "group_size": int(os.environ.get("DEEPSPEED_GROUP_SIZE", gs)),
                 "quant_method": "deepspeedfp"
             }
+
+        VALID_QUANT_LLM_FP_BITS = [2, 3, 4, 5, 6, 7]
+        VALID_QUANT_LLM_EXPONENTS = [1, 2, 3, 4, 5]
+        # The formula is mantissa_bits = fp_bits - exp_bits - 1
+        # The default exp_bits for each fp_bits are as follows:
+        DEFAULT_EXP_BITS = {
+            2: 1,
+            3: 2,
+            4: 2,
+            5: 2,
+            6: 2,
+            7: 3,
+        }
+
+        if self.quantization == "quant_llm":
+            if self.quant_llm_fp_bits is None:
+                raise ValueError(
+                    "quant_llm_fp_bits must be specified when using "
+                    "quant_llm quantization."
+                )
+            if self.quant_llm_fp_bits not in VALID_QUANT_LLM_FP_BITS:
+                raise ValueError(
+                    f"Invalid quant_llm_fp_bits: {self.quant_llm_fp_bits}. "
+                    f"Must be one of {VALID_QUANT_LLM_FP_BITS}."
+                )
+            if self.quant_llm_exp_bits is None:
+                self.quant_llm_exp_bits = DEFAULT_EXP_BITS[
+                    self.quant_llm_fp_bits]
+            else:
+                if self.quant_llm_exp_bits not in VALID_QUANT_LLM_EXPONENTS:
+                    raise ValueError(
+                        f"Invalid exponent bits: {self.quant_llm_exp_bits}. "
+                        f"Must be one of {VALID_QUANT_LLM_EXPONENTS}."
+                    )
+
+            self.hf_config.quantization_config = {
+                "bits": self.quant_llm_fp_bits,
+                "exp_bits": self.quant_llm_exp_bits,
+                "quant_method": "quant_llm"
+            }
+            
+        online_quant_methods = ["fp2", "fp3", "fp4", "fp5", "fp6", "fp7"]
+        if self.quantization is not None and self.quantization in \
+            online_quant_methods:
+            fp_bits = int(self.quantization[2])
+            if fp_bits not in VALID_QUANT_LLM_FP_BITS:
+                raise ValueError(
+                    f"Invalid quant_llm_fp_bits: {fp_bits}. "
+                    f"Must be one of {VALID_QUANT_LLM_FP_BITS}."
+                )
+            if fp_bits in [2, 3]:
+                logger.warning("FP2 and FP3 quantization methods lead to "
+                               "significant accuracy loss. Use them with "
+                               "caution. Model may be incoherent.")
+            exp_bits = DEFAULT_EXP_BITS[fp_bits]
+            self.hf_config.quantization_config = {
+                "bits": fp_bits,
+                "exp_bits": exp_bits,
+                "quant_method": self.quantization
+            }
+            self.dtype = torch.float16
+            self.enforce_eager = True
 
         if self.quantization is not None:
             if self.quantization not in supported_quantization:

@@ -196,6 +196,15 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   // QuIP# Decompress
   ops.def("quip_decompress", &decompress_e8p_origorder);
   ops.impl("quip_decompress", torch::kCUDA, &decompress_e8p_origorder);
+
+  // fp6_llm
+  ops.def(
+      "fp_eXmY_linear_forward_cuda(int EXPONENT, int MANTISSA,"
+      "                            Tensor _in_feats, Tensor _weights,"
+      "                            Tensor _scales, int splitK=1) -> Tensor");
+  ops.impl("fp_eXmY_linear_forward_cuda", torch::kCUDA,
+           &fp_eXmY_linear_forward_cuda);
+
 #endif
 
   // Quantized GEMM for GPTQ.

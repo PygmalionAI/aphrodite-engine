@@ -465,6 +465,20 @@ def ggml_mul_mat_a8(
     return torch.ops._C.ggml_mul_mat_a8(W, X, quant_type, row)
 
 
+# fp6
+def fp_eXmY_linear_forward_cuda(
+    EXPONENT: int,
+    MANTISSA: int,
+    _in_feats: torch.Tensor,
+    _weights: torch.Tensor,
+    _scales: torch.Tensor,
+    splitK: int = 1,
+) -> torch.Tensor:
+    return torch.ops._C.fp_eXmY_linear_forward_cuda(EXPONENT, MANTISSA,
+                                                    _in_feats, _weights,
+                                                    _scales, splitK)
+
+
 # mamba
 def causal_conv1d_fwd(x: torch.Tensor, weight: torch.Tensor,
                       bias_: Optional[torch.Tensor],

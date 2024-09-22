@@ -11,6 +11,7 @@ from aphrodite.quantization.deepspeedfp import DeepSpeedFPConfig
 from aphrodite.quantization.eetq import EETQConfig
 from aphrodite.quantization.experts_int8 import ExpertsInt8Config
 from aphrodite.quantization.fbgemm_fp8 import FBGEMMFp8Config
+from aphrodite.quantization.fp6 import QuantLLMFPConfig
 from aphrodite.quantization.fp8 import Fp8Config
 from aphrodite.quantization.gguf import GGUFConfig
 from aphrodite.quantization.gptq import GPTQConfig
@@ -29,6 +30,7 @@ QUANTIZATION_METHODS = {
     "tpu_int8": Int8TpuConfig,
     "eetq": EETQConfig,
     "fp8": Fp8Config,
+    "quant_llm": QuantLLMFPConfig,
     "fbgemm_fp8": FBGEMMFp8Config,
     "gguf": GGUFConfig,
     # The order of gptq methods is important for config.py iteration over
@@ -44,6 +46,13 @@ QUANTIZATION_METHODS = {
     "bitsandbytes": BitsAndBytesConfig,
     "qqq": QQQConfig,
     "experts_int8": ExpertsInt8Config,
+    # the quant_llm methods
+    "fp2": QuantLLMFPConfig,
+    "fp3": QuantLLMFPConfig,
+    "fp4": QuantLLMFPConfig,
+    "fp5": QuantLLMFPConfig,
+    "fp6": QuantLLMFPConfig,
+    "fp7": QuantLLMFPConfig,
 }
 
 

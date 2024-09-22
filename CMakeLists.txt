@@ -199,6 +199,7 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
   FetchContent_MakeAvailable(cutlass)
 
   list(APPEND APHRODITE_EXT_SRC
+    "kernels/quantization/fp6/fp6_linear.cu"
     "kernels/mamba/mamba_ssm/selective_scan_fwd.cu"
     "kernels/mamba/causal_conv1d/causal_conv1d.cu"
     "kernels/quantization/aqlm/gemm_kernels.cu"
