@@ -51,7 +51,7 @@ python main.py $MODEL_PATH $DATASET_PATH \
 You can then load the quantized model for inference using Aphrodite:
 
 ```sh
-aphrodite run --model $SAVE_PATH
+aphrodite run $SAVE_PATH
 ```
 
 
@@ -94,7 +94,7 @@ model.save_pretrained(f"{model_id}-AWQ")
 You can then load the quantized model for inference using Aphrodite:
 
 ```sh
-aphrodite run --model /path/to/model-AWQ
+aphrodite run /path/to/model-AWQ
 ```
 
 :::tip
@@ -167,7 +167,7 @@ model = AutoModelForCausalLM.from_pretrained(quant_path, device_map="auto")
 Then, you can load the quantized model for inference using Aphrodite:
 
 ```sh
-aphrodite run --model /path/to/quantized/model
+aphrodite run /path/to/quantized/model
 ```
 
 ## FBGEMM_FP8
@@ -239,7 +239,7 @@ model.save_pretrained(f"{model_id}-GPTQ")
 You can then load the quantized model for inference using Aphrodite:
 
 ```sh
-aphrodite run --model /path/to/model-GPTQ
+aphrodite run /path/to/model-GPTQ
 ```
 :::tip
 By default, Aphrodite will load GPTQ models using the Marlin kernels for high throughput. If this is undesirable, you can use the `-q gptq` flag to load the model using the GPTQ library instead.
@@ -252,6 +252,32 @@ Reference:
 - [GitHub](https://github.com/vllm-project/llm-compressor/)
 
 Aphrodite supports LLM Compressor-produced quants. Please refer to their repo on how to generate these quants.
+
+## Quant-LLM
+Reference:
+- [GitHub](https://github.com/usyd-fsalab/fp6_llm)
+- [Paper](https://arxiv.org/abs/2401.14112)
+
+Aphrodite supports loading FP16 models quantized to FP2, FP3, FP4, FP5, FP6, and FP7 using the Quant-LLM method at runtime, to achieve extremely high throughput. 
+
+To load a model with Quant-LLM quantization, you can simply run:
+```sh
+aphrodite run <fp16 model> -q fpX
+```
+
+Where `X` is the desired weight quantization: 2, 3, 4, 5, 6, or 7 (although 2 and 3-bit quantization is not recommended due to significant accuracy loss).
+
+We also provide fine-grained control over the exact exponent-mantissa combination, if the user wants to the experiment with other formats:
+
+```sh
+aphrodite run <fp16 model> -q quant_llm --quant-llm-exp-bits 4 
+```
+
+The valid values for `--quant-llm-exp-bits` are 1, 2, 3, 4, and 5. The heuristic we use to determine mantissa is `weight_bits - exp_bits - 1`, so make sure your provided value does not result in a negative mantissa.
+
+See [here](https://gist.github.com/AlpinDale/17babab5be16f522d4d3b134e171001a) for a list of all valid combinations.
+
+To see accuracy and throughput benchmarks, see [here](https://github.com/PygmalionAI/aphrodite-engine/pull/755).
 
 ## The other methods
 

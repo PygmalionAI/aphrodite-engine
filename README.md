@@ -13,6 +13,8 @@ The compute necessary for Aphrodite's development is provided by [Arc Compute](h
 
 
 ## 🔥 News
+(09/2024) v0.6.1 is here. You can now load FP16 models in FP2 to FP7 quant formats, to achieve extremely high throughput and save on memory.
+
 (09/2024) v0.6.0 is released, with huge throughput improvements, many new quant formats (including fp8 and llm-compressor), asymmetric tensor parallel, pipeline parallel and more! Please check out the [exhaustive documentation](https://aphrodite.pygmalion.chat) for the User and Developer guides.
 
 ## Features
@@ -20,7 +22,7 @@ The compute necessary for Aphrodite's development is provided by [Arc Compute](h
 - Continuous Batching
 - Efficient K/V management with [PagedAttention](./aphrodite/modeling/layers/attention.py) from vLLM
 - Optimized CUDA kernels for improved inference
-- Quantization support via AQLM, AWQ, Bitsandbytes, GGUF, GPTQ, QuIP#, Smoothquant+, SqueezeLLM, Marlin, FP4, FP6, FP8, FP12
+- Quantization support via AQLM, AWQ, Bitsandbytes, GGUF, GPTQ, QuIP#, Smoothquant+, SqueezeLLM, Marlin, FP2-FP12
 - Distributed inference
 - 8-bit KV Cache for higher context lengths and throughput, at both FP8 E5M3 and E4M3 formats.
 
@@ -29,7 +31,7 @@ The compute necessary for Aphrodite's development is provided by [Arc Compute](h
 
 Install the engine:
 ```sh
-pip install -U aphrodite-engine==0.6.0
+pip install -U aphrodite-engine
 ```
 
 Then launch a model:
