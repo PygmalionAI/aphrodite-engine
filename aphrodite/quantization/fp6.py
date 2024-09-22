@@ -5,6 +5,7 @@ import torch.nn as nn
 from loguru import logger
 
 from aphrodite import _custom_ops as ops
+from aphrodite.distributed import get_tensor_model_parallel_rank
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import QuantizationConfig
@@ -43,8 +44,9 @@ class QuantLLMFPConfig(QuantizationConfig):
                 f"supported for QuantLLM FP quantizaiton, but got "
                 f"{self.weight_bits} bits.")
         
-        logger.info(f"Loading model in FP{self.weight_bits}_E"
-                    f"{self.exponent_bits}M{self.mantissa_bits} format.")
+        if get_tensor_model_parallel_rank() == 0:
+            logger.info(f"Loading model in FP{self.weight_bits}_E"
+                        f"{self.exponent_bits}M{self.mantissa_bits} format.")
 
     def __repr__(self) -> str:
         return (f"QuantLLMFPConfig(weight_bits={self.weight_bits}), "

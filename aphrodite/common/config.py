@@ -48,6 +48,12 @@ _PP_SUPPORTED_MODELS = [
 ]
 
 _OPTIMIZED_QUANTS = [
+    "fp2",
+    "fp3",
+    "fp4",
+    "fp5",
+    "fp6",
+    "fp7",
     "fp8",
     "marlin",
     "gptq_marlin_24",
@@ -57,6 +63,7 @@ _OPTIMIZED_QUANTS = [
     "compressed-tensors",
     "compressed_tensors",
     "experts_int8",
+    "quant_llm",
 ]
 
 
@@ -371,12 +378,18 @@ class ModelConfig:
                     f"Invalid quant_llm_fp_bits: {fp_bits}. "
                     f"Must be one of {VALID_QUANT_LLM_FP_BITS}."
                 )
+            if fp_bits in [2, 3]:
+                logger.warning("FP2 and FP3 quantization methods lead to "
+                               "significant accuracy loss. Use them with "
+                               "caution. Model may be incoherent.")
             exp_bits = DEFAULT_EXP_BITS[fp_bits]
             self.hf_config.quantization_config = {
                 "bits": fp_bits,
                 "exp_bits": exp_bits,
                 "quant_method": self.quantization
             }
+            self.dtype = torch.float16
+            self.enforce_eager = True
 
         if self.quantization is not None:
             if self.quantization not in supported_quantization:
