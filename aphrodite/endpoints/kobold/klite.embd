@@ -4195,7 +4195,7 @@ Current version indicated by LITEVER below.
 	var uses_cors_proxy = false; //we start off attempting a direct connection. switch to proxy if that fails
 	var synchro_polled_response = null;
 	var last_stop_reason = ""; //update stop reason if known
-	var synchro_pending_stream = ""; //used for token pseduo streaming for kobold api only
+	var synchro_pending_stream = ""; //used for token pseudo streaming for kobold api only
 	var waiting_for_autosummary = false;
 	var italics_regex = new RegExp(/\*(\S[^*]+\S)\*/g); //the fallback regex
 	var bold_regex = new RegExp(/\*\*(\S[^*]+\S)\*\*/g); //the fallback regex
