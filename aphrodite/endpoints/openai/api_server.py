@@ -351,10 +351,6 @@ def prepare_engine_payload(
         kai_payload.top_p = 1.0
         kai_payload.top_k = -1
 
-    dynatemp_min = kai_payload.temperature - kai_payload.dynatemp_range / 2 \
-        if kai_payload.dynatemp_range else None
-    dynatemp_max = kai_payload.temperature + kai_payload.dynatemp_range / 2 \
-        if kai_payload.dynatemp_range else None
 
     sampling_params = SamplingParams(
         n=kai_payload.n,
@@ -377,9 +373,6 @@ def prepare_engine_payload(
         if kai_payload.use_default_badwordsids else [],
         max_tokens=kai_payload.max_length,
         seed=kai_payload.sampler_seed,
-        dynatemp_min=dynatemp_min,
-        dynatemp_max=dynatemp_max,
-        dynatemp_exponent=kai_payload.dynatemp_exponent,
         xtc_probability=kai_payload.xtc_probability,
         xtc_threshold=kai_payload.xtc_threshold,
     )
