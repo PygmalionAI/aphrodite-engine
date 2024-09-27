@@ -22,6 +22,7 @@ from aphrodite.quantization.qqq import QQQConfig
 from aphrodite.quantization.quip import QuipConfig
 from aphrodite.quantization.squeezellm import SqueezeLLMConfig
 from aphrodite.quantization.tpu_int8 import Int8TpuConfig
+from aphrodite.quantization.weights_int4 import AutoQuantConfig
 
 QUANTIZATION_METHODS = {
     "aqlm": AQLMConfig,
@@ -53,6 +54,7 @@ QUANTIZATION_METHODS = {
     "fp5": QuantLLMFPConfig,
     "fp6": QuantLLMFPConfig,
     "fp7": QuantLLMFPConfig,
+    "int4": AutoQuantConfig,
 }
 
 

@@ -205,6 +205,14 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.impl("fp_eXmY_linear_forward_cuda", torch::kCUDA,
            &fp_eXmY_linear_forward_cuda);
 
+  // int4 weights
+  ops.def("autoquant_s4_f16_gemm", &autoquant_s4_f16_gemm);
+  ops.impl("autoquant_s4_f16_gemm", torch::kCUDA, &autoquant_s4_f16_gemm);
+
+  ops.def("autoquant_convert_s4_k_m8", &autoquant_convert_s4_k_m8);
+  ops.impl("autoquant_convert_s4_k_m8", torch::kCUDA,
+           &autoquant_convert_s4_k_m8);
+
 #endif
 
   // Quantized GEMM for GPTQ.

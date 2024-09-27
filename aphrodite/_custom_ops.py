@@ -479,6 +479,31 @@ def fp_eXmY_linear_forward_cuda(
                                                     _scales, splitK)
 
 
+# int4
+def autoquant_s4_f16_gemm(
+        _in_feats: torch.Tensor,
+        _kernel: torch.Tensor,
+        _scales_zeros: torch.Tensor,
+) -> torch.Tensor:
+    return torch.ops._C.autoquant_s4_f16_gemm(_in_feats, _kernel,
+                                              _scales_zeros)
+
+def autoquant_convert_s4_k_m8(
+        _weight_dest: torch.Tensor,
+        _quant_scales_zeros_dest: torch.Tensor,
+        _workspace: torch.Tensor,
+        _quant_weight_src: torch.Tensor,
+        _quant_scales: torch.Tensor,
+        _quant_zeros: torch.Tensor,
+        m: int,
+        k: int,
+        group_size: int,
+) -> torch.Tensor:
+    return torch.ops._C.autoquant_convert_s4_k_m8(_weight_dest, _quant_scales_zeros_dest,
+                                                  _workspace, _quant_weight_src, _quant_scales,
+                                                  _quant_zeros, m, k, group_size)
+
+
 # mamba
 def causal_conv1d_fwd(x: torch.Tensor, weight: torch.Tensor,
                       bias_: Optional[torch.Tensor],

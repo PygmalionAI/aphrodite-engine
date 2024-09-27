@@ -160,3 +160,17 @@ void dynamic_scaled_fp8_quant(torch::Tensor& out, torch::Tensor const& input,
 void dynamic_per_token_scaled_fp8_quant(
     torch::Tensor& out, torch::Tensor const& input, torch::Tensor& scale,
     c10::optional<torch::Tensor> const& scale_ub);
+
+// INT4 Weights
+
+torch::Tensor autoquant_s4_f16_gemm(torch::Tensor _in_feats,
+                                    torch::Tensor _kernel,
+                                    torch::Tensor _scales_zeros);
+
+void autoquant_convert_s4_k_m8(torch::Tensor _weight_dest,
+                               torch::Tensor _quant_scales_zeros_dest,
+                               torch::Tensor _workspace,
+                               torch::Tensor _quant_weight_src,
+                               torch::Tensor _quant_scales,
+                               torch::Tensor _quant_zeros, int64_t m, int64_t k,
+                               int64_t group_size);

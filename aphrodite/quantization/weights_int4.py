@@ -57,7 +57,7 @@ class AutoQuantConfig(QuantizationConfig):
 
     def get_min_capability(self) -> int:
         # The AutoQuant kernel only supports Ampere or newer GPUs.
-        return 75
+        return 80
 
     @staticmethod
     def get_config_filenames() -> List[str]:
@@ -209,6 +209,21 @@ class AutoQuantLinearMethod(LinearMethodBase):
                 del state.CB
                 weight.data = state.CxB
             return out
+        
+    def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+        # if self.quant_config.quant_mode == "weight_only":
+        #     layer.qweight = torch.nn.Parameter(layer.qweight.data,
+        #                                        requires_grad=False)
+        #     layer.qzeros = torch.nn.Parameter(layer.qzeros.data,
+        #                                       requires_grad=False)
+        #     layer.scales = torch.nn.Parameter(layer.scales.data,
+        #                                       requires_grad=False)
+        # else:
+        #     layer.weight = torch.nn.Parameter(layer.weight.data,
+        #                                       requires_grad=False)
+        #     if hasattr(layer, "state"):
+        #         del layer.state
+        pass
 
 
 T = TypeVar("T", bound="torch.nn.Module")
@@ -339,117 +354,68 @@ def quantize_tensor(
     return qweight, scales, qzeros
 
 
-def replace_quant_params(model,
-                         quant_config,
-                         modules_to_not_convert="lm_head"):
+def replace_quant_params(
+        model,
+        quant_config,
+        modules_to_not_convert="lm_head",
+):
     """
-    modules_to_not_convert (`str`, *optional*, defaults to `lm_head`):
-            Name of the module to not convert in `Linear8bitLt`.
-            In practice we keep the `lm_head` in full precision
-            for numerical stability reasons.
+    Replace quantization parameters in the model to use AutoQuant.
+
+    Args:
+        model: The model to modify.
+        quant_config: The AutoQuantConfig instance.
+        modules_to_not_convert (str or List[str], optional): Names of modules not to convert.
+            Defaults to "lm_head".
     """
     if not isinstance(modules_to_not_convert, list):
         modules_to_not_convert = [modules_to_not_convert]
-    for name, module in model.named_children():
-        if len(list(module.children())) > 0:
-            replace_quant_params(module, quant_config, modules_to_not_convert)
-        if isinstance(
-            module,
-                (ColumnParallelLinear, QKVParallelLinear, RowParallelLinear)) \
-                and name not in modules_to_not_convert:
+
+    for name, module in model.named_modules():
+        if any(exclude in name for exclude in modules_to_not_convert):
+            continue
+
+        if hasattr(module, 'quant_method') and isinstance(module.quant_method, AutoQuantLinearMethod):
             if quant_config.from_float:
-                module.linear_weights.pop("weight")
-                param = module._parameters["weight"]
-                if quant_config.quant_mode in ("llm_int8", "smoothquant"):
-                    import bitsandbytes as bnb
-                    new_value = bnb.nn.Int8Params(param.data,
-                                                  requires_grad=False,
-                                                  has_fp16_weights=False)
-                    state = bnb.MatmulLtState()
-                    if quant_config.quant_mode == "smoothquant":
-                        state.threshold = 0.0
-                    else:
-                        state.threshold = 6.0
-                    state.has_fp16_weights = False
-                    state.memory_efficient_backward = False
-                    state.use_pool = True
-                    module._parameters["weight"] = new_value
-                    module.linear_weights["weight"] = new_value
-                    module.linear_weights["state"] = state
-                    set_weight_attrs(
-                        new_value, {
-                            "input_dim": 0,
-                            "output_dim": 1,
-                            "packed_dim": 1,
-                            "pack_factor": quant_config.pack_factor,
-                        })
-                    del param
-                    torch.cuda.empty_cache()
+                with torch.no_grad():
+                    weight_fp = module.weight.data
+                    qweight, scales, qzeros = quantize_tensor(
+                        weight_fp,
+                        n_bits=quant_config.weight_bits,
+                        group_size=quant_config.group_size,
+                    )
+                    qweight, scales_zeros = convert_s4(qweight, qzeros, scales)
 
-                elif quant_config.quant_mode == "weight_only":
-                    data_fp = param.cuda()
-                    _qweight, _scales, _qzeros = quantize_tensor(
-                        data_fp, n_bits=4, group_size=128)
-                    qweight, scales_zeros = convert_s4(_qweight, _qzeros,
-                                                       _scales)
-                    torch.cuda.synchronize()
-                    param_qweight = Parameter(qweight, requires_grad=False)
-                    param_scales_zeros = Parameter(scales_zeros,
-                                                   requires_grad=False)
-                    module.register_parameter("qweight", param_qweight)
-                    module.register_parameter("scales_zeros",
-                                              param_scales_zeros)
-                    set_weight_attrs(
-                        param_qweight, {
-                            "input_dim": 0,
-                            "output_dim": 1,
-                            "packed_dim": 1,
-                            "pack_factor": quant_config.pack_factor,
-                        })
-                    set_weight_attrs(param_scales_zeros, {
-                        "input_dim": 0,
-                        "output_dim": 1,
-                    })
-                    module.linear_weights["qweight"] = param_qweight
-                    module.linear_weights["scales_zeros"] = param_scales_zeros
-                    del _qzeros
-                    del _scales
-                    del param
-                    delattr(module, "weight")
-                    torch.cuda.empty_cache()
+                    module.register_parameter("qweight", Parameter(qweight, requires_grad=False))
+                    module.register_parameter("scales_zeros", Parameter(scales_zeros, requires_grad=False))
 
-            else:  # load packed int4 weight
-                module.linear_weights.pop("qweight")
-                module.linear_weights.pop("qzeros")
-                module.linear_weights.pop("scales")
-                _qweight = module._parameters["qweight"]
-                _qzeros = module._parameters["qzeros"]
-                _scales = module._parameters["scales"]
-                qweight, scales_zeros = convert_s4(_qweight.data, _qzeros.data,
-                                                   _scales.data)
-                param_qweight = Parameter(qweight, requires_grad=False)
-                param_scales_zeros = Parameter(scales_zeros,
-                                               requires_grad=False)
-                del _qweight
-                del _qzeros
-                del _scales
-                delattr(module, "qweight")
-                delattr(module, "qzeros")
-                delattr(module, "scales")
-                module.register_parameter("qweight", param_qweight)
-                module.register_parameter("scales_zeros", param_scales_zeros)
-                set_weight_attrs(
-                    param_qweight, {
-                        "input_dim": 0,
-                        "output_dim": 1,
-                        "packed_dim": 1,
-                        "pack_factor": quant_config.pack_factor,
-                    })
-                set_weight_attrs(param_scales_zeros, {
-                    "input_dim": 0,
-                    "output_dim": 1,
-                })
-                module.linear_weights["qweight"] = param_qweight
-                module.linear_weights["scales_zeros"] = param_scales_zeros
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
+                    if hasattr(module, "weight"):
+                        del module._parameters["weight"]
+            else:
+                qweight = module.qweight.data
+                qzeros = module.qzeros.data
+                scales = module.scales.data
+
+                qweight_new, scales_zeros_new = convert_s4(qweight, qzeros, scales)
+                module.qweight.data = qweight_new
+                module.scales_zeros.data = scales_zeros_new
+
+                if hasattr(module, 'qzeros'):
+                    del module._parameters["qzeros"]
+                if hasattr(module, 'scales'):
+                    del module._parameters["scales"]
+        elif isinstance(module, LinearBase) and not hasattr(module, 'quant_method'):
+            module.quant_method = AutoQuantLinearMethod(quant_config)
+            module.quant_method.create_weights(
+                module,
+                input_size_per_partition=module.weight.shape[1],
+                output_partition_sizes=[module.weight.shape[0]],
+                input_size=module.weight.shape[1],
+                output_size=module.weight.shape[0],
+                params_dtype=module.weight.dtype,
+            )
+            replace_quant_params(
+                module,
+                quant_config,
+                modules_to_not_convert=modules_to_not_convert,
+            )

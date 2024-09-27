@@ -391,6 +391,16 @@ class ModelConfig:
             self.dtype = torch.float16
             self.enforce_eager = True
 
+        if self.quantization is not None and self.quantization == "int4":
+            self.hf_config.quantization_config = {
+                "bits": 4,
+                "quant_mode": "weight_only",
+                "quant_method": "int4",
+                "group_size": 128,
+                "zero_point": True,
+                "from_float": True
+            }
+
         if self.quantization is not None:
             if self.quantization not in supported_quantization:
                 raise ValueError(

@@ -2,6 +2,7 @@
 import collections
 import copy
 import fnmatch
+import gc
 import glob
 import json
 import math
@@ -41,6 +42,7 @@ from aphrodite.modeling.models.interfaces import (has_inner_state,
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.platforms import current_platform
 from aphrodite.quantization.base_config import QuantizationConfig
+from aphrodite.quantization.weights_int4 import replace_quant_params
 
 
 @contextmanager
@@ -332,18 +334,33 @@ class DefaultModelLoader(BaseModelLoader):
                    scheduler_config: SchedulerConfig,
                    cache_config: CacheConfig) -> nn.Module:
         target_device = torch.device(device_config.device)
+        # quant_method is hf_config's quantization_config's `quant_method`
+        quant_method = getattr(model_config.hf_config,
+                               "quantization_config", {}).get(
+                                   "quant_method", None)
+        quant_config = _get_quantization_config(model_config, self.load_config)
         with set_default_torch_dtype(model_config.dtype):
             with target_device:
                 model = _initialize_model(model_config, self.load_config,
                                           lora_config, cache_config,
                                           scheduler_config)
-            model.load_weights(
-                self._get_weights_iterator(model_config.model,
-                                           model_config.revision,
-                                           fall_back_to_pt=getattr(
-                                               model,
-                                               "fall_back_to_pt_during_load",
-                                               True)), )
+            # check if quant_method is auto_quant
+            if quant_method != "int4":
+                model.load_weights(
+                    self._get_weights_iterator(model_config.model,
+                                            model_config.revision,
+                                            fall_back_to_pt=getattr(
+                                                model,
+                                                "fall_back_to_pt_during_load",
+                                                True)), )
+            else:
+                replace_quant_params(model, quant_config,
+                                     modules_to_not_convert="lm_head")
+                torch.cuda.synchronize()
+                if quant_config.from_float:
+                    model = model.cuda()
+                gc.collect()
+                torch.cuda.empty_cache()
 
             for _, module in model.named_modules():
                 quant_method = getattr(module, "quant_method", None)
@@ -947,6 +964,8 @@ class BitsAndBytesModelLoader(BaseModelLoader):
                 self._load_weights(model_config, model)
 
         return model.eval()
+    
+
 
 
 class GGUFModelLoader(BaseModelLoader):
