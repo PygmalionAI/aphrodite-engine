@@ -815,7 +815,7 @@ class KAIGenerationInputSchema(BaseModel):
     stop_sequence: Optional[List[str]] = None
     include_stop_str_in_output: Optional[bool] = False
 
-    @model_validator(mode='after')
+    @model_validator(mode='before')
     def check_context(cls, values):  # pylint: disable=no-self-argument
         assert values.get("max_length") <= values.get(
             "max_context_length"
