@@ -1545,12 +1545,22 @@ class LoRAConfig:
     def __post_init__(self):
         # Setting the maximum rank to 256 should be able to satisfy the vast
         # majority of applications.
-        possible_max_ranks = (8, 16, 32, 64, 128, 256)
+        from aphrodite.lora.worker_manager import APHRODITE_USE_CUDA_LORA
+        if not APHRODITE_USE_CUDA_LORA:
+            possible_max_ranks = (8, 16, 32, 64)
+        else:
+            possible_max_ranks = (8, 16, 32, 64, 128, 256)
         possible_lora_extra_vocab_size = (0, 256, 512)
         if self.max_lora_rank not in possible_max_ranks:
-            raise ValueError(
-                f"max_lora_rank ({self.max_lora_rank}) must be one of "
-                f"{possible_max_ranks}.")
+            if APHRODITE_USE_CUDA_LORA:
+                raise ValueError(
+                    f"max_lora_rank ({self.max_lora_rank}) must be one of "
+                    f"{possible_max_ranks}. To support higher ranks, please "
+                    "do not use the CUDA extensions for LoRA.")
+            else:
+                raise ValueError(
+                    f"max_lora_rank ({self.max_lora_rank}) must be one of "
+                    f"{possible_max_ranks}.")
         if self.lora_extra_vocab_size not in possible_lora_extra_vocab_size:
             raise ValueError(
                 f"lora_extra_vocab_size ({self.lora_extra_vocab_size}) "

@@ -177,6 +177,9 @@ class cmake_build_ext(build_ext):
 
         num_jobs, nvcc_threads = self.compute_num_jobs()
 
+        if _install_punica():
+            cmake_args += ['-DAPHRODITE_INSTALL_PUNICA_KERNELS=ON']
+
         if nvcc_threads:
             cmake_args += ['-DNVCC_THREADS={}'.format(nvcc_threads)]
 
@@ -268,6 +271,17 @@ def _build_custom_ops() -> bool:
 
 def _build_core_ext() -> bool:
     return not _is_neuron() and not _is_tpu()
+
+def _install_punica() -> bool:
+    install_punica = bool(
+        int(os.getenv("APHRODITE_INSTALL_PUNICA_KERNELS", "0")))
+    device_count = torch.cuda.device_count()
+    for i in range(device_count):
+        major, minor = torch.cuda.get_device_capability(i)
+        if major < 8:
+            install_punica = False
+            break
+    return install_punica
 
 
 def get_hipcc_rocm_version():
@@ -443,6 +457,9 @@ if _is_cuda() or _is_hip():
 
 if _build_custom_ops():
     ext_modules.append(CMakeExtension(name="aphrodite._C"))
+
+if _is_cuda() or _is_hip() and _install_punica():
+    ext_modules.append(CMakeExtension(name="aphrodite._punica_C"))
 
 package_data = {
     "aphrodite": [

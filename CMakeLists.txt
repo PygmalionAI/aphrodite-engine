@@ -245,6 +245,74 @@ define_gpu_extension_target(
   WITH_SOABI)
 
 #
+# _punica_C extension
+#
+
+set(APHRODITE_PUNICA_EXT_SRC
+  "kernels/punica/bgmv/bgmv_bf16_bf16_bf16.cu"
+  "kernels/punica/bgmv/bgmv_bf16_bf16_fp16.cu"
+  "kernels/punica/bgmv/bgmv_bf16_fp16_bf16.cu"
+  "kernels/punica/bgmv/bgmv_bf16_fp16_fp16.cu"
+  "kernels/punica/bgmv/bgmv_bf16_fp32_bf16.cu"
+  "kernels/punica/bgmv/bgmv_bf16_fp32_fp16.cu"
+  "kernels/punica/bgmv/bgmv_fp16_bf16_bf16.cu"
+  "kernels/punica/bgmv/bgmv_fp16_bf16_fp16.cu"
+  "kernels/punica/bgmv/bgmv_fp16_fp16_bf16.cu"
+  "kernels/punica/bgmv/bgmv_fp16_fp16_fp16.cu"
+  "kernels/punica/bgmv/bgmv_fp16_fp32_bf16.cu"
+  "kernels/punica/bgmv/bgmv_fp16_fp32_fp16.cu"
+  "kernels/punica/bgmv/bgmv_fp32_bf16_bf16.cu"
+  "kernels/punica/bgmv/bgmv_fp32_bf16_fp16.cu"
+  "kernels/punica/bgmv/bgmv_fp32_fp16_bf16.cu"
+  "kernels/punica/bgmv/bgmv_fp32_fp16_fp16.cu"
+  "kernels/punica/bgmv/bgmv_fp32_fp32_bf16.cu"
+  "kernels/punica/bgmv/bgmv_fp32_fp32_fp16.cu"
+  "kernels/punica/punica_ops.cu"
+  "kernels/punica/torch_bindings.cpp")
+
+#
+# Copy GPU compilation flags+update for punica
+#
+set(APHRODITE_PUNICA_GPU_FLAGS ${APHRODITE_GPU_FLAGS})
+list(REMOVE_ITEM APHRODITE_PUNICA_GPU_FLAGS
+  "-D__CUDA_NO_HALF_OPERATORS__"
+  "-D__CUDA_NO_HALF_CONVERSIONS__"
+  "-D__CUDA_NO_BFLOAT16_CONVERSIONS__"
+  "-D__CUDA_NO_HALF2_OPERATORS__")
+
+#
+# Filter out CUDA architectures < 8.0 for punica.
+#
+if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
+  set(APHRODITE_PUNICA_GPU_ARCHES)
+  foreach(ARCH ${APHRODITE_GPU_ARCHES})
+    string_to_ver(CODE_VER ${ARCH})
+    if (CODE_VER GREATER_EQUAL 8.0)
+      list(APPEND APHRODITE_PUNICA_GPU_ARCHES ${ARCH})
+    endif()
+  endforeach()
+  message(STATUS "Punica target arches: ${APHRODITE_PUNICA_GPU_ARCHES}")
+elseif(${APHRODITE_GPU_LANG} STREQUAL "HIP")
+  set(APHRODITE_PUNICA_GPU_ARCHES ${APHRODITE_GPU_ARCHES})
+  message(STATUS "Punica target arches: ${APHRODITE_PUNICA_GPU_ARCHES}")
+endif()
+
+if (APHRODITE_PUNICA_GPU_ARCHES)
+  define_gpu_extension_target(
+    _punica_C
+    DESTINATION aphrodite
+    LANGUAGE ${APHRODITE_GPU_LANG}
+    SOURCES ${APHRODITE_PUNICA_EXT_SRC}
+    COMPILE_FLAGS ${APHRODITE_PUNICA_GPU_FLAGS}
+    ARCHITECTURES ${APHRODITE_PUNICA_GPU_ARCHES}
+    USE_SABI 3
+    WITH_SOABI)
+else()
+  message(WARNING "Unable to create _punica_C target because none of the "
+    "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 8.0")
+endif()
+
+#
 # _moe_C extension
 #
 
@@ -268,4 +336,13 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA" OR APHRODITE_GPU_LANG STREQUAL "HIP")
 
   message(STATUS "Enabling moe extension.")
   add_dependencies(default _moe_C)
+
+  # Enable punica if -DAPHRODITE_INSTALL_PUNICA_KERNELS=ON or
+  # APHRODITE_INSTALL_PUNICA_KERNELS is set in the environment and
+  # there are supported target arches.
+  if (APHRODITE_PUNICA_GPU_ARCHES AND
+      (ENV{APHRODITE_INSTALL_PUNICA_KERNELS} OR APHRODITE_INSTALL_PUNICA_KERNELS))
+    message(STATUS "Enabling punica extension.")
+    add_dependencies(default _punica_C)
+  endif()
 endif()

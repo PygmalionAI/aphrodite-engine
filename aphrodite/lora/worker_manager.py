@@ -1,3 +1,4 @@
+import os
 from contextlib import contextmanager
 from typing import Any, Dict, List, Literal, Optional, Set, Type, Union
 
@@ -9,11 +10,19 @@ from aphrodite.adapter_commons.utils import (add_adapter_worker,
                                              set_active_adapters_worker)
 from aphrodite.adapter_commons.worker_manager import AbstractWorkerManager
 from aphrodite.common.config import LoRAConfig
-from aphrodite.lora.models import (LoRAModel, LoRAModelManager,
-                                   LRUCacheLoRAModelManager,
-                                   create_lora_manager)
 from aphrodite.lora.request import LoRARequest
 from aphrodite.lora.utils import get_adapter_absolute_path
+
+APHRODITE_USE_CUDA_LORA = bool(os.getenv("APHRODITE_USE_CUDA_LORA", False))
+
+if APHRODITE_USE_CUDA_LORA:
+    from aphrodite.lora.triton.models import (LoRAModel, LoRAModelManager,
+                                              LRUCacheLoRAModelManager,
+                                              create_lora_manager)
+else:
+    from aphrodite.lora.triton.models import (LoRAModel, LoRAModelManager,
+                                              LRUCacheLoRAModelManager,
+                                              create_lora_manager)
 
 
 class WorkerLoRAManager(AbstractWorkerManager):

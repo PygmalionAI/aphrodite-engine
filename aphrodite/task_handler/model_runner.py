@@ -30,6 +30,7 @@ from aphrodite.attention import AttentionMetadata, get_attn_backend
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,
                                      PromptAdapterConfig, SchedulerConfig)
+from aphrodite.common.logger import log_once
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceGroupMetadata)
@@ -42,9 +43,10 @@ from aphrodite.distributed.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size,
     graph_capture)
 from aphrodite.inputs import INPUT_REGISTRY, InputRegistry
-from aphrodite.lora.layers import LoRAMapping
+from aphrodite.lora import LoRAMapping
 from aphrodite.lora.request import LoRARequest
-from aphrodite.lora.worker_manager import LRUCacheWorkerLoRAManager
+from aphrodite.lora.worker_manager import (APHRODITE_USE_CUDA_LORA,
+                                           LRUCacheWorkerLoRAManager)
 from aphrodite.modeling import SamplingMetadata, SamplingMetadataCache
 from aphrodite.modeling.model_loader import get_model
 from aphrodite.modeling.model_loader.tensorizer import TensorizerConfig
@@ -447,6 +449,19 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             self.block_aligned_sliding_window = \
                 self.sliding_window_blocks * self.block_size
 
+        # LoRA
+        if self.enable_lora and not APHRODITE_USE_CUDA_LORA:
+            log_once(
+                level="WARNING",
+                message=
+                "LoRA is enabled with Triton backend. "
+                "This may lead to slowdowns, but will offer "
+                "a greater range of LoRA rank and vocab size "
+                "support. To use the CUDA backend instead, "
+                "set the environment variable "
+                "APHRODITE_USE_CUDA_LORA=1."
+            )
+
     def _compute_lens(self, inter_data: InterDataForSeqGroup, seq_idx: int,
                       seq_group_metadata: SequenceGroupMetadata):
         """Compute context length, sequence length and tokens
@@ -731,10 +746,16 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
                 flatten_2d_lists(inter_data.lora_prompt_mapping)
                 for inter_data in self.inter_data_list
             ])
-            lora_mapping = LoRAMapping(
-                **dict(index_mapping=lora_index_mapping,
-                       prompt_mapping=lora_prompt_mapping,
-                       is_prefill=not self.decode_only))
+            if not APHRODITE_USE_CUDA_LORA:
+                lora_mapping = LoRAMapping(
+                    **dict(index_mapping=lora_index_mapping,
+                        prompt_mapping=lora_prompt_mapping,
+                        is_prefill=not self.decode_only))
+            else:
+                lora_mapping = LoRAMapping(
+                lora_index_mapping,
+                lora_prompt_mapping,
+            )
 
         # Prompt adapter data.
         prompt_adapter_requests: Set[PromptAdapterRequest] = set()
@@ -1346,10 +1367,16 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                         )
 
                     if self.lora_config:
-                        lora_mapping = LoRAMapping(
-                            **dict(index_mapping=[0] * batch_size,
-                                   prompt_mapping=[0] * batch_size,
-                                   is_prefill=False))
+                        if not APHRODITE_USE_CUDA_LORA:
+                            lora_mapping = LoRAMapping(
+                                **dict(index_mapping=[0] * batch_size,
+                                    prompt_mapping=[0] * batch_size,
+                                    is_prefill=False))
+                        else:
+                            lora_mapping = LoRAMapping(
+                            [0] * batch_size,
+                            [0] * batch_size,
+                        )
                         self.set_active_loras(set(), lora_mapping)
 
                     if self.prompt_adapter_config:

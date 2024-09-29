@@ -1,6 +1,5 @@
 # pylint: disable=unused-argument
 import math
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -17,7 +16,7 @@ from aphrodite.distributed import (get_tensor_model_parallel_rank,
                                    tensor_model_parallel_all_reduce,
                                    tensor_model_parallel_gather)
 from aphrodite.distributed.utils import divide
-from aphrodite.lora.punica import PunicaWrapper
+from aphrodite.lora.triton.punica import PunicaWrapper
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               MergedColumnParallelLinear,
                                               QKVParallelLinear,
@@ -62,11 +61,6 @@ def _not_fully_sharded_can_replace(can_replace):
         return can_replace(*args, **kwargs) and condition
 
     return dec
-
-
-@dataclass
-class LoRAMapping(AdapterMapping):
-    is_prefill: bool = False
 
 
 class BaseLayerWithLoRA(nn.Module):

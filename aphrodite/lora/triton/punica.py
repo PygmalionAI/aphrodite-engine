@@ -12,17 +12,17 @@ import torch
 from aphrodite.triton_utils import HAS_TRITON
 
 if HAS_TRITON:
-    from aphrodite.lora.ops.bgmv_expand import bgmv_expand
-    from aphrodite.lora.ops.bgmv_expand_slice import bgmv_expand_slice
-    from aphrodite.lora.ops.bgmv_shrink import bgmv_shrink
-    from aphrodite.lora.ops.sgmv_expand import sgmv_expand
-    from aphrodite.lora.ops.sgmv_expand_slice import sgmv_expand_slice
-    from aphrodite.lora.ops.sgmv_shrink import sgmv_shrink
+    from aphrodite.lora.triton.ops.bgmv_expand import bgmv_expand
+    from aphrodite.lora.triton.ops.bgmv_expand_slice import bgmv_expand_slice
+    from aphrodite.lora.triton.ops.bgmv_shrink import bgmv_shrink
+    from aphrodite.lora.triton.ops.sgmv_expand import sgmv_expand
+    from aphrodite.lora.triton.ops.sgmv_expand_slice import sgmv_expand_slice
+    from aphrodite.lora.triton.ops.sgmv_shrink import sgmv_shrink
 
 if TYPE_CHECKING:
     # avoid circuit import
-    from aphrodite.lora.layers import LoRAMapping
-    from aphrodite.lora.models import LongContextLoRAContext
+    from aphrodite.lora import LoRAMapping
+    from aphrodite.lora.triton.models import LongContextLoRAContext
 
 
 def compute_meta(

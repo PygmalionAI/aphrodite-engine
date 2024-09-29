@@ -4,7 +4,7 @@ import math
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
 import safetensors.torch
 import torch
@@ -19,16 +19,14 @@ from aphrodite.adapter_commons.utils import (add_adapter, deactivate_adapter,
                                              set_adapter_mapping)
 from aphrodite.common.config import LoRAConfig
 from aphrodite.common.utils import is_pin_memory_available
-from aphrodite.lora.layers import (BaseLayerWithLoRA,
-                                   LinearScalingRotaryEmbeddingWithLora,
-                                   LoRAMapping)
+from aphrodite.lora import LoRAMapping
+from aphrodite.lora.cuda.layers import (BaseLayerWithLoRA,
+                                        LinearScalingRotaryEmbeddingWithLora)
+from aphrodite.lora.cuda.utils import (from_layer, from_layer_logits_processor,
+                                       parse_fine_tuned_lora_name,
+                                       replace_submodule)
 from aphrodite.lora.lora import LoRALayerWeights, PackedLoRALayerWeights
-from aphrodite.lora.punica import PunicaWrapper
-from aphrodite.lora.utils import (from_layer, from_layer_logits_processor,
-                                  parse_fine_tuned_lora_name,
-                                  replace_submodule)
 from aphrodite.modeling.models.interfaces import SupportsLoRA
-from aphrodite.modeling.models.utils import PPMissingLayer
 
 _GLOBAL_LORA_ID = 0
 
@@ -43,6 +41,115 @@ class LongContextLoRAContext:
     # offsets to the sin_cos_cache for each lora_id loaded.
     # This value is dynamically modified.
     offsets_by_lora_id: Dict[int, int] = field(default_factory=dict)
+
+
+def convert_mapping(
+    mapping: LoRAMapping,
+    lora_index_to_id: List[Optional[int]],
+    max_loras: int,
+    vocab_size: int,
+    extra_vocab_size: int,
+    long_lora_context: Optional[LongContextLoRAContext] = None,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
+           Optional[torch.Tensor], List[int]]:
+    """Converts LoRAMapping to index tensors.
+
+    Args:
+        mapping: LoRAMapping mapping rows in a batch to LoRA ids.
+        lora_index_to_id: List mapping LoRA ids to LoRA indices.
+        max_loras: Maximum number of LoRAs.
+        vocab_size: Model vocab size.
+        extra_vocab_size: Extra vocab size each LoRA can have.
+        long_lora_context: Passed if there are long context lora in a batch.
+
+    Returns:
+        A tuple of tensors:
+            base_indices: Tensor of shape [batch_size] mapping batch rows to
+                LoRA indices.
+            sampler_indices: Tensor of shape [batch_size] mapping requests to
+                LoRA indices for sampler. For generation, this will be the
+                same as base_indicies. For prefill, this will map requests
+                to LoRA indices.
+            sampler_indices_padded: Tensor of shape [batch_size] mapping
+                requests to LoRA indices for sampler with padding.
+                Same as sampler_indicies, but -1 is replaced with
+                max_loras.
+            embeddings_indices: Tensor of shape [2, batch_size] mapping
+                requests to embedding indices. First row is for embeddings
+                added by the LoRAs, second row is for the LoRA.lora_a
+                embeddings.
+            long_lora_indices: Tensor of shape [batch_size] mapping
+                requests to RoPE offsets and rot dims for long LoRAs.
+                None if long context lora doesn't exist.
+            indices_len: List of lengths of the above tensors.
+                Used to index into each tensor. It contains length for
+                (base_indices, sampler_indices, sampler_indices_padded,
+                embeddings_indices, long_lora_indices). If long_lora doesn't
+                exist, it only contains first 4 entries.
+    """
+    index_mapping_indices: List[int] = list(mapping.index_mapping).copy()
+    embedding_indices = index_mapping_indices.copy()
+    lora_indices = index_mapping_indices.copy()
+    long_lora_offsets: Optional[torch.Tensor] = None
+    if long_lora_context:
+        long_lora_offsets = torch.zeros(len(index_mapping_indices),
+                                        device="cuda",
+                                        dtype=torch.long)
+    prompt_mapping: List[int] = [
+        lora_index_to_id.index(x) if x > 0 else -1
+        for x in mapping.prompt_mapping
+    ]
+    lora_idx = None
+    for i in range(len(index_mapping_indices)):
+        # TODO index can be slow. optimize
+        lora_idx = (lora_index_to_id.index(index_mapping_indices[i])
+                    if index_mapping_indices[i] > 0 else -1)
+        embedding_indices[i] = lora_idx if index_mapping_indices[i] > 0 else 0
+        lora_indices[i] = lora_idx
+        if long_lora_context:
+            assert long_lora_offsets is not None
+            lora_offset: int = long_lora_context.offsets_by_lora_id.get(
+                index_mapping_indices[i], 0)
+            long_lora_offsets[i] = lora_offset
+
+    indices_list: List[Union[List[int], torch.Tensor]] = [
+        index_mapping_indices, lora_indices, embedding_indices
+    ]
+    if long_lora_context:
+        assert long_lora_offsets is not None
+        indices_list.append(long_lora_offsets)
+    indices = torch.tensor(indices_list, dtype=torch.long, device="cuda")
+    prompt_mapping_tensor = torch.tensor(prompt_mapping,
+                                         device="cuda",
+                                         dtype=torch.long)
+    embeddings_indices = torch.stack([
+        indices[2] * extra_vocab_size,
+        indices[2] * (vocab_size + extra_vocab_size)
+    ])
+    embeddings_indices[embeddings_indices == -1] = max_loras - 1
+    base_indices = indices[1]
+    sampler_indices = prompt_mapping_tensor
+    sampler_indices_padded = sampler_indices.clone()
+    sampler_indices_padded[sampler_indices_padded == -1] = max_loras - 1
+    sampler_indices_padded = (
+        torch.arange(
+            0, len(sampler_indices_padded), device="cuda", dtype=torch.long) +
+        (sampler_indices_padded * len(sampler_indices_padded)))
+    long_lora_indices = None
+    long_lora_indices_len: Optional[int] = None
+    if long_lora_context:
+        long_lora_indices = indices[3]
+        long_lora_indices_len = long_lora_indices.shape[-1]
+    # Contain length of indices tensors. Used to index into each tensor.
+    indices_len = [
+        base_indices.shape[-1], sampler_indices.shape[-1],
+        sampler_indices_padded.shape[-1], embeddings_indices.shape[-1]
+    ]
+    if long_lora_indices_len is not None:
+        indices_len.append(long_lora_indices_len)
+
+    return (base_indices, sampler_indices, sampler_indices_padded,
+            embeddings_indices, long_lora_indices, indices_len)
 
 
 def get_lora_id():
@@ -239,8 +346,7 @@ class LoRAModel(AdapterModel):
                 if part_name not in expected_lora_modules:
                     unexpected_modules.append(module)
             # loaded lora's target modules must be a subset of
-            # expected_lora_modules. It is not reliable. See
-            # https://github.com/vllm-project/vllm/pull/5909. But there's no
+            # expected_lora_modules. It is not reliable. But there's no
             # other better mechanism.
             if unexpected_modules:
                 print(unexpected_modules, "modules")
@@ -249,7 +355,7 @@ class LoRAModel(AdapterModel):
                     f" target modules in {expected_lora_modules}"
                     f" but received {unexpected_modules}."
                     f" Please verify that the loaded LoRA module is correct")
-            tensors = torch.load(lora_bin_file_path, map_location=device)
+            tensors = torch.load(lora_bin_file_path)
         else:
             raise ValueError(f"{lora_dir} doesn't contain tensors")
 
@@ -258,12 +364,10 @@ class LoRAModel(AdapterModel):
             embeddings = safetensors.torch.load_file(
                 new_embeddings_tensor_path)
         elif os.path.isfile(new_embeddings_bin_file_path):
-            embeddings = torch.load(new_embeddings_bin_file_path,
-                                    map_location=device)
+            embeddings = torch.load(new_embeddings_bin_file_path)
 
         rank = config["r"]
-        lora_alpha = config["lora_alpha"] * math.sqrt(rank) if config.get(
-            "use_rslora", False) else config["lora_alpha"]
+        lora_alpha = config["lora_alpha"]
         context_length = config.get("context_length", None)
         scaling_factor = None
         if context_length:
@@ -317,12 +421,29 @@ class LoRAModelManager(AdapterModelManager):
         self.lora_index_to_id: List[Optional[int]] = [None] * self.lora_slots
         self.vocab_size = vocab_size
         self.long_lora_context: Optional[LongContextLoRAContext] = None
-        self.punica_wrapper = PunicaWrapper(max_num_batched_tokens,
-                                            max_batches=self.max_num_seqs,
-                                            device="cuda")
+        self.base_indices = torch.empty(self.max_num_batched_tokens,
+                                        dtype=torch.long,
+                                        device="cuda")
+        self.sampler_indices = torch.empty(self.max_num_batched_tokens,
+                                           dtype=torch.long,
+                                           device="cuda")
+        self.sampler_indices_padded = torch.empty(self.max_num_batched_tokens,
+                                                  dtype=torch.long,
+                                                  device="cuda")
+        self.embeddings_indices = torch.empty(2,
+                                              self.max_num_batched_tokens,
+                                              dtype=torch.long,
+                                              device="cuda")
+        self.long_lora_indices = torch.empty(self.max_num_batched_tokens,
+                                             dtype=torch.long,
+                                             device="cuda")
         # Scaling factor -> offset to the sin_cos_cache to it.
         # Used for long context lora.
         self.scaling_factor_to_offset: Dict[float, int] = {}
+        # 4 is the number of indicies tensors defined above
+        # base_indices, sampler_indices, sampler_indices_padded,
+        # embeddings_indices
+        self.indices_len: List[Optional[int]] = [None] * 4
         super().__init__(model)
         if hasattr(self.model, "supported_lora_modules"):
             self.supported_lora_modules = copy.deepcopy(
@@ -368,8 +489,8 @@ class LoRAModelManager(AdapterModelManager):
         index, _ = first_free_slot
         self._active_adapters[lora_id] = None
         lora_model = self._registered_adapters[lora_id]
-        logger.debug("Activating LoRA. int id: %d, slot index: %d",
-                     lora_model.id, index)
+        logger.debug(f"Activating LoRA. int id: {lora_model.id}, "
+                     f"slot index: {index}")
         self.lora_index_to_id[index] = lora_model.id
         for module_name, module in self.modules.items():
             module_lora = lora_model.get_lora(module_name)
@@ -414,16 +535,28 @@ class LoRAModelManager(AdapterModelManager):
             "Pinning is not supported in LoRAModelManager."
             "Use LRUCacheLoRAModelManager for pinning")  # type: ignore
 
+    # TODO see if this can be vectorized
     def _set_adapter_mapping(self, mapping: LoRAMapping) -> None:
-        # update lora states
-        self.punica_wrapper.update_metadata(
-            mapping,
-            self.lora_index_to_id,
-            self.lora_slots + 1,
-            self.vocab_size,
-            self.lora_config.lora_extra_vocab_size,
-            self.long_lora_context,
-        )
+        (base_indices, sampler_indices, sampler_indices_padded,
+         embeddings_indices, long_lora_offsets_tensor,
+         indices_len) = convert_mapping(mapping, self.lora_index_to_id,
+                                        self.lora_slots + 1, self.vocab_size,
+                                        self.lora_config.lora_extra_vocab_size,
+                                        self.long_lora_context)
+        self.base_indices[:base_indices.shape[0]].copy_(base_indices)
+        self.sampler_indices[:sampler_indices.shape[0]].copy_(sampler_indices)
+        self.sampler_indices_padded[:sampler_indices_padded.shape[0]].copy_(
+            sampler_indices_padded)
+        self.embeddings_indices[:embeddings_indices.
+                                shape[0], :embeddings_indices.shape[1]].copy_(
+                                    embeddings_indices)
+        if long_lora_offsets_tensor is not None:
+            self.long_lora_indices[:long_lora_offsets_tensor.shape[0]].copy_(
+                long_lora_offsets_tensor)
+        else:
+            self.long_lora_indices.zero_()
+        # Maintain the reference
+        self.indices_len[:] = indices_len
 
     def remove_all_adapters(self):
         """Remove all LoRAModels from the manager."""
@@ -434,8 +567,6 @@ class LoRAModelManager(AdapterModelManager):
     def _create_lora_modules(self):
         for module_name, module in self.model.named_modules(
                 remove_duplicate=False):
-            if isinstance(module, PPMissingLayer):
-                continue
             if not self._match_target_modules(module_name):
                 continue
             parts = module_name.split(".")[-1]
@@ -463,8 +594,10 @@ class LoRAModelManager(AdapterModelManager):
                                                 self.model.config))
             self.register_module(module_name, new_module)
             self._register_packed_modules(module_name)
-            # All lora layers share the same punica_wrapper based on reference.
-            new_module.set_mapping(self.punica_wrapper)
+            new_module.set_mapping(self.base_indices, self.sampler_indices,
+                                   self.sampler_indices_padded,
+                                   self.embeddings_indices,
+                                   self.long_lora_indices, self.indices_len)
 
     def register_module(self, module_name: str, module: "BaseLayerWithLoRA"):
         assert isinstance(module, BaseLayerWithLoRA)
@@ -578,11 +711,9 @@ class LoRAModelManager(AdapterModelManager):
                                   self._deactivate_adapter)
 
     def add_adapter(self, adapter: LoRAModel) -> bool:
-        logger.debug(
-            "Adding lora. Model id: %d, "
-            "int id: %d, "
-            "scaling factor: %s", adapter.id, adapter.id,
-            adapter.scaling_factor)
+        logger.debug(f"Adding lora. Model id: {adapter.id}, "
+                     f"int id: {adapter.id}, "
+                     f"scaling factor: {adapter.scaling_factor}")
         return add_adapter(adapter, self._registered_adapters, self.capacity,
                            self._add_adapter)
 
@@ -632,10 +763,9 @@ class LRUCacheLoRAModelManager(LoRAModelManager):
 
     def add_adapter(self, lora: LoRAModel) -> bool:
         """Add a LoRAModel to the manager."""
-        logger.debug(
-            "Adding lora. Model id: %d, "
-            "int id: %d, "
-            "scaling factor: %s", lora.id, lora.id, lora.scaling_factor)
+        logger.debug(f"Adding lora. Model id: {lora.id}, "
+                     f"int id: {lora.id}, "
+                     f"scaling factor: {lora.scaling_factor}")
         if lora.id not in self._registered_adapters:
             self._add_adapter(lora)
             was_added = True

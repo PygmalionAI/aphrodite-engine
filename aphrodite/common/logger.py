@@ -6,7 +6,7 @@ import datetime
 import logging
 import os
 import sys
-from functools import partial
+from functools import lru_cache, partial
 from typing import Optional
 
 from loguru import logger
@@ -82,6 +82,7 @@ def _log_formatter(record: dict):
 _logged_messages = set()
 
 
+@lru_cache(maxsize=None)
 def log_once(level, message, *args, **kwargs):
     if message not in _logged_messages:
         _logged_messages.add(message)
