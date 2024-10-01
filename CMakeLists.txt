@@ -216,7 +216,11 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     "kernels/all_reduce/custom_all_reduce.cu"
     "kernels/quantization/cutlass_w8a8/scaled_mm_entry.cu"
     "kernels/quantization/cutlass_w8a8/scaled_mm_c2x.cu"
-    "kernels/quantization/cutlass_w8a8/scaled_mm_c3x.cu")
+    "kernels/quantization/cutlass_w8a8/scaled_mm_c3x.cu"
+    "kernels/quantization/flute/qgemm_kernel_raw.cu"
+    "kernels/quantization/flute/qgemm_kernel.cu"
+    # "kernels/quantization/flute/qgemm.cpp"
+    )
 
   #
   # The CUTLASS kernels for Hopper require sm90a to be enabled.

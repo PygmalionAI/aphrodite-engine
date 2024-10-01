@@ -478,6 +478,129 @@ def fp_eXmY_linear_forward_cuda(
                                                     _in_feats, _weights,
                                                     _scales, splitK)
 
+# qgemm ops
+@hint_on_error
+def qgemm_simple_80(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    scales: torch.Tensor,
+    table: torch.Tensor,
+    table2: torch.Tensor,
+    workspace: torch.Tensor,
+    num_bits: int,
+    group_size: int,
+) -> torch.Tensor:
+    return torch.ops._C.qgemm_simple_80(
+        input, weight, scales, table, table2, workspace, num_bits, group_size
+    )
+
+@hint_on_error
+def qgemm_simple_86(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    scales: torch.Tensor,
+    table: torch.Tensor,
+    table2: torch.Tensor,
+    workspace: torch.Tensor,
+    num_bits: int,
+    group_size: int,
+) -> torch.Tensor:
+    return torch.ops._C.qgemm_simple_86(
+        input, weight, scales, table, table2, workspace, num_bits, group_size
+    )
+
+@hint_on_error
+def qgemm_simple_89(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    scales: torch.Tensor,
+    table: torch.Tensor,
+    table2: torch.Tensor,
+    workspace: torch.Tensor,
+    num_bits: int,
+    group_size: int,
+) -> torch.Tensor:
+    return torch.ops._C.qgemm_simple_89(
+        input, weight, scales, table, table2, workspace, num_bits, group_size
+    )
+
+@hint_on_error
+def qgemm_raw_simple_80(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    output: torch.Tensor,
+    scales: torch.Tensor,
+    table: torch.Tensor,
+    table2: torch.Tensor,
+    workspace: torch.Tensor,
+    num_bits: int,
+    group_size: int,
+    template_id: int,
+) -> None:
+    torch.ops._C.qgemm_raw_simple_80(
+        input,
+        weight,
+        output,
+        scales,
+        table,
+        table2,
+        workspace,
+        num_bits,
+        group_size,
+        template_id,
+    )
+
+@hint_on_error
+def qgemm_raw_simple_86(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    output: torch.Tensor,
+    scales: torch.Tensor,
+    table: torch.Tensor,
+    table2: torch.Tensor,
+    workspace: torch.Tensor,
+    num_bits: int,
+    group_size: int,
+    template_id: int,
+) -> None:
+    torch.ops._C.qgemm_raw_simple_86(
+        input,
+        weight,
+        output,
+        scales,
+        table,
+        table2,
+        workspace,
+        num_bits,
+        group_size,
+        template_id,
+    )
+
+@hint_on_error
+def qgemm_raw_simple_89(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    output: torch.Tensor,
+    scales: torch.Tensor,
+    table: torch.Tensor,
+    table2: torch.Tensor,
+    workspace: torch.Tensor,
+    num_bits: int,
+    group_size: int,
+    template_id: int,
+) -> None:
+    torch.ops._C.qgemm_raw_simple_89(
+        input,
+        weight,
+        output,
+        scales,
+        table,
+        table2,
+        workspace,
+        num_bits,
+        group_size,
+        template_id,
+    )
 
 # mamba
 def causal_conv1d_fwd(x: torch.Tensor, weight: torch.Tensor,

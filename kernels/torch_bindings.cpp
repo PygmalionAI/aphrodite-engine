@@ -3,7 +3,7 @@
 #include "ops.h"
 #include "core/registration.h"
 #include "quantization/quant_ops.h"
-
+#include "cute/numeric/integral_constant.hpp"
 #include <torch/library.h>
 
 // Note on op signatures:
@@ -204,6 +204,37 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "                            Tensor _scales, int splitK=1) -> Tensor");
   ops.impl("fp_eXmY_linear_forward_cuda", torch::kCUDA,
            &fp_eXmY_linear_forward_cuda);
+
+  ops.def(
+      "qgemm_simple_80(Tensor input, Tensor weight, Tensor scales, Tensor "
+      "table, Tensor table2, Tensor(a!) workspace, int num_bits, int "
+      "group_size) -> Tensor");
+  ops.def(
+      "qgemm_simple_86(Tensor input, Tensor weight, Tensor scales, Tensor "
+      "table, Tensor table2, Tensor(a!) workspace, int num_bits, int "
+      "group_size) -> Tensor");
+  ops.def(
+      "qgemm_simple_89(Tensor input, Tensor weight, Tensor scales, Tensor "
+      "table, Tensor table2, Tensor(a!) workspace, int num_bits, int "
+      "group_size) -> Tensor");
+  ops.def(
+      "qgemm_raw_simple_80(Tensor input, Tensor weight, Tensor(a!) output, "
+      "Tensor scales, Tensor table, Tensor table2, Tensor(b!) workspace, int "
+      "num_bits, int group_size, int template_id) -> ()");
+  ops.def(
+      "qgemm_raw_simple_86(Tensor input, Tensor weight, Tensor(a!) output, "
+      "Tensor scales, Tensor table, Tensor table2, Tensor(b!) workspace, int "
+      "num_bits, int group_size, int template_id) -> ()");
+  ops.def(
+      "qgemm_raw_simple_89(Tensor input, Tensor weight, Tensor(a!) output, "
+      "Tensor scales, Tensor table, Tensor table2, Tensor(b!) workspace, int "
+      "num_bits, int group_size, int template_id) -> ()");
+  ops.impl("qgemm_simple_80", &qgemm_simple<cute::Int<108>>);
+  ops.impl("qgemm_simple_86", &qgemm_simple<cute::Int<84>>);
+  ops.impl("qgemm_simple_89", &qgemm_simple<cute::Int<128>>);
+  ops.impl("qgemm_raw_simple_80", &qgemm_raw_simple<cute::Int<108>>);
+  ops.impl("qgemm_raw_simple_86", &qgemm_raw_simple<cute::Int<84>>);
+  ops.impl("qgemm_raw_simple_89", &qgemm_raw_simple<cute::Int<128>>);
 
 #endif
 
