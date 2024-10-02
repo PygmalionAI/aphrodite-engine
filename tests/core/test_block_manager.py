@@ -6,13 +6,14 @@ import pytest
 
 from aphrodite import SamplingParams
 from aphrodite.common.block import PhysicalTokenBlock
-from aphrodite.processing.block.utils import (STR_NOT_IMPL_ENC_DEC_PREFIX_CACHE,
-                                        STR_NOT_IMPL_ENC_DEC_SWA)
-from aphrodite.common..block_manager_v1 import (BlockSpaceManagerV1,
-                                             UncachedBlockAllocator)
-from aphrodite.common.interfaces import AllocStatus
-from aphrodite.common.sequence import Logprob, Sequence, SequenceGroup, SequenceStatus
+from aphrodite.common.sequence import (Logprob, Sequence, SequenceGroup,
+                                       SequenceStatus)
 from aphrodite.common.utils import Device
+from aphrodite.processing.block.utils import (
+    STR_NOT_IMPL_ENC_DEC_PREFIX_CACHE, STR_NOT_IMPL_ENC_DEC_SWA)
+from aphrodite.processing.block_manager_v1 import (BlockSpaceManagerV1,
+                                                   UncachedBlockAllocator)
+from aphrodite.processing.interfaces import AllocStatus
 
 from .utils import create_dummy_prompt, create_dummy_prompt_encoder_decoder
 

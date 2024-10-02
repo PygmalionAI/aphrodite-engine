@@ -1,6 +1,7 @@
 """Compare the short outputs of HF and Aphrodite when using greedy sampling.
 
-APHRODITE_TEST_ENABLE_ARTIFICIAL_PREEMPT=1 has to be set before running this test.
+APHRODITE_TEST_ENABLE_ARTIFICIAL_PREEMPT=1 has to be set before running this
+test.
 
 Run `APHRODITE_TEST_ENABLE_ARTIFICIAL_PREEMPT=1
 pytest tests/basic_correctness/test_preemption.py`.
@@ -9,8 +10,8 @@ import pytest
 from prometheus_client import REGISTRY
 
 from aphrodite import SamplingParams
-from aphrodite.core.scheduler import (ARTIFICIAL_PREEMPTION_MAX_CNT,
-                                      ENABLE_ARTIFICIAL_PREEMPT)
+from aphrodite.processing.scheduler import (ARTIFICIAL_PREEMPTION_MAX_CNT,
+                                            ENABLE_ARTIFICIAL_PREEMPT)
 
 from ..models.utils import check_outputs_equal
 
@@ -55,15 +56,18 @@ def test_chunked_prefill_recompute(
             enable_chunked_prefill=enable_chunked_prefill,
             max_num_seqs=max_num_seqs,
     ) as aphrodite_model:
-        aphrodite_outputs = aphrodite_model.generate_greedy(example_prompts, max_tokens)
-        assert (aphrodite_model.model.llm_engine.scheduler[0].artificial_preempt_cnt
+        aphrodite_outputs = aphrodite_model.generate_greedy(example_prompts,
+                                                            max_tokens)
+        assert (
+            aphrodite_model.model.llm_engine.scheduler[0].artificial_preempt_cnt
                 < ARTIFICIAL_PREEMPTION_MAX_CNT)
 
     for i in range(len(example_prompts)):
         hf_output_ids, hf_output_str = hf_outputs[i]
         aphrodite_output_ids, aphrodite_output_str = aphrodite_outputs[i]
         assert hf_output_str == aphrodite_output_str, (
-            f"Test{i}:\nHF: {hf_output_str!r}\nAphrodite: {aphrodite_output_str!r}")
+            f"Test{i}:\nHF: {hf_output_str!r}\nAphrodite: "
+            f"{aphrodite_output_str!r}")
         assert hf_output_ids == aphrodite_output_ids, (
             f"Test{i}:\nHF: {hf_output_ids}\nAphrodite: {aphrodite_output_ids}")
 
@@ -90,8 +94,10 @@ def test_preemption(
             dtype=dtype,
             disable_log_stats=False,
     ) as aphrodite_model:
-        aphrodite_outputs = aphrodite_model.generate_greedy(example_prompts, max_tokens)
-        assert (aphrodite_model.model.llm_engine.scheduler[0].artificial_preempt_cnt
+        aphrodite_outputs = aphrodite_model.generate_greedy(example_prompts,
+                                                            max_tokens)
+        assert (
+            aphrodite_model.model.llm_engine.scheduler[0].artificial_preempt_cnt
                 < ARTIFICIAL_PREEMPTION_MAX_CNT)
         total_preemption = (
             aphrodite_model.model.llm_engine.scheduler[0].num_cumulative_preemption)
@@ -145,9 +151,10 @@ def test_swap(
             swap_space=10,
             disable_log_stats=False,
     ) as aphrodite_model:
-        aphrodite_outputs = aphrodite_model.generate_beam_search(example_prompts,
-                                                       beam_width, max_tokens)
-        assert (aphrodite_model.model.llm_engine.scheduler[0].artificial_preempt_cnt
+        aphrodite_outputs = aphrodite_model.generate_beam_search(
+            example_prompts, beam_width, max_tokens)
+        assert (
+            aphrodite_model.model.llm_engine.scheduler[0].artificial_preempt_cnt
                 < ARTIFICIAL_PREEMPTION_MAX_CNT)
         total_preemption = (
             aphrodite_model.model.llm_engine.scheduler[0].num_cumulative_preemption)
@@ -214,7 +221,8 @@ def test_swap_infeasible(
             example_prompts,
             sampling_params=sampling_params,
         )
-        assert (aphrodite_model.model.llm_engine.scheduler[0].artificial_preempt_cnt
+        assert (
+            aphrodite_model.model.llm_engine.scheduler[0].artificial_preempt_cnt
                 < ARTIFICIAL_PREEMPTION_MAX_CNT)
 
     # Verify the request is ignored and not hang.
@@ -252,7 +260,8 @@ def test_preemption_infeasible(
             sampling_params=sampling_params,
         )
 
-        assert (aphrodite_model.model.llm_engine.scheduler[0].artificial_preempt_cnt
+        assert (
+            aphrodite_model.model.llm_engine.scheduler[0].artificial_preempt_cnt
                 < ARTIFICIAL_PREEMPTION_MAX_CNT)
 
     # Verify the request is ignored and not hang.

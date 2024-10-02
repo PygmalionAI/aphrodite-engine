@@ -56,7 +56,8 @@ def test_models(
                      dtype=dtype,
                      enforce_eager=enforce_eager,
                      gpu_memory_utilization=0.7) as aphrodite_model:
-        aphrodite_outputs = aphrodite_model.generate_greedy(example_prompts, max_tokens)
+        aphrodite_outputs = aphrodite_model.generate_greedy(example_prompts,
+                                                            max_tokens)
 
     check_outputs_equal(
         outputs_0_lst=hf_outputs,

@@ -49,8 +49,8 @@ def test_models(
     tensor_parallel_size: int,
 ) -> None:
     """
-    Checks exact match decode between huggingface model and aphrodite runner with
-    chunked prefill.
+    Checks exact match decode between huggingface model and aphrodite runner
+    with chunked prefill.
     """
     max_num_seqs = chunked_prefill_token_size
     max_num_batched_tokens = chunked_prefill_token_size
@@ -67,7 +67,8 @@ def test_models(
             enforce_eager=enforce_eager,
             max_num_seqs=max_num_seqs,
     ) as aphrodite_model:
-        aphrodite_outputs = aphrodite_model.generate_greedy(example_prompts, max_tokens)
+        aphrodite_outputs = aphrodite_model.generate_greedy(example_prompts,
+                                                            max_tokens)
 
     check_outputs_equal(
         outputs_0_lst=hf_outputs,

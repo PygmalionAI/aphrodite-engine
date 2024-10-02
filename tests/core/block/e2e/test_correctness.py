@@ -208,8 +208,8 @@ def test_v1_v2_greedy_equality_with_cow(baseline_llm_generator,
 def test_lookahead_greedy_equality_with_preemption(baseline_llm_generator,
                                                    test_llm_generator,
                                                    batch_size):
-    """Verify Aphrodite produces the same output with greedy sampling, when lookahead
-    scheduling is used vs. not.
+    """Verify Aphrodite produces the same output with greedy sampling, when
+    lookahead scheduling is used vs. not.
 
     Lookahead scheduling is not expected to modify the output, as it simply
     allocates empty slots ahead of the known token ids in a sliding fashion.

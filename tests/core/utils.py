@@ -4,8 +4,8 @@ from typing import Sequence as GenericSequence
 from typing import Tuple
 
 from aphrodite import SamplingParams
-from aphrodite.lora.request import LoRARequest
 from aphrodite.common.sequence import Logprob, Sequence, SequenceGroup
+from aphrodite.lora.request import LoRARequest
 
 
 def create_dummy_prompt(
