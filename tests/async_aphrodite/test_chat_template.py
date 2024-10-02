@@ -1,6 +1,7 @@
 import pytest
 
-from aphrodite.endpoints.chat_utils import apply_chat_template, load_chat_template
+from aphrodite.endpoints.chat_utils import (apply_chat_template,
+                                            load_chat_template)
 from aphrodite.endpoints.openai.protocol import ChatCompletionRequest
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 

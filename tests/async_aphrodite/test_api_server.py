@@ -37,8 +37,9 @@ def api_server(tokenizer_pool_size: int, engine_use_ray: bool,
         str(tokenizer_pool_size)
     ]
 
-    # Copy the environment variables and append `APHRODITE_ALLOW_ENGINE_USE_RAY=1`
-    # to prevent `--engine-use-ray` raises an exception due to it deprecation
+    # Copy the environment variables and append
+    # `APHRODITE_ALLOW_ENGINE_USE_RAY=1` to prevent
+    # `--engine-use-ray` raises an exception due to it deprecation
     env_vars = os.environ.copy()
     env_vars["APHRODITE_ALLOW_ENGINE_USE_RAY"] = "1"
 

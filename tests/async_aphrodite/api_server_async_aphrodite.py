@@ -5,9 +5,9 @@ import uvicorn
 from fastapi.responses import JSONResponse, Response
 
 import aphrodite.endpoints.api_server
+from aphrodite.common.utils import FlexibleArgumentParser
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
-from aphrodite.common.utils import FlexibleArgumentParser
 
 app = aphrodite.endpoints.api_server.app
 

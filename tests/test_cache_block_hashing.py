@@ -6,8 +6,8 @@ from typing import List, Optional
 
 import pytest
 
-from aphrodite.lora.request import LoRARequest
 from aphrodite.common.sequence import Sequence
+from aphrodite.lora.request import LoRARequest
 from aphrodite.transformers_utils.tokenizer_group import TokenizerGroup
 
 # Make two prefixes with different first blocks.

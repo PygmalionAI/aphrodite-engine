@@ -20,7 +20,8 @@ APHRODITE_ASSETS_CACHE = os.path.expanduser(
         "APHRODITE_ASSETS_CACHE",
         os.path.join(get_default_cache_root(), "aphrodite", "assets"),
     ))
-APHRODITE_IMAGE_FETCH_TIMEOUT = int(os.getenv("APHRODITE_IMAGE_FETCH_TIMEOUT", 5))
+APHRODITE_IMAGE_FETCH_TIMEOUT = int(os.getenv("APHRODITE_IMAGE_FETCH_TIMEOUT",
+                                              5))
 
 def get_cache_dir() -> Path:
     """Get the path to the cache for storing downloaded assets."""
