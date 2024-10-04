@@ -2,7 +2,7 @@ from typing import Any, List, Optional
 
 import pytest
 
-from aphrodite import CompletionOutput, AphroditeEngine, SamplingParams
+from aphrodite import AphroditeEngine, CompletionOutput, SamplingParams
 
 MODEL = "meta-llama/llama-2-7b-hf"
 MAX_TOKENS = 200

@@ -1,4 +1,5 @@
-"""Compare the outputs of HF and distributed Aphrodite when using greedy sampling.
+"""Compare the outputs of HF and distributed Aphrodite when using
+greedy sampling.
 
 Run:
 ```sh
@@ -66,7 +67,8 @@ def test_models(
                      tensor_parallel_size=2,
                      distributed_executor_backend=distributed_executor_backend
                      ) as aphrodite_model:
-        aphrodite_outputs = aphrodite_model.generate_greedy(example_prompts, max_tokens)
+        aphrodite_outputs = aphrodite_model.generate_greedy(
+            example_prompts, max_tokens)
 
     with hf_runner(model, dtype=dtype) as hf_model:
         hf_outputs = hf_model.generate_greedy(example_prompts, max_tokens)

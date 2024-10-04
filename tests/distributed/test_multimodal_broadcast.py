@@ -1,4 +1,5 @@
-"""Compare the outputs of HF and distributed Aphrodite when using greedy sampling.
+"""Compare the outputs of HF and distributed Aphrodite when using greedy
+sampling.
 
 Run:
 ```sh

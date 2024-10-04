@@ -1,8 +1,8 @@
 import pytest
 
-from aphrodite.engine.arg_utils import EngineArgs
-from vllm.engine.llm_engine import LLMEngine
-from vllm.sampling_params import SamplingParams
+from aphrodite.common.sampling_params import SamplingParams
+from aphrodite.engine.aphrodite_engine import AphroditeEngine
+from aphrodite.engine.args_tools import EngineArgs
 
 
 @pytest.mark.parametrize("model", ["facebook/opt-125m"])
@@ -25,7 +25,7 @@ def test_computed_prefix_blocks(model: str, block_size: int):
                              block_size=block_size,
                              enable_prefix_caching=True)
 
-    engine = LLMEngine.from_engine_args(engine_args)
+    engine = AphroditeEngine.from_engine_args(engine_args)
     sampling_params = SamplingParams()
 
     engine.add_request("0", prompt + prompt2, sampling_params)

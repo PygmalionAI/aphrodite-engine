@@ -69,8 +69,9 @@ def test_models(
             distributed_executor_backend=distributed_executor_backend,
             enforce_eager=True,
     ) as aphrodite_model:
-        aphrodite_outputs = aphrodite_model.generate_encoder_decoder_greedy_logprobs(
-            test_prompts, max_tokens, num_logprobs)
+        aphrodite_outputs = (
+            aphrodite_model.generate_encoder_decoder_greedy_logprobs(
+                test_prompts, max_tokens, num_logprobs))
 
     # Configuration settings for HF baseline
     hf_kwargs = {

@@ -1,7 +1,7 @@
 import pytest
 
-from aphrodite.endpoints.llm import LLM
 from aphrodite.common.sampling_params import SamplingParams
+from aphrodite.endpoints.llm import LLM
 
 
 @pytest.mark.parametrize("model", ["facebook/opt-125m"])
