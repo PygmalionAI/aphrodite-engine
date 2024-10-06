@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-from tests.kernels.quant_utils import ref_dynamic_per_token_quant
 from aphrodite._custom_ops import scaled_int8_quant
+from tests.kernels.quant_utils import ref_dynamic_per_token_quant
 
 DTYPES = [torch.half, torch.bfloat16, torch.float]
 HIDDEN_SIZES = [16, 67, 768, 2048, 5120, 5137, 8192,
