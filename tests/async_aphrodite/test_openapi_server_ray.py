@@ -5,7 +5,7 @@ from ..utils import APHRODITE_PATH, RemoteOpenAIServer
 
 # any model with a chat template should work here
 MODEL_NAME = "facebook/opt-125m"
-chatml_jinja_path = APHRODITE_PATH / "examples/template_chatml.jinja"
+chatml_jinja_path = APHRODITE_PATH / "examples/chat_templates/chatml.jinja"
 assert chatml_jinja_path.exists()
 
 
