@@ -115,7 +115,7 @@ async def test_batch_base64_embedding(embedding_client: openai.AsyncOpenAI,
                                       model_name: str):
     input_texts = [
         "Hello my name is",
-        "The best thing about Aphrodite is that it supports many different models"
+        "The best thing about Aphrodite is that it supports many different models"  # noqa: E501
     ]
 
     responses_float = await embedding_client.embeddings.create(

@@ -29,7 +29,8 @@ async def test_mp_cuda_init():
     # in the API server process
     import torch
     torch.cuda.init()
-    parser = FlexibleArgumentParser(description="Aphrodite's remote OpenAI server.")
+    parser = FlexibleArgumentParser(
+        description="Aphrodite's remote OpenAI server.")
     parser = make_arg_parser(parser)
     args = parser.parse_args([])
 

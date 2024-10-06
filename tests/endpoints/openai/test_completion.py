@@ -144,7 +144,8 @@ async def test_added_lora_tokens(client: openai.AsyncOpenAI):
         temperature=0.0,
     )
     # Added tokens should appear in tokenized prompt
-    assert completion.choices[0].text.startswith("<unk><unk>aphrodite1aphrodite2aphrodite3")
+    assert completion.choices[0].text.startswith(
+        "<unk><unk>aphrodite1aphrodite2aphrodite3")
 
 
 @pytest.mark.asyncio
@@ -238,8 +239,8 @@ async def test_too_many_completion_logprobs(client: openai.AsyncOpenAI,
             prompt=[0, 0, 0, 0, 0],
             max_tokens=5,
             temperature=0.0,
-            # Aphrodite has higher default max_logprobs (20 instead of 5) to support
-            # both Completion API and Chat Completion API
+            # Aphrodite has higher default max_logprobs (20 instead of 5)
+            # to support both Completion API and Chat Completion API
             logprobs=21,
         )
         ...
@@ -250,8 +251,8 @@ async def test_too_many_completion_logprobs(client: openai.AsyncOpenAI,
             prompt=[0, 0, 0, 0, 0],
             max_tokens=5,
             temperature=0.0,
-            # Aphrodite has higher default max_logprobs (20 instead of 5) to support
-            # both Completion API and Chat Completion API
+            # Aphrodite has higher default max_logprobs (20 instead of 5)
+            # to support both Completion API and Chat Completion API
             logprobs=30,
             stream=True,
         )
@@ -587,8 +588,8 @@ async def test_batch_completions(client: openai.AsyncOpenAI, model_name: str):
             max_tokens=5,
             temperature=0.0,
             extra_body=dict(
-                # NOTE: this has to be true for n > 1 in Aphrodite, but not necessary
-                # for official client.
+                # NOTE: this has to be true for n > 1 in Aphrodite, but
+                # not necessary for official client.
                 use_beam_search=True),
         )
         assert len(batch.choices) == 4
