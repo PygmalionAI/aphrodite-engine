@@ -22,6 +22,7 @@ from aphrodite.quantization.qqq import QQQConfig
 from aphrodite.quantization.quip import QuipConfig
 from aphrodite.quantization.squeezellm import SqueezeLLMConfig
 from aphrodite.quantization.tpu_int8 import Int8TpuConfig
+from aphrodite.quantization.exl2 import Exl2Config
 
 QUANTIZATION_METHODS = {
     "aqlm": AQLMConfig,
@@ -29,6 +30,7 @@ QUANTIZATION_METHODS = {
     "deepspeedfp": DeepSpeedFPConfig,
     "tpu_int8": Int8TpuConfig,
     "eetq": EETQConfig,
+    "exl2": Exl2Config,
     "fp8": Fp8Config,
     "quant_llm": QuantLLMFPConfig,
     "fbgemm_fp8": FBGEMMFp8Config,

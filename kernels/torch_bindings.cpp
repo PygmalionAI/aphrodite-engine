@@ -205,6 +205,16 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.impl("fp_eXmY_linear_forward_cuda", torch::kCUDA,
            &fp_eXmY_linear_forward_cuda);
 
+  // ExL2 Quantized GEMM
+  ops.def(
+      "exl2_gemm(Tensor a, int b) -> Tensor");
+  ops.impl("exl2_gemm", torch::kCUDA, &exl2_gemm);
+
+  ops.def(
+      "make_q_matrix(Tensor q_weight, Tensor q_perm, Tensor q_invperm,"
+      "              Tensor q_scale, Tensor q_scale_max, Tensor q_groups,"
+      "              Tensor q_group_map) -> int");
+  ops.impl("make_q_matrix", torch::kCUDA, &make_q_matrix);
 #endif
 
   // Quantized GEMM for GPTQ.

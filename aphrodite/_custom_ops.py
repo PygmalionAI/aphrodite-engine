@@ -479,6 +479,25 @@ def fp_eXmY_linear_forward_cuda(
                                                     _scales, splitK)
 
 
+# exllamav2
+def exl2_gemm(
+        a: torch.Tensor,
+        b: int,
+) -> torch.Tensor:
+    return torch.ops._C.exl2_gemm(a, b)
+
+def make_q_matrix(
+    q_weight: torch.Tensor,
+    q_perm: torch.Tensor,
+    q_invperm: torch.Tensor,
+    q_scale: torch.Tensor,
+    q_scale_max: torch.Tensor,
+    q_groups: torch.Tensor,
+    q_group_map: torch.Tensor,
+) -> int:
+    return torch.ops._C.make_q_matrix(q_weight, q_perm, q_invperm, q_scale,
+                                      q_scale_max, q_groups, q_group_map)
+
 # mamba
 def causal_conv1d_fwd(x: torch.Tensor, weight: torch.Tensor,
                       bias_: Optional[torch.Tensor],

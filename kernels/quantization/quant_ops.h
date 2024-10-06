@@ -138,6 +138,13 @@ torch::Tensor fp_eXmY_linear_forward_cuda(int64_t EXPONENT, int64_t MANTISSA,
                                           torch::Tensor _scales,
                                           int64_t splitK = 1);
 
+torch::Tensor exl2_gemm(torch::Tensor a, int64_t b);
+
+int64_t make_q_matrix(torch::Tensor q_weight, torch::Tensor q_perm,
+                        torch::Tensor q_invperm, torch::Tensor q_scale,
+                        torch::Tensor q_scale_max, torch::Tensor q_groups,
+                        torch::Tensor q_group_map);
+
 #endif
 
 void static_scaled_int8_quant(torch::Tensor& out, torch::Tensor const& input,

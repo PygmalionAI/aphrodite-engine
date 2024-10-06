@@ -119,7 +119,7 @@ void gemm_half_q_half_cuda(cublasHandle_t cublas_handle, const half* a,
 }  // namespace exl2
 }  // namespace aphrodite
 
-torch::Tensor exl2_gemm(torch::Tensor a, uintptr_t b) {
+torch::Tensor exl2_gemm(torch::Tensor a, int64_t b) {
   const at::cuda::OptionalCUDAGuard device_guard(device_of(a));
   aphrodite::exl2::QMatrix* qm = reinterpret_cast<aphrodite::exl2::QMatrix*>(b);
 
@@ -140,7 +140,7 @@ torch::Tensor exl2_gemm(torch::Tensor a, uintptr_t b) {
   return c;
 }
 
-uintptr_t make_q_matrix(torch::Tensor q_weight, torch::Tensor q_perm,
+int64_t make_q_matrix(torch::Tensor q_weight, torch::Tensor q_perm,
                         torch::Tensor q_invperm, torch::Tensor q_scale,
                         torch::Tensor q_scale_max, torch::Tensor q_groups,
                         torch::Tensor q_group_map) {
@@ -155,5 +155,5 @@ uintptr_t make_q_matrix(torch::Tensor q_weight, torch::Tensor q_perm,
       (uint16_t*)q_perm.data_ptr(), (uint16_t*)q_invperm.data_ptr(),
       (uint32_t*)q_scale.data_ptr(), (half*)q_scale_max.data_ptr(),
       (uint16_t*)q_groups.data_ptr(), (uint16_t*)q_group_map.data_ptr());
-  return reinterpret_cast<uintptr_t>(m);
+  return reinterpret_cast<int64_t>(m);
 }

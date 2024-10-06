@@ -211,6 +211,8 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     "kernels/quantization/gptq_marlin/gptq_marlin.cu"
     "kernels/quantization/gptq_marlin/gptq_marlin_repack.cu"
     "kernels/quantization/gguf/gguf_kernel.cu"
+    "kernels/quantization/exl2/q_gemm_exl2.cu"
+    "kernels/quantization/exl2/q_matrix.cu"
     "kernels/quantization/gptq_marlin/awq_marlin_repack.cu"
     "kernels/quantization/fp8/fp8_marlin.cu"
     "kernels/all_reduce/custom_all_reduce.cu"

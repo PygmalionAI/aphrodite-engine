@@ -4,6 +4,7 @@ import torch
 
 from aphrodite import _custom_ops as ops
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
+from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import QuantizationConfig
 
@@ -29,8 +30,11 @@ def make_group_map(q_groups, num_qrows):
 class Exl2Config(QuantizationConfig):
     """Config class for Exl2."""
 
+    def __init__(self, lm_head_quantized: bool):
+        self.lm_head_quantized = lm_head_quantized
+
     def __repr__(self) -> str:
-        return "Exl2Config()"
+        return f"Exl2Config(lm_head_quantized={self.lm_head_quantized})"
 
     @classmethod
     def get_name(cls) -> str:
@@ -51,11 +55,13 @@ class Exl2Config(QuantizationConfig):
 
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "Exl2Config":
-        return cls()
+        lm_head_quantized = cls.get_from_keys_or(config, ["lm_head"], default=False)
+        return cls(lm_head_quantized)
 
     def get_quant_method(self, layer: torch.nn.Module,
                          prefix: str) -> Optional["Exl2LinearMethod"]:
-        if isinstance(layer, LinearBase):
+        if (isinstance(layer, LinearBase) or
+            (isinstance(layer, ParallelLMHead) and self.lm_head_quantized)):
             return Exl2LinearMethod(self)
         return None
 
@@ -93,11 +99,27 @@ class Exl2LinearMethod(LinearMethodBase):
         # The shape of weight is unknown until load state dict
         # q_groups, q_invperm, q_scale, q_scale_max, q_weight, q_groups
         layer.exllama_state = 0
-        qweight = torch.nn.parameter.UninitializedParameter(
-            requires_grad=False)
+        # qweight = torch.nn.parameter.UninitializedParameter(
+        #     requires_grad=False)
+        qweight = Parameter(
+            torch.empty(
+                input_size_per_partition // self.quant_config.pack_factor,
+                output_size_per_partition,
+                dtype=torch.int32,
+            ),
+            requires_grad=False,
+        )
         set_weight_attrs(qweight, {"output_dim": 1, "ignore_warning": True})
         layer.register_parameter("q_weight", qweight)
-        qscale = torch.nn.parameter.UninitializedParameter(requires_grad=False)
+        # qscale = torch.nn.parameter.UninitializedParameter(requires_grad=False)
+        qscale = Parameter(
+            torch.empty(
+                input_size_per_partition // self.quant_config.pack_factor,
+                output_size_per_partition,
+                dtype=torch.int32,
+            ),
+            requires_grad=False,
+        )
         set_weight_attrs(
             qscale, {
                 "output_dim": 1,
@@ -127,7 +149,7 @@ class Exl2LinearMethod(LinearMethodBase):
             if not hasattr(layer, 'q_group_map'):
                 layer.q_group_map = make_group_map(layer.q_groups,
                                                    layer.q_weight.shape[0])
-            layer.q_matrix = ops.exl2_make_q_matrix(
+            layer.q_matrix = ops.make_q_matrix(
                 layer.q_weight,
                 layer.q_perm,
                 layer.q_invperm,
