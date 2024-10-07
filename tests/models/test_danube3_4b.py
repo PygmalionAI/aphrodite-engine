@@ -1,31 +1,21 @@
 """Compare the outputs of HF and Aphrodite when using greedy sampling.
 
-This test only tests small models. Big models such as 7B should be tested from
-test_big_models.py because it could use a larger instance to run tests.
+This tests danube3 separately because its head size isn't supported on CPU yet.
 
-Run `pytest tests/models/test_models.py`.
+Run `pytest tests/models/test_danube3_4b.py`.
 """
 import pytest
 
 from .utils import check_outputs_equal
 
-MODELS = [
-    "facebook/opt-125m",
-    "gpt2",
-    "bigcode/tiny_starcoder_py",
-    "EleutherAI/pythia-70m",
-    "bigscience/bloom-560m",  # Testing alibi slopes.
-    "microsoft/phi-2",
-    "stabilityai/stablelm-3b-4e1t",
-    # "allenai/OLMo-1B",  # Broken
-    "bigcode/starcoder2-3b",
-    "google/gemma-1.1-2b-it",
-]
+MODELS = ["h2oai/h2o-danube3-4b-base"]
+
+target_dtype = "half"
 
 
 @pytest.mark.parametrize("model", MODELS)
-@pytest.mark.parametrize("dtype", ["float"])
-@pytest.mark.parametrize("max_tokens", [96])
+@pytest.mark.parametrize("dtype", [target_dtype])
+@pytest.mark.parametrize("max_tokens", [32])
 def test_models(
     hf_runner,
     aphrodite_runner,
@@ -34,9 +24,6 @@ def test_models(
     dtype: str,
     max_tokens: int,
 ) -> None:
-    # To pass the small model tests, we need full precision.
-    assert dtype == "float"
-
     with hf_runner(model, dtype=dtype) as hf_model:
         hf_outputs = hf_model.generate_greedy(example_prompts, max_tokens)
 
@@ -52,7 +39,7 @@ def test_models(
 
 
 @pytest.mark.parametrize("model", MODELS)
-@pytest.mark.parametrize("dtype", ["float"])
+@pytest.mark.parametrize("dtype", [target_dtype])
 def test_model_print(
     aphrodite_runner,
     model: str,
