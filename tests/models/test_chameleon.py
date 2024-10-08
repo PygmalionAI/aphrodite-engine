@@ -3,10 +3,10 @@ from typing import List, Optional, Type
 import pytest
 from transformers import BatchEncoding
 
-from aphrodite.multimodal.utils import rescale_image_size
 from aphrodite.common.utils import STR_DTYPE_TO_TORCH_DTYPE
+from aphrodite.multimodal.utils import rescale_image_size
 
-from ..conftest import IMAGE_ASSETS, HfRunner, AphroditeRunner, _ImageAssets
+from ..conftest import IMAGE_ASSETS, AphroditeRunner, HfRunner, _ImageAssets
 from .utils import check_outputs_equal
 
 pytestmark = pytest.mark.vlm
@@ -85,8 +85,8 @@ def run_test(
 
     for hf_outputs, aphrodite_outputs in zip(hf_outputs_per_image,
                                         aphrodite_outputs_per_image):
-        # HF Logprobs include image tokens, unlike Aphrodite, so we don't directly
-        # compare them
+        # HF Logprobs include image tokens, unlike Aphrodite, so we don't
+        # directly compare them
         check_outputs_equal(
             outputs_0_lst=[outputs[:2] for outputs in hf_outputs],
             outputs_1_lst=[outputs[:2] for outputs in aphrodite_outputs],

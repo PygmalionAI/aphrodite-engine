@@ -5,7 +5,7 @@ from transformers import AutoConfig, AutoTokenizer
 
 from aphrodite.common.sequence import SampleLogprobs
 
-from ..conftest import IMAGE_ASSETS, HfRunner, AphroditeRunner, _ImageAssets
+from ..conftest import IMAGE_ASSETS, AphroditeRunner, HfRunner, _ImageAssets
 from .utils import check_logprobs_close
 
 pytestmark = pytest.mark.vlm

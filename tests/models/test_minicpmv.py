@@ -5,10 +5,10 @@ import torch
 import torch.types
 from transformers import BatchEncoding
 
-from aphrodite.multimodal.utils import rescale_image_size
 from aphrodite.common.sequence import SampleLogprobs
+from aphrodite.multimodal.utils import rescale_image_size
 
-from ..conftest import IMAGE_ASSETS, HfRunner, AphroditeRunner, _ImageAssets
+from ..conftest import IMAGE_ASSETS, AphroditeRunner, HfRunner, _ImageAssets
 from .utils import check_logprobs_close
 
 pytestmark = pytest.mark.vlm

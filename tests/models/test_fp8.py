@@ -9,8 +9,8 @@ import pytest
 import torch
 from transformers import AutoTokenizer
 
-from tests.quantization.utils import is_quant_method_supported
 from aphrodite import LLM, SamplingParams
+from tests.quantization.utils import is_quant_method_supported
 
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 

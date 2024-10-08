@@ -44,7 +44,8 @@ def test_metric_counter_prompt_tokens(
         aphrodite_prompt_token_count = sum(prompt_token_counts)
 
         _ = aphrodite_model.generate_greedy(example_prompts, max_tokens)
-        stat_logger = aphrodite_model.model.llm_engine.stat_loggers['prometheus']
+        stat_logger = (
+            aphrodite_model.model.llm_engine.stat_loggers['prometheus'])
         metric_count = stat_logger.metrics.counter_prompt_tokens.labels(
             **stat_logger.labels)._value.get()
 
@@ -67,18 +68,22 @@ def test_metric_counter_generation_tokens(
                      dtype=dtype,
                      disable_log_stats=False,
                      gpu_memory_utilization=0.4) as aphrodite_model:
-        aphrodite_outputs = aphrodite_model.generate_greedy(example_prompts, max_tokens)
+        aphrodite_outputs = aphrodite_model.generate_greedy(
+            example_prompts, max_tokens)
         tokenizer = aphrodite_model.model.get_tokenizer()
-        stat_logger = aphrodite_model.model.llm_engine.stat_loggers['prometheus']
+        stat_logger = (
+            aphrodite_model.model.llm_engine.stat_loggers['prometheus'])
         metric_count = stat_logger.metrics.counter_generation_tokens.labels(
             **stat_logger.labels)._value.get()
         aphrodite_generation_count = 0
         for i in range(len(example_prompts)):
             aphrodite_output_ids, aphrodite_output_str = aphrodite_outputs[i]
             prompt_ids = tokenizer.encode(example_prompts[i])
-            # aphrodite_output_ids contains both prompt tokens and generation tokens.
-            # We're interested only in the count of the generation tokens.
-            aphrodite_generation_count += len(aphrodite_output_ids) - len(prompt_ids)
+            # aphrodite_output_ids contains both prompt tokens and generation
+            # tokens. We're interested only in the count of the generation
+            # tokens.
+            aphrodite_generation_count += len(aphrodite_output_ids) - len(
+                prompt_ids)
 
     assert aphrodite_generation_count == metric_count, (
         f"generation token count: {aphrodite_generation_count!r}\n"
@@ -97,7 +102,8 @@ def test_metric_set_tag_model_name(aphrodite_runner, model: str, dtype: str,
                      disable_log_stats=False,
                      gpu_memory_utilization=0.3,
                      served_model_name=served_model_name) as aphrodite_model:
-        stat_logger = aphrodite_model.model.llm_engine.stat_loggers['prometheus']
+        stat_logger = (
+            aphrodite_model.model.llm_engine.stat_loggers['prometheus'])
         metrics_tag_content = stat_logger.labels["model_name"]
 
     if served_model_name is None or served_model_name == []:
@@ -193,7 +199,8 @@ def test_metric_spec_decode(
                      use_v2_block_manager=True) as aphrodite_model:
 
         # Force log interval to be 0 to catch all metrics.
-        stat_logger = aphrodite_model.model.llm_engine.stat_loggers['prometheus']
+        stat_logger = (
+            aphrodite_model.model.llm_engine.stat_loggers['prometheus'])
         stat_logger.local_interval = 0
 
         # Note that the purpose of this test is to verify spec decode

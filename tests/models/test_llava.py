@@ -3,11 +3,11 @@ from typing import List, Optional, Tuple, Type
 import pytest
 from transformers import AutoConfig, AutoTokenizer, BatchEncoding
 
-from aphrodite.multimodal.utils import rescale_image_size
 from aphrodite.common.sequence import SampleLogprobs
 from aphrodite.common.utils import STR_DTYPE_TO_TORCH_DTYPE
+from aphrodite.multimodal.utils import rescale_image_size
 
-from ..conftest import IMAGE_ASSETS, HfRunner, AphroditeRunner, _ImageAssets
+from ..conftest import IMAGE_ASSETS, AphroditeRunner, HfRunner, _ImageAssets
 from .utils import check_logprobs_close
 
 pytestmark = pytest.mark.vlm

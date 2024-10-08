@@ -2,7 +2,7 @@ from typing import Type
 
 import pytest
 
-from ..conftest import HfRunner, AphroditeRunner
+from ..conftest import AphroditeRunner, HfRunner
 from .utils import check_logprobs_close
 
 models = ["qwen/qwen-vl"]

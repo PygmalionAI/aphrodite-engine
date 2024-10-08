@@ -40,7 +40,8 @@ def test_models(
         hf_outputs = hf_model.generate_greedy(example_prompts, max_tokens)
 
     with aphrodite_runner(model, dtype=dtype) as aphrodite_model:
-        aphrodite_outputs = aphrodite_model.generate_greedy(example_prompts, max_tokens)
+        aphrodite_outputs = aphrodite_model.generate_greedy(
+            example_prompts, max_tokens)
 
     check_outputs_equal(
         outputs_0_lst=hf_outputs,

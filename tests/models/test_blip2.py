@@ -3,8 +3,8 @@ from typing import List, Optional, Tuple
 import pytest
 from transformers import AutoTokenizer
 
-from aphrodite.multimodal.utils import rescale_image_size
 from aphrodite.common.sequence import SampleLogprobs
+from aphrodite.multimodal.utils import rescale_image_size
 
 from ..conftest import IMAGE_ASSETS
 from .utils import check_logprobs_close
@@ -71,7 +71,8 @@ def test_models(hf_runner, aphrodite_runner, image_assets, model, size_factors,
     ) for image, prompt in zip(images, HF_IMAGE_PROMPTS)]
 
     # max_model_len should be greater than image_feature_size
-    with aphrodite_runner(model, dtype=dtype, enforce_eager=True) as aphrodite_model:
+    with aphrodite_runner(model, dtype=dtype,
+                          enforce_eager=True) as aphrodite_model:
         aphrodite_outputs_per_image = [
             aphrodite_model.generate_greedy_logprobs(prompts,
                                                 max_tokens,
