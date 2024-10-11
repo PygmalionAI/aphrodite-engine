@@ -401,6 +401,10 @@ class CompletionRequest(OpenAIBaseModel):
     prompt_logprobs: Optional[int] = None
     xtc_threshold: Optional[float] = 0.1
     xtc_probability: Optional[float] = 0.0
+    kl_threshold: Optional[float] = 0.0
+    jsd_threshold: Optional[float] = 0.0
+    min_typical_p: Optional[float] = 1.0
+    max_typical_p: Optional[float] = 1.0
     dynatemp_min: Optional[float] = 0.0
     dynatemp_max: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
@@ -503,6 +507,10 @@ class CompletionRequest(OpenAIBaseModel):
             temperature_last=self.temperature_last,
             xtc_threshold=self.xtc_threshold,
             xtc_probability=self.xtc_probability,
+            kl_threshold=self.kl_threshold,
+            jsd_threshold=self.jsd_threshold,
+            min_typical_p=self.min_typical_p,
+            max_typical_p=self.max_typical_p,
             dynatemp_min=self.dynatemp_min,
             dynatemp_max=self.dynatemp_max,
             dynatemp_exponent=self.dynatemp_exponent,

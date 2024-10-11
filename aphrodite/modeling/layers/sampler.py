@@ -72,7 +72,8 @@ class Sampler(nn.Module):
         # Initialize new sampling tensors
         (sampling_tensors, do_penalties, do_temperatures, do_top_p_top_k,
          do_top_as, do_min_p, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
-         do_typical_ps, do_quadratic, do_xtc, do_temp_last
+         do_typical_ps, do_quadratic, do_xtc, do_kl_threshold, do_jsd_threshold,
+         do_dynatypical_p, do_temp_last
          ) = SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype)
 
@@ -88,6 +89,9 @@ class Sampler(nn.Module):
         self._do_typical_ps = do_typical_ps
         self._do_quadratic = do_quadratic
         self._do_xtc = do_xtc
+        self._do_kl_threshold = do_kl_threshold
+        self._do_jsd_threshold = do_jsd_threshold
+        self._do_dynatypical_p = do_dynatypical_p
         self._do_temp_last = do_temp_last
 
     def forward(
@@ -126,6 +130,9 @@ class Sampler(nn.Module):
         do_typical_ps = self._do_typical_ps
         do_quadratic = self._do_quadratic
         do_xtc = self._do_xtc
+        do_kl_threshold = self._do_kl_threshold
+        do_jsd_threshold = self._do_jsd_threshold
+        do_dynatypical_p = self._do_dynatypical_p
         do_temp_last = self._do_temp_last
 
         logits = _apply_min_tokens_penalty(logits, sampling_metadata)
@@ -178,6 +185,18 @@ class Sampler(nn.Module):
             logits = _apply_xtc_sampling(
                 logits, sampling_tensors.xtc_thresholds,
                 sampling_tensors.xtc_probabilities)
+            
+        if do_kl_threshold:
+            logits = _apply_kl_divergence_sampling(
+                logits, sampling_tensors.kl_thresholds)
+
+        if do_jsd_threshold:
+            logits = _apply_jsd_sampling(logits, sampling_tensors.jsd_thresholds)
+
+        if do_dynatypical_p:
+            logits = _apply_dynamic_typical_sampling(
+                logits, sampling_tensors.min_typical_ps,
+                sampling_tensors.max_typical_ps)
 
         if do_temperatures and do_temp_last:
             _apply_temperatures(logits, sampling_tensors.temperatures,
@@ -536,6 +555,126 @@ def _apply_typical_sampling(
 
     typ_mask = typ_mask_sorted.scatter(1, indices, typ_mask_sorted)
     logits[typ_mask] = -float("inf")
+    return logits
+
+
+def _apply_dynamic_typical_sampling(
+    logits: torch.Tensor,
+    min_typical_p: torch.Tensor,
+    max_typical_p: torch.Tensor,
+) -> torch.Tensor:
+    """Applies typical sampling with a dynamic typical_p threshold based on entropy.
+
+    Args:
+        logits: Tensor of shape (batch_size, vocab_size) containing the logits.
+        min_typical_p: Minimum threshold for typical sampling.
+        max_typical_p: Maximum threshold for typical sampling.
+
+    Returns:
+        Modified logits tensor with atypical tokens masked out.
+    """
+    shifted_logits = torch.log_softmax(logits, dim=-1)
+    probs = shifted_logits.exp()
+
+    neg_entropy = (probs * shifted_logits).nansum(dim=-1, keepdim=True)
+    entropy = -neg_entropy  # Entropy is the negative of the sum
+
+    # Normalize entropy to range [0, 1]
+    max_entropy = torch.log(torch.tensor(logits.size(-1), dtype=logits.dtype, device=logits.device))
+    normalized_entropy = entropy / max_entropy  # (batch_size, 1)
+
+    # Compute dynamic typical_p
+    dynamic_typical_p = min_typical_p + (max_typical_p - min_typical_p) * normalized_entropy
+    dynamic_typical_p = dynamic_typical_p.squeeze(dim=-1)  # (batch_size,)
+
+    # Calculate surprisal deviation for each token
+    surprisal_deviations = (entropy - shifted_logits).abs()
+
+    # Sort tokens by surprisal deviation
+    sorted_deviations, indices = torch.sort(surprisal_deviations, dim=-1)
+    sorted_probs = probs.gather(-1, indices)
+
+    # Compute cumulative probabilities of sorted tokens
+    cum_probs = sorted_probs.cumsum(dim=-1)
+
+    # Create a mask for tokens exceeding the dynamic typical_p threshold
+    typ_mask = cum_probs > dynamic_typical_p.unsqueeze(dim=1)
+
+    # Ensure at least one token is kept
+    typ_mask[..., 0] = False
+
+    # Scatter the mask back to the original logits order
+    typ_mask = typ_mask.scatter(1, indices, typ_mask)
+
+    # Mask out the filtered tokens
+    logits = logits.masked_fill(typ_mask, -float("inf"))
+    return logits
+
+
+def _apply_kl_divergence_sampling(
+    logits: torch.Tensor,
+    kl_thresholds: torch.Tensor,
+) -> torch.Tensor:
+    """Applies KL Divergence-based sampling to filter tokens.
+
+    Args:
+        logits: Tensor of shape (batch_size, vocab_size) containing the logits.
+        kl_thresholds: Tensor of shape (batch_size,) containing the KL divergence thresholds.
+
+    Returns:
+        Modified logits tensor with tokens below the KL divergence threshold masked out.
+    """
+    # Compute the probability distribution from logits
+    probs = torch.softmax(logits, dim=-1)
+
+    # Create a uniform distribution
+    uniform_probs = torch.full_like(probs, 1.0 / probs.size(-1))
+
+    # Calculate the KL divergence between the predicted and uniform distributions for each token
+    kl_div_tokens = -torch.log(probs + 1e-8) - torch.log(uniform_probs + 1e-8)
+
+    # Create a mask for tokens where KL divergence is less than the threshold
+    kl_mask = kl_div_tokens < kl_thresholds.unsqueeze(-1)
+
+    # Mask out tokens where the KL divergence is below the threshold
+    logits = logits.masked_fill(kl_mask, -float("inf"))
+    return logits
+
+
+def _apply_jsd_sampling(
+    logits: torch.Tensor,
+    jsd_thresholds: torch.Tensor,
+) -> torch.Tensor:
+    """Applies Jensen-Shannon Distance-based sampling to filter tokens.
+
+    Args:
+        logits: Tensor of shape (batch_size, vocab_size) containing the logits.
+        jsd_thresholds: Tensor of shape (batch_size,) with the JSD threshold for each sequence.
+
+    Returns:
+        Modified logits tensor with tokens beyond the JSD threshold masked out.
+    """
+    # Compute the probability distribution from logits
+    probs = torch.softmax(logits, dim=-1)
+
+    # Create a uniform distribution
+    uniform_probs = torch.full_like(probs, 1.0 / probs.size(-1))
+
+    # Compute the average distribution
+    average_probs = 0.5 * (probs + uniform_probs)
+
+    # Compute the Kullback-Leibler divergences
+    kl_probs = torch.sum(probs * (torch.log(probs + 1e-8) - torch.log(average_probs + 1e-8)), dim=-1)
+    kl_uniform = torch.sum(uniform_probs * (torch.log(uniform_probs + 1e-8) - torch.log(average_probs + 1e-8)), dim=-1)
+
+    # Calculate the Jensen-Shannon Distance
+    jsd = 0.5 * (kl_probs + kl_uniform)
+
+    # Create a mask for tokens where JSD is less than the threshold
+    jsd_mask = jsd.unsqueeze(-1) < jsd_thresholds.unsqueeze(-1)
+
+    # Mask out tokens where the JSD exceeds the threshold
+    logits = logits.masked_fill(~jsd_mask, -float("inf"))
     return logits
 
 

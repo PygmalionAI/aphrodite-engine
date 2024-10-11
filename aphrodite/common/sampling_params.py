@@ -189,6 +189,10 @@ class SamplingParams:
         truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None,
         xtc_threshold: float = 0.1,
         xtc_probability: float = 0,
+        kl_threshold: float = 0.0,
+        jsd_threshold: float = 0.0,
+        min_typical_p: float = 1.0,
+        max_typical_p: float = 1.0,
     ) -> None:
         self.n = n
         self.best_of = best_of if best_of is not None else n
@@ -253,6 +257,10 @@ class SamplingParams:
             self.output_text_buffer_length = 0
         self.xtc_threshold = xtc_threshold
         self.xtc_probability = xtc_probability
+        self.kl_threshold = kl_threshold
+        self.jsd_threshold = jsd_threshold
+        self.min_typical_p = min_typical_p
+        self.max_typical_p = max_typical_p
 
         self.default_values = {
             "n": 1,
@@ -294,6 +302,10 @@ class SamplingParams:
             "truncate_prompt_tokens": None,
             "xtc_threshold": 0.1,
             "xtc_probability": 0,
+            "kl_threshold": 0.0,
+            "jsd_threshold": 0.0,
+            "min_typical_p": 1.0,
+            "max_typical_p": 1.0,
         }
 
         # Number of characters to hold back for stop string evaluation
@@ -397,6 +409,28 @@ class SamplingParams:
             raise ValueError(
                 "xtc_probability must be in [0, 1], got "
                 f"{self.xtc_probability}.")
+        if self.kl_threshold < 0.0:
+            raise ValueError(
+                "kl_threshold must be non-negative, got "
+                f"{self.kl_threshold}.")
+        # jsd_threshold has to be between 0 and 1
+        if not 0.0 <= self.jsd_threshold <= 1.0:
+            raise ValueError(
+                "jsd_threshold must be in [0, 1], got "
+                f"{self.jsd_threshold}.")
+        if self.min_typical_p < 0.0 or self.min_typical_p > 1.0:
+            raise ValueError(
+                "min_typical_p must be in [0, 1], got "
+                f"{self.min_typical_p}.")
+        if self.max_typical_p < 0.0 or self.max_typical_p > 1.0:
+            raise ValueError(
+                "max_typical_p must be in [0, 1], got "
+                f"{self.max_typical_p}.")
+        if self.min_typical_p > self.max_typical_p:
+            raise ValueError(
+                "min_typical_p must be less than or equal to max_typical_p, "
+                f"got min_typical_p={self.min_typical_p} and "
+                f"max_typical_p={self.max_typical_p}.")
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:
