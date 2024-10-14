@@ -72,6 +72,8 @@ Finally, build Aphrodite:
 git clone https://github.com/PygmalionAI/aphrodite-engine.git
 cd aphrodite-engine
 
+chmod +x ./amdgpu.sh
+./amdgpu.sh
 pip install -U -r requirements-rocm.txt
 python setup.py develop  #  pip install -e . won't work for now
 ```
