@@ -1,5 +1,4 @@
 import pytest
-
 from transformers import AutoTokenizer
 
 from aphrodite.transformers_utils.tokenizer import detokenize_incrementally

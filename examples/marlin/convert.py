@@ -1,10 +1,11 @@
-import torch
 import argparse
 import copy
-from transformers import AutoModelForCausalLM, AutoTokenizer
+import gc
+
+import torch
 from auto_gptq.nn_modules.qlinear.qlinear_exllama import QuantLinear
 from marlin import Layer as MarlinLayer
-import gc
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model-id", type=str)

@@ -1,10 +1,10 @@
 import math
+from contextlib import suppress
 from pathlib import Path
 
 import scipy
 import torch
 from safetensors.torch import load_file
-from contextlib import suppress
 
 with suppress(ImportError):
     import aphrodite._hadamard_C as hadamard_C

@@ -3,14 +3,15 @@ from functools import partial
 from typing import Union
 
 import torch
-from torch import nn
 import transformers
-from transformers import PreTrainedTokenizer
 from pkg_resources import parse_version
+from torch import nn
+from transformers import PreTrainedTokenizer
+
+from aphrodite.kv_quant.observer import ActivationObserver, KVCacheObserver
 from aphrodite.kv_quant.utils import (bimap_name_mod, collect_target_modules,
                                       concat_decoder_layer_outputs,
                                       split_decoder_layer_inputs)
-from aphrodite.kv_quant.observer import ActivationObserver, KVCacheObserver
 
 
 class CalibrationContext():

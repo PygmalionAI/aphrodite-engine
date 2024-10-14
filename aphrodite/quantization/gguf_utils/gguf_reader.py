@@ -19,14 +19,8 @@ if __name__ == "__main__":
     # Allow running file in package as a script.
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from .constants import (
-    GGML_QUANT_SIZES,
-    GGUF_DEFAULT_ALIGNMENT,
-    GGUF_MAGIC,
-    GGUF_VERSION,
-    GGMLQuantizationType,
-    GGUFValueType,
-)
+from .constants import (GGML_QUANT_SIZES, GGUF_DEFAULT_ALIGNMENT, GGUF_MAGIC,
+                        GGUF_VERSION, GGMLQuantizationType, GGUFValueType)
 
 READER_SUPPORTED_VERSIONS = [2, GGUF_VERSION]
 
