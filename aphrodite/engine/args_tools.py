@@ -7,11 +7,12 @@ from typing import (TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Type,
 
 from loguru import logger
 
-from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
-                                     EngineConfig, LoadConfig, LoRAConfig,
-                                     ModelConfig, ParallelConfig,
-                                     PromptAdapterConfig, SchedulerConfig,
-                                     SpeculativeConfig, TokenizerPoolConfig)
+from aphrodite.common.config import (CacheConfig, ConfigFormat, DecodingConfig,
+                                     DeviceConfig, EngineConfig, LoadConfig,
+                                     LoadFormat, LoRAConfig, ModelConfig,
+                                     ParallelConfig, PromptAdapterConfig,
+                                     SchedulerConfig, SpeculativeConfig,
+                                     TokenizerPoolConfig)
 from aphrodite.common.utils import FlexibleArgumentParser, is_cpu
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.quantization import QUANTIZATION_METHODS
@@ -75,6 +76,7 @@ class EngineArgs:
     device: str = "auto"
     # Load Options
     load_format: str = "auto"
+    config_format: str = "auto"
     dtype: str = "auto"
     ignore_patterns: Optional[Union[str, List[str]]] = None
     # Parallel Options
@@ -359,16 +361,7 @@ class EngineArgs:
             '--load-format',
             type=str,
             default=EngineArgs.load_format,
-            choices=[
-                'auto',
-                'pt',
-                'safetensors',
-                'npcache',
-                'dummy',
-                'tensorizer',
-                'sharded_state',
-                'bitsandbytes',
-            ],
+            choices=[f.value for f in LoadFormat],
             help='Category: Model Options\n'
             'The format of the model weights to load.\n\n'
             '* "auto" will try to load the weights in the safetensors format '
@@ -385,6 +378,15 @@ class EngineArgs:
             'Examples section for more information.\n'
             '* "bitsandbytes" will load the weights using bitsandbytes '
             'quantization.\n')
+        parser.add_argument(
+            '--config-format',
+            default=EngineArgs.config_format,
+            choices=[f.value for f in ConfigFormat],
+            help='The format of the model config to load.\n\n'
+            '* "auto" will try to load the config in hf format '
+            'if available else it will try to load in mistral format. '
+            'Mistral format is specific to mistral models and is not '
+            'compatible with other models.')
         parser.add_argument(
             '--dtype',
             type=str,
@@ -911,6 +913,7 @@ class EngineArgs:
             skip_tokenizer_init=self.skip_tokenizer_init,
             served_model_name=self.served_model_name,
             limit_mm_per_prompt=self.limit_mm_per_prompt,
+            config_format=self.config_format,
         )
 
         cache_config = CacheConfig(
