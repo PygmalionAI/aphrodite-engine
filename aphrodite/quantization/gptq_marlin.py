@@ -19,6 +19,7 @@ from aphrodite.quantization.utils.marlin_utils import (
     marlin_repeat_scales_on_all_ranks, marlin_sort_g_idx, replace_tensor,
     verify_marlin_supported, verify_marlin_supports_shape)
 from aphrodite.scalar_type import scalar_types
+from aphrodite.common.utils import is_hip
 
 
 class GPTQMarlinConfig(QuantizationConfig):
@@ -93,6 +94,9 @@ class GPTQMarlinConfig(QuantizationConfig):
         is_valid_user_quant = (user_quant is None or user_quant == "marlin"
                                or user_quant == "gptq_marlin")
 
+        if is_hip():
+            return None
+
         if can_convert and is_valid_user_quant:
             msg = ("The model is convertible to {} during runtime."
                    " Using {} kernel.".format(cls.get_name(), cls.get_name()))
@@ -105,6 +109,7 @@ class GPTQMarlinConfig(QuantizationConfig):
                         " so forcing gptq. Use quantization=gptq_marlin for"
                         " faster inference")
         return None
+            
 
     def get_quant_method(self, layer: torch.nn.Module,
                          prefix: str) -> Optional["GPTQMarlinLinearMethod"]:
