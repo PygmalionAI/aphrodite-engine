@@ -131,6 +131,11 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install --upgrade numba scipy huggingface-hub[cli]
 
+
+# Clang needs to be patched for ROCm
+RUN chmod +x patches/amd.patch
+RUN patch -p1 < patches/amd.patch
+
 # Workaround for ray >= 2.10.0
 ENV RAY_EXPERIMENTAL_NOSET_ROCR_VISIBLE_DEVICES=1
 # Silences the HF Tokenizers warning
