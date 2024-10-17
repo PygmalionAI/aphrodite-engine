@@ -1,10 +1,8 @@
 import ray
 
 from aphrodite.common.utils import get_open_port
-from aphrodite.distributed import (
-    ensure_model_parallel_initialized,
-    init_distributed_environment,
-)
+from aphrodite.distributed import (ensure_model_parallel_initialized,
+                                   init_distributed_environment)
 
 
 def init_test_distributed_environment(

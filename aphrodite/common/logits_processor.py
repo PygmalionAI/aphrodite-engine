@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
-import torch
 from typing import Dict, List
+
+import torch
 
 
 class LogitsProcessor(ABC):

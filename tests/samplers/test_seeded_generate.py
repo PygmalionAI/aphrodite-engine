@@ -7,8 +7,8 @@ from itertools import combinations
 
 import pytest
 
-from aphrodite.modeling.utils import set_random_seed
 from aphrodite import SamplingParams
+from aphrodite.modeling.utils import set_random_seed
 
 MODEL = "EleutherAI/pythia-70m-deduped"
 RANDOM_SEEDS = list(range(5))

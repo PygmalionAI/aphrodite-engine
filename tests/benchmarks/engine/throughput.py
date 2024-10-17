@@ -85,6 +85,7 @@ def run_aphrodite(
     gpu_memory_utilization: float = 0.9,
     download_dir: Optional[str] = None,
     load_format: str = EngineArgs.load_format,
+    max_num_seqs: Optional[int] = None,
 ) -> float:
     from aphrodite import LLM, SamplingParams
     llm = LLM(
@@ -108,6 +109,7 @@ def run_aphrodite(
         max_num_batched_tokens=max_num_batched_tokens,
         distributed_executor_backend=distributed_executor_backend,
         load_format=load_format,
+        max_num_seqs=max_num_seqs,
     )
 
     # Add the requests to the engine.
@@ -235,7 +237,8 @@ def main(args: argparse.Namespace):
             args.quantization_param_path, args.device,
             args.enable_prefix_caching, args.enable_chunked_prefill,
             args.max_num_batched_tokens, args.distributed_executor_backend,
-            args.gpu_memory_utilization, args.download_dir, args.load_format)
+            args.gpu_memory_utilization, args.download_dir, args.load_format,
+            args.max_num_seqs)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -301,6 +304,10 @@ if __name__ == "__main__":
                         default=1,
                         help="Number of generated sequences per prompt.")
     parser.add_argument("--use-beam-search", action="store_true")
+    parser.add_argument('--max-num-seqs',
+                        type=int,
+                        default=256,
+                        help='maximum number of batched requests per iteration')
     parser.add_argument("--num-prompts",
                         type=int,
                         default=1000,

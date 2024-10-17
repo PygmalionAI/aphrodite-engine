@@ -5,8 +5,8 @@ from typing import List, Optional, Union
 import torch
 from lmformatenforcer import (CharacterLevelParser, FormatEnforcerAnalyzer,
                               TokenEnforcer, TokenEnforcerTokenizerData)
-from lmformatenforcer.integrations.transformers import \
-    build_token_enforcer_tokenizer_data
+from lmformatenforcer.integrations.transformers import (
+    build_token_enforcer_tokenizer_data)
 from transformers import PreTrainedTokenizerBase
 
 import aphrodite

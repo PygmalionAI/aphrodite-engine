@@ -17,7 +17,6 @@ from huggingface_hub import HfFileSystem, hf_hub_download, snapshot_download
 from loguru import logger
 from safetensors.torch import load_file, safe_open, save_file
 from tqdm.auto import tqdm
-from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
 from aphrodite.common.config import LoadConfig, ModelConfig
 from aphrodite.common.utils import print_warning_once
@@ -243,6 +242,7 @@ def download_weights_from_hf(
 
 def download_safetensors_index_file_from_hf(
     model_name_or_path: str,
+    index_file: str,
     cache_dir: Optional[str],
     revision: Optional[str] = None,
 ) -> None:
@@ -260,36 +260,37 @@ def download_safetensors_index_file_from_hf(
             # Download the safetensors index file.
             hf_hub_download(
                 repo_id=model_name_or_path,
-                filename=SAFE_WEIGHTS_INDEX_NAME,
+                filename=index_file,
                 cache_dir=cache_dir,
                 revision=revision,
                 local_files_only=huggingface_hub.constants.HF_HUB_OFFLINE,
             )
         # If file not found on remote or locally, we should not fail since
-        # only some models will have SAFE_WEIGHTS_INDEX_NAME.
+        # only some models will have index_file.
         except huggingface_hub.utils.EntryNotFoundError:
-            logger.info(f"No {SAFE_WEIGHTS_INDEX_NAME} found in remote.")
+            logger.info(f"No {index_file} found in remote.")
         except huggingface_hub.utils.LocalEntryNotFoundError:
-            logger.info(f"No {SAFE_WEIGHTS_INDEX_NAME} found in local cache.")
+            logger.info(f"No {index_file} found in local cache.")
 
 
 # For models like Mistral-7B-v0.3, there are both sharded
 # safetensors files and a consolidated safetensors file.
 # Passing both of these to the weight loader functionality breaks.
-# So, we use the SAFE_WEIGHTS_INDEX_NAME to
+# So, we use the index_file to
 # look up which safetensors files should be used.
 def filter_duplicate_safetensors_files(hf_weights_files: List[str],
-                                       hf_folder: str) -> List[str]:
+                                       hf_folder: str,
+                                       index_file: str) -> List[str]:
     # model.safetensors.index.json is a mapping from keys in the
     # torch state_dict to safetensors file holding that weight.
-    index_file_name = os.path.join(hf_folder, SAFE_WEIGHTS_INDEX_NAME)
+    index_file_name = os.path.join(hf_folder, index_file)
     if not os.path.isfile(index_file_name):
         return hf_weights_files
 
     # Iterate through the weight_map (weight_name: safetensors files)
     # to identify weights that we should use.
-    with open(index_file_name) as index_file:
-        weight_map = json.load(index_file)["weight_map"]
+    with open(index_file_name, "r") as f:
+        weight_map = json.load(f)["weight_map"]
     weight_files_in_index = set()
     for weight_name in weight_map:
         weight_files_in_index.add(

@@ -15,6 +15,8 @@ from mistral_common.tokens.tokenizers.sentencepiece import (
 from mistral_common.tokens.tokenizers.tekken import (SpecialTokenPolicy,
                                                      Tekkenizer)
 
+from aphrodite.common.logger import log_once
+
 if TYPE_CHECKING:
     from aphrodite.endpoints.chat_utils import ConversationMessage
 
@@ -159,9 +161,11 @@ class MistralTokenizer:
             ids: List[int],
             skip_special_tokens: Optional[bool] = True) -> List[str]:
         # TODO(Patrick) - potentially allow special tokens to not be skipped
-        assert (
-            skip_special_tokens
-        ), "Skipping special tokens is not supported for Mistral tokenizers."
+        if not skip_special_tokens:
+            log_once(
+                level="ERROR",
+                message="skip_special_tokens=False is not supported for "
+                "Mistral tokenizers.")
 
         assert isinstance(self.tokenizer,
                           (Tekkenizer, SentencePieceTokenizer)), type(

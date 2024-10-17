@@ -8,9 +8,9 @@ from accelerate import (infer_auto_device_map, init_empty_weights,
                         load_checkpoint_in_model)
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
+from aphrodite.kv_quant.calib_dataloader import get_calib_loaders
 from aphrodite.kv_quant.calibration import CalibrationContext
 from aphrodite.kv_quant.utils import collect_target_modules
-from aphrodite.kv_quant.calib_dataloader import get_calib_loaders
 
 LAYER_TYPE_MAP = {
     'InternLMForCausalLM': 'InternLMDecoderLayer',
