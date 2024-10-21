@@ -12,12 +12,13 @@ import tempfile
 import threading
 import uuid
 import warnings
+import math
 from asyncio import FIRST_COMPLETED, ensure_future
 from functools import lru_cache, partial, wraps
 from platform import uname
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Dict, Generic,
                     Hashable, List, Literal, Optional, OrderedDict, Set, Tuple,
-                    Type, TypeVar, Union, overload)
+                    Type, TypeVar, Union, overload, Iterable)
 from uuid import uuid4
 
 import numpy as np
@@ -1115,5 +1116,27 @@ def progress_bar(iterable, desc="Processing"):
             for item in iterable:
                 yield item
                 progress.update(task, advance=1)
+    else:
+        yield from iterable
+
+def tensor_progress_bar(iterable:Iterable[Tuple[str, torch.Tensor]],
+                        final_bytes:int, desc="Processing"):
+    show_progress = get_tensor_model_parallel_rank() == 0
+    units = 1024 ** (int(math.log2(final_bytes)) // 10)
+
+    if show_progress:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TimeElapsedColumn(),
+        ) as progress:
+            task = progress.add_task(f"[cyan]{desc}", total=final_bytes/units)
+            for item in iterable:
+                steps = item[1].element_size() * item[1].nelement() / units
+                yield item
+                progress.update(task, advance=steps)
     else:
         yield from iterable
