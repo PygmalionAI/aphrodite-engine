@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 
 from aphrodite.common.sequence import SamplerOutput
-from aphrodite.common.utils import progress_bar
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead)
@@ -138,9 +137,7 @@ class Medusa(nn.Module):
 
         weights_map = {}
 
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             name = name.replace("medusa_heads.", "")
 
             if name == "token_map":
