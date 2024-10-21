@@ -14,7 +14,6 @@ from xformers.ops import memory_efficient_attention
 
 from aphrodite.common.config import ModelConfig
 from aphrodite.common.sequence import SequenceData
-from aphrodite.common.utils import progress_bar
 from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.inputs import LLMInputs
 from aphrodite.modeling.layers.activation import get_act_fn

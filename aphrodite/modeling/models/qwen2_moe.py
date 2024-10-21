@@ -32,7 +32,7 @@ from transformers import PretrainedConfig
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig
 from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
-from aphrodite.common.utils import print_warning_once, progress_bar
+from aphrodite.common.utils import print_warning_once
 from aphrodite.distributed import (get_pp_group,
                                    get_tensor_model_parallel_world_size,
                                    tensor_model_parallel_all_reduce)

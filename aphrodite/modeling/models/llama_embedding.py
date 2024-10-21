@@ -5,7 +5,6 @@ from torch import nn
 
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.sequence import PoolerOutput
-from aphrodite.common.utils import progress_bar
 from aphrodite.modeling.layers.pooler import Pooler, PoolingType
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.models.llama import LlamaModel
