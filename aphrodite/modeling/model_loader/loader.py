@@ -353,7 +353,7 @@ class DefaultModelLoader(BaseModelLoader):
                                                "fall_back_to_pt_during_load",
                                                True))
             model.load_weights(tensor_progress_bar(weights, wgt_bytes,
-                                                   "Loading modules..."))
+                                                   "Loading model weights..."))
 
             for _, module in model.named_modules():
                 quant_method = getattr(module, "quant_method", None)
