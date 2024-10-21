@@ -24,7 +24,7 @@ from aphrodite.common.config import (APHRODITE_USE_MODELSCOPE, CacheConfig,
                                      DeviceConfig, LoadConfig, LoadFormat,
                                      LoRAConfig, ModelConfig, MultiModalConfig,
                                      ParallelConfig, SchedulerConfig)
-from aphrodite.common.utils import is_pin_memory_available
+from aphrodite.common.utils import is_pin_memory_available, tensor_progress_bar
 from aphrodite.modeling.model_loader.tensorizer import (
     TensorizerConfig, is_aphrodite_tensorized, load_with_tensorizer,
     serialize_aphrodite_model, tensorizer_weights_iterator)
@@ -345,14 +345,15 @@ class DefaultModelLoader(BaseModelLoader):
                 model = _initialize_model(model_config, self.load_config,
                                           lora_config, cache_config,
                                           scheduler_config)
-            model.load_weights(
-                *self._get_weights_iterator(model_config.model,
+                
+            weights, wgt_bytes = self._get_weights_iterator(model_config.model,
                                            model_config.revision,
                                            fall_back_to_pt=getattr(
                                                model,
                                                "fall_back_to_pt_during_load",
                                                True))
-            )
+            model.load_weights(tensor_progress_bar(weights, wgt_bytes,
+                                                   "Loading modules..."))
 
             for _, module in model.named_modules():
                 quant_method = getattr(module, "quant_method", None)
