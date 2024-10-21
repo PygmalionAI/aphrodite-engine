@@ -303,10 +303,12 @@ class DefaultModelLoader(BaseModelLoader):
     def _get_weights_iterator(
         self, model_name_or_path: str, revision: Optional[str],
         fall_back_to_pt: bool
-    ) -> Generator[Tuple[str, torch.Tensor], None, None]:
+    ) -> Tuple[Generator[Tuple[str, torch.Tensor], None, None], int]:
         """Get an iterator for the model weights based on the load format."""
         hf_folder, hf_weights_files, use_safetensors = self._prepare_weights(
             model_name_or_path, revision, fall_back_to_pt)
+        est_weight_bytes = sum(os.path.getsize(f)
+                               for f in hf_weights_files)
         if self.load_config.load_format == LoadFormat.NPCACHE:
             # Currently np_cache only support *.bin checkpoints
             assert use_safetensors is False
@@ -329,7 +331,7 @@ class DefaultModelLoader(BaseModelLoader):
                     xm.mark_step()
 
             weights_iterator = _xla_weights_iterator(weights_iterator)
-        return weights_iterator
+        return weights_iterator, est_weight_bytes
 
     def load_model(self, *, model_config: ModelConfig,
                    device_config: DeviceConfig,
@@ -344,12 +346,13 @@ class DefaultModelLoader(BaseModelLoader):
                                           lora_config, cache_config,
                                           scheduler_config)
             model.load_weights(
-                self._get_weights_iterator(model_config.model,
+                *self._get_weights_iterator(model_config.model,
                                            model_config.revision,
                                            fall_back_to_pt=getattr(
                                                model,
                                                "fall_back_to_pt_during_load",
-                                               True)), )
+                                               True))
+            )
 
             for _, module in model.named_modules():
                 quant_method = getattr(module, "quant_method", None)
