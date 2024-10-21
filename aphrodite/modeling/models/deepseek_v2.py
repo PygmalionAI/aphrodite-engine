@@ -489,9 +489,7 @@ class DeepseekV2ForCausalLM(nn.Module):
             num_experts=self.config.n_routed_experts)
 
         params_dict = dict(self.named_parameters())
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
                 continue
             for (param_name, weight_name, shard_id) in stacked_params_mapping:

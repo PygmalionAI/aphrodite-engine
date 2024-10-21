@@ -314,9 +314,7 @@ class JAISLMHeadModel(nn.Module):
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         params_dict = dict(self.named_parameters(remove_duplicate=False))
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             if "lm_head.weight" in name:
                 # GPT-2 ties the weights of the embedding layer and the final
                 # linear layer.

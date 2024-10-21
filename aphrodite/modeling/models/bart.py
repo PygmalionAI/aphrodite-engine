@@ -930,12 +930,10 @@ class BartForConditionalGeneration(nn.Module):
         model_params_dict = dict(self.model.named_parameters())
         top_params_dict = dict(self.named_parameters())
 
-        weights_tuple_list = list(weights)
-
         shared_embedding_weight = None
         shared_embedding_shard_id = None
 
-        for name, loaded_weight in weights_tuple_list:
+        for name, loaded_weight in weights:
 
             name = self._rename_key(name)
             name, shard_id = self._rename_stacked_param(name)

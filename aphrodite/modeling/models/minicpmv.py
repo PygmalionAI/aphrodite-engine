@@ -660,9 +660,7 @@ class MiniCPMVBaseModel(nn.Module, SupportsMultiModal):
             ("gate_up_proj", "up_proj", 1),
         ]
         params_dict = dict(self.named_parameters())
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             for key_to_modify, new_key in _KEYS_TO_MODIFY_MAPPING.items():
                 if key_to_modify in name:
                     name = name.replace(key_to_modify, new_key)

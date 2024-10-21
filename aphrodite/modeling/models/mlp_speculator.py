@@ -182,9 +182,7 @@ class MLPSpeculator(nn.Module):
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         params_dict = dict(self.named_parameters())
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             param = params_dict.get(name.replace("speculator.", ""))
             if param is not None:
                 weight_loader = getattr(param, "weight_loader",

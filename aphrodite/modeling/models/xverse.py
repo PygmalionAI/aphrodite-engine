@@ -351,9 +351,7 @@ class XverseForCausalLM(nn.Module, SupportsLoRA):
             ("gate_up_proj", "up_proj", 1),
         ]
         params_dict = dict(self.named_parameters())
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             if ("rotary_emb.inv_freq" in name
                     or "rotary_emb.cos_cached" in name
                     or "rotary_emb.sin_cached" in name):

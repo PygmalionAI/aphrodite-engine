@@ -138,9 +138,7 @@ class Medusa(nn.Module):
 
         weights_map = {}
 
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             name = name.replace("medusa_heads.", "")
 
             if name == "token_map":

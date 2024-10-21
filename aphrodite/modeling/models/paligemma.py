@@ -292,9 +292,7 @@ class PaliGemmaForConditionalGeneration(nn.Module, SupportsMultiModal):
         ]
         params_dict = dict(self.named_parameters())
         loaded_params = set()
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             for key_to_modify, new_key in _KEYS_TO_MODIFY_MAPPING.items():
                 if key_to_modify in name:
                     name = name.replace(key_to_modify, new_key)

@@ -348,9 +348,7 @@ class OPTForCausalLM(nn.Module):
             ("qkv_proj", "v_proj", "v"),
         ]
         params_dict = dict(self.named_parameters(remove_duplicate=False))
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             if "lm_head.weight" in name:
                 continue
             if name.startswith("decoder."):

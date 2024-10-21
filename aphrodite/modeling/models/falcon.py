@@ -422,9 +422,7 @@ class FalconForCausalLM(nn.Module):
             total_num_kv_heads = total_num_heads
         num_query_heads_per_kv_head = total_num_heads // total_num_kv_heads
         params_dict = dict(self.named_parameters(remove_duplicate=False))
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             if name == "lm_head.weight":
                 # Falcon uses tied embeddings.
                 continue

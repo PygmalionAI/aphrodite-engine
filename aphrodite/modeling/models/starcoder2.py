@@ -294,9 +294,7 @@ class Starcoder2ForCausalLM(nn.Module):
         ]
 
         params_dict = dict(self.named_parameters(remove_duplicate=False))
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
                 continue
 

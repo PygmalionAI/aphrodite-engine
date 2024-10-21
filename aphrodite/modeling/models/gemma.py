@@ -378,9 +378,7 @@ class GemmaForCausalLM(nn.Module, SupportsLoRA):
         ]
         params_dict = dict(self.named_parameters())
         loaded_params: Set[str] = set()
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             for (param_name, shard_name, shard_id) in stacked_params_mapping:
                 if shard_name not in name:
                     continue

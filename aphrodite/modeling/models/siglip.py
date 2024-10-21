@@ -644,9 +644,7 @@ class SiglipVisionModel(nn.Module):
         params_dict = dict(self.named_parameters())
         layer_count = len(self.vision_model.encoder.layers)
 
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             # omit layers when num_hidden_layers_override is set
             if "vision_model.encoder.layers." in name:
                 layer_idx = int(name.split(".")[3])

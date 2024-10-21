@@ -389,9 +389,7 @@ class ChatGLMForCausalLM(nn.Module, SupportsLoRA):
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         params_dict = dict(self.named_parameters(remove_duplicate=False))
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             if "rotary_pos_emb.inv_freq" in name:
                 continue
             if "word_embeddings" in name:
