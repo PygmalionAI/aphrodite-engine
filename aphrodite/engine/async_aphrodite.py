@@ -498,6 +498,7 @@ class AsyncAphrodite:
     _engine_class: Type[_AsyncAphrodite] = _AsyncAphrodite
 
     def __init__(self,
+                 per_request_logging: bool,
                  worker_use_ray: bool,
                  engine_use_ray: bool,
                  *args,
@@ -507,6 +508,7 @@ class AsyncAphrodite:
         self.worker_use_ray = worker_use_ray
         self.engine_use_ray = engine_use_ray
         self.log_requests = log_requests
+        self.per_request_logging = per_request_logging
         self.engine = self._init_engine(*args, **kwargs)
 
         self.background_loop: Optional[asyncio.Future] = None
@@ -599,6 +601,7 @@ class AsyncAphrodite:
         executor_class = cls._get_executor_cls(engine_config)
         # Create the async LLM engine.
         engine = cls(
+            engine_args.per_request_logging,
             executor_class.uses_ray,
             engine_args.engine_use_ray,
             **engine_config.to_dict(),
@@ -914,14 +917,22 @@ class AsyncAphrodite:
             >>> # Process and return the final output
             >>> ...
         """
-        async for output in await self.add_request(
-                request_id,
-                inputs,
-                sampling_params,
-                lora_request=lora_request,
-                prompt_adapter_request=prompt_adapter_request,
-        ):
-            yield AphroditeEngine.validate_output(output, RequestOutput)
+        if self.per_request_logging:
+            request_id = f"{request_id}_{uuid4()}"
+            self.engine.stat_logger.start_request(request_id)
+
+        try:
+            async for output in await self.add_request(
+                    request_id,
+                    inputs,
+                    sampling_params,
+                    lora_request=lora_request,
+                    prompt_adapter_request=prompt_adapter_request,
+            ):
+                yield AphroditeEngine.validate_output(output, RequestOutput)
+        finally:
+            if self.per_request_logging:
+                self.engine.stat_logger.end_request()
 
     async def encode(
         self,
@@ -1066,6 +1077,8 @@ class AsyncAphrodite:
             self,
             scheduler_outputs: Optional[SchedulerOutputs] = None,
             model_output: Optional[List[SamplerOutput]] = None) -> None:
+        if not self.per_request_logging:
+            
         if self.engine_use_ray:
             await self.engine.do_log_stats.remote(  # type: ignore
                 scheduler_outputs, model_output)

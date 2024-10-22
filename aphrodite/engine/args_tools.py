@@ -1093,6 +1093,7 @@ class AsyncEngineArgs(EngineArgs):
 
     engine_use_ray: bool = False
     disable_log_requests: bool = False
+    per_request_logging: bool = False
     uvloop: bool = False
 
     @staticmethod
@@ -1107,6 +1108,10 @@ class AsyncEngineArgs(EngineArgs):
         parser.add_argument('--disable-log-requests',
                             action='store_true',
                             help='Disable logging requests.')
+        parser.add_argument('--per-request-logging',
+                            action='store_true',
+                            help='Switch to per-request logging instead of '
+                            'global logging.')
         parser.add_argument(
             "--uvloop",
             action="store_true",
