@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from typing import Counter as CollectionsCounter
 from typing import Dict, List, Optional, Union
 
@@ -177,35 +177,6 @@ class Metrics:
             labelnames=labelnames,
             multiprocess_mode="sum",
         )
-
-        if "request_id" not in labelnames:
-            labelnames.append("request_id")
-
-        self.gauge_per_request_duration = self._gauge_cls(
-            name="aphrodite:per_request_duration_seconds",
-            documentation="Duration of each request in seconds.",
-            labelnames=labelnames,
-            multiprocess_mode="livesum")
-        self.gauge_per_request_prompt_throughput = self._gauge_cls(
-            name="aphrodite:per_request_prompt_throughput",
-            documentation="Prompt throughput for each request.",
-            labelnames=labelnames,
-            multiprocess_mode="livesum")
-        self.gauge_per_request_generation_throughput = self._gauge_cls(
-            name="aphrodite:per_request_generation_throughput",
-            documentation="Generation throughput for each request.",
-            labelnames=labelnames,
-            multiprocess_mode="livesum")
-        self.gauge_per_request_gpu_cache_usage = self._gauge_cls(
-            name="aphrodite:per_request_gpu_cache_usage",
-            documentation="GPU cache usage for each request.",
-            labelnames=labelnames,
-            multiprocess_mode="livesum")
-        self.gauge_per_request_cpu_cache_usage = self._gauge_cls(
-            name="aphrodite:per_request_cpu_cache_usage",
-            documentation="CPU cache usage for each request.",
-            labelnames=labelnames,
-            multiprocess_mode="livesum")
 
 
 # end-metrics-definitions
@@ -555,16 +526,6 @@ class PrometheusStatLogger(StatLoggerBase):
                 labelnames=metrics_info.keys(),
                 multiprocess_mode="mostrecent")
             info_gauge.labels(**metrics_info).set(1)
-
-    def log_per_request(self, request_id: str,
-                        stats: Dict[str, Any]) -> None:
-        if self.per_request_logging:
-            labels = {**self.labels, "request_id": request_id}
-            self.metrics.gauge_per_request_duration.labels(**labels).set(stats["duration"])
-            self.metrics.gauge_per_request_prompt_throughput.labels(**labels).set(stats["prompt_throughput"])
-            self.metrics.gauge_per_request_generation_throughput.labels(**labels).set(stats["generation_throughput"])
-            self.metrics.gauge_per_request_gpu_cache_usage.labels(**labels).set(stats["gpu_cache_usage"])
-            self.metrics.gauge_per_request_cpu_cache_usage.labels(**labels).set(stats["cpu_cache_usage"])
 
 
 class RayPrometheusStatLogger(PrometheusStatLogger):
