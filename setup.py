@@ -150,6 +150,10 @@ class cmake_build_ext(build_ext):
         outdir = os.path.abspath(
             os.path.dirname(self.get_ext_fullpath(ext.name)))
 
+        python_executable = sys.executable
+        if sys.platform.startswith("win32"):
+            python_executable = python_executable.replace("\\", "/")
+
         cmake_args = [
             '-DCMAKE_BUILD_TYPE={}'.format(cfg),
             '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={}'.format(outdir),
@@ -177,7 +181,7 @@ class cmake_build_ext(build_ext):
         # Pass the python executable to cmake so it can find an exact
         # match.
         cmake_args += [
-            '-DAPHRODITE_PYTHON_EXECUTABLE={}'.format(sys.executable)
+            '-DAPHRODITE_PYTHON_EXECUTABLE={}'.format(python_executable)
         ]
 
         num_jobs, nvcc_threads = self.compute_num_jobs()

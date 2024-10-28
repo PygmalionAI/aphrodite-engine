@@ -203,16 +203,6 @@ set(APHRODITE_EXT_SRC
   "kernels/torch_bindings.cpp")
 
 if(APHRODITE_GPU_LANG STREQUAL "CUDA")
-#  include(FetchContent)
-#  SET(CUTLASS_ENABLE_HEADERS_ONLY=ON)
-#  FetchContent_Declare(
-#        cutlass
-#        GIT_REPOSITORY https://github.com/nvidia/cutlass.git
-#        # CUTLASS 3.5.1
-#        GIT_TAG 06b21349bcf6ddf6a1686a47a137ad1446579db9 
-#  )
-#  FetchContent_MakeAvailable(cutlass)
-
   list(APPEND APHRODITE_EXT_SRC
     "kernels/quantization/fp6/fp6_linear.cu"
     "kernels/mamba/mamba_ssm/selective_scan_fwd.cu"
@@ -223,29 +213,41 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     "kernels/quantization/marlin/dense/marlin_cuda_kernel.cu"
     "kernels/quantization/marlin/sparse/marlin_24_cuda_kernel.cu"
     "kernels/quantization/marlin/qqq/marlin_qqq_gemm_kernel.cu"
-#    "kernels/quantization/gptq_marlin/gptq_marlin.cu"
-#    "kernels/quantization/gptq_marlin/gptq_marlin_repack.cu"
     "kernels/quantization/gguf/gguf_kernel.cu"
     "kernels/quantization/gptq_marlin/awq_marlin_repack.cu"
     "kernels/quantization/fp8/fp8_marlin.cu"
-    "kernels/all_reduce/custom_all_reduce.cu"
-    #"kernels/quantization/cutlass_w8a8/scaled_mm_entry.cu"
-    #"kernels/quantization/cutlass_w8a8/scaled_mm_c2x.cu"
-    #"kernels/quantization/cutlass_w8a8/scaled_mm_c3x.cu"
-    )
+    "kernels/all_reduce/custom_all_reduce.cu")
 
-  #
-  # The CUTLASS kernels for Hopper require sm90a to be enabled.
-  # This is done via the below gencode option, BUT that creates kernels for both sm90 and sm90a.
-  # That adds an extra 17MB to compiled binary, so instead we selectively enable it.
-  #if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER 12.0)
-  #  set_source_files_properties(
-  #        "kernels/quantization/cutlass_w8a8/scaled_mm_c2x.cu"
-  #        "kernels/quantization/cutlass_w8a8/scaled_mm_c3x.cu"
-  #        PROPERTIES
-  #        COMPILE_FLAGS
-  #        "-gencode arch=compute_90a,code=sm_90a -Wno-psabi")
-  #endif()
+  # Add CUTLASS and GPTQ Marlin kernels if not MSVC
+  if(NOT MSVC)
+    # Include CUTLASS only when needed
+    include(FetchContent)
+    SET(CUTLASS_ENABLE_HEADERS_ONLY=ON)
+    FetchContent_Declare(
+          cutlass
+          GIT_REPOSITORY https://github.com/nvidia/cutlass.git
+          # CUTLASS 3.5.1
+          GIT_TAG 06b21349bcf6ddf6a1686a47a137ad1446579db9 
+    )
+    FetchContent_MakeAvailable(cutlass)
+
+    list(APPEND APHRODITE_EXT_SRC
+      "kernels/quantization/cutlass_w8a8/scaled_mm_entry.cu"
+      "kernels/quantization/cutlass_w8a8/scaled_mm_c2x.cu"
+      "kernels/quantization/cutlass_w8a8/scaled_mm_c3x.cu"
+      "kernels/quantization/gptq_marlin/gptq_marlin.cu"
+      "kernels/quantization/gptq_marlin/gptq_marlin_repack.cu")
+
+    # Enable sm90a for Hopper CUTLASS kernels when using newer CUDA
+    if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER 12.0)
+      set_source_files_properties(
+        "kernels/quantization/cutlass_w8a8/scaled_mm_c2x.cu"
+        "kernels/quantization/cutlass_w8a8/scaled_mm_c3x.cu"
+        PROPERTIES
+        COMPILE_FLAGS
+        "-gencode arch=compute_90a,code=sm_90a -Wno-psabi")
+    endif()
+  endif()
 
 endif()
 
