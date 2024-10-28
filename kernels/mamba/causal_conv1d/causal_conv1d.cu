@@ -124,7 +124,7 @@ at::Tensor causal_conv1d_fwd(const at::Tensor& x, const at::Tensor& weight,
     TORCH_CHECK(
         dim % 8 == 0,
         "causal_conv1d only supports channel dimension divisible by 8 for now");
-    TORCH_CHECK(x.stride(2) % 8 == 0 and x.stride(0) % 8 == 0,
+    TORCH_CHECK(x.stride(2) % 8 == 0 && x.stride(0) % 8 == 0,
                 "causal_conv1d with channel last layout requires strides "
                 "(x.stride(0) and x.stride(2)) to be multiples of 8");
   }
@@ -342,18 +342,18 @@ __global__ __launch_bounds__(Ktraits::kNThreads) void causal_conv1d_fwd_kernel(
 
   // Shared memory.
   extern __shared__ char smem_[];
-  auto& smem_load =
+  [[maybe_unused]] auto& smem_load =
       reinterpret_cast<typename Ktraits::BlockLoadT::TempStorage&>(smem_);
-  auto& smem_load_vec =
+  [[maybe_unused]] auto& smem_load_vec =
       reinterpret_cast<typename Ktraits::BlockLoadVecT::TempStorage&>(smem_);
-  auto& smem_load_index =
+  [[maybe_unused]] auto& smem_load_index =
       reinterpret_cast<typename Ktraits::BlockLoadIndexT::TempStorage&>(smem_);
-  auto& smem_load_index_vec =
+  [[maybe_unused]] auto& smem_load_index_vec =
       reinterpret_cast<typename Ktraits::BlockLoadIndexVecT::TempStorage&>(
           smem_);
-  auto& smem_store =
+  [[maybe_unused]] auto& smem_store =
       reinterpret_cast<typename Ktraits::BlockStoreT::TempStorage&>(smem_);
-  auto& smem_store_vec =
+  [[maybe_unused]] auto& smem_store_vec =
       reinterpret_cast<typename Ktraits::BlockStoreVecT::TempStorage&>(smem_);
   vec_t* smem_exchange = reinterpret_cast<vec_t*>(smem_ + Ktraits::kSmemIOSize);
 
@@ -589,7 +589,7 @@ __launch_bounds__(Ktraits::kNThreads) void causal_conv1d_channellast_fwd_kernel(
                  batch_id * params.out_batch_stride +
                  (chunk_l_id * kChunkSizeL + l_idx) * params.out_l_stride +
                  chunk_c_id * kChunkSizeC + c_idx * kNElts;
-  int* seq_idx = !kHasSeqIdx
+  [[maybe_unused]] int* seq_idx = !kHasSeqIdx
                      ? nullptr
                      : reinterpret_cast<int*>(params.seq_idx_ptr) +
                            batch_id * params.seqlen + chunk_l_id * kChunkSizeL;
@@ -702,7 +702,9 @@ __launch_bounds__(Ktraits::kNThreads) void causal_conv1d_channellast_fwd_kernel(
 #pragma unroll
   for (int i = 0; i < kLPerThread; ++i) {
     out_vals[i] = bias_val;
-    const int seq_idx_cur = !kHasSeqIdx ? 0 : seq_idx_thread[i + kWidth - 1];
+    [[maybe_unused]] const int seq_idx_cur = !kHasSeqIdx
+                                              ? 0
+                                              : seq_idx_thread[i + kWidth - 1];
 #pragma unroll
     for (int w = 0; w < kWidth; ++w) {
       if constexpr (!kHasSeqIdx) {

@@ -116,11 +116,11 @@ __global__ __launch_bounds__(
   // reinterpret_cast<typename BlockLoadT::TempStorage&>(smem_loadstorescan);
   auto& smem_load =
       reinterpret_cast<typename Ktraits::BlockLoadT::TempStorage&>(smem_);
-  auto& smem_load_weight =
+  [[maybe_unused]] auto& smem_load_weight =
       reinterpret_cast<typename Ktraits::BlockLoadWeightT::TempStorage&>(smem_);
-  auto& smem_load_index =
+  [[maybe_unused]] auto& smem_load_index =
       reinterpret_cast<typename Ktraits::BlockLoadIndexT::TempStorage&>(smem_);
-  auto& smem_load_weight1 =
+  [[maybe_unused]] auto& smem_load_weight1 =
       *reinterpret_cast<typename Ktraits::BlockLoadWeightT::TempStorage*>(
           smem_ + sizeof(typename Ktraits::BlockLoadWeightT::TempStorage));
   auto& smem_store =
@@ -145,12 +145,12 @@ __global__ __launch_bounds__(
                    dim_id * kNRows * params.delta_d_stride;
   weight_t* A = reinterpret_cast<weight_t*>(params.A_ptr) +
                 dim_id * kNRows * params.A_d_stride;
-  weight_t* B = reinterpret_cast<weight_t*>(params.B_ptr) +
+  [[maybe_unused]] weight_t* B = reinterpret_cast<weight_t*>(params.B_ptr) +
                 dim_id * kNRows * params.B_d_stride;
   input_t* Bvar = reinterpret_cast<input_t*>(params.B_ptr) +
                   batch_id * params.B_batch_stride +
                   group_id * params.B_group_stride;
-  weight_t* C = reinterpret_cast<weight_t*>(params.C_ptr) +
+  [[maybe_unused]] weight_t* C = reinterpret_cast<weight_t*>(params.C_ptr) +
                 dim_id * kNRows * params.C_d_stride;
   input_t* Cvar = reinterpret_cast<input_t*>(params.C_ptr) +
                   batch_id * params.C_batch_stride +
@@ -158,7 +158,7 @@ __global__ __launch_bounds__(
   scan_t* x = reinterpret_cast<scan_t*>(params.x_ptr) +
               (batch_id * params.dim + dim_id * kNRows) * params.n_chunks *
                   params.dstate;
-  int* index = !kUseIndex ? nullptr
+  [[maybe_unused]] int* index = !kUseIndex ? nullptr
                           : reinterpret_cast<int*>(params.index_ptr) +
                                 batch_id * params.seqlen;
 
@@ -188,7 +188,7 @@ __global__ __launch_bounds__(
   constexpr int kChunkSize = kNThreads * kNItems;
   for (int chunk = 0; chunk < params.n_chunks; ++chunk) {
     input_t u_vals[kNRows][kNItems], delta_vals_load[kNRows][kNItems];
-    int index_vals_load[kNRows][kNItems];
+    [[maybe_unused]] int index_vals_load[kNRows][kNItems];
 
     __syncthreads();
 #pragma unroll
@@ -397,7 +397,7 @@ template <int kNThreads, int kNItems, typename input_t, typename weight_t>
 void selective_scan_fwd_launch(SSMParamsBase& params, cudaStream_t stream) {
   // Only kNRows == 1 is tested for now, which ofc doesn't differ from
   // previously when we had each block processing 1 row.
-  constexpr int kNRows = 1;
+  static constexpr int kNRows = 1;
   BOOL_SWITCH(params.seqlen % (kNThreads * kNItems) == 0, kIsEvenLen, [&] {
     BOOL_SWITCH(params.is_variable_B, kIsVariableB, [&] {
       BOOL_SWITCH(params.is_variable_C, kIsVariableC, [&] {
