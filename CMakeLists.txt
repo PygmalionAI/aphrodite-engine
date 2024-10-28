@@ -73,7 +73,7 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # Replace -std=c++20 with -std=c++17 in APHRODITE_GPU_FLAGS
 if(APHRODITE_GPU_LANG STREQUAL "CUDA")
-  list(APPEND APHRODITE_GPU_FLAGS "--std=c++17")
+  list(APPEND APHRODITE_GPU_FLAGS "--std=c++17" "-Xcompiler -Wno-return-type")
 endif()
 
 #
@@ -218,8 +218,8 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     "kernels/quantization/marlin/dense/marlin_cuda_kernel.cu"
     "kernels/quantization/marlin/sparse/marlin_24_cuda_kernel.cu"
     "kernels/quantization/marlin/qqq/marlin_qqq_gemm_kernel.cu"
-    "kernels/quantization/gptq_marlin/gptq_marlin.cu"
-    "kernels/quantization/gptq_marlin/gptq_marlin_repack.cu"
+#    "kernels/quantization/gptq_marlin/gptq_marlin.cu"
+#    "kernels/quantization/gptq_marlin/gptq_marlin_repack.cu"
     "kernels/quantization/gguf/gguf_kernel.cu"
     "kernels/quantization/gptq_marlin/awq_marlin_repack.cu"
     "kernels/quantization/fp8/fp8_marlin.cu"
