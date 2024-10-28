@@ -124,13 +124,13 @@ void decompress_e8p_origorder(torch::Tensor YIs, torch::Tensor CB,
 //                            c10::optional<torch::Tensor> const& azp,
 //                            c10::optional<torch::Tensor> const& bias);
 
-torch::Tensor marlin_qqq_gemm(torch::Tensor const& a,
-                              torch::Tensor const& b_q_weight,
-                              torch::Tensor const& s_tok,
-                              torch::Tensor const& s_ch,
-                              torch::Tensor const& s_group,
-                              torch::Tensor& workspace, int64_t size_m,
-                              int64_t size_n, int64_t size_k);
+// torch::Tensor marlin_qqq_gemm(torch::Tensor const& a,
+//                               torch::Tensor const& b_q_weight,
+//                               torch::Tensor const& s_tok,
+//                               torch::Tensor const& s_ch,
+//                               torch::Tensor const& s_group,
+//                               torch::Tensor& workspace, int64_t size_m,
+//                               int64_t size_n, int64_t size_k);
 
 torch::Tensor fp_eXmY_linear_forward_cuda(int64_t EXPONENT, int64_t MANTISSA,
                                           torch::Tensor _in_feats,

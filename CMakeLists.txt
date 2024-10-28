@@ -65,6 +65,11 @@ endif()
 # etc.
 #
 find_package(Torch REQUIRED)
+find_package(CUDA REQUIRED)
+find_package(CUDAToolkit REQUIRED)
+
+# Add cuBLAS to the list of libraries to link against
+list(APPEND LIBS CUDA::cublas)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -252,6 +257,7 @@ define_gpu_extension_target(
   COMPILE_FLAGS ${APHRODITE_GPU_FLAGS}
   ARCHITECTURES ${APHRODITE_GPU_ARCHES}
   INCLUDE_DIRECTORIES ${CUTLASS_INCLUDE_DIR}
+  LIBRARIES ${LIBS}
   USE_SABI 3
   WITH_SOABI)
 

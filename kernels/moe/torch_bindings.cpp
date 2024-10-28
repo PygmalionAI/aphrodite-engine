@@ -1,3 +1,7 @@
+#ifdef _WIN32
+#include <crtdefs.h>
+#endif
+
 #include "../core/registration.h"
 #include "moe_ops.h"
 
