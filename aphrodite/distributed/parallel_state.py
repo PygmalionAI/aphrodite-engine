@@ -21,6 +21,7 @@ If you only need to use the distributed environment without model/pipeline
  steps.
 """
 import contextlib
+import sys
 import os
 import pickle
 from collections import namedtuple
@@ -847,6 +848,11 @@ def init_distributed_environment(
         assert distributed_init_method is not None, (
             "distributed_init_method must be provided when initializing "
             "distributed environment")
+
+        if sys.platform.startswith("win32") and distributed_init_method.startswith("tcp://"):
+            distributed_init_method += "?use_libuv=0"
+            backend = "gloo"
+
         # this backend is used for WORLD
         torch.distributed.init_process_group(
             backend=backend,

@@ -391,6 +391,10 @@ def in_wsl() -> bool:
     # Reference: https://github.com/microsoft/WSL/issues/4071
     return "microsoft" in " ".join(uname()).lower()
 
+@lru_cache(maxsize=None)
+def in_windows() -> bool:
+    return sys.platform.startswith("win32")
+
 
 def make_async(func: Callable[P, T]) -> Callable[P, Awaitable[T]]:
     """Take a blocking function, and run it on in an executor thread.
