@@ -63,29 +63,29 @@ torch::Tensor marlin_gemm(torch::Tensor& a, torch::Tensor& b_q_weight,
                           torch::Tensor& b_scales, torch::Tensor& workspace,
                           int64_t size_m, int64_t size_n, int64_t size_k);
 
-torch::Tensor gptq_marlin_24_gemm(torch::Tensor& a, torch::Tensor& b_q_weight,
-                                  torch::Tensor& b_meta,
-                                  torch::Tensor& b_scales,
-                                  torch::Tensor& workspace,
-                                  aphrodite::ScalarTypeTorchPtr const& b_q_type,
-                                  int64_t size_m, int64_t size_n,
-                                  int64_t size_k);
+// torch::Tensor gptq_marlin_24_gemm(torch::Tensor& a, torch::Tensor& b_q_weight,
+//                                   torch::Tensor& b_meta,
+//                                   torch::Tensor& b_scales,
+//                                   torch::Tensor& workspace,
+//                                   aphrodite::ScalarTypeTorchPtr const& b_q_type,
+//                                   int64_t size_m, int64_t size_n,
+//                                   int64_t size_k);
 
-torch::Tensor gptq_marlin_gemm(torch::Tensor& a, torch::Tensor& b_q_weight,
-                               torch::Tensor& b_scales, torch::Tensor& b_zeros,
-                               torch::Tensor& g_idx, torch::Tensor& perm,
-                               torch::Tensor& workspace,
-                               aphrodite::ScalarTypeTorchPtr const& b_q_type,
-                               int64_t size_m, int64_t size_n, int64_t size_k,
-                               bool is_k_full, bool has_zp,
-                               bool use_fp32_reduce);
+// torch::Tensor gptq_marlin_gemm(torch::Tensor& a, torch::Tensor& b_q_weight,
+//                                torch::Tensor& b_scales, torch::Tensor& b_zeros,
+//                                torch::Tensor& g_idx, torch::Tensor& perm,
+//                                torch::Tensor& workspace,
+//                                aphrodite::ScalarTypeTorchPtr const& b_q_type,
+//                                int64_t size_m, int64_t size_n, int64_t size_k,
+//                                bool is_k_full, bool has_zp,
+//                                bool use_fp32_reduce);
 
-torch::Tensor gptq_marlin_repack(torch::Tensor& b_q_weight, torch::Tensor& perm,
-                                 int64_t size_k, int64_t size_n,
-                                 int64_t num_bits);
+// torch::Tensor gptq_marlin_repack(torch::Tensor& b_q_weight, torch::Tensor& perm,
+//                                  int64_t size_k, int64_t size_n,
+//                                  int64_t num_bits);
 
-torch::Tensor awq_marlin_repack(torch::Tensor& b_q_weight, int64_t size_k,
-                                int64_t size_n, int64_t num_bits);
+// torch::Tensor awq_marlin_repack(torch::Tensor& b_q_weight, int64_t size_k,
+//                                 int64_t size_n, int64_t num_bits);
 
 torch::Tensor fp8_marlin_gemm(torch::Tensor& a, torch::Tensor& b_q_weight,
                               torch::Tensor& b_scales, torch::Tensor& workspace,
@@ -109,20 +109,20 @@ at::Tensor e8p_mm_origorder(const at::Tensor& A, const at::Tensor& B,
 void decompress_e8p_origorder(torch::Tensor YIs, torch::Tensor CB,
                               torch::Tensor& Y);
 
-bool cutlass_scaled_mm_supports_fp8(int64_t cuda_device_capability);
+// bool cutlass_scaled_mm_supports_fp8(int64_t cuda_device_capability);
 
-void cutlass_scaled_mm(torch::Tensor& out, torch::Tensor const& a,
-                       torch::Tensor const& b, torch::Tensor const& a_scales,
-                       torch::Tensor const& b_scales,
-                       c10::optional<torch::Tensor> const& bias);
+// void cutlass_scaled_mm(torch::Tensor& out, torch::Tensor const& a,
+//                        torch::Tensor const& b, torch::Tensor const& a_scales,
+//                        torch::Tensor const& b_scales,
+//                        c10::optional<torch::Tensor> const& bias);
 
-void cutlass_scaled_mm_azp(torch::Tensor& out, torch::Tensor const& a,
-                           torch::Tensor const& b,
-                           torch::Tensor const& a_scales,
-                           torch::Tensor const& b_scales,
-                           torch::Tensor const& azp_adj,
-                           c10::optional<torch::Tensor> const& azp,
-                           c10::optional<torch::Tensor> const& bias);
+// void cutlass_scaled_mm_azp(torch::Tensor& out, torch::Tensor const& a,
+//                            torch::Tensor const& b,
+//                            torch::Tensor const& a_scales,
+//                            torch::Tensor const& b_scales,
+//                            torch::Tensor const& azp_adj,
+//                            c10::optional<torch::Tensor> const& azp,
+//                            c10::optional<torch::Tensor> const& bias);
 
 torch::Tensor marlin_qqq_gemm(torch::Tensor const& a,
                               torch::Tensor const& b_q_weight,

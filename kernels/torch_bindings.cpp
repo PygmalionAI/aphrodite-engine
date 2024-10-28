@@ -142,21 +142,21 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.def("marlin_gemm", &marlin_gemm);
   ops.impl("marlin_gemm", torch::kCUDA, &marlin_gemm);
 
-  // Marlin_24 (Sparse) Optimized Quantized GEMM for GPTQ.
-  ops.def("gptq_marlin_24_gemm", &gptq_marlin_24_gemm);
-  ops.impl("gptq_marlin_24_gemm", torch::kCUDA, &gptq_marlin_24_gemm);
+//   // Marlin_24 (Sparse) Optimized Quantized GEMM for GPTQ.
+//   ops.def("gptq_marlin_24_gemm", &gptq_marlin_24_gemm);
+//   ops.impl("gptq_marlin_24_gemm", torch::kCUDA, &gptq_marlin_24_gemm);
 
-  // gptq_marlin Optimized Quantized GEMM for GPTQ.
-  ops.def("gptq_marlin_gemm", &gptq_marlin_gemm);
-  ops.impl("gptq_marlin_gemm", torch::kCUDA, &gptq_marlin_gemm);
+//   // gptq_marlin Optimized Quantized GEMM for GPTQ.
+//   ops.def("gptq_marlin_gemm", &gptq_marlin_gemm);
+//   ops.impl("gptq_marlin_gemm", torch::kCUDA, &gptq_marlin_gemm);
 
-  // gptq_marlin repack from GPTQ.
-  ops.def("gptq_marlin_repack", &gptq_marlin_repack);
-  ops.impl("gptq_marlin_repack", torch::kCUDA, &gptq_marlin_repack);
+//   // gptq_marlin repack from GPTQ.
+//   ops.def("gptq_marlin_repack", &gptq_marlin_repack);
+//   ops.impl("gptq_marlin_repack", torch::kCUDA, &gptq_marlin_repack);
 
-  // awq_marlin repack from AWQ.
-  ops.def("awq_marlin_repack", &awq_marlin_repack);
-  ops.impl("awq_marlin_repack", torch::kCUDA, &awq_marlin_repack);
+//   // awq_marlin repack from AWQ.
+//   ops.def("awq_marlin_repack", &awq_marlin_repack);
+//   ops.impl("awq_marlin_repack", torch::kCUDA, &awq_marlin_repack);
 
   // fp8_marlin Optimized Quantized GEMM for FP8 weight-only.
   ops.def("fp8_marlin_gemm", &fp8_marlin_gemm);
@@ -166,28 +166,28 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.def("marlin_qqq_gemm", &marlin_qqq_gemm);
   ops.impl("marlin_qqq_gemm", torch::kCUDA, &marlin_qqq_gemm);
 
-  // CUTLASS w8a8 GEMM, supporting symmetric per-tensor or per-row/column
-  // quantization.
-  ops.def(
-      "cutlass_scaled_mm(Tensor! out, Tensor a,"
-      "                  Tensor b, Tensor a_scales,"
-      "                  Tensor b_scales, Tensor? bias) -> ()");
-  ops.impl("cutlass_scaled_mm", torch::kCUDA, &cutlass_scaled_mm);
+//   // CUTLASS w8a8 GEMM, supporting symmetric per-tensor or per-row/column
+//   // quantization.
+//   ops.def(
+//       "cutlass_scaled_mm(Tensor! out, Tensor a,"
+//       "                  Tensor b, Tensor a_scales,"
+//       "                  Tensor b_scales, Tensor? bias) -> ()");
+//   ops.impl("cutlass_scaled_mm", torch::kCUDA, &cutlass_scaled_mm);
 
-  // Check if cutlass scaled_mm is supported for CUDA devices of the given
-  // capability
-  ops.def("cutlass_scaled_mm_supports_fp8", &cutlass_scaled_mm_supports_fp8);
-  ops.impl("cutlass_scaled_mm_supports_fp8", torch::kCUDA,
-           &cutlass_scaled_mm_supports_fp8);
+//   // Check if cutlass scaled_mm is supported for CUDA devices of the given
+//   // capability
+//   ops.def("cutlass_scaled_mm_supports_fp8", &cutlass_scaled_mm_supports_fp8);
+//   ops.impl("cutlass_scaled_mm_supports_fp8", torch::kCUDA,
+//            &cutlass_scaled_mm_supports_fp8);
 
-  // CUTLASS w8a8 GEMM, supporting asymmetric per-tensor or per-row/column
-  // quantization.
-  ops.def(
-      "cutlass_scaled_mm_azp(Tensor! out, Tensor a,"
-      "                  Tensor b, Tensor a_scales,"
-      "                  Tensor b_scales, Tensor azp_adj,"
-      "                  Tensor? azp, Tensor? bias) -> ()");
-  ops.impl("cutlass_scaled_mm_azp", torch::kCUDA, &cutlass_scaled_mm_azp);
+//   // CUTLASS w8a8 GEMM, supporting asymmetric per-tensor or per-row/column
+//   // quantization.
+//   ops.def(
+//       "cutlass_scaled_mm_azp(Tensor! out, Tensor a,"
+//       "                  Tensor b, Tensor a_scales,"
+//       "                  Tensor b_scales, Tensor azp_adj,"
+//       "                  Tensor? azp, Tensor? bias) -> ()");
+//   ops.impl("cutlass_scaled_mm_azp", torch::kCUDA, &cutlass_scaled_mm_azp);
 
   // QuIP# GEMV
   ops.def("quip_gemv", &e8p_mm_origorder);
