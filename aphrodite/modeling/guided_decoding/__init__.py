@@ -20,8 +20,11 @@ async def get_guided_decoding_logits_processor(
         tokenizer) -> Optional[LogitsProcessorFunc]:
     request = _adapt_request_for_tool_use(request)
     if guided_decoding_backend == 'outlines':
-        return await get_outlines_guided_decoding_logits_processor(
-            request, tokenizer)
+        if HAS_TRITON:
+            return await get_outlines_guided_decoding_logits_processor(
+                request, tokenizer)
+        else:
+            pass
     if guided_decoding_backend == 'lm-format-enforcer':
         from aphrodite.modeling.guided_decoding.lm_format_enforcer_decoding import (  # noqa
             get_lm_format_enforcer_guided_decoding_logits_processor)
