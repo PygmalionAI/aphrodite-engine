@@ -1696,7 +1696,7 @@ __global__ void Marlin(
 
   #define __CALL_IF(W_TYPE, THREAD_M_BLOCKS, THREAD_N_BLOCKS, THREAD_K_BLOCKS, \
                     HAS_ACT_ORDER, HAS_ZP, GROUP_BLOCKS, NUM_THREADS)          \
-    else if (q_type == W_TYPE && thread_m_blocks == THREAD_M_BLOCKS &&         \
+    if (q_type == W_TYPE && thread_m_blocks == THREAD_M_BLOCKS &&              \
              thread_n_blocks == THREAD_N_BLOCKS &&                             \
              thread_k_blocks == THREAD_K_BLOCKS &&                             \
              has_act_order == HAS_ACT_ORDER && has_zp == HAS_ZP &&             \
@@ -2109,15 +2109,6 @@ void marlin_mm(const void* A, const void* B, void* C, void* C_tmp, void* s,
     AWQ_CALL_IF(aphrodite::kU8, 8, 8, 256)
     AWQ_CALL_IF(aphrodite::kU8, 8, 4, 128)
     AWQ_CALL_IF(aphrodite::kU8, 4, 8, 128)
-    else {
-      TORCH_CHECK(false, "Unsupported shapes: MNK = [", prob_m, ", ", prob_n,
-                  ", ", prob_k, "]", ", has_act_order = ", has_act_order,
-                  ", num_groups = ", num_groups, ", group_size = ", group_size,
-                  ", thread_m_blocks = ", thread_m_blocks,
-                  ", thread_n_blocks = ", thread_n_blocks,
-                  ", thread_k_blocks = ", thread_k_blocks,
-                  ", num_bits = ", num_bits);
-    }
 
     A_ptr += 16 * thread_m_blocks * (prob_k / 8) * par;
     C_ptr += 16 * thread_m_blocks * (prob_n / 8) * par;

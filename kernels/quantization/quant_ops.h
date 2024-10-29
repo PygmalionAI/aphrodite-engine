@@ -63,7 +63,6 @@ torch::Tensor marlin_gemm(torch::Tensor& a, torch::Tensor& b_q_weight,
                           torch::Tensor& b_scales, torch::Tensor& workspace,
                           int64_t size_m, int64_t size_n, int64_t size_k);
 
-#ifndef _WIN32
 torch::Tensor gptq_marlin_24_gemm(torch::Tensor& a, torch::Tensor& b_q_weight,
                                   torch::Tensor& b_meta,
                                   torch::Tensor& b_scales,
@@ -87,7 +86,6 @@ torch::Tensor gptq_marlin_repack(torch::Tensor& b_q_weight, torch::Tensor& perm,
 
 torch::Tensor awq_marlin_repack(torch::Tensor& b_q_weight, int64_t size_k,
                                 int64_t size_n, int64_t num_bits);
-#endif
 
 torch::Tensor fp8_marlin_gemm(torch::Tensor& a, torch::Tensor& b_q_weight,
                               torch::Tensor& b_scales, torch::Tensor& workspace,

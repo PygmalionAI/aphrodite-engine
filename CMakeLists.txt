@@ -210,6 +210,8 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     "kernels/quantization/aqlm/gemm_kernels.cu"
     "kernels/quantization/awq/gemm_kernels.cu"
     "kernels/quantization/quip/origin_order.cu"
+    "kernels/quantization/gptq_marlin/gptq_marlin.cu"
+    "kernels/quantization/gptq_marlin/gptq_marlin_repack.cu"
     "kernels/quantization/marlin/dense/marlin_cuda_kernel.cu"
     "kernels/quantization/marlin/sparse/marlin_24_cuda_kernel.cu"
     "kernels/quantization/marlin/qqq/marlin_qqq_gemm_kernel.cu"
@@ -234,9 +236,7 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     list(APPEND APHRODITE_EXT_SRC
       "kernels/quantization/cutlass_w8a8/scaled_mm_entry.cu"
       "kernels/quantization/cutlass_w8a8/scaled_mm_c2x.cu"
-      "kernels/quantization/cutlass_w8a8/scaled_mm_c3x.cu"
-      "kernels/quantization/gptq_marlin/gptq_marlin.cu"
-      "kernels/quantization/gptq_marlin/gptq_marlin_repack.cu")
+      "kernels/quantization/cutlass_w8a8/scaled_mm_c3x.cu")
 
     # Enable sm90a for Hopper CUTLASS kernels when using newer CUDA
     if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER 12.0)

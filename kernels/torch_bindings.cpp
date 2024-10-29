@@ -142,7 +142,6 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.def("marlin_gemm", &marlin_gemm);
   ops.impl("marlin_gemm", torch::kCUDA, &marlin_gemm);
 
-#ifndef _WIN32
   // Marlin_24 (Sparse) Optimized Quantized GEMM for GPTQ.
   ops.def("gptq_marlin_24_gemm", &gptq_marlin_24_gemm);
   ops.impl("gptq_marlin_24_gemm", torch::kCUDA, &gptq_marlin_24_gemm);
@@ -158,7 +157,6 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   // awq_marlin repack from AWQ.
   ops.def("awq_marlin_repack", &awq_marlin_repack);
   ops.impl("awq_marlin_repack", torch::kCUDA, &awq_marlin_repack);
-#endif
 
   // fp8_marlin Optimized Quantized GEMM for FP8 weight-only.
   ops.def("fp8_marlin_gemm", &fp8_marlin_gemm);
