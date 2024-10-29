@@ -415,6 +415,24 @@ def get_requirements() -> List[str]:
 
     if _no_device() or _is_windows():
         requirements = _read_requirements("requirements-cuda.txt")
+        
+        # Handle Windows-specific packages
+        if sys.platform.startswith("win32"):
+            # Remove packages we'll handle specially
+            requirements = [r for r in requirements if not any(
+                pkg in r for pkg in ["torch==", "xformers==", "triton", "--extra-index-url"]
+            )]
+            
+            # Get Python version
+            py_version = f"{sys.version_info.major}{sys.version_info.minor}"
+            
+            # TODO: figure out how to handle the extra-index-url
+            windows_packages = [
+                f"torch @ https://download.pytorch.org/whl/cu124/torch-2.4.0%2Bcu124-cp{py_version}-cp{py_version}-win_amd64.whl",
+                f"xformers @ https://downloads.pygmalion.chat/whl/windows/xformers/xformers-0.0.28-cp{py_version}-cp{py_version}-win_amd64.whl",
+                f"triton @ https://downloads.pygmalion.chat/whl/windows/triton/triton-3.1.0-cp{py_version}-cp{py_version}-win_amd64.whl"
+            ]
+            requirements.extend(windows_packages)
     elif _is_cuda():
         requirements = _read_requirements("requirements-cuda.txt")
         cuda_major, cuda_minor = torch.version.cuda.split(".")
