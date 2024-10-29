@@ -10,6 +10,7 @@ from loguru import logger
 
 from aphrodite.engine.async_aphrodite import AsyncEngineDeadError
 from aphrodite.engine.protocol import AsyncEngineClient
+from aphrodite.common.utils import in_windows
 
 APHRODITE_KEEP_ALIVE_ON_ENGINE_DEATH = bool(os.getenv(
     "APHRODITE_KEEP_ALIVE_ON_ENGINE_DEATH", 0))
@@ -33,8 +34,14 @@ async def serve_http(app: FastAPI, engine: AsyncEngineClient,
     async def dummy_shutdown() -> None:
         pass
 
-    loop.add_signal_handler(signal.SIGINT, signal_handler)
-    loop.add_signal_handler(signal.SIGTERM, signal_handler)
+    if in_windows():
+        # Windows - use signal.signal() directly
+        signal.signal(signal.SIGINT, lambda signum, frame: signal_handler())
+        signal.signal(signal.SIGTERM, lambda signum, frame: signal_handler())
+    else:
+        # Unix - use asyncio's add_signal_handler
+        loop.add_signal_handler(signal.SIGINT, signal_handler)
+        loop.add_signal_handler(signal.SIGTERM, signal_handler)
 
     try:
         await server_task
