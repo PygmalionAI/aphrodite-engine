@@ -3,7 +3,6 @@ import signal
 from typing import Any, Coroutine
 
 import cloudpickle
-import uvloop
 import zmq
 import zmq.asyncio
 from loguru import logger
@@ -15,6 +14,12 @@ from aphrodite.endpoints.openai.rpc import (APHRODITE_RPC_HEALTHY_STR,
                                             RPCAbortRequest,
                                             RPCGenerateRequest,
                                             RPCUtilityRequest)
+from aphrodite.common.utils import in_windows
+
+if in_windows():
+    import winloop as uvloop
+else:
+    import uvloop
 
 
 class AsyncEngineRPCServer:

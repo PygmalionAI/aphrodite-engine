@@ -11,7 +11,6 @@ from contextlib import asynccontextmanager
 from http import HTTPStatus
 from typing import AsyncGenerator, AsyncIterator, List, Set, Tuple
 
-import uvloop
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -55,6 +54,12 @@ from aphrodite.engine.protocol import AsyncEngineClient
 from aphrodite.server import serve_http
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.version import __version__ as APHRODITE_VERSION
+from aphrodite.common.utils import in_windows
+
+if in_windows():
+    import winloop as uvloop
+else:
+    import uvloop
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
