@@ -111,7 +111,7 @@ class EngineArgs:
     use_v2_block_manager: bool = False
     scheduler_delay_factor: float = 0.0
     enable_chunked_prefill: bool = False
-    guided_decoding_backend: str = 'outlines'
+    guided_decoding_backend: str = 'lm-format-enforcer'
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: int = 256
     num_scheduler_steps: int = 1

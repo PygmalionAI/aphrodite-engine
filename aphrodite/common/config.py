@@ -1836,7 +1836,7 @@ class DecodingConfig:
     """Dataclass which contains the decoding strategy of the engine"""
 
     # Which guided decoding algo to use. 'outlines' / 'lm-format-enforcer'
-    guided_decoding_backend: str = 'outlines'
+    guided_decoding_backend: str = 'lm-format-enforcer'
 
     def __post_init__(self):
         valid_guided_backends = ['outlines', 'lm-format-enforcer']
