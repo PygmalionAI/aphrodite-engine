@@ -6,9 +6,12 @@ from aphrodite.endpoints.openai.protocol import (
     CompletionRequest)
 from aphrodite.modeling.guided_decoding.guided_fields import (
     GuidedDecodingRequest)
-from aphrodite.modeling.guided_decoding.outlines_decoding import (
-    get_local_outlines_guided_decoding_logits_processor,
-    get_outlines_guided_decoding_logits_processor)
+from aphrodite.triton_utils import HAS_TRITON
+
+if HAS_TRITON:
+    from aphrodite.modeling.guided_decoding.outlines_decoding import (
+        get_local_outlines_guided_decoding_logits_processor,
+        get_outlines_guided_decoding_logits_processor)
 
 
 async def get_guided_decoding_logits_processor(
