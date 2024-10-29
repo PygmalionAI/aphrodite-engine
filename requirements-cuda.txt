@@ -3,7 +3,7 @@
 
 # Dependencies for NVIDIA GPUs
 nvidia-ml-py == 12.555.43
-torch == 2.4.0
+torch == 2.4.0; platform_system == 'Linux'
 torchvision == 0.19  # for phi3v
 xformers == 0.0.27.post2; platform_system == 'Linux' and platform_machine == 'x86_64' # Requires PyTorch 2.4.0
 triton >= 2.2.1; platform_system == 'Linux'
