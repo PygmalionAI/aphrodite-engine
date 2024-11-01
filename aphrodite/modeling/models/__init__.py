@@ -115,7 +115,6 @@ _MODELS = {
 if not HAS_TRITON:
     for model_arch in _MIXTURE_OF_EXPERTS:
         _MODELS[model_arch] = (None, None)
-    raise ValueError("Triton is not installed, MoE will not work.")
 
 # Architecture -> type.
 # out of tree models
