@@ -55,6 +55,6 @@ pip install "https://download.pytorch.org/whl/cu124/torch-2.4.1%2Bcu124-$pyVer-w
 pip install "https://downloads.pygmalion.chat/whl/windows/xformers/xformers-0.0.28-$pyVer-win_amd64.whl" --no-deps
 
 Write-Host "Installing Aphrodite engine..."
-pip install "https://github.com/PygmalionAI/aphrodite-engine/releases/download/$RequiredVer/aphrodite_engine-$RequiredVer-cp38-abi3-win_amd64.whl"
+pip install "https://github.com/PygmalionAI/aphrodite-engine/releases/download/v$RequiredVer/aphrodite_engine-$RequiredVer-cp38-abi3-win_amd64.whl"
 
 Write-Host "Installation complete!"
