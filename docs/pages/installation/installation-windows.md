@@ -71,7 +71,7 @@ Download and install CUDA 12.4.1 from [here](https://developer.nvidia.com/cuda-1
 
 #### Building
 
-Simply, clone the repository and run the following commands:
+Simply, clone the repository and run the following commands in `Developer PowerShell for VS 2022` (search for it in the Start menu):
 
 ```console
 git clone https://github.com/PygmalionAI/aphrodite-engine.git
@@ -83,12 +83,14 @@ python -m venv venv --prompt aphrodite
 venv\Scripts\activate
 
 # Install the required dependencies
-pip install 'torch==2.4.1' --index-url https://download.pytorch.org/whl/cu124
+pip install https://download.pytorch.org/whl/cu124/torch-2.4.1%2Bcu124-cp312-cp312-win_amd64.whl
 pip install https://downloads.pygmalion.chat/whl/windows/xformers/xformers-0.0.28-cp312-cp312-win_amd64.whl
 
 # Build Aphrodite Engine
 pip install -e . --no-build-isolation
 ```
+
+Please replace the `cp312-cp312` with your Python version. For example, if you have Python 3.10, you should replace it with `cp310-cp310`.
 
 Many things can go wrong during the build process. Below is a list of common issues and their solutions:
 
