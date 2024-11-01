@@ -119,7 +119,7 @@ The story behind this error is fascinating. The CUDA installer stopped shipping 
 
 1. Download the NvToolsExt.7z file from the official pytorch builder: https://ossci-windows.s3.us-east-1.amazonaws.com/builder/NvToolsExt.7z
 
-(you can also just install CUDA 12.8 but with only the NSight NVTX component selected)
+(you can also just install CUDA 11.8 but with only the NSight NVTX component selected)
 
 2. Extract the contents of the archive. You can use a 7zip tool for this, like 7zip or WinRAR.
 
