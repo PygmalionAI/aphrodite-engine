@@ -93,18 +93,6 @@ _CONDITIONAL_GENERATION_MODELS = {
     "BartForConditionalGeneration": ("bart", "BartForConditionalGeneration"),
 }
 
-# TODO(alpin): get a proper list of all MoE models
-_MIXTURE_OF_EXPERTS = {
-    "MixtralForCausalLM": ("mixtral", "MixtralForCausalLM"),
-    "QuantMixtralForCausalLM": ("mixtral_quant", "MixtralForCausalLM"),
-    "OlmoeForCausalLM": ("olmoe", "OlmoeForCausalLM"),
-    "JambaForCausalLM": ("jamba", "JambaForCausalLM"),
-    "Qwen2MoeForCausalLM": ("qwen2_moe", "Qwen2MoeForCausalLM"),
-    "DbrxForCausalLM": ("dbrx", "DbrxForCausalLM"),
-    "DeepseekForCausalLM": ("deepseek", "DeepseekForCausalLM"),
-    "DeepseekV2ForCausalLM": ("deepseek_v2", "DeepseekV2ForCausalLM"),
-}
-
 _MODELS = {
     **_GENERATION_MODELS,
     **_EMBEDDING_MODELS,
@@ -112,9 +100,6 @@ _MODELS = {
     **_CONDITIONAL_GENERATION_MODELS,
 }
 
-if not HAS_TRITON:
-    for model_arch in _MIXTURE_OF_EXPERTS:
-        _MODELS[model_arch] = (None, None)
 
 # Architecture -> type.
 # out of tree models
