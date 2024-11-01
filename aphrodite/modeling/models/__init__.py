@@ -6,6 +6,7 @@ import torch.nn as nn
 from loguru import logger
 
 from aphrodite.common.utils import is_hip
+from aphrodite.triton_utils import HAS_TRITON
 
 _GENERATION_MODELS = {
     "AquilaModel": ("llama", "LlamaForCausalLM"),
@@ -92,12 +93,29 @@ _CONDITIONAL_GENERATION_MODELS = {
     "BartForConditionalGeneration": ("bart", "BartForConditionalGeneration"),
 }
 
+# TODO(alpin): get a proper list of all MoE models
+_MIXTURE_OF_EXPERTS = {
+    "MixtralForCausalLM": ("mixtral", "MixtralForCausalLM"),
+    "QuantMixtralForCausalLM": ("mixtral_quant", "MixtralForCausalLM"),
+    "OlmoeForCausalLM": ("olmoe", "OlmoeForCausalLM"),
+    "JambaForCausalLM": ("jamba", "JambaForCausalLM"),
+    "Qwen2MoeForCausalLM": ("qwen2_moe", "Qwen2MoeForCausalLM"),
+    "DbrxForCausalLM": ("dbrx", "DbrxForCausalLM"),
+    "DeepseekForCausalLM": ("deepseek", "DeepseekForCausalLM"),
+    "DeepseekV2ForCausalLM": ("deepseek_v2", "DeepseekV2ForCausalLM"),
+}
+
 _MODELS = {
     **_GENERATION_MODELS,
     **_EMBEDDING_MODELS,
     **_MULTIMODAL_MODELS,
     **_CONDITIONAL_GENERATION_MODELS,
 }
+
+if not HAS_TRITON:
+    for model_arch in _MIXTURE_OF_EXPERTS:
+        _MODELS[model_arch] = (None, None)
+    raise ValueError("Triton is not installed, MoE will not work.")
 
 # Architecture -> type.
 # out of tree models

@@ -17,6 +17,7 @@ from aphrodite.common.utils import FlexibleArgumentParser, is_cpu
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.quantization import QUANTIZATION_METHODS
 from aphrodite.transformers_utils.utils import check_gguf_file
+from aphrodite.triton_utils import HAS_TRITON
 
 if TYPE_CHECKING:
     from aphrodite.transformers_utils.tokenizer_group import BaseTokenizerGroup
@@ -1036,6 +1037,9 @@ class EngineArgs:
             preemption_mode=self.preemption_mode,
             num_scheduler_steps=self.num_scheduler_steps,
         )
+
+        if not HAS_TRITON and self.enable_lora:
+            raise ValueError("Triton is not installed, LoRA will not work.")
 
         lora_config = LoRAConfig(
             max_lora_rank=self.max_lora_rank,

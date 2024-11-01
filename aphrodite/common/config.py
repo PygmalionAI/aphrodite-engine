@@ -19,6 +19,7 @@ from aphrodite.platforms import current_platform
 from aphrodite.quantization import QUANTIZATION_METHODS
 from aphrodite.transformers_utils.config import (ConfigFormat, get_config,
                                                  get_hf_text_config)
+from aphrodite.triton_utils import HAS_TRITON
 
 if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
@@ -738,6 +739,10 @@ class CacheConfig:
                     "4090, H100). Your GPU has compute capability "
                     f"{capability}")
 
+        if not HAS_TRITON:
+            raise ValueError("Triton is not installed, "
+                             "prefix caching will not work.")
+
 
     def verify_with_parallel_config(
         self,
@@ -1045,6 +1050,9 @@ class SchedulerConfig:
             self.max_num_batched_tokens = max_num_batched_tokens
         else:
             if enable_chunked_prefill:
+                if not HAS_TRITON:
+                    raise ValueError("Triton is not installed, "
+                                     "chunked prefill will not work.")
                 # For chunked prefill, choose the well-tuned batch size.
                 self.max_num_batched_tokens = 768
             elif embedding_mode:
