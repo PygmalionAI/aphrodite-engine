@@ -6,7 +6,6 @@ import torch.nn as nn
 from loguru import logger
 
 from aphrodite.common.utils import is_hip
-from aphrodite.triton_utils import HAS_TRITON
 
 _GENERATION_MODELS = {
     "AquilaModel": ("llama", "LlamaForCausalLM"),
