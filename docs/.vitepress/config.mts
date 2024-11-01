@@ -17,6 +17,10 @@ export default defineConfig({
 						link: "/pages/installation/installation",
 					},
 					{
+						text: "Microsoft Windows",
+						link: "/pages/installation/installation-windows",
+					},
+					{
 						text: "AMD GPU",
 						link: "/pages/installation/installation-rocm",
 					},
