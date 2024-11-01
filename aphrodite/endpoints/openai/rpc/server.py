@@ -210,6 +210,18 @@ async def run_server(server: AsyncEngineRPCServer):
         server.cleanup()
 
 
-def run_rpc_server(async_engine_args: AsyncEngineArgs, rpc_path: str):
+def run_rpc_server(async_engine_args: AsyncEngineArgs, rpc_path: str, command=None):
+    """
+    Run the RPC server.
+    
+    Args:
+        async_engine_args: Engine arguments
+        rpc_path: Path for RPC communication
+        command: Optional command line arguments to use instead of sys.argv
+    """
+    if command is not None:
+        # Replace sys.argv with our explicit command
+        sys.argv = [sys.argv[0]] + command
+        
     server = AsyncEngineRPCServer(async_engine_args, rpc_path)
     uvloop.run(run_server(server))

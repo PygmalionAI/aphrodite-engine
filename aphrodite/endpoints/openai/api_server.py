@@ -149,7 +149,12 @@ async def build_async_engine_client(args) -> AsyncIterator[AsyncEngineClient]:
         # so we need to spawn a new process
         rpc_server_process = context.Process(
             target=run_rpc_server,
-            args=(engine_args, rpc_path))
+            args=(engine_args, rpc_path),
+            kwargs={
+                'command': ['run', args.model_tag] + 
+                          [f'--{k.replace("_", "-")}={v}' for k, v in vars(args).items() 
+                           if v is not None and k not in ['model_tag', 'dispatch_function']]
+            })
         rpc_server_process.start()
         logger.info(
             f"Started engine process with PID {rpc_server_process.pid}")
