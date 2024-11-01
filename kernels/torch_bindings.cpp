@@ -162,6 +162,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.def("fp8_marlin_gemm", &fp8_marlin_gemm);
   ops.impl("fp8_marlin_gemm", torch::kCUDA, &fp8_marlin_gemm);
 
+  #ifndef _WIN32
   // marlin_qqq_gemm for QQQ.
   ops.def("marlin_qqq_gemm", &marlin_qqq_gemm);
   ops.impl("marlin_qqq_gemm", torch::kCUDA, &marlin_qqq_gemm);
@@ -188,6 +189,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "                  Tensor b_scales, Tensor azp_adj,"
       "                  Tensor? azp, Tensor? bias) -> ()");
   ops.impl("cutlass_scaled_mm_azp", torch::kCUDA, &cutlass_scaled_mm_azp);
+  #endif
 
   // QuIP# GEMV
   ops.def("quip_gemv", &e8p_mm_origorder);

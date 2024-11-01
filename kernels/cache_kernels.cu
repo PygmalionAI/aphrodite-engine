@@ -111,8 +111,8 @@ void copy_blocks(std::vector<torch::Tensor> const& key_caches,
 
   // Create data structures for the kernel.
   // Create an array of pointers to the key and value caches.
-  int64_t key_cache_ptrs[num_layers];
-  int64_t value_cache_ptrs[num_layers];
+  std::vector<int64_t> key_cache_ptrs(num_layers);
+  std::vector<int64_t> value_cache_ptrs(num_layers);
   for (int layer_idx = 0; layer_idx < num_layers; ++layer_idx) {
     key_cache_ptrs[layer_idx] =
         reinterpret_cast<int64_t>(key_caches[layer_idx].data_ptr());
@@ -126,10 +126,10 @@ void copy_blocks(std::vector<torch::Tensor> const& key_caches,
   // Move the data structures to the GPU.
   // NOTE: This synchronizes the CPU and GPU.
   torch::Tensor key_cache_ptrs_tensor =
-      torch::from_blob(key_cache_ptrs, {num_layers}, torch::kInt64)
+      torch::from_blob(key_cache_ptrs.data(), {num_layers}, torch::kInt64)
           .to(cache_device);
   torch::Tensor value_cache_ptrs_tensor =
-      torch::from_blob(value_cache_ptrs, {num_layers}, torch::kInt64)
+      torch::from_blob(value_cache_ptrs.data(), {num_layers}, torch::kInt64)
           .to(cache_device);
 
   // Launch the kernel.

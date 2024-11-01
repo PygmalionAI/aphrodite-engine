@@ -43,7 +43,23 @@ using ReduceFnType = T (*)(T, T);
 // Helper function to return the next largest power of 2
 static constexpr int _nextPow2(unsigned int num) {
   if (num <= 1) return num;
+
+#if defined(_MSC_VER) && !defined(__clang__)  // MSVC without Clang
+  // Decrement n (to handle cases when n itself is a power of 2)
+  num--;
+
+  // Set all bits after the first set bit
+  num |= num >> 1;
+  num |= num >> 2;
+  num |= num >> 4;
+  num |= num >> 8;
+  num |= num >> 16;
+
+  // Add 1 to get the next power of 2
+  return num + 1;
+#else  // GCC, Clang, or other compilers with __builtin_clz
   return 1 << (CHAR_BIT * sizeof(num) - __builtin_clz(num - 1));
+#endif
 }
 
 template <typename T, int numLanes = WARP_SIZE>
