@@ -25,7 +25,7 @@ from aphrodite.quantization.base_config import (QuantizationConfig,
 
 WEIGHT_LOADER_V2_SUPPORTED = [
     "CompressedTensorsLinearMethod", "GPTQMarlinLinearMethod",
-    "AWQMarlinLinearMethod", "AWQLinearMethod",
+    "AWQMarlinLinearMethod", "AWQLinearMethod", "HQQMarlinMethod",
 ]
 
 
