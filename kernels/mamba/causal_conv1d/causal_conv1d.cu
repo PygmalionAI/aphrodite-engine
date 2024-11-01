@@ -589,10 +589,10 @@ __launch_bounds__(Ktraits::kNThreads) void causal_conv1d_channellast_fwd_kernel(
                  batch_id * params.out_batch_stride +
                  (chunk_l_id * kChunkSizeL + l_idx) * params.out_l_stride +
                  chunk_c_id * kChunkSizeC + c_idx * kNElts;
-  [[maybe_unused]] int* seq_idx = !kHasSeqIdx
-                     ? nullptr
-                     : reinterpret_cast<int*>(params.seq_idx_ptr) +
-                           batch_id * params.seqlen + chunk_l_id * kChunkSizeL;
+  [[maybe_unused]] int* seq_idx =
+      !kHasSeqIdx ? nullptr
+                  : reinterpret_cast<int*>(params.seq_idx_ptr) +
+                        batch_id * params.seqlen + chunk_l_id * kChunkSizeL;
   input_t* initial_states =
       params.initial_states_ptr == nullptr || chunk_l_id > 0
           ? nullptr
@@ -702,9 +702,8 @@ __launch_bounds__(Ktraits::kNThreads) void causal_conv1d_channellast_fwd_kernel(
 #pragma unroll
   for (int i = 0; i < kLPerThread; ++i) {
     out_vals[i] = bias_val;
-    [[maybe_unused]] const int seq_idx_cur = !kHasSeqIdx
-                                              ? 0
-                                              : seq_idx_thread[i + kWidth - 1];
+    [[maybe_unused]] const int seq_idx_cur =
+        !kHasSeqIdx ? 0 : seq_idx_thread[i + kWidth - 1];
 #pragma unroll
     for (int w = 0; w < kWidth; ++w) {
       if constexpr (!kHasSeqIdx) {

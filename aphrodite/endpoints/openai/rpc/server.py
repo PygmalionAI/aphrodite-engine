@@ -9,12 +9,12 @@ from loguru import logger
 from typing_extensions import Never
 
 from aphrodite import AsyncAphrodite, AsyncEngineArgs
+from aphrodite.common.utils import in_windows
 from aphrodite.endpoints.openai.rpc import (APHRODITE_RPC_HEALTHY_STR,
                                             APHRODITE_RPC_SUCCESS_STR,
                                             RPCAbortRequest,
                                             RPCGenerateRequest,
                                             RPCUtilityRequest)
-from aphrodite.common.utils import in_windows
 
 if in_windows():
     import winloop as uvloop

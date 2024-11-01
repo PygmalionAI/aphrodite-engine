@@ -8,9 +8,9 @@ import uvicorn
 from fastapi import FastAPI, Response
 from loguru import logger
 
+from aphrodite.common.utils import in_windows
 from aphrodite.engine.async_aphrodite import AsyncEngineDeadError
 from aphrodite.engine.protocol import AsyncEngineClient
-from aphrodite.common.utils import in_windows
 
 APHRODITE_KEEP_ALIVE_ON_ENGINE_DEATH = bool(os.getenv(
     "APHRODITE_KEEP_ALIVE_ON_ENGINE_DEATH", 0))

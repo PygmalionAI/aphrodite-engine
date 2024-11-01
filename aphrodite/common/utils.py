@@ -4,6 +4,7 @@ import contextlib
 import datetime
 import enum
 import gc
+import math
 import os
 import socket
 import subprocess
@@ -12,13 +13,12 @@ import tempfile
 import threading
 import uuid
 import warnings
-import math
 from asyncio import FIRST_COMPLETED, ensure_future
 from functools import lru_cache, partial, wraps
 from platform import uname
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Dict, Generic,
-                    Hashable, List, Literal, Optional, OrderedDict, Set, Tuple,
-                    Type, TypeVar, Union, overload, Iterable)
+                    Hashable, Iterable, List, Literal, Optional, OrderedDict,
+                    Set, Tuple, Type, TypeVar, Union, overload)
 from uuid import uuid4
 
 import numpy as np

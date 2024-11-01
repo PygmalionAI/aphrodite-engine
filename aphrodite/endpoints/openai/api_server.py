@@ -23,7 +23,8 @@ from aphrodite.common.config import ModelConfig
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import _SAMPLING_EPS, SamplingParams
 from aphrodite.common.utils import (FlexibleArgumentParser,
-                                    get_open_zmq_ipc_path, random_uuid)
+                                    get_open_zmq_ipc_path, in_windows,
+                                    random_uuid)
 from aphrodite.endpoints.logger import RequestLogger
 from aphrodite.endpoints.openai.args import make_arg_parser
 # yapf: disable
@@ -54,7 +55,6 @@ from aphrodite.engine.protocol import AsyncEngineClient
 from aphrodite.server import serve_http
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.version import __version__ as APHRODITE_VERSION
-from aphrodite.common.utils import in_windows
 
 if in_windows():
     import winloop as uvloop

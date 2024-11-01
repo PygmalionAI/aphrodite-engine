@@ -21,9 +21,9 @@ If you only need to use the distributed environment without model/pipeline
  steps.
 """
 import contextlib
-import sys
 import os
 import pickle
+import sys
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass

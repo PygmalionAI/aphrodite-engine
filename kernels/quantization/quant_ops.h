@@ -109,7 +109,7 @@ at::Tensor e8p_mm_origorder(const at::Tensor& A, const at::Tensor& B,
 void decompress_e8p_origorder(torch::Tensor YIs, torch::Tensor CB,
                               torch::Tensor& Y);
 
-#ifndef _WIN32
+  #ifndef _WIN32
 bool cutlass_scaled_mm_supports_fp8(int64_t cuda_device_capability);
 
 void cutlass_scaled_mm(torch::Tensor& out, torch::Tensor const& a,
@@ -132,7 +132,7 @@ torch::Tensor marlin_qqq_gemm(torch::Tensor const& a,
                               torch::Tensor const& s_group,
                               torch::Tensor& workspace, int64_t size_m,
                               int64_t size_n, int64_t size_k);
-#endif
+  #endif
 
 torch::Tensor fp_eXmY_linear_forward_cuda(int64_t EXPONENT, int64_t MANTISSA,
                                           torch::Tensor _in_feats,
