@@ -610,7 +610,7 @@ class EngineArgs:
         parser.add_argument(
             '--guided-decoding-backend',
             type=str,
-            default='outlines',
+            default='lm-format-enforcer',
             choices=['outlines', 'lm-format-enforcer'],
             help='Category: Scheduler Options\n'
             'Which engine will be used for guided decoding'
