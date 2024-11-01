@@ -739,7 +739,7 @@ class CacheConfig:
                     "4090, H100). Your GPU has compute capability "
                     f"{capability}")
 
-        if not HAS_TRITON:
+        if not HAS_TRITON and self.enable_prefix_caching:
             raise ValueError("Triton is not installed, "
                              "prefix caching will not work.")
 
