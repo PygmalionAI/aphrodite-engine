@@ -523,6 +523,8 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                     param, shard_size, shard_offset)
 
             use_bitsandbytes = getattr(param, "use_bitsandbytes", False)
+            use_bitsandbytes_4bit = getattr(param, "use_bitsandbytes_4bit",
+                                            False)
             if use_bitsandbytes:
                 shard_size = loaded_weight.shape[output_dim]
                 shard_offset = loaded_weight.shape[output_dim] * \
@@ -547,8 +549,11 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                     loaded_weight.shape[output_dim], tp_rank, tp_size)
             else:
                 start_idx = tp_rank * shard_size
-            loaded_weight = loaded_weight.narrow(output_dim, start_idx,
-                                                 shard_size)
+            # bitsandbytes loads the weights of the specific portion
+            # no need to narrow here
+            if not use_bitsandbytes_4bit:
+                loaded_weight = loaded_weight.narrow(output_dim, start_idx,
+                                                     shard_size)
         # Special case for AQLM codebooks.
         elif is_metadata:
             # metadata indicates fixed size concatenated along dim 0
@@ -894,6 +899,8 @@ class QKVParallelLinear(ColumnParallelLinear):
                     param, shard_size, shard_offset)
 
             use_bitsandbytes = getattr(param, "use_bitsandbytes", False)
+            use_bitsandbytes_4bit = getattr(param, "use_bitsandbytes_4bit",
+                                            False)
             if use_bitsandbytes:
                 orig_qkv_offsets = {
                     "q": (0, self.num_heads * self.head_size),
@@ -934,8 +941,11 @@ class QKVParallelLinear(ColumnParallelLinear):
                 else:
                     shard_id = tp_rank // self.num_kv_head_replicas
                 start_idx = shard_id * shard_size
-            loaded_weight = loaded_weight.narrow(output_dim, start_idx,
-                                                 shard_size)
+            # bitsandbytes loads the weights of the specific portion
+            # no need to narrow here
+            if not use_bitsandbytes_4bit:
+                loaded_weight = loaded_weight.narrow(output_dim, start_idx,
+                                                     shard_size)
         # Special case for for AQLM codebooks.
         elif is_metadata:
             # metadata indicates fixed size concatenated along dim 0
@@ -1044,6 +1054,7 @@ class RowParallelLinear(LinearBase):
     def weight_loader(self, param: Parameter, loaded_weight: torch.Tensor):
         tp_size = get_tensor_model_parallel_world_size()
         input_dim = getattr(param, "input_dim", None)
+        use_bitsandbytes_4bit = getattr(param, "use_bitsandbytes_4bit", False)
         # Special case for GGUF
         is_gguf_weight = getattr(param, "is_gguf_weight", False)
         is_gguf_weight_type = getattr(param, "is_gguf_weight_type", False)
@@ -1058,7 +1069,9 @@ class RowParallelLinear(LinearBase):
             param.materialize(tuple(weight_shape), dtype=loaded_weight.dtype)
 
         param_data = param.data
-        if input_dim is not None:
+        # bitsandbytes loads the weights of the specific portion
+        # no need to narrow here
+        if input_dim is not None and not use_bitsandbytes_4bit:
             shard_size = param_data.shape[input_dim]
             if self.quant_config is None:
                 start_idx = get_current_tp_rank_partition_offset(
