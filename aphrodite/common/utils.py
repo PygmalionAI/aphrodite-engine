@@ -1132,7 +1132,6 @@ def tensor_progress_bar(iterable:Iterable[Tuple[str, torch.Tensor]],
                         final_bytes:int, desc="Processing"):
     show_progress = get_tensor_model_parallel_rank() == 0
     units = 1024 ** (int(math.log2(final_bytes)) // 10)
-    total_gib = final_bytes / units / 1024 ** 3
 
     if show_progress:
         with Progress(
