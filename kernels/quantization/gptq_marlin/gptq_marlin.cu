@@ -1766,12 +1766,12 @@ __global__ void Marlin(
   #define __CALL_IF(W_TYPE, THREAD_M_BLOCKS, THREAD_N_BLOCKS, THREAD_K_BLOCKS, \
                     HAS_ACT_ORDER, HAS_ZP, GROUP_BLOCKS, NUM_THREADS,          \
                     IS_ZP_FLOAT)                                               \
-    else if (q_type == W_TYPE && thread_m_blocks == THREAD_M_BLOCKS &&         \
-             thread_n_blocks == THREAD_N_BLOCKS &&                             \
-             thread_k_blocks == THREAD_K_BLOCKS &&                             \
-             has_act_order == HAS_ACT_ORDER && has_zp == HAS_ZP &&             \
-             group_blocks == GROUP_BLOCKS && num_threads == NUM_THREADS &&     \
-             is_zp_float == IS_ZP_FLOAT) {                                     \
+    if (q_type == W_TYPE && thread_m_blocks == THREAD_M_BLOCKS &&              \
+        thread_n_blocks == THREAD_N_BLOCKS &&                                  \
+        thread_k_blocks == THREAD_K_BLOCKS &&                                  \
+        has_act_order == HAS_ACT_ORDER && has_zp == HAS_ZP &&                  \
+        group_blocks == GROUP_BLOCKS && num_threads == NUM_THREADS &&          \
+        is_zp_float == IS_ZP_FLOAT) {                                          \
       if constexpr (!IS_ZP_FLOAT || std::is_same<scalar_t, half>::value) {     \
         cudaFuncSetAttribute(                                                  \
             Marlin<scalar_t, W_TYPE.id(), NUM_THREADS, THREAD_M_BLOCKS,        \
