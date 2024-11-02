@@ -11,7 +11,6 @@ from contextlib import asynccontextmanager
 from http import HTTPStatus
 from typing import AsyncGenerator, AsyncIterator, List, Set, Tuple
 
-import uvloop
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,7 +23,8 @@ from aphrodite.common.config import ModelConfig
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import _SAMPLING_EPS, SamplingParams
 from aphrodite.common.utils import (FlexibleArgumentParser,
-                                    get_open_zmq_ipc_path, random_uuid)
+                                    get_open_zmq_ipc_path, in_windows,
+                                    random_uuid)
 from aphrodite.endpoints.logger import RequestLogger
 from aphrodite.endpoints.openai.args import make_arg_parser
 # yapf: disable
@@ -55,6 +55,11 @@ from aphrodite.engine.protocol import AsyncEngineClient
 from aphrodite.server import serve_http
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.version import __version__ as APHRODITE_VERSION
+
+if in_windows():
+    import winloop as uvloop
+else:
+    import uvloop
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
@@ -541,7 +546,7 @@ async def get_kobold_lite_ui():
         klitepath = os.path.join(scriptpath, "../kobold/klite.embd")
         klitepath = os.path.normpath(klitepath)  # Normalize the path
         if os.path.exists(klitepath):
-            with open(klitepath, "r") as f:
+            with open(klitepath, "r", encoding="utf-8") as f:
                 kobold_lite_ui = f.read()
         else:
             logger.error("Kobold Lite UI not found at " + klitepath)

@@ -147,7 +147,12 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.impl("gptq_marlin_24_gemm", torch::kCUDA, &gptq_marlin_24_gemm);
 
   // gptq_marlin Optimized Quantized GEMM for GPTQ.
-  ops.def("gptq_marlin_gemm", &gptq_marlin_gemm);
+  ops.def(
+      "gptq_marlin_gemm(Tensor a, Tensor b_q_weight, Tensor b_scales, "
+      "Tensor b_zeros, Tensor g_idx, Tensor perm, Tensor workspace, "
+      "int b_q_type, "
+      "SymInt size_m, SymInt size_n, SymInt size_k, bool is_k_full, "
+      "bool has_zp, bool use_fp32_reduce, bool is_zp_float) -> Tensor");
   ops.impl("gptq_marlin_gemm", torch::kCUDA, &gptq_marlin_gemm);
 
   // gptq_marlin repack from GPTQ.
@@ -162,6 +167,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.def("fp8_marlin_gemm", &fp8_marlin_gemm);
   ops.impl("fp8_marlin_gemm", torch::kCUDA, &fp8_marlin_gemm);
 
+  #ifndef _WIN32
   // marlin_qqq_gemm for QQQ.
   ops.def("marlin_qqq_gemm", &marlin_qqq_gemm);
   ops.impl("marlin_qqq_gemm", torch::kCUDA, &marlin_qqq_gemm);
@@ -188,6 +194,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "                  Tensor b_scales, Tensor azp_adj,"
       "                  Tensor? azp, Tensor? bias) -> ()");
   ops.impl("cutlass_scaled_mm_azp", torch::kCUDA, &cutlass_scaled_mm_azp);
+  #endif
 
   // QuIP# GEMV
   ops.def("quip_gemv", &e8p_mm_origorder);

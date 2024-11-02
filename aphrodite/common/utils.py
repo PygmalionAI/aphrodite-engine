@@ -4,6 +4,7 @@ import contextlib
 import datetime
 import enum
 import gc
+import math
 import os
 import socket
 import subprocess
@@ -12,13 +13,12 @@ import tempfile
 import threading
 import uuid
 import warnings
-import math
 from asyncio import FIRST_COMPLETED, ensure_future
 from functools import lru_cache, partial, wraps
 from platform import uname
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Dict, Generic,
-                    Hashable, List, Literal, Optional, OrderedDict, Set, Tuple,
-                    Type, TypeVar, Union, overload, Iterable)
+                    Hashable, Iterable, List, Literal, Optional, OrderedDict,
+                    Set, Tuple, Type, TypeVar, Union, overload)
 from uuid import uuid4
 
 import numpy as np
@@ -391,6 +391,10 @@ def in_wsl() -> bool:
     # Reference: https://github.com/microsoft/WSL/issues/4071
     return "microsoft" in " ".join(uname()).lower()
 
+@lru_cache(maxsize=None)
+def in_windows() -> bool:
+    return sys.platform.startswith("win32")
+
 
 def make_async(func: Callable[P, T]) -> Callable[P, Awaitable[T]]:
     """Take a blocking function, and run it on in an executor thread.
@@ -515,11 +519,16 @@ def get_distributed_init_method(ip: str, port: int) -> str:
     return f"tcp://[{ip}]:{port}" if ":" in ip else f"tcp://{ip}:{port}"
 
 def get_open_zmq_ipc_path() -> str:
-    APHRODITE_RPC_BASE_PATH = os.getenv("APHRODITE_RPC_BASE_PATH",
-                                    tempfile.gettempdir())
-    base_rpc_path = APHRODITE_RPC_BASE_PATH
-    return f"ipc://{base_rpc_path}/{uuid4()}"
-
+    if not in_windows():
+        APHRODITE_RPC_BASE_PATH = os.getenv("APHRODITE_RPC_BASE_PATH",
+                                        tempfile.gettempdir())
+        base_rpc_path = APHRODITE_RPC_BASE_PATH
+        return f"ipc://{base_rpc_path}/{uuid4()}"
+    else:
+        # windows doesn't support ipc://
+        # use tcp:// instead
+        return f"tcp://127.0.0.1:{get_open_port()}"
+     
 def get_open_port(port: Optional[int] = None) -> int:
     port = int(os.getenv("APHRODITE_PORT", 0)
                 ) if "APHRODITE_PORT" in os.environ else None
