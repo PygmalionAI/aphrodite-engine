@@ -1,7 +1,7 @@
 # Installing Aphrodite engine on Windows
 # Copyright (c) 2024 PygmalionAI
 
-$RequiredVer = "0.6.3"
+$RequiredVer = "0.6.3.post1"
 
 # Check if Python is installed and version >= 3.8
 try {
