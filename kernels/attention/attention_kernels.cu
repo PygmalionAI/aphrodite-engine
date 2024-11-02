@@ -208,8 +208,8 @@ __device__ void paged_attention_kernel(
   const int* block_table = block_tables + seq_idx * max_num_blocks_per_seq;
 
   // blocksparse specific vars
-  int bs_block_offset;
-  int q_bs_block_id;
+  [[maybe_unused]] int bs_block_offset;
+  [[maybe_unused]] int q_bs_block_id;
   if constexpr (IS_BLOCK_SPARSE) {
     // const int num_blocksparse_blocks = DIVIDE_ROUND_UP(seq_len,
     // blocksparse_block_size);
