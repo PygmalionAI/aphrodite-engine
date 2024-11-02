@@ -147,12 +147,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.impl("gptq_marlin_24_gemm", torch::kCUDA, &gptq_marlin_24_gemm);
 
   // gptq_marlin Optimized Quantized GEMM for GPTQ.
-  ops.def(
-      "gptq_marlin_gemm(Tensor a, Tensor b_q_weight, Tensor b_scales, "
-      "Tensor b_zeros, Tensor g_idx, Tensor perm, Tensor workspace, "
-      "int b_q_type, "
-      "SymInt size_m, SymInt size_n, SymInt size_k, bool is_k_full, "
-      "bool has_zp, bool use_fp32_reduce, bool is_zp_float) -> Tensor");
+  ops.def("gptq_marlin_gemm", &gptq_marlin_gemm);
   ops.impl("gptq_marlin_gemm", torch::kCUDA, &gptq_marlin_gemm);
 
   // gptq_marlin repack from GPTQ.
