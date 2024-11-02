@@ -1,7 +1,6 @@
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
-from loguru import logger
 
 from aphrodite import _custom_ops as ops
 from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
