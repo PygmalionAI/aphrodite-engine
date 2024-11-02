@@ -47,7 +47,7 @@ ignore = [
 
 [tool.codespell]
 ignore-words-list = "dout, te, indicies, ist, subtile, wit, whit, beseige"
-skip = "./tests/,./aphrodite/endpoints/kobold/klite.embd,./kernels/,./tests/benchmarks/sonnet.txt"
+skip = "./tests/,./aphrodite/endpoints/kobold/klite.embd,./kernels/,./tests/benchmarks/sonnet.txt,./docs/"
 
 [tool.isort]
 use_parentheses = true
