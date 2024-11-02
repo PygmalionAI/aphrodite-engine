@@ -546,7 +546,7 @@ async def get_kobold_lite_ui():
         klitepath = os.path.join(scriptpath, "../kobold/klite.embd")
         klitepath = os.path.normpath(klitepath)  # Normalize the path
         if os.path.exists(klitepath):
-            with open(klitepath, "r") as f:
+            with open(klitepath, "r", encoding="utf-8") as f:
                 kobold_lite_ui = f.read()
         else:
             logger.error("Kobold Lite UI not found at " + klitepath)
