@@ -1138,8 +1138,9 @@ def tensor_progress_bar(iterable:Iterable[Tuple[str, torch.Tensor]],
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
-            MofNCompleteColumn(),
+            # MofNCompleteColumn(),
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TextColumn("{task.completed:.2f}/{task.total:.2f} GiB"),
             TimeElapsedColumn(),
         ) as progress:
             task = progress.add_task(f"[cyan]{desc}", total=final_bytes/units)
