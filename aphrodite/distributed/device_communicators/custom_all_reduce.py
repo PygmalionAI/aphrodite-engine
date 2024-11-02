@@ -78,12 +78,13 @@ class CustomAllreduce:
             return
 
         if world_size not in CustomAllreduce._SUPPORTED_WORLD_SIZES:
-            logger.warning(
-                "Custom allreduce is disabled due to an unsupported world"
-                f" size: {world_size}. Supported world sizes:"
-                f"{str(CustomAllreduce._SUPPORTED_WORLD_SIZES)}. To silence "
-                "this warning, specify disable_custom_all_reduce=True "
-                "explicitly.")
+            if rank == 0:
+                logger.warning(
+                    "Custom allreduce is disabled due to an unsupported world"
+                    f" size: {world_size}. Supported world sizes:"
+                    f"{str(CustomAllreduce._SUPPORTED_WORLD_SIZES)}. To "
+                    "silence this warning, specify disable_custom_all_reduce="
+                    "True explicitly.")
             return
 
         if isinstance(device, int):
