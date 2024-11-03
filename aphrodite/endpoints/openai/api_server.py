@@ -8,6 +8,7 @@ import re
 import tempfile
 from argparse import Namespace
 from contextlib import asynccontextmanager
+from distutils.util import strtobool
 from http import HTTPStatus
 from typing import AsyncGenerator, AsyncIterator, List, Set, Tuple
 
@@ -62,6 +63,7 @@ else:
     import uvloop
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
+SERVE_KOBOLD_LITE_UI = strtobool(os.getenv("SERVE_KOBOLD_LITE_UI", "1"))
 
 async_engine_client: AsyncEngineClient
 engine_args: AsyncEngineArgs
@@ -324,6 +326,7 @@ async def unload_soft_prompt(soft_prompt_name: str):
 
 # ============ KoboldAI API ============ #
 
+badwordsids: List[int] = []
 
 def _set_badwords(tokenizer, hf_config):  # pylint: disable=redefined-outer-name
     # pylint: disable=global-variable-undefined
@@ -539,7 +542,10 @@ async def get_extra_version():
 @router.get("/")
 async def get_kobold_lite_ui():
     """Serves a cached copy of the Kobold Lite UI, loading it from disk
-    on demand if needed."""
+    on demand if needed. Can be disabled with SERVE_KOBOLD_LITE_UI=0."""
+    if not SERVE_KOBOLD_LITE_UI:
+        return JSONResponse(content={"error": "Kobold Lite UI is disabled"},
+                            status_code=404)
     global kobold_lite_ui
     if kobold_lite_ui == "":
         scriptpath = os.path.dirname(os.path.abspath(__file__))
@@ -561,14 +567,13 @@ def build_app(args: Namespace) -> FastAPI:
     app.include_router(router)
     app.root_path = args.root_path
     if args.launch_kobold_api:
-        logger.warning("Launching Kobold API server in addition to OpenAI. "
-                       "Keep in mind that the Kobold API routes are NOT "
-                       "protected via the API key.")
-        app.include_router(kai_api, prefix="/api/v1")
-        app.include_router(kai_api,
-                           prefix="/api/latest",
-                           include_in_schema=False)
-        app.include_router(extra_api, prefix="/api/extra")
+        logger.warning("Kobold API is now enabled by default. "
+                       "This flag will be removed in the future.")
+    app.include_router(kai_api, prefix="/api/v1")
+    app.include_router(kai_api,
+                        prefix="/api/latest",
+                        include_in_schema=False)
+    app.include_router(extra_api, prefix="/api/extra")
 
     mount_metrics(app)
 
@@ -595,12 +600,8 @@ def build_app(args: Namespace) -> FastAPI:
 
         @app.middleware("http")
         async def authentication(request: Request, call_next):
-            excluded_paths = ["/api"]
-            if any(
-                    request.url.path.startswith(path)
-                    for path in excluded_paths):
-                return await call_next(request)
-            if not request.url.path.startswith("/v1"):
+
+            if not request.url.path.startswith(("/v1", "/api")):
                 return await call_next(request)
 
             # Browsers may send OPTIONS requests to check CORS headers
@@ -722,6 +723,22 @@ async def run_server(args, **uvicorn_kwargs) -> None:
 
     async with build_async_engine_client(args) as async_engine_client:
         app = await init_app(async_engine_client, args)
+
+        protocol = "https" if args.ssl_certfile else "http"
+        root_path = args.root_path.rstrip("/") if args.root_path else ""
+        host_name = args.host if args.host else "localhost"
+        port_str = str(args.port)
+
+
+        if SERVE_KOBOLD_LITE_UI:
+            ui_url = f"{protocol}://{host_name}:{port_str}{root_path}/"
+            logger.info(f"Kobold Lite UI:   {ui_url}")
+
+        logger.info(f"Documentation:    {protocol}://{host_name}:{port_str}{root_path}/redoc")  # noqa: E501
+        logger.info(f"Completions API:  {protocol}://{host_name}:{port_str}{root_path}/v1/completions")  # noqa: E501
+        logger.info(f"Chat API:         {protocol}://{host_name}:{port_str}{root_path}/v1/chat/completions")  # noqa: E501
+        logger.info(f"Embeddings API:   {protocol}://{host_name}:{port_str}{root_path}/v1/embeddings")  # noqa: E501
+        logger.info(f"Tokenization API: {protocol}://{host_name}:{port_str}{root_path}/v1/tokenize")  # noqa: E501
 
         shutdown_task = await serve_http(
             app,
