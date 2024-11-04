@@ -252,6 +252,30 @@ async def show_version():
     return JSONResponse(content=ver)
 
 
+
+@router.get("/.well-known/ai-plugin.json")
+async def get_plugin_manifest():
+    return JSONResponse({
+        "schema_version": "v1",
+        "name_for_human": "Aphrodite Engine",
+        "name_for_model": "aphrodite",
+        "description_for_human": "OpenAI- and KoboldAI-compatible inference API for serving LLMS at scale.",  # noqa: E501
+        "description_for_model": "OpenAI- and KoboldAI-compatible inference API for serving LLMS at scale.",  # noqa: E501
+        "auth": {
+            "type": "user_http",
+            "authorization_type": "bearer",
+        },
+        "api": {
+            "type": "openapi",
+            "url": f"{args.root_path}/openapi.json",
+            "has_user_authentication": False,
+        },
+        "logo_url": "stub",
+        "contact_email": "info@pygmalion.chat",
+        "legal_info_url": "stub",
+    })
+
+
 @router.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,
                                  raw_request: Request):
