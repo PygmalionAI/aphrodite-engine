@@ -252,6 +252,43 @@ async def show_version():
     return JSONResponse(content=ver)
 
 
+@router.get("/.well-known/serviceinfo")
+async def serviceinfo():
+    """Return service information including version, API endpoints,
+    and documentation URLs."""
+    protocol = "https" if api_server_args.ssl_certfile else "http"
+    host = api_server_args.host if api_server_args.host else "localhost"
+    host = f"{host}:{api_server_args.port}"
+    root = api_server_args.root_path.rstrip(
+        "/") if api_server_args.root_path else ""
+    base_url = f"{protocol}://{host}{root}"
+    
+    return JSONResponse(content={
+        "version": 0.1,
+        "software": {
+            "name": "Aphrodite Engine",
+            "version": APHRODITE_VERSION,
+            "repository": "https://github.com/PygmalionAI/aphrodite-engine",
+            "homepage": "https://aphrodite.pygmalion.chat",
+            "logo": "https://pygmalion.chat/icons/favicon.ico",
+        },
+        "api": {
+            "openai": {
+                "name": "OpenAI API",
+                "base_url": f"{base_url}/v1",
+                "documentation": f"{base_url}/redoc",
+                "version": 1,
+            },
+            "koboldai": {
+                "name": "KoboldAI API", 
+                "base_url": f"{base_url}/api",
+                "documentation": f"{base_url}/redoc",
+                "version": 1,
+            }
+        }
+    })
+
+
 @router.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,
                                  raw_request: Request):
@@ -643,6 +680,8 @@ async def init_app(
     async_engine_client: AsyncEngineClient,
     args: Namespace,
 ) -> FastAPI:
+    global api_server_args
+    api_server_args = args
     app = build_app(args)
 
     logger.debug(f"args: {args}")
