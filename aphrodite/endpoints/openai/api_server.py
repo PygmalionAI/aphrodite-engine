@@ -275,7 +275,7 @@ async def serviceinfo():
         "api": {
             "openai": {
                 "name": "OpenAI API",
-                "base_url": base_url,
+                "base_url": f"{base_url}/v1",
                 "documentation": f"{base_url}/redoc",
                 "version": 1,
             },
