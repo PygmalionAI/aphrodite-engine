@@ -256,15 +256,9 @@ async def show_version():
 async def serviceinfo():
     """Return service information including version, API endpoints,
     and documentation URLs."""
-    protocol = "https" if api_server_args.ssl_certfile else "http"
-    host = api_server_args.host if api_server_args.host else "localhost"
-    host = f"{host}:{api_server_args.port}"
-    root = api_server_args.root_path.rstrip(
-        "/") if api_server_args.root_path else ""
-    base_url = f"{protocol}://{host}{root}"
     
     return JSONResponse(content={
-        "version": 0.1,
+        "version": 0.2,
         "software": {
             "name": "Aphrodite Engine",
             "version": APHRODITE_VERSION,
@@ -275,14 +269,14 @@ async def serviceinfo():
         "api": {
             "openai": {
                 "name": "OpenAI API",
-                "base_url": f"{base_url}/v1",
-                "documentation": f"{base_url}/redoc",
+                "rel_url": "/v1",
+                "documentation": "/redoc",
                 "version": 1,
             },
             "koboldai": {
                 "name": "KoboldAI API", 
-                "base_url": f"{base_url}/api",
-                "documentation": f"{base_url}/redoc",
+                "rel_url": "/api",
+                "documentation": "/redoc",
                 "version": 1,
             }
         }
