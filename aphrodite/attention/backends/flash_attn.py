@@ -617,7 +617,8 @@ class FlashAttentionImpl(AttentionImpl):
         assert k_scale == 1.0 and v_scale == 1.0, (
             "key/v_scale is not supported in FlashAttention.")
 
-        num_tokens, hidden_size = query.shape
+        num_tokens = query.shape[0]
+        hidden_size = query.numel() //  num_tokens
         # Reshape the query, key, and value tensors.
         query = query.view(-1, self.num_heads, self.head_size)
         key = key.view(-1, self.num_kv_heads, self.head_size)
