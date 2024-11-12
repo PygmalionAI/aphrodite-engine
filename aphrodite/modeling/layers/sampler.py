@@ -303,7 +303,7 @@ def _apply_temperatures(
     dynatemp_maxs: torch.Tensor,
     dynatemp_exps: torch.Tensor,
 ) -> None:
-    dynatemp_mask = dynatemp_exps != 0
+    dynatemp_mask = (dynatemp_mins != 0) | (dynatemp_maxs != 0)
     dynatemp_mins = dynatemp_mins[dynatemp_mask]
     dynatemp_maxs = dynatemp_maxs[dynatemp_mask]
     dynatemp_exps = dynatemp_exps[dynatemp_mask]
