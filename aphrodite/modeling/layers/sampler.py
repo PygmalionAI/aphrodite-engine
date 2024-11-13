@@ -320,11 +320,11 @@ def _apply_temperatures(
                 normalized_entropies.pow_(dynatemp_exps))
 
     temperatures[dynatemp_mask] = dyn_temp
-    temperatures[temperatures <= 0.0] = 1.0
-    # Use float32 to apply temp.
-    # Use in-place division to avoid creating a new tensor.
-    logits = logits.to(torch.float)
+    temperatures[temperatures <= 0.0] = 1e-5
     logits.div_(temperatures.unsqueeze(dim=1))
+    # There really isn't a "safe" temperature range for fp16 logits.
+    # So just sanitize them afterwards! -inf is fine, it's +inf that's shonky.
+    logits[logits.isposinf()] = torch.finfo(torch.float16).max
 
 
 def _apply_token_bans(logits: torch.Tensor,
