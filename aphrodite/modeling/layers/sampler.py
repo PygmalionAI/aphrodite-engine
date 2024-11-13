@@ -318,13 +318,18 @@ def _apply_temperatures(
     normalized_entropies = dynatemp_entropies.div_(dynatemp_max_entropies)
     dyn_temp = (dynatemp_mins + (dynatemp_maxs - dynatemp_mins) *
                 normalized_entropies.pow_(dynatemp_exps))
-
-    temperatures[dynatemp_mask] = dyn_temp
-    temperatures[temperatures <= 0.0] = 1e-5
+  
+    # There isn't a "safe" temperature range for fp16 logits.
+    # This value was chosen because 1/2e-5 is just under the 65k fp16 max,
+    # meaning that this temperature well-uses the fp16 space after the offset.
+    temperatures[temperatures <= 2e-5] = 2e-5
+  
+    # To prevent saturation of top logits, we shift the range to [-inf, 1]
+    # Why align to 1, instead of 0? Because [0, 1] holds 25% of all floats.
+    # Why mask? So we aren't potentially discarding data in milder temps.
+    low_temps = temperatures < 0.1
+    logits[low_temps] -= logits.max(dim=-1, keepdim=True).values[low_temps] - 1
     logits.div_(temperatures.unsqueeze(dim=1))
-    # There really isn't a "safe" temperature range for fp16 logits.
-    # So just sanitize them afterwards! -inf is fine, it's +inf that's shonky.
-    logits[logits.isposinf()] = torch.finfo(torch.float16).max
 
 
 def _apply_token_bans(logits: torch.Tensor,
