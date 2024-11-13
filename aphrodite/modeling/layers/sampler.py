@@ -318,6 +318,7 @@ def _apply_temperatures(
     normalized_entropies = dynatemp_entropies.div_(dynatemp_max_entropies)
     dyn_temp = (dynatemp_mins + (dynatemp_maxs - dynatemp_mins) *
                 normalized_entropies.pow_(dynatemp_exps))
+    temperatures[dynatemp_mask] = dyn_temp
   
     # There isn't a "safe" temperature range for fp16 logits.
     # This value was chosen because 1/2e-5 is just under the 65k fp16 max,
