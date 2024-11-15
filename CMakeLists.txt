@@ -65,20 +65,19 @@ endif()
 # etc.
 #
 find_package(Torch REQUIRED)
-find_package(CUDA REQUIRED)
-find_package(CUDAToolkit REQUIRED)
-
-# Add cuBLAS to the list of libraries to link against
-list(APPEND LIBS CUDA::cublas)
-
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CUDA_STANDARD 17)
-set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-
-# Replace -std=c++20 with -std=c++17 in APHRODITE_GPU_FLAGS
-if(APHRODITE_GPU_LANG STREQUAL "CUDA")
+if(MSVC)
+  find_package(CUDA REQUIRED)
+  find_package(CUDAToolkit REQUIRED)
+  # Add cuBLAS to the list of libraries to link against
+  list(APPEND LIBS CUDA::cublas)
+  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
+  set(CMAKE_CUDA_STANDARD 17)
+  set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+  # Replace -std=c++20 with -std=c++17 in APHRODITE_GPU_FLAGS
+  if(APHRODITE_GPU_LANG STREQUAL "CUDA")
   list(APPEND APHRODITE_GPU_FLAGS "--std=c++17" "-Xcompiler -Wno-return-type")
+endif()
 endif()
 
 #
@@ -221,6 +220,10 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     "kernels/all_reduce/custom_all_reduce.cu")
 
   # Add CUTLASS and GPTQ Marlin kernels if not MSVC
+  if(MSVC)
+    list(APPEND APHRODITE_EXT_SRC
+      "kernels/quantization/gptq_marlin/gptq_marlin.cu")
+  endif()
   if(NOT MSVC)
     # Include CUTLASS only when needed
     include(FetchContent)
