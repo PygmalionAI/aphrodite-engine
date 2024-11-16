@@ -20,7 +20,7 @@ set(PYTHON_SUPPORTED_VERSIONS "3.8" "3.9" "3.10" "3.11" "3.12")
 set(CUDA_SUPPORTED_ARCHS "6.0;6.1;7.0;7.5;8.0;8.6;8.9;9.0")
 
 # Supported AMD GPU architectures.
-set(HIP_SUPPORTED_ARCHS "gfx906;gfx908;gfx90a;gfx940;gfx941;gfx942;gfx1030;gfx1100")
+set(HIP_SUPPORTED_ARCHS "gfx906;gfx908;gfx90a;gfx940;gfx941;gfx942;gfx1030;gfx1100;gfx1101")
 
 #
 # Supported/expected torch versions for CUDA/ROCm.
@@ -218,7 +218,6 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     "kernels/quantization/fp8/fp8_marlin.cu"
     "kernels/all_reduce/custom_all_reduce.cu")
 
-  # Add CUTLASS and GPTQ Marlin kernels if not MSVC
   if(MSVC)
     list(APPEND APHRODITE_EXT_SRC
       "kernels/quantization/gptq_marlin/gptq_marlin_windows.cu")
