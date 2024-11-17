@@ -67,7 +67,8 @@ def test_kv_cache_model_load_and_run(aphrodite_runner, model_id: str):
                     reason="FP8 is not supported on this GPU type.")
 @pytest.mark.parametrize("kv_cache_dtype", ["auto", "fp8"])
 @pytest.mark.parametrize("force_marlin", [False, True])
-def test_load_fp16_model(aphrodite_runner, kv_cache_dtype: str, force_marlin: bool,
+def test_load_fp16_model(aphrodite_runner, kv_cache_dtype: str,
+                         force_marlin: bool,
                          monkeypatch) -> None:
     if force_marlin:
         monkeypatch.setenv("aphrodite_TEST_FORCE_FP8_MARLIN", "1")

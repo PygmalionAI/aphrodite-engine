@@ -70,7 +70,8 @@ def test_compressed_tensors_no_enforce_eager(aphrodite_runner):
     ("nm-testing/tinyllama-oneshot-w8a8-dynamic-token-v2", "tensor"),
     ("nm-testing/tinyllama-oneshot-w8a8-channel-dynamic-token-v2", "channel"),
 ])
-def test_compressed_tensors_w8a8_dynanmic_per_token(aphrodite_runner, model_args):
+def test_compressed_tensors_w8a8_dynanmic_per_token(aphrodite_runner,
+                                                    model_args):
     model_path, strategy = model_args
     with aphrodite_runner(model_path, dtype=torch.float16) as llm:
         model = llm.model.llm_engine.model_executor.driver_worker.model_runner.model  # noqa: E501

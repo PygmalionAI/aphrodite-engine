@@ -1,7 +1,7 @@
 import torch
 
-from aphrodite.quantization import QUANTIZATION_METHODS
 from aphrodite.platforms import current_platform
+from aphrodite.quantization import QUANTIZATION_METHODS
 
 
 def is_quant_method_supported(quant_method: str) -> bool:
