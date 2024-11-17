@@ -59,7 +59,7 @@ class EngineArgs:
     download_dir: Optional[str] = None
     max_model_len: Optional[int] = None
     max_context_len_to_capture: Optional[int] = None
-    max_seq_len_to_capture: int = 8192
+    max_seq_len_to_capture: Optional[int] = None
     rope_scaling: Optional[dict] = None
     rope_theta: Optional[float] = None
     model_loader_extra_config: Optional[dict] = None
