@@ -78,7 +78,7 @@ torch::Tensor gptq_marlin_gemm(torch::Tensor& a, torch::Tensor& b_q_weight,
                                aphrodite::ScalarTypeTorchPtr const& b_q_type,
                                int64_t size_m, int64_t size_n, int64_t size_k,
                                bool is_k_full, bool has_zp,
-                               bool use_fp32_reduce);
+                               bool use_fp32_reduce, bool is_zp_float);
 
 torch::Tensor gptq_marlin_repack(torch::Tensor& b_q_weight, torch::Tensor& perm,
                                  int64_t size_k, int64_t size_n,
@@ -109,6 +109,7 @@ at::Tensor e8p_mm_origorder(const at::Tensor& A, const at::Tensor& B,
 void decompress_e8p_origorder(torch::Tensor YIs, torch::Tensor CB,
                               torch::Tensor& Y);
 
+  #ifndef _WIN32
 bool cutlass_scaled_mm_supports_fp8(int64_t cuda_device_capability);
 
 void cutlass_scaled_mm(torch::Tensor& out, torch::Tensor const& a,
@@ -131,13 +132,13 @@ torch::Tensor marlin_qqq_gemm(torch::Tensor const& a,
                               torch::Tensor const& s_group,
                               torch::Tensor& workspace, int64_t size_m,
                               int64_t size_n, int64_t size_k);
+  #endif
 
 torch::Tensor fp_eXmY_linear_forward_cuda(int64_t EXPONENT, int64_t MANTISSA,
                                           torch::Tensor _in_feats,
                                           torch::Tensor _weights,
                                           torch::Tensor _scales,
                                           int64_t splitK = 1);
-
 #endif
 
 void static_scaled_int8_quant(torch::Tensor& out, torch::Tensor const& input,

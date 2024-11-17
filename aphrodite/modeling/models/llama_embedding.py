@@ -5,7 +5,6 @@ from torch import nn
 
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.sequence import PoolerOutput
-from aphrodite.common.utils import progress_bar
 from aphrodite.modeling.layers.pooler import Pooler, PoolingType
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.models.llama import LlamaModel
@@ -59,9 +58,7 @@ class LlamaEmbeddingModel(nn.Module):
             ("gate_up_proj", "up_proj", 1),
         ]
         params_dict = dict(self.model.named_parameters())
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
                 continue
             if ("rotary_emb.cos_cached" in name

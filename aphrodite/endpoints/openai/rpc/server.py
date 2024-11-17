@@ -3,18 +3,23 @@ import signal
 from typing import Any, Coroutine
 
 import cloudpickle
-import uvloop
 import zmq
 import zmq.asyncio
 from loguru import logger
 from typing_extensions import Never
 
 from aphrodite import AsyncAphrodite, AsyncEngineArgs
+from aphrodite.common.utils import in_windows
 from aphrodite.endpoints.openai.rpc import (APHRODITE_RPC_HEALTHY_STR,
                                             APHRODITE_RPC_SUCCESS_STR,
                                             RPCAbortRequest,
                                             RPCGenerateRequest,
                                             RPCUtilityRequest)
+
+if in_windows():
+    import winloop as uvloop
+else:
+    import uvloop
 
 
 class AsyncEngineRPCServer:

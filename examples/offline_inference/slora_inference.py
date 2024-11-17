@@ -3,11 +3,12 @@ This example shows how to use the multi-LoRA functionality for offline
 inference. Requires HuggingFace credentials for access to Llama2.
 """
 
-from typing import Optional, List, Tuple
+from typing import List, Optional, Tuple
 
 from huggingface_hub import snapshot_download
 
-from aphrodite import EngineArgs, AphroditeEngine, SamplingParams, RequestOutput
+from aphrodite import (AphroditeEngine, EngineArgs, RequestOutput,
+                       SamplingParams)
 from aphrodite.lora.request import LoRARequest
 
 

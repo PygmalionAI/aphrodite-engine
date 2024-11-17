@@ -3,7 +3,8 @@
 # `EXECUTABLE` and is one of the `SUPPORTED_VERSIONS`.
 #
 macro (find_python_from_executable EXECUTABLE SUPPORTED_VERSIONS)
-  file(REAL_PATH ${EXECUTABLE} EXECUTABLE)
+  file(TO_CMAKE_PATH "${EXECUTABLE}" EXECUTABLE_PATH)
+  file(REAL_PATH "${EXECUTABLE_PATH}" EXECUTABLE)
   set(Python_EXECUTABLE ${EXECUTABLE})
   find_package(Python COMPONENTS Interpreter Development.Module Development.SABIModule)
   if (NOT Python_FOUND)

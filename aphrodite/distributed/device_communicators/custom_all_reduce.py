@@ -78,12 +78,13 @@ class CustomAllreduce:
             return
 
         if world_size not in CustomAllreduce._SUPPORTED_WORLD_SIZES:
-            logger.warning(
-                "Custom allreduce is disabled due to an unsupported world"
-                f" size: {world_size}. Supported world sizes:"
-                f"{str(CustomAllreduce._SUPPORTED_WORLD_SIZES)}. To silence "
-                "this warning, specify disable_custom_all_reduce=True "
-                "explicitly.")
+            if rank == 0:
+                logger.warning(
+                    "Custom allreduce is disabled due to an unsupported world"
+                    f" size: {world_size}. Supported world sizes:"
+                    f"{str(CustomAllreduce._SUPPORTED_WORLD_SIZES)}. To "
+                    "silence this warning, specify disable_custom_all_reduce="
+                    "True explicitly.")
             return
 
         if isinstance(device, int):
@@ -119,19 +120,23 @@ class CustomAllreduce:
         cuda_platform: CudaPlatform = current_platform
         full_nvlink = cuda_platform.is_full_nvlink(physical_device_ids)
         if world_size > 2 and not full_nvlink:
-            logger.warning(
-                "Custom allreduce is disabled because it's not supported on"
-                " more than two PCIe-only GPUs. To silence this warning, "
-                "specify disable_custom_all_reduce=True explicitly.")
+            if rank == 0:
+                logger.warning(
+                    "Custom allreduce is disabled because it's not supported "
+                    "on more than two PCIe-only GPUs. To silence this "
+                    "warning, specify disable_custom_all_reduce=True "
+                    "explicitly.")
             return
         # test P2P capability, this checks software/cudaruntime support
         # this is expensive to compute at the first time
         # then we cache the result
         if not _can_p2p(rank, world_size):
-            logger.warning(
-                "Custom allreduce is disabled because your platform lacks "
-                "GPU P2P capability or P2P test failed. To silence this "
-                "warning, specify disable_custom_all_reduce=True explicitly.")
+            if rank == 0:
+                logger.warning(
+                    "Custom allreduce is disabled because your platform lacks "
+                    "GPU P2P capability or P2P test failed. To silence this "
+                    "warning, specify disable_custom_all_reduce=True "
+                    "explicitly.")
             return
 
         self.disabled = False

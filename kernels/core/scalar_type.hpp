@@ -36,7 +36,7 @@ class ScalarType {
         signed_(signed_),
         bias(bias),
         finite_values_only(finite_values_only),
-        nan_repr(nan_repr){};
+        nan_repr(nan_repr) {}
 
   static constexpr ScalarType int_(uint8_t size_bits, int32_t bias = 0) {
     return ScalarType(0, size_bits - 1, true, bias);
@@ -107,19 +107,32 @@ class ScalarType {
                                  finite_values_only, nan_repr);
   };
 
-  template <typename Fn, typename Init>
-  static constexpr auto reduce_member_types(Fn f, Init init) {
-    constexpr auto dummy_type = ScalarType(0, 0, false, 0, false, NAN_NONE);
-    return dummy_type.reduce_members(f, init);
-  };
+private:
+    template <typename Fn, typename Init>
+    static constexpr auto reduce_member_types(Fn f, Init init) {
+        // Directly specify the types in the same order as the members
+        using MemberTypes = std::tuple<
+            uint8_t,    // exponent
+            uint8_t,    // mantissa
+            bool,       // signed_
+            int32_t,    // bias
+            bool,       // finite_values_only
+            NanRepr     // nan_repr
+        >;
+        
+        return std::apply([f, init](auto... types) {
+            return reduce_members_helper(f, init, 
+                typename std::decay<decltype(types)>::type{}...);
+        }, MemberTypes{});
+    }
 
-  static constexpr auto id_size_bits() {
-    return reduce_member_types(
-        [](int acc, auto member) -> int {
-          return acc + member_id_field_width<decltype(member)>();
-        },
-        0);
-  }
+    static constexpr auto id_size_bits() {
+        return reduce_member_types(
+            [](int acc, auto member) -> int {
+                return acc + member_id_field_width<decltype(member)>();
+            },
+            0);
+    }
 
  public:
   // unique id for this scalar type that can be computed at compile time for

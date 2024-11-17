@@ -30,7 +30,6 @@ from transformers import MixtralConfig
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig, LoRAConfig
 from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
-from aphrodite.common.utils import progress_bar
 from aphrodite.distributed import (get_pp_group,
                                    get_tensor_model_parallel_world_size)
 from aphrodite.modeling.layers.fused_moe import FusedMoE
@@ -423,9 +422,7 @@ class MixtralForCausalLM(nn.Module, SupportsLoRA):
             num_experts=self.config.num_local_experts)
 
         params_dict = dict(self.named_parameters())
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
                 continue
 

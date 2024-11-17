@@ -29,7 +29,6 @@ import torch
 from transformers import LlamaConfig
 
 from aphrodite.common.config import CacheConfig, LoRAConfig
-from aphrodite.common.utils import progress_bar
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.models.llama import LlamaForCausalLM
 from aphrodite.quantization.base_config import QuantizationConfig
@@ -77,9 +76,7 @@ class DeciLMForCausalLM(LlamaForCausalLM):
             ("gate_up_proj", "up_proj", 1),
         ]
         params_dict = dict(self.named_parameters())
-        weights_list = list(weights)
-        for name, loaded_weight in progress_bar(weights_list,
-                                                desc="Loading modules..."):
+        for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
                 continue
 

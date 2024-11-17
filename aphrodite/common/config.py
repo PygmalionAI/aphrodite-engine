@@ -17,7 +17,9 @@ from aphrodite.distributed import get_current_tp_rank_partition_size
 from aphrodite.modeling.models import ModelRegistry
 from aphrodite.platforms import current_platform
 from aphrodite.quantization import QUANTIZATION_METHODS
-from aphrodite.transformers_utils.config import get_config, get_hf_text_config
+from aphrodite.transformers_utils.config import (ConfigFormat, get_config,
+                                                 get_hf_text_config)
+from aphrodite.triton_utils import HAS_TRITON
 
 if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
@@ -133,6 +135,8 @@ class ModelConfig:
             the model name will be the same as `model`.
         limit_mm_per_prompt: Maximum number of data instances per modality
             per prompt. Only applicable for multimodal models.
+        config_format: The config format which will be loaded. Defaults to
+            'auto' which defaults to 'hf'.
     """
 
     def __init__(
@@ -162,6 +166,7 @@ class ModelConfig:
         skip_tokenizer_init: bool = False,
         served_model_name: Optional[Union[str, List[str]]] = None,
         limit_mm_per_prompt: Optional[Mapping[str, int]] = None,
+        config_format: ConfigFormat = ConfigFormat.AUTO,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -194,7 +199,8 @@ class ModelConfig:
         self.skip_tokenizer_init = skip_tokenizer_init
 
         self.hf_config = get_config(self.model, trust_remote_code, revision,
-                                    code_revision, rope_scaling, rope_theta)
+                                    code_revision, rope_scaling, rope_theta,
+                                    config_format)
         self.hf_text_config = get_hf_text_config(self.hf_config)
         self.dtype = _get_and_verify_dtype(self.hf_text_config, dtype)
 
@@ -226,14 +232,18 @@ class ModelConfig:
             # so no logging message needed.
             self.enforce_eager = False
 
-        if (not self.disable_sliding_window
-                and self.hf_text_config.model_type == "gemma2"
-                and self.hf_text_config.sliding_window is not None):
+        sliding_window = getattr(self.hf_text_config, "sliding_window", None)
+        has_interleaved_attention = (sliding_window is not None) and (
+            isinstance(sliding_window, list) or
+            (self.hf_text_config.model_type in ["gemma2"]))
+        if (not self.disable_sliding_window and has_interleaved_attention):
+            sliding_window_len_min = get_min_sliding_window(
+                self.hf_text_config.sliding_window)
             print_warning_once(
-                "Gemma 2 uses sliding window attention for every odd layer, "
-                "which is currently not supported by Aphrodite. Disabling "
-                "sliding window and capping the max length to the sliding "
-                f"window size ({self.hf_text_config.sliding_window}).")
+                f"{self.hf_text_config.model_type} has interleaved attention, "
+                "which is currently not supported by vLLM. Disabling sliding "
+                "window and capping the max length to the sliding window size "
+                f"({sliding_window_len_min}).")
             self.disable_sliding_window = True
 
         self.max_model_len = _get_and_verify_max_len(
@@ -469,7 +479,8 @@ class ModelConfig:
             return True
         return False
 
-    def get_hf_config_sliding_window(self) -> Optional[int]:
+    def get_hf_config_sliding_window(
+            self) -> Union[Optional[int], List[Optional[int]]]:
         """Get the sliding window size, or None if disabled.
         """
 
@@ -481,7 +492,7 @@ class ModelConfig:
             return None
         return getattr(self.hf_text_config, "sliding_window", None)
 
-    def get_sliding_window(self) -> Optional[int]:
+    def get_sliding_window(self) -> Optional[Union[int, List[Optional[int]]]]:
         """Get the sliding window size, or None if disabled.
         """
         # If user disables sliding window, return None.
@@ -728,6 +739,10 @@ class CacheConfig:
                     "4090, H100). Your GPU has compute capability "
                     f"{capability}")
 
+        if not HAS_TRITON and self.enable_prefix_caching:
+            raise ValueError("Triton is not installed, "
+                             "prefix caching will not work.")
+
 
     def verify_with_parallel_config(
         self,
@@ -811,6 +826,7 @@ class LoadFormat(str, enum.Enum):
     SHARDED_STATE = "sharded_state"
     GGUF = "gguf"
     BITSANDBYTES = "bitsandbytes"
+    MISTRAL = "mistral"
 
 
 @dataclass
@@ -853,7 +869,7 @@ class LoadConfig:
                 "Ignoring the following patterns when downloading weights: "
                 f"{self.ignore_patterns}")
         else:
-            self.ignore_patterns = ["original/**/*", "consolidated*"]
+            self.ignore_patterns = ["original/**/*"]
 
     def _verify_load_format(self) -> None:
         if not isinstance(self.load_format, str):
@@ -1034,6 +1050,9 @@ class SchedulerConfig:
             self.max_num_batched_tokens = max_num_batched_tokens
         else:
             if enable_chunked_prefill:
+                if not HAS_TRITON:
+                    raise ValueError("Triton is not installed, "
+                                     "chunked prefill will not work.")
                 # For chunked prefill, choose the well-tuned batch size.
                 self.max_num_batched_tokens = 768
             elif embedding_mode:
@@ -1704,7 +1723,7 @@ def _get_and_verify_max_len(
     hf_config: PretrainedConfig,
     max_model_len: Optional[int],
     disable_sliding_window: bool,
-    sliding_window_len: Optional[int],
+    sliding_window_len: Optional[Union[int, List[Optional[int]]]],
     rope_scaling_arg: Optional[Dict[str, Any]],
 ) -> int:
     """Get and verify the model's maximum length."""
@@ -1739,9 +1758,11 @@ def _get_and_verify_max_len(
     # If sliding window is manually disabled, max_length should be less
     # than the sliding window length in the model config.
     if disable_sliding_window and sliding_window_len is not None:
+        sliding_window_len_min = get_min_sliding_window(sliding_window_len)
         max_len_key = "sliding_window" \
-            if sliding_window_len < derived_max_model_len else max_len_key
-        derived_max_model_len = min(derived_max_model_len, sliding_window_len)
+            if sliding_window_len_min < derived_max_model_len else max_len_key
+        derived_max_model_len = min(derived_max_model_len,
+                                    sliding_window_len_min)
 
     # If none of the keys were found in the config, use a default and
     # log a warning.
@@ -1795,6 +1816,13 @@ def _get_and_verify_max_len(
     return int(max_model_len)
 
 
+def get_min_sliding_window(
+        sliding_window: Union[int, List[Optional[int]]]) -> int:
+    if isinstance(sliding_window, list):
+        return min(s for s in sliding_window if s is not None)
+    return sliding_window
+
+
 def get_served_model_name(model: str,
                           served_model_name: Optional[Union[str, List[str]]]):
     """
@@ -1816,7 +1844,7 @@ class DecodingConfig:
     """Dataclass which contains the decoding strategy of the engine"""
 
     # Which guided decoding algo to use. 'outlines' / 'lm-format-enforcer'
-    guided_decoding_backend: str = 'outlines'
+    guided_decoding_backend: str = 'lm-format-enforcer'
 
     def __post_init__(self):
         valid_guided_backends = ['outlines', 'lm-format-enforcer']

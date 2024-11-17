@@ -18,12 +18,13 @@ from huggingface_hub import HfApi, hf_hub_download
 from loguru import logger
 from torch import nn
 from transformers import AutoModelForCausalLM, PretrainedConfig
+from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
 from aphrodite.common.config import (APHRODITE_USE_MODELSCOPE, CacheConfig,
                                      DeviceConfig, LoadConfig, LoadFormat,
                                      LoRAConfig, ModelConfig, MultiModalConfig,
                                      ParallelConfig, SchedulerConfig)
-from aphrodite.common.utils import is_pin_memory_available
+from aphrodite.common.utils import is_pin_memory_available, tensor_progress_bar
 from aphrodite.modeling.model_loader.tensorizer import (
     TensorizerConfig, is_aphrodite_tensorized, load_with_tensorizer,
     serialize_aphrodite_model, tensorizer_weights_iterator)
@@ -237,12 +238,17 @@ class DefaultModelLoader(BaseModelLoader):
         is_local = os.path.isdir(model_name_or_path)
         load_format = self.load_config.load_format
         use_safetensors = False
+        index_file = SAFE_WEIGHTS_INDEX_NAME
         # Some quantized models use .pt files for storing the weights.
         if load_format == LoadFormat.AUTO:
             allow_patterns = ["*.safetensors", "*.bin"]
         elif load_format == LoadFormat.SAFETENSORS:
             use_safetensors = True
             allow_patterns = ["*.safetensors"]
+        elif load_format == LoadFormat.MISTRAL:
+            use_safetensors = True
+            allow_patterns = ["consolidated*.safetensors"]
+            index_file = "consolidated.safetensors.index.json"
         elif load_format == LoadFormat.PT:
             allow_patterns = ["*.pt"]
         elif load_format == LoadFormat.NPCACHE:
@@ -280,10 +286,10 @@ class DefaultModelLoader(BaseModelLoader):
             # any files not found in the index.
             if not is_local:
                 download_safetensors_index_file_from_hf(
-                    model_name_or_path, self.load_config.download_dir,
-                    revision)
+                    model_name_or_path, index_file,
+                    self.load_config.download_dir, revision)
             hf_weights_files = filter_duplicate_safetensors_files(
-                hf_weights_files, hf_folder)
+                hf_weights_files, hf_folder, index_file)
         else:
             hf_weights_files = filter_files_not_needed_for_inference(
                 hf_weights_files)
@@ -297,10 +303,12 @@ class DefaultModelLoader(BaseModelLoader):
     def _get_weights_iterator(
         self, model_name_or_path: str, revision: Optional[str],
         fall_back_to_pt: bool
-    ) -> Generator[Tuple[str, torch.Tensor], None, None]:
+    ) -> Tuple[Generator[Tuple[str, torch.Tensor], None, None], int]:
         """Get an iterator for the model weights based on the load format."""
         hf_folder, hf_weights_files, use_safetensors = self._prepare_weights(
             model_name_or_path, revision, fall_back_to_pt)
+        est_weight_bytes = sum(os.path.getsize(f)
+                               for f in hf_weights_files)
         if self.load_config.load_format == LoadFormat.NPCACHE:
             # Currently np_cache only support *.bin checkpoints
             assert use_safetensors is False
@@ -323,7 +331,7 @@ class DefaultModelLoader(BaseModelLoader):
                     xm.mark_step()
 
             weights_iterator = _xla_weights_iterator(weights_iterator)
-        return weights_iterator
+        return weights_iterator, est_weight_bytes
 
     def load_model(self, *, model_config: ModelConfig,
                    device_config: DeviceConfig,
@@ -337,13 +345,15 @@ class DefaultModelLoader(BaseModelLoader):
                 model = _initialize_model(model_config, self.load_config,
                                           lora_config, cache_config,
                                           scheduler_config)
-            model.load_weights(
-                self._get_weights_iterator(model_config.model,
+                
+            weights, wgt_bytes = self._get_weights_iterator(model_config.model,
                                            model_config.revision,
                                            fall_back_to_pt=getattr(
                                                model,
                                                "fall_back_to_pt_during_load",
-                                               True)), )
+                                               True))
+            model.load_weights(tensor_progress_bar(weights, wgt_bytes,
+                                                   "Loading model weights..."))
 
             for _, module in model.named_modules():
                 quant_method = getattr(module, "quant_method", None)

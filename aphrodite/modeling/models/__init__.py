@@ -42,6 +42,7 @@ _GENERATION_MODELS = {
     "MiniCPMForCausalLM": ("minicpm", "MiniCPMForCausalLM"),
     "NemotronForCausalLM": ("nemotron", "NemotronForCausalLM"),
     "OlmoForCausalLM": ("olmo", "OlmoForCausalLM"),
+    "OlmoeForCausalLM": ("olmoe", "OlmoeForCausalLM"),
     "OPTForCausalLM": ("opt", "OPTForCausalLM"),
     "OrionForCausalLM": ("orion", "OrionForCausalLM"),
     "PhiForCausalLM": ("phi", "PhiForCausalLM"),
@@ -97,6 +98,7 @@ _MODELS = {
     **_MULTIMODAL_MODELS,
     **_CONDITIONAL_GENERATION_MODELS,
 }
+
 
 # Architecture -> type.
 # out of tree models

@@ -5,5 +5,5 @@
 awscli
 boto3
 botocore
-ray == 2.10.0
+ray >= 2.10.0
 peft

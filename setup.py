@@ -52,7 +52,12 @@ if not sys.platform.startswith("linux"):
         "Aphrodite only supports Linux platform (including WSL). "
         f"Building on {sys.platform}, "
         "so APhrodite may not be able to run correctly")
-    APHRODITE_TARGET_DEVICE = "empty"
+    if sys.platform.startswith("win32"):
+        logger.warning("Only CUDA backend is tested on Windows.")
+        APHRODITE_TARGET_DEVICE = "cuda"
+    else:
+        APHRODITE_TARGET_DEVICE = "empty"
+       
 
 MAIN_CUDA_VERSION = "12.4"
 
@@ -145,6 +150,10 @@ class cmake_build_ext(build_ext):
         outdir = os.path.abspath(
             os.path.dirname(self.get_ext_fullpath(ext.name)))
 
+        python_executable = sys.executable
+        if sys.platform.startswith("win32"):
+            python_executable = python_executable.replace("\\", "/")
+
         cmake_args = [
             '-DCMAKE_BUILD_TYPE={}'.format(cfg),
             '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={}'.format(outdir),
@@ -172,7 +181,7 @@ class cmake_build_ext(build_ext):
         # Pass the python executable to cmake so it can find an exact
         # match.
         cmake_args += [
-            '-DAPHRODITE_PYTHON_EXECUTABLE={}'.format(sys.executable)
+            '-DAPHRODITE_PYTHON_EXECUTABLE={}'.format(python_executable)
         ]
 
         num_jobs, nvcc_threads = self.compute_num_jobs()
@@ -224,6 +233,9 @@ class cmake_build_ext(build_ext):
 
 def _no_device() -> bool:
     return APHRODITE_TARGET_DEVICE == "empty"
+
+def _is_windows() -> bool:
+    return APHRODITE_TARGET_DEVICE == "windows"
 
 def _is_cuda() -> bool:
     has_cuda = torch.version.cuda is not None
@@ -401,7 +413,7 @@ def get_requirements() -> List[str]:
                 resolved_requirements.append(line)
         return resolved_requirements
 
-    if _no_device():
+    if _no_device() or _is_windows():
         requirements = _read_requirements("requirements-cuda.txt")
     elif _is_cuda():
         requirements = _read_requirements("requirements-cuda.txt")
@@ -430,6 +442,8 @@ def get_requirements() -> List[str]:
         raise ValueError(
             "Unsupported platform, please use CUDA, ROCm, Neuron, CPU or "
             "OpenVINO.")
+    if _is_windows():
+        requirements.append("winloop")
     return requirements
 
 

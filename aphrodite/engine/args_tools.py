@@ -7,15 +7,17 @@ from typing import (TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Type,
 
 from loguru import logger
 
-from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
-                                     EngineConfig, LoadConfig, LoRAConfig,
-                                     ModelConfig, ParallelConfig,
-                                     PromptAdapterConfig, SchedulerConfig,
-                                     SpeculativeConfig, TokenizerPoolConfig)
+from aphrodite.common.config import (CacheConfig, ConfigFormat, DecodingConfig,
+                                     DeviceConfig, EngineConfig, LoadConfig,
+                                     LoadFormat, LoRAConfig, ModelConfig,
+                                     ParallelConfig, PromptAdapterConfig,
+                                     SchedulerConfig, SpeculativeConfig,
+                                     TokenizerPoolConfig)
 from aphrodite.common.utils import FlexibleArgumentParser, is_cpu
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.quantization import QUANTIZATION_METHODS
 from aphrodite.transformers_utils.utils import check_gguf_file
+from aphrodite.triton_utils import HAS_TRITON
 
 if TYPE_CHECKING:
     from aphrodite.transformers_utils.tokenizer_group import BaseTokenizerGroup
@@ -57,7 +59,7 @@ class EngineArgs:
     download_dir: Optional[str] = None
     max_model_len: Optional[int] = None
     max_context_len_to_capture: Optional[int] = None
-    max_seq_len_to_capture: int = 8192
+    max_seq_len_to_capture: Optional[int] = None
     rope_scaling: Optional[dict] = None
     rope_theta: Optional[float] = None
     model_loader_extra_config: Optional[dict] = None
@@ -75,6 +77,7 @@ class EngineArgs:
     device: str = "auto"
     # Load Options
     load_format: str = "auto"
+    config_format: str = "auto"
     dtype: str = "auto"
     ignore_patterns: Optional[Union[str, List[str]]] = None
     # Parallel Options
@@ -109,7 +112,7 @@ class EngineArgs:
     use_v2_block_manager: bool = False
     scheduler_delay_factor: float = 0.0
     enable_chunked_prefill: bool = False
-    guided_decoding_backend: str = 'outlines'
+    guided_decoding_backend: str = 'lm-format-enforcer'
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: int = 256
     num_scheduler_steps: int = 1
@@ -256,7 +259,7 @@ class EngineArgs:
                             "larger than this, we fall back to eager mode. "
                             "(DEPRECATED. Use --max-seq_len-to-capture instead"
                             ")")
-        parser.add_argument("--max-seq_len-to-capture",
+        parser.add_argument("--max-seq-len-to-capture",
                             type=int,
                             default=EngineArgs.max_seq_len_to_capture,
                             help="Category: Model Options\n"
@@ -359,16 +362,7 @@ class EngineArgs:
             '--load-format',
             type=str,
             default=EngineArgs.load_format,
-            choices=[
-                'auto',
-                'pt',
-                'safetensors',
-                'npcache',
-                'dummy',
-                'tensorizer',
-                'sharded_state',
-                'bitsandbytes',
-            ],
+            choices=[f.value for f in LoadFormat],
             help='Category: Model Options\n'
             'The format of the model weights to load.\n\n'
             '* "auto" will try to load the weights in the safetensors format '
@@ -385,6 +379,15 @@ class EngineArgs:
             'Examples section for more information.\n'
             '* "bitsandbytes" will load the weights using bitsandbytes '
             'quantization.\n')
+        parser.add_argument(
+            '--config-format',
+            default=EngineArgs.config_format,
+            choices=[f.value for f in ConfigFormat],
+            help='The format of the model config to load.\n\n'
+            '* "auto" will try to load the config in hf format '
+            'if available else it will try to load in mistral format. '
+            'Mistral format is specific to mistral models and is not '
+            'compatible with other models.')
         parser.add_argument(
             '--dtype',
             type=str,
@@ -608,7 +611,7 @@ class EngineArgs:
         parser.add_argument(
             '--guided-decoding-backend',
             type=str,
-            default='outlines',
+            default='lm-format-enforcer',
             choices=['outlines', 'lm-format-enforcer'],
             help='Category: Scheduler Options\n'
             'Which engine will be used for guided decoding'
@@ -911,6 +914,7 @@ class EngineArgs:
             skip_tokenizer_init=self.skip_tokenizer_init,
             served_model_name=self.served_model_name,
             limit_mm_per_prompt=self.limit_mm_per_prompt,
+            config_format=self.config_format,
         )
 
         cache_config = CacheConfig(
@@ -1033,6 +1037,9 @@ class EngineArgs:
             preemption_mode=self.preemption_mode,
             num_scheduler_steps=self.num_scheduler_steps,
         )
+
+        if not HAS_TRITON and self.enable_lora:
+            raise ValueError("Triton is not installed, LoRA will not work.")
 
         lora_config = LoRAConfig(
             max_lora_rank=self.max_lora_rank,

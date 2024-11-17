@@ -1,17 +1,17 @@
 import collections
-from copy import deepcopy, copy
-from dataclasses import dataclass, fields
 import functools
+import weakref
+from copy import copy, deepcopy
+from dataclasses import dataclass, fields
+from typing import List, Optional, Set, Union
+
 import regex
 import torch
-from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
-from typing import Optional, List, Set, Union
-import weakref
-
 from lark import Lark
+from lark.lexer import Pattern, PatternRE, PatternStr, Token
 from lark.parsers.lalr_interactive_parser import InteractiveParser
 from lark.parsers.lalr_parser_state import ParserState
-from lark.lexer import Token, Pattern, PatternStr, PatternRE
+from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
 
 class FastParserState(ParserState):
