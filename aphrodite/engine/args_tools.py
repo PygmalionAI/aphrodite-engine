@@ -259,7 +259,7 @@ class EngineArgs:
                             "larger than this, we fall back to eager mode. "
                             "(DEPRECATED. Use --max-seq_len-to-capture instead"
                             ")")
-        parser.add_argument("--max-seq_len-to-capture",
+        parser.add_argument("--max-seq-len-to-capture",
                             type=int,
                             default=EngineArgs.max_seq_len_to_capture,
                             help="Category: Model Options\n"
