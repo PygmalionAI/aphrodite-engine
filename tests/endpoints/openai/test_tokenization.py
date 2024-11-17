@@ -63,7 +63,7 @@ async def test_tokenize_completions(client: openai.AsyncOpenAI,
         prompt = "aphrodite1 This is a test prompt."
         tokens = tokenizer.encode(prompt, add_special_tokens=add_special)
 
-        response = requests.post(base_url + "/tokenize",
+        response = requests.post(base_url + "/v1/tokenize",
                                  json={
                                      "add_special_tokens": add_special,
                                      "model": model_name,
@@ -109,7 +109,7 @@ async def test_tokenize_chat(client: openai.AsyncOpenAI, model_name: str,
                 tokenize=False)
             tokens = tokenizer.encode(prompt, add_special_tokens=add_special)
 
-            response = requests.post(base_url + "/tokenize",
+            response = requests.post(base_url + "/v1/tokenize",
                                      json={
                                          "add_generation_prompt":
                                          add_generation,
@@ -142,7 +142,7 @@ async def test_detokenize(client: openai.AsyncOpenAI, model_name: str,
     tokens = tokenizer.encode(prompt, add_special_tokens=False)
 
     print(f"CALLING {base_url} FOR {model_name}")
-    response = requests.post(base_url + "/detokenize",
+    response = requests.post(base_url + "/v1/detokenize",
                              json={
                                  "model": model_name,
                                  "tokens": tokens
