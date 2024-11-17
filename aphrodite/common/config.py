@@ -1597,7 +1597,8 @@ class LoRAConfig:
 
     def verify_with_scheduler_config(self, scheduler_config: SchedulerConfig):
         if scheduler_config.chunked_prefill_enabled:
-            raise ValueError("LoRA is not supported with chunked prefill yet.")
+            logger.warning(
+                "Chunked Prefill with LoRA is not rigorously tested.")
 
     def verify_with_parallel_config(self, parallel_config: ParallelConfig):
         if self.lora_vocab_padding_size % parallel_config.world_size != 0:
