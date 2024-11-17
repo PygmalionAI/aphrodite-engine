@@ -3,10 +3,10 @@ from typing import Any, Dict, List, Optional
 import pytest
 from transformers import AutoTokenizer
 
-from aphrodite.common.sequence import (
-    Logprob, SamplingParams, Sequence, SequenceGroup)
+from aphrodite.common.sequence import (Logprob, SamplingParams, Sequence,
+                                       SequenceGroup)
 from aphrodite.transformers_utils.detokenizer import (Detokenizer,
-                                                 detokenize_incrementally)
+                                                      detokenize_incrementally)
 from aphrodite.transformers_utils.tokenizer_group import get_tokenizer_group
 
 TRUTH = [
@@ -243,7 +243,7 @@ def test_decode_prompt_logprobs_chunked_prefill(
         max_num_batched_tokens = chunked_prefill_token_size
 
     with aphrodite_runner(model,
-                     dtype="half",aphrodite
+                     dtype="half",
                      max_logprobs=5,
                      gpu_memory_utilization=0.5,
                      enable_chunked_prefill=enable_chunked_prefill,
