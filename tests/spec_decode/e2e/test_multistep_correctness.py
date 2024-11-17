@@ -460,8 +460,8 @@ def test_spec_decode_e2e_greedy_correctness_with_preemption(
 @pytest.mark.parametrize(
     "per_test_common_llm_kwargs",
     [
-        # As of this writing, aphrodite only compiles with these 3 block sizes by
-        # default.
+        # As of this writing, aphrodite only compiles with these 3 block sizes
+        # by default.
         {
             "block_size": 8,
         },
