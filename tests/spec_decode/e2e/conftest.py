@@ -8,16 +8,16 @@ import ray
 import torch
 
 from aphrodite import LLM
+from aphrodite.common.outputs import RequestOutput
+from aphrodite.common.sampling_params import SamplingParams
+from aphrodite.common.sequence import Logprob
+from aphrodite.common.utils import Counter, random_uuid
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.lora.request import LoRARequest
 from aphrodite.modeling.utils import set_random_seed
 from aphrodite.multimodal import MultiModalDataDict
-from aphrodite.common.outputs import RequestOutput
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
-from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.common.sequence import Logprob
-from aphrodite.common.utils import Counter, random_uuid
 
 from ...conftest import cleanup
 from ...utils import wait_for_gpu_memory_to_clear
