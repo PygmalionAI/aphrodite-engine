@@ -8,7 +8,7 @@ from aphrodite.multimodal.utils import encode_image_base64, fetch_image
 from ...utils import APHRODITE_PATH, RemoteOpenAIServer
 
 MODEL_NAME = "llava-hf/llava-1.5-7b-hf"
-LLAVA_CHAT_TEMPLATE = APHRODITE_PATH / "examples/template_llava.jinja"
+LLAVA_CHAT_TEMPLATE = APHRODITE_PATH / "examples/chat_templates/llava.jinja"
 assert LLAVA_CHAT_TEMPLATE.exists()
 
 # Test different image extensions (JPG/PNG) and formats (gray/RGB/RGBA)
