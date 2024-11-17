@@ -36,7 +36,8 @@ def test_ranks(
                                          max_tokens=max_tokens,
                                          logprobs=num_top_logprobs,
                                          prompt_logprobs=num_prompt_logprobs)
-        res = aphrodite_model.generate_w_logprobs(example_prompts, sampling_params)
+        res = aphrodite_model.generate_w_logprobs(example_prompts,
+                                                  sampling_params)
 
     for result in aphrodite_results:
         assert result[2] is not None
