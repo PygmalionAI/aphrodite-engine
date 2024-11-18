@@ -1,7 +1,7 @@
 import time
-from dataclasses import dataclass
 from typing import Callable, Optional
 
+import msgspec
 import torch
 
 from aphrodite.common.utils import is_pin_memory_available
@@ -9,8 +9,10 @@ from aphrodite.modeling.layers.spec_decode_base_sampler import (
     SpecDecodeBaseSampler)
 
 
-@dataclass
-class SpecDecodeWorkerMetrics:
+class SpecDecodeWorkerMetrics(
+    msgspec.Struct,
+    omit_defaults=True,
+    array_like=True):
     """Dataclass holding metrics emitted from the spec decode worker.
     """
 
