@@ -24,7 +24,7 @@ MODELS = [
 def test_model_load_and_run(aphrodite_runner, model_id: str, force_marlin: bool,
                             monkeypatch) -> None:
     if force_marlin:
-        monkeypatch.setenv("aphrodite_TEST_FORCE_FP8_MARLIN", "1")
+        monkeypatch.setenv("APHRODITE_TEST_FORCE_FP8_MARLIN", "1")
 
     with aphrodite_runner(model_id) as llm:
         # note: this does not test accuracy, just that we can run through
@@ -71,7 +71,7 @@ def test_load_fp16_model(aphrodite_runner, kv_cache_dtype: str,
                          force_marlin: bool,
                          monkeypatch) -> None:
     if force_marlin:
-        monkeypatch.setenv("aphrodite_TEST_FORCE_FP8_MARLIN", "1")
+        monkeypatch.setenv("APHRODITE_TEST_FORCE_FP8_MARLIN", "1")
 
     with aphrodite_runner("facebook/opt-125m",
                      quantization="fp8",
