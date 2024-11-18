@@ -15,6 +15,7 @@ from aphrodite.common.config import (CacheConfig, ConfigFormat, DecodingConfig,
                                      TokenizerPoolConfig)
 from aphrodite.common.utils import FlexibleArgumentParser, is_cpu
 from aphrodite.executor.executor_base import ExecutorBase
+from aphrodite.executor.ray_gpu_executor import APHRODITE_USE_RAY_SPMD_WORKER
 from aphrodite.quantization import QUANTIZATION_METHODS
 from aphrodite.transformers_utils.utils import check_gguf_file
 from aphrodite.triton_utils import HAS_TRITON
@@ -1036,6 +1037,8 @@ class EngineArgs:
             embedding_mode=model_config.embedding_mode,
             preemption_mode=self.preemption_mode,
             num_scheduler_steps=self.num_scheduler_steps,
+            send_delta_data=(APHRODITE_USE_RAY_SPMD_WORKER and
+                             parallel_config.use_ray),
         )
 
         if not HAS_TRITON and self.enable_lora:
