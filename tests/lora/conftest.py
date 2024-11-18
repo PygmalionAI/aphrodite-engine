@@ -256,7 +256,8 @@ def llama_2_7b_engine_extra_embeddings():
                              device_config=device_config,
                              **kwargs)
 
-    with patch("aphrodite.worker.model_runner.get_model", get_model_patched):
+    with patch("aphrodite.task_handler.model_runner.get_model",
+               get_model_patched):
         engine = aphrodite.LLM("meta-llama/Llama-2-7b-hf", enable_lora=False)
     yield engine.llm_engine
     del engine
@@ -265,5 +266,5 @@ def llama_2_7b_engine_extra_embeddings():
 
 @pytest.fixture
 def llama_2_7b_model_extra_embeddings(llama_2_7b_engine_extra_embeddings):
-    yield (llama_2_7b_engine_extra_embeddings.modeling.driver_worker.
+    yield (llama_2_7b_engine_extra_embeddings.model_executor.driver_worker.
            model_runner.model)
