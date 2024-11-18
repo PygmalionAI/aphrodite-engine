@@ -1,3 +1,4 @@
+from array import array
 from typing import (Iterable, List, Literal, Mapping, Optional, Tuple,
                     TypedDict, Union)
 
@@ -8,7 +9,8 @@ from transformers import (Blip2Config, Blip2QFormerConfig, Blip2VisionConfig,
 
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
-from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
+from aphrodite.common.sequence import (APHRODITE_TOKEN_ID_ARRAY_TYPE,
+                                       IntermediateTensors, SamplerOutput,
                                        SequenceData)
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.layers.activation import get_act_fn
@@ -427,8 +429,10 @@ def dummy_seq_data_for_blip2(
     else:
         image_feature_size = image_feature_size_override
 
-    token_ids = [image_token_id] * image_feature_size * num_images
-    token_ids += [0] * (seq_len - image_feature_size * num_images)
+    token_ids = array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
+                      [image_token_id]) * image_feature_size * num_images
+    token_ids += array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
+                       [0]) * (seq_len - image_feature_size * num_images)
     return SequenceData(token_ids)
 
 

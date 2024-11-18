@@ -2,6 +2,7 @@
 within a vision language model."""
 
 import math
+from array import array
 from typing import Iterable, Optional, Tuple
 
 import torch
@@ -13,7 +14,8 @@ from transformers.models.siglip.modeling_siglip import SiglipAttention
 from xformers.ops import memory_efficient_attention
 
 from aphrodite.common.config import ModelConfig
-from aphrodite.common.sequence import SequenceData
+from aphrodite.common.sequence import (APHRODITE_TOKEN_ID_ARRAY_TYPE,
+                                       SequenceData)
 from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.inputs import LLMInputs
 from aphrodite.modeling.layers.activation import get_act_fn
@@ -62,8 +64,10 @@ def dummy_seq_data_for_siglip(
     else:
         image_feature_size = image_feature_size_override
 
-    token_ids = [image_token_id] * image_feature_size * num_images
-    token_ids += [0] * (seq_len - image_feature_size * num_images)
+    token_ids = array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
+                      [image_token_id]) * image_feature_size
+    token_ids += array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
+                       [0]) * (seq_len - image_feature_size)
     return SequenceData(token_ids)
 
 

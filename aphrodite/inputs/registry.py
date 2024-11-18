@@ -34,7 +34,7 @@ class InputContext:
     model_config: "ModelConfig"
     """The configuration of the model."""
 
-    def get_hf_config(self, hf_config_type: Type[C]) -> C:
+    def get_hf_config(self, hf_config_type: Type[C] = PretrainedConfig) -> C:
         """
         Get the HuggingFace configuration
         (:class:`transformers.PretrainedConfig`) of the model,

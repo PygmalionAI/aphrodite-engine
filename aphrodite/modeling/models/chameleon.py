@@ -1,3 +1,4 @@
+from array import array
 from functools import cached_property
 from typing import (Any, Dict, Iterable, List, Literal, Mapping, Optional,
                     Tuple, TypedDict)
@@ -10,7 +11,8 @@ from transformers import ChameleonConfig, ChameleonVQVAEConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
-from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
+from aphrodite.common.sequence import (APHRODITE_TOKEN_ID_ARRAY_TYPE,
+                                       IntermediateTensors, SamplerOutput,
                                        SequenceData)
 from aphrodite.common.utils import print_warning_once
 from aphrodite.distributed import get_tensor_model_parallel_world_size
@@ -68,8 +70,10 @@ def dummy_seq_data_for_chameleon(
     else:
         image_feature_size = image_feature_size_override
 
-    token_ids = [image_token_id] * image_feature_size * num_images
-    token_ids += [0] * (seq_len - image_feature_size * num_images)
+    token_ids = array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
+                      [image_token_id]) * image_feature_size * num_images
+    token_ids += array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
+                       [0]) * (seq_len - image_feature_size * num_images)
     return SequenceData(token_ids)
 
 
