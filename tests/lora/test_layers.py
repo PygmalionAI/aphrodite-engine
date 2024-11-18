@@ -1023,10 +1023,10 @@ def test_vocab_parallel_embedding_indices(tp_size, seed):
 
     for tp_rank in range(tp_size):
         with patch(
-                "aphrodite.model_executor.layers.vocab_parallel_embedding.get_tensor_model_parallel_rank",
+                "aphrodite.modeling.layers.vocab_parallel_embedding.get_tensor_model_parallel_rank",
                 return_value=tp_rank
         ), patch(
-                "aphrodite.model_executor.layers.vocab_parallel_embedding.get_tensor_model_parallel_world_size",
+                "aphrodite.modeling.layers.vocab_parallel_embedding.get_tensor_model_parallel_world_size",
                 return_value=tp_size):
             vocab_embedding = VocabParallelEmbedding(
                 vocab_size, 1, org_num_embeddings=org_vocab_size)
