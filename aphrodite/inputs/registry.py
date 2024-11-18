@@ -1,4 +1,5 @@
 import functools
+from array import array
 from collections import UserDict
 from dataclasses import dataclass
 from typing import (TYPE_CHECKING, Callable, Dict, Mapping, Optional, Protocol,
@@ -17,6 +18,10 @@ if TYPE_CHECKING:
     from aphrodite.multimodal import MultiModalDataDict, MultiModalRegistry
 
 C = TypeVar("C", bound=PretrainedConfig)
+
+# NOTE: This has to match with sequence.py's `APHRODITE_TOKEN_ID_ARRAY_TYPE`.
+# We cannot import it here because of circular dependencies.
+APHRODITE_TOKEN_ID_ARRAY_TYPE = "l"
 
 
 @dataclass(frozen=True)
@@ -111,7 +116,8 @@ class InputRegistry:
         # Avoid circular import
         from aphrodite.common.sequence import SequenceData
 
-        dummy_seq_data = SequenceData([0] * seq_len)
+        dummy_seq_data = SequenceData(
+            array(APHRODITE_TOKEN_ID_ARRAY_TYPE, [0]) * seq_len)
         dummy_multi_modal_data = None
 
         return dummy_seq_data, dummy_multi_modal_data
