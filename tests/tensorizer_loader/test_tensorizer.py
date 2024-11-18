@@ -18,7 +18,7 @@ from aphrodite.modeling.model_loader.tensorizer import (
     load_with_tensorizer, open_stream, serialize_aphrodite_model,
     tensorize_aphrodite_model)
 
-from ..conftest import aphroditeRunner
+from ..conftest import AphroditeRunner
 from ..utils import RemoteOpenAIServer
 from .conftest import retry_until_skip
 
@@ -47,7 +47,7 @@ def is_curl_installed():
         return False
 
 
-def get_torch_model(aphrodite_runner: aphroditeRunner):
+def get_torch_model(aphrodite_runner: AphroditeRunner):
     return aphrodite_runner \
         .model \
         .llm_engine \
@@ -64,7 +64,7 @@ def write_keyfile(keyfile_path: str):
         f.write(encryption_params.key)
 
 
-@patch('aphrodite.model_executor.model_loader.tensorizer.TensorizerAgent')
+@patch('aphrodite.modeling.model_loader.tensorizer.TensorizerAgent')
 def test_load_with_tensorizer(mock_agent, tensorizer_config):
     mock_linear_method = MagicMock()
     mock_agent_instance = mock_agent.return_value
@@ -155,8 +155,8 @@ def test_deserialized_hf_model_has_same_outputs(hf_runner, aphrodite_runner,
 def test_aphrodite_model_can_load_with_lora(aphrodite_runner, tmp_path):
     from huggingface_hub import snapshot_download
 
-    from examples.multilora_inference import (create_test_prompts,
-                                              process_requests)
+    from examples.offline_inference.slora_inference import (
+        create_test_prompts, process_requests)
 
     model_ref = "meta-llama/Llama-2-7b-hf"
     lora_path = snapshot_download(repo_id="yard1/llama-2-7b-sql-lora-test")

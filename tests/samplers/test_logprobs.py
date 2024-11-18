@@ -5,7 +5,7 @@ import torch
 
 from aphrodite import SamplingParams
 
-from ..conftest import aphroditeRunner
+from ..conftest import AphroditeRunner
 
 MODELS = ["facebook/opt-125m"]
 
@@ -131,7 +131,7 @@ def test_get_prompt_logprobs(
 
 
 def test_max_logprobs():
-    runner = aphroditeRunner("facebook/opt-125m", max_logprobs=1)
+    runner = AphroditeRunner("facebook/opt-125m", max_logprobs=1)
     aphrodite_sampling_params = SamplingParams(logprobs=1)
     # should pass
     runner.generate(["Hello world"], sampling_params=aphrodite_sampling_params)
