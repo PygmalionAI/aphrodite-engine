@@ -66,6 +66,7 @@ class TP1DraftModelRunner(ModelRunner):
         is_driver_worker: bool = False,
         prompt_adapter_config: Optional[PromptAdapterConfig] = None,
         return_hidden_states: bool = False,
+        **kwargs,  # for uneven TP
     ):
         if return_hidden_states:
             raise ValueError(
@@ -84,6 +85,7 @@ class TP1DraftModelRunner(ModelRunner):
             is_driver_worker=is_driver_worker,
             prompt_adapter_config=prompt_adapter_config,
             return_hidden_states=return_hidden_states,
+            **kwargs,
         )
 
         self.flashinfer_decode_workspace_buffer = None
