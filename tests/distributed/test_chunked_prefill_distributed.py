@@ -6,6 +6,7 @@ Run:
 pytest test_chunked_prefill_distributed.py
 ```
 """
+import os
 
 import pytest
 
@@ -31,6 +32,10 @@ def test_models(
     model: str,
     distributed_executor_backend: str,
 ) -> None:
+    if model == "meta-llama/Llama-2-7b-hf" and distributed_executor_backend == "ray": # noqa
+        assert distributed_executor_backend == "ray"
+        os.environ["APHRODITE_USE_RAY_SPMD_WORKER"] = "1"
+        os.environ["APHRODITE_USE_RAY_COMPILED_DAG"] = "1"
 
     dtype = "half"
     max_tokens = 5
