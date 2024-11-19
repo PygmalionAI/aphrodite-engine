@@ -11,10 +11,10 @@ from transformers import ChameleonConfig, ChameleonVQVAEConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
-from aphrodite.common.sequence import (APHRODITE_TOKEN_ID_ARRAY_TYPE,
-                                       IntermediateTensors, SamplerOutput,
+from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceData)
 from aphrodite.common.utils import print_warning_once
+from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.layers.activation import SiluAndMul

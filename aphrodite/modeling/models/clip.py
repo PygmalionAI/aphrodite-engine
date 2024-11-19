@@ -10,8 +10,8 @@ from transformers import CLIPVisionConfig
 from transformers.models.clip.modeling_clip import CLIPAttention
 
 from aphrodite.common.config import ModelConfig
-from aphrodite.common.sequence import (APHRODITE_TOKEN_ID_ARRAY_TYPE,
-                                       SequenceData)
+from aphrodite.common.sequence import SequenceData
+from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.inputs import LLMInputs
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,

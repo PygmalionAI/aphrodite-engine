@@ -6,11 +6,11 @@ from typing import Dict, List, Optional, Tuple
 import torch
 
 from aphrodite.common.sampling_params import SamplingParams, SamplingType
-from aphrodite.common.sequence import (APHRODITE_TOKEN_ID_ARRAY_TYPE,
-                                       SequenceData, SequenceGroupMetadata)
+from aphrodite.common.sequence import SequenceData, SequenceGroupMetadata
 from aphrodite.common.utils import (PyObjectCache, async_tensor_h2d,
                                     is_pin_memory_available,
                                     make_tensor_with_pad, maybe_expand_dim)
+from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.triton_utils.sample import get_num_triton_sampler_splits
 
 _SAMPLING_EPS = 1e-5

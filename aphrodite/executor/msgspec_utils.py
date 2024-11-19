@@ -1,7 +1,7 @@
 from array import array
 from typing import Any, Type
 
-from aphrodite.common.sequence import APHRODITE_TOKEN_ID_ARRAY_TYPE
+from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 
 
 def encode_hook(obj: Any) -> Any:

@@ -4,10 +4,10 @@ from typing import List
 import pytest
 import torch
 
-from aphrodite.common.sequence import (APHRODITE_TOKEN_ID_ARRAY_TYPE,
-                                       SamplingParams, SequenceData,
+from aphrodite.common.sequence import (SamplingParams, SequenceData,
                                        SequenceGroupMetadata)
 from aphrodite.common.utils import get_open_port
+from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.distributed.parallel_state import (
     ensure_model_parallel_initialized, init_distributed_environment)
 from aphrodite.engine.args_tools import EngineArgs

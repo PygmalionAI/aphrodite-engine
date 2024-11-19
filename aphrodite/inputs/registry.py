@@ -10,6 +10,8 @@ from torch import nn
 from transformers import PretrainedConfig
 from typing_extensions import TypeVar
 
+from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
+
 from .data import LLMInputs
 
 if TYPE_CHECKING:
@@ -18,10 +20,6 @@ if TYPE_CHECKING:
     from aphrodite.multimodal import MultiModalDataDict, MultiModalRegistry
 
 C = TypeVar("C", bound=PretrainedConfig)
-
-# NOTE: This has to match with sequence.py's `APHRODITE_TOKEN_ID_ARRAY_TYPE`.
-# We cannot import it here because of circular dependencies.
-APHRODITE_TOKEN_ID_ARRAY_TYPE = "l"
 
 
 @dataclass(frozen=True)

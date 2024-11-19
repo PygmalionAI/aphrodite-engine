@@ -10,9 +10,9 @@ from aphrodite.modeling.layers.spec_decode_base_sampler import (
 
 
 class SpecDecodeWorkerMetrics(
-    msgspec.Struct,
-    omit_defaults=True,
-    array_like=True):
+        msgspec.Struct,
+        omit_defaults=True,  # type: ignore[call-arg]
+        array_like=True):  # type: ignore[call-arg]
     """Dataclass holding metrics emitted from the spec decode worker.
     """
 
@@ -112,6 +112,7 @@ class AsyncMetricsCollector:
     def _copy_rejsample_metrics_async(self) -> torch.cuda.Event:
         """Copy rejection/typical-acceptance sampling metrics 
         (number of accepted tokens, etc) to CPU asynchronously.
+
         Returns a CUDA event recording when the copy is complete.
         """
         assert self._copy_stream is not None
@@ -130,6 +131,7 @@ class AsyncMetricsCollector:
 
         aggregate_metrics_ready = torch.cuda.Event()
         aggregate_metrics_ready.record(self._copy_stream)
+
         return aggregate_metrics_ready
 
     def _collect_rejsample_metrics(

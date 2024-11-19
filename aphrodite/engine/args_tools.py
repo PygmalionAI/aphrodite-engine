@@ -1,6 +1,7 @@
 import argparse
 import dataclasses
 import json
+import os
 from dataclasses import dataclass
 from typing import (TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Type,
                     Union)
@@ -15,7 +16,6 @@ from aphrodite.common.config import (CacheConfig, ConfigFormat, DecodingConfig,
                                      TokenizerPoolConfig)
 from aphrodite.common.utils import FlexibleArgumentParser, is_cpu
 from aphrodite.executor.executor_base import ExecutorBase
-from aphrodite.executor.ray_gpu_executor import APHRODITE_USE_RAY_SPMD_WORKER
 from aphrodite.quantization import QUANTIZATION_METHODS
 from aphrodite.transformers_utils.utils import check_gguf_file
 from aphrodite.triton_utils import HAS_TRITON
@@ -23,6 +23,9 @@ from aphrodite.triton_utils import HAS_TRITON
 if TYPE_CHECKING:
     from aphrodite.transformers_utils.tokenizer_group import BaseTokenizerGroup
 
+
+APHRODITE_USE_RAY_SPMD_WORKER = bool(
+    os.getenv("APHRODITE_USE_RAY_SPMD_WORKER", 0))
 
 def nullable_kvs(val: str) -> Optional[Mapping[str, int]]:
     if len(val) == 0:

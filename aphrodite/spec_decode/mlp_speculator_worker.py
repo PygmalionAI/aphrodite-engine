@@ -11,6 +11,7 @@ from aphrodite.spec_decode.proposer_worker_base import NonLLMProposerWorkerBase
 
 class MLPSpeculatorWorker(NonLLMProposerWorkerBase, MultiStepWorker):
     """Worker for MLPSpeculator models.
+
     Not currently compatible with LoRA or chunked prefill.
     """
 
@@ -27,6 +28,7 @@ class MLPSpeculatorWorker(NonLLMProposerWorkerBase, MultiStepWorker):
         Returns the list of sampler output, one per layer, along with indicator
         of whether torch tensor in sampler output need to be transposed in
         latter sampler_output_to_torch logic.
+
         For mlp spec worker, this indicator shall be True.
         """
         self._raise_if_unsupported(execute_model_req)
