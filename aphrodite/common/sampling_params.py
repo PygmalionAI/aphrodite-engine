@@ -375,7 +375,7 @@ class SamplingParams(
             raise ValueError(
                 "xtc_probability must be in [0, 1], got "
                 f"{self.xtc_probability}.")
-        if not self.nsigma <= 0.0:
+        if self.nsigma <= 0.0:
             raise ValueError(
                 "nsigma must be non-negative, got "
                 f"{self.nsigma}.")
