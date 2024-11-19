@@ -4,10 +4,10 @@ from typing import List
 import pytest
 import torch
 
-from aphrodite.common.sequence import (APHRODITE_TOKEN_ID_ARRAY_TYPE,
-                                       SamplingParams, SequenceData,
+from aphrodite.common.sequence import (SamplingParams, SequenceData,
                                        SequenceGroupMetadata)
 from aphrodite.common.utils import is_cpu
+from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.task_handler.enc_dec_model_runner import (
     EncoderDecoderModelRunner)

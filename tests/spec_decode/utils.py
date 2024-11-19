@@ -8,12 +8,12 @@ from unittest.mock import MagicMock
 import torch
 
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.common.sequence import (APHRODITE_TOKEN_ID_ARRAY_TYPE,
-                                       CompletionSequenceGroupOutput, Logprob,
+from aphrodite.common.sequence import (CompletionSequenceGroupOutput, Logprob,
                                        SamplerOutput, SequenceData,
                                        SequenceGroupMetadata, SequenceOutput)
 from aphrodite.common.utils import (get_distributed_init_method, get_ip,
                                     get_open_port)
+from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.modeling.utils import set_random_seed
 from aphrodite.task_handler.cache_engine import CacheEngine

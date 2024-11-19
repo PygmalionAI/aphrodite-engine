@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Set, Tuple
 
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
-from aphrodite.lora.request import LoRARequest
 from aphrodite.spec_decode.interfaces import SpeculativeProposer
 from aphrodite.task_handler.worker_base import LoraNotSupportedWorkerBase
 
@@ -33,15 +32,6 @@ class ProposerWorkerBase(LoraNotSupportedWorkerBase, SpeculativeProposer):
         """Implementation optional"""
         pass
 
-    def add_lora(self, lora_request: LoRARequest) -> bool:
-        raise ValueError(f"{type(self)} does not support LoRA")
-
-    def remove_lora(self, lora_id: int) -> bool:
-        raise ValueError(f"{type(self)} does not support LoRA")
-
-    def list_loras(self) -> Set[int]:
-        raise ValueError(f"{type(self)} does not support LoRA")
-
 
 class NonLLMProposerWorkerBase(ProposerWorkerBase, ABC):
     """Proposer worker which does not use a model with kvcache"""
@@ -63,12 +53,3 @@ class NonLLMProposerWorkerBase(ProposerWorkerBase, ABC):
 
     def get_cache_block_size_bytes(self) -> int:
         return 0
-
-    def add_lora(self, lora_request: LoRARequest) -> bool:
-        raise ValueError(f"{type(self)} does not support LoRA")
-
-    def remove_lora(self, lora_id: int) -> bool:
-        raise ValueError(f"{type(self)} does not support LoRA")
-
-    def list_loras(self) -> Set[int]:
-        raise ValueError(f"{type(self)} does not support LoRA")

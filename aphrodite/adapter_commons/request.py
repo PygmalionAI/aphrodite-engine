@@ -1,8 +1,6 @@
 from abc import abstractmethod
-from dataclasses import dataclass
 
 
-@dataclass
 class AdapterRequest:
     """
     Base class for adapter requests.

@@ -1,5 +1,6 @@
 """Minimal implementation of BlipVisionModel intended to be only used 
 within a vision language model."""
+from array import array
 from typing import Optional, Union
 
 import torch
@@ -10,6 +11,7 @@ from transformers.models.blip.modeling_blip import BlipAttention
 
 from aphrodite.common.config import ModelConfig
 from aphrodite.common.sequence import SequenceData
+from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.inputs import LLMInputs
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
@@ -53,8 +55,10 @@ def dummy_seq_data_for_blip(
     else:
         image_feature_size = image_feature_size_override
 
-    token_ids = [image_token_id] * image_feature_size
-    token_ids += [0] * (seq_len - image_feature_size)
+    token_ids = array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
+                      [image_token_id]) * image_feature_size
+    token_ids += array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
+                       [0]) * (seq_len - image_feature_size)
     return SequenceData(token_ids)
 
 

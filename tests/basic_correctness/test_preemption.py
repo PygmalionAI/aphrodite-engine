@@ -10,6 +10,7 @@ import pytest
 from prometheus_client import REGISTRY
 
 from aphrodite import SamplingParams
+from aphrodite.executor.ray_gpu_executor import APHRODITE_USE_RAY_SPMD_WORKER
 from aphrodite.processing.scheduler import (ARTIFICIAL_PREEMPTION_MAX_CNT,
                                             ENABLE_ARTIFICIAL_PREEMPT)
 
@@ -25,6 +26,13 @@ assert ENABLE_ARTIFICIAL_PREEMPT is True, (
     "tests/basic_correctness/test_preemption.py`")
 
 
+@pytest.fixture
+def worker_use_ray() -> bool:
+    # When SPMD worker is used, use ray_use_worker=True
+    # to test delta input optimization works with preemption.
+    return APHRODITE_USE_RAY_SPMD_WORKER
+
+
 @pytest.mark.parametrize("model", MODELS)
 @pytest.mark.parametrize("dtype", ["half"])
 @pytest.mark.parametrize("max_tokens", [96])
@@ -37,6 +45,7 @@ def test_chunked_prefill_recompute(
     dtype: str,
     max_tokens: int,
     chunked_prefill_token_size: int,
+    worker_use_ray: bool,
 ) -> None:
     """Ensure that chunked prefill works with preemption."""
     max_num_seqs = min(chunked_prefill_token_size, 256)
@@ -55,6 +64,7 @@ def test_chunked_prefill_recompute(
             max_num_batched_tokens=max_num_batched_tokens,
             enable_chunked_prefill=enable_chunked_prefill,
             max_num_seqs=max_num_seqs,
+            worker_use_ray=worker_use_ray,
     ) as aphrodite_model:
         aphrodite_outputs = aphrodite_model.generate_greedy(example_prompts,
                                                             max_tokens)
@@ -83,6 +93,7 @@ def test_preemption(
     model: str,
     dtype: str,
     max_tokens: int,
+    worker_use_ray: bool,
 ) -> None:
     """By default, recompute preemption is enabled"""
 
@@ -93,6 +104,7 @@ def test_preemption(
             model,
             dtype=dtype,
             disable_log_stats=False,
+            worker_use_ray=worker_use_ray,
     ) as aphrodite_model:
         aphrodite_outputs = aphrodite_model.generate_greedy(example_prompts,
                                                             max_tokens)
@@ -138,6 +150,7 @@ def test_swap(
     dtype: str,
     max_tokens: int,
     beam_width: int,
+    worker_use_ray: bool,
 ) -> None:
     """Use beam search enables swapping."""
     example_prompts = example_prompts[:1]
@@ -150,6 +163,7 @@ def test_swap(
             dtype=dtype,
             swap_space=10,
             disable_log_stats=False,
+            worker_use_ray=worker_use_ray,
     ) as aphrodite_model:
         aphrodite_outputs = aphrodite_model.generate_beam_search(
             example_prompts, beam_width, max_tokens)
@@ -195,6 +209,7 @@ def test_swap_infeasible(
     dtype: str,
     max_tokens: int,
     beam_width: int,
+    worker_use_ray: bool,
 ) -> None:
     """Verify infeasible swap request will be ignored."""
     BLOCK_SIZE = 16
@@ -211,6 +226,7 @@ def test_swap_infeasible(
             # decode blocks are not enough to finish.
             num_gpu_blocks_override=prefill_blocks + decode_blocks,
             max_model_len=(prefill_blocks + decode_blocks) * BLOCK_SIZE,
+            worker_use_ray=worker_use_ray,
     ) as aphrodite_model:
         sampling_params = SamplingParams(n=beam_width,
                                          use_beam_search=True,
@@ -238,6 +254,7 @@ def test_preemption_infeasible(
     model: str,
     dtype: str,
     max_tokens: int,
+    worker_use_ray: bool,
 ) -> None:
     """Verify infeasible preemption request will be ignored."""
     BLOCK_SIZE = 16
@@ -252,6 +269,7 @@ def test_preemption_infeasible(
             # ignored instead of hanging forever.
             num_gpu_blocks_override=prefill_blocks + decode_blocks // 2,
             max_model_len=((prefill_blocks + decode_blocks // 2) * BLOCK_SIZE),
+            worker_use_ray=worker_use_ray,
     ) as aphrodite_model:
         sampling_params = SamplingParams(max_tokens=max_tokens,
                                          ignore_eos=True)

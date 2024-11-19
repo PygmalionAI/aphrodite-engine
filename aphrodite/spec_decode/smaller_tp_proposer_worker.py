@@ -16,6 +16,7 @@ class SmallerTpProposerWorker(ProposerWorkerBase):
     """Class which allows a speculative draft model to run with smaller tensor
     parallel degree than target model.
     This reduces the communication overhead of small draft models.
+
     To implement this feature, this class differs behavior based on is_dummy
     flag, where dummy means worker that does not participate draft generation.
     Participating workers use a smaller tp group by patching Aphrodite's tensor
@@ -38,6 +39,7 @@ class SmallerTpProposerWorker(ProposerWorkerBase):
 
     def __init__(self, worker: MultiStepWorker, draft_ranks: List[int]):
         """Create a SmallerTpProposerWorker.
+
         Args:
             worker (MultiStepWorker): an actual worker wrapped with this class
             draft_ranks (List[int]): if this value is given, only the GPU ranks

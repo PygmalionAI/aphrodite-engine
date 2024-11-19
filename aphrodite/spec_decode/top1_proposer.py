@@ -108,8 +108,7 @@ class Top1Proposer(SpeculativeProposer):
             proposal_token_ids=proposal_tokens,
             proposal_probs=proposal_probs,
             proposal_lens=proposal_lens,
-            no_proposals=maybe_sampler_output is None,
-        )
+            no_proposals=maybe_sampler_output is None)
 
         return proposals
 
@@ -139,7 +138,7 @@ class Top1Proposer(SpeculativeProposer):
 
             # Currently only proposal lens of 0 or the global batch proposal len
             # are supported.
-            # If max_proposal_len is defined, then we shall no exccess this
+            # If max_proposal_len is defined, then we shall not exceed this
             # quota for nonzero_proposal
             new_k = 0
             if (self.max_proposal_len is None

@@ -10,6 +10,7 @@ from aphrodite.common.sequence import SequenceData, SequenceGroupMetadata
 from aphrodite.common.utils import (PyObjectCache, async_tensor_h2d,
                                     is_pin_memory_available,
                                     make_tensor_with_pad, maybe_expand_dim)
+from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.triton_utils.sample import get_num_triton_sampler_splits
 
 _SAMPLING_EPS = 1e-5
@@ -550,9 +551,11 @@ class SamplingTensors:
                         and params.prompt_logprobs is not None):
                     prefill_len = len(seq_group.prompt_logprob_indices)
                     prompt_tokens.extend(
-                        array('l') for _ in range(prefill_len))
+                        array(APHRODITE_TOKEN_ID_ARRAY_TYPE)
+                        for _ in range(prefill_len))
                     output_tokens.extend(
-                        array('l') for _ in range(prefill_len))
+                        array(APHRODITE_TOKEN_ID_ARRAY_TYPE)
+                        for _ in range(prefill_len))
                 if seq_group.do_sample:
                     for seq_id in seq_ids:
                         seq_data = seq_group.seq_data[seq_id]

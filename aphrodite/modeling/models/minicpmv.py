@@ -23,6 +23,7 @@
 """Inference-only MiniCPM-V model compatible with HuggingFace weights."""
 import math
 import re
+from array import array
 from functools import partial
 from typing import (Any, Callable, Iterable, List, Mapping, Optional, Tuple,
                     TypedDict, Union)
@@ -40,6 +41,7 @@ from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
 from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceData)
+from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.layers.linear import ReplicatedLinear
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
@@ -409,7 +411,7 @@ def get_max_minicpmv_image_tokens(ctx: InputContext):
 
 
 def dummy_seq_data_for_minicpmv(seq_len: int, num_images: int):
-    token_ids = [0] * seq_len
+    token_ids = array(APHRODITE_TOKEN_ID_ARRAY_TYPE, [0]) * seq_len
     return SequenceData(token_ids)
 
 
