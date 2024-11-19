@@ -5,7 +5,7 @@ tensor parallelism.
 import pytest
 import torch
 
-from aphrodite.utils import is_hip
+from aphrodite.common.utils import is_hip
 
 from .conftest import run_greedy_equality_correctness_test
 
