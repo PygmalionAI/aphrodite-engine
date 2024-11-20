@@ -832,7 +832,7 @@ class SamplingTensors:
             dry_multipliers=dry_multipliers_t.to(device=device, non_blocking=True),
             dry_bases=dry_bases_t.to(device=device, non_blocking=True),
             dry_allowed_lengths=dry_allowed_lengths_t.to(device=device, non_blocking=True),
-            dry_sequence_breakers=dry_sequence_breakers_t.to(device=device, non_blocking=True),
+            dry_sequence_breaker_ids=dry_sequence_breakers_t.to(device=device, non_blocking=True),
             typical_ps=typical_ps_t.to(device=device, non_blocking=True),
             prompt_tokens=prompt_t.to(device=device, non_blocking=True),
             output_tokens=output_t.to(device=device, non_blocking=True),
