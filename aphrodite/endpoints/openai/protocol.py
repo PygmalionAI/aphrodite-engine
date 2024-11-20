@@ -147,10 +147,10 @@ class ChatCompletionRequest(OpenAIBaseModel):
     prompt_logprobs: Optional[int] = None
     xtc_threshold: Optional[float] = 0.1
     xtc_probability: Optional[float] = 0.0
-    dry_multiplier: Optional[float] = 1.0
-    dry_base: Optional[float] = 1.0
-    dry_allowed_length: Optional[int] = 0
-    dry_sequence_breakers: Optional[List[str]] = Field(default_factory=list)
+    dry_multiplier: Optional[float] = 0
+    dry_base: Optional[float] = 1.75
+    dry_allowed_length: Optional[int] = 2
+    dry_sequence_breakers: Optional[List[str]] = Field(default=["\n", ":", "\"", "*"])
     dynatemp_min: Optional[float] = 0.0
     dynatemp_max: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
@@ -418,10 +418,10 @@ class CompletionRequest(OpenAIBaseModel):
     prompt_logprobs: Optional[int] = None
     xtc_threshold: Optional[float] = 0.1
     xtc_probability: Optional[float] = 0.0
-    dry_multiplier: Optional[float] = 1.0
-    dry_base: Optional[float] = 1.0
-    dry_allowed_length: Optional[int] = 0
-    dry_sequence_breakers: Optional[List[str]] = Field(default_factory=list)
+    dry_multiplier: Optional[float] = 0
+    dry_base: Optional[float] = 1.75
+    dry_allowed_length: Optional[int] = 2
+    dry_sequence_breakers: Optional[List[str]] = Field(default=["\n", ":", "\"", "*"])
     dynatemp_min: Optional[float] = 0.0
     dynatemp_max: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
