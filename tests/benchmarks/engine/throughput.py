@@ -75,6 +75,7 @@ def run_aphrodite(
     dtype: str,
     max_model_len: Optional[int],
     enforce_eager: bool,
+    max_seq_len_to_capture: int,
     kv_cache_dtype: str,
     quantization_param_path: Optional[str],
     device: str,
@@ -100,6 +101,7 @@ def run_aphrodite(
         max_model_len=max_model_len,
         gpu_memory_utilization=gpu_memory_utilization,
         enforce_eager=enforce_eager,
+        max_seq_len_to_capture=max_seq_len_to_capture,
         kv_cache_dtype=kv_cache_dtype,
         quantization_param_path=quantization_param_path,
         device=device,
@@ -233,8 +235,8 @@ def main(args: argparse.Namespace):
             args.quant_llm_fp_bits,
             args.tensor_parallel_size, args.seed, args.n, args.use_beam_search,
             args.trust_remote_code, args.dtype, args.max_model_len,
-            args.enforce_eager, args.kv_cache_dtype,
-            args.quantization_param_path, args.device,
+            args.enforce_eager, args.max_seq_len_to_capture,
+            args.kv_cache_dtype, args.quantization_param_path, args.device,
             args.enable_prefix_caching, args.enable_chunked_prefill,
             args.max_num_batched_tokens, args.distributed_executor_backend,
             args.gpu_memory_utilization, args.download_dir, args.load_format,
@@ -344,6 +346,11 @@ if __name__ == "__main__":
     parser.add_argument("--enforce-eager",
                         action="store_true",
                         help="enforce eager execution")
+    parser.add_argument("--max-seq-len-to-capture",
+                        type=int,
+                        default=None,
+                        help="The maximum sequence length to capture for "
+                        "CUDA graphs.")
     parser.add_argument(
         '--kv-cache-dtype',
         type=str,

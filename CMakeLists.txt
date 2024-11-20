@@ -218,7 +218,8 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     "kernels/quantization/gguf/gguf_kernel.cu"
     "kernels/quantization/gptq_marlin/awq_marlin_repack.cu"
     "kernels/quantization/fp8/fp8_marlin.cu"
-    "kernels/all_reduce/custom_all_reduce.cu")
+    "kernels/all_reduce/custom_all_reduce.cu"
+    "kernels/sampling/sampling.cu")
 
   # Add CUTLASS and GPTQ Marlin kernels if not MSVC
   if(NOT MSVC)
