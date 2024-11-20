@@ -534,7 +534,7 @@ class CompletionRequest(OpenAIBaseModel):
             dry_multiplier=self.dry_multiplier,
             dry_base=self.dry_base,
             dry_allowed_length=self.dry_allowed_length,
-            dry_sequence_breakers_ids=dry_sequence_breaker_ids,
+            dry_sequence_breaker_ids=dry_sequence_breaker_ids,
             dynatemp_min=self.dynatemp_min,
             dynatemp_max=self.dynatemp_max,
             dynatemp_exponent=self.dynatemp_exponent,
