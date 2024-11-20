@@ -5,6 +5,7 @@ from typing import Sequence as GenericSequence
 from typing import Tuple
 
 from aphrodite.common.sequence import Sequence, SequenceGroup
+from aphrodite.common.utils import Device
 
 
 class AllocStatus(enum.Enum):
@@ -117,4 +118,9 @@ class BlockSpaceManager(ABC):
 
     @abstractmethod
     def mark_blocks_as_computed(self, seq_group: SequenceGroup):
+        pass
+
+    @abstractmethod
+    def get_prefix_cache_hit_rate(self, device: Device) -> float:
+        """Prefix cache hit rate. -1 means not supported or disabled."""
         pass
