@@ -153,21 +153,23 @@ class SamplingParams(
             (max_logit - nsgima * std_dev) are filtered out. Higher values
             (e.g. 3.0) keep more tokens, lower values (e.g. 1.0) are more
             selective. Must be positive. 0 to disable.
-        dry_multiplier: Float that controls the magnitude of the DRY sampling penalty.
-            Higher values create stronger penalties against repetition. The penalty
-            is multiplied by this value before being applied. Must be non-negative.
-            0 disables the sampler.
+        dry_multiplier: Float that controls the magnitude of the DRY sampling
+            penalty. Higher values create stronger penalties against
+            repetition. The penalty is multiplied by this value before being
+            applied. Must be non-negative. 0 disables the sampler.
         dry_base: Base for the exponential growth of the DRY sampling penalty.
-            Controls how quickly the penalty increases with longer repeated sequences.
-            Must be greater than 1. Higher values (e.g. 2.0) create more aggressive
-            penalties for longer repetitions. Defaults to 1.75.
-        dry_allowed_length: Maximum number of tokens that can be repeated without
-            incurring a DRY sampling penalty. Sequences longer than this will be
-            penalized exponentially. Must be at least 1. Defaults to 2.
+            Controls how quickly the penalty increases with longer repeated
+            sequences. Must be greater than 1. Higher values (e.g. 2.0) create
+            more aggressive penalties for longer repetitions. Defaults to 1.75.
+        dry_allowed_length: Maximum number of tokens that can be repeated
+            without incurring a DRY sampling penalty. Sequences longer than
+            this will be penalized exponentially. Must be at least 1.
+            Defaults to 2.
         dry_sequence_breaker_ids: List of token IDs that stop
-            the matching of repeated content. These tokens will break up the input
-            into sections where repetition is evaluated separately. Common examples
-            are newlines, quotes, and other structural tokens. Defaults to None.
+            the matching of repeated content. These tokens will break up the
+            input into sections where repetition is evaluated separately.
+            Common examples are newlines, quotes, and other structural tokens.
+            Defaults to None.
     """
 
     n: int = 1

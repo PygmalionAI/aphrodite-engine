@@ -458,7 +458,8 @@ def _apply_dry(
             if next_token in sequence_breakers_ids:
                 continue
 
-            # We found last_token matches at this index, so match length starts at 1
+            # We found last_token matches at this index, so match length starts
+            # at 1
             match_length = 1
 
             # Try to extend match backwards
@@ -481,7 +482,8 @@ def _apply_dry(
 
             # Update max match length for this next token
             if next_token in match_lengths:
-                match_lengths[next_token] = max(match_length, match_lengths[next_token])
+                match_lengths[next_token] = max(
+                    match_length, match_lengths[next_token])
             else:
                 match_lengths[next_token] = match_length
 
