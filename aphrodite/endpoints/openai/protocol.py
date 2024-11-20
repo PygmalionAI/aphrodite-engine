@@ -1,5 +1,6 @@
 # Adapted from
 # https://github.com/lm-sys/FastChat/blob/168ccc29d3f7edc50823016105c024fe2282732a/fastchat/protocol/openai_api_protocol.py
+import json
 import time
 from typing import Any, Dict, List, Literal, Optional, Union
 
@@ -491,6 +492,7 @@ class CompletionRequest(OpenAIBaseModel):
         dry_sequence_breaker_ids = []
         if self.dry_sequence_breakers:
             for s in self.dry_sequence_breakers:
+                s = bytes(s, "utf-8").decode("unicode_escape")
                 token_id = tokenizer.encode(f'a{s}')[-1]
                 dry_sequence_breaker_ids.append(token_id)
 
@@ -570,6 +572,33 @@ class CompletionRequest(OpenAIBaseModel):
         if data.get("stream_options") and not data.get("stream"):
             raise ValueError(
                 "Stream options can only be defined when stream is True.")
+        return data
+    
+    @model_validator(mode='before')
+    @classmethod
+    def parse_dry_sequence_breakers(cls, data):
+        if 'dry_sequence_breakers' in data:
+            breakers = data['dry_sequence_breakers']
+            if isinstance(breakers, str):
+                try:
+                    # Try to parse as JSON string
+                    data['dry_sequence_breakers'] = json.loads(breakers)
+                except json.JSONDecodeError as e:
+                    raise ValueError(f"Invalid JSON for dry_sequence_breakers:"
+                                     f" {e}") from e
+                
+            # Validate that we now have a list of strings
+            is_list = isinstance(data['dry_sequence_breakers'], list)
+            all_strings = all(
+                isinstance(x, str) 
+                for x in data['dry_sequence_breakers']
+            )
+            if not is_list or not all_strings:
+                raise ValueError(
+                    "dry_sequence_breakers must be a list of strings or a "
+                    "JSON string representing a list of strings"
+                )
+        
         return data
 
 
