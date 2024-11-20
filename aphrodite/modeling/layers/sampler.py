@@ -423,61 +423,51 @@ def _apply_dry(
     Reference: https://github.com/oobabooga/text-generation-webui/pull/5677
     """
     
-    # Process each sequence in the batch
-    for i, (input_ids_row, logits_row) in enumerate(zip(input_ids, logits)):
-        # Get the last token
+    batch_size = logits.shape[0]
+
+    for i in range(batch_size):
+        input_ids_row = input_ids[i]
+        logits_row = logits[i]
         last_token = input_ids_row[-1].item()
+        sequence_breakers = sequence_breakers_ids[i]
 
         # Skip if last token is a sequence breaker
-        if last_token in sequence_breakers_ids:
+        if torch.any(sequence_breakers == last_token):
             continue
 
-        # Find matches of the last token, excluding the last position
-        match_indices = (input_ids_row[:-1] == last_token).nonzero()
+        # Find indices where last_token occurs, excluding the last position
+        match_indices = (input_ids_row[:-1] == last_token).nonzero(as_tuple=False).flatten()
 
-        # Track max matching sequence length for each potential next token
         match_lengths = {}
 
-        # Process each match
         for idx in match_indices:
-            # Convert to scalar
             idx = idx.item()
-            
-            # Get the token that followed this match in the input
             next_token = input_ids_row[idx + 1].item()
 
-            # Skip if next token is a sequence breaker
-            if next_token in sequence_breakers_ids:
+            if torch.any(sequence_breakers == next_token):
                 continue
 
-            # We found last_token matches at this index, so match length starts at 1
             match_length = 1
 
-            # Try to extend match backwards
             while True:
                 j = idx - match_length
                 if j < 0:
-                    # Reached start of input
                     break
 
                 previous_token = input_ids_row[-(match_length + 1)].item()
                 if input_ids_row[j] != previous_token:
-                    # No more matches
                     break
 
-                if previous_token in sequence_breakers_ids:
-                    # Hit a sequence breaker
+                if torch.any(sequence_breakers == input_ids_row[j]):
                     break
 
                 match_length += 1
 
-            # Update max match length for this next token
             if next_token in match_lengths:
                 match_lengths[next_token] = max(match_length, match_lengths[next_token])
             else:
                 match_lengths[next_token] = match_length
 
-        # Apply penalties based on match lengths
         allowed_length = allowed_lengths[i]
         multiplier = multipliers[i]  
         base = bases[i]
@@ -488,6 +478,8 @@ def _apply_dry(
                 logits_row[token] -= penalty
 
     return logits
+
+
 
 def _apply_top_k_top_p(
     logits: torch.Tensor,
