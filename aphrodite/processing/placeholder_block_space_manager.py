@@ -1,6 +1,7 @@
 from typing import List, Tuple
 
 from aphrodite.common.sequence import Sequence, SequenceGroup
+from aphrodite.common.utils import Device
 from aphrodite.processing.interfaces import AllocStatus, BlockSpaceManager
 
 
@@ -81,3 +82,6 @@ class PlaceholderBlockSpaceManager(BlockSpaceManager):
 
     def mark_blocks_as_computed(self, seq_group: SequenceGroup):
         pass
+
+    def get_prefix_cache_hit_rate(self, device: Device) -> float:
+        return -1

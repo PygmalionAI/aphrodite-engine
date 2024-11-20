@@ -13,7 +13,7 @@ from aphrodite.common.sequence import (Sequence, SequenceData, SequenceGroup,
                                        SequenceGroupMetadata,
                                        SequenceGroupMetadataDelta,
                                        SequenceStatus)
-from aphrodite.common.utils import PyObjectCache
+from aphrodite.common.utils import Device, PyObjectCache
 from aphrodite.lora.request import LoRARequest
 from aphrodite.processing.interfaces import AllocStatus, BlockSpaceManager
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
@@ -456,6 +456,9 @@ class Scheduler:
     def has_unfinished_seqs(self) -> bool:
         return len(self.waiting) != 0 or len(self.running) != 0 or len(
             self.swapped) != 0
+
+    def get_prefix_cache_hit_rate(self, device: Device) -> float:
+        return self.block_manager.get_prefix_cache_hit_rate(device)
 
     def get_num_unfinished_seq_groups(self) -> int:
         return len(self.waiting) + len(self.running) + len(self.swapped)
