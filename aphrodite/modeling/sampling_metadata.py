@@ -566,7 +566,7 @@ class SamplingTensors:
                     sampling_seeds.append(seq_seeds)
                 sample_indices.extend(seq_group.sample_indices)
 
-        if do_penalties:
+        if do_penalties or do_dry:
             for seq_group in sampling_metadata.seq_groups:
                 seq_ids = seq_group.seq_ids
                 if (seq_group.is_prompt
