@@ -150,6 +150,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
     dynatemp_min: Optional[float] = 0.0
     dynatemp_max: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
+    nsigma: Optional[float] = 0.0
     custom_token_bans: Optional[List[int]] = None
     # doc: end-chat-completion-sampling-params
 
@@ -293,6 +294,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
             dynatemp_min=self.dynatemp_min,
             dynatemp_max=self.dynatemp_max,
             dynatemp_exponent=self.dynatemp_exponent,
+            nsigma=self.nsigma,
             custom_token_bans=self.custom_token_bans,
         )
 
@@ -404,6 +406,7 @@ class CompletionRequest(OpenAIBaseModel):
     dynatemp_min: Optional[float] = 0.0
     dynatemp_max: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
+    nsigma: Optional[float] = 0.0
     custom_token_bans: Optional[List[int]] = None
     # doc: end-completion-sampling-params
 
@@ -506,6 +509,7 @@ class CompletionRequest(OpenAIBaseModel):
             dynatemp_min=self.dynatemp_min,
             dynatemp_max=self.dynatemp_max,
             dynatemp_exponent=self.dynatemp_exponent,
+            nsigma=self.nsigma,
             custom_token_bans=self.custom_token_bans,
         )
 

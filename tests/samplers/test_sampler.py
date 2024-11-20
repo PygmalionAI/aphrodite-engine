@@ -732,6 +732,52 @@ def test_sampler_repetition_penalty_mixed(device: str):
     assert tokens1[1] == tokens2[0]
 
 
+@pytest.mark.parametrize("seed", RANDOM_SEEDS)
+@pytest.mark.parametrize("device", CUDA_DEVICES)
+def test_sampler_nsigma(seed: int, device: str):
+    """Test that top-nsigma sampling behaves as expected."""
+    set_random_seed(seed)
+    torch.set_default_device(device)
+    batch_size = random.randint(1, 256)
+    _, fake_logits, sampler = _prepare_test(batch_size)
+
+    # Create a clear separation in logits for testing
+    high_logit_indices = {}  # Store high logit indices for each batch
+    for i in range(batch_size):
+        # Set a few logits significantly higher than others
+        num_high_logits = random.randint(1, 5)
+        high_indices = random.sample(range(fake_logits.size(1)),
+                                     num_high_logits)
+        high_logit_indices[i] = set(high_indices)  # Store for verification
+        for idx in high_indices:
+            fake_logits[i, idx] = 10.0  # Clearly above the mean
+
+    # Test with different nsigma values
+    for nsigma in [1.5, 2.0, 3.0]:
+        sampling_params = SamplingParams(
+            temperature=1.0,
+            nsigma=nsigma,
+            seed=random.randint(0, 10000),
+        )
+        
+        sampler_output = _do_sample(batch_size, fake_logits.clone(), sampler,
+                                  sampling_params, device)
+
+        # Verify that sampling only selects from high logits
+        for batch_idx, sequence_output in enumerate(sampler_output):
+            for nth_output in sequence_output.samples:
+                token_id = nth_output.output_token
+                # The token should come from the high logits region
+                assert token_id in high_logit_indices[batch_idx], \
+                    f"Sampled token {token_id} for batch {batch_idx} was not in the high logit set"  # noqa
+
+        # Test determinism
+        second_output = _do_sample(batch_size, fake_logits.clone(), sampler,
+                                 sampling_params, device)
+        assert sampler_output == second_output, \
+            "Top-nsigma sampling is not deterministic with same seed"
+
+
 @pytest.mark.parametrize("device", CUDA_DEVICES)
 def test_sampler_include_gpu_probs_tensor(device: str):
     set_random_seed(42)

@@ -77,7 +77,7 @@ class Sampler(nn.Module):
         # Initialize new sampling tensors
         (sampling_tensors, do_penalties, do_temperatures, do_top_p_top_k,
          do_top_as, do_min_p, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
-         do_typical_ps, do_quadratic, do_xtc, do_temp_last
+         do_typical_ps, do_quadratic, do_xtc, do_nsigmas, do_temp_last
          ) = SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype)
 
@@ -93,6 +93,7 @@ class Sampler(nn.Module):
         self._do_typical_ps = do_typical_ps
         self._do_quadratic = do_quadratic
         self._do_xtc = do_xtc
+        self._do_nsgimas = do_nsigmas
         self._do_temp_last = do_temp_last
 
     def forward(
@@ -131,6 +132,7 @@ class Sampler(nn.Module):
         do_typical_ps = self._do_typical_ps
         do_quadratic = self._do_quadratic
         do_xtc = self._do_xtc
+        do_nsigmas = self._do_nsgimas
         do_temp_last = self._do_temp_last
 
         logits = _apply_min_tokens_penalty(logits, sampling_metadata)
@@ -149,6 +151,9 @@ class Sampler(nn.Module):
                                 sampling_tensors.dynatemp_mins,
                                 sampling_tensors.dynatemp_maxs,
                                 sampling_tensors.dynatemp_exps)
+
+        if do_nsigmas:
+            logits = _apply_top_nsigma(logits, sampling_tensors.nsigmas)
 
         if do_top_p_top_k:
             logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
@@ -630,6 +635,28 @@ def _apply_xtc_sampling(
                 # Mask out above_thresh logits except the last/lowest one.
                 logits[i].scatter_(
                     0, sorted_indices[i, :indices_to_remove], -float('inf'))
+
+    return logits
+
+
+def _apply_top_nsigma(
+        logits: torch.Tensor,
+        nsigma: torch.Tensor,
+) -> torch.Tensor:
+    """Apply top-nsigma truncation to the logits.
+    
+    Reference: https://arxiv.org/abs/2411.07641
+
+    Args:
+        logits: Logits of shape (num_tokens, vocab_size)
+        nsigma: Number of standard deviations to use as threshold
+    Returns:
+        Modified logits with values below threshold set to -inf
+    """
+    std = logits.std(dim=-1, keepdim=True) 
+    threshold = (logits.max(dim=-1, keepdim=True).values -
+                 nsigma.unsqueeze(dim=1) * std)
+    logits[logits < threshold] = float("-inf")
 
     return logits
 

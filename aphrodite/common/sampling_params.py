@@ -148,6 +148,11 @@ class SamplingParams(
             above this threshold, consider removing all but the last one.
         xtc_probability: Probability that the removal will actually happen.
             0 disables the sampler, 1 makes it always happen.
+        nsigma: Number of standard deviations from the maximum logit to use
+            as a cutoff threshold. Tokens with logits below
+            (max_logit - nsgima * std_dev) are filtered out. Higher values
+            (e.g. 3.0) keep more tokens, lower values (e.g. 1.0) are more
+            selective. Must be positive. 0 to disable.
     """
 
     n: int = 1
@@ -193,6 +198,7 @@ class SamplingParams(
     truncate_prompt_tokens: Optional[Annotated[int, msgspec.Meta(ge=1)]] = None
     xtc_threshold: float = 0.1
     xtc_probability: float = 0
+    nsigma: float = 0.0
 
     # The below fields are not supposed to be used as an input.
     # They are set in post_init.
@@ -239,6 +245,7 @@ class SamplingParams(
         "truncate_prompt_tokens": None,
         "xtc_threshold": 0.1,
         "xtc_probability": 0,
+        "nsigma": 0.0,
     }
 
     def __post_init__(self) -> None:
@@ -368,6 +375,11 @@ class SamplingParams(
             raise ValueError(
                 "xtc_probability must be in [0, 1], got "
                 f"{self.xtc_probability}.")
+        if self.nsigma < 0.0:
+            raise ValueError(
+                "nsigma must be non-negative, got "
+                f"{self.nsigma}.")
+            
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:
