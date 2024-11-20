@@ -147,6 +147,10 @@ class ChatCompletionRequest(OpenAIBaseModel):
     prompt_logprobs: Optional[int] = None
     xtc_threshold: Optional[float] = 0.1
     xtc_probability: Optional[float] = 0.0
+    dry_multiplier: Optional[float] = 1.0
+    dry_base: Optional[float] = 1.0
+    dry_allowed_length: Optional[int] = 0
+    dry_sequence_breakers: Optional[List[str]] = Field(default_factory=list)
     dynatemp_min: Optional[float] = 0.0
     dynatemp_max: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
@@ -255,6 +259,13 @@ class ChatCompletionRequest(OpenAIBaseModel):
         if guided_decode_logits_processor:
             logits_processors.append(guided_decode_logits_processor)
 
+
+        dry_sequence_breaker_ids = []
+        if self.dry_sequence_breakers:
+            for s in self.dry_sequence_breakers:
+                token_id = tokenizer.encode(f'a{s}')[-1]
+                dry_sequence_breaker_ids.append(token_id)
+
         return SamplingParams(
             n=self.n,
             presence_penalty=self.presence_penalty,
@@ -291,6 +302,10 @@ class ChatCompletionRequest(OpenAIBaseModel):
             temperature_last=self.temperature_last,
             xtc_threshold=self.xtc_threshold,
             xtc_probability=self.xtc_probability,
+            dry_multiplier=self.dry_multiplier,
+            dry_base=self.dry_base,
+            dry_allowed_length=self.dry_allowed_length,
+            dry_sequence_breaker_ids=dry_sequence_breaker_ids,
             dynatemp_min=self.dynatemp_min,
             dynatemp_max=self.dynatemp_max,
             dynatemp_exponent=self.dynatemp_exponent,
@@ -403,6 +418,10 @@ class CompletionRequest(OpenAIBaseModel):
     prompt_logprobs: Optional[int] = None
     xtc_threshold: Optional[float] = 0.1
     xtc_probability: Optional[float] = 0.0
+    dry_multiplier: Optional[float] = 1.0
+    dry_base: Optional[float] = 1.0
+    dry_allowed_length: Optional[int] = 0
+    dry_sequence_breakers: Optional[List[str]] = Field(default_factory=list)
     dynatemp_min: Optional[float] = 0.0
     dynatemp_max: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
@@ -469,6 +488,12 @@ class CompletionRequest(OpenAIBaseModel):
         if guided_decode_logits_processor:
             logits_processors.append(guided_decode_logits_processor)
 
+        dry_sequence_breaker_ids = []
+        if self.dry_sequence_breakers:
+            for s in self.dry_sequence_breakers:
+                token_id = tokenizer.encode(f'a{s}')[-1]
+                dry_sequence_breaker_ids.append(token_id)
+
         return SamplingParams(
             n=self.n,
             best_of=self.best_of,
@@ -506,6 +531,10 @@ class CompletionRequest(OpenAIBaseModel):
             temperature_last=self.temperature_last,
             xtc_threshold=self.xtc_threshold,
             xtc_probability=self.xtc_probability,
+            dry_multiplier=self.dry_multiplier,
+            dry_base=self.dry_base,
+            dry_allowed_length=self.dry_allowed_length,
+            dry_sequence_breakers_ids=dry_sequence_breaker_ids,
             dynatemp_min=self.dynatemp_min,
             dynatemp_max=self.dynatemp_max,
             dynatemp_exponent=self.dynatemp_exponent,
