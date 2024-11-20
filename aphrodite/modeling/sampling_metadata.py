@@ -10,6 +10,7 @@ from aphrodite.common.sequence import SequenceData, SequenceGroupMetadata
 from aphrodite.common.utils import (PyObjectCache, async_tensor_h2d,
                                     is_pin_memory_available,
                                     make_tensor_with_pad, maybe_expand_dim)
+from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.triton_utils.sample import get_num_triton_sampler_splits
 
 _SAMPLING_EPS = 1e-5
@@ -386,6 +387,7 @@ class SamplingTensors:
     smoothing_curves: torch.Tensor
     xtc_thresholds: torch.Tensor
     xtc_probabilities: torch.Tensor
+    nsigmas: torch.Tensor
     sampling_seeds: torch.Tensor
     sample_indices: torch.Tensor
     extra_seeds: Optional[torch.Tensor]
@@ -403,7 +405,7 @@ class SamplingTensors:
         extra_seeds_to_generate: int = 0,
         extra_entropy: Optional[Tuple[int, ...]] = None
     ) -> Tuple["SamplingTensors", bool, bool, bool, bool, bool, bool, bool,
-               bool, bool, bool, bool, bool]:
+               bool, bool, bool, bool, bool, bool]:
         """
         extra_seeds_to_generate: extra seeds to generate using the
             user-defined seed for each sequence.
@@ -431,6 +433,7 @@ class SamplingTensors:
         smoothing_curves: List[float] = []
         xtc_thresholds: List[float] = []
         xtc_probabilities: List[float] = []
+        nsigmas: List[float] = []
         sampling_seeds: List[List[int]] = []
         sample_indices: List[int] = []
         do_penalties = False
@@ -444,6 +447,7 @@ class SamplingTensors:
         do_typical_ps = False
         do_quadratic = False
         do_xtc = False
+        do_nsigmas = False
         do_temp_last = False
 
         if _USE_TRITON_SAMPLER:
@@ -486,6 +490,7 @@ class SamplingTensors:
             do_quadratic |= (params.smoothing_factor > _SAMPLING_EPS or
                              params.smoothing_curve > 1.0)
             do_xtc |= params.xtc_probability > _SAMPLING_EPS
+            do_nsigmas |= params.nsigma > _SAMPLING_EPS
             do_temp_last |= params.temperature_last
 
             is_prompt = seq_group.is_prompt
@@ -520,6 +525,7 @@ class SamplingTensors:
             smoothing_curves += [params.smoothing_curve] * n_seqs
             xtc_thresholds += [params.xtc_threshold] * n_seqs
             xtc_probabilities += [params.xtc_probability] * n_seqs
+            nsigmas += [params.nsigma] * n_seqs
 
             if _USE_TRITON_SAMPLER:
                 if is_prompt:
@@ -550,9 +556,11 @@ class SamplingTensors:
                         and params.prompt_logprobs is not None):
                     prefill_len = len(seq_group.prompt_logprob_indices)
                     prompt_tokens.extend(
-                        array('l') for _ in range(prefill_len))
+                        array(APHRODITE_TOKEN_ID_ARRAY_TYPE)
+                        for _ in range(prefill_len))
                     output_tokens.extend(
-                        array('l') for _ in range(prefill_len))
+                        array(APHRODITE_TOKEN_ID_ARRAY_TYPE)
+                        for _ in range(prefill_len))
                 if seq_group.do_sample:
                     for seq_id in seq_ids:
                         seq_data = seq_group.seq_data[seq_id]
@@ -564,13 +572,13 @@ class SamplingTensors:
             temperature_lasts, top_ps, top_ks, top_as, min_ps,
             presence_penalties, frequency_penalties, repetition_penalties,
             tfss, eta_cutoffs, epsilon_cutoffs, typical_ps, smoothing_factors,
-            smoothing_curves, xtc_thresholds, xtc_probabilities, sampling_seeds,
-            sample_indices, prompt_tokens, output_tokens, vocab_size,
-            extra_seeds_to_generate, device, dtype)
+            smoothing_curves, xtc_thresholds, xtc_probabilities, nsigmas,
+            sampling_seeds, sample_indices, prompt_tokens, output_tokens,
+            vocab_size, extra_seeds_to_generate, device, dtype)
         return (sampling_tensors, do_penalties, do_temperatures,
                 do_top_p_top_k, do_top_as, do_min_p, do_tfss, do_eta_cutoffs,
                 do_epsilon_cutoffs, do_typical_ps, do_quadratic, do_xtc,
-                do_temp_last)
+                do_nsigmas, do_temp_last)
 
     @classmethod
     def from_lists(cls, temperatures: List[float], dynatemp_mins: List[float],
@@ -583,7 +591,7 @@ class SamplingTensors:
                    eta_cutoffs: List[float], epsilon_cutoffs: List[float],
                    typical_ps: List[float], smoothing_factors: List[float],
                    smoothing_curves: List[float], xtc_thresholds: List[float],
-                   xtc_probabilities: List[float],
+                   xtc_probabilities: List[float], nsigmas: List[float],
                    sampling_seeds: List[List[int]],
                    sample_indices: List[int], prompt_tokens: List[array],
                    output_tokens: List[array], vocab_size: int,
@@ -716,6 +724,10 @@ class SamplingTensors:
                                            device="cpu",
                                            dtype=dtype,
                                            pin_memory=pin_memory)
+        nsigmas_t = torch.tensor(nsigmas,
+                                 device="cpu",
+                                 dtype=dtype,
+                                 pin_memory=pin_memory)
         sample_indices_t = torch.tensor(
             sample_indices,
             device="cpu",
@@ -772,6 +784,7 @@ class SamplingTensors:
                                                non_blocking=True),
             xtc_probabilities=xtc_probabilities_t.to(device=device,
                                                      non_blocking=True),
+            nsigmas=nsigmas_t.to(device=device, non_blocking=True),
             typical_ps=typical_ps_t.to(device=device, non_blocking=True),
             prompt_tokens=prompt_t.to(device=device, non_blocking=True),
             output_tokens=output_t.to(device=device, non_blocking=True),

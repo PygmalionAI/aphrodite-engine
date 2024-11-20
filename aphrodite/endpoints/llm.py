@@ -8,6 +8,9 @@ from aphrodite.common.outputs import EmbeddingRequestOutput, RequestOutput
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.utils import Counter, deprecate_kwargs
+from aphrodite.endpoints.chat_utils import (ChatCompletionMessageParam,
+                                            apply_chat_template,
+                                            parse_chat_messages)
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.inputs import PromptInputs, TextPrompt, TokensPrompt
@@ -332,6 +335,59 @@ class LLM:
 
         outputs = self._run_engine(use_tqdm=use_tqdm)
         return AphroditeEngine.validate_outputs(outputs, RequestOutput)
+
+    def chat(
+        self,
+        messages: List[ChatCompletionMessageParam],
+        sampling_params: Optional[Union[SamplingParams,
+                                        List[SamplingParams]]] = None,
+        use_tqdm: bool = True,
+        lora_request: Optional[LoRARequest] = None,
+        chat_template: Optional[str] = None,
+        add_generation_template: bool = True,
+    ) -> List[RequestOutput]:
+        """
+        Generates responses for chat messages.
+        Converts the messages to prompts using the tokenizer and calls
+        the :meth:`generate` method to generate the responses.
+        Args:
+            messages: A list of messages to generate responses for. Each
+                message is a list of dictionaries with 'role' and 'content'
+                keys.
+            sampling_params: The sampling parameters for text generation.
+                If None, we use the default sampling parameters. When it
+                is a single value, it is applied to every prompt. When it
+                is a list, the list must have the same length as the
+                prompts and it is paired one by one with the prompt.
+            use_tqdm: Whether to use tqdm to display the progress bar.
+            lora_request: LoRA request to use for generation, if any.
+            chat_template: The template to use for structuring the chat.
+              If not provided, the model's default chat template will be used.
+            add_generation_template: If True, adds a generation template 
+                to each message.
+        Returns:
+            A list of ``RequestOutput`` objects containing the generated
+            responses in the same order as the input messages.
+        """
+
+        tokenizer = self.get_tokenizer()
+        model_config = self.llm_engine.get_model_config()
+
+        conversations, _ = parse_chat_messages(messages, model_config,
+                                               tokenizer)
+
+        prompts = apply_chat_template(
+            tokenizer,
+            conversations,
+            chat_template=chat_template,
+            add_generation_template=add_generation_template)
+
+        return self.generate(
+            prompts,
+            sampling_params,
+            use_tqdm=use_tqdm,
+            lora_request=lora_request,
+        )
 
     @overload  # LEGACY: single (prompt + optional token ids)
     def encode(

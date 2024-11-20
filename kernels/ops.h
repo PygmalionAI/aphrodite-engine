@@ -102,4 +102,36 @@ at::Tensor causal_conv1d_fwd(const at::Tensor& x, const at::Tensor& weight,
                              const c10::optional<at::Tensor>& initial_states_,
                              const c10::optional<at::Tensor>& final_states_out_,
                              bool silu_activation);
+
+// Sampling kernels
+torch::Tensor sampling_from_probs(torch::Tensor probs,
+                                  torch::Tensor uniform_samples,
+                                  bool deterministic);
+std::vector<torch::Tensor> top_p_sampling_from_probs(
+    torch::Tensor probs, torch::Tensor uniform_samples,
+    std::optional<torch::Tensor> maybe_top_p_arr, double top_p_val,
+    bool deterministic);
+std::vector<torch::Tensor> top_k_sampling_from_probs(
+    torch::Tensor probs, torch::Tensor uniform_samples,
+    std::optional<torch::Tensor> maybe_top_k_arr, int64_t top_k_val,
+    bool deterministic);
+std::vector<torch::Tensor> min_p_sampling_from_probs(
+    torch::Tensor probs, torch::Tensor uniform_samples,
+    std::optional<torch::Tensor> maybe_min_p_arr, double min_p_val,
+    bool deterministic);
+std::vector<torch::Tensor> top_k_top_p_sampling_from_probs(
+    torch::Tensor probs, torch::Tensor uniform_samples,
+    std::optional<torch::Tensor> maybe_top_k_arr, double top_k_val,
+    std::optional<torch::Tensor> maybe_top_p_arr, double top_p_val,
+    bool deterministic);
+torch::Tensor top_p_renorm_prob(torch::Tensor probs,
+                                std::optional<torch::Tensor> maybe_top_p_arr,
+                                double top_p_val);
+torch::Tensor top_k_renorm_prob(torch::Tensor probs,
+                                std::optional<torch::Tensor> maybe_top_k_arr,
+                                int64_t top_k_val);
+torch::Tensor top_k_mask_logits(torch::Tensor logits,
+                                std::optional<torch::Tensor> maybe_top_k_arr,
+                                int64_t top_k_val);
+
 #endif

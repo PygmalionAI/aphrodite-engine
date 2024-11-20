@@ -173,8 +173,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             proposer_worker,
             scorer_worker,
             disable_logprobs=disable_logprobs,
-            disable_by_batch_size=disable_by_batch_size,
             disable_log_stats=disable_log_stats,
+            disable_by_batch_size=disable_by_batch_size,
             spec_decode_sampler=spec_decode_sampler,
             allow_zero_draft_token_step=allow_zero_draft_token_step)
 
@@ -497,7 +497,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         for both speculation cases (num_lookahead_slots>0) and non-speculation
         cases (e.g. prefill).
 
-        Returns True iff there are remaining sequences to process.
+        Returns True if there are remaining sequences to process.
         """
         assert self.rank != self._driver_rank
 

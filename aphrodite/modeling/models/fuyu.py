@@ -16,6 +16,7 @@
 # limitations under the License.
 """ PyTorch Fuyu model."""
 import math
+from array import array
 from typing import Iterable, List, Literal, Mapping, Optional, Tuple, TypedDict
 
 import torch
@@ -28,6 +29,7 @@ from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
 from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceData)
+from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.layers.linear import ColumnParallelLinear
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
@@ -95,9 +97,13 @@ def dummy_seq_data_for_fuyu(ctx: InputContext, seq_len: int, num_images: int):
     ncol, nrow = get_max_fuyu_image_feature_size()
     image_feature_size = get_max_fuyu_image_tokens(ctx)
 
-    image_token_ids = ([_IMAGE_TOKEN_ID] * ncol + [_NEWLINE_TOKEN_ID]) * nrow
-    token_ids = image_token_ids * num_images
-    token_ids += [0] * (seq_len - image_feature_size * num_images)
+    image_token_ids = (
+        array(APHRODITE_TOKEN_ID_ARRAY_TYPE, [_IMAGE_TOKEN_ID]) * ncol +
+        array(APHRODITE_TOKEN_ID_ARRAY_TYPE, [_NEWLINE_TOKEN_ID])) * nrow
+    token_ids = array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
+                      image_token_ids) * num_images
+    token_ids += array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
+                       [0]) * (seq_len - image_feature_size * num_images)
     return SequenceData(token_ids)
 
 

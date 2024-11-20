@@ -1,6 +1,7 @@
 import argparse
 import dataclasses
 import json
+import os
 from dataclasses import dataclass
 from typing import (TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Type,
                     Union)
@@ -22,6 +23,9 @@ from aphrodite.triton_utils import HAS_TRITON
 if TYPE_CHECKING:
     from aphrodite.transformers_utils.tokenizer_group import BaseTokenizerGroup
 
+
+APHRODITE_USE_RAY_SPMD_WORKER = bool(
+    os.getenv("APHRODITE_USE_RAY_SPMD_WORKER", 0))
 
 def nullable_kvs(val: str) -> Optional[Mapping[str, int]]:
     if len(val) == 0:
@@ -59,7 +63,7 @@ class EngineArgs:
     download_dir: Optional[str] = None
     max_model_len: Optional[int] = None
     max_context_len_to_capture: Optional[int] = None
-    max_seq_len_to_capture: int = 8192
+    max_seq_len_to_capture: Optional[int] = None
     rope_scaling: Optional[dict] = None
     rope_theta: Optional[float] = None
     model_loader_extra_config: Optional[dict] = None
@@ -259,7 +263,7 @@ class EngineArgs:
                             "larger than this, we fall back to eager mode. "
                             "(DEPRECATED. Use --max-seq_len-to-capture instead"
                             ")")
-        parser.add_argument("--max-seq_len-to-capture",
+        parser.add_argument("--max-seq-len-to-capture",
                             type=int,
                             default=EngineArgs.max_seq_len_to_capture,
                             help="Category: Model Options\n"
@@ -1036,6 +1040,8 @@ class EngineArgs:
             embedding_mode=model_config.embedding_mode,
             preemption_mode=self.preemption_mode,
             num_scheduler_steps=self.num_scheduler_steps,
+            send_delta_data=(APHRODITE_USE_RAY_SPMD_WORKER and
+                             parallel_config.use_ray),
         )
 
         if not HAS_TRITON and self.enable_lora:

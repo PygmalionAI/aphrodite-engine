@@ -50,6 +50,7 @@ class MedusaWorker(NonLLMProposerWorkerBase, Worker):
         Returns the list of sampler output, one per layer, along with indicator
         of whether torch tensor in sampler output need to be transposed in
         latter sampler_output_to_torch logic.
+
         For medusa worker, this indicator shall be False.
         """
         self._raise_if_unsupported(execute_model_req)

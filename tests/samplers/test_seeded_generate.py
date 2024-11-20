@@ -1,5 +1,6 @@
 """Verify that seeded random sampling is deterministic.
-Run `pytest tests/samplers/test_seeded_generate.py --forked`.
+
+Run `pytest tests/samplers/test_seeded_generate.py`.
 """
 import copy
 import random
@@ -10,15 +11,14 @@ import pytest
 from aphrodite import SamplingParams
 from aphrodite.modeling.utils import set_random_seed
 
-MODEL = "EleutherAI/pythia-70m-deduped"
+MODEL = "facebook/opt-125m"
 RANDOM_SEEDS = list(range(5))
 
 
 @pytest.fixture
 def aphrodite_model(aphrodite_runner):
-    aphrodite_model = aphrodite_runner(MODEL, dtype="half")
-    yield aphrodite_model
-    del aphrodite_model
+    with aphrodite_runner(MODEL, dtype="half") as aphrodite_model:
+        yield aphrodite_model
 
 
 @pytest.mark.parametrize("seed", RANDOM_SEEDS)
@@ -56,11 +56,7 @@ def test_random_sample_with_seed(
                 sampling_params_seed_1,
                 sampling_params_seed_2,
         ):
-            llm._add_request(
-                prompt=prompt,
-                prompt_token_ids=None,
-                sampling_params=params,
-            )
+            llm._add_request(prompt, params=params)
 
     results = llm._run_engine(use_tqdm=False)
     all_outputs = [[out.token_ids for out in output.outputs]
