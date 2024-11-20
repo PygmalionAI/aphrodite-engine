@@ -482,7 +482,7 @@ class CompletionRequest(OpenAIBaseModel):
             top_a=self.top_a,
             tfs=self.tfs,
             eta_cutoff=self.eta_cutoff,
-            epsilon_cutoff=self.epsilon_cutoff,
+            # epsilon_cutoff=self.epsilon_cutoff,
             typical_p=self.typical_p,
             smoothing_factor=self.smoothing_factor,
             smoothing_curve=self.smoothing_curve,
@@ -509,7 +509,7 @@ class CompletionRequest(OpenAIBaseModel):
             dynatemp_min=self.dynatemp_min,
             dynatemp_max=self.dynatemp_max,
             dynatemp_exponent=self.dynatemp_exponent,
-            nsigma=self.nsigma,
+            nsigma=self.epsilon_cutoff,
             custom_token_bans=self.custom_token_bans,
         )
 
