@@ -18,7 +18,6 @@ from aphrodite.common.sequence import (ExecuteModelRequest,
                                        SequenceGroupMetadataDelta)
 from aphrodite.distributed import (ensure_model_parallel_initialized,
                                    get_tensor_model_parallel_rank,
-                                   get_tensor_model_parallel_world_size,
                                    init_distributed_environment,
                                    set_custom_all_reduce)
 from aphrodite.lora.request import LoRARequest
@@ -192,7 +191,6 @@ class Worker(LocalOrDistributedWorkerBase):
         # cache blocks that can be allocated with the remaining free memory.
         torch.cuda.empty_cache()
         tp_rank = get_tensor_model_parallel_rank()
-        world_size = get_tensor_model_parallel_world_size()
 
         # Execute a forward pass with dummy inputs to profile the memory usage
         # of the model.
