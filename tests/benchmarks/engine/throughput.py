@@ -87,6 +87,7 @@ def run_aphrodite(
     download_dir: Optional[str] = None,
     load_format: str = EngineArgs.load_format,
     max_num_seqs: Optional[int] = None,
+    num_scheduler_steps: Optional[int] = None,
 ) -> float:
     from aphrodite import LLM, SamplingParams
     llm = LLM(
@@ -112,6 +113,7 @@ def run_aphrodite(
         distributed_executor_backend=distributed_executor_backend,
         load_format=load_format,
         max_num_seqs=max_num_seqs,
+        num_scheduler_steps=num_scheduler_steps,
     )
 
     # Add the requests to the engine.
@@ -240,7 +242,7 @@ def main(args: argparse.Namespace):
             args.enable_prefix_caching, args.enable_chunked_prefill,
             args.max_num_batched_tokens, args.distributed_executor_backend,
             args.gpu_memory_utilization, args.download_dir, args.load_format,
-            args.max_num_seqs)
+            args.max_num_seqs, args.num_scheduler_steps)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -310,6 +312,10 @@ if __name__ == "__main__":
                         type=int,
                         default=256,
                         help='maximum number of batched requests per iteration')
+    parser.add_argument('--num-scheduler-steps',
+                        type=int,
+                        default=1,
+                        help='number of scheduler steps for multi-step.')
     parser.add_argument("--num-prompts",
                         type=int,
                         default=1000,
