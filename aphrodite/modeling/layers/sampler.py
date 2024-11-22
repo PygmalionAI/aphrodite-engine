@@ -104,6 +104,22 @@ class Sampler(nn.Module):
         self._do_nsgimas = do_nsigmas
         self._do_temp_last = do_temp_last
 
+    def _calculate_entropy_varentropy(
+            self, logits: torch.Tensor
+        ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculate entropy and varentropy for each logit in the batch.
+
+        Reference: https://github.com/xjdr-alt/entropix/blob/198ba1adc05c57cb98b65266ce100e3f23db4bc4/entropix/torch_main.py#L181-L187
+        """
+        LN_2 = 0.6931471805599453
+        log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+        probs = torch.exp(log_probs)
+        entropy = -torch.sum(probs * log_probs, dim=-1) / LN_2
+        varentropy = torch.sum(probs * (log_probs / LN_2 +
+                                        entropy.unsqueeze(-1))**2, dim=-1)
+        return entropy, varentropy
+
     def forward(
         self,
         logits: torch.Tensor,
@@ -144,6 +160,9 @@ class Sampler(nn.Module):
         do_temp_last = self._do_temp_last
 
         logits = _apply_min_tokens_penalty(logits, sampling_metadata)
+
+        entropy, varentropy = self._calculate_entropy_varentropy(logits)
+        self._adjust_sampling_params(sampling_metadata, entropy, varentropy)
 
         # Apply presence and frequency penalties.
         if do_penalties:
@@ -256,6 +275,50 @@ class Sampler(nn.Module):
         method be encoded into the probability distribution.
         """
         return self.should_modify_greedy_probs_inplace
+
+    def _adjust_sampling_params(
+            self,
+            sampling_metadata: SamplingMetadata,
+            entropy: torch.Tensor,
+            varentropy: torch.Tensor,
+    ) -> None:
+        for seq_group in sampling_metadata.seq_groups:
+            if not seq_group.do_sample:
+                continue
+
+            sampling_params = seq_group.sampling_params
+            sample_indices = seq_group.sample_indices
+
+            for idx in sample_indices:
+                ent = entropy[idx].item()
+                vent = varentropy[idx].item()
+
+                # low entropy, low varentropy: use greedy sampling
+                if ent < 0.1 and vent < 0.1:
+                    sampling_params.temperature = 1e-10
+                    sampling_params.top_p = 1.0
+                    sampling_params.top_k = -1
+                
+                # high entropy, low varentropy: slightly higher temp
+                elif ent > 5.0 and vent < 0.1:
+                    sampling_params.temperature = min(
+                        1.3,sampling_params.temperature * 1.5)
+
+                # low entropy, high varentropy: slightly higher temp
+                elif ent < 5.0 and vent > 5.0:
+                    sampling_params.temperature = min(
+                        1.2, sampling_params.temperature * 1.5)
+
+                # high entropy, high varentropy: much higher temp
+                elif ent > 5.0 and vent > 5.0:
+                    sampling_params.temperature = max(
+                        2.0, sampling_params.temperature * 3)
+                
+                # middle ground: smooth transition
+                else:
+                    t = torch.clamp(
+                        torch.tensor((ent + vent) / 10.0), 0.5, 2.0).item()
+                    sampling_params.temperature *= t
 
 
 def _get_bin_counts_and_mask(
