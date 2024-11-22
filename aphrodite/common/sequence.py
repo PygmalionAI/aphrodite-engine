@@ -9,7 +9,6 @@ from typing import (TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple,
                     Union, cast)
 
 import msgspec
-import numpy
 import torch
 
 from aphrodite.common.pooling_params import PoolingParams
