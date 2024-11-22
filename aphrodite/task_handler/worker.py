@@ -209,17 +209,6 @@ class Worker(LocalOrDistributedWorkerBase):
         # NOTE: Here we assume that the other processes using the same
         # GPU did not change their memory usage during the profiling.
         peak_memory = self.init_gpu_memory - free_gpu_memory
-        weights_memory = self.model_runner.get_model_memory_usage()
-        kv_cache_memory = peak_memory - weights_memory
-        # log peak memory usage in GB
-        if world_size > 1:
-            if tp_rank == 0:
-                logger.info(f"Estimated KV Cache memory usage: "
-                            f"{(kv_cache_memory) / 1e9:.2f} x {world_size} = "
-                            f"{(kv_cache_memory * world_size) / 1e9:.2f} GB")
-        else:
-            logger.info(f"Estimated KV Cache memory usage: "
-                        f"{(kv_cache_memory) / 1e9:.2f} GB")
         assert peak_memory > 0, (
             "Error in memory profiling. This happens when the GPU memory was "
             "not properly cleaned up before initializing Aphrodite.")
