@@ -65,6 +65,9 @@ class SamplingParams(
             freq_pen is applied additively while
             rep_pen is applied multiplicatively.
             Must be in [1, inf). Set to 1 to disable the effect.
+        no_repeat_ngram_size: Size of the n-grams to prevent repeating.
+            1 would mean no token can appear twice.
+            2 would mean no pair of consecutive tokens can appear twice.
         temperature: Float that controls the randomness of the sampling. Lower
             values make the model more deterministic, while higher values make
             the model more random. Zero means greedy sampling.
@@ -177,6 +180,7 @@ class SamplingParams(
     presence_penalty: float = 0.0
     frequency_penalty: float = 0.0
     repetition_penalty: float = 1.0
+    no_repeat_ngram_size: int = 0
     temperature: float = 1.0
     dynatemp_min: float = 0.0
     dynatemp_max: float = 0.0
@@ -231,6 +235,7 @@ class SamplingParams(
         "presence_penalty": 0.0,
         "frequency_penalty": 0.0,
         "repetition_penalty": 1.0,
+        "no_repeat_ngram_size": 0,
         "temperature": 1.0,
         "dynatemp_min": 0.0,
         "dynatemp_max": 0.0,
