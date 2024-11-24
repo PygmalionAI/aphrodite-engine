@@ -147,6 +147,16 @@ class Sampler(nn.Module):
 
         logits = _apply_min_tokens_penalty(logits, sampling_metadata)
 
+        if do_dry:
+            logits = _apply_dry(
+                logits,
+                sampling_tensors.prompt_tokens,
+                sampling_tensors.dry_multipliers,
+                sampling_tensors.dry_bases, 
+                sampling_tensors.dry_allowed_lengths,
+                sampling_tensors.dry_sequence_breaker_ids
+            )
+
         # Apply presence and frequency penalties.
         if do_penalties:
             logits = _apply_penalties(logits, sampling_tensors.prompt_tokens,
@@ -198,16 +208,6 @@ class Sampler(nn.Module):
             logits = _apply_xtc_sampling(
                 logits, sampling_tensors.xtc_thresholds,
                 sampling_tensors.xtc_probabilities)
-
-        if do_dry:
-            logits = _apply_dry(
-                logits,
-                sampling_tensors.prompt_tokens,
-                sampling_tensors.dry_multipliers,
-                sampling_tensors.dry_bases, 
-                sampling_tensors.dry_allowed_lengths,
-                sampling_tensors.dry_sequence_breaker_ids
-            )
 
         if do_temperatures and do_temp_last:
             _apply_temperatures(logits, sampling_tensors.temperatures,
