@@ -85,7 +85,7 @@ class Sampler(nn.Module):
         # Initialize new sampling tensors
         (sampling_tensors, do_penalties, do_temperatures, do_top_p_top_k,
          do_top_as, do_min_p, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
-         do_typical_ps, do_quadratic, do_xtc, do_nsigmas, do_temp_last
+         do_typical_ps, do_quadratic, do_xtc, do_nsigmas, do_dry, do_temp_last
          ) = SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype)
 
@@ -102,6 +102,7 @@ class Sampler(nn.Module):
         self._do_quadratic = do_quadratic
         self._do_xtc = do_xtc
         self._do_nsgimas = do_nsigmas
+        self._do_dry = do_dry
         self._do_temp_last = do_temp_last
 
     def forward(
@@ -141,9 +142,20 @@ class Sampler(nn.Module):
         do_quadratic = self._do_quadratic
         do_xtc = self._do_xtc
         do_nsigmas = self._do_nsgimas
+        do_dry = self._do_dry
         do_temp_last = self._do_temp_last
 
         logits = _apply_min_tokens_penalty(logits, sampling_metadata)
+
+        if do_dry:
+            logits = _apply_dry(
+                logits,
+                sampling_tensors.prompt_tokens,
+                sampling_tensors.dry_multipliers,
+                sampling_tensors.dry_bases, 
+                sampling_tensors.dry_allowed_lengths,
+                sampling_tensors.dry_sequence_breaker_ids
+            )
 
         # Apply presence and frequency penalties.
         if do_penalties:
@@ -406,6 +418,93 @@ def _apply_min_tokens_penalty(
     assert logits_applied == logits.shape[0]
     return logits
 
+def _apply_dry(
+    logits: torch.Tensor,
+    input_ids: torch.Tensor,
+    multipliers: torch.Tensor, 
+    bases: torch.Tensor,
+    allowed_lengths: torch.Tensor,
+    sequence_breakers_ids: torch.Tensor
+) -> torch.Tensor:
+    """
+    Apply Exclude Don't Repeat Yourself (DRY) sampling to the logits.
+
+    Reference: https://github.com/oobabooga/text-generation-webui/pull/5677
+    """
+    # Don't apply dry penalties if multiplier is 0
+    if torch.all(multipliers == 0):
+        return logits
+    
+    # Process each sequence in the batch
+    for i, (input_ids_row, logits_row) in enumerate(zip(input_ids, logits)):
+        multiplier = multipliers[i].item()
+        if multiplier == 0:
+            continue  # Skip processing for this sequence
+        # Get the last token
+        last_token = input_ids_row[-1].item()
+
+        # Skip if last token is a sequence breaker
+        if last_token in sequence_breakers_ids:
+            continue
+
+        # Find matches of the last token, excluding the last position
+        match_indices = (input_ids_row[:-1] == last_token).nonzero()
+
+        # Track max matching sequence length for each potential next token
+        match_lengths = {}
+
+        # Process each match
+        for idx in match_indices:
+            # Convert to scalar
+            idx = idx.item()
+            
+            # Get the token that followed this match in the input
+            next_token = input_ids_row[idx + 1].item()
+
+            # Skip if next token is a sequence breaker
+            if next_token in sequence_breakers_ids:
+                continue
+
+            # We found last_token matches at this index, so match length starts
+            # at 1
+            match_length = 1
+
+            # Try to extend match backwards
+            while match_length < 50:
+                j = idx - match_length
+                k = len(input_ids_row) - match_length - 1
+                if j < 0 or k < 0:
+                    # Reached start of input
+                    break
+
+                if input_ids_row[j].item() != input_ids_row[k].item():
+                    # No more matches
+                    break
+
+                if input_ids_row[k].item() in sequence_breakers_ids:
+                    # Hit a sequence breaker
+                    break
+
+                match_length += 1
+
+            # Update max match length for this next token
+            if next_token in match_lengths:
+                match_lengths[next_token] = max(
+                    match_length, match_lengths[next_token])
+            else:
+                match_lengths[next_token] = match_length
+
+        # Apply penalties based on match lengths
+        allowed_length = allowed_lengths[i]
+        multiplier = multipliers[i]  
+        base = bases[i]
+
+        for token, match_length in match_lengths.items():
+            if match_length >= allowed_length:
+                penalty = multiplier * (base ** (match_length - allowed_length))
+                logits_row[token] -= penalty
+
+    return logits
 
 def _apply_top_k_top_p(
     logits: torch.Tensor,

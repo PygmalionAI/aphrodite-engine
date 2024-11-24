@@ -1,5 +1,6 @@
 # Adapted from
 # https://github.com/lm-sys/FastChat/blob/168ccc29d3f7edc50823016105c024fe2282732a/fastchat/protocol/openai_api_protocol.py
+import json
 import time
 from typing import Any, Dict, List, Literal, Optional, Union
 
@@ -147,6 +148,11 @@ class ChatCompletionRequest(OpenAIBaseModel):
     prompt_logprobs: Optional[int] = None
     xtc_threshold: Optional[float] = 0.1
     xtc_probability: Optional[float] = 0.0
+    dry_multiplier: Optional[float] = 0
+    dry_base: Optional[float] = 1.75
+    dry_allowed_length: Optional[int] = 2
+    dry_sequence_breakers: Optional[List[str]] = Field(
+        default=["\n", ":", "\"", "*"])
     dynatemp_min: Optional[float] = 0.0
     dynatemp_max: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
@@ -255,6 +261,13 @@ class ChatCompletionRequest(OpenAIBaseModel):
         if guided_decode_logits_processor:
             logits_processors.append(guided_decode_logits_processor)
 
+
+        dry_sequence_breaker_ids = []
+        if self.dry_sequence_breakers:
+            for s in self.dry_sequence_breakers:
+                token_id = tokenizer.encode(f'a{s}')[-1]
+                dry_sequence_breaker_ids.append(token_id)
+
         return SamplingParams(
             n=self.n,
             presence_penalty=self.presence_penalty,
@@ -291,6 +304,10 @@ class ChatCompletionRequest(OpenAIBaseModel):
             temperature_last=self.temperature_last,
             xtc_threshold=self.xtc_threshold,
             xtc_probability=self.xtc_probability,
+            dry_multiplier=self.dry_multiplier,
+            dry_base=self.dry_base,
+            dry_allowed_length=self.dry_allowed_length,
+            dry_sequence_breaker_ids=dry_sequence_breaker_ids,
             dynatemp_min=self.dynatemp_min,
             dynatemp_max=self.dynatemp_max,
             dynatemp_exponent=self.dynatemp_exponent,
@@ -403,6 +420,11 @@ class CompletionRequest(OpenAIBaseModel):
     prompt_logprobs: Optional[int] = None
     xtc_threshold: Optional[float] = 0.1
     xtc_probability: Optional[float] = 0.0
+    dry_multiplier: Optional[float] = 0
+    dry_base: Optional[float] = 1.75
+    dry_allowed_length: Optional[int] = 2
+    dry_sequence_breakers: Optional[List[str]] = Field(
+        default=["\n", ":", "\"", "*"])
     dynatemp_min: Optional[float] = 0.0
     dynatemp_max: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
@@ -469,6 +491,13 @@ class CompletionRequest(OpenAIBaseModel):
         if guided_decode_logits_processor:
             logits_processors.append(guided_decode_logits_processor)
 
+        dry_sequence_breaker_ids = []
+        if self.dry_sequence_breakers:
+            for s in self.dry_sequence_breakers:
+                s = bytes(s, "utf-8").decode("unicode_escape")
+                token_id = tokenizer.encode(f'a{s}')[-1]
+                dry_sequence_breaker_ids.append(token_id)
+
         return SamplingParams(
             n=self.n,
             best_of=self.best_of,
@@ -506,6 +535,10 @@ class CompletionRequest(OpenAIBaseModel):
             temperature_last=self.temperature_last,
             xtc_threshold=self.xtc_threshold,
             xtc_probability=self.xtc_probability,
+            dry_multiplier=self.dry_multiplier,
+            dry_base=self.dry_base,
+            dry_allowed_length=self.dry_allowed_length,
+            dry_sequence_breaker_ids=dry_sequence_breaker_ids,
             dynatemp_min=self.dynatemp_min,
             dynatemp_max=self.dynatemp_max,
             dynatemp_exponent=self.dynatemp_exponent,
@@ -541,6 +574,33 @@ class CompletionRequest(OpenAIBaseModel):
         if data.get("stream_options") and not data.get("stream"):
             raise ValueError(
                 "Stream options can only be defined when stream is True.")
+        return data
+    
+    @model_validator(mode='before')
+    @classmethod
+    def parse_dry_sequence_breakers(cls, data):
+        if 'dry_sequence_breakers' in data:
+            breakers = data['dry_sequence_breakers']
+            if isinstance(breakers, str):
+                try:
+                    # Try to parse as JSON string
+                    data['dry_sequence_breakers'] = json.loads(breakers)
+                except json.JSONDecodeError as e:
+                    raise ValueError(f"Invalid JSON for dry_sequence_breakers:"
+                                     f" {e}") from e
+                
+            # Validate that we now have a list of strings
+            is_list = isinstance(data['dry_sequence_breakers'], list)
+            all_strings = all(
+                isinstance(x, str) 
+                for x in data['dry_sequence_breakers']
+            )
+            if not is_list or not all_strings:
+                raise ValueError(
+                    "dry_sequence_breakers must be a list of strings or a "
+                    "JSON string representing a list of strings"
+                )
+        
         return data
 
 
