@@ -428,6 +428,7 @@ def _apply_dry(
 ) -> torch.Tensor:
     """
     Apply Exclude Don't Repeat Yourself (DRY) sampling to the logits.
+
     Reference: https://github.com/oobabooga/text-generation-webui/pull/5677
     """
     # Don't apply dry penalties if multiplier is 0
