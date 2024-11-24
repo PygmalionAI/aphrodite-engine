@@ -470,7 +470,7 @@ def _apply_dry(
             match_length = 1
 
             # Try to extend match backwards
-            while True:
+            while match_length < 50:
                 j = idx - match_length
                 k = len(input_ids_row) - match_length - 1
                 if j < 0 or k < 0:
