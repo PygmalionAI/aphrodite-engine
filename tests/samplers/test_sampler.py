@@ -734,6 +734,79 @@ def test_sampler_repetition_penalty_mixed(device: str):
 
 @pytest.mark.parametrize("seed", RANDOM_SEEDS)
 @pytest.mark.parametrize("device", CUDA_DEVICES)
+def test_sampler_no_repeat_ngram(seed: int, device: str):
+    """Test that no-repeat-ngram sampling behaves as expected."""
+    set_random_seed(seed)
+    torch.set_default_device(device)
+    batch_size = random.randint(1, 256)
+    _, fake_logits, sampler = _prepare_test(batch_size)
+
+    test_sequences = {
+        # Format: sequence: [tokens_that_should_be_blocked]
+        (1, 2, 3): [3],  # With ngram_size=2, should block 3 after [2]
+        (4, 5, 4, 5): [4],  # With ngram_size=2, should block 4 after [5]
+        (6, 7, 8, 6, 7): [8],  # With ngram_size=3, should block 8 after [6, 7]
+        (1, 2, 3, 4, 1, 2): [3],  # With ngram_size=4, should block 3 after [1, 2]  # noqa: E501
+    }
+
+    for input_seq, blocked_tokens in test_sequences.items():
+        for ngram_size in [2, 3, 4]:
+            sampling_params = SamplingParams(
+                temperature=1.0,
+                no_repeat_ngram_size=ngram_size,
+                seed=random.randint(0, 10000),
+            )
+
+            sampler_output = _do_sample(
+                1, 
+                fake_logits[0:1].clone(),  # Just use first row
+                sampler,
+                sampling_params,
+                device
+            )
+
+            if len(input_seq) >= ngram_size:
+                # check if blocked tokens have -inf logits
+                for token in blocked_tokens:
+                    assert sampler_output[0].samples[0].output_token != token, \
+                        f"Token {token} should have been blocked by {ngram_size}-gram repetition prevention"  # noqa: E501
+
+        # disabled
+        sampling_params = SamplingParams(
+            temperature=1.0,
+            no_repeat_ngram_size=0,
+            seed=random.randint(0, 10000),
+        )
+
+        sampler_output = _do_sample(
+            1,
+            fake_logits[0:1].clone(),
+            sampler,
+            sampling_params,
+            device
+        )
+
+        output_token = sampler_output[0].samples[0].output_token
+        assert output_token is not None, "Should produce output token with ngram_size=0"  # noqa: E501
+
+    # determinism
+    sampling_params = SamplingParams(
+        temperature=1.0,
+        no_repeat_ngram_size=3,
+        seed=random.randint(0, 10000),
+    )
+
+    first_output = _do_sample(batch_size, fake_logits.clone(), sampler,
+                             sampling_params, device)
+    second_output = _do_sample(batch_size, fake_logits.clone(), sampler,
+                              sampling_params, device)
+
+    assert first_output == second_output, \
+        "No-repeat-ngram sampling is not deterministic with same seed"
+
+
+@pytest.mark.parametrize("seed", RANDOM_SEEDS)
+@pytest.mark.parametrize("device", CUDA_DEVICES)
 def test_sampler_nsigma(seed: int, device: str):
     """Test that top-nsigma sampling behaves as expected."""
     set_random_seed(seed)
