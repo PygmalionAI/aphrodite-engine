@@ -1043,10 +1043,6 @@ class EngineArgs:
             if speculative_config is None \
             else speculative_config.num_lookahead_slots
 
-        cfg_config = CFGConfig.maybe_create_spec_config(
-            target_model_config=model_config,
-            target_parallel_config=parallel_config,
-            guidance_model=self.cfg_model)
 
         scheduler_config = SchedulerConfig(
             max_num_batched_tokens=self.max_num_batched_tokens,
@@ -1063,6 +1059,12 @@ class EngineArgs:
             send_delta_data=(APHRODITE_USE_RAY_SPMD_WORKER and
                              parallel_config.use_ray),
         )
+
+        cfg_config = CFGConfig.maybe_create_spec_config(
+            target_model_config=model_config,
+            target_parallel_config=parallel_config,
+            target_scheduler_config=scheduler_config,
+            guidance_model=self.cfg_model)
 
         if not HAS_TRITON and self.enable_lora:
             raise ValueError("Triton is not installed, LoRA will not work.")
