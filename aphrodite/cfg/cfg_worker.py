@@ -109,7 +109,7 @@ class CFGWorker(LoraNotSupportedWorkerBase):
                 negative_seq_data: Dict[int, SequenceData] = {}
                 negative_block_tables: Dict[int, List[int]] = {}
                 assert len(seq_group_metadata.seq_data) == 1
-                for seq_id in seq_group_metadata.seq_data.keys():
+                for seq_id in seq_group_metadata.seq_data:
                     negative_seq_data[
                         seq_id
                     ] = seq_group_metadata.negative_seq_data

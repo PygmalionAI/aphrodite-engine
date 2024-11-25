@@ -137,7 +137,8 @@ class CFGModelRunner(ModelRunner):
         )
 
         if self.return_hidden_states:
-            raise NotImplementedError("return_hidden_states is not supported in CFGModelRunner")
+            raise NotImplementedError("return_hidden_states is not supported "
+                                      "in CFGModelRunner")
 
         return [output]
 
