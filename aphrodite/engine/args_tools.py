@@ -8,12 +8,12 @@ from typing import (TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Type,
 
 from loguru import logger
 
-from aphrodite.common.config import (CacheConfig, ConfigFormat, DecodingConfig,
-                                     DeviceConfig, EngineConfig, LoadConfig,
-                                     LoadFormat, LoRAConfig, ModelConfig,
-                                     ParallelConfig, PromptAdapterConfig,
-                                     SchedulerConfig, SpeculativeConfig,
-                                     TokenizerPoolConfig)
+from aphrodite.common.config import (CacheConfig, CFGConfig, ConfigFormat,
+                                     DecodingConfig, DeviceConfig,
+                                     EngineConfig, LoadConfig, LoadFormat,
+                                     LoRAConfig, ModelConfig, ParallelConfig,
+                                     PromptAdapterConfig, SchedulerConfig,
+                                     SpeculativeConfig, TokenizerPoolConfig)
 from aphrodite.common.utils import FlexibleArgumentParser, is_cpu
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.quantization import QUANTIZATION_METHODS
@@ -149,6 +149,8 @@ class EngineArgs:
     max_prompt_adapter_token: int = 0
     # Log Options
     disable_log_stats: bool = False
+    # Classifier-Free-Guidance (CFG) options
+    cfg_model: Optional[str] = None
 
     def __post_init__(self):
         if self.tokenizer is None:
@@ -855,6 +857,14 @@ class EngineArgs:
             "disable logging statistics",
         )
 
+        # CFG Options
+        parser.add_argument(
+            "--cfg-model",
+            type=str,
+            default=EngineArgs.cfg_model,
+            help="The name of the model to be used in CFG."
+        )
+
         return parser
 
     @classmethod
@@ -1033,6 +1043,11 @@ class EngineArgs:
             if speculative_config is None \
             else speculative_config.num_lookahead_slots
 
+        cfg_config = CFGConfig.maybe_create_spec_config(
+            target_model_config=model_config,
+            target_parallel_config=parallel_config,
+            guidance_model=self.cfg_model)
+
         scheduler_config = SchedulerConfig(
             max_num_batched_tokens=self.max_num_batched_tokens,
             max_num_seqs=self.max_num_seqs,
@@ -1099,7 +1114,8 @@ class EngineArgs:
                             speculative_config=speculative_config,
                             load_config=load_config,
                             decoding_config=decoding_config,
-                            prompt_adapter_config=prompt_adapter_config)
+                            prompt_adapter_config=prompt_adapter_config,
+                            cfg_config=cfg_config)
 
 
 @dataclass

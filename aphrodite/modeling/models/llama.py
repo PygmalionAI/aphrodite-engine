@@ -34,13 +34,15 @@ from aphrodite.common.utils import is_hip
 from aphrodite.distributed import (get_current_tp_rank_partition_size,
                                    get_pp_group,
                                    get_tensor_model_parallel_rank,
-                                   get_tensor_model_parallel_world_size)
+                                   get_tensor_model_parallel_world_size,
+                                   tensor_model_parallel_gather)
 from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (MergedColumnParallelLinear,
                                               QKVParallelLinear,
                                               RowParallelLinear)
-from aphrodite.modeling.layers.logits_processor import LogitsProcessor
+from aphrodite.modeling.layers.logits_processor import (LogitsProcessor,
+                                                        _prune_hidden_states)
 from aphrodite.modeling.layers.rotary_embedding import get_rope
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
@@ -429,7 +431,9 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
             logit_scale = getattr(config, "logit_scale", 1.0)
             self.logits_processor = LogitsProcessor(self.unpadded_vocab_size,
                                                     config.vocab_size,
-                                                    logit_scale)
+                                                    logit_scale,
+                                                    logits_as_input=True)
+            self.org_vocab_size = config.vocab_size
             self.sampler = Sampler()
         else:
             self.lm_head = PPMissingLayer()
@@ -445,6 +449,23 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
         model_output = self.model(input_ids, positions, kv_caches,
                                   attn_metadata, intermediate_tensors)
         return model_output
+
+    def _get_logits(self,
+        hidden_states: torch.Tensor,
+        sampling_metadata: SamplingMetadata,
+    ) -> torch.Tensor:
+        hidden_states = _prune_hidden_states(hidden_states, sampling_metadata)
+        # Get the logits for the next tokens.
+        logits = self.lm_head.linear_method.apply(
+            self.lm_head,
+            hidden_states,
+            bias=None,
+        )
+        logits = tensor_model_parallel_gather(logits)
+        # Remove paddings in vocab (if any).
+        if logits is not None:
+            logits = logits[:, :self.org_vocab_size]
+        return logits
 
     def compute_logits(
         self,

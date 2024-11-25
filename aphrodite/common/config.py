@@ -1555,6 +1555,43 @@ class SpeculativeConfig:
         return f"SpeculativeConfig({draft_model=}, {num_spec_tokens=})"
 
 
+class CFGConfig:
+    @staticmethod
+    def maybe_create_spec_config(
+        target_model_config: ModelConfig,
+        target_parallel_config: ParallelConfig,
+        guidance_model: Optional[str],
+    ):
+        if guidance_model is None:
+            return None
+
+        guidance_parallel_config = target_parallel_config
+        assert target_model_config.model == guidance_model
+        guidance_model_config = target_model_config
+
+        return CFGConfig(
+            guidance_model_config,
+            guidance_parallel_config
+        )
+
+    def __init__(
+        self,
+        guidance_model_config: ModelConfig,
+        guidance_parallel_config: ParallelConfig,
+    ):
+        self.guidance_model_config = guidance_model_config
+        self.guidance_parallel_config = guidance_parallel_config
+
+    def _verify_args(self) -> None:
+        if self.guidance_model_config:
+            self.guidance_model_config.verify_with_parallel_config(
+                self.guidance_parallel_config)
+
+    def __repr__(self) -> str:
+        guidance_model = self.guidance_model_config.model
+        return f"CFGConfig({guidance_model=})"
+
+
 @dataclass
 class LoRAConfig:
     max_lora_rank: int
@@ -1877,6 +1914,7 @@ class EngineConfig:
     speculative_config: Optional[SpeculativeConfig]
     decoding_config: Optional[DecodingConfig]
     prompt_adapter_config: Optional[PromptAdapterConfig]
+    cfg_config: Optional[CFGConfig]
 
     def __post_init__(self):
         """Verify configs are valid & consistent with each other.

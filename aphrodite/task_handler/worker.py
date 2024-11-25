@@ -8,10 +8,10 @@ import torch
 import torch.distributed
 from loguru import logger
 
-from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
-                                     LoRAConfig, ModelConfig, ParallelConfig,
-                                     PromptAdapterConfig, SchedulerConfig,
-                                     SpeculativeConfig)
+from aphrodite.common.config import (CacheConfig, CFGConfig, DeviceConfig,
+                                     LoadConfig, LoRAConfig, ModelConfig,
+                                     ParallelConfig, PromptAdapterConfig,
+                                     SchedulerConfig, SpeculativeConfig)
 from aphrodite.common.sequence import (ExecuteModelRequest,
                                        IntermediateTensors, SamplerOutput,
                                        SequenceGroupMetadata,
@@ -56,6 +56,7 @@ class Worker(LocalOrDistributedWorkerBase):
         lora_config: Optional[LoRAConfig] = None,
         speculative_config: Optional[SpeculativeConfig] = None,
         prompt_adapter_config: Optional[PromptAdapterConfig] = None,
+        cfg_config: Optional[CFGConfig] = None,
         is_driver_worker: bool = False,
         model_runner_cls: Optional[Type[GPUModelRunnerBase]] = None,
     ) -> None:
@@ -70,6 +71,7 @@ class Worker(LocalOrDistributedWorkerBase):
         self.distributed_init_method = distributed_init_method
         self.lora_config = lora_config
         self.prompt_adapter_config = prompt_adapter_config
+        self.cfg_config = cfg_config
         self.load_config = load_config
         self.is_driver_worker = is_driver_worker
         if parallel_config and is_driver_worker:
@@ -154,6 +156,9 @@ class Worker(LocalOrDistributedWorkerBase):
 
     def load_model(self):
         self.model_runner.load_model()
+
+    def share_model(self, shared_worker) -> None:
+        self.model_runner.share_model(shared_worker.model_runner.model)
 
     def save_sharded_state(
         self,
