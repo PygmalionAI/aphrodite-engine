@@ -183,9 +183,6 @@ class Sampler(nn.Module):
                                 sampling_tensors.dynatemp_maxs,
                                 sampling_tensors.dynatemp_exps)
 
-        if do_skew:
-            logits = _apply_skew(logits, sampling_tensors.skews)
-
         if do_nsigmas:
             logits = _apply_top_nsigma(logits, sampling_tensors.nsigmas)
 
@@ -235,6 +232,17 @@ class Sampler(nn.Module):
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
         probs = torch.softmax(logits, dim=-1, dtype=torch.float)
+
+        # skew needs to be applied post-softmax
+        if do_skew:
+            # reference: https://github.com/turboderp/exllamav2/commit/1de4cdd70b09208e7b4f17ee322c190e16f60efd
+            cum_probs = torch.cumsum(probs, dim=-1)
+            cum_probs = torch.pow(cum_probs, torch.exp(
+                sampling_tensors.skews).unsqueeze(dim=1))
+            probs = torch.diff(cum_probs, dim=-1,
+                               prepend=torch.zeros_like(cum_probs[..., :1]))
+            logits = torch.log(probs)
+
         # Compute the log probabilities.
         logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
 
@@ -813,40 +821,6 @@ def _apply_top_nsigma(
     logits[logits < threshold] = float("-inf")
 
     return logits
-
-
-def _apply_skew(
-    logits: torch.Tensor,
-    skew: torch.Tensor,
-) -> torch.Tensor:
-    """Apply skew sampling which biases selection towards higher or lower
-    probability tokens.
-
-    Reference: https://github.com/turboderp/exllamav2/commit/1de4cdd70b09208e7b4f17ee322c190e16f60efd
-
-    Args:
-        logits: Logits tensor of shape [batch_size, vocab_size]
-        skew: Skew factor tensor of shape [batch_size]
-            - Positive skew: Bias towards high probability tokens
-            - Negative skew: Bias towards low probability tokens
-            - Zero skew: No bias (standard sampling)
-
-    Returns:
-        Modified logits tensor
-    """
-    if torch.all(skew == 0):
-        return logits
-
-    probs = torch.softmax(logits, dim=-1)
-
-    # p' = p^(e^(-skew))
-    skew_factor = torch.exp(-skew).unsqueeze(dim=1)
-    modified_probs = torch.pow(probs, skew_factor)
-
-    modified_probs = modified_probs / modified_probs.sum(dim=-1, keepdim=True)
-    modified_logits = torch.log(modified_probs)
-
-    return modified_logits
 
 
 def _greedy_sample(
