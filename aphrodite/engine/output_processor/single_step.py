@@ -84,6 +84,10 @@ class SingleStepOutputProcessor(SequenceGroupOutputProcessor):
             # only have one sequence
             seq = seq_group.seqs[0]
             seq.append_token_id(sample.output_token, sample.logprobs)
+            if seq_group.has_negative_seqs():
+                negative_seq = seq_group.negative_seqs[0]
+                negative_seq.append_token_id(sample.output_token,
+                                             sample.logprobs)
             if sampling_params.detokenize and self.detokenizer:
                 new_char_count = self.detokenizer.decode_sequence_inplace(
                     seq, sampling_params)

@@ -330,6 +330,7 @@ class Sequence:
         lora_request: Optional[LoRARequest] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         from_decoder_prompt: bool = True,
+        from_negative_prompt: bool = False,
     ) -> None:
         self.seq_id = seq_id
         self.inputs = inputs
@@ -338,6 +339,7 @@ class Sequence:
         self.lora_request = lora_request
         self.prompt_adapter_request = prompt_adapter_request
         self.from_decoder_prompt = from_decoder_prompt
+        self.from_negative_prompt = from_negative_prompt
         self._prompt: Optional[str] = None
         self._prompt_token_ids: Optional[List[int]] = None
 
@@ -397,6 +399,9 @@ class Sequence:
         # as appropriate
         prompt_key: str = ("prompt"
                            if self.from_decoder_prompt else "encoder_prompt")
+        if self.from_negative_prompt:
+            assert self.from_decoder_prompt is True
+            prompt_key: str = "negative_prompt"
 
         # Cache prompt
         self._prompt = cast(Optional[str], self.inputs.get(prompt_key))
@@ -532,7 +537,8 @@ class Sequence:
     def __repr__(self) -> str:
         return (f"Sequence(seq_id={self.seq_id}, "
                 f"status={self.status.name}, "
-                f"num_blocks={self.n_blocks}, ")
+                f"num_blocks={self.n_blocks}, "
+                f"data={self.data}) ")
 
 
 class SequenceGroupState(
@@ -576,6 +582,7 @@ class SequenceGroup:
         embeddings: Optional[List[float]] = None,
         pooling_params: Optional[PoolingParams] = None,
         encoder_seq: Optional[Sequence] = None,
+        negative_seqs: Optional[list[Sequence]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
     ) -> None:
         self.request_id = request_id
@@ -595,6 +602,11 @@ class SequenceGroup:
         self.pooling_params = pooling_params
         self.prompt_adapter_request = prompt_adapter_request
         self.encoder_seq = encoder_seq
+        self.negative_seqs = negative_seqs
+        if negative_seqs:
+            assert self.is_single_seq is True
+            self.negative_seqs_dict = {seq.seq_id: seq for seq in negative_seqs}
+            assert self.seqs_dict.keys() == self.negative_seqs_dict.keys()
 
     @property
     def prompt(self) -> Optional[str]:
@@ -623,6 +635,22 @@ class SequenceGroup:
         # distinct from the decoder's.
         return (self.encoder_seq.prompt_token_ids
                 if self.encoder_seq is not None else None)
+
+    @property
+    def negative_prompt(self) -> Optional[str]:
+        # There are either 0 or 1 negative sequences
+        # We use the prompt of an arbitrary sequence.
+        assert self.is_single_seq is True
+        return (self.negative_seqs[0].prompt
+                if self.negative_seqs is not None else None)
+
+    @property
+    def negative_prompt_token_ids(self) -> List[int]:
+        # All sequences in the group should have the same prompt.
+        # We use the prompt of an arbitrary sequence.
+        assert self.is_single_seq is True
+        return (self.negative_seqs[0].prompt_token_ids
+                if self.negative_seqs is not None else None)
 
     @property
     def multi_modal_data(self) -> "MultiModalDataDict":
@@ -723,6 +751,26 @@ class SequenceGroup:
     def get_encoder_seq(self) -> Optional[Sequence]:
         return self.encoder_seq
 
+    def has_negative_seqs(self) -> bool:
+        return self.negative_seqs is not None
+
+    def get_negative_seqs(
+        self,
+        status: Optional[SequenceStatus] = None,
+    ) -> List[Sequence]:
+        if status is None:
+            return self.negative_seqs
+
+        if self.is_single_seq:
+            return self.negative_seqs if self.seqs[0].status == status else []
+
+        return_seqs = []
+        for seq, negative_seq in zip(self.seqs, self.negative_seqs):
+            if seq.status == status:
+                return_seqs.append(negative_seq)
+
+        return return_seqs
+
     def get_unfinished_seqs(self) -> List[Sequence]:
         if self.is_single_seq:
             return self.seqs if not self.seqs[0].is_finished() else []
@@ -740,6 +788,13 @@ class SequenceGroup:
         for seq in self.seqs:
             if not seq.is_finished():
                 seq.data.update_num_computed_tokens(num_new_computed_tokens)
+
+    def update_negative_num_computed_tokens(
+            self, num_new_computed_tokens: int):
+        for seq, negative_seq in zip(self.seqs, self.negative_seqs):
+            if not seq.is_finished():
+                negative_seq.data.update_num_computed_tokens(
+                    num_new_computed_tokens)
 
     def get_num_uncomputed_tokens(self) -> int:
         num_uncomputed_tokens = 0
@@ -924,6 +979,10 @@ class SequenceGroupMetadata(
     prompt_adapter_request: Optional[PromptAdapterRequest] = None
     token_chunk_size: Optional[int] = None
 
+    negative_seq_data: Optional[Dict[int, SequenceData]] = None
+    negative_block_tables: Optional[Dict[int, List[int]]] = None
+    negative_token_chunk_size: Optional[int] = None
+
     # Stateful fields that are lazily defined.
     # The number of speculative tokens adopted in this request.
     # None means specuative decoding is not used.
@@ -938,6 +997,14 @@ class SequenceGroupMetadata(
                     self.seq_data.values())).get_len()
             else:
                 self.token_chunk_size = 1
+
+        if self.negative_seq_data is not None and \
+            self.negative_token_chunk_size is None:
+            if self.is_prompt:
+                self.negative_token_chunk_size = next(iter(
+                    self.negative_seq_data.values())).get_len()
+            else:
+                self.negative_token_chunk_size = 1
 
 
     @property

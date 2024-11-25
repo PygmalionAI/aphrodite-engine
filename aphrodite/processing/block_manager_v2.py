@@ -18,6 +18,7 @@ from aphrodite.processing.interfaces import AllocStatus, BlockSpaceManager
 
 SeqId = int
 EncoderSeqId = str
+NegativeSeqId = int
 
 
 class BlockSpaceManagerV2(BlockSpaceManager):
@@ -99,6 +100,7 @@ class BlockSpaceManagerV2(BlockSpaceManager):
 
         self.block_tables: Dict[SeqId, BlockTable] = {}
         self.cross_block_tables: Dict[EncoderSeqId, BlockTable] = {}
+        self.negative_block_tables: Dict[NegativeSeqId, BlockTable] = {}
 
         self._computed_blocks_tracker = ComputedBlocksTracker(
             self.block_allocator)
@@ -120,6 +122,13 @@ class BlockSpaceManagerV2(BlockSpaceManager):
         if seq_group.is_encoder_decoder():
             num_required_blocks += BlockTable.get_num_required_blocks(
                 seq_group.get_encoder_seq().get_token_ids(),
+                block_size=self.block_size,
+            )
+
+        if seq_group.has_negative_seqs():
+            negative_seq = seq_group.negative_seqs_dict[seq.seq_id]
+            num_required_blocks += BlockTable.get_num_required_blocks(
+                negative_seq.get_token_ids(),
                 block_size=self.block_size,
             )
 
@@ -184,6 +193,18 @@ class BlockSpaceManagerV2(BlockSpaceManager):
                 not in self.cross_block_tables), \
                 "block table already exists"
 
+        if seq_group.has_negative_seqs():
+            seq = waiting_seqs[0]
+            negative_seq = seq_group.negative_seqs_dict[seq.seq_id]
+            negative_block_table: BlockTable = self._allocate_sequence(
+                negative_seq)
+            self.negative_block_tables[negative_seq.seq_id
+                                       ] = negative_block_table
+            for seq in waiting_seqs[1:]:
+                negative_seq = seq_group.negative_seqs_dict[seq.seq_id]
+                self.negative_block_tables[negative_seq.seq_id
+                                           ] = negative_block_table.fork()
+
         check_no_caching_or_swa_for_blockmgr_encdec(self, seq_group)
 
         if seq_group.is_encoder_decoder():
@@ -215,6 +236,17 @@ class BlockSpaceManagerV2(BlockSpaceManager):
                     num_lookahead_slots=num_lookahead_slots,
                 ))
 
+            if seq_group.has_negative_seqs():
+                negative_seq = seq_group.negative_seqs_dict[seq.seq_id]
+                negative_block_table = self.negative_block_tables[
+                    negative_seq.seq_id]
+                num_touched_blocks += (
+                    negative_block_table.get_num_blocks_touched_by_append_slots(
+                        token_ids=negative_block_table.get_unseen_token_ids(
+                            negative_seq.get_token_ids()),
+                        num_lookahead_slots=num_lookahead_slots,
+                    ))
+
         num_free_gpu_blocks = self.block_allocator.get_num_free_blocks(
             Device.GPU)
         return num_touched_blocks <= num_free_gpu_blocks
@@ -223,6 +255,7 @@ class BlockSpaceManagerV2(BlockSpaceManager):
         self,
         seq: Sequence,
         num_lookahead_slots: int,
+        seq_group: SequenceGroup,
     ) -> List[Tuple[int, int]]:
 
         block_table = self.block_tables[seq.seq_id]
@@ -232,6 +265,16 @@ class BlockSpaceManagerV2(BlockSpaceManager):
             num_lookahead_slots=num_lookahead_slots,
             num_computed_slots=seq.data.get_num_computed_tokens(),
         )
+
+        if seq_group.has_negative_seqs():
+            negative_seq = seq_group.negative_seqs_dict[seq.seq_id]
+            negative_block_table = self.negative_block_tables[
+                negative_seq.seq_id]
+            negative_block_table.append_token_ids(
+                token_ids=negative_block_table.get_unseen_token_ids(negative_seq.get_token_ids()),
+                num_lookahead_slots=num_lookahead_slots,
+                num_computed_slots=negative_seq.data.get_num_computed_tokens(),
+            )
         # Return any new copy-on-writes.
         new_cows = self.block_allocator.clear_copy_on_writes()
         return new_cows
@@ -255,6 +298,11 @@ class BlockSpaceManagerV2(BlockSpaceManager):
         self.block_tables[seq_id].free()
         del self.block_tables[seq_id]
 
+        # Free negative table/blocks
+        if self.negative_block_tables:
+            self.negative_block_tables[seq_id].free()
+            del self.negative_block_tables[seq_id]
+
     def free_cross(self, seq_group: SequenceGroup) -> None:
         request_id = seq_group.request_id
         if request_id not in self.cross_block_tables:
@@ -266,6 +314,10 @@ class BlockSpaceManagerV2(BlockSpaceManager):
     def get_block_table(self, seq: Sequence) -> List[int]:
         block_ids = self.block_tables[seq.seq_id].physical_block_ids
         return block_ids  # type: ignore
+
+    def get_negative_block_table(self, seq: Sequence) -> List[int]:
+        block_ids = self.negative_block_tables[seq.seq_id].physical_block_ids
+        return block_ids # type: ignore
 
     def get_cross_block_table(self, seq_group: SequenceGroup) -> List[int]:
         request_id = seq_group.request_id

@@ -448,12 +448,18 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
                 self.sliding_window_blocks * self.block_size
 
     def _compute_lens(self, inter_data: InterDataForSeqGroup, seq_idx: int,
-                      seq_group_metadata: SequenceGroupMetadata):
+                      seq_group_metadata: SequenceGroupMetadata,
+                      is_negative: bool = False):
         """Compute context length, sequence length and tokens
         for the given sequence data.
         """
-        seq_data = seq_group_metadata.seq_data[inter_data.seq_ids[seq_idx]]
-        token_chunk_size = seq_group_metadata.token_chunk_size
+        if is_negative:
+            seq_data = seq_group_metadata.negative_seq_data[
+                inter_data.seq_ids[seq_idx]]
+            token_chunk_size = seq_group_metadata.negative_token_chunk_size
+        else:
+            seq_data = seq_group_metadata.seq_data[inter_data.seq_ids[seq_idx]]
+            token_chunk_size = seq_group_metadata.token_chunk_size
 
         # Compute context length (the number of tokens that are
         # already computed) and sequence length (total number of tokens).
@@ -497,7 +503,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
 
     def _compute_for_prefix_cache_hit(
             self, inter_data: InterDataForSeqGroup, seq_idx: int,
-            seq_group_metadata: SequenceGroupMetadata):
+            seq_group_metadata: SequenceGroupMetadata,
+            is_negative: bool = False):
         """Check if hit prefix cache (i.e., some blocks are already computed).
         If hit, update input tokens and positions to only compute the
         remaining blocks.
@@ -530,7 +537,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
 
     def _compute_for_sliding_window(self, inter_data: InterDataForSeqGroup,
                                     seq_idx: int,
-                                    seq_group_metadata: SequenceGroupMetadata):
+                                    seq_group_metadata: SequenceGroupMetadata,
+                                    is_negative: bool = False,):
         """Update seq_len and curr_sliding_window_block for the given
         sequence data (only required by decoding) if sliding window is enabled.
         """
@@ -559,7 +567,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
 
     def _compute_lora_input(self, inter_data: InterDataForSeqGroup,
                             seq_idx: int,
-                            seq_group_metadata: SequenceGroupMetadata):
+                            seq_group_metadata: SequenceGroupMetadata,
+                            is_negative: bool = False):
         """If LoRA is enabled, compute LoRA index and prompt mapping."""
         if not self.enable_lora:
             return
@@ -640,6 +649,25 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
                 per_seq_fn(inter_data, seq_idx, seq_group_metadata)
         for per_seq_group_fn in self.per_seq_group_compute_fns:
             per_seq_group_fn(inter_data, seq_group_metadata)
+
+        if seq_group_metadata.negative_seq_data:
+            negative_inter_data = self.init_cached_inter_data(
+                request_id=seq_group_metadata.request_id,
+                seq_ids=seq_ids,
+                is_prompt=is_prompt,
+                block_tables=seq_group_metadata.negative_block_tables,
+                computed_block_nums=[], # for prefix caching.
+                reinit=True,
+                reinit_use_defaults=True
+            )
+            self.inter_data_list.append(negative_inter_data)
+
+            for seq_idx in range(n_seqs):
+                for per_seq_fn in self.per_seq_compute_fns:
+                    per_seq_fn(negative_inter_data, seq_idx,
+                               seq_group_metadata, is_negative=True)
+            for per_seq_group_fn in self.per_seq_group_compute_fns:
+                per_seq_group_fn(negative_inter_data, seq_group_metadata)
 
     def _use_captured_graph(self, batch_size: int,
                             max_decode_seq_len: int) -> bool:

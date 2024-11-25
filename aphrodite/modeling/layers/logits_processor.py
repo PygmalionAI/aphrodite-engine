@@ -118,18 +118,39 @@ def _apply_logits_processors(
     sampling_metadata: SamplingMetadata,
 ) -> torch.Tensor:
     found_logits_processors = False
+    has_negative = False
     logits_processed = 0
     for seq_group in sampling_metadata.seq_groups:
         seq_ids = seq_group.seq_ids
         sampling_params = seq_group.sampling_params
         logits_processors = sampling_params.logits_processors
+        guidance_scale = sampling_params.guidance_scale
 
         if logits_processors:
             found_logits_processors = True
 
             for seq_id, logits_row_idx in zip(seq_ids,
                                               seq_group.sample_indices):
-                logits_row = logits[logits_row_idx]
+
+                if guidance_scale is not None:
+                    has_negative = True
+                    assert 2 * logits_row_idx + 1 < logits.shape[0]
+                    if guidance_scale != 1.0:
+                        positive_logits_row = logits[2 * logits_row_idx]
+                        negative_logitis_row = logits[2 * logits_row_idx + 1]
+                        condition_logits = torch.nn.functional.log_softmax(
+                            positive_logits_row, dim=-1)
+                        unconditional_logits = torch.nn.functional.log_softmax(
+                            negative_logitis_row, dim=-1)
+                        logits_row = guidance_scale * (condition_logits -
+                                                       unconditional_logits) + \
+                                                        unconditional_logits
+                        logits_row_idx *= 2
+                    else:
+                        logits_row = logits[2 * logits_row_idx]
+                        logits_row_idx *= 2
+                else:
+                    logits_row = logits[logits_row_idx]
                 past_tokens_ids = seq_group.seq_data[seq_id].output_token_ids
                 prompt_tokens_ids = seq_group.seq_data[seq_id].prompt_token_ids
 
@@ -150,5 +171,12 @@ def _apply_logits_processors(
 
     if found_logits_processors:
         # verifies that no rows in logits were missed unexpectedly
-        assert logits_processed == logits.shape[0]
-    return logits
+        if has_negative:
+            assert logits_processed == logits.shape[0] // 2
+        else:
+            assert logits_processed == logits.shape[0]
+
+    if has_negative:
+        return logits[::2, :]
+    else:
+        return logits
