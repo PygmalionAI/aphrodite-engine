@@ -173,6 +173,8 @@ class SamplingParams(
             input into sections where repetition is evaluated separately.
             Common examples are newlines, quotes, and other structural tokens.
             Defaults to None.
+        skew: Bias the token selection towards higher or lower probability
+            tokens. Defaults to 0 (disabled).
     """
 
     n: int = 1
@@ -224,6 +226,7 @@ class SamplingParams(
     dry_base: float = 1.75
     dry_allowed_length: int = 2
     dry_sequence_breaker_ids: List[int] = []
+    skew: float = 0.0
     # The below fields are not supposed to be used as an input.
     # They are set in post_init.
     output_text_buffer_length: int = 0
@@ -275,6 +278,7 @@ class SamplingParams(
         "dry_base": 1.75,
         "dry_allowed_length": 2,
         "dry_sequence_breaker_ids": [],
+        "skew": 0.0,
     }
 
     def __post_init__(self) -> None:
@@ -419,7 +423,11 @@ class SamplingParams(
         if self.dry_allowed_length < 0:
             raise ValueError(
                 "dry_allowed_length must be non-negative, got "
-                f"{self.dry_allowed_length}.")    
+                f"{self.dry_allowed_length}.")
+        if self.skew < 0.0:
+            raise ValueError(
+                "skew must be non-negative, got "
+                f"{self.skew}.")
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:
