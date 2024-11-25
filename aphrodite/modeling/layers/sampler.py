@@ -86,7 +86,7 @@ class Sampler(nn.Module):
         (sampling_tensors, do_penalties, do_no_repeat_ngrams, do_temperatures,
          do_top_p_top_k, do_top_as, do_min_p, do_tfss, do_eta_cutoffs,
          do_epsilon_cutoffs, do_typical_ps, do_quadratic, do_xtc, do_nsigmas,
-         do_dry, do_temp_last
+         do_dry, do_skew, do_temp_last
          ) = SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype)
 
@@ -105,6 +105,7 @@ class Sampler(nn.Module):
         self._do_xtc = do_xtc
         self._do_nsgimas = do_nsigmas
         self._do_dry = do_dry
+        self._do_skew = do_skew
         self._do_temp_last = do_temp_last
 
     def forward(
@@ -146,6 +147,7 @@ class Sampler(nn.Module):
         do_xtc = self._do_xtc
         do_nsigmas = self._do_nsgimas
         do_dry = self._do_dry
+        do_skew = self._do_skew
         do_temp_last = self._do_temp_last
 
         logits = _apply_min_tokens_penalty(logits, sampling_metadata)
@@ -180,6 +182,9 @@ class Sampler(nn.Module):
                                 sampling_tensors.dynatemp_mins,
                                 sampling_tensors.dynatemp_maxs,
                                 sampling_tensors.dynatemp_exps)
+
+        if do_skew:
+            logits = _apply_skew(logits, sampling_tensors.skews)
 
         if do_nsigmas:
             logits = _apply_top_nsigma(logits, sampling_tensors.nsigmas)
@@ -808,6 +813,40 @@ def _apply_top_nsigma(
     logits[logits < threshold] = float("-inf")
 
     return logits
+
+
+def _apply_skew(
+    logits: torch.Tensor,
+    skew: torch.Tensor,
+) -> torch.Tensor:
+    """Apply skew sampling which biases selection towards higher or lower
+    probability tokens.
+
+    Reference: https://github.com/turboderp/exllamav2/commit/1de4cdd70b09208e7b4f17ee322c190e16f60efd
+
+    Args:
+        logits: Logits tensor of shape [batch_size, vocab_size]
+        skew: Skew factor tensor of shape [batch_size]
+            - Positive skew: Bias towards high probability tokens
+            - Negative skew: Bias towards low probability tokens
+            - Zero skew: No bias (standard sampling)
+
+    Returns:
+        Modified logits tensor
+    """
+    if torch.all(skew == 0):
+        return logits
+
+    probs = torch.softmax(logits, dim=-1)
+
+    # p' = p^(e^(-skew))
+    skew_factor = torch.exp(-skew).unsqueeze(dim=1)
+    modified_probs = torch.pow(probs, skew_factor)
+
+    modified_probs = modified_probs / modified_probs.sum(dim=-1, keepdim=True)
+    modified_logits = torch.log(modified_probs)
+
+    return modified_logits
 
 
 def _greedy_sample(
