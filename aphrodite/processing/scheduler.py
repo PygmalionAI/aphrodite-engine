@@ -1341,9 +1341,19 @@ class Scheduler:
         """
         num_new_tokens = 0
         seqs = seq_group.get_seqs(status=status)
+        
+        if not seqs:
+            return 0
+
         for seq in seqs:
-            num_new_tokens += seq.get_num_new_tokens()
-        assert num_new_tokens > 0
+            new_tokens = seq.get_num_new_tokens()
+            if new_tokens == 0 and seq.status == SequenceStatus.WAITING:
+                continue
+            num_new_tokens += new_tokens
+
+        if num_new_tokens == 0:
+            return 0
+
         # Chunk if a running request cannot fit in.
         # If number of seq > 1, it means it is doing beam search in a
         # decode phase. Do not chunk in that case.

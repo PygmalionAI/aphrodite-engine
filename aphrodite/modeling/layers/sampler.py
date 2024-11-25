@@ -149,6 +149,7 @@ class Sampler(nn.Module):
         do_temp_last = self._do_temp_last
 
         logits = _apply_min_tokens_penalty(logits, sampling_metadata)
+        logits = _apply_banned_strings(logits, sampling_metadata)
 
         if do_dry:
             logits = _apply_dry(
@@ -310,6 +311,31 @@ def _get_custom_token_bans(
             banned_tokens += [custom_token_bans] * (prompt_len - 1)
         banned_tokens += [custom_token_bans] * len(seq_ids)
     return banned_tokens
+
+
+def _apply_banned_strings(
+        logits: torch.Tensor,
+        sampling_metadata: SamplingMetadata
+) -> torch.Tensor:
+    for i, seq_group in enumerate(sampling_metadata.seq_groups):
+        sampling_params = seq_group.sampling_params
+        if not sampling_params.banned_strings:
+            continue
+
+        start_idx = seq_group.sample_indices[0]
+        num_seqs = len(seq_group.seq_ids)
+
+        for j in range(num_seqs):
+            seq_idx = start_idx + j
+            seq = seq_group.seq_data[seq_group.seq_ids[j]]
+
+            prev_tokens = seq.get_token_ids()
+
+            for banned_seq in sampling_params.banned_strings:
+                if len(prev_tokens) >= len(banned_seq) - 1:
+                    if prev_tokens[-(len(banned_seq)-1):] == banned_seq[:-1]:
+                        logits[seq_idx, banned_seq[-1]] = -float("inf")
+    return logits
 
 
 def _apply_penalties(logits: torch.Tensor, prompt_tokens_tensor: torch.Tensor,

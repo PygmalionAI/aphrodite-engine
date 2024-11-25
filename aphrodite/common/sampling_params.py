@@ -173,6 +173,7 @@ class SamplingParams(
             input into sections where repetition is evaluated separately.
             Common examples are newlines, quotes, and other structural tokens.
             Defaults to None.
+        banned_strings: A list of banned strings.
     """
 
     n: int = 1
@@ -210,6 +211,7 @@ class SamplingParams(
     prompt_logprobs: Optional[int] = None
     detokenize: bool = True
     custom_token_bans: Optional[List[int]] = None
+    banned_strings: Optional[List[List[int]]] = None
     skip_special_tokens: bool = True
     spaces_between_special_tokens: bool = True
     # Optional[List[LogitsProcessorFunc]] type.
@@ -264,6 +266,7 @@ class SamplingParams(
         "prompt_logprobs": None,
         "detokenize": True,
         "custom_token_bans": [],
+        "banned_strings": [],
         "skip_special_tokens": True,
         "spaces_between_special_tokens": True,
         "include_stop_str_in_output": False,

@@ -83,6 +83,31 @@ class SingleStepOutputProcessor(SequenceGroupOutputProcessor):
             sample = outputs.samples[0]
             # only have one sequence
             seq = seq_group.seqs[0]
+
+            buffered_tokens, rollback_len = self.stop_checker.maybe_stop_sequence(
+                seq,
+                0,  # new_char_count will be calculated after appending
+                sampling_params,
+                lora_req=seq_group.lora_request,
+            )
+
+            if rollback_len > 0:
+                # Roll back the sequence
+                for _ in range(rollback_len):
+                    seq.output_logprobs.pop()
+                    seq.data.pop_token()
+                return
+
+            if buffered_tokens == []:
+                return []  # Skip this token
+                
+            if buffered_tokens:
+                for token_id in buffered_tokens:
+                    seq.append_token_id(token_id, None)
+                    if sampling_params.detokenize:
+                        new_char_count = self.detokenizer.decode_sequence_inplace(
+                            seq, sampling_params)
+
             seq.append_token_id(sample.output_token, sample.logprobs)
             if sampling_params.detokenize and self.detokenizer:
                 new_char_count = self.detokenizer.decode_sequence_inplace(
