@@ -15,7 +15,8 @@ from aphrodite.distributed import (broadcast_tensor_dict, get_pp_group,
                                    get_tp_group)
 from aphrodite.lora.request import LoRARequest
 from aphrodite.platforms import current_platform
-from aphrodite.task_handler.model_runner_base import (ModelRunnerBase,
+from aphrodite.task_handler.model_runner_base import (BroadcastableModelInput,
+                                                      ModelRunnerBase,
                                                       ModelRunnerInputBase)
 
 
@@ -217,7 +218,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         raise NotImplementedError
 
     def _get_worker_input_from_broadcast(
-            self) -> Optional[Tuple[ModelRunnerInputBase, WorkerInput]]:
+            self) -> Optional[Tuple[BroadcastableModelInput, WorkerInput]]:
         """ Get the worker input from the broadcasted tensor dict. """
         assert self.do_metadata_broadcast
         assert not self.is_driver_worker
@@ -234,7 +235,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
     def _get_driver_input_and_broadcast(
         self, execute_model_req: ExecuteModelRequest
-    ) -> Tuple[ModelRunnerInputBase, WorkerInput]:
+    ) -> Tuple[BroadcastableModelInput, WorkerInput]:
         """ Get the driver input and broadcast it to other workers.  """
         assert self.is_driver_worker
 
@@ -256,7 +257,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
     def prepare_input(
         self,
         execute_model_req: Optional[ExecuteModelRequest] = None
-    ) -> Optional[Tuple[ModelRunnerInputBase, WorkerInput]]:
+    ) -> Optional[Tuple[BroadcastableModelInput, WorkerInput]]:
         """
         Prepare the inputs to ModelRunner and workers.
         """

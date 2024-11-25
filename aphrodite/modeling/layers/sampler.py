@@ -83,14 +83,16 @@ class Sampler(nn.Module):
         self._sampling_tensors = None
 
         # Initialize new sampling tensors
-        (sampling_tensors, do_penalties, do_temperatures, do_top_p_top_k,
-         do_top_as, do_min_p, do_tfss, do_eta_cutoffs, do_epsilon_cutoffs,
-         do_typical_ps, do_quadratic, do_xtc, do_nsigmas, do_temp_last
+        (sampling_tensors, do_penalties, do_no_repeat_ngrams, do_temperatures,
+         do_top_p_top_k, do_top_as, do_min_p, do_tfss, do_eta_cutoffs,
+         do_epsilon_cutoffs, do_typical_ps, do_quadratic, do_xtc, do_nsigmas,
+         do_dry, do_temp_last
          ) = SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype)
 
         self._sampling_tensors = sampling_tensors
         self._do_penalties = do_penalties
+        self._do_no_repeat_ngrams = do_no_repeat_ngrams
         self._do_temperatures = do_temperatures
         self._do_top_p_top_k = do_top_p_top_k
         self._do_top_as = do_top_as
@@ -102,6 +104,7 @@ class Sampler(nn.Module):
         self._do_quadratic = do_quadratic
         self._do_xtc = do_xtc
         self._do_nsgimas = do_nsigmas
+        self._do_dry = do_dry
         self._do_temp_last = do_temp_last
 
     def forward(
@@ -130,6 +133,7 @@ class Sampler(nn.Module):
         assert self._sampling_tensors is not None
         sampling_tensors = self._sampling_tensors
         do_penalties = self._do_penalties
+        do_no_repeat_ngrams = self._do_no_repeat_ngrams
         do_temperatures = self._do_temperatures
         do_top_p_top_k = self._do_top_p_top_k
         do_top_as = self._do_top_as
@@ -141,9 +145,20 @@ class Sampler(nn.Module):
         do_quadratic = self._do_quadratic
         do_xtc = self._do_xtc
         do_nsigmas = self._do_nsgimas
+        do_dry = self._do_dry
         do_temp_last = self._do_temp_last
 
         logits = _apply_min_tokens_penalty(logits, sampling_metadata)
+
+        if do_dry:
+            logits = _apply_dry(
+                logits,
+                sampling_tensors.prompt_tokens,
+                sampling_tensors.dry_multipliers,
+                sampling_tensors.dry_bases, 
+                sampling_tensors.dry_allowed_lengths,
+                sampling_tensors.dry_sequence_breaker_ids
+            )
 
         # Apply presence and frequency penalties.
         if do_penalties:
@@ -152,6 +167,12 @@ class Sampler(nn.Module):
                                       sampling_tensors.presence_penalties,
                                       sampling_tensors.frequency_penalties,
                                       sampling_tensors.repetition_penalties)
+        
+        if do_no_repeat_ngrams:
+            logits = _apply_no_repeat_ngram(
+                logits,
+                sampling_tensors.prompt_tokens,
+                sampling_tensors.no_repeat_ngram_sizes)
 
         # Apply temperature scaling if not doing temp_last.
         if do_temperatures and not do_temp_last:
@@ -406,6 +427,126 @@ def _apply_min_tokens_penalty(
     assert logits_applied == logits.shape[0]
     return logits
 
+def _apply_dry(
+    logits: torch.Tensor,
+    input_ids: torch.Tensor,
+    multipliers: torch.Tensor, 
+    bases: torch.Tensor,
+    allowed_lengths: torch.Tensor,
+    sequence_breakers_ids: torch.Tensor
+) -> torch.Tensor:
+    """
+    Apply Exclude Don't Repeat Yourself (DRY) sampling to the logits.
+
+    Reference: https://github.com/oobabooga/text-generation-webui/pull/5677
+    """
+    # Don't apply dry penalties if multiplier is 0
+    if torch.all(multipliers == 0):
+        return logits
+    
+    # Process each sequence in the batch
+    for i, (input_ids_row, logits_row) in enumerate(zip(input_ids, logits)):
+        multiplier = multipliers[i].item()
+        if multiplier == 0:
+            continue  # Skip processing for this sequence
+        # Get the last token
+        last_token = input_ids_row[-1].item()
+
+        # Skip if last token is a sequence breaker
+        if last_token in sequence_breakers_ids:
+            continue
+
+        # Find matches of the last token, excluding the last position
+        match_indices = (input_ids_row[:-1] == last_token).nonzero()
+
+        # Track max matching sequence length for each potential next token
+        match_lengths = {}
+
+        # Process each match
+        for idx in match_indices:
+            # Convert to scalar
+            idx = idx.item()
+            
+            # Get the token that followed this match in the input
+            next_token = input_ids_row[idx + 1].item()
+
+            # Skip if next token is a sequence breaker
+            if next_token in sequence_breakers_ids:
+                continue
+
+            # We found last_token matches at this index, so match length starts
+            # at 1
+            match_length = 1
+
+            # Try to extend match backwards
+            while match_length < 50:
+                j = idx - match_length
+                k = len(input_ids_row) - match_length - 1
+                if j < 0 or k < 0:
+                    # Reached start of input
+                    break
+
+                if input_ids_row[j].item() != input_ids_row[k].item():
+                    # No more matches
+                    break
+
+                if input_ids_row[k].item() in sequence_breakers_ids:
+                    # Hit a sequence breaker
+                    break
+
+                match_length += 1
+
+            # Update max match length for this next token
+            if next_token in match_lengths:
+                match_lengths[next_token] = max(
+                    match_length, match_lengths[next_token])
+            else:
+                match_lengths[next_token] = match_length
+
+        # Apply penalties based on match lengths
+        allowed_length = allowed_lengths[i]
+        multiplier = multipliers[i]  
+        base = bases[i]
+
+        for token, match_length in match_lengths.items():
+            if match_length >= allowed_length:
+                penalty = multiplier * (base ** (match_length - allowed_length))
+                logits_row[token] -= penalty
+
+    return logits
+
+def _apply_no_repeat_ngram(
+    logits: torch.Tensor,
+    input_ids: torch.Tensor,
+    ngram_size: torch.Tensor,
+) -> torch.Tensor:
+    """Apply no-repeat-ngram penalty which sets logits to -inf for tokens that 
+    would create a repeated n-gram.
+    """
+    if torch.all(ngram_size == 0):
+        return logits
+
+    batch_size = logits.shape[0]
+
+    for i in range(batch_size):
+        size = int(ngram_size[i].item())
+        if size == 0:
+            continue
+
+        cur_len = len(input_ids[i])
+        if cur_len < size:
+            continue
+
+        banned_tokens = _calc_banned_ngram_tokens(
+            ngram_size=size,
+            prev_input_ids=input_ids[i],
+            cur_len=cur_len-1
+        )
+
+        if banned_tokens:
+            logits[i, banned_tokens] = -float("inf")
+
+    return logits
 
 def _apply_top_k_top_p(
     logits: torch.Tensor,
@@ -1506,6 +1647,84 @@ def _get_next_prompt_tokens(seq_group: SequenceGroupToSample) -> List[str]:
     next_prompt_tokens = prompt_tokens[
         next_token_index_start:next_token_index_end]
     return next_prompt_tokens
+
+def _get_ngrams(
+    ngram_size: int, 
+    prev_input_ids: torch.Tensor
+) -> Dict[Tuple[int, ...], List[int]]:
+    """Get dictionary of ngrams and the tokens that followed them.
+
+    Args:
+        ngram_size: Size of ngrams to track
+        prev_input_ids: 1D tensor of previous token ids
+
+    Returns:
+        Dictionary mapping ngram tuples to list of tokens that followed them
+    """
+    generated_ngrams = {}
+    gen_tokens = prev_input_ids.tolist()
+
+    for i in range(len(gen_tokens) - ngram_size + 1):
+        ngram = tuple(gen_tokens[i:i + ngram_size - 1])
+        next_token = gen_tokens[i + ngram_size - 1]
+        if ngram in generated_ngrams:
+            generated_ngrams[ngram].append(next_token)
+        else:
+            generated_ngrams[ngram] = [next_token]
+
+    return generated_ngrams
+
+def _get_generated_ngrams(
+    banned_ngrams: Dict[Tuple[int, ...], List[int]], 
+    prev_input_ids: torch.Tensor,
+    ngram_size: int, 
+    cur_len: int
+) -> List[int]:
+    """Get list of tokens that would create a repeated ngram if generated next.
+
+    Args:
+        banned_ngrams: Dictionary of previously seen ngrams and their next
+            tokens
+        prev_input_ids: Previous token ids
+        ngram_size: Size of ngrams to check
+        cur_len: Current position in sequence
+
+    Returns:
+        List of token ids that would create a repeat ngram
+    """
+    start_idx = cur_len + 1 - ngram_size
+    current_ngram = tuple(prev_input_ids[start_idx:cur_len].tolist())
+
+    return banned_ngrams.get(current_ngram, [])
+
+def _calc_banned_ngram_tokens(
+    ngram_size: int,
+    prev_input_ids: torch.Tensor,
+    cur_len: int
+) -> List[int]:
+    """Calculate tokens that would create repeated ngrams if generated next.
+
+    Args:
+        ngram_size: Size of ngrams to prevent repeating
+        prev_input_ids: Previous token ids in sequence
+        cur_len: Current position in sequence
+
+    Returns:
+        List of token ids that should be banned to prevent ngram repetition
+    """
+    if cur_len + 1 < ngram_size:
+        return []
+
+    generated_ngrams = _get_ngrams(ngram_size, prev_input_ids)
+
+    banned_tokens = _get_generated_ngrams(
+        generated_ngrams,
+        prev_input_ids, 
+        ngram_size,
+        cur_len
+    )
+
+    return banned_tokens
 
 
 # def _apply_mirostat_v2(logits: torch.Tensor,

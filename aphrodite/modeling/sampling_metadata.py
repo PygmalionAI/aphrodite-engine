@@ -379,6 +379,7 @@ class SamplingTensors:
     presence_penalties: torch.Tensor
     frequency_penalties: torch.Tensor
     repetition_penalties: torch.Tensor
+    no_repeat_ngram_sizes: torch.Tensor
     tfss: torch.Tensor
     eta_cutoffs: torch.Tensor
     epsilon_cutoffs: torch.Tensor
@@ -388,6 +389,10 @@ class SamplingTensors:
     xtc_thresholds: torch.Tensor
     xtc_probabilities: torch.Tensor
     nsigmas: torch.Tensor
+    dry_multipliers: torch.Tensor
+    dry_bases: torch.Tensor
+    dry_allowed_lengths: torch.Tensor
+    dry_sequence_breaker_ids: torch.Tensor
     sampling_seeds: torch.Tensor
     sample_indices: torch.Tensor
     extra_seeds: Optional[torch.Tensor]
@@ -405,7 +410,7 @@ class SamplingTensors:
         extra_seeds_to_generate: int = 0,
         extra_entropy: Optional[Tuple[int, ...]] = None
     ) -> Tuple["SamplingTensors", bool, bool, bool, bool, bool, bool, bool,
-               bool, bool, bool, bool, bool, bool]:
+               bool, bool, bool, bool, bool, bool, bool, bool]:
         """
         extra_seeds_to_generate: extra seeds to generate using the
             user-defined seed for each sequence.
@@ -425,6 +430,7 @@ class SamplingTensors:
         presence_penalties: List[float] = []
         frequency_penalties: List[float] = []
         repetition_penalties: List[float] = []
+        no_repeat_ngram_sizes: List[int] = []
         tfss: List[float] = []
         eta_cutoffs: List[float] = []
         epsilon_cutoffs: List[float] = []
@@ -436,7 +442,13 @@ class SamplingTensors:
         nsigmas: List[float] = []
         sampling_seeds: List[List[int]] = []
         sample_indices: List[int] = []
+        dry_multipliers: List[float] = []
+        dry_bases: List[float] = []
+        dry_allowed_lengths: List[int] = []
+        dry_sequence_breaker_ids: List[List[int]] = []
+
         do_penalties = False
+        do_no_repeat_ngrams = False
         do_temperatures = False
         do_top_p_top_k = False
         do_top_as = False
@@ -448,6 +460,7 @@ class SamplingTensors:
         do_quadratic = False
         do_xtc = False
         do_nsigmas = False
+        do_dry = False
         do_temp_last = False
 
         if _USE_TRITON_SAMPLER:
@@ -483,6 +496,7 @@ class SamplingTensors:
             do_penalties |= (abs(params.presence_penalty) >= _SAMPLING_EPS or
                              abs(params.frequency_penalty) >= _SAMPLING_EPS or
                              params.repetition_penalty > 1.0)
+            do_no_repeat_ngrams |= params.no_repeat_ngram_size > 0
             do_tfss |= params.tfs < 1.0 - _SAMPLING_EPS
             do_eta_cutoffs |= params.eta_cutoff > _SAMPLING_EPS
             do_epsilon_cutoffs |= params.epsilon_cutoff > _SAMPLING_EPS
@@ -491,6 +505,8 @@ class SamplingTensors:
                              params.smoothing_curve > 1.0)
             do_xtc |= params.xtc_probability > _SAMPLING_EPS
             do_nsigmas |= params.nsigma > _SAMPLING_EPS
+            do_dry |= params.dry_multiplier > _SAMPLING_EPS
+
             do_temp_last |= params.temperature_last
 
             is_prompt = seq_group.is_prompt
@@ -517,6 +533,7 @@ class SamplingTensors:
             presence_penalties += [params.presence_penalty] * n_seqs
             frequency_penalties += [params.frequency_penalty] * n_seqs
             repetition_penalties += [params.repetition_penalty] * n_seqs
+            no_repeat_ngram_sizes += [params.no_repeat_ngram_size] * n_seqs
             tfss += [params.tfs] * n_seqs
             eta_cutoffs += [params.eta_cutoff] * n_seqs
             epsilon_cutoffs += [params.epsilon_cutoff] * n_seqs
@@ -526,6 +543,11 @@ class SamplingTensors:
             xtc_thresholds += [params.xtc_threshold] * n_seqs
             xtc_probabilities += [params.xtc_probability] * n_seqs
             nsigmas += [params.nsigma] * n_seqs
+            dry_multipliers += [params.dry_multiplier] * n_seqs
+            dry_bases += [params.dry_base] * n_seqs
+            dry_allowed_lengths += [params.dry_allowed_length] * n_seqs
+            dry_sequence_breaker_ids += (
+                [params.dry_sequence_breaker_ids] * n_seqs)
 
             if _USE_TRITON_SAMPLER:
                 if is_prompt:
@@ -549,7 +571,7 @@ class SamplingTensors:
                     sampling_seeds.append(seq_seeds)
                 sample_indices.extend(seq_group.sample_indices)
 
-        if do_penalties:
+        if do_penalties or do_dry or do_no_repeat_ngrams:
             for seq_group in sampling_metadata.seq_groups:
                 seq_ids = seq_group.seq_ids
                 if (seq_group.is_prompt
@@ -571,14 +593,16 @@ class SamplingTensors:
             temperatures, dynatemp_mins, dynatemp_maxs, dynatemp_exps,
             temperature_lasts, top_ps, top_ks, top_as, min_ps,
             presence_penalties, frequency_penalties, repetition_penalties,
-            tfss, eta_cutoffs, epsilon_cutoffs, typical_ps, smoothing_factors,
-            smoothing_curves, xtc_thresholds, xtc_probabilities, nsigmas,
-            sampling_seeds, sample_indices, prompt_tokens, output_tokens,
-            vocab_size, extra_seeds_to_generate, device, dtype)
-        return (sampling_tensors, do_penalties, do_temperatures,
-                do_top_p_top_k, do_top_as, do_min_p, do_tfss, do_eta_cutoffs,
-                do_epsilon_cutoffs, do_typical_ps, do_quadratic, do_xtc,
-                do_nsigmas, do_temp_last)
+            no_repeat_ngram_sizes, tfss, eta_cutoffs, epsilon_cutoffs,
+            typical_ps, smoothing_factors, smoothing_curves, xtc_thresholds,
+            xtc_probabilities, nsigmas, dry_multipliers, dry_bases,
+            dry_allowed_lengths, dry_sequence_breaker_ids, sampling_seeds,
+            sample_indices, prompt_tokens, output_tokens, vocab_size,
+            extra_seeds_to_generate, device, dtype)
+        return (sampling_tensors, do_penalties, do_no_repeat_ngrams,
+                do_temperatures, do_top_p_top_k, do_top_as, do_min_p,
+                do_tfss, do_eta_cutoffs, do_epsilon_cutoffs, do_typical_ps,
+                do_quadratic, do_xtc, do_nsigmas, do_dry, do_temp_last)
 
     @classmethod
     def from_lists(cls, temperatures: List[float], dynatemp_mins: List[float],
@@ -587,11 +611,15 @@ class SamplingTensors:
                    top_ks: List[int], top_as: List[float],
                    min_ps: List[float], presence_penalties: List[float],
                    frequency_penalties: List[float],
-                   repetition_penalties: List[float], tfss: List[float],
+                   repetition_penalties: List[float],
+                   no_repeat_ngram_sizes: List[int], tfss: List[float],
                    eta_cutoffs: List[float], epsilon_cutoffs: List[float],
                    typical_ps: List[float], smoothing_factors: List[float],
                    smoothing_curves: List[float], xtc_thresholds: List[float],
                    xtc_probabilities: List[float], nsigmas: List[float],
+                   dry_multipliers: List[float], dry_bases: List[float],
+                   dry_allowed_lengths: List[int],
+                   dry_sequence_breaker_ids: List[List[int]],
                    sampling_seeds: List[List[int]],
                    sample_indices: List[int], prompt_tokens: List[array],
                    output_tokens: List[array], vocab_size: int,
@@ -686,6 +714,12 @@ class SamplingTensors:
             dtype=dtype,
             pin_memory=pin_memory,
         )
+        no_repeat_ngram_sizes_t = torch.tensor(
+            no_repeat_ngram_sizes,
+            device="cpu",
+            dtype=torch.int,
+            pin_memory=pin_memory,
+        )
         top_ks_t = torch.tensor(
             top_ks,
             device="cpu",
@@ -728,6 +762,31 @@ class SamplingTensors:
                                  device="cpu",
                                  dtype=dtype,
                                  pin_memory=pin_memory)
+        dry_multipliers_t = torch.tensor(
+            dry_multipliers,
+            device="cpu", 
+            dtype=dtype,
+            pin_memory=pin_memory,
+        )
+        dry_bases_t = torch.tensor(
+            dry_bases,
+            device="cpu",
+            dtype=dtype, 
+            pin_memory=pin_memory,
+        )
+        dry_allowed_lengths_t = torch.tensor(
+            dry_allowed_lengths,
+            device="cpu",
+            dtype=torch.int,
+            pin_memory=pin_memory,
+        )
+        dry_sequence_breakers_t = torch.tensor(
+            dry_sequence_breaker_ids, 
+            device="cpu",
+            dtype=torch.long,
+            pin_memory=pin_memory,
+        )
+
         sample_indices_t = torch.tensor(
             sample_indices,
             device="cpu",
@@ -772,6 +831,8 @@ class SamplingTensors:
                                                          non_blocking=True),
             repetition_penalties=repetition_penalties_t.to(device=device,
                                                            non_blocking=True),
+            no_repeat_ngram_sizes=no_repeat_ngram_sizes_t.to(device=device,
+                                                             non_blocking=True),
             tfss=tfss_t.to(device=device, non_blocking=True),
             eta_cutoffs=eta_cutoffs_t.to(device=device, non_blocking=True),
             epsilon_cutoffs=epsilon_cutoffs_t.to(device=device,
@@ -785,6 +846,13 @@ class SamplingTensors:
             xtc_probabilities=xtc_probabilities_t.to(device=device,
                                                      non_blocking=True),
             nsigmas=nsigmas_t.to(device=device, non_blocking=True),
+            dry_multipliers=dry_multipliers_t.to(device=device,
+                                                 non_blocking=True),
+            dry_bases=dry_bases_t.to(device=device, non_blocking=True),
+            dry_allowed_lengths=dry_allowed_lengths_t.to(device=device,
+                                                         non_blocking=True),
+            dry_sequence_breaker_ids=dry_sequence_breakers_t.to(device=device,
+                                                                non_blocking=True),
             typical_ps=typical_ps_t.to(device=device, non_blocking=True),
             prompt_tokens=prompt_t.to(device=device, non_blocking=True),
             output_tokens=output_t.to(device=device, non_blocking=True),

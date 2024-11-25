@@ -65,6 +65,9 @@ class SamplingParams(
             freq_pen is applied additively while
             rep_pen is applied multiplicatively.
             Must be in [1, inf). Set to 1 to disable the effect.
+        no_repeat_ngram_size: Size of the n-grams to prevent repeating.
+            1 would mean no token can appear twice.
+            2 would mean no pair of consecutive tokens can appear twice.
         temperature: Float that controls the randomness of the sampling. Lower
             values make the model more deterministic, while higher values make
             the model more random. Zero means greedy sampling.
@@ -153,6 +156,23 @@ class SamplingParams(
             (max_logit - nsgima * std_dev) are filtered out. Higher values
             (e.g. 3.0) keep more tokens, lower values (e.g. 1.0) are more
             selective. Must be positive. 0 to disable.
+        dry_multiplier: Float that controls the magnitude of the DRY sampling
+            penalty. Higher values create stronger penalties against
+            repetition. The penalty is multiplied by this value before being
+            applied. Must be non-negative. 0 disables the sampler.
+        dry_base: Base for the exponential growth of the DRY sampling penalty.
+            Controls how quickly the penalty increases with longer repeated
+            sequences. Must be greater than 1. Higher values (e.g. 2.0) create
+            more aggressive penalties for longer repetitions. Defaults to 1.75.
+        dry_allowed_length: Maximum number of tokens that can be repeated
+            without incurring a DRY sampling penalty. Sequences longer than
+            this will be penalized exponentially. Must be at least 1.
+            Defaults to 2.
+        dry_sequence_breaker_ids: List of token IDs that stop
+            the matching of repeated content. These tokens will break up the
+            input into sections where repetition is evaluated separately.
+            Common examples are newlines, quotes, and other structural tokens.
+            Defaults to None.
     """
 
     n: int = 1
@@ -160,6 +180,7 @@ class SamplingParams(
     presence_penalty: float = 0.0
     frequency_penalty: float = 0.0
     repetition_penalty: float = 1.0
+    no_repeat_ngram_size: int = 0
     temperature: float = 1.0
     dynatemp_min: float = 0.0
     dynatemp_max: float = 0.0
@@ -199,7 +220,10 @@ class SamplingParams(
     xtc_threshold: float = 0.1
     xtc_probability: float = 0
     nsigma: float = 0.0
-
+    dry_multiplier: float = 0.0
+    dry_base: float = 1.75
+    dry_allowed_length: int = 2
+    dry_sequence_breaker_ids: List[int] = []
     # The below fields are not supposed to be used as an input.
     # They are set in post_init.
     output_text_buffer_length: int = 0
@@ -211,6 +235,7 @@ class SamplingParams(
         "presence_penalty": 0.0,
         "frequency_penalty": 0.0,
         "repetition_penalty": 1.0,
+        "no_repeat_ngram_size": 0,
         "temperature": 1.0,
         "dynatemp_min": 0.0,
         "dynatemp_max": 0.0,
@@ -246,6 +271,10 @@ class SamplingParams(
         "xtc_threshold": 0.1,
         "xtc_probability": 0,
         "nsigma": 0.0,
+        "dry_multiplier": 0.0,
+        "dry_base": 1.75,
+        "dry_allowed_length": 2,
+        "dry_sequence_breaker_ids": [],
     }
 
     def __post_init__(self) -> None:
@@ -379,7 +408,18 @@ class SamplingParams(
             raise ValueError(
                 "nsigma must be non-negative, got "
                 f"{self.nsigma}.")
-            
+        if self.dry_multiplier < 0.0:
+            raise ValueError(
+                "dry_multiplier must be non-negative, got "
+                f"{self.dry_multiplier}.")
+        if self.dry_base <= 1.0:
+            raise ValueError(
+                "dry_base must be greater than 1, got "
+                f"{self.dry_base}.")
+        if self.dry_allowed_length < 0:
+            raise ValueError(
+                "dry_allowed_length must be non-negative, got "
+                f"{self.dry_allowed_length}.")    
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:
