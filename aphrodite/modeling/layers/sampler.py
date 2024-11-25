@@ -86,7 +86,7 @@ class Sampler(nn.Module):
         (sampling_tensors, do_penalties, do_no_repeat_ngrams, do_temperatures,
          do_top_p_top_k, do_top_as, do_min_p, do_tfss, do_eta_cutoffs,
          do_epsilon_cutoffs, do_typical_ps, do_quadratic, do_xtc, do_nsigmas,
-         do_dry, do_temp_last
+         do_dry, do_skew, do_temp_last
          ) = SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype)
 
@@ -105,6 +105,7 @@ class Sampler(nn.Module):
         self._do_xtc = do_xtc
         self._do_nsgimas = do_nsigmas
         self._do_dry = do_dry
+        self._do_skew = do_skew
         self._do_temp_last = do_temp_last
 
     def forward(
@@ -146,6 +147,7 @@ class Sampler(nn.Module):
         do_xtc = self._do_xtc
         do_nsigmas = self._do_nsgimas
         do_dry = self._do_dry
+        do_skew = self._do_skew
         do_temp_last = self._do_temp_last
 
         logits = _apply_min_tokens_penalty(logits, sampling_metadata)
@@ -230,6 +232,17 @@ class Sampler(nn.Module):
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
         probs = torch.softmax(logits, dim=-1, dtype=torch.float)
+
+        # skew needs to be applied post-softmax
+        if do_skew:
+            # reference: https://github.com/turboderp/exllamav2/commit/1de4cdd70b09208e7b4f17ee322c190e16f60efd
+            cum_probs = torch.cumsum(probs, dim=-1)
+            cum_probs = torch.pow(cum_probs, torch.exp(
+                sampling_tensors.skews).unsqueeze(dim=1))
+            probs = torch.diff(cum_probs, dim=-1,
+                               prepend=torch.zeros_like(cum_probs[..., :1]))
+            logits = torch.log(probs)
+
         # Compute the log probabilities.
         logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
 
