@@ -1,4 +1,5 @@
 from typing import List
+
 from aphrodite import LLM, SamplingParams
 from aphrodite.inputs import PromptInputs
 
@@ -16,7 +17,7 @@ prompt_pairs = [
     },
     {
         "prompt": "The president of the United States is",
-        "negative_prompt": "I don't know anything about US politics or leadership"
+        "negative_prompt": "I don't know anything about US politics or leadership"  # noqa: E501
     },
 ]
 
@@ -25,7 +26,7 @@ tokenizer = llm.get_tokenizer()
 inputs: List[PromptInputs] = [
     {
         "prompt_token_ids": tokenizer.encode(text=pair["prompt"]),
-        "negative_prompt_token_ids": tokenizer.encode(text=pair["negative_prompt"])
+        "negative_prompt_token_ids": tokenizer.encode(text=pair["negative_prompt"])  # noqa: E501
     }
     for pair in prompt_pairs
 ]
