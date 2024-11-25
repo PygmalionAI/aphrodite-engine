@@ -851,6 +851,72 @@ def test_sampler_nsigma(seed: int, device: str):
             "Top-nsigma sampling is not deterministic with same seed"
 
 
+@pytest.mark.parametrize("seed", RANDOM_SEEDS)
+@pytest.mark.parametrize("device", CUDA_DEVICES)
+def test_sampler_skew(seed: int, device: str):
+    """Test that skew sampling behaves as expected."""
+    set_random_seed(seed)
+    torch.set_default_device(device)
+    batch_size = random.randint(1, 256)
+    _, fake_logits, sampler = _prepare_test(batch_size)
+
+    high_prob_tokens = {}
+    for i in range(batch_size):
+        # Make token i have a much higher logit in sequence i
+        fake_logits[i, i] = 10.0
+        high_prob_tokens[i] = i
+
+    test_cases = [
+        # (skew, expected_behavior)
+        (2.0, "high"),    # Strong bias towards high probability tokens
+        (-2.0, "low"),    # Strong bias towards low probability tokens
+        (0.0, "neutral"), # No bias (regular sampling)
+    ]
+
+    for skew, expected_behavior in test_cases:
+        sampling_params = SamplingParams(
+            temperature=1.0,  # Keep temperature neutral
+            skew=skew,
+            seed=random.randint(0, 10000),  # for determinism
+        )
+
+        sampler_output = _do_sample(batch_size, fake_logits.clone(), sampler,
+                                  sampling_params, device)
+
+        for batch_idx, sequence_output in enumerate(sampler_output):
+            token_id = sequence_output.samples[0].output_token
+
+            if expected_behavior == "high":
+                assert token_id == high_prob_tokens[batch_idx], \
+                    f"With positive skew {skew}, expected high probability " \
+                    f"token {high_prob_tokens[batch_idx]} but got {token_id}"
+
+            elif expected_behavior == "low":
+                assert token_id != high_prob_tokens[batch_idx], \
+                    f"With negative skew {skew}, should not select high " \
+                    f"probability token {high_prob_tokens[batch_idx]}"
+
+        # determinism
+        second_output = _do_sample(batch_size, fake_logits.clone(), sampler,
+                                 sampling_params, device)
+        assert sampler_output == second_output, \
+            f"Skew sampling with seed is not deterministic for skew={skew}"
+
+    sampling_params = SamplingParams(
+        temperature=0.5,
+        skew=1.0,
+        seed=random.randint(0, 10000),
+    )
+
+    first_output = _do_sample(batch_size, fake_logits.clone(), sampler,
+                             sampling_params, device)
+    second_output = _do_sample(batch_size, fake_logits.clone(), sampler,
+                              sampling_params, device)
+
+    assert first_output == second_output, \
+        "Skew sampling with temperature is not deterministic"
+
+
 @pytest.mark.parametrize("device", CUDA_DEVICES)
 def test_sampler_include_gpu_probs_tensor(device: str):
     set_random_seed(42)
