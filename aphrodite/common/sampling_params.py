@@ -424,6 +424,10 @@ class SamplingParams(
             raise ValueError(
                 "dry_allowed_length must be non-negative, got "
                 f"{self.dry_allowed_length}.")
+        if self.skew < 0.0:
+            raise ValueError(
+                "skew must be non-negative, got "
+                f"{self.skew}.")
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:
