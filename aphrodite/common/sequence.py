@@ -330,6 +330,7 @@ class Sequence:
         lora_request: Optional[LoRARequest] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         from_decoder_prompt: bool = True,
+        from_negative_prompt: bool = False,
     ) -> None:
         self.seq_id = seq_id
         self.inputs = inputs
@@ -338,6 +339,7 @@ class Sequence:
         self.lora_request = lora_request
         self.prompt_adapter_request = prompt_adapter_request
         self.from_decoder_prompt = from_decoder_prompt
+        self.from_negative_prompt = from_negative_prompt
         self._prompt: Optional[str] = None
         self._prompt_token_ids: Optional[List[int]] = None
 
@@ -395,8 +397,12 @@ class Sequence:
 
         # Select decoder or encoder input prompt str,
         # as appropriate
-        prompt_key: str = ("prompt"
-                           if self.from_decoder_prompt else "encoder_prompt")
+        prompt_key: str = "prompt"
+        if not self.from_decoder_prompt:
+            prompt_key = "encoder_prompt"
+        if self.from_negative_prompt:
+            assert self.from_decoder_prompt is True
+            prompt_key = "negative_prompt"
 
         # Cache prompt
         self._prompt = cast(Optional[str], self.inputs.get(prompt_key))
@@ -410,9 +416,12 @@ class Sequence:
 
         # Select decoder or encoder input prompt
         # token ids, as appropriate
-        prompt_token_ids_key: str = ("prompt_token_ids"
-                                     if self.from_decoder_prompt else
-                                     "encoder_prompt_token_ids")
+        prompt_token_ids_key: str = "prompt_token_ids"
+        if not self.from_decoder_prompt:
+            "encoder_prompt_token_ids"
+        if self.from_negative_prompt:
+            assert self.from_decoder_prompt is True
+            prompt_token_ids_key = "negative_prompt_token_ids"
 
         # Cache computed prompt token ids
         self._prompt_token_ids = cast(List[int],
@@ -476,6 +485,9 @@ class Sequence:
     def get_token_ids(self) -> List[int]:
         return self.data.get_token_ids()
 
+    def get_negative_token_ids(self) -> List[int]:
+        return self.data.get_negative_token_ids()
+
     def get_prompt_token_ids(self) -> Tuple[int, ...]:
         return self.data.get_prompt_token_ids()
 
@@ -532,7 +544,8 @@ class Sequence:
     def __repr__(self) -> str:
         return (f"Sequence(seq_id={self.seq_id}, "
                 f"status={self.status.name}, "
-                f"num_blocks={self.n_blocks}, ")
+                f"num_blocks={self.n_blocks}, "
+                f"data={self.data})")
 
 
 class SequenceGroupState(
@@ -576,6 +589,7 @@ class SequenceGroup:
         embeddings: Optional[List[float]] = None,
         pooling_params: Optional[PoolingParams] = None,
         encoder_seq: Optional[Sequence] = None,
+        negative_seq: Optional[Sequence] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
     ) -> None:
         self.request_id = request_id
@@ -595,6 +609,9 @@ class SequenceGroup:
         self.pooling_params = pooling_params
         self.prompt_adapter_request = prompt_adapter_request
         self.encoder_seq = encoder_seq
+
+        assert self.is_single_seq is True
+        self.negative_seq = negative_seq
 
     @property
     def prompt(self) -> Optional[str]:
@@ -623,6 +640,22 @@ class SequenceGroup:
         # distinct from the decoder's.
         return (self.encoder_seq.prompt_token_ids
                 if self.encoder_seq is not None else None)
+
+    @property
+    def negative_prompt(self) -> Optional[str]:
+        # There are either 0 or 1 negative sequences
+        # We use the prompt of an arbitrary sequence.
+        assert self.is_single_seq is True
+        return (self.negative_seq.prompt
+                if self.negative_seq is not None else None)
+
+    @property
+    def negative_prompt_token_ids(self) -> List[int]:
+        # All sequences in the group should have the same prompt.
+        # We use the prompt of an arbitrary sequence.
+        assert self.is_single_seq is True
+        return (self.negative_seq.prompt_token_ids
+                if self.negative_seq is not None else None)
 
     @property
     def multi_modal_data(self) -> "MultiModalDataDict":
@@ -722,6 +755,12 @@ class SequenceGroup:
 
     def get_encoder_seq(self) -> Optional[Sequence]:
         return self.encoder_seq
+
+    def has_negative_prompt(self) -> bool:
+        return self.negative_seq is not None
+
+    def get_negative_seq(self) -> Optional[Sequence]:
+        return self.negative_seq
 
     def get_unfinished_seqs(self) -> List[Sequence]:
         if self.is_single_seq:
@@ -921,6 +960,8 @@ class SequenceGroupMetadata(
     multi_modal_data: Optional[Any] = None
     encoder_seq_data: Optional[SequenceData] = None
     cross_block_table: Optional[List[int]] = None
+    negative_seq_data: Optional[SequenceData] = None
+    negative_block_table: Optional[List[int]] = None
     prompt_adapter_request: Optional[PromptAdapterRequest] = None
     token_chunk_size: Optional[int] = None
 

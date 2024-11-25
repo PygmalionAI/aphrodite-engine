@@ -441,6 +441,7 @@ class Scheduler:
                     self.free_seq(seq)
 
                 self._free_seq_group_cross_attn_blocks(aborted_group)
+                self._free_seq_group_negative_blocks(aborted_group)
 
     def _free_seq_group_cross_attn_blocks(
         self,
@@ -452,6 +453,13 @@ class Scheduler:
         """
         if seq_group.is_encoder_decoder():
             self.block_manager.free_cross(seq_group)
+
+    def _free_seq_group_negative_blocks(
+        self,
+        seq_group: SequenceGroup,
+    ) -> None:
+        if seq_group.has_negative_prompt():
+            self.block_manager.free_negative(seq_group)
 
     def has_unfinished_seqs(self) -> bool:
         return len(self.waiting) != 0 or len(self.running) != 0 or len(
@@ -1036,7 +1044,8 @@ class Scheduler:
 
         return self.block_manager.can_append_slots(
             seq_group=seq_group,
-            num_lookahead_slots=self._get_num_lookahead_slots(is_prefill),
+            num_lookahead_slots=self._get_num_lookahead_slots(
+                is_prefill, seq_group),
         )
 
     def schedule(self) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs]:
@@ -1072,6 +1081,14 @@ class Scheduler:
             else:
                 encoder_seq_data = None
                 cross_block_table = None
+
+            if seq_group.has_negative_prompt():
+                negative_seq_data = seq_group.get_negative_seq().data
+                negative_block_table = (
+                    self.block_manager.get_negative_block_table(seq_group))
+            else:
+                negative_seq_data = None
+                negative_block_table = None
 
             for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
                 seq_id = seq.seq_id
@@ -1120,6 +1137,8 @@ class Scheduler:
                     computed_block_nums=common_computed_block_nums,
                     encoder_seq_data=encoder_seq_data,
                     cross_block_table=cross_block_table,
+                    negative_seq_data=negative_seq_data,
+                    negative_block_table=negative_block_table,
                     state=seq_group.state,
                     # `multi_modal_data` will only be present for the 1st comm
                     # between engine and worker.
@@ -1169,6 +1188,7 @@ class Scheduler:
             if seq_group.is_finished():
                 # Free cross-attention block table, if it exists
                 self._free_seq_group_cross_attn_blocks(seq_group)
+                self._free_seq_group_negative_blocks(seq_group)
                 # Add the finished requests to the finished requests list.
                 # This list will be used to update the Mamba cache in the
                 # next step.
@@ -1198,11 +1218,14 @@ class Scheduler:
                 the new source and destination block indices for the appended
                 slots.
         """
-        num_lookahead_slots = self._get_num_lookahead_slots(is_prefill=False)
+        num_lookahead_slots = self._get_num_lookahead_slots(
+            is_prefill=False, seq_group=seq_group)
         seq_group.init_multi_step(num_scheduler_steps=num_lookahead_slots + 1)
 
         for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
-            cows = self.block_manager.append_slots(seq, num_lookahead_slots)
+            cows = self.block_manager.append_slots(seq, num_lookahead_slots,
+                                                   seq_group)
+            assert len(cows) == 0
             if len(cows) > 0:
                 blocks_to_copy.extend(cows)
 
@@ -1313,7 +1336,9 @@ class Scheduler:
             passed_delay = True
         return passed_delay
 
-    def _get_num_lookahead_slots(self, is_prefill: bool) -> int:
+    def _get_num_lookahead_slots(self, is_prefill: bool,
+                                 seq_group: Optional[SequenceGroup] = None
+                                 ) -> int:
         """The number of slots to allocate per sequence per step, beyond known
         token ids. Speculative decoding uses these slots to store KV activations
         of tokens which may or may not be accepted.

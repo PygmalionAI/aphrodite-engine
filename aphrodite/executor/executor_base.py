@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional, Set, Tuple
 
-from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
-                                     LoRAConfig, ModelConfig, ParallelConfig,
-                                     PromptAdapterConfig, SchedulerConfig,
-                                     SpeculativeConfig)
+from aphrodite.common.config import (CacheConfig, CFGConfig, DeviceConfig,
+                                     LoadConfig, LoRAConfig, ModelConfig,
+                                     ParallelConfig, PromptAdapterConfig,
+                                     SchedulerConfig, SpeculativeConfig)
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.lora.request import LoRARequest
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
@@ -31,6 +31,7 @@ class ExecutorBase(ABC):
         lora_config: Optional[LoRAConfig],
         speculative_config: Optional[SpeculativeConfig],
         prompt_adapter_config: Optional[PromptAdapterConfig],
+        cfg_config: Optional[CFGConfig],
     ) -> None:
         self.model_config = model_config
         self.cache_config = cache_config
@@ -41,6 +42,7 @@ class ExecutorBase(ABC):
         self.device_config = device_config
         self.speculative_config = speculative_config
         self.prompt_adapter_config = prompt_adapter_config
+        self.cfg_config = cfg_config
 
         self._init_executor()
 

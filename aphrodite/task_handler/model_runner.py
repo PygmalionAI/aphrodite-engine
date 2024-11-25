@@ -979,6 +979,9 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
     def get_model_memory_usage(self):
         return self.model_memory_usage
 
+    def share_model(self, model: nn.Module) -> None:
+        self.model = model
+
     def save_sharded_state(
         self,
         path: str,

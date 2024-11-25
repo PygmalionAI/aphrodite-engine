@@ -57,6 +57,7 @@ class GPUExecutor(ExecutorBase):
             lora_config=self.lora_config,
             speculative_config=self.speculative_config,
             prompt_adapter_config=self.prompt_adapter_config,
+            cfg_config=self.cfg_config,
             is_driver_worker=(not self.parallel_config)
             or (rank % self.parallel_config.tensor_parallel_size == 0),
         )
@@ -76,6 +77,10 @@ class GPUExecutor(ExecutorBase):
             worker_kwargs.update(
                 worker_module_name="aphrodite.spec_decode.spec_decode_worker",
                 worker_class_name="create_spec_worker")
+        elif self.cfg_config:
+            worker_kwargs.update(
+                worker_module_name="aphrodite.cfg.cfg_worker",
+                worker_class_name="create_cfg_worker")
         else:
             worker_kwargs.update(
                 worker_module_name="aphrodite.task_handler.worker",

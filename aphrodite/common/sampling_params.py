@@ -175,6 +175,7 @@ class SamplingParams(
             Defaults to None.
         skew: Bias the token selection towards higher or lower probability
             tokens. Defaults to 0 (disabled).
+        guidance_scale: The scale of CFG guidance to apply.
     """
 
     n: int = 1
@@ -227,6 +228,7 @@ class SamplingParams(
     dry_allowed_length: int = 2
     dry_sequence_breaker_ids: List[int] = []
     skew: float = 0.0
+    guidance_scale: Optional[float] = None
     # The below fields are not supposed to be used as an input.
     # They are set in post_init.
     output_text_buffer_length: int = 0
@@ -279,6 +281,7 @@ class SamplingParams(
         "dry_allowed_length": 2,
         "dry_sequence_breaker_ids": [],
         "skew": 0.0,
+        "guidance_scale": None,
     }
 
     def __post_init__(self) -> None:
