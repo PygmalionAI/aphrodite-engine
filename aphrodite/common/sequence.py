@@ -50,16 +50,17 @@ class SequenceStatus(enum.IntEnum):
     WAITING = 0
     RUNNING = 1
     SWAPPED = 2
-    # Note: anything after SWAPPED (2) will be considered
+    BUFFERING = 3
+    # Note: anything after BUFFERING (3) will be considered
     # as a finished status.
-    FINISHED_STOPPED = 3
-    FINISHED_LENGTH_CAPPED = 4
-    FINISHED_ABORTED = 5
-    FINISHED_IGNORED = 6
+    FINISHED_STOPPED = 4
+    FINISHED_LENGTH_CAPPED = 5
+    FINISHED_ABORTED = 6
+    FINISHED_IGNORED = 7
 
     @staticmethod
     def is_finished(status: "SequenceStatus") -> bool:
-        return status > SequenceStatus.SWAPPED
+        return status > SequenceStatus.BUFFERING
 
     @staticmethod
     def get_finished_reason(status: "SequenceStatus") -> Union[str, None]:
@@ -147,6 +148,8 @@ class SequenceData(msgspec.Struct,
 
     _new_appended_tokens: List[int] = msgspec.field(default_factory=list)
 
+    _status: SequenceStatus = SequenceStatus.BUFFERING
+
     def __post_init__(self) -> None:
         assert self._prompt_token_ids.typecode == "l"
         assert self._output_token_ids.typecode == "l"
@@ -159,6 +162,15 @@ class SequenceData(msgspec.Struct,
         assert isinstance(self._prompt_token_ids, array)
         self._cached_all_token_ids: List[int] = list(self._prompt_token_ids +
                                                      self._output_token_ids)
+    
+    def pop_token(self) -> None:
+        if len(self._output_token_ids) > 0:
+            tokens = self._get_mutable_output_tokens()
+            tokens.pop()
+            self._output_token_ids = array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
+                                           tokens)
+            self._update_cached_all_tokens()
+            self._num_computed_tokens = max(0, self._num_computed_tokens - 1)
 
     @property
     def cumulative_logprob(self) -> float:
@@ -202,12 +214,18 @@ class SequenceData(msgspec.Struct,
         """
         assert isinstance(self._output_token_ids, array)
         return self._output_token_ids
+    
+    def _get_mutable_output_tokens(self) -> List[int]:
+        return list(self._output_token_ids)
 
     def append_token_id(self, token_id: int, logprob: float) -> None:
         self._output_token_ids.append(token_id)
         self._new_appended_tokens.append(token_id)
         self._cached_all_token_ids.append(token_id)
         self._cumulative_logprob += logprob
+
+    def is_buffering(self) -> bool:
+        return self._status == SequenceStatus.BUFFERING
 
     def get_len(self) -> int:
         return len(self._output_token_ids) + len(self._prompt_token_ids)
@@ -238,9 +256,15 @@ class SequenceData(msgspec.Struct,
 
     def update_num_computed_tokens(self, num_new_computed_tokens: int):
         """Update number of tokens computed so far."""
-        self._num_computed_tokens += num_new_computed_tokens
-        assert self._num_computed_tokens <= self.get_len(), (
-            self._num_computed_tokens, self.get_len())
+        if self.stage == SequenceStage.PREFILL:
+            self._num_computed_tokens = num_new_computed_tokens
+        else:
+            # Don't increment counter for buffered tokens
+            if not self.is_buffering:
+                self._num_computed_tokens += num_new_computed_tokens
+
+        # Ensure we don't exceed sequence length
+        self._num_computed_tokens = min(self._num_computed_tokens, self.get_len())
         # If all tokens are computed, it means it is in decoding phase.
         if self.get_num_uncomputed_tokens() == 0:
             self._stage = SequenceStage.DECODE
@@ -290,6 +314,11 @@ class SequenceData(msgspec.Struct,
     @property
     def stage(self) -> SequenceStage:
         return self._stage
+    
+    def resest_state_for_recompute(self) -> None:
+        self._num_computed_tokens = 0
+        self._stage = SequenceStage.PREFILL
+        self._new_appended_tokens = []
 
     def __repr__(self) -> str:
         return (f"SequenceData("
@@ -458,11 +487,21 @@ class Sequence:
     def append_token_id(
         self,
         token_id: int,
-        logprobs: Dict[int, Logprob],
+        logprobs: Optional[Dict[int, Logprob]],
     ) -> None:
-        assert token_id in logprobs
-        self.output_logprobs.append(logprobs)
-        self.data.append_token_id(token_id, logprobs[token_id].logprob)
+        """Modified to handle buffered tokens (which won't have logprobs)"""
+        if logprobs is not None:
+            assert token_id in logprobs
+            self.output_logprobs.append(logprobs)
+            self.data.append_token_id(token_id, logprobs[token_id].logprob)
+        else:
+            # For buffered tokens, we don't have logprobs
+            self.output_logprobs.append({})  # Empty logprobs for buffered token
+            self.data.append_token_id(token_id, 0.0)  # Use 0.0 as placeholder logprob  # noqa
+
+    def is_buffering(self) -> bool:
+        """Check if sequence is currently buffering tokens."""
+        return self.status == SequenceStatus.BUFFERING
 
     def get_len(self) -> int:
         return self.data.get_len()

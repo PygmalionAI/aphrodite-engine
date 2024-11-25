@@ -433,6 +433,7 @@ class CompletionRequest(OpenAIBaseModel):
     dynatemp_exponent: Optional[float] = 1.0
     nsigma: Optional[float] = 0.0
     custom_token_bans: Optional[List[int]] = None
+    banned_strings: Optional[Union[str, List[str]]] = None
     # doc: end-completion-sampling-params
 
     # doc: begin-completion-extra-params
@@ -501,6 +502,18 @@ class CompletionRequest(OpenAIBaseModel):
                 token_id = tokenizer.encode(f'a{s}')[-1]
                 dry_sequence_breaker_ids.append(token_id)
 
+        banned_sequences = []
+        if self.banned_strings:
+            # Handle both single string and list of strings
+            banned_strings = (
+                [self.banned_strings] if isinstance(self.banned_strings, str)
+                else self.banned_strings
+            )
+            for s in banned_strings:
+                # Tokenize each banned string into a list of token IDs
+                token_ids = tokenizer.encode(s, add_special_tokens=False)
+                banned_sequences.append(token_ids)
+
         return SamplingParams(
             n=self.n,
             best_of=self.best_of,
@@ -548,6 +561,7 @@ class CompletionRequest(OpenAIBaseModel):
             dynatemp_exponent=self.dynatemp_exponent,
             nsigma=self.nsigma,
             custom_token_bans=self.custom_token_bans,
+            banned_strings=banned_sequences,
         )
 
     @model_validator(mode="before")
@@ -605,6 +619,27 @@ class CompletionRequest(OpenAIBaseModel):
                     "JSON string representing a list of strings"
                 )
         
+        return data
+    
+    @model_validator(mode='before')
+    @classmethod
+    def validate_banned_strings(cls, data):
+        if 'banned_strings' in data and data['banned_strings'] is not None:
+            banned = data['banned_strings']
+            if isinstance(banned, str):
+                # Single string is fine
+                return data
+
+            if not isinstance(banned, list):
+                raise ValueError(
+                    "banned_strings must be a string or list of strings"
+                )
+
+            if not all(isinstance(x, str) for x in banned):
+                raise ValueError(
+                    "All elements in banned_strings must be strings"
+                )
+
         return data
 
 
