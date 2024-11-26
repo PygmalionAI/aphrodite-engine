@@ -24,21 +24,23 @@ class SamplingType(IntEnum):
     BEAM = 3
 
 class SamplerID(IntEnum):
-    DRY = 1 
-    PENALTIES = 2
-    NO_REPEAT_NGRAM = 3
-    TEMPERATURE = 4
-    TOP_NSIGMA = 5
-    TOP_P_TOP_K = 6
-    TOP_A = 7
-    MIN_P = 8
-    TFS = 9
+    # Mirror these in aphrodite/modeling/layers/sampler.py
+    # Values out of order to keep backwards compatibility
+    # with Koboldcpp values
+    DRY = 7
+    PENALTIES = 6
+    NO_REPEAT_NGRAM = 8
+    TEMPERATURE = 5
+    TOP_NSIGMA = 9
+    TOP_P_TOP_K = 0
+    TOP_A = 1
+    MIN_P = 2
+    TFS = 3
     ETA_CUTOFF = 10
     EPSILON_CUTOFF = 11
-    TYPICAL_P = 12
-    QUADRATIC = 13
-    XTC = 14
-    TOKEN_BAN = 15
+    TYPICAL_P = 4
+    QUADRATIC = 12
+    XTC = 13
 
 
 LogitsProcessorFunc = Union[Callable[[List[int], torch.Tensor], torch.Tensor],
