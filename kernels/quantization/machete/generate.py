@@ -57,7 +57,7 @@ torch::Tensor GemmDispatcher_::dispatch(PyTorchArguments args) {
   {% for s in schedules %}
   if (*args.schedule == "{{ gen_sch_name(s) }}") {
     return impl_{{ type_name }}_sch_{{ gen_sch_name(s) }}(args);
-  }v
+  }
   {% endfor %}
   TORCH_CHECK_NOT_IMPLEMENTED(false, "machete_gemm(..) is not implemented for "
                                      "schedule = ", *args.schedule);
