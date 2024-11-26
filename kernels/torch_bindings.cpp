@@ -162,7 +162,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.def("fp8_marlin_gemm", &fp8_marlin_gemm);
   ops.impl("fp8_marlin_gemm", torch::kCUDA, &fp8_marlin_gemm);
 
-  #ifndef _WIN32
+#ifndef _WIN32
   // marlin_qqq_gemm for QQQ.
   ops.def("marlin_qqq_gemm", &marlin_qqq_gemm);
   ops.impl("marlin_qqq_gemm", torch::kCUDA, &marlin_qqq_gemm);
@@ -189,7 +189,22 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "                  Tensor b_scales, Tensor azp_adj,"
       "                  Tensor? azp, Tensor? bias) -> ()");
   ops.impl("cutlass_scaled_mm_azp", torch::kCUDA, &cutlass_scaled_mm_azp);
-  #endif
+
+  // Machete (Dense) Optimized Mixed Precision GEMM for Hopper.
+  ops.def("machete_supported_schedules", &machete::supported_schedules);
+  ops.def(
+      "machete_gemm(Tensor A, Tensor B,"
+      "             __torch__.torch.classes._core_C.ScalarType btype,"
+      "             Tensor? scales, Tensor? zeros, int? group_size,"
+      "             Tensor? C, float? alpha, float? beta, str? schedule)"
+      "-> Tensor");
+  ops.impl("machete_gemm", torch::kCUDA, &machete::gemm);
+  ops.def(
+      "machete_prepack_B(Tensor B,"
+      "                  __torch__.torch.classes._core_C.ScalarType btype)"
+      "-> Tensor");
+  ops.impl("machete_prepack_B", torch::kCUDA, &machete::prepack_B);
+#endif
 
   // QuIP# GEMV
   ops.def("quip_gemv", &e8p_mm_origorder);
