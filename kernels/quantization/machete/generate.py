@@ -7,14 +7,17 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
 
 import jinja2
-
 # yapf conflicts with isort for this block
 # yapf: disable
-from aphrodite_cutlass_library_extension import (
-    APHRODITEDataType, APHRODITEDataTypeNames, APHRODITEDataTypeTag,
-    APHRODITEKernelScheduleTag, DataType, EpilogueScheduleTag,
-    EpilogueScheduleType, MixedInputKernelScheduleType, TileSchedulerTag,
-    TileSchedulerType)
+from aphrodite_cutlass_library_extension import (APHRODITEDataType,
+                                                 APHRODITEDataTypeNames,
+                                                 APHRODITEDataTypeTag,
+                                                 APHRODITEKernelScheduleTag,
+                                                 DataType, EpilogueScheduleTag,
+                                                 EpilogueScheduleType,
+                                                 MixedInputKernelScheduleType,
+                                                 TileSchedulerTag,
+                                                 TileSchedulerType)
 
 # yapf: enable
 

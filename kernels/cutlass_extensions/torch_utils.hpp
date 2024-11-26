@@ -15,7 +15,8 @@ namespace cute {
 namespace detail {
 
 template <class T, class F, class G, int... I>
-CUTE_HOST_DEVICE constexpr auto tapply_with_idx(T&& t, F&& f, G&& g, seq<I...>) {
+CUTE_HOST_DEVICE constexpr auto tapply_with_idx(T&& t, F&& f, G&& g,
+                                                seq<I...>) {
   return g(f(cute::get<I>(static_cast<T&&>(t)), I)...);
 }
 
@@ -30,8 +31,8 @@ template <class T, class F>
 CUTE_HOST_DEVICE constexpr auto transform_with_idx(T const& t, F&& f) {
   if constexpr (cute::is_tuple<T>::value) {
     return detail::tapply_with_idx(
-      t, f, [](auto const&... a) { return cute::make_tuple(a...); },
-      tuple_seq<T>{});
+        t, f, [](auto const&... a) { return cute::make_tuple(a...); },
+        tuple_seq<T>{});
   } else {
     return f(t);
   }
@@ -45,41 +46,39 @@ CUTE_HOST_DEVICE constexpr auto make_shape_from_idx(F&& f) {
   return detail::make_shape_from_idx(f, make_seq<N>{});
 }
 
-}  // namespace cute
+};  // namespace cute
 
-
-/*
-
-Make a layout from a tensor with `rank(Stride{})`, where the shape is the
-shape of the passed in tensor and the strides are of type `Stride` and
-contain the strides of the passed in tensor, checking that any static
-strides in `Stride{}` match the strides of the passed in tensor.
-If `tensor.dim() < rank(Stride{})`, the shape is padded with 1s and
-the extra strides are set to be 0 or 1.
-
-*/
+// Make a layout from a tensor with `rank(Stride{})`, where the shape is the
+// shape of the passed in tensor and the strides are of type `Stride` and
+// contain the strides of the passed in tensor, checking that any static strides
+// in `Stride{}` match the strides of the passed in tensor.
+// If `tensor.dim() < rank(Stride{})`, the shape is padded with 1s and the extra
+// strides are set to be 0 or 1.
 template <typename Stride>
 static inline auto make_cute_layout(torch::Tensor const& tensor,
                                     std::string_view name = "tensor") {
   TORCH_CHECK(tensor.dim() <= rank(Stride{}));
   auto stride = cute::transform_with_idx(
-    Stride{}, [&](auto const& stride_ele, auto const& idx) {
-      using StrideEle = std::decay_t<decltype(stride_ele)>;
-      if (idx < tensor.dim()) {
-        if constexpr (cute::is_static_v<StrideEle>) {
-          TORCH_CHECK(StrideEle::value == tensor.stride(idx), "Expected ",
-                      name, ".stride(", idx, ") to be", StrideEle::value);
-          return StrideEle{};
+      Stride{}, [&](auto const& stride_ele, auto const& idx) {
+        using StrideEle = std::decay_t<decltype(stride_ele)>;
+
+        if (idx < tensor.dim()) {
+          if constexpr (cute::is_static_v<StrideEle>) {
+            TORCH_CHECK(StrideEle::value == tensor.stride(idx), "Expected ",
+                        name, ".stride(", idx, ") to be ", StrideEle::value);
+            return StrideEle{};
+          } else {
+            return tensor.stride(idx);
+          }
         } else {
-          return tensor.stride(idx);
+          // Extra strides are assumed to be 0 or 1
+          if constexpr (cute::is_static_v<StrideEle>) {
+            static_assert(StrideEle::value == 0 || StrideEle::value == 1);
+          }
+          return StrideEle{};
         }
-      } else {
-        if constexpr (cute::is_static_v<StrideEle>) {
-          static_assert(StrideEle::value == 0 || StrideEle::value == 1);
-        }
-        return StrideEle{};
-      }
-    });
+      });
+
   auto shape = cute::make_shape_from_idx<rank(Stride{})>([&](auto const& idx) {
     if (idx < tensor.dim())
       return tensor.size(idx);
@@ -87,13 +86,13 @@ static inline auto make_cute_layout(torch::Tensor const& tensor,
       return int64_t(1);
   });
 
-  return make_layout(shape, stride); 
+  return make_layout(shape, stride);
 }
 
 template <typename Stride>
 static inline auto maybe_make_cute_layout(
-  c10::optional<torch::Tensor> const& tensor,
-  std::string_view name = "tensor") {
+    c10::optional<torch::Tensor> const& tensor,
+    std::string_view name = "tensor") {
   using Layout = decltype(make_cute_layout<Stride>(*tensor));
 
   if (tensor) {
@@ -102,6 +101,10 @@ static inline auto maybe_make_cute_layout(
     return std::optional<Layout>{};
   }
 }
+
+//
+//  Torch Type to Cutlass Type (equivalent_cutlass_type)
+//
 
 template <typename T>
 struct equivalent_cutlass_type {
@@ -121,6 +124,12 @@ struct equivalent_cutlass_type<c10::BFloat16> {
   using type = cutlass::bfloat16_t;
 };
 
+//
+// equivalent_scalar_t (basically inverse of equivalent_cutlass_type)
+//
+
+// Return a `c10::CppTypeToScalarType<T>` compatible type, i.e. get the C++ from
+// c10 that is equivalent to T, e.g.: `cutlass::half_t -> c10::Half`
 template <typename T>
 struct equivalent_scalar_type {
   using type = T;
@@ -139,6 +148,7 @@ struct equivalent_scalar_type<cutlass::bfloat16_t> {
   using type = c10::BFloat16;
 };
 
+// get equivalent c10::ScalarType tag from compile time type
 template <typename T>
 static inline constexpr c10::ScalarType equivalent_scalar_type_v =
-  c10::CppTypeToScalarType<equivalent_scalar_type_t<T>>::value;
+    c10::CppTypeToScalarType<equivalent_scalar_type_t<T>>::value;
