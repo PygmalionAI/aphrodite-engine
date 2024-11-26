@@ -24,7 +24,6 @@ class SamplingType(IntEnum):
     BEAM = 3
 
 class SamplerID(IntEnum):
-    MIN_TOKENS = 0
     DRY = 1 
     PENALTIES = 2
     NO_REPEAT_NGRAM = 3
@@ -247,7 +246,7 @@ class SamplingParams(
     dry_allowed_length: int = 2
     dry_sequence_breaker_ids: List[int] = []
     skew: float = 0.0
-    sampler_priority: Optional[List[int]] = None
+    sampler_priority: Optional[List[int]] = []
     # The below fields are not supposed to be used as an input.
     # They are set in post_init.
     output_text_buffer_length: int = 0
@@ -452,6 +451,10 @@ class SamplingParams(
                 f"{self.skew}.")
         
         if self.sampler_priority is not None:
+            if not self.sampler_priority:
+                self.sampler_priority = None
+                return
+
             if not isinstance(self.sampler_priority, list):
                 raise ValueError("sampler_priority must be a list of integers")
             try:

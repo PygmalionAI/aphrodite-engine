@@ -39,7 +39,6 @@ APHRODITE_USE_SAMPLING_KERNELS = bool(int(
 
 
 class SamplerID(IntEnum):
-    MIN_TOKENS = 0
     DRY = 1 
     PENALTIES = 2
     NO_REPEAT_NGRAM = 3
@@ -171,6 +170,8 @@ class Sampler(nn.Module):
         do_skew = self._do_skew
         do_temp_last = self._do_temp_last
 
+        logits = _apply_min_tokens_penalty(logits, sampling_metadata)
+
         sampler_order = None
         if sampling_metadata.seq_groups:
             sampler_order = sampling_metadata.seq_groups[
@@ -193,10 +194,36 @@ class Sampler(nn.Module):
                 if sampler_id == SamplerID.XTC and do_temp_last:
                     sampler_order.append(SamplerID.TEMPERATURE)
 
+        if sampling_metadata.seq_groups and sampling_metadata.seq_groups[
+            0].is_prompt:
+            logger.debug("Sampler execution order: ")
+            for i, sampler_id in enumerate(sampler_order, 1):
+                logger.debug(f"{i}. {SamplerID(sampler_id).name}")
+
+            enabled_samplers = []
+            # ruff: noqa: E701
+            if do_penalties: enabled_samplers.append("PENALTIES")
+            if do_no_repeat_ngrams: enabled_samplers.append("NO_REPEAT_NGRAM")
+            if do_temperatures: enabled_samplers.append("TEMPERATURE")
+            if do_top_p_top_k: enabled_samplers.append("TOP_P_TOP_K")
+            if do_top_as: enabled_samplers.append("TOP_A")
+            if do_min_p: enabled_samplers.append("MIN_P")
+            if do_tfss: enabled_samplers.append("TFS")
+            if do_eta_cutoffs: enabled_samplers.append("ETA_CUTOFF")
+            if do_epsilon_cutoffs: enabled_samplers.append("EPSILON_CUTOFF")
+            if do_typical_ps: enabled_samplers.append("TYPICAL_P")
+            if do_quadratic: enabled_samplers.append("QUADRATIC")
+            if do_xtc: enabled_samplers.append("XTC")
+            if do_nsigmas: enabled_samplers.append("TOP_NSIGMA")
+            if do_dry: enabled_samplers.append("DRY")
+            if do_skew: enabled_samplers.append("SKEW")
+            logger.debug(f"Enabled samplers: {', '.join(enabled_samplers)}")
+
         for sampler_id in sampler_order:
-            if sampler_id == SamplerID.MIN_TOKENS:
-                logits = _apply_min_tokens_penalty(
-                    logits, sampling_metadata)
+            if sampling_metadata.seq_groups and sampling_metadata.seq_groups[
+                0].is_prompt:
+                logger.debug(f"Applying sampler: {SamplerID(sampler_id).name}")
+
             elif sampler_id == SamplerID.DRY and do_dry:
                 logits = _apply_dry(
                     logits,

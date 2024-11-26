@@ -160,6 +160,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
     nsigma: Optional[float] = 0.0
     skew: Optional[float] = 0.0
     custom_token_bans: Optional[List[int]] = None
+    sampler_priority: Optional[List[int]] = []
     # doc: end-chat-completion-sampling-params
 
     # doc: begin-chat-completion-extra-params
@@ -317,6 +318,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
             nsigma=self.nsigma,
             skew=self.skew,
             custom_token_bans=self.custom_token_bans,
+            sampler_priority=self.sampler_priority,
         )
 
     @model_validator(mode='before')
@@ -436,7 +438,7 @@ class CompletionRequest(OpenAIBaseModel):
     nsigma: Optional[float] = 0.0
     skew: Optional[float] = 0.0
     custom_token_bans: Optional[List[int]] = None
-    sampler_priority: Optional[List[int]] = None
+    sampler_priority: Optional[List[int]] = []
     # doc: end-completion-sampling-params
 
     # doc: begin-completion-extra-params
