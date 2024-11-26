@@ -23,6 +23,24 @@ class SamplingType(IntEnum):
     RANDOM_SEED = 2
     BEAM = 3
 
+class SamplerID(IntEnum):
+    MIN_TOKENS = 0
+    DRY = 1 
+    PENALTIES = 2
+    NO_REPEAT_NGRAM = 3
+    TEMPERATURE = 4
+    TOP_NSIGMA = 5
+    TOP_P_TOP_K = 6
+    TOP_A = 7
+    MIN_P = 8
+    TFS = 9
+    ETA_CUTOFF = 10
+    EPSILON_CUTOFF = 11
+    TYPICAL_P = 12
+    QUADRATIC = 13
+    XTC = 14
+    TOKEN_BAN = 15
+
 
 LogitsProcessorFunc = Union[Callable[[List[int], torch.Tensor], torch.Tensor],
                             Callable[[List[int], List[int], torch.Tensor],
@@ -175,6 +193,8 @@ class SamplingParams(
             Defaults to None.
         skew: Bias the token selection towards higher or lower probability
             tokens. Defaults to 0 (disabled).
+        sampler_priority: A list of integers to control the order in which
+            samplers are applied.
     """
 
     n: int = 1
@@ -227,6 +247,8 @@ class SamplingParams(
     dry_allowed_length: int = 2
     dry_sequence_breaker_ids: List[int] = []
     skew: float = 0.0
+    sampler_priority: Optional[List[int]] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+                                             11, 12, 13 , 14, 15]
     # The below fields are not supposed to be used as an input.
     # They are set in post_init.
     output_text_buffer_length: int = 0
@@ -279,6 +301,8 @@ class SamplingParams(
         "dry_allowed_length": 2,
         "dry_sequence_breaker_ids": [],
         "skew": 0.0,
+        "sampler_priority": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+                             11, 12, 13 , 14, 15],
     }
 
     def __post_init__(self) -> None:
@@ -428,6 +452,17 @@ class SamplingParams(
             raise ValueError(
                 "skew must be non-negative, got "
                 f"{self.skew}.")
+        
+        if self.sampler_priority is not None:
+            if not isinstance(self.sampler_priority, list):
+                raise ValueError("sampler_priority must be a list of integers")
+
+            required_samplers = set(SamplerID)
+            provided_samplers = set(self.sampler_priority)
+            if not required_samplers.issubset(provided_samplers):
+                missing = required_samplers - provided_samplers
+                raise ValueError(f"Missing required samplers in priority list: "
+                                 f"{missing}")
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:

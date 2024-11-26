@@ -2,11 +2,13 @@
 import itertools
 import os
 import warnings
+from enum import IntEnum
 from math import inf
 from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
+from loguru import logger
 
 import aphrodite._custom_ops as ops
 from aphrodite.common.sampling_params import SamplingType
@@ -34,6 +36,25 @@ _TEMPERATURE_MINIMUM = 2e-5
 # of top-k and top-p
 APHRODITE_USE_SAMPLING_KERNELS = bool(int(
     os.getenv("APHRODITE_USE_SAMPLING_KERNELS", "0")))
+
+
+class SamplerID(IntEnum):
+    MIN_TOKENS = 0
+    DRY = 1 
+    PENALTIES = 2
+    NO_REPEAT_NGRAM = 3
+    TEMPERATURE = 4
+    TOP_NSIGMA = 5
+    TOP_P_TOP_K = 6
+    TOP_A = 7
+    MIN_P = 8
+    TFS = 9
+    ETA_CUTOFF = 10
+    EPSILON_CUTOFF = 11
+    TYPICAL_P = 12
+    QUADRATIC = 13
+    XTC = 14
+    TOKEN_BAN = 15
 
 
 class Sampler(nn.Module):
@@ -150,84 +171,110 @@ class Sampler(nn.Module):
         do_skew = self._do_skew
         do_temp_last = self._do_temp_last
 
-        logits = _apply_min_tokens_penalty(logits, sampling_metadata)
+        sampler_order = None
+        if sampling_metadata.seq_groups:
+            sampler_order = sampling_metadata.seq_groups[
+                0].sampling_params.sampler_priority
 
-        if do_dry:
-            logits = _apply_dry(
-                logits,
-                sampling_tensors.prompt_tokens,
-                sampling_tensors.dry_multipliers,
-                sampling_tensors.dry_bases, 
-                sampling_tensors.dry_allowed_lengths,
-                sampling_tensors.dry_sequence_breaker_ids
-            )
+            # Warn if both custom order and temp_last are specified
+            if sampler_order is not None and do_temp_last:
+                logger.warning(
+                    "Both sampler_priority and temperature_last=True "
+                    "were specified. Using custom sampler_priority order "
+                    "and ignoring temperature_last.")
 
-        # Apply presence and frequency penalties.
-        if do_penalties:
-            logits = _apply_penalties(logits, sampling_tensors.prompt_tokens,
-                                      sampling_tensors.output_tokens,
-                                      sampling_tensors.presence_penalties,
-                                      sampling_tensors.frequency_penalties,
-                                      sampling_tensors.repetition_penalties)
-        
-        if do_no_repeat_ngrams:
-            logits = _apply_no_repeat_ngram(
-                logits,
-                sampling_tensors.prompt_tokens,
-                sampling_tensors.no_repeat_ngram_sizes)
+        if sampler_order is None:
+            sampler_order = []
+            for sampler_id in SamplerID:
+                if sampler_id == SamplerID.TEMPERATURE and do_temp_last:
+                    continue
+                sampler_order.append(sampler_id)
 
-        # Apply temperature scaling if not doing temp_last.
-        if do_temperatures and not do_temp_last:
-            _apply_temperatures(logits, sampling_tensors.temperatures,
-                                sampling_tensors.dynatemp_mins,
-                                sampling_tensors.dynatemp_maxs,
-                                sampling_tensors.dynatemp_exps)
+                if sampler_id == SamplerID.XTC and do_temp_last:
+                    sampler_order.append(SamplerID.TEMPERATURE)
 
-        if do_nsigmas:
-            logits = _apply_top_nsigma(logits, sampling_tensors.nsigmas)
+        for sampler_id in sampler_order:
+            if sampler_id == SamplerID.MIN_TOKENS:
+                logits = _apply_min_tokens_penalty(
+                    logits, sampling_metadata)
+            elif sampler_id == SamplerID.DRY and do_dry:
+                logits = _apply_dry(
+                    logits,
+                    sampling_tensors.prompt_tokens,
+                    sampling_tensors.dry_multipliers,
+                    sampling_tensors.dry_bases, 
+                    sampling_tensors.dry_allowed_lengths,
+                    sampling_tensors.dry_sequence_breaker_ids)
 
-        if do_top_p_top_k and not APHRODITE_USE_SAMPLING_KERNELS:
-            logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
-                                        sampling_tensors.top_ks)
+            elif sampler_id == SamplerID.PENALTIES and do_penalties:
+                logits = _apply_penalties(
+                    logits, sampling_tensors.prompt_tokens,
+                    sampling_tensors.output_tokens,
+                    sampling_tensors.presence_penalties,
+                    sampling_tensors.frequency_penalties,
+                    sampling_tensors.repetition_penalties)
 
-        if do_top_as:
-            logits = _apply_top_a(logits, sampling_tensors.top_as)
+            elif sampler_id == SamplerID.NO_REPEAT_NGRAM and \
+                do_no_repeat_ngrams:
+                logits = _apply_no_repeat_ngram(
+                    logits,
+                    sampling_tensors.prompt_tokens,
+                    sampling_tensors.no_repeat_ngram_sizes)
 
-        if do_min_p:
-            logits = _apply_min_p(logits, sampling_tensors.min_ps)
+            elif sampler_id == SamplerID.TEMPERATURE and do_temperatures:
+                _apply_temperatures(
+                    logits, sampling_tensors.temperatures,
+                    sampling_tensors.dynatemp_mins,
+                    sampling_tensors.dynatemp_maxs,
+                    sampling_tensors.dynatemp_exps)
 
-        if do_tfss:
-            logits = _apply_tfs(logits, sampling_tensors.tfss)
+            elif sampler_id == SamplerID.TOP_NSIGMA and do_nsigmas:
+                logits = _apply_top_nsigma(
+                    logits, sampling_tensors.nsigmas)
 
-        if do_eta_cutoffs:
-            logits = _apply_eta_cutoff(logits, sampling_tensors.eta_cutoffs)
+            elif sampler_id == SamplerID.TOP_P_TOP_K and do_top_p_top_k and \
+                not APHRODITE_USE_SAMPLING_KERNELS:
+                logits = _apply_top_k_top_p(
+                    logits, sampling_tensors.top_ps,
+                    sampling_tensors.top_ks)
 
-        if do_epsilon_cutoffs:
-            logits = _apply_epsilon_cutoff(logits,
-                                           sampling_tensors.epsilon_cutoffs)
+            elif sampler_id == SamplerID.TOP_A and do_top_as:
+                logits = _apply_top_a(
+                    logits, sampling_tensors.top_as)
 
-        if do_typical_ps:
-            logits = _apply_typical_sampling(logits,
-                                             sampling_tensors.typical_ps)
+            elif sampler_id == SamplerID.MIN_P and do_min_p:
+                logits = _apply_min_p(
+                    logits, sampling_tensors.min_ps)
 
-        if do_quadratic:
-            logits = _apply_quadratic_sampling(
-                logits, sampling_tensors.smoothing_factors,
-                sampling_tensors.smoothing_curves)
+            elif sampler_id == SamplerID.TFS and do_tfss:
+                logits = _apply_tfs(
+                    logits, sampling_tensors.tfss)
 
-        if do_xtc:
-            logits = _apply_xtc_sampling(
-                logits, sampling_tensors.xtc_thresholds,
-                sampling_tensors.xtc_probabilities)
+            elif sampler_id == SamplerID.ETA_CUTOFF and do_eta_cutoffs:
+                logits = _apply_eta_cutoff(
+                    logits, sampling_tensors.eta_cutoffs)
 
-        if do_temperatures and do_temp_last:
-            _apply_temperatures(logits, sampling_tensors.temperatures,
-                                sampling_tensors.dynatemp_mins,
-                                sampling_tensors.dynatemp_maxs,
-                                sampling_tensors.dynatemp_exps)
+            elif sampler_id == SamplerID.EPSILON_CUTOFF and do_epsilon_cutoffs:
+                logits = _apply_epsilon_cutoff(
+                    logits, sampling_tensors.epsilon_cutoffs)
 
-        banned_tokens = _get_custom_token_bans(sampling_metadata)
-        logits = _apply_token_bans(logits, banned_tokens)
+            elif sampler_id == SamplerID.TYPICAL_P and do_typical_ps:
+                logits = _apply_typical_sampling(
+                    logits, sampling_tensors.typical_ps)
+
+            elif sampler_id == SamplerID.QUADRATIC and do_quadratic:
+                logits = _apply_quadratic_sampling(
+                    logits, sampling_tensors.smoothing_factors,
+                    sampling_tensors.smoothing_curves)
+
+            elif sampler_id == SamplerID.XTC and do_xtc:
+                logits = _apply_xtc_sampling(
+                    logits, sampling_tensors.xtc_thresholds,
+                    sampling_tensors.xtc_probabilities)
+
+            elif sampler_id == SamplerID.TOKEN_BAN:
+                banned_tokens = _get_custom_token_bans(sampling_metadata)
+                logits = _apply_token_bans(logits, banned_tokens)
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
