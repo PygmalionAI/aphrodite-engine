@@ -3,7 +3,6 @@
 #include <cute/tensor.hpp>
 #include <torch/all.h>
 
-
 namespace cute {
 
 template <size_t... I, typename Layout>
@@ -20,7 +19,7 @@ CUTE_HOST_DEVICE static constexpr bool is_identity_layout() {
   else {
     constexpr auto coalesced_layout = coalesce(Layout{});
     // TODO(alpin): was it && or and for MSVC?
-    if constexpr (rank(coalesced_layout) == 1 && 
+    if constexpr (rank(coalesced_layout) == 1 &&
                   stride<0>(coalesced_layout) == 1) {
       return true;
     }
