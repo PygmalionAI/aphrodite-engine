@@ -1,6 +1,5 @@
 from typing import List, NamedTuple, Optional, Tuple
 
-from aphrodite.common.passthrough import Passthrough
 import openvino as ov
 import torch
 from torch import nn
@@ -10,6 +9,7 @@ from aphrodite.attention.backends.openvino import OpenVINOAttentionMetadata
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, MultiModalConfig,
                                      ParallelConfig, SchedulerConfig)
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
 from aphrodite.modeling import SamplingMetadata
 from aphrodite.modeling.model_loader.openvino import get_model

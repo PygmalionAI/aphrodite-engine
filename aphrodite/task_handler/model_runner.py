@@ -161,7 +161,8 @@ class ModelInputForGPUWithSamplingMetadata(ModelInputForGPU):
             "passthrough": self.passthrough,
         }
         _add_attn_metadata_broadcastable_dict(tensor_dict, self.attn_metadata)
-        _add_sampling_metadata_broadcastable_dict(tensor_dict, self.sampling_metadata)
+        _add_sampling_metadata_broadcastable_dict(
+            tensor_dict, self.sampling_metadata)
         return tensor_dict
 
     @classmethod
@@ -172,7 +173,8 @@ class ModelInputForGPUWithSamplingMetadata(ModelInputForGPU):
     ) -> "ModelInputForGPUWithSamplingMetadata":
         tensor_dict = _init_sampling_metadata_from_tensor_dict(tensor_dict)
         if attn_backend is not None:
-            tensor_dict = _init_attn_metadata_from_tensor_dict(attn_backend, tensor_dict)
+            tensor_dict = _init_attn_metadata_from_tensor_dict(
+                attn_backend, tensor_dict)
         return cls(**tensor_dict)
 
     def __post_init__(self):
@@ -587,8 +589,11 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         else:
             inter_data.lora_prompt_mapping.append([])
 
-    def _compute_passthru(self, inter_data: InterDataForSeqGroup, seq_group_metadata: SequenceGroupMetadata):
-        inter_data.passthrough = seq_group_metadata.sampling_params.passthrough  # TODO:Luke better way?
+    def _compute_passthru(self,
+        inter_data: InterDataForSeqGroup,
+        seq_group_metadata: SequenceGroupMetadata):
+        # TODO:Luke better way?
+        inter_data.passthrough = seq_group_metadata.sampling_params.passthrough
 
     def _compute_prompt_adapter_input(
             self, inter_data: InterDataForSeqGroup,
@@ -783,7 +788,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
 
         passthrough = None
         if self.inter_data_list:
-            passthrough = self.inter_data_list[0].passthrough  # TODO:Luke might be better way?
+            # TODO:Luke might be better way?
+            passthrough = self.inter_data_list[0].passthrough
         return self.model_input_cls(
             input_tokens=input_tokens_tensor,
             input_positions=input_positions_tensor,

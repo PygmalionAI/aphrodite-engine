@@ -914,7 +914,8 @@ class SequenceGroupMetadata(
     sampling_params: SamplingParams
     block_tables: Dict[int, List[int]]
     do_sample: bool = True
-    # passthrough: Optional[Passthrough] = None # get it from the pooling or sampling params
+    # get it from the pooling or sampling params instead
+    # passthrough: Optional[Passthrough] = None 
     pooling_params: Optional[PoolingParams] = None
     lora_request: Optional[LoRARequest] = None
     computed_block_nums: Optional[List[int]] = None
@@ -975,7 +976,8 @@ class SequenceGroupMetadata(
         passthrough = None
         if self.sampling_params.passthrough:
             return self.sampling_params.passthrough
-        if self.pooling_params and isinstance(self.pooling_params.additional_data, dict):
+        if self.pooling_params and \
+            isinstance(self.pooling_params.additional_data, dict):
             passthrough = self.pooling_params.additional_data.get("passthrough")
         return passthrough
 

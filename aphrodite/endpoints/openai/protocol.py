@@ -9,11 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from transformers import PreTrainedTokenizer
 from typing_extensions import Annotated
 
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import (LogitsProcessorFunc,
                                               SamplingParams)
 from aphrodite.common.sequence import Logprob
-from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.utils import random_uuid
 from aphrodite.endpoints.chat_utils import ChatCompletionMessageParam
 from aphrodite.endpoints.openai.logits_processors import get_logits_processors

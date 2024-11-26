@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Dict, Iterable, List, Optional
 from typing import Sequence as GenericSequence
 from typing import Tuple, Type, TypeVar, Union
 
-from aphrodite.common import passthrough
 from loguru import logger
 from transformers import PreTrainedTokenizer
 from typing_extensions import assert_never
@@ -18,6 +17,7 @@ from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
 from aphrodite.common.logger import setup_logger
 from aphrodite.common.outputs import (EmbeddingRequestOutput, RequestOutput,
                                       RequestOutputFactory)
+from aphrodite.common.passthrough import Passthrough, try_get_passthrough
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (EmbeddingSequenceGroupOutput,
@@ -25,7 +25,6 @@ from aphrodite.common.sequence import (EmbeddingSequenceGroupOutput,
                                        SamplerOutput, Sequence, SequenceGroup,
                                        SequenceGroupMetadata, SequenceStatus)
 from aphrodite.common.utils import Counter, Device
-from aphrodite.common.passthrough import Passthrough, try_get_passthrough
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.metrics_types import StatLoggerBase, Stats
 from aphrodite.engine.output_processor.interfaces import (

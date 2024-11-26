@@ -29,7 +29,6 @@ import torch
 from transformers import LlamaConfig
 
 from aphrodite.common.config import CacheConfig, LoRAConfig
-from aphrodite.common.passthrough import Passthrough
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.models.llama import LlamaForCausalLM
 from aphrodite.quantization.base_config import QuantizationConfig

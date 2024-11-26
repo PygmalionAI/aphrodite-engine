@@ -40,7 +40,8 @@ class CPUModelInput(ModelRunnerInputBase):
     sampling_metadata: Optional["SamplingMetadata"] = None
     multi_modal_kwargs: Optional[BatchedTensorInputs] = None
     virtual_engine: Optional[int] = None
-    passthrough: Optional[Passthrough] = None # TODO:Luke ride along on SamplingMetadata
+    # TODO:Luke ride along on SamplingMetadata
+    passthrough: Optional[Passthrough] = None
 
     def as_broadcastable_tensor_dict(
             self) -> Dict[str, Union[int, torch.Tensor]]:

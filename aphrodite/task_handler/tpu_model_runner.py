@@ -6,7 +6,6 @@ from unittest.mock import patch
 import numpy as np
 import torch
 import torch.nn as nn
-from aphrodite.common.passthrough import Passthrough
 import torch_xla.core.xla_model as xm
 import torch_xla.runtime as xr
 from loguru import logger
@@ -15,6 +14,7 @@ from aphrodite.attention import AttentionMetadata, get_attn_backend
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      ModelConfig, ParallelConfig,
                                      SchedulerConfig)
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.sequence import (CompletionSequenceGroupOutput,
                                        IntermediateTensors, Logprob,
                                        SamplerOutput, SequenceGroupMetadata,

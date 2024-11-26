@@ -10,7 +10,6 @@ from transformers import CLIPVisionConfig
 from transformers.models.clip.modeling_clip import CLIPAttention
 
 from aphrodite.common.config import ModelConfig
-from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.sequence import SequenceData
 from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.inputs import LLMInputs

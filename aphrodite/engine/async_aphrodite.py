@@ -15,11 +15,11 @@ from aphrodite.common.config import (DecodingConfig, EngineConfig, LoRAConfig,
                                      ModelConfig, ParallelConfig,
                                      SchedulerConfig)
 from aphrodite.common.outputs import EmbeddingRequestOutput, RequestOutput
+from aphrodite.common.passthrough import Passthrough, try_get_passthrough
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (ExecuteModelRequest, SamplerOutput,
                                        SequenceGroupMetadata)
-from aphrodite.common.passthrough import Passthrough, try_get_passthrough
 from aphrodite.engine.aphrodite_engine import (AphroditeEngine,
                                                DecoderPromptComponents,
                                                PromptComponents)

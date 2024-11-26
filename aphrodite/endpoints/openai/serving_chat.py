@@ -81,7 +81,8 @@ class OpenAIServingChat(OpenAIServing):
         if error_check_ret is not None:
             return error_check_ret
         if request.passthrough and not self.enable_passthrough_param:
-            return self.create_error_response("Passthrough parameter is not enabled")
+            return self.create_error_response(
+                "Passthrough parameter is not enabled")
 
         if request.prompt_logprobs is not None:
             if request.stream and request.prompt_logprobs > 0:
@@ -441,7 +442,8 @@ class OpenAIServingChat(OpenAIServing):
         final_res: Optional[RequestOutput] = None
 
         if request.passthrough and not self.enable_passthrough_param:
-            return self.create_error_response("Passthrough parameter is not enabled")
+            return self.create_error_response(
+                "Passthrough parameter is not enabled")
 
         try:
             async for res in result_generator:

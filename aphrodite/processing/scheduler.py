@@ -1108,9 +1108,12 @@ class Scheduler:
             # if seq_group.sampling_params:
             #     passthrough = seq_group.sampling_params.passthrough
             # elif seq_group.seqs:
-            #     passthrough = seq_group.seqs[0].inputs.get("passthrough") # TODO:Luke could be a better way?
-            # elif seq_group.pooling_params and isinstance(seq_group.pooling_params.additional_data, dict):
-            #     passthrough = seq_group.pooling_params.additional_data.get("passthrough")
+            #     passthrough = seq_group.seqs[0].inputs.get("passthrough")
+            # # TODO:Luke could be a better way?
+            # elif seq_group.pooling_params and \
+            # isinstance(seq_group.pooling_params.additional_data, dict):
+            #     passthrough = \
+            #       seq_group.pooling_params.additional_data.get("passthrough")
 
             # It assumes the scheduled_seq_groups is ordered by
             # prefill < decoding.

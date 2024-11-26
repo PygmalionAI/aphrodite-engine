@@ -6,7 +6,6 @@ from typing_extensions import TypeIs
 
 from aphrodite.common.config import (LoRAConfig, MultiModalConfig,
                                      SchedulerConfig)
-from aphrodite.common.passthrough import Passthrough
 
 
 @runtime_checkable

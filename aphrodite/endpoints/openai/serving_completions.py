@@ -75,7 +75,8 @@ class OpenAIServingCompletion(OpenAIServing):
                 "suffix is not currently supported")
 
         if request.passthrough and not self.enable_passthrough_param:
-            return self.create_error_response("Passthrough parameter is not enabled")
+            return self.create_error_response(
+                "Passthrough parameter is not enabled")
 
         model_name = self.served_model_names[0]
         request_id = f"cmpl-{random_uuid()}"

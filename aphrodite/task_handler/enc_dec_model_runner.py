@@ -11,7 +11,6 @@ from aphrodite.attention.selector import (_Backend,
                                           get_env_variable_attn_backend,
                                           get_global_forced_attn_backend,
                                           global_force_attn_backend)
-from aphrodite.common import passthrough
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,
                                      PromptAdapterConfig, SchedulerConfig)
