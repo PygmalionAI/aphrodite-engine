@@ -247,8 +247,7 @@ class SamplingParams(
     dry_allowed_length: int = 2
     dry_sequence_breaker_ids: List[int] = []
     skew: float = 0.0
-    sampler_priority: Optional[List[int]] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-                                             11, 12, 13 , 14, 15]
+    sampler_priority: Optional[List[int]] = None
     # The below fields are not supposed to be used as an input.
     # They are set in post_init.
     output_text_buffer_length: int = 0
@@ -301,8 +300,7 @@ class SamplingParams(
         "dry_allowed_length": 2,
         "dry_sequence_breaker_ids": [],
         "skew": 0.0,
-        "sampler_priority": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-                             11, 12, 13 , 14, 15],
+        "sampler_priority": [],
     }
 
     def __post_init__(self) -> None:
@@ -456,13 +454,19 @@ class SamplingParams(
         if self.sampler_priority is not None:
             if not isinstance(self.sampler_priority, list):
                 raise ValueError("sampler_priority must be a list of integers")
+            try:
+                provided_samplers = {
+                    SamplerID(x) for x in self.sampler_priority}
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid sampler ID in priority list: {e}") from e
 
             required_samplers = set(SamplerID)
-            provided_samplers = set(self.sampler_priority)
             if not required_samplers.issubset(provided_samplers):
                 missing = required_samplers - provided_samplers
+                missing_names = [s.name for s in missing]
                 raise ValueError(f"Missing required samplers in priority list: "
-                                 f"{missing}")
+                                 f"{missing_names}")
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:
