@@ -767,7 +767,8 @@ struct NumericArrayConverter<cutlass::bfloat16_t, aphrodite_uint8b128_t, N,
         convert_f32_to_bf16_;
     return convert_f32_to_bf16_(tmp);
   }
-  aphrodite friend class detail::VectorizedConverter;
+
+  friend class detail::VectorizedConverter;
 
  public:
   CUTLASS_DEVICE
