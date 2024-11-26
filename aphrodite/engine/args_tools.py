@@ -101,6 +101,7 @@ class EngineArgs:
     quantization_param_path: Optional[str] = None
     preemption_mode: Optional[str] = None
     deepspeed_fp_bits: Optional[int] = None
+    enable_passthrough_param: Optional[bool] = False
     quant_llm_fp_bits: Optional[int] = None
     quant_llm_exp_bits: Optional[int] = None
     # Cache Options
@@ -855,6 +856,15 @@ class EngineArgs:
             "disable logging statistics",
         )
 
+        parser.add_argument(
+            '--enable-passthrough-param',
+            action='store_true',
+            help="Category: API Options\n"
+            "Allow `passthrough` param in API to be sent"
+            "directly to `model.forward`. Debug only."
+            "Useful for quick experiments and debugging."
+        )
+
         return parser
 
     @classmethod
@@ -919,6 +929,7 @@ class EngineArgs:
             served_model_name=self.served_model_name,
             limit_mm_per_prompt=self.limit_mm_per_prompt,
             config_format=self.config_format,
+            enable_passthrough_param=self.enable_passthrough_param,
         )
 
         cache_config = CacheConfig(

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Dict, Iterable, List, Optional
 from typing import Sequence as GenericSequence
 from typing import Tuple, Type, TypeVar, Union
 
+from aphrodite.common import passthrough
 from loguru import logger
 from transformers import PreTrainedTokenizer
 from typing_extensions import assert_never
@@ -24,6 +25,7 @@ from aphrodite.common.sequence import (EmbeddingSequenceGroupOutput,
                                        SamplerOutput, Sequence, SequenceGroup,
                                        SequenceGroupMetadata, SequenceStatus)
 from aphrodite.common.utils import Counter, Device
+from aphrodite.common.passthrough import Passthrough, try_get_passthrough
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.metrics_types import StatLoggerBase, Stats
 from aphrodite.engine.output_processor.interfaces import (
@@ -807,6 +809,7 @@ class AphroditeEngine:
         self,
         prompt_comps: PromptComponents,
         prompt_adapter_request: Optional[PromptAdapterRequest],
+        passthrough: Optional[Passthrough] = None
     ) -> LLMInputs:
         prompt, prompt_token_ids, multi_modal_data = prompt_comps
 
@@ -815,7 +818,8 @@ class AphroditeEngine:
 
         return LLMInputs(prompt_token_ids=prompt_token_ids,
                          prompt=prompt,
-                         multi_modal_data=multi_modal_data)
+                         multi_modal_data=multi_modal_data,
+                         passthrough=passthrough)
 
     def _process_decoder_only_prompt(
         self,
@@ -823,6 +827,7 @@ class AphroditeEngine:
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        passthrough: Optional[Passthrough] = None,
     ) -> LLMInputs:
         '''
         For decoder-only models:
@@ -845,6 +850,7 @@ class AphroditeEngine:
         return self._build_decoder_only_llm_inputs(
             prompt_comps,
             prompt_adapter_request=prompt_adapter_request,
+            passthrough=passthrough,
         )
 
     def process_model_inputs(
@@ -853,6 +859,7 @@ class AphroditeEngine:
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        passthrough: Optional[Passthrough] = None,
     ) -> Union[LLMInputs, EncoderDecoderLLMInputs]:
 
         if self.is_encoder_decoder_model():
@@ -872,6 +879,7 @@ class AphroditeEngine:
                 request_id=request_id,
                 lora_request=lora_request,
                 prompt_adapter_request=prompt_adapter_request,
+                passthrough=passthrough,
             )
 
         return self.input_processor(model_inputs)
@@ -940,6 +948,7 @@ class AphroditeEngine:
             request_id=request_id,
             lora_request=lora_request,
             prompt_adapter_request=prompt_adapter_request,
+            passthrough=try_get_passthrough(params),
         )
 
         self._add_processed_request(

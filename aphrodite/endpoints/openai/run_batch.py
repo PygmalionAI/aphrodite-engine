@@ -133,6 +133,7 @@ async def main(args):
         prompt_adapters=None,
         request_logger=request_logger,
         chat_template=None,
+        enable_passthrough_param=args.enable_passthrough_param,
     )
     openai_serving_embedding = OpenAIServingEmbedding(
         engine,

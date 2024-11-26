@@ -414,6 +414,7 @@ def prepare_engine_payload(
         seed=kai_payload.sampler_seed,
         xtc_probability=kai_payload.xtc_probability,
         xtc_threshold=kai_payload.xtc_threshold,
+        passthrough=kai_payload.passthrough,
     )
 
     max_input_tokens = max(
@@ -713,6 +714,7 @@ async def init_app(
         request_logger=request_logger,
         chat_template=args.chat_template,
         return_tokens_as_token_ids=args.return_tokens_as_token_ids,
+        enable_passthrough_param=args.enable_passthrough_param,
     )
     openai_serving_completion = OpenAIServingCompletion(
         async_engine_client,
@@ -722,6 +724,7 @@ async def init_app(
         prompt_adapters=args.prompt_adapters,
         request_logger=request_logger,
         return_tokens_as_token_ids=args.return_tokens_as_token_ids,
+        enable_passthrough_param=args.enable_passthrough_param,
     )
     openai_serving_embedding = OpenAIServingEmbedding(
         async_engine_client,

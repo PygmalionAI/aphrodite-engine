@@ -11,6 +11,7 @@ from typing import (TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple,
 import msgspec
 import torch
 
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
@@ -913,6 +914,7 @@ class SequenceGroupMetadata(
     sampling_params: SamplingParams
     block_tables: Dict[int, List[int]]
     do_sample: bool = True
+    # passthrough: Optional[Passthrough] = None # get it from the pooling or sampling params
     pooling_params: Optional[PoolingParams] = None
     lora_request: Optional[LoRARequest] = None
     computed_block_nums: Optional[List[int]] = None
@@ -968,7 +970,14 @@ class SequenceGroupMetadata(
         assert self.state is not None
         assert self.state.current_step < self.state.num_steps
         self.state.current_step += 1
-
+    
+    def try_get_passthrough(self) -> Optional["Passthrough"]:
+        passthrough = None
+        if self.sampling_params.passthrough:
+            return self.sampling_params.passthrough
+        if self.pooling_params and isinstance(self.pooling_params.additional_data, dict):
+            passthrough = self.pooling_params.additional_data.get("passthrough")
+        return passthrough
 
 class SequenceOutput(
     msgspec.Struct,

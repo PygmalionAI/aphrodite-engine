@@ -7,6 +7,7 @@ from torch import nn
 
 from aphrodite.common.config import (DeviceConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig)
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceGroupMetadata)
 from aphrodite.common.utils import (is_pin_memory_available,
@@ -32,6 +33,7 @@ class ModelInputForNeuron(ModelRunnerInputBase):
     input_block_ids: Optional[torch.Tensor] = None
     sampling_metadata: Optional["SamplingMetadata"] = None
     multi_modal_kwargs: Optional[BatchedTensorInputs] = None
+    passthrough: Optional[Passthrough] = None
 
     def as_broadcastable_tensor_dict(
             self) -> Dict[str, Union[int, torch.Tensor]]:
@@ -221,12 +223,16 @@ class NeuronModelRunner(ModelRunnerBase[ModelInputForNeuron]):
             self.device,
             self.pin_memory,
             generators=self.get_generators(finished_requests_ids))
+        passthrough = None
+        if seq_group_metadata_list:
+            passthrough = seq_group_metadata_list[0].try_get_passthrough()
 
         return ModelInputForNeuron(input_tokens=input_tokens,
                                    input_positions=input_positions,
                                    input_block_ids=input_block_ids,
                                    sampling_metadata=sampling_metadata,
-                                   multi_modal_kwargs=multi_modal_kwargs)
+                                   multi_modal_kwargs=multi_modal_kwargs,
+                                   passthrough=passthrough)
 
     @torch.inference_mode()
     def execute_model(

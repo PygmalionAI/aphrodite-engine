@@ -70,6 +70,7 @@ class OpenAIServing:
         prompt_adapters: Optional[List[PromptAdapterPath]],
         request_logger: Optional[RequestLogger],
         return_tokens_as_token_ids: bool = False,
+        enable_passthrough_param: bool = False,
     ):
         super().__init__()
 
@@ -105,6 +106,7 @@ class OpenAIServing:
 
         self.request_logger = request_logger
         self.return_tokens_as_token_ids = return_tokens_as_token_ids
+        self.enable_passthrough_param = enable_passthrough_param
 
     async def show_available_models(self) -> ModelList:
         """Show available models. Right now we only have one model."""

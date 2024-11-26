@@ -160,6 +160,7 @@ class TP1DraftModelRunner(ModelRunner):
             multi_modal_kwargs=model_input.multi_modal_kwargs,
             sampling_metadata=model_input.sampling_metadata,
             is_prompt=False,
+            passthrough=model_input.passthrough,
         )
 
         # Ensure we skip CPU samples
@@ -337,6 +338,7 @@ class TP1DraftModelRunner(ModelRunner):
                 kv_caches=kv_caches,
                 attn_metadata=model_input.attn_metadata,
                 intermediate_tensors=intermediate_tensors,
+                passthrough=model_input.passthrough,
                 **MultiModalInputs.as_kwargs(multi_modal_kwargs,
                                              device=self.device),
             )

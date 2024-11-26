@@ -12,6 +12,7 @@ from typing_extensions import NotRequired
 
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
@@ -519,6 +520,7 @@ class LlavaNextForConditionalGeneration(nn.Module, SupportsMultiModal):
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
         intermediate_tensors: Optional[IntermediateTensors] = None,
+        passthrough: Optional[Passthrough] = None,
         **kwargs: object,
     ) -> SamplerOutput:
         """Run forward pass for LlaVA-NeXT.

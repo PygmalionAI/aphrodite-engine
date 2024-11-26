@@ -28,6 +28,7 @@ from transformers import CLIPVisionConfig, PretrainedConfig
 
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, ModelConfig, MultiModalConfig
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
@@ -438,7 +439,8 @@ def input_processor_for_phi3v(ctx: InputContext, llm_inputs: LLMInputs):
     # NOTE: Create a defensive copy of the original inputs
     llm_inputs = LLMInputs(prompt_token_ids=new_token_ids,
                            prompt=new_prompt,
-                           multi_modal_data=multi_modal_data)
+                           multi_modal_data=multi_modal_data,
+                           passthrough=llm_inputs.get("passthrough"))
 
     return input_processor_for_clip(
         model_config,
@@ -562,6 +564,7 @@ class Phi3VForCausalLM(nn.Module, SupportsMultiModal):
                 kv_caches: List[torch.Tensor],
                 attn_metadata: AttentionMetadata,
                 intermediate_tensors: Optional[IntermediateTensors] = None,
+                passthrough: Optional[Passthrough] = None,
                 **kwargs: object):
         image_input = self._parse_and_validate_image_input(**kwargs)
 

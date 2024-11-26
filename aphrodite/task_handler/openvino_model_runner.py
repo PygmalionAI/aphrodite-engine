@@ -1,5 +1,6 @@
 from typing import List, NamedTuple, Optional, Tuple
 
+from aphrodite.common.passthrough import Passthrough
 import openvino as ov
 import torch
 from torch import nn
@@ -271,7 +272,7 @@ class OpenVINOModelRunner:
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[torch.Tensor, torch.Tensor, OpenVINOAttentionMetadata,
-               SamplingMetadata, BatchedTensorInputs]:
+               SamplingMetadata, BatchedTensorInputs, Optional[Passthrough]]:
         # Prepare input tensors.
         (
             input_tokens,
@@ -289,6 +290,9 @@ class OpenVINOModelRunner:
             self.device,
             pin_memory=False,
         )
+        passthrough = None
+        if seq_group_metadata_list:
+            passthrough = seq_group_metadata_list[0].try_get_passthrough()
 
         return (
             input_tokens,
@@ -296,6 +300,7 @@ class OpenVINOModelRunner:
             attn_metadata,
             sampling_metadata,
             multi_modal_kwargs,
+            passthrough
         )
 
     @torch.inference_mode()
@@ -310,6 +315,7 @@ class OpenVINOModelRunner:
             attn_metadata,
             sampling_metadata,
             multi_modal_kwargs,
+            passthrough,
         ) = self.prepare_input_tensors(seq_group_metadata_list)
 
         model_executable = self.model
@@ -322,6 +328,8 @@ class OpenVINOModelRunner:
             kv_caches,
             "attn_metadata":
             attn_metadata,
+            "passthrough":
+            passthrough,
             **MultiModalInputs.as_kwargs(multi_modal_kwargs or {},
                                          device=self.device),
         }

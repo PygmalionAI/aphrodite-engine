@@ -47,6 +47,7 @@ class OpenAIServingChat(OpenAIServing):
         request_logger: Optional[RequestLogger],
         chat_template: Optional[str],
         return_tokens_as_token_ids: bool = False,
+        enable_passthrough_param: bool = False,
     ):
         super().__init__(async_engine_client=async_engine_client,
                          model_config=model_config,
@@ -54,7 +55,8 @@ class OpenAIServingChat(OpenAIServing):
                          lora_modules=lora_modules,
                          prompt_adapters=prompt_adapters,
                          request_logger=request_logger,
-                         return_tokens_as_token_ids=return_tokens_as_token_ids)
+                         return_tokens_as_token_ids=return_tokens_as_token_ids,
+                         enable_passthrough_param=enable_passthrough_param)
 
         self.response_role = response_role
         # If this is None we use the tokenizer's default chat template
@@ -78,6 +80,8 @@ class OpenAIServingChat(OpenAIServing):
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
             return error_check_ret
+        if request.passthrough and not self.enable_passthrough_param:
+            return self.create_error_response("Passthrough parameter is not enabled")
 
         if request.prompt_logprobs is not None:
             if request.stream and request.prompt_logprobs > 0:
@@ -214,6 +218,7 @@ class OpenAIServingChat(OpenAIServing):
         created_time = int(time.time())
         chunk_object_type = "chat.completion.chunk"
         first_iteration = True
+
 
         # Send response for each token for each request.n (index)
         num_choices = 1 if request.n is None else request.n
@@ -434,6 +439,9 @@ class OpenAIServingChat(OpenAIServing):
         model_name = self.served_model_names[0]
         created_time = int(time.time())
         final_res: Optional[RequestOutput] = None
+
+        if request.passthrough and not self.enable_passthrough_param:
+            return self.create_error_response("Passthrough parameter is not enabled")
 
         try:
             async for res in result_generator:

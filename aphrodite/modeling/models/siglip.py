@@ -14,6 +14,7 @@ from transformers.models.siglip.modeling_siglip import SiglipAttention
 from xformers.ops import memory_efficient_attention
 
 from aphrodite.common.config import ModelConfig
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.sequence import SequenceData
 from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.distributed import get_tensor_model_parallel_world_size
@@ -126,6 +127,7 @@ def input_processor_for_siglip(
         prompt_token_ids=new_token_ids,
         prompt=new_prompt,
         multi_modal_data=multi_modal_data,
+        passthrough=llm_inputs.get("passthrough"),
     )
 
 

@@ -7,6 +7,7 @@ from transformers import PretrainedConfig
 
 from aphrodite.common.config import (CacheConfig, LoRAConfig, MultiModalConfig,
                                      SchedulerConfig)
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.utils import is_pin_memory_available, progress_bar
 from aphrodite.modeling.model_loader.loader import build_model
 from aphrodite.modeling.models import ModelRegistry

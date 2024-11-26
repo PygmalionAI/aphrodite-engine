@@ -27,6 +27,7 @@ from transformers import FuyuConfig, FuyuImageProcessor
 
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceData)
 from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
@@ -194,7 +195,8 @@ def input_processor_for_fuyu(ctx: InputContext, llm_inputs: LLMInputs):
 
     return LLMInputs(prompt=new_prompt,
                      prompt_token_ids=new_prompt_token_ids,
-                     multi_modal_data=new_multi_modal_data)
+                     multi_modal_data=new_multi_modal_data,
+                     passthrough=llm_inputs.get("passthrough"))
 
 
 def input_mapper_for_fuyu(ctx: InputContext, data: object):
@@ -273,6 +275,7 @@ class FuyuForCausalLM(nn.Module, SupportsMultiModal):
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
         intermediate_tensors: Optional[IntermediateTensors] = None,
+        passthrough: Optional[Passthrough] = None,
         **kwargs: object,
     ):
         image_input = self._parse_and_validate_image_input(**kwargs)

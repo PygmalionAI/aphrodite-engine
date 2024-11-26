@@ -10,6 +10,7 @@ from transformers import Blip2VisionConfig, BlipVisionConfig
 from transformers.models.blip.modeling_blip import BlipAttention
 
 from aphrodite.common.config import ModelConfig
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.sequence import SequenceData
 from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.inputs import LLMInputs
@@ -109,7 +110,8 @@ def input_processor_for_blip(
     # NOTE: Create a defensive copy of the original inputs
     return LLMInputs(prompt_token_ids=new_token_ids,
                      prompt=new_prompt,
-                     multi_modal_data=multi_modal_data)
+                     multi_modal_data=multi_modal_data,
+                     passthrough=llm_inputs.get("passthrough"))
 
 
 # Adapted from https://github.com/huggingface/transformers/blob/v4.39.0/src/transformers/models/blip/modeling_blip.py#L164 # noqa

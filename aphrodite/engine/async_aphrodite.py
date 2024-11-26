@@ -19,6 +19,7 @@ from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (ExecuteModelRequest, SamplerOutput,
                                        SequenceGroupMetadata)
+from aphrodite.common.passthrough import Passthrough, try_get_passthrough
 from aphrodite.engine.aphrodite_engine import (AphroditeEngine,
                                                DecoderPromptComponents,
                                                PromptComponents)
@@ -498,6 +499,7 @@ class _AsyncAphrodite(AphroditeEngine):
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        passthrough: Optional[Passthrough] = None,
     ) -> LLMInputs:
         """Async version of :meth:`_process_decoder_only_prompt`."""
         prompt_comps = await self._extract_prompt_components_async(
@@ -509,6 +511,7 @@ class _AsyncAphrodite(AphroditeEngine):
         return self._build_decoder_only_llm_inputs(
             prompt_comps,
             prompt_adapter_request=prompt_adapter_request,
+            passthrough=passthrough,
         )
 
     async def process_model_inputs_async(
@@ -517,6 +520,7 @@ class _AsyncAphrodite(AphroditeEngine):
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        passthrough: Optional[Passthrough] = None,
     ) -> Union[LLMInputs, EncoderDecoderLLMInputs]:
         """Async version of :meth:`process_model_inputs`."""
         if self.is_encoder_decoder_model():
@@ -537,6 +541,7 @@ class _AsyncAphrodite(AphroditeEngine):
                 request_id=request_id,
                 lora_request=lora_request,
                 prompt_adapter_request=prompt_adapter_request,
+                passthrough=passthrough,
             )
 
         return self.input_processor(model_inputs)
@@ -557,11 +562,13 @@ class _AsyncAphrodite(AphroditeEngine):
         if arrival_time is None:
             arrival_time = time.time()
 
+        
         processed_inputs = await self.process_model_inputs_async(
             inputs,
             request_id=request_id,
             lora_request=lora_request,
             prompt_adapter_request=prompt_adapter_request,
+            passthrough=try_get_passthrough(params),
         )
 
         self._add_processed_request(

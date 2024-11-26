@@ -8,6 +8,7 @@ from aphrodite.attention import AttentionMetadata, get_attn_backend
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,
                                      PromptAdapterConfig, SchedulerConfig)
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceGroupMetadata)
 from aphrodite.common.utils import make_tensor_with_pad
@@ -39,6 +40,7 @@ class CPUModelInput(ModelRunnerInputBase):
     sampling_metadata: Optional["SamplingMetadata"] = None
     multi_modal_kwargs: Optional[BatchedTensorInputs] = None
     virtual_engine: Optional[int] = None
+    passthrough: Optional[Passthrough] = None # TODO:Luke ride along on SamplingMetadata
 
     def as_broadcastable_tensor_dict(
             self) -> Dict[str, Union[int, torch.Tensor]]:
@@ -46,6 +48,7 @@ class CPUModelInput(ModelRunnerInputBase):
             "input_tokens": self.input_tokens,
             "input_positions": self.input_positions,
             "multi_modal_kwargs": self.multi_modal_kwargs,
+            # TODO:Luke passthrough not supported...
         }
         _add_attn_metadata_broadcastable_dict(tensor_dict, self.attn_metadata)
         _add_sampling_metadata_broadcastable_dict(tensor_dict,
@@ -330,12 +333,16 @@ class CPUModelRunner(ModelRunnerBase[CPUModelInput]):
             self.device,
             pin_memory=False,
             generators=self.get_generators(finished_requests_ids))
+        passthrough = None
+        if seq_group_metadata_list:
+            passthrough = seq_group_metadata_list[0].try_get_passthrough()
         return CPUModelInput(
             input_tokens=input_tokens,
             input_positions=input_positions,
             attn_metadata=attn_metadata,
             sampling_metadata=sampling_metadata,
             multi_modal_kwargs=multi_modal_kwargs,
+            passthrough=passthrough
         )
 
     @torch.no_grad()
@@ -359,6 +366,8 @@ class CPUModelRunner(ModelRunnerBase[CPUModelInput]):
             kv_caches,
             "attn_metadata":
             model_input.attn_metadata,
+            "passthrough":
+            model_input.passthrough,
             **MultiModalInputs.as_kwargs(model_input.multi_modal_kwargs or {},
                                          device=self.device),
         }

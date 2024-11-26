@@ -4,6 +4,7 @@ import torch
 from torch import nn
 
 from aphrodite.attention import AttentionMetadata
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.sequence import PoolerOutput
 from aphrodite.modeling.layers.pooler import Pooler, PoolingType
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
@@ -37,6 +38,7 @@ class LlamaEmbeddingModel(nn.Module):
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
         inputs_embeds: Optional[torch.Tensor] = None,
+        passthrough: Optional[Passthrough] = None,
     ) -> torch.Tensor:
         return self.model.forward(input_ids, positions, kv_caches,
                                   attn_metadata, inputs_embeds)

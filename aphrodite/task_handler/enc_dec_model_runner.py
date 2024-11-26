@@ -11,6 +11,7 @@ from aphrodite.attention.selector import (_Backend,
                                           get_env_variable_attn_backend,
                                           get_global_forced_attn_backend,
                                           global_force_attn_backend)
+from aphrodite.common import passthrough
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,
                                      PromptAdapterConfig, SchedulerConfig)
@@ -190,6 +191,7 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
             kv_caches=kv_caches,
             attn_metadata=model_input.attn_metadata,
             intermediate_tensors=intermediate_tensors,
+            passthrough=model_input.passthrough,
             **seqlen_agnostic_kwargs)
 
         logits = self.model.compute_logits(hidden_or_intermediate_states,

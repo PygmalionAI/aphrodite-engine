@@ -10,6 +10,7 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, MultiModalConfig,
                                      ParallelConfig, PromptAdapterConfig,
                                      SchedulerConfig)
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceGroupMetadata)
@@ -48,6 +49,7 @@ class ModelInputForXPU(ModelRunnerInputBase):
     attn_metadata: Optional["AttentionMetadata"] = None
     sampling_metadata: Optional["SamplingMetadata"] = None
     multi_modal_kwargs: Optional[BatchedTensorInputs] = None
+    passthrough: Optional[Passthrough] = None
 
     def as_broadcastable_tensor_dict(
             self) -> Dict[str, Union[int, torch.Tensor]]:
@@ -271,12 +273,16 @@ class XPUModelRunner(ModelRunnerBase[ModelInputForXPU]):
                 categorized_sample_indices=None,
                 num_prompts=0,
             )
+        passthrough = None
+        if seq_group_metadata_list:
+            passthrough = seq_group_metadata_list[0].try_get_passthrough()
 
         return ModelInputForXPU(input_tokens=input_tokens,
                                 input_positions=input_positions,
                                 attn_metadata=attn_metadata,
                                 sampling_metadata=sampling_metadata,
-                                multi_modal_kwargs=multi_modal_kwargs)
+                                multi_modal_kwargs=multi_modal_kwargs,
+                                passthrough=passthrough)
 
     def _prepare_decode(
         self,
@@ -383,6 +389,8 @@ class XPUModelRunner(ModelRunnerBase[ModelInputForXPU]):
             kv_caches,
             "attn_metadata":
             model_input.attn_metadata,
+            "passthrough":
+            model_input.passthrough,
             **MultiModalInputs.as_kwargs(model_input.multi_modal_kwargs or {},
                                          device=self.device),
         }

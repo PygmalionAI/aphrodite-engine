@@ -92,6 +92,8 @@ class LLM:
         serving, use the :class:`~aphrodite.AsyncAphrodite` class instead.
     """
 
+    # TODO:Luke do we need `enable_passthrough_param` stuff in llm.py?
+
     DEPRECATE_LEGACY: ClassVar[bool] = False
     """A flag to toggle whether to deprecate the legacy generate/encode API."""
 

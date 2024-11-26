@@ -25,6 +25,7 @@ from transformers import BartConfig
 
 from aphrodite.attention import Attention, AttentionMetadata, AttentionType
 from aphrodite.common.config import CacheConfig, LoRAConfig
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
 from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.modeling.layers.activation import get_act_fn
@@ -842,11 +843,12 @@ class BartForConditionalGeneration(nn.Module):
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        encoder_input_ids: torch.Tensor,
+        encoder_input_ids: torch.Tensor, # TODO:Luke
         encoder_positions: torch.Tensor,
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
         intermediate_tensors: Optional[IntermediateTensors] = None,
+        passthrough: Optional[Passthrough] = None,
     ) -> torch.Tensor:
         r"""
         Args:

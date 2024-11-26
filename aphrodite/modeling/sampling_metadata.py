@@ -400,6 +400,8 @@ class SamplingTensors:
     prompt_tokens: torch.Tensor
     output_tokens: torch.Tensor
 
+    # TODO:Luke i dont understand why passthrough not needed here.
+
     @classmethod
     def from_sampling_metadata(
         cls,

@@ -43,6 +43,7 @@ class OpenAIServingCompletion(OpenAIServing):
         prompt_adapters: Optional[List[PromptAdapterPath]],
         request_logger: Optional[RequestLogger],
         return_tokens_as_token_ids: bool = False,
+        enable_passthrough_param: bool = False,
     ):
         super().__init__(async_engine_client=async_engine_client,
                          model_config=model_config,
@@ -50,7 +51,8 @@ class OpenAIServingCompletion(OpenAIServing):
                          lora_modules=lora_modules,
                          prompt_adapters=prompt_adapters,
                          request_logger=request_logger,
-                         return_tokens_as_token_ids=return_tokens_as_token_ids)
+                         return_tokens_as_token_ids=return_tokens_as_token_ids,
+                         enable_passthrough_param=enable_passthrough_param)
 
     async def create_completion(self, request: CompletionRequest,
                                 raw_request: Request):
@@ -71,6 +73,9 @@ class OpenAIServingCompletion(OpenAIServing):
         if request.suffix is not None:
             return self.create_error_response(
                 "suffix is not currently supported")
+
+        if request.passthrough and not self.enable_passthrough_param:
+            return self.create_error_response("Passthrough parameter is not enabled")
 
         model_name = self.served_model_names[0]
         request_id = f"cmpl-{random_uuid()}"
@@ -216,6 +221,11 @@ class OpenAIServingCompletion(OpenAIServing):
         has_echoed = [False] * num_choices * num_prompts
 
         try:
+
+            if request.passthrough and not self.enable_passthrough_param:
+                raise ValueError("Passthrough parameter is not enabled")
+
+
             async for prompt_idx, res in result_generator:
 
                 for output in res.outputs:

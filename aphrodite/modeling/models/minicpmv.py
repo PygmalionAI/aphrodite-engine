@@ -39,6 +39,7 @@ from transformers.configuration_utils import PretrainedConfig
 
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceData)
 from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
@@ -479,6 +480,7 @@ def input_processor_for_minicpmv(ctx: InputContext, llm_inputs: LLMInputs):
         prompt_token_ids=new_token_ids,
         prompt=new_prompt,
         multi_modal_data=multi_modal_data,
+        passthrough=llm_inputs.get("passthrough"),
     )
     return llm_inputs
 
@@ -618,6 +620,7 @@ class MiniCPMVBaseModel(nn.Module, SupportsMultiModal):
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
         intermediate_tensors: Optional[IntermediateTensors] = None,
+        passthrough: Optional[Passthrough] = None,
         **kwargs: Any,
     ) -> torch.Tensor:
         image_inputs = self._parse_and_validate_inputs(input_ids, **kwargs)

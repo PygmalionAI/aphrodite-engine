@@ -1103,6 +1103,14 @@ class Scheduler:
                 if (token_chunk_size + num_computed_tokens <
                         seqs[0].data.get_len()):
                     do_sample = False
+            
+            # passthrough = None
+            # if seq_group.sampling_params:
+            #     passthrough = seq_group.sampling_params.passthrough
+            # elif seq_group.seqs:
+            #     passthrough = seq_group.seqs[0].inputs.get("passthrough") # TODO:Luke could be a better way?
+            # elif seq_group.pooling_params and isinstance(seq_group.pooling_params.additional_data, dict):
+            #     passthrough = seq_group.pooling_params.additional_data.get("passthrough")
 
             # It assumes the scheduled_seq_groups is ordered by
             # prefill < decoding.
@@ -1128,6 +1136,7 @@ class Scheduler:
                     multi_modal_data=seq_group.multi_modal_data
                     if scheduler_outputs.num_prefill_groups > 0 else None,
                     prompt_adapter_request=seq_group.prompt_adapter_request,
+                    # passthrough=passthrough,
                 )
             else:
                 # When SPMD mode is enabled, we only send delta data except for

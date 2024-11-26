@@ -106,6 +106,8 @@ class EmbeddingModelRunner(
             kv_caches,
             "attn_metadata":
             model_input.attn_metadata,
+            "passthrough":
+            model_input.passthrough,
             **MultiModalInputs.as_kwargs(model_input.multi_modal_kwargs or {},
                                          device=self.device),
         }

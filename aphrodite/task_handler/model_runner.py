@@ -15,6 +15,8 @@ import torch.distributed
 import torch.nn as nn
 from loguru import logger
 
+from aphrodite.common.passthrough import Passthrough
+
 try:
     from flashinfer import BatchDecodeWithPagedKVCacheWrapper
     from flashinfer.decode import CUDAGraphBatchDecodeWithPagedKVCacheWrapper
@@ -103,6 +105,7 @@ class ModelInputForGPU(ModelRunnerInputBase):
     request_ids_to_seq_ids: Optional[Dict[str, List[int]]] = None
     finished_requests_ids: Optional[List[str]] = None
     virtual_engine: int = 0
+    passthrough: Optional[Passthrough] = None
 
     def as_broadcastable_tensor_dict(self) -> Dict[str, Any]:
         tensor_dict = {
@@ -116,6 +119,7 @@ class ModelInputForGPU(ModelRunnerInputBase):
             "virtual_engine": self.virtual_engine,
             "request_ids_to_seq_ids": self.request_ids_to_seq_ids,
             "finished_requests_ids": self.finished_requests_ids,
+            "passthrough": self.passthrough,
         }
         _add_attn_metadata_broadcastable_dict(tensor_dict, self.attn_metadata)
         return tensor_dict
@@ -154,10 +158,10 @@ class ModelInputForGPUWithSamplingMetadata(ModelInputForGPU):
             "virtual_engine": self.virtual_engine,
             "request_ids_to_seq_ids": self.request_ids_to_seq_ids,
             "finished_requests_ids": self.finished_requests_ids,
+            "passthrough": self.passthrough,
         }
         _add_attn_metadata_broadcastable_dict(tensor_dict, self.attn_metadata)
-        _add_sampling_metadata_broadcastable_dict(tensor_dict,
-                                                  self.sampling_metadata)
+        _add_sampling_metadata_broadcastable_dict(tensor_dict, self.sampling_metadata)
         return tensor_dict
 
     @classmethod
@@ -168,9 +172,11 @@ class ModelInputForGPUWithSamplingMetadata(ModelInputForGPU):
     ) -> "ModelInputForGPUWithSamplingMetadata":
         tensor_dict = _init_sampling_metadata_from_tensor_dict(tensor_dict)
         if attn_backend is not None:
-            tensor_dict = _init_attn_metadata_from_tensor_dict(
-                attn_backend, tensor_dict)
+            tensor_dict = _init_attn_metadata_from_tensor_dict(attn_backend, tensor_dict)
         return cls(**tensor_dict)
+
+    def __post_init__(self):
+        pass
 
 
 class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
@@ -181,7 +187,6 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
     # is not supported in python<3.10.
     class InterDataForSeqGroup:
         """Intermediate data for the current sequence group."""
-
         def simple_reinit(self):
             self.input_tokens[0].clear()  # type: ignore
             self.input_positions[0].clear()  # type: ignore
@@ -195,6 +200,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             self.lora_requests.clear()  # type: ignore
             self.prompt_adapter_index_mapping.clear()  # type: ignore
             self.prompt_adapter_prompt_mapping.clear()  # type: ignore
+            self.passthrough = None
 
         def __init__(
             self,
@@ -232,6 +238,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             prompt_adapter_index_mapping: Optional[List[int]] = None,
             prompt_adapter_prompt_mapping: Optional[List[int]] = None,
             prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+            passthrough: Optional[Passthrough] = None,
 
             # Multi-modal inputs.
             multi_modal_inputs: Optional[MultiModalInputs] = None,
@@ -252,6 +259,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             self.block_tables = block_tables
             self.computed_block_nums = computed_block_nums
             self.n_seqs = n_seqs
+
+            self.passthrough = passthrough
 
             if reinit:
                 if len(self.seq_ids) == 1 and reinit_use_defaults:
@@ -414,6 +423,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         self.per_seq_group_compute_fns = [
             self._compute_prompt_adapter_input,
             self._compute_multi_modal_input,
+            self._compute_passthru,
         ]
         self.runner = runner
         self.model_input_cls = self.runner._model_input_cls
@@ -576,6 +586,9 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             inter_data.lora_prompt_mapping.append([lora_id])
         else:
             inter_data.lora_prompt_mapping.append([])
+
+    def _compute_passthru(self, inter_data: InterDataForSeqGroup, seq_group_metadata: SequenceGroupMetadata):
+        inter_data.passthrough = seq_group_metadata.sampling_params.passthrough  # TODO:Luke better way?
 
     def _compute_prompt_adapter_input(
             self, inter_data: InterDataForSeqGroup,
@@ -768,6 +781,9 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         ]
         multi_modal_kwargs = MultiModalInputs.batch(multi_modal_inputs_list)
 
+        passthrough = None
+        if self.inter_data_list:
+            passthrough = self.inter_data_list[0].passthrough  # TODO:Luke might be better way?
         return self.model_input_cls(
             input_tokens=input_tokens_tensor,
             input_positions=input_positions_tensor,
@@ -780,7 +796,9 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             request_ids_to_seq_ids=request_ids_to_seq_ids,
             finished_requests_ids=self.finished_requests_ids,
             prompt_adapter_mapping=prompt_adapter_mapping,
-            prompt_adapter_requests=prompt_adapter_requests)
+            prompt_adapter_requests=prompt_adapter_requests,
+            passthrough=passthrough,
+        )
 
 
 class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
@@ -1558,6 +1576,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
             kv_caches=kv_caches,
             attn_metadata=model_input.attn_metadata,
             intermediate_tensors=intermediate_tensors,
+            passthrough=model_input.passthrough,
             **MultiModalInputs.as_kwargs(multi_modal_kwargs,
                                          device=self.device),
             **seqlen_agnostic_kwargs,
