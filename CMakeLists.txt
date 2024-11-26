@@ -250,6 +250,38 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     endif()
   endif()
 
+  execute_process(
+    COMMAND ${CMAKE_COMMAND} -E env
+    PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/kernels/cutlass_extensions/:${CUTLASS_DIR}/python/:$PYTHONPATH
+    ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/kernels/quantization/machete/generate.py
+    RESULT_VARIABLE machete_generation_result
+    OUTPUT_VARIABLE machete_generation_output
+    OUTPUT_FILE ${CMAKE_CURRENT_BINARY_DIR}/machete_generation.log
+  )
+
+  if (NOT machete_generation_result EQUAL 0)
+    message(FATAL_ERROR "Machete generation failed."
+                        " Result: \"${machete_generation_result}\""
+                        "\nCheck the log for details: "
+                        "${CMAKE_CURRENT_BINARY_DIR}/machete_generation.log")
+  else()
+    message(STATUS "Machete generation completed successfully.")
+  endif()
+
+  file(GLOB MACHETE_GEN_SOURCES "kernels/quantization/machete/generated/*.cu")
+  list(APPEND APHRODITE_EXT_SRC ${MACHETE_GEN_SOURCES})
+  message(STATUS "Machete generated sources: ${MACHETE_GEN_SOURCES}")
+
+  if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER 12.0)
+    set_source_files_properties(
+      ${MACHETE_GEN_SOURCES}
+      PROPERTIES
+      COMPILE_FLAGS
+      "-gencode arch=compute_90a,code=sm_90a")
+  endif()
+
+  list(APPEND APHRODITE_EXT_SRC
+    kernels/quantization/machete/machete_pytorch.cu)
 endif()
 
 define_gpu_extension_target(
