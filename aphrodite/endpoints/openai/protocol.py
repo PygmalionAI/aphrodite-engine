@@ -5,7 +5,8 @@ import time
 from typing import Any, Dict, List, Literal, Optional, Union
 
 import torch
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (AliasChoices, BaseModel, ConfigDict, Field,
+                      model_validator)
 from transformers import PreTrainedTokenizer
 from typing_extensions import Annotated
 
@@ -160,6 +161,10 @@ class ChatCompletionRequest(OpenAIBaseModel):
     nsigma: Optional[float] = 0.0
     skew: Optional[float] = 0.0
     custom_token_bans: Optional[List[int]] = None
+    sampler_priority: Optional[List[int]] = Field(
+        default=[],
+        validation_alias=AliasChoices("sampler_priority",
+                                      "sampler_order"))
     # doc: end-chat-completion-sampling-params
 
     # doc: begin-chat-completion-extra-params
@@ -317,6 +322,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
             nsigma=self.nsigma,
             skew=self.skew,
             custom_token_bans=self.custom_token_bans,
+            sampler_priority=self.sampler_priority,
         )
 
     @model_validator(mode='before')
@@ -436,6 +442,10 @@ class CompletionRequest(OpenAIBaseModel):
     nsigma: Optional[float] = 0.0
     skew: Optional[float] = 0.0
     custom_token_bans: Optional[List[int]] = None
+    sampler_priority: Optional[List[int]] = Field(
+        default=[],
+        validation_alias=AliasChoices("sampler_priority",
+                                      "sampler_order"))
     # doc: end-completion-sampling-params
 
     # doc: begin-completion-extra-params
@@ -552,6 +562,7 @@ class CompletionRequest(OpenAIBaseModel):
             nsigma=self.nsigma,
             skew=self.skew,
             custom_token_bans=self.custom_token_bans,
+            sampler_priority=self.sampler_priority,
         )
 
     @model_validator(mode="before")
