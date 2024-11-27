@@ -6,9 +6,11 @@ from loguru import logger
 from aphrodite.modeling.parameter import (BaseAphroditeParameter,
                                           ChannelQuantScaleParameter,
                                           GroupQuantScaleParameter,
-                                          PackedAphroditeParameter)
+                                          PackedAphroditeParameter,
+                                          RowAphroditeParameter)
 from aphrodite.quantization.compressed_tensors.schemes import (
     CompressedTensorsScheme)
+from aphrodite.quantization.compressed_tensors.utils import ActivationOrdering
 from aphrodite.quantization.kernels import (MPLinearLayerConfig,
                                             choose_mp_linear_kernel)
 from aphrodite.quantization.utils.marlin_utils import (
@@ -18,7 +20,7 @@ from aphrodite.scalar_type import scalar_types
 __all__ = ["CompressedTensorsWNA16"]
 WNA16_SUPPORTED_TYPES_MAP = {
     4: scalar_types.uint4b8,
-    8: scalar_types.uint8b128,
+    8: scalar_types.uint8b128
 }
 WNA16_SUPPORTED_BITS = list(WNA16_SUPPORTED_TYPES_MAP.keys())
 
@@ -29,11 +31,13 @@ class CompressedTensorsWNA16(CompressedTensorsScheme):
     def __init__(self,
                  strategy: str,
                  num_bits: int,
-                 group_size: Optional[int] = None):
+                 group_size: Optional[int] = None,
+                 actorder: Optional[ActivationOrdering] = None):
 
         self.pack_factor = 32 // num_bits
         self.strategy = strategy
         self.group_size = -1 if group_size is None else group_size
+        self.has_g_idx = actorder == ActivationOrdering.GROUP
 
         if self.group_size == -1 and self.strategy != "channel":
             raise ValueError("Marlin kernels require group quantization or "
@@ -128,7 +132,17 @@ class CompressedTensorsWNA16(CompressedTensorsScheme):
 
         layer.register_parameter("weight_packed", weight)
         layer.register_parameter("weight_scale", weight_scale)
-        layer.register_parameter("weight_g_idx", weight_g_idx)
+        layer.register_parameter("weight_shape", weight_shape)
+
+        # group index (for activation reordering)
+        if self.has_g_idx:
+            weight_g_idx = RowAphroditeParameter(data=torch.empty(
+                input_size_per_partition,
+                dtype=torch.int32,
+            ),
+                                            input_dim=0,
+                                            weight_loader=weight_loader)
+            layer.register_parameter("weight_g_idx", weight_g_idx)
 
         self.kernel = kernel_type(mp_linear_kernel_config,
                                   w_q_param_name="weight_packed",
