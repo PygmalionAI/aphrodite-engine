@@ -103,6 +103,8 @@ at::Tensor causal_conv1d_fwd(const at::Tensor& x, const at::Tensor& weight,
                              const c10::optional<at::Tensor>& final_states_out_,
                              bool silu_activation);
 
+torch::Tensor permute_cols(torch::Tensor const& A, torch::Tensor const& perm);
+
 // Sampling kernels
 torch::Tensor sampling_from_probs(torch::Tensor probs,
                                   torch::Tensor uniform_samples,

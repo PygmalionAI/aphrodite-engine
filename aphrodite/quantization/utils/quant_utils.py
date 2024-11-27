@@ -19,6 +19,49 @@ FUSED_LAYER_NAME_MAPPING = {
 }
 
 
+def pack_weights_into_int32(w_q: torch.Tensor,
+                            wtype: ScalarType,
+                            packed_dim: int = 0):
+    # move dim to pack to the end
+    perm = (*[i for i in range(len(w_q.shape)) if i != packed_dim], packed_dim)
+    inv_perm = tuple(perm.index(i) for i in range(len(perm)))
+    w_q_perm = w_q.permute(perm)
+
+    pack_factor = 32 // wtype.size_bits
+    mask = (1 << wtype.size_bits) - 1
+
+    new_shape_perm = list(w_q_perm.shape)
+    assert w_q_perm.shape[-1] % pack_factor == 0
+    new_shape_perm[-1] //= pack_factor
+
+    res = torch.zeros(new_shape_perm, dtype=torch.int32, device=w_q.device)
+    for i in range(pack_factor):
+        res |= (w_q_perm[..., i::pack_factor] & mask) << wtype.size_bits * i
+
+    return res.permute(inv_perm)
+
+
+def unpack_weights_into_int32(w_q: torch.Tensor,
+                              wtype: ScalarType,
+                              packed_dim: int = 0):
+    # move dim to pack to the end
+    perm = (*[i for i in range(len(w_q.shape)) if i != packed_dim], packed_dim)
+    inv_perm = tuple(perm.index(i) for i in range(len(perm)))
+    w_q_perm = w_q.permute(perm)
+
+    pack_factor = 32 // wtype.size_bits
+    mask = (1 << wtype.size_bits) - 1
+
+    new_shape_perm = list(w_q_perm.shape)
+    new_shape_perm[-1] *= pack_factor
+
+    res = torch.zeros(new_shape_perm, dtype=torch.int32, device=w_q.device)
+    for i in range(pack_factor):
+        res[..., i::pack_factor] = (w_q_perm >> wtype.size_bits * i) & mask
+
+    return res.permute(inv_perm)
+
+
 def is_layer_skipped(prefix: str, ignored_layers: List[str]) -> bool:
     # prefix: model.layers.0.self_attn.q_proj
     # proj_name: q_proj
@@ -80,7 +123,8 @@ def permute_rows(q_w: torch.Tensor, w_ref: torch.Tensor, group_size: int):
 def quantize_weights(w: torch.Tensor,
                      quant_type: ScalarType,
                      group_size: int,
-                     zero_points: bool = False):
+                     zero_points: bool = False,
+                     ref_zero_points_after_scales: bool = False):
     assert quant_type.is_integer(), \
         "Floating point quantization may work but has not been tested"
 
@@ -124,8 +168,13 @@ def quantize_weights(w: torch.Tensor,
     w_q = torch.round(w / w_s).int() + (maybe_w_zp if zero_points else 0)
     w_q = torch.clamp(w_q, min_q_val, max_q_val)
 
-    # Compute ref (dequantized)
-    w_ref = (w_q - (maybe_w_zp if zero_points else 0)).to(orig_type) * w_s
+    # For some kernels (namely Machete) the zero-points are applied after the
+    # scales are applied, for this case computing the reference in similar way
+    # allows us to use tighter error tolerances in our unit tests.
+    if ref_zero_points_after_scales and zero_points:
+        w_ref = w_q.to(orig_type) * w_s - maybe_w_zp.to(orig_type) * w_s
+    else:
+        w_ref = (w_q - (maybe_w_zp if zero_points else 0)).to(orig_type) * w_s
 
     if quant_type.has_bias():
         w_q += quant_type.bias
