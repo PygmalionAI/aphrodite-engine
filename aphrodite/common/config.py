@@ -316,8 +316,15 @@ class ModelConfig:
                 quantization_override = method.override_quantization_method(
                     quant_cfg, self.quantization)
                 if quantization_override:
-                    quant_method = quantization_override
-                    self.quantization = quantization_override
+                    if quantization_override == "awq_marlin":
+                        quant_method = quant_method
+                        logger.info(
+                            "AWQ Marlin kernels are temporarily disabled, "
+                            "they will be re-enabled with a future release. "
+                            "falling back to AWQ kernels.")
+                    else:
+                        quant_method = quantization_override
+                        self.quantization = quantization_override
                     break
 
             # Verify quantization configurations.
