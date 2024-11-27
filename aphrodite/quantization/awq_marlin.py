@@ -92,7 +92,7 @@ class AWQMarlinConfig(QuantizationConfig):
                         ", however you specified quantization=awq explicitly,"
                         " so forcing awq. Use quantization=awq_marlin for"
                         " faster inference")
-        return False
+        return None
 
     def get_quant_method(self, layer: torch.nn.Module,
                          prefix: str) -> Optional["AWQMarlinLinearMethod"]:
