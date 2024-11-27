@@ -9,10 +9,11 @@ from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
 from aphrodite.modeling.parameter import (GroupQuantScaleParameter,
                                           PackedAphroditeParameter)
 from aphrodite.quantization.base_config import QuantizationConfig
+from aphrodite.quantization.utils import replace_parameter
 from aphrodite.quantization.utils.marlin_utils import (
     apply_awq_marlin_linear, awq_to_marlin_zero_points, check_marlin_supported,
     marlin_make_empty_g_idx, marlin_make_workspace, marlin_permute_scales,
-    replace_tensor, verify_marlin_supported, verify_marlin_supports_shape)
+    verify_marlin_supported, verify_marlin_supports_shape)
 from aphrodite.scalar_type import scalar_types
 
 
@@ -227,7 +228,7 @@ class AWQMarlinLinearMethod(LinearMethodBase):
             size_k=layer.input_size_per_partition,
             size_n=layer.output_size_per_partition,
             num_bits=self.quant_config.quant_type.size_bits)
-        replace_tensor(layer, "qweight", marlin_qweight)
+        replace_parameter(layer, "qweight", marlin_qweight)
 
         # Permute scales from AWQ format to marlin format.
         marlin_scales = marlin_permute_scales(
@@ -235,7 +236,7 @@ class AWQMarlinLinearMethod(LinearMethodBase):
             size_k=layer.input_size_per_partition,
             size_n=layer.output_size_per_partition,
             group_size=self.quant_config.group_size)
-        replace_tensor(layer, "scales", marlin_scales)
+        replace_parameter(layer, "scales", marlin_scales)
 
         # Permute zero-points from AWQ format to marlin format.
         marlin_zp = awq_to_marlin_zero_points(
@@ -243,7 +244,7 @@ class AWQMarlinLinearMethod(LinearMethodBase):
             size_k=layer.num_groups,
             size_n=layer.output_size_per_partition,
             num_bits=self.quant_config.quant_type.size_bits)
-        replace_tensor(layer, "qzeros", marlin_zp)
+        replace_parameter(layer, "qzeros", marlin_zp)
 
         # Not-used
         layer.g_idx = marlin_make_empty_g_idx(device)

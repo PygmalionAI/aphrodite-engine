@@ -110,6 +110,7 @@ void decompress_e8p_origorder(torch::Tensor YIs, torch::Tensor CB,
                               torch::Tensor& Y);
 
   #ifndef _WIN32
+// Cutlass Kernels
 bool cutlass_scaled_mm_supports_fp8(int64_t cuda_device_capability);
 
 void cutlass_scaled_mm(torch::Tensor& out, torch::Tensor const& a,
@@ -124,6 +125,26 @@ void cutlass_scaled_mm_azp(torch::Tensor& out, torch::Tensor const& a,
                            torch::Tensor const& azp_adj,
                            c10::optional<torch::Tensor> const& azp,
                            c10::optional<torch::Tensor> const& bias);
+
+// Machete Kernels
+namespace machete {
+
+std::vector<std::string> supported_schedules(
+    aphrodite::ScalarTypeTorchPtr const& btype);
+
+torch::Tensor gemm(torch::Tensor const& A, torch::Tensor const& B,
+                   aphrodite::ScalarTypeTorchPtr const& btype,
+                   c10::optional<torch::Tensor> const& scales,
+                   c10::optional<torch::Tensor> const& zeros,
+                   c10::optional<int64_t> group_size,
+                   c10::optional<torch::Tensor> const& C,
+                   c10::optional<double> alpha, c10::optional<double> beta,
+                   c10::optional<std::string> schedule);
+
+torch::Tensor prepack_B(torch::Tensor const& B,
+                        aphrodite::ScalarTypeTorchPtr const& btype);
+
+};  // namespace machete
 
 torch::Tensor marlin_qqq_gemm(torch::Tensor const& a,
                               torch::Tensor const& b_q_weight,
