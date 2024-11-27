@@ -204,6 +204,10 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "                  __torch__.torch.classes._core_C.ScalarType btype)"
       "-> Tensor");
   ops.impl("machete_prepack_B", torch::kCUDA, &machete::prepack_B);
+
+  ops.def("permute_cols(Tensor A, Tensor perm) -> Tensor");
+  ops.impl("permute_cols", torch::kCUDA, &permute_cols);
+
   #endif
 
   // QuIP# GEMV

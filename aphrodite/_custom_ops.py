@@ -355,6 +355,9 @@ def machete_prepack_B(b_q_weight: torch.Tensor,
                       b_type: ScalarType) -> torch.Tensor:
     return torch.ops._C.machete_prepack_B(b_q_weight, b_type)
 
+def permute_cols(a: torch.Tensor, perm: torch.Tensor) -> torch.Tensor:
+    return torch.ops._C.permute_cols(a, perm)
+
 
 # fp8
 def scaled_fp8_quant(
