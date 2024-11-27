@@ -2,7 +2,6 @@ from typing import Optional, Union
 
 from typing_extensions import TypedDict
 
-
 class Passthrough(TypedDict):
     """
     (development only) arguments passed through to the model.forward call
@@ -22,5 +21,6 @@ def try_get_passthrough(
         passthrough = params.additional_data.get("passthrough")
     return passthrough
 
+# prevent circular import:
 from aphrodite.common.pooling_params import PoolingParams  # noqa: E402
 from aphrodite.common.sampling_params import SamplingParams  # noqa: E402

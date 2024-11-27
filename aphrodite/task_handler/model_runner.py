@@ -592,7 +592,6 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
     def _compute_passthru(self,
         inter_data: InterDataForSeqGroup,
         seq_group_metadata: SequenceGroupMetadata):
-        # TODO:Luke better way?
         inter_data.passthrough = seq_group_metadata.sampling_params.passthrough
 
     def _compute_prompt_adapter_input(
@@ -788,7 +787,6 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
 
         passthrough = None
         if self.inter_data_list:
-            # TODO:Luke might be better way?
             passthrough = self.inter_data_list[0].passthrough
         return self.model_input_cls(
             input_tokens=input_tokens_tensor,
