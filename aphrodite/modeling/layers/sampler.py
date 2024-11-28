@@ -146,7 +146,7 @@ class Sampler(nn.Module):
         # Prepare sampling tensors with pinned memory to avoid blocking.
         if not sampling_metadata.reuse_sampling_tensors:
             self._init_sampling_tensors(logits, sampling_metadata)
-        elif self._do_penalties:
+        elif self._do_penalties or self._do_dry:
             # In this case, the sampling tensors logic depends on
             # "output_tokens" of a sequence. As a result, we cannot
             # reuse sampling tensors, since "output_tokens" changes
@@ -252,6 +252,7 @@ class Sampler(nn.Module):
                 logits = _apply_dry(
                     logits,
                     sampling_tensors.prompt_tokens,
+                    sampling_tensors.output_tokens,
                     sampling_tensors.dry_multipliers,
                     sampling_tensors.dry_bases, 
                     sampling_tensors.dry_allowed_lengths,
@@ -618,7 +619,8 @@ def _apply_min_tokens_penalty(
 
 def _apply_dry(
     logits: torch.Tensor,
-    input_ids: torch.Tensor,
+    input_token_ids: torch.Tensor,
+    output_token_ids: torch.Tensor,
     multipliers: torch.Tensor, 
     bases: torch.Tensor,
     allowed_lengths: torch.Tensor,
@@ -630,6 +632,7 @@ def _apply_dry(
     Reference: https://github.com/oobabooga/text-generation-webui/pull/5677
     """
     print("inside dry")
+    input_ids = torch.cat((input_token_ids, output_token_ids), dim=1)
     # Don't apply dry penalties if multiplier is 0
     if torch.all(multipliers == 0):
         print("skipping dry")
