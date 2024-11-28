@@ -242,13 +242,11 @@ class Sampler(nn.Module):
 
         for sampler_id in sampler_order:
             if sampler_id == SamplerID.DRY and do_dry:
-                print("considering dry")
                 if (sampling_metadata.seq_groups and
                     sampling_metadata.seq_groups[0].is_prompt):
                     logger.debug(
                         f"Applying DRY with dry_multiplier: "
                         f"{sampling_tensors.dry_multipliers}.")
-                print("applying dry")
                 logits = _apply_dry(
                     logits,
                     sampling_tensors.prompt_tokens,
@@ -631,30 +629,26 @@ def _apply_dry(
 
     Reference: https://github.com/oobabooga/text-generation-webui/pull/5677
     """
-    print("inside dry")
     input_ids = torch.cat((input_token_ids, output_token_ids), dim=1)
     # Don't apply dry penalties if multiplier is 0
     if torch.all(multipliers == 0):
-        print("skipping dry")
         return logits
-    print("inputs:", input_ids, "logits:", logits)
+    
     # Process each sequence in the batch
     for i, (input_ids_row, logits_row) in enumerate(zip(input_ids, logits)):
         multiplier = multipliers[i].item()
         if multiplier == 0:
-            print("skipping multiplier", multiplier)
             continue  # Skip processing for this sequence
         # Get the last token
         last_token = input_ids_row[-1].item()
-        print("last token", last_token)
+
         # Skip if last token is a sequence breaker
         if last_token in sequence_breakers_ids:
-            print("skipping sequence breaker", last_token)
             continue
 
         # Find matches of the last token, excluding the last position
         match_indices = (input_ids_row[:-1] == last_token).nonzero()
-        print("match indices", match_indices)
+
         # Track max matching sequence length for each potential next token
         match_lengths = {}
 
@@ -662,13 +656,12 @@ def _apply_dry(
         for idx in match_indices:
             # Convert to scalar
             idx = idx.item()
-            print("idx", idx)
+            
             # Get the token that followed this match in the input
             next_token = input_ids_row[idx + 1].item()
-            print("next token", next_token)
+
             # Skip if next token is a sequence breaker
             if next_token in sequence_breakers_ids:
-                print("skipping sequence breaker", next_token)
                 continue
 
             # We found last_token matches at this index, so match length starts
@@ -680,17 +673,14 @@ def _apply_dry(
                 j = idx - match_length
                 k = len(input_ids_row) - match_length - 1
                 if j < 0 or k < 0:
-                    print("reached start of input")
                     # Reached start of input
                     break
 
                 if input_ids_row[j].item() != input_ids_row[k].item():
-                    print("no match", input_ids_row[j].item(), input_ids_row[k].item())
                     # No more matches
                     break
 
                 if input_ids_row[k].item() in sequence_breakers_ids:
-                    print("skipping sequence breaker", input_ids_row[k].item())
                     # Hit a sequence breaker
                     break
 
@@ -707,12 +697,12 @@ def _apply_dry(
         allowed_length = allowed_lengths[i]
         multiplier = multipliers[i]  
         base = bases[i]
-        print("match lengths", match_lengths)
+
         for token, match_length in match_lengths.items():
             if match_length >= allowed_length:
                 penalty = multiplier * (base ** (match_length - allowed_length))
                 logits_row[token] -= penalty
-                print("applying penalty", penalty)
+
     return logits
 
 def _apply_no_repeat_ngram(
