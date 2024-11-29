@@ -629,11 +629,12 @@ def _apply_dry(
 
     Reference: https://github.com/oobabooga/text-generation-webui/pull/5677
     """
-    input_ids = torch.cat((input_token_ids, output_token_ids), dim=1)
     # Don't apply dry penalties if multiplier is 0
     if torch.all(multipliers == 0):
         return logits
-    
+
+    # we need to apply dry to both input and output tokens
+    input_ids = torch.cat((input_token_ids, output_token_ids), dim=1)
     # Process each sequence in the batch
     for i, (input_ids_row, logits_row) in enumerate(zip(input_ids, logits)):
         multiplier = multipliers[i].item()
