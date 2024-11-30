@@ -98,6 +98,7 @@ A few places to look for aarch64 binaries if you're having trouble:
 - pytorch.org hosts wheels at https://download.pytorch.org/whl and https://download.pytorch.org/whl/cuXXX (eg https://download.pytorch.org/whl/cu124). Note that `/whl/cu124` is a separate index, not a folder in `/whl`. There is also https://download.pytorch.org/whl/nightly/.
 - [nvidia's NGC docker containers](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch/tags) come with many tools and python packages bundled
 - Sometimes a project will have ARM binaries in their github build artifacts before the official releases. [example](https://github.com/pytorch/pytorch/actions/workflows/generated-linux-aarch64-binary-manywheel-nightly.yml)
+- The spack package manager may be helpful for building especially tricky sources, like pytorch.
 
 ## Installation with Docker
 We provide both a pre-built docker image, and a Dockerfile.
