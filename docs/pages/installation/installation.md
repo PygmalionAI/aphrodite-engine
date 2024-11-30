@@ -65,20 +65,53 @@ Afterwards, prefix every Aphrodite-related command with `./runtime.sh`. e.g.:
 ./runtime.sh aphrodite run -h
 ```
 
+## linux arm64/aarch64/GH200 tips
+
+The GH200 comes with an ARM CPU, so you might have to look around for the binaries you need.
+As of November 2024, this produced a working aphrodite build:
+
+```sh
+conda create -y -n 311 python=3.11; conda activate 311
+pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cu124
+conda install -y -c conda-forge cuda-nvcc_linux-aarch64=12.4 libstdcxx-ng=12
+conda install -y cmake sccache
+
+export CUDA_HOME=$CONDA_PREFIX
+export PATH=$CUDA_HOME/bin:$PATH
+python -c 'import torch; print(torch.tensor(5).cuda() + 1, "torch cuda ok")'
+
+cd aphrodite-engine
+
+pip install nvidia-ml-py==12.555.43 protobuf==3.20.2 ninja msgspec coloredlogs portalocker pytimeparse -r requirements-common.txt
+pip install --no-clean --no-deps --no-build-isolation -v .
+
+# if you want flash attention:
+cd ..
+git clone https://github.com/AlpinDale/flash-attention
+cd flash-attention
+pip install --no-clean --no-deps --no-build-isolation -v .
+```
+
+A few places to look for aarch64 binaries if you're having trouble:
+
+- [conda aarch64 defaults channel](https://repo.anaconda.com/pkgs/main/linux-aarch64/)
+- pytorch.org hosts wheels at https://download.pytorch.org/whl and https://download.pytorch.org/whl/cuXXX (eg https://download.pytorch.org/whl/cu124). Note that `/whl/cu124` is a separate index, not a folder in `/whl`. There is also https://download.pytorch.org/whl/nightly/.
+- [nvidia's NGC docker containers](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch/tags) come with many tools and python packages bundled
+- Sometimes a project will have ARM binaries in their github build artifacts before the official releases. [example](https://github.com/pytorch/pytorch/actions/workflows/generated-linux-aarch64-binary-manywheel-nightly.yml)
+
 ## Installation with Docker
 We provide both a pre-built docker image, and a Dockerfile.
 
 ### Using the pre-built Docker image
 
 ```sh
-docker run --runtime nvidia --gpus all \
-    -v ~/.cache/huggingface:/root/.cache/huggingface \
-    #--env "CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7" \
+sudo docker run --rm --runtime nvidia --gpus all \
+    -v /home/ubuntu:/home/ubuntu \
     -p 2242:2242 \
     --ipc=host \
     alpindale/aphrodite-openai:latest \
-    --model NousResearch/Meta-Llama-3.1-8B-Instruct \
-    --tensor-parallel-size 8 \
+    --model /home/ubuntu/hff/70b-base --served-model-name=70b-base \
+    --tensor-parallel-size 1 \
     --api-keys "sk-empty"
 ```
 
@@ -100,6 +133,3 @@ This Dockerfile will build for all CUDA arches, which may take hours. You can li
 ```
 
 You can run your built image using the command in the previous section.
-
-
-
