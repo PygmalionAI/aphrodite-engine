@@ -16,12 +16,6 @@ from aphrodite.modeling.guided_decoding.guided_fields import (
 from aphrodite.modeling.guided_decoding.lm_format_enforcer_logits_processors import (  # noqa: E501
     build_aphrodite_logits_processor,
     build_aphrodite_token_enforcer_tokenizer_data)
-from aphrodite.triton_utils import HAS_TRITON
-
-if HAS_TRITON:
-    from aphrodite.modeling.guided_decoding.outlines_decoding import (
-        get_local_outlines_guided_decoding_logits_processor,
-        get_outlines_guided_decoding_logits_processor)
 
 
 async def get_lm_format_enforcer_guided_decoding_logits_processor(
@@ -46,6 +40,9 @@ async def get_lm_format_enforcer_guided_decoding_logits_processor(
     elif request.guided_regex:
         character_level_parser = RegexParser(request.guided_regex)
     elif request.guided_grammar:
+        from aphrodite.modeling.guided_decoding.outlines_decoding import (
+            get_outlines_guided_decoding_logits_processor)
+
         # CFG grammar not supported by LMFE, revert to outlines
         return await get_outlines_guided_decoding_logits_processor(
             request, tokenizer)
@@ -83,6 +80,9 @@ def get_local_lm_format_enforcer_guided_decoding_logits_processor(
     elif guided_options.guided_regex:
         character_level_parser = RegexParser(guided_options.guided_regex)
     elif guided_options.guided_grammar:
+        from aphrodite.modeling.guided_decoding.outlines_decoding import (
+            get_local_outlines_guided_decoding_logits_processor)
+
         # CFG grammar not supported by LMFE, revert to outlines
         return get_local_outlines_guided_decoding_logits_processor(
             guided_options, tokenizer)
