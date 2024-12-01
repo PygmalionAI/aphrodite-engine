@@ -107,7 +107,7 @@ We provide both a pre-built docker image, and a Dockerfile.
 
 ```sh
 sudo docker run --rm --runtime nvidia --gpus all \
-    -v /home/ubuntu:/home/ubuntu \
+    -v ~/.cache/huggingface:/root/.cache/huggingface \
     -p 2242:2242 \
     --ipc=host \
     alpindale/aphrodite-openai:latest \
