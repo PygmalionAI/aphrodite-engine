@@ -106,7 +106,8 @@ We provide both a pre-built docker image, and a Dockerfile.
 ### Using the pre-built Docker image
 
 ```sh
-sudo docker run --runtime nvidia --gpus all \
+# Run this with sudo if you run into permission issues.
+docker run --runtime nvidia --gpus all \
     -v ~/.cache/huggingface:/root/.cache/huggingface \
     -p 2242:2242 \
     --ipc=host \
