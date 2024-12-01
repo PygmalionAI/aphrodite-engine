@@ -65,7 +65,7 @@ Afterwards, prefix every Aphrodite-related command with `./runtime.sh`. e.g.:
 ./runtime.sh aphrodite run -h
 ```
 
-## linux arm64/aarch64/GH200 tips
+## Linux arm64/aarch64/GH200 tips
 
 The GH200 comes with an ARM CPU, so you might have to look around for the binaries you need.
 As of November 2024, this produced a working aphrodite build:
