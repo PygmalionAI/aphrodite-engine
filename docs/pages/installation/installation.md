@@ -111,7 +111,7 @@ sudo docker run --rm --runtime nvidia --gpus all \
     -p 2242:2242 \
     --ipc=host \
     alpindale/aphrodite-openai:latest \
-    --model /home/ubuntu/hff/70b-base --served-model-name=70b-base \
+    --model NousResearch/Meta-Llama-3.1-8B-Instruct \
     --tensor-parallel-size 1 \
     --api-keys "sk-empty"
 ```
