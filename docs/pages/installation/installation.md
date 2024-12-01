@@ -67,7 +67,7 @@ Afterwards, prefix every Aphrodite-related command with `./runtime.sh`. e.g.:
 
 ## Linux arm64/aarch64/GH200 tips
 
-The GH200 comes with an ARM CPU, so you might have to look around for the binaries you need.
+The NVIDIA GH200 comes with an ARM CPU, so you might have to look around for the binaries you need.
 As of November 2024, this produced a working aphrodite build:
 
 ```sh
