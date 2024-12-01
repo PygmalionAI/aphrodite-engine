@@ -109,6 +109,7 @@ We provide both a pre-built docker image, and a Dockerfile.
 # Run this with sudo if you run into permission issues.
 docker run --runtime nvidia --gpus all \
     -v ~/.cache/huggingface:/root/.cache/huggingface \
+    #--env "CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7" \
     -p 2242:2242 \
     --ipc=host \
     alpindale/aphrodite-openai:latest \
