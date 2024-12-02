@@ -628,7 +628,7 @@ def _apply_dry(
 ) -> torch.Tensor:
     """
     Apply Don't Repeat Yourself (DRY) sampling to the logits.
-
+    
     Reference: https://github.com/oobabooga/text-generation-webui/pull/5677
     """
     if torch.all(multipliers == 0):
@@ -638,69 +638,84 @@ def _apply_dry(
     input_ids = torch.cat((input_token_ids, output_token_ids), dim=1)
     vocab_size = logits.size(-1)
 
+    def compute_z_array(s: List[int], end: int, search_start: int) -> List[int]:
+        """
+        Compute Z array using two-pointer technique for linear time complexity
+        """
+        z = [0] * len(s)
+        right = end - 1
+        left = end - 1
+
+        while right >= search_start:
+            while left == right and left >= search_start:
+                if s[right] == s[end]:
+                    break
+                right -= 1
+                left -= 1
+
+            while left >= search_start and s[left] == s[end - (right - left)]:
+                z[right] += 1
+                left -= 1
+
+            helper = right
+            while right > left:
+                right -= 1
+                if left == right:
+                    break
+                z[right] = min(z[end - (helper - right)], right - left)
+                if left >= search_start and right - z[right] <= left:
+                    break
+
+        return z
+
     # Process each sequence in the batch
     for i, (input_ids_row, logits_row) in enumerate(zip(input_ids, logits)):
         multiplier = multipliers[i].item()
         if multiplier == 0:
             continue
 
-        range_limit = ranges[i].item()
-        if range_limit == 0:
-            search_start = 0
-        else:
-            search_start = max(0, len(input_ids_row) - range_limit)
-
-        last_token = input_ids_row[-1].item()
+        input_ids_list = input_ids_row.tolist()
+        last_token = input_ids_list[-1]
 
         if last_token in sequence_breakers_ids:
             continue
 
-        # Find matches of the last token, excluding the last position
-        # Only look within the specified range
-        match_indices = (input_ids_row[search_start:-1] == last_token).nonzero()
-        if len(match_indices) > 0:
-            match_indices = match_indices + search_start
+        range_limit = ranges[i].item()
+        if range_limit == 0:
+            search_start = 0
+        else:
+            search_start = max(0, len(input_ids_list) - range_limit)
 
-        match_lengths = {}
+        # Find max match length based on sequence breakers
+        max_match_length = 0
+        MAX_LENGTH = min(len(input_ids_list), 1000)  # Prevent overflow
+        while (max_match_length < MAX_LENGTH and 
+               input_ids_list[len(input_ids_list) - max_match_length - 1] 
+               not in sequence_breakers_ids):
+            max_match_length += 1
 
-        for idx in match_indices:
-            idx = idx.item()
-            next_token = input_ids_row[idx + 1].item()
+        z_array = compute_z_array(
+            input_ids_list, len(input_ids_list) - 1, search_start)
+        
+        z_array = [min(length, max_match_length) for length in z_array]
 
-            if next_token in sequence_breakers_ids or next_token >= vocab_size:
-                continue
-
-            match_length = 1
-
-            while match_length < 50:
-                j = idx - match_length
-                k = len(input_ids_row) - match_length - 1
-                if j < search_start or j < 0 or k < 0:
-                    break
-
-                if input_ids_row[j].item() != input_ids_row[k].item():
-                    # No more matches
-                    break
-
-                if input_ids_row[k].item() in sequence_breakers_ids:
-                    break
-
-                match_length += 1
-
-            if next_token in match_lengths:
-                match_lengths[next_token] = max(
-                    match_length, match_lengths[next_token])
-            else:
-                match_lengths[next_token] = match_length
-
+        penalties = {}
         allowed_length = allowed_lengths[i]
-        multiplier = multipliers[i]  
         base = bases[i]
 
-        for token, match_length in match_lengths.items():
-            if match_length >= allowed_length and token < vocab_size:
+        for idx, match_length in enumerate(z_array[:-1]):
+            if match_length >= allowed_length:
+                next_token = input_ids_list[idx + 1]
+                if (next_token >= vocab_size or next_token in
+                    sequence_breakers_ids):
+                    continue
+
                 penalty = multiplier * (base ** (match_length - allowed_length))
-                logits_row[token] -= penalty
+                penalties[next_token] = max(
+                    penalty, penalties.get(next_token, 0))
+
+        for token, penalty in penalties.items():
+            logits_row[token] -= penalty
 
     return logits
 
