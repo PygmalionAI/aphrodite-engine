@@ -254,7 +254,8 @@ class Sampler(nn.Module):
                     sampling_tensors.dry_multipliers,
                     sampling_tensors.dry_bases, 
                     sampling_tensors.dry_allowed_lengths,
-                    sampling_tensors.dry_sequence_breaker_ids)
+                    sampling_tensors.dry_sequence_breaker_ids,
+                    sampling_tensors.dry_ranges)
 
             elif sampler_id == SamplerID.PENALTIES and do_penalties:
                 if (sampling_metadata.seq_groups and
@@ -622,61 +623,61 @@ def _apply_dry(
     multipliers: torch.Tensor, 
     bases: torch.Tensor,
     allowed_lengths: torch.Tensor,
-    sequence_breakers_ids: torch.Tensor
+    sequence_breakers_ids: torch.Tensor,
+    ranges: torch.Tensor,
 ) -> torch.Tensor:
     """
     Apply Don't Repeat Yourself (DRY) sampling to the logits.
 
     Reference: https://github.com/oobabooga/text-generation-webui/pull/5677
     """
-    # Don't apply dry penalties if multiplier is 0
     if torch.all(multipliers == 0):
         return logits
 
-    # we need to apply dry to both input and output tokens
+    # DRY needs to be applied to both input AND output tokens
     input_ids = torch.cat((input_token_ids, output_token_ids), dim=1)
     vocab_size = logits.size(-1)
-    
+
     # Process each sequence in the batch
     for i, (input_ids_row, logits_row) in enumerate(zip(input_ids, logits)):
         multiplier = multipliers[i].item()
         if multiplier == 0:
-            continue  # Skip processing for this sequence
-        # Get the last token
+            continue
+
+        range_limit = ranges[i].item()
+        if range_limit == 0:
+            search_start = 0
+        else:
+            search_start = max(0, len(input_ids_row) - range_limit)
+
         last_token = input_ids_row[-1].item()
 
-        # Skip if last token is a sequence breaker
         if last_token in sequence_breakers_ids:
             continue
 
         # Find matches of the last token, excluding the last position
-        match_indices = (input_ids_row[:-1] == last_token).nonzero()
+        # Only look within the specified range
+        match_indices = (input_ids_row[search_start:-1] == last_token).nonzero()
+        if len(match_indices) > 0:
+            # Adjust indices to account for the range offset
+            match_indices = match_indices + search_start
 
-        # Track max matching sequence length for each potential next token
+        # Rest of the function remains the same...
         match_lengths = {}
 
-        # Process each match
         for idx in match_indices:
-            # Convert to scalar
             idx = idx.item()
-            
-            # Get the token that followed this match in the input
             next_token = input_ids_row[idx + 1].item()
 
-            # Skip if next token is a sequence breaker or out of vocab range
             if next_token in sequence_breakers_ids or next_token >= vocab_size:
                 continue
 
-            # We found last_token matches at this index, so match length starts
-            # at 1
             match_length = 1
 
-            # Try to extend match backwards
             while match_length < 50:
                 j = idx - match_length
                 k = len(input_ids_row) - match_length - 1
-                if j < 0 or k < 0:
-                    # Reached start of input
+                if j < search_start or j < 0 or k < 0:
                     break
 
                 if input_ids_row[j].item() != input_ids_row[k].item():
@@ -684,19 +685,16 @@ def _apply_dry(
                     break
 
                 if input_ids_row[k].item() in sequence_breakers_ids:
-                    # Hit a sequence breaker
                     break
 
                 match_length += 1
 
-            # Update max match length for this next token
             if next_token in match_lengths:
                 match_lengths[next_token] = max(
                     match_length, match_lengths[next_token])
             else:
                 match_lengths[next_token] = match_length
 
-        # Apply penalties based on match lengths
         allowed_length = allowed_lengths[i]
         multiplier = multipliers[i]  
         base = bases[i]
