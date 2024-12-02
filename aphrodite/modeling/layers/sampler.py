@@ -674,10 +674,11 @@ def _apply_dry(
         if multiplier == 0:
             continue
 
+        seq_breakers = set(sequence_breakers_ids[i].tolist())
         input_ids_list = input_ids_row.tolist()
         last_token = input_ids_list[-1]
 
-        if last_token in sequence_breakers_ids:
+        if last_token in seq_breakers:
             continue
 
         range_limit = ranges[i].item()
