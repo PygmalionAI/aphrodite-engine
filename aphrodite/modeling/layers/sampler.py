@@ -692,7 +692,7 @@ def _apply_dry(
         MAX_LENGTH = min(len(input_ids_list), 1000)  # Prevent overflow
         while (max_match_length < MAX_LENGTH and 
                input_ids_list[len(input_ids_list) - max_match_length - 1] 
-               not in sequence_breakers_ids):
+               not in seq_breakers):
             max_match_length += 1
 
         z_array = compute_z_array(
@@ -708,7 +708,7 @@ def _apply_dry(
             if match_length >= allowed_length:
                 next_token = input_ids_list[idx + 1]
                 if (next_token >= vocab_size or next_token in
-                    sequence_breakers_ids):
+                    seq_breakers):
                     continue
 
                 penalty = multiplier * (base ** (match_length - allowed_length))
