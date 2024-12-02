@@ -659,10 +659,8 @@ def _apply_dry(
         # Only look within the specified range
         match_indices = (input_ids_row[search_start:-1] == last_token).nonzero()
         if len(match_indices) > 0:
-            # Adjust indices to account for the range offset
             match_indices = match_indices + search_start
 
-        # Rest of the function remains the same...
         match_lengths = {}
 
         for idx in match_indices:
