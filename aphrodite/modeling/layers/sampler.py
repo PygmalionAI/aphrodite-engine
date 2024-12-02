@@ -628,7 +628,7 @@ def _apply_dry(
 ) -> torch.Tensor:
     """
     Apply Don't Repeat Yourself (DRY) sampling to the logits.
-    
+
     Reference: https://github.com/oobabooga/text-generation-webui/pull/5677
     """
     if torch.all(multipliers == 0):
