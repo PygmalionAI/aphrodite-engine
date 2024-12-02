@@ -192,6 +192,8 @@ class SamplingParams(
             input into sections where repetition is evaluated separately.
             Common examples are newlines, quotes, and other structural tokens.
             Defaults to None.
+        dry_range: The range of tokens (input + output) to apply the DRY
+            sampler.
         skew: Bias the token selection towards higher or lower probability
             tokens. Defaults to 0 (disabled).
         sampler_priority: A list of integers to control the order in which
@@ -247,6 +249,7 @@ class SamplingParams(
     dry_base: float = 1.75
     dry_allowed_length: int = 2
     dry_sequence_breaker_ids: List[int] = []
+    dry_range: int = 0
     skew: float = 0.0
     sampler_priority: Optional[List[int]] = []
     # The below fields are not supposed to be used as an input.
@@ -300,6 +303,7 @@ class SamplingParams(
         "dry_base": 1.75,
         "dry_allowed_length": 2,
         "dry_sequence_breaker_ids": [],
+        "dry_range": 0,
         "skew": 0.0,
         "sampler_priority": [],
     }
@@ -447,6 +451,10 @@ class SamplingParams(
             raise ValueError(
                 "dry_allowed_length must be non-negative, got "
                 f"{self.dry_allowed_length}.")
+        if self.dry_range < 0:
+            raise ValueError(
+                "dry_range must be non-negative, got "
+                f"{self.dry_range}.")
         if self.skew < 0.0:
             raise ValueError(
                 "skew must be non-negative, got "

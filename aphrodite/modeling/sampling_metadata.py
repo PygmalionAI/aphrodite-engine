@@ -393,6 +393,7 @@ class SamplingTensors:
     dry_bases: torch.Tensor
     dry_allowed_lengths: torch.Tensor
     dry_sequence_breaker_ids: torch.Tensor
+    dry_ranges: torch.Tensor
     skews: torch.Tensor
     sampling_seeds: torch.Tensor
     sample_indices: torch.Tensor
@@ -447,6 +448,7 @@ class SamplingTensors:
         dry_bases: List[float] = []
         dry_allowed_lengths: List[int] = []
         dry_sequence_breaker_ids: List[List[int]] = []
+        dry_ranges: List[int] = []
         skews: List[float] = []
 
         do_penalties = False
@@ -552,6 +554,7 @@ class SamplingTensors:
             dry_allowed_lengths += [params.dry_allowed_length] * n_seqs
             dry_sequence_breaker_ids += (
                 [params.dry_sequence_breaker_ids] * n_seqs)
+            dry_ranges += [params.dry_range] * n_seqs
             skews += [params.skew] * n_seqs
 
             if _USE_TRITON_SAMPLER:
@@ -601,7 +604,7 @@ class SamplingTensors:
             no_repeat_ngram_sizes, tfss, eta_cutoffs, epsilon_cutoffs,
             typical_ps, smoothing_factors, smoothing_curves, xtc_thresholds,
             xtc_probabilities, nsigmas, dry_multipliers, dry_bases,
-            dry_allowed_lengths, dry_sequence_breaker_ids, skews,
+            dry_allowed_lengths, dry_sequence_breaker_ids, dry_ranges, skews,
             sampling_seeds, sample_indices, prompt_tokens, output_tokens,
             vocab_size, extra_seeds_to_generate, device, dtype)
         return (sampling_tensors, do_penalties, do_no_repeat_ngrams,
@@ -626,7 +629,8 @@ class SamplingTensors:
                    dry_multipliers: List[float], dry_bases: List[float],
                    dry_allowed_lengths: List[int],
                    dry_sequence_breaker_ids: List[List[int]],
-                   skews: List[float], sampling_seeds: List[List[int]],
+                   dry_ranges: List[int], skews: List[float],
+                   sampling_seeds: List[List[int]],
                    sample_indices: List[int], prompt_tokens: List[array],
                    output_tokens: List[array], vocab_size: int,
                    extra_seeds_to_generate: int, device: torch.device,
@@ -792,6 +796,12 @@ class SamplingTensors:
             dtype=torch.long,
             pin_memory=pin_memory,
         )
+        dry_ranges_t = torch.tensor(
+            dry_ranges,
+            device="cpu",
+            dtype=torch.int,
+            pin_memory=pin_memory,
+        )
         skews_t = torch.tensor(
             skews,
             device="cpu",
@@ -865,6 +875,7 @@ class SamplingTensors:
                                                          non_blocking=True),
             dry_sequence_breaker_ids=dry_sequence_breakers_t.to(device=device,
                                                                 non_blocking=True),
+            dry_ranges=dry_ranges_t.to(device=device, non_blocking=True),
             skews=skews_t.to(device=device, non_blocking=True),
             typical_ps=typical_ps_t.to(device=device, non_blocking=True),
             prompt_tokens=prompt_t.to(device=device, non_blocking=True),
