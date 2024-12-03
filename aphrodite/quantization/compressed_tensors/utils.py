@@ -1,8 +1,8 @@
 import re
 from enum import Enum
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from torch.nn import Module
 
 from aphrodite.quantization.utils.quant_utils import FUSED_LAYER_NAME_MAPPING
@@ -39,6 +39,17 @@ class QuantizationStrategy(str, Enum):
     TOKEN = "token"
 
 
+class ActivationOrdering(str, Enum):
+    """
+    Enum storing strategies for activation ordering
+    Group: reorder groups and weight\n
+    Weight: only reorder weight, not groups. Slightly lower latency and
+    accuracy compared to group actorder\n
+    """
+    GROUP = "group"
+    WEIGHT = "weight"
+
+
 class QuantizationArgs(BaseModel):
     """
     User facing arguments used to define a quantization config 
@@ -57,6 +68,8 @@ class QuantizationArgs(BaseModel):
         observed with every sample. Defaults to False for static
         quantization. Note that enabling dynamic quantization 
         will change the default observer to a memoryless one
+    :param actorder: whether to apply group quantization in decreasing order of
+        activation. Defaults to None for arbitrary ordering
     """
 
     num_bits: int = 8
@@ -66,6 +79,7 @@ class QuantizationArgs(BaseModel):
     strategy: Optional[QuantizationStrategy] = None
     block_structure: Optional[str] = None
     dynamic: bool = False
+    actorder: Union[ActivationOrdering, bool, None] = None
     observer: str = Field(
         default="minmax",
         description=("The class to use to compute the quantization param - "
@@ -77,6 +91,14 @@ class QuantizationArgs(BaseModel):
         ("optional dict of kwargs to be passed directly to torch quantization "
          "Observers constructor excluding quantization range or symmetry"),
     )
+
+    @field_validator("actorder", mode="before")
+    def validate_actorder(cls, value) -> Optional[ActivationOrdering]:
+        if isinstance(value, bool):
+            return ActivationOrdering.GROUP if value else None
+        if isinstance(value, str):
+            return ActivationOrdering(value.lower())
+        return value
 
 
 def is_activation_quantization_format(format: str) -> bool:

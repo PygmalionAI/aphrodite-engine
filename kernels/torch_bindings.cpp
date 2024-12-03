@@ -189,6 +189,25 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "                  Tensor b_scales, Tensor azp_adj,"
       "                  Tensor? azp, Tensor? bias) -> ()");
   ops.impl("cutlass_scaled_mm_azp", torch::kCUDA, &cutlass_scaled_mm_azp);
+
+  // Machete (Dense) Optimized Mixed Precision GEMM for Hopper.
+  ops.def("machete_supported_schedules", &machete::supported_schedules);
+  ops.def(
+      "machete_gemm(Tensor A, Tensor B,"
+      "             __torch__.torch.classes._core_C.ScalarType btype,"
+      "             Tensor? scales, Tensor? zeros, int? group_size,"
+      "             Tensor? C, float? alpha, float? beta, str? schedule)"
+      "-> Tensor");
+  ops.impl("machete_gemm", torch::kCUDA, &machete::gemm);
+  ops.def(
+      "machete_prepack_B(Tensor B,"
+      "                  __torch__.torch.classes._core_C.ScalarType btype)"
+      "-> Tensor");
+  ops.impl("machete_prepack_B", torch::kCUDA, &machete::prepack_B);
+
+  ops.def("permute_cols(Tensor A, Tensor perm) -> Tensor");
+  ops.impl("permute_cols", torch::kCUDA, &permute_cols);
+
   #endif
 
   // QuIP# GEMV

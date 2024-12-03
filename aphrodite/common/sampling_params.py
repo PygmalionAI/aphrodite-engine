@@ -23,6 +23,49 @@ class SamplingType(IntEnum):
     RANDOM_SEED = 2
     BEAM = 3
 
+class SamplerID(IntEnum):
+    # Mirror these in aphrodite/modeling/layers/sampler.py
+    # Values out of order to keep backwards compatibility
+    # with Koboldcpp values
+    DRY = 7
+    PENALTIES = 6
+    NO_REPEAT_NGRAM = 8
+    TEMPERATURE = 5
+    TOP_NSIGMA = 9
+    TOP_P_TOP_K = 0
+    TOP_A = 1
+    MIN_P = 2
+    TFS = 3
+    ETA_CUTOFF = 10
+    EPSILON_CUTOFF = 11
+    TYPICAL_P = 4
+    QUADRATIC = 12
+    XTC = 13
+
+    @classmethod
+    def from_str(cls, value: Union[str, int]) -> "SamplerID":
+        """Convert string or int to SamplerID enum.
+
+        Args:
+            value: String name (case-insensitive) or integer value
+
+        Returns:
+            SamplerID enum value
+
+        Raises:
+            ValueError: If value cannot be converted to SamplerID
+        """
+        if isinstance(value, int):
+            return cls(value)
+
+        try:
+            return cls[value.upper()]
+        except KeyError as e:
+            valid_names = [x.name for x in cls]
+            raise ValueError(
+                f"Invalid sampler name '{value}'. Must be one of: {valid_names}"
+            ) from e
+
 
 LogitsProcessorFunc = Union[Callable[[List[int], torch.Tensor], torch.Tensor],
                             Callable[[List[int], List[int], torch.Tensor],
@@ -173,8 +216,12 @@ class SamplingParams(
             input into sections where repetition is evaluated separately.
             Common examples are newlines, quotes, and other structural tokens.
             Defaults to None.
+        dry_range: The range of tokens (input + output) to apply the DRY
+            sampler.
         skew: Bias the token selection towards higher or lower probability
             tokens. Defaults to 0 (disabled).
+        sampler_priority: A list of integers to control the order in which
+            samplers are applied.
     """
 
     n: int = 1
@@ -226,7 +273,9 @@ class SamplingParams(
     dry_base: float = 1.75
     dry_allowed_length: int = 2
     dry_sequence_breaker_ids: List[int] = []
+    dry_range: int = 0
     skew: float = 0.0
+    sampler_priority: Optional[List[int]] = []
     # The below fields are not supposed to be used as an input.
     # They are set in post_init.
     output_text_buffer_length: int = 0
@@ -266,7 +315,7 @@ class SamplingParams(
         "logprobs": None,
         "prompt_logprobs": None,
         "detokenize": True,
-        "custom_token_bans": [],
+        "custom_token_bans": None,
         "skip_special_tokens": True,
         "spaces_between_special_tokens": True,
         "include_stop_str_in_output": False,
@@ -278,7 +327,9 @@ class SamplingParams(
         "dry_base": 1.75,
         "dry_allowed_length": 2,
         "dry_sequence_breaker_ids": [],
+        "dry_range": 0,
         "skew": 0.0,
+        "sampler_priority": [],
     }
 
     def __post_init__(self) -> None:
@@ -424,10 +475,42 @@ class SamplingParams(
             raise ValueError(
                 "dry_allowed_length must be non-negative, got "
                 f"{self.dry_allowed_length}.")
+        if self.dry_range < 0:
+            raise ValueError(
+                "dry_range must be non-negative, got "
+                f"{self.dry_range}.")
         if self.skew < 0.0:
             raise ValueError(
                 "skew must be non-negative, got "
                 f"{self.skew}.")
+        
+        if self.sampler_priority is not None:
+            if not self.sampler_priority:
+                self.sampler_priority = None
+                return
+
+            if not isinstance(self.sampler_priority, list):
+                raise ValueError(
+                    "sampler_priority must be a list of integers or strings")
+
+            try:
+                self.sampler_priority = [
+                    SamplerID.from_str(x) for x in self.sampler_priority
+                ]
+                provided_samplers = set(self.sampler_priority)
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid sampler ID in priority list: {e}"
+                ) from e
+
+            required_samplers = set(SamplerID)
+            if not required_samplers.issubset(provided_samplers):
+                missing = required_samplers - provided_samplers
+                missing_names = [s.name for s in missing]
+                raise ValueError(
+                    "Missing required samplers in priority list: "
+                    f"{missing_names}"
+                )
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:

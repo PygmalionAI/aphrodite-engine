@@ -5,7 +5,8 @@ import time
 from typing import Any, Dict, List, Literal, Optional, Union
 
 import torch
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (AliasChoices, BaseModel, ConfigDict, Field,
+                      model_validator)
 from transformers import PreTrainedTokenizer
 from typing_extensions import Annotated
 
@@ -154,12 +155,20 @@ class ChatCompletionRequest(OpenAIBaseModel):
     dry_allowed_length: Optional[int] = 2
     dry_sequence_breakers: Optional[List[str]] = Field(
         default=["\n", ":", "\"", "*"])
+    dry_range: Optional[int] = Field(
+        default=0,
+        validation_alias=AliasChoices("dry_range",
+                                      "dry_penalty_last_n"))
     dynatemp_min: Optional[float] = 0.0
     dynatemp_max: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
     nsigma: Optional[float] = 0.0
     skew: Optional[float] = 0.0
     custom_token_bans: Optional[List[int]] = None
+    sampler_priority: Optional[Union[List[int], List[str]]] = Field(
+        default=[],
+        validation_alias=AliasChoices("sampler_priority",
+                                      "sampler_order"))
     # doc: end-chat-completion-sampling-params
 
     # doc: begin-chat-completion-extra-params
@@ -311,12 +320,14 @@ class ChatCompletionRequest(OpenAIBaseModel):
             dry_base=self.dry_base,
             dry_allowed_length=self.dry_allowed_length,
             dry_sequence_breaker_ids=dry_sequence_breaker_ids,
+            dry_range=self.dry_range,
             dynatemp_min=self.dynatemp_min,
             dynatemp_max=self.dynatemp_max,
             dynatemp_exponent=self.dynatemp_exponent,
             nsigma=self.nsigma,
             skew=self.skew,
             custom_token_bans=self.custom_token_bans,
+            sampler_priority=self.sampler_priority,
         )
 
     @model_validator(mode='before')
@@ -430,12 +441,20 @@ class CompletionRequest(OpenAIBaseModel):
     dry_allowed_length: Optional[int] = 2
     dry_sequence_breakers: Optional[List[str]] = Field(
         default=["\n", ":", "\"", "*"])
+    dry_range: Optional[int] = Field(
+        default=0,
+        validation_alias=AliasChoices("dry_range",
+                                      "dry_penalty_last_n"))
     dynatemp_min: Optional[float] = 0.0
     dynatemp_max: Optional[float] = 0.0
     dynatemp_exponent: Optional[float] = 1.0
     nsigma: Optional[float] = 0.0
     skew: Optional[float] = 0.0
     custom_token_bans: Optional[List[int]] = None
+    sampler_priority: Optional[Union[List[int], List[str]]] = Field(
+        default=[],
+        validation_alias=AliasChoices("sampler_priority",
+                                      "sampler_order"))
     # doc: end-completion-sampling-params
 
     # doc: begin-completion-extra-params
@@ -546,12 +565,14 @@ class CompletionRequest(OpenAIBaseModel):
             dry_base=self.dry_base,
             dry_allowed_length=self.dry_allowed_length,
             dry_sequence_breaker_ids=dry_sequence_breaker_ids,
+            dry_range=self.dry_range,
             dynatemp_min=self.dynatemp_min,
             dynatemp_max=self.dynatemp_max,
             dynatemp_exponent=self.dynatemp_exponent,
             nsigma=self.nsigma,
             skew=self.skew,
             custom_token_bans=self.custom_token_bans,
+            sampler_priority=self.sampler_priority,
         )
 
     @model_validator(mode="before")
