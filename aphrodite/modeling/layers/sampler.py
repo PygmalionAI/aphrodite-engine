@@ -631,7 +631,8 @@ def _apply_dry(
 
     Reference: https://github.com/oobabooga/text-generation-webui/pull/5677
     """
-    if torch.all(multipliers == 0):
+    dry_indices = torch.nonzero(multipliers).squeeze(-1)
+    if len(dry_indices) == 0:
         return logits
 
     # DRY needs to be applied to both input AND output tokens
@@ -668,20 +669,18 @@ def _apply_dry(
 
         return z
 
-    # Process each sequence in the batch
-    for i, (input_ids_row, logits_row) in enumerate(zip(input_ids, logits)):
-        multiplier = multipliers[i].item()
-        if multiplier == 0:
-            continue
-
-        seq_breakers = set(sequence_breakers_ids[i].tolist())
+    # Process only sequences that have DRY enabled
+    for idx in dry_indices:
+        input_ids_row = input_ids[idx]
+        logits_row = logits[idx]
+        seq_breakers = set(sequence_breakers_ids[idx].tolist())
         input_ids_list = input_ids_row.tolist()
         last_token = input_ids_list[-1]
 
         if last_token in seq_breakers:
             continue
 
-        range_limit = ranges[i].item()
+        range_limit = ranges[idx].item()
         if range_limit == 0:
             search_start = 0
         else:
@@ -701,12 +700,13 @@ def _apply_dry(
         z_array = [min(length, max_match_length) for length in z_array]
 
         penalties = {}
-        allowed_length = allowed_lengths[i]
-        base = bases[i]
+        allowed_length = allowed_lengths[idx]
+        base = bases[idx]
+        multiplier = multipliers[idx].item()
 
-        for idx, match_length in enumerate(z_array[:-1]):
+        for idx2, match_length in enumerate(z_array[:-1]):
             if match_length >= allowed_length:
-                next_token = input_ids_list[idx + 1]
+                next_token = input_ids_list[idx2 + 1]
                 if (next_token >= vocab_size or next_token in
                     seq_breakers):
                     continue
