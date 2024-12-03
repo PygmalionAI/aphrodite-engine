@@ -639,11 +639,18 @@ def _apply_dry(
     input_ids = torch.cat((input_token_ids, output_token_ids), dim=1)
     vocab_size = logits.size(-1)
 
-    def compute_z_array(s: List[int], end: int, search_start: int) -> List[int]:
+    def compute_z_array_gpu(
+            s: torch.Tensor, end: int,
+            search_start: int) -> torch.Tensor:
         """
-        Compute Z array using two-pointer technique for linear time complexity
+        GPU-optimized version of Z array computation using two-pointer technique
         """
-        z = [0] * len(s)
+        n = len(s)
+        z = torch.zeros(n, dtype=torch.int64, device=s.device)
+
+        if end < search_start:
+            return z
+
         right = end - 1
         left = end - 1
 
@@ -663,7 +670,7 @@ def _apply_dry(
                 right -= 1
                 if left == right:
                     break
-                z[right] = min(z[end - (helper - right)], right - left)
+                z[right] = min(z[end - (helper - right)].item(), right - left)
                 if left >= search_start and right - z[right] <= left:
                     break
 
@@ -674,8 +681,7 @@ def _apply_dry(
         input_ids_row = input_ids[idx]
         logits_row = logits[idx]
         seq_breakers = set(sequence_breakers_ids[idx].tolist())
-        input_ids_list = input_ids_row.tolist()
-        last_token = input_ids_list[-1]
+        last_token = input_ids_row[-1].item()
 
         if last_token in seq_breakers:
             continue
@@ -684,20 +690,21 @@ def _apply_dry(
         if range_limit == 0:
             search_start = 0
         else:
-            search_start = max(0, len(input_ids_list) - range_limit)
+            search_start = max(0, len(input_ids_row) - range_limit)
 
         # Find max match length based on sequence breakers
         max_match_length = 0
-        MAX_LENGTH = min(len(input_ids_list), 1000)  # Prevent overflow
+        MAX_LENGTH = min(len(input_ids_row), 1000)  # Prevent overflow
         while (max_match_length < MAX_LENGTH and 
-               input_ids_list[len(input_ids_list) - max_match_length - 1] 
+               input_ids_row[len(input_ids_row) - max_match_length - 1].item() 
                not in seq_breakers):
             max_match_length += 1
 
-        z_array = compute_z_array(
-            input_ids_list, len(input_ids_list) - 1, search_start)
-        
-        z_array = [min(length, max_match_length) for length in z_array]
+        z_array = compute_z_array_gpu(
+            input_ids_row, len(input_ids_row) - 1, search_start)
+
+        z_array = torch.minimum(
+            z_array, torch.tensor(max_match_length, device=z_array.device))
 
         penalties = {}
         allowed_length = allowed_lengths[idx]
@@ -705,8 +712,9 @@ def _apply_dry(
         multiplier = multipliers[idx].item()
 
         for idx2, match_length in enumerate(z_array[:-1]):
+            match_length = match_length.item()  # Convert tensor to int
             if match_length >= allowed_length:
-                next_token = input_ids_list[idx2 + 1]
+                next_token = input_ids_row[idx2 + 1].item()
                 if (next_token >= vocab_size or next_token in
                     seq_breakers):
                     continue
