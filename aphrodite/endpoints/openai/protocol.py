@@ -165,7 +165,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
     nsigma: Optional[float] = 0.0
     skew: Optional[float] = 0.0
     custom_token_bans: Optional[List[int]] = None
-    sampler_priority: Optional[List[int]] = Field(
+    sampler_priority: Optional[Union[List[int], List[str]]] = Field(
         default=[],
         validation_alias=AliasChoices("sampler_priority",
                                       "sampler_order"))
@@ -451,7 +451,7 @@ class CompletionRequest(OpenAIBaseModel):
     nsigma: Optional[float] = 0.0
     skew: Optional[float] = 0.0
     custom_token_bans: Optional[List[int]] = None
-    sampler_priority: Optional[List[int]] = Field(
+    sampler_priority: Optional[Union[List[int], List[str]]] = Field(
         default=[],
         validation_alias=AliasChoices("sampler_priority",
                                       "sampler_order"))

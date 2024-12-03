@@ -42,6 +42,30 @@ class SamplerID(IntEnum):
     QUADRATIC = 12
     XTC = 13
 
+    @classmethod
+    def from_str(cls, value: Union[str, int]) -> "SamplerID":
+        """Convert string or int to SamplerID enum.
+
+        Args:
+            value: String name (case-insensitive) or integer value
+
+        Returns:
+            SamplerID enum value
+
+        Raises:
+            ValueError: If value cannot be converted to SamplerID
+        """
+        if isinstance(value, int):
+            return cls(value)
+
+        try:
+            return cls[value.upper()]
+        except KeyError as e:
+            valid_names = [x.name for x in cls]
+            raise ValueError(
+                f"Invalid sampler name '{value}'. Must be one of: {valid_names}"
+            ) from e
+
 
 LogitsProcessorFunc = Union[Callable[[List[int], torch.Tensor], torch.Tensor],
                             Callable[[List[int], List[int], torch.Tensor],
@@ -291,7 +315,7 @@ class SamplingParams(
         "logprobs": None,
         "prompt_logprobs": None,
         "detokenize": True,
-        "custom_token_bans": [],
+        "custom_token_bans": None,
         "skip_special_tokens": True,
         "spaces_between_special_tokens": True,
         "include_stop_str_in_output": False,
@@ -466,20 +490,27 @@ class SamplingParams(
                 return
 
             if not isinstance(self.sampler_priority, list):
-                raise ValueError("sampler_priority must be a list of integers")
+                raise ValueError(
+                    "sampler_priority must be a list of integers or strings")
+
             try:
-                provided_samplers = {
-                    SamplerID(x) for x in self.sampler_priority}
+                self.sampler_priority = [
+                    SamplerID.from_str(x) for x in self.sampler_priority
+                ]
+                provided_samplers = set(self.sampler_priority)
             except ValueError as e:
                 raise ValueError(
-                    f"Invalid sampler ID in priority list: {e}") from e
+                    f"Invalid sampler ID in priority list: {e}"
+                ) from e
 
             required_samplers = set(SamplerID)
             if not required_samplers.issubset(provided_samplers):
                 missing = required_samplers - provided_samplers
                 missing_names = [s.name for s in missing]
-                raise ValueError(f"Missing required samplers in priority list: "
-                                 f"{missing_names}")
+                raise ValueError(
+                    "Missing required samplers in priority list: "
+                    f"{missing_names}"
+                )
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:
