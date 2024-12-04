@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 from loguru import logger
 
@@ -9,13 +9,16 @@ from aphrodite.common.utils import (get_distributed_init_method, get_ip,
 from aphrodite.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from aphrodite.lora.request import LoRARequest
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
-from aphrodite.task_handler.worker_base import WorkerWrapperBase
+from aphrodite.task_handler.worker_base import WorkerBase, WorkerWrapperBase
 
 
-def create_worker(worker_module_name, worker_class_name, **kwargs):
+def create_worker(worker_module_name: str, worker_class_name: str,
+                  worker_class_fn: Optional[Callable[[], Type[WorkerBase]]],
+                  **kwargs):
     wrapper = WorkerWrapperBase(
         worker_module_name=worker_module_name,
         worker_class_name=worker_class_name,
+        worker_class_fn=worker_class_fn,
     )
     wrapper.init_worker(**kwargs)
     return wrapper.worker
@@ -61,7 +64,9 @@ class GPUExecutor(ExecutorBase):
             or (rank % self.parallel_config.tensor_parallel_size == 0),
         )
 
-    def _get_worker_module_and_class(self) -> Tuple[str, str]:
+    def _get_worker_module_and_class(
+            self) -> Tuple[str, str, Optional[Callable[[], Type[WorkerBase]]]]:
+        worker_class_fn = None
         if self.scheduler_config.is_multi_step:
             worker_module_name = "aphrodite.task_handler.multi_step_worker"
             worker_class_name = "MultiStepWorker"
@@ -71,7 +76,7 @@ class GPUExecutor(ExecutorBase):
         else:
             worker_module_name = "aphrodite.task_handler.worker"
             worker_class_name = "Worker"
-        return (worker_module_name, worker_class_name)
+        return (worker_module_name, worker_class_name, worker_class_fn)
 
     def _get_create_worker_kwargs(
             self,
@@ -80,10 +85,13 @@ class GPUExecutor(ExecutorBase):
             distributed_init_method: Optional[str] = None) -> Dict:
         worker_kwargs = self._get_worker_kwargs(local_rank, rank,
                                                 distributed_init_method)
-        (worker_module_name,
-         worker_class_name) = self._get_worker_module_and_class()
-        worker_kwargs.update(worker_module_name=worker_module_name,
-                             worker_class_name=worker_class_name)
+        (worker_module_name, worker_class_name,
+         worker_class_fn) = self._get_worker_module_and_class()
+        worker_kwargs.update(
+            worker_module_name=worker_module_name,
+            worker_class_name=worker_class_name,
+            worker_class_fn=worker_class_fn,
+        )
 
         return worker_kwargs
 

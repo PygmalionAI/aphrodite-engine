@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Type, Union
 
 import torch
 from loguru import logger
@@ -12,6 +12,7 @@ from aphrodite.common.sequence import (ExecuteModelRequest, PoolerOutput,
 from aphrodite.common.utils import make_async
 from aphrodite.executor.executor_base import ExecutorAsyncBase
 from aphrodite.executor.gpu_executor import GPUExecutor
+from aphrodite.task_handler.worker_base import WorkerBase
 
 
 class XPUExecutor(GPUExecutor):
@@ -48,15 +49,16 @@ class XPUExecutor(GPUExecutor):
 
         # Instantiate the worker and load the model to GPU.
         self._init_executor()
-
-    def _get_worker_module_and_class(self) -> Tuple[str, str]:
+    def _get_worker_module_and_class(
+            self) -> Tuple[str, str, Optional[Callable[[], Type[WorkerBase]]]]:
+        worker_class_fn = None
         if self.speculative_config is not None:
             raise NotImplementedError(
                 "XPU does not support speculative decoding")
         else:
             worker_module_name = "aphrodite.task_handler.xpu_worker"
             worker_class_name = "XPUWorker"
-        return (worker_module_name, worker_class_name)
+        return (worker_module_name, worker_class_name, worker_class_fn)
 
     def execute_model(
         self, execute_model_req: ExecuteModelRequest
