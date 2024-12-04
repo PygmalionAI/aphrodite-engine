@@ -670,7 +670,7 @@ def _apply_dry(
         if max_ngram <= min_ngram:  # Too close to a break to match anything
             continue
             
-        # If [token] is picked, whats the longest ngram that would match?
+        # If [token] is picked, what's the longest ngram that would match?
         ngram_lens = torch.zeros(VOCAB_SIZE, dtype=torch.int32,
                                  device=logits.device)
         
