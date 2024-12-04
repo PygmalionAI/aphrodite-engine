@@ -1,5 +1,6 @@
 import itertools
 import random
+import time
 from array import array
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -1057,3 +1058,80 @@ def test_sampler_include_gpu_probs_tensor(device: str):
     assert sampler_output.sampled_token_probs is not None
     assert sampler_output.logprobs is not None
     assert sampler_output.sampled_token_ids is not None
+
+@pytest.mark.parametrize("seed", RANDOM_SEEDS)
+@pytest.mark.parametrize("device", CUDA_DEVICES)
+def test_sampler_dry_performance(seed: int, device: str):
+    """Test DRY sampler performance with different batch sizes."""
+    set_random_seed(seed)
+    torch.set_default_device(device)
+
+    # Test with increasing batch sizes
+    batch_sizes = [1, 2, 4, 8, 16, 32]
+    vocab_size = 32000
+    
+    for batch_size in batch_sizes:
+        # Create input tensors
+        fake_logits = torch.normal(
+            0, 5, 
+            size=(batch_size, vocab_size),
+            device=device,
+            dtype=torch.float16
+        )
+        sampler = MockLogitsSampler(fake_logits)
+
+        # Create some repeating patterns in the input to trigger DRY
+        seq_data = array(APHRODITE_TOKEN_ID_ARRAY_TYPE, 
+                        [1, 2, 3, 1, 2, 3, 4, 5, 1, 2, 3])
+
+        # Create metadata list
+        seq_group_metadata_list = []
+        seq_lens = []
+        
+        # Configure DRY sampling parameters
+        sampling_params = SamplingParams(
+            temperature=1.0,
+            dry_multiplier=0.5,  # Enable DRY
+            dry_base=1.75,
+            dry_allowed_length=2,
+            dry_sequence_breaker_ids=[],
+            dry_range=0
+        )
+
+        # Create sequence groups
+        for i in range(batch_size):
+            seq_group_metadata_list.append(
+                SequenceGroupMetadata(
+                    request_id=f"test_{i}",
+                    is_prompt=True,
+                    seq_data={0: SequenceData(seq_data)},
+                    sampling_params=sampling_params,
+                    block_tables={0: [1]},
+                )
+            )
+            seq_lens.append(len(seq_data))
+
+        # Time the sampling operation
+        start_time = time.perf_counter()
+        
+        sampling_metadata = SamplingMetadata.prepare(
+            seq_group_metadata_list,
+            seq_lens,
+            query_lens=seq_lens,
+            device=device,
+            pin_memory=is_pin_memory_available()
+        )
+        
+        sampler_output = sampler(
+            logits=fake_logits,
+            sampling_metadata=sampling_metadata
+        )
+        
+        end_time = time.perf_counter()
+        
+        print(f"\nBatch size {batch_size}:")
+        print(f"Total time: {end_time - start_time:.4f}s")
+        print(f"Time per sequence: {(end_time - start_time)/batch_size:.4f}s")
+
+        # Verify outputs exist
+        assert len(sampler_output) == batch_size

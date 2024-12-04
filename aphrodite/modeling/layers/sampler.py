@@ -247,7 +247,7 @@ class Sampler(nn.Module):
                     logger.debug(
                         f"Applying DRY with dry_multiplier: "
                         f"{sampling_tensors.dry_multipliers}.")
-                logits = _apply_dry(
+                logits = _apply_dry_vectorized(
                     logits,
                     sampling_tensors.prompt_tokens,
                     sampling_tensors.output_tokens,
@@ -719,6 +719,70 @@ def _apply_dry(
             logits_row[token] -= penalty
 
     return logits
+
+def _apply_dry_vectorized(
+    logits: torch.Tensor,
+    input_token_ids: torch.Tensor,
+    output_token_ids: torch.Tensor,
+    multipliers: torch.Tensor, 
+    bases: torch.Tensor,
+    allowed_lengths: torch.Tensor,
+    sequence_breakers_ids: torch.Tensor,
+    ranges: torch.Tensor,
+) -> torch.Tensor:
+    """Vectorized implementation of DRY sampling."""
+    dry_indices = torch.nonzero(multipliers).squeeze(-1)
+    if len(dry_indices) == 0:
+        return logits
+
+    input_ids = torch.cat((input_token_ids, output_token_ids), dim=1)
+    batch_size, seq_len = input_ids.shape
+    vocab_size = logits.shape[-1]
+
+    breaker_mask = torch.zeros_like(input_ids, dtype=torch.bool)
+    for i in range(len(sequence_breakers_ids)):
+        breaker_mask[i] = torch.isin(input_ids[i], sequence_breakers_ids[i])
+
+    matches = torch.zeros((batch_size, seq_len - 1), 
+                         dtype=torch.long, 
+                         device=logits.device)
+
+    for pos in range(seq_len - 1):
+        curr_tokens = input_ids[:, pos].unsqueeze(1)  # [batch_size, 1]
+        next_tokens = input_ids[:, pos + 1:]  # [batch_size, remaining_len]
+
+        token_matches = (
+            curr_tokens == next_tokens)  # [batch_size, remaining_len]
+
+        token_matches = token_matches & ~breaker_mask[:, pos + 1:]
+
+        match_lengths = token_matches.cumsum(dim=1)
+        match_lengths = match_lengths * token_matches
+
+        matches[:, pos] = match_lengths.max(dim=1)[0]
+
+    penalties = torch.zeros_like(logits)
+    for i in range(batch_size):
+        match_mask = matches[i] >= allowed_lengths[i]
+
+        if match_mask.any():
+            next_tokens = input_ids[i, 1:seq_len][match_mask]
+
+            penalty_values = multipliers[i] * (
+                bases[i] ** (matches[i][match_mask] - allowed_lengths[i])
+            )
+
+            valid_tokens = (next_tokens < vocab_size) & ~torch.isin(
+                next_tokens, sequence_breakers_ids[i])
+            if valid_tokens.any():
+                penalties[i].scatter_add_(
+                    0,
+                    next_tokens[valid_tokens],
+                    penalty_values[valid_tokens]
+                )
+
+    return logits - penalties
+
 
 def _apply_no_repeat_ngram(
     logits: torch.Tensor,
