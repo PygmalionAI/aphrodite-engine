@@ -63,8 +63,9 @@ class XPUWorker(LoraNotSupportedWorkerBase, Worker):
         self.lora_config = lora_config
         self.prompt_adapter_config = prompt_adapter_config
         self.is_driver_worker = is_driver_worker
-        if self.is_driver_worker:
-            assert self.rank == 0, "The driver worker must have rank 0."
+        if parallel_config and is_driver_worker:
+            assert rank % parallel_config.tensor_parallel_size == 0, \
+                   "Driver worker should be rank 0 of tensor parallel group."
 
         self.multimodal_config = multimodal_config
 
@@ -175,7 +176,11 @@ class XPUWorker(LoraNotSupportedWorkerBase, Worker):
             # dependency (libdrm and drm headers) on your system.
             ENV_CCL_ZE_IPC_EXCHANGE = os.getenv("CCL_ZE_IPC_EXCHANGE",
                                                 "sockets")
+            ENV_LOCAL_WORLD_SIZE = os.getenv("LOCAL_WORLD_SIZE",
+                                             str(parallel_config.world_size))
             os.environ['CCL_ZE_IPC_EXCHANGE'] = ENV_CCL_ZE_IPC_EXCHANGE
+            os.environ["LOCAL_WORLD_SIZE"] = ENV_LOCAL_WORLD_SIZE
+            os.environ["LOCAL_RANK"] = str(self.local_rank)
             init_distributed_environment(
                 world_size=parallel_config.world_size,
                 rank=rank,
