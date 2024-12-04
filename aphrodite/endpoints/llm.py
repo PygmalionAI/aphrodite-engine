@@ -92,6 +92,7 @@ class LLM:
         serving, use the :class:`~aphrodite.AsyncAphrodite` class instead.
     """
 
+
     DEPRECATE_LEGACY: ClassVar[bool] = False
     """A flag to toggle whether to deprecate the legacy generate/encode API."""
 

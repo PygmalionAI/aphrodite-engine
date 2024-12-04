@@ -3,6 +3,8 @@ from typing import (TYPE_CHECKING, Generic, Iterable, List, Optional, Tuple,
 
 from typing_extensions import NotRequired, TypedDict, TypeVar
 
+from aphrodite.common.passthrough import Passthrough
+
 if TYPE_CHECKING:
     from aphrodite.multimodal import MultiModalDataDict
 
@@ -115,6 +117,7 @@ class LLMInputs(TypedDict):
     Optional multi-modal data to pass to the model,
     if the model supports it.
     """
+    passthrough: NotRequired[Optional[Passthrough]]
 
 
 class EncoderDecoderLLMInputs(LLMInputs):
@@ -131,6 +134,7 @@ class EncoderDecoderLLMInputs(LLMInputs):
     The original encoder prompt text corresponding to the token IDs, if
     available.
     """
+    passthrough: NotRequired[Optional[Passthrough]]
 
 
 _T1 = TypeVar("_T1",

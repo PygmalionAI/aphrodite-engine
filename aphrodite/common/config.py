@@ -137,6 +137,9 @@ class ModelConfig:
             per prompt. Only applicable for multimodal models.
         config_format: The config format which will be loaded. Defaults to
             'auto' which defaults to 'hf'.
+        enable_passthrough_param: Allow `passthrough` param in API to be sent
+            directly to `model.forward`. Debug only. Useful for quick
+            experiments and debugging.
     """
 
     def __init__(
@@ -163,6 +166,7 @@ class ModelConfig:
         max_seq_len_to_capture: Optional[int] = None,
         max_logprobs: int = 5,
         disable_sliding_window: bool = False,
+        enable_passthrough_param: bool = False,
         skip_tokenizer_init: bool = False,
         served_model_name: Optional[Union[str, List[str]]] = None,
         limit_mm_per_prompt: Optional[Mapping[str, int]] = None,
@@ -196,6 +200,7 @@ class ModelConfig:
                                        or max_context_len_to_capture)
         self.max_logprobs = max_logprobs
         self.disable_sliding_window = disable_sliding_window
+        self.enable_passthrough_param = enable_passthrough_param
         self.skip_tokenizer_init = skip_tokenizer_init
 
         self.hf_config = get_config(self.model, trust_remote_code, revision,

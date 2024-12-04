@@ -10,6 +10,7 @@ from pydantic import (AliasChoices, BaseModel, ConfigDict, Field,
 from transformers import PreTrainedTokenizer
 from typing_extensions import Annotated
 
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import (LogitsProcessorFunc,
                                               SamplingParams)
@@ -150,6 +151,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
     prompt_logprobs: Optional[int] = None
     xtc_threshold: Optional[float] = 0.1
     xtc_probability: Optional[float] = 0.0
+    passthrough: Optional[Passthrough] = None
     dry_multiplier: Optional[float] = 0
     dry_base: Optional[float] = 1.75
     dry_allowed_length: Optional[int] = 2
@@ -316,6 +318,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
             temperature_last=self.temperature_last,
             xtc_threshold=self.xtc_threshold,
             xtc_probability=self.xtc_probability,
+            passthrough=self.passthrough,
             dry_multiplier=self.dry_multiplier,
             dry_base=self.dry_base,
             dry_allowed_length=self.dry_allowed_length,
@@ -436,6 +439,7 @@ class CompletionRequest(OpenAIBaseModel):
     prompt_logprobs: Optional[int] = None
     xtc_threshold: Optional[float] = 0.1
     xtc_probability: Optional[float] = 0.0
+    passthrough: Optional[Passthrough] = None
     dry_multiplier: Optional[float] = 0
     dry_base: Optional[float] = 1.75
     dry_allowed_length: Optional[int] = 2
@@ -561,6 +565,7 @@ class CompletionRequest(OpenAIBaseModel):
             temperature_last=self.temperature_last,
             xtc_threshold=self.xtc_threshold,
             xtc_probability=self.xtc_probability,
+            passthrough=self.passthrough,
             dry_multiplier=self.dry_multiplier,
             dry_base=self.dry_base,
             dry_allowed_length=self.dry_allowed_length,
@@ -901,6 +906,7 @@ class KAIGenerationInputSchema(BaseModel):
     smoothing_curve: Optional[float] = 1.0
     xtc_threshold: Optional[float] = 0.1
     xtc_probability: Optional[float] = 0.0
+    passthrough: Optional[Passthrough] = None
     use_default_badwordsids: Optional[bool] = None
     quiet: Optional[bool] = None
     # pylint: disable=unexpected-keyword-arg

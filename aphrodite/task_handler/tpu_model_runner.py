@@ -14,6 +14,7 @@ from aphrodite.attention import AttentionMetadata, get_attn_backend
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      ModelConfig, ParallelConfig,
                                      SchedulerConfig)
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.sequence import (CompletionSequenceGroupOutput,
                                        IntermediateTensors, Logprob,
                                        SamplerOutput, SequenceGroupMetadata,
@@ -49,6 +50,7 @@ class ModelInputForTPU(ModelRunnerInputBase):
     num_samples: int
     best_of: List[int]
     seq_groups: List[List[int]]
+    passthrough: Optional[Passthrough] = None
 
     def as_broadcastable_tensor_dict(
             self) -> Dict[str, Union[int, torch.Tensor]]:
@@ -62,6 +64,7 @@ class ModelInputForTPU(ModelRunnerInputBase):
             "best_of": self.best_of,
             "seq_groups": self.seq_groups,
             "virtual_engine": self.virtual_engine,
+            # no passthrough
         }
         _add_attn_metadata_broadcastable_dict(tensor_dict, self.attn_metadata)
         return tensor_dict
@@ -492,9 +495,14 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
             list(metadata.seq_data.keys())
             for metadata in seq_group_metadata_list
         ]
+
+        passthrough = None
+        if seq_group_metadata_list:
+            passthrough = seq_group_metadata_list[0].try_get_passthrough()
+
         return ModelInputForTPU(input_tokens, input_positions, attn_metadata,
                                 input_lens, t, p, num_samples, best_of,
-                                seq_groups)
+                                seq_groups, passthrough=passthrough)
 
     def make_model_input_from_broadcasted_tensor_dict(
             self, tensor_dict: Dict[str, Any]) -> ModelInputForTPU:

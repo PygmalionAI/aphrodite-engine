@@ -17,6 +17,7 @@ from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
 from aphrodite.common.logger import setup_logger
 from aphrodite.common.outputs import (EmbeddingRequestOutput, RequestOutput,
                                       RequestOutputFactory)
+from aphrodite.common.passthrough import Passthrough, try_get_passthrough
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (EmbeddingSequenceGroupOutput,
@@ -807,6 +808,7 @@ class AphroditeEngine:
         self,
         prompt_comps: PromptComponents,
         prompt_adapter_request: Optional[PromptAdapterRequest],
+        passthrough: Optional[Passthrough] = None
     ) -> LLMInputs:
         prompt, prompt_token_ids, multi_modal_data = prompt_comps
 
@@ -815,7 +817,8 @@ class AphroditeEngine:
 
         return LLMInputs(prompt_token_ids=prompt_token_ids,
                          prompt=prompt,
-                         multi_modal_data=multi_modal_data)
+                         multi_modal_data=multi_modal_data,
+                         passthrough=passthrough)
 
     def _process_decoder_only_prompt(
         self,
@@ -823,6 +826,7 @@ class AphroditeEngine:
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        passthrough: Optional[Passthrough] = None,
     ) -> LLMInputs:
         '''
         For decoder-only models:
@@ -845,6 +849,7 @@ class AphroditeEngine:
         return self._build_decoder_only_llm_inputs(
             prompt_comps,
             prompt_adapter_request=prompt_adapter_request,
+            passthrough=passthrough,
         )
 
     def process_model_inputs(
@@ -853,6 +858,7 @@ class AphroditeEngine:
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        passthrough: Optional[Passthrough] = None,
     ) -> Union[LLMInputs, EncoderDecoderLLMInputs]:
 
         if self.is_encoder_decoder_model():
@@ -872,6 +878,7 @@ class AphroditeEngine:
                 request_id=request_id,
                 lora_request=lora_request,
                 prompt_adapter_request=prompt_adapter_request,
+                passthrough=passthrough,
             )
 
         return self.input_processor(model_inputs)
@@ -940,6 +947,7 @@ class AphroditeEngine:
             request_id=request_id,
             lora_request=lora_request,
             prompt_adapter_request=prompt_adapter_request,
+            passthrough=try_get_passthrough(params),
         )
 
         self._add_processed_request(

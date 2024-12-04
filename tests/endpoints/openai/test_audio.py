@@ -63,7 +63,8 @@ def server_function(port):
 
         return LLMInputs(prompt_token_ids=new_token_ids,
                          prompt=new_prompt,
-                         multi_modal_data=multi_modal_data)
+                         multi_modal_data=multi_modal_data,
+                         passthrough=llm_inputs.get("passthrough"))
 
     @MULTIMODAL_REGISTRY.register_input_mapper("audio", fake_input_mapper)
     @MULTIMODAL_REGISTRY.register_max_multimodal_tokens(

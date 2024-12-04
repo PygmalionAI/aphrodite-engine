@@ -114,7 +114,8 @@ def input_processor_for_clip(
     # NOTE: Create a defensive copy of the original inputs
     return LLMInputs(prompt_token_ids=new_token_ids,
                      prompt=new_prompt,
-                     multi_modal_data=multi_modal_data)
+                     multi_modal_data=multi_modal_data,
+                     passthrough=llm_inputs.get("passthrough"))
 
 
 # Adapted from https://github.com/huggingface/transformers/blob/v4.39.0/src/transformers/models/clip/modeling_clip.py#L164 # noqa

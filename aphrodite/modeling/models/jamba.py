@@ -11,6 +11,7 @@ from transformers import JambaConfig
 from aphrodite.attention.backends.abstract import AttentionMetadata
 from aphrodite.attention.layer import Attention
 from aphrodite.common.config import CacheConfig, LoRAConfig, SchedulerConfig
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
 # yapf: disable
 from aphrodite.distributed import (get_tensor_model_parallel_rank,
@@ -607,6 +608,7 @@ class JambaForCausalLM(nn.Module, HasInnerState):
                 kv_caches: List[KVCache],
                 attn_metadata: AttentionMetadata,
                 intermediate_tensors: Optional[IntermediateTensors] = None,
+                passthrough: Optional[Passthrough] = None,
                 **kwargs):
         if self.mamba_cache is None:
             max_batch_size = (_get_graph_batch_size(

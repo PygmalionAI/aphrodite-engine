@@ -10,6 +10,7 @@ from transformers import MambaConfig
 
 from aphrodite.attention.backends.abstract import AttentionMetadata
 from aphrodite.common.config import CacheConfig, LoRAConfig, SchedulerConfig
+from aphrodite.common.passthrough import Passthrough
 from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
 from aphrodite.distributed import (get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size)
@@ -435,6 +436,7 @@ class MambaForCausalLM(nn.Module, HasInnerState):
                 kv_caches: List[KVCache],
                 attn_metadata: AttentionMetadata,
                 intermediate_tensors: Optional[IntermediateTensors] = None,
+                passthrough: Optional[Passthrough] = None,
                 **kwargs):
         if self.mamba_cache is None:
             max_batch_size = (_get_graph_batch_size(

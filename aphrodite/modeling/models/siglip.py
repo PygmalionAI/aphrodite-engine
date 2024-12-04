@@ -126,6 +126,7 @@ def input_processor_for_siglip(
         prompt_token_ids=new_token_ids,
         prompt=new_prompt,
         multi_modal_data=multi_modal_data,
+        passthrough=llm_inputs.get("passthrough"),
     )
 
 
