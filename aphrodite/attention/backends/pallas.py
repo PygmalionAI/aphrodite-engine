@@ -8,6 +8,7 @@ from aphrodite.attention.backends.abstract import (AttentionBackend,
                                                    AttentionImpl,
                                                    AttentionMetadata,
                                                    AttentionType)
+from aphrodite.attention.backends.utils import CommonAttentionState
 
 
 class PallasAttentionBackend(AttentionBackend):
@@ -19,6 +20,10 @@ class PallasAttentionBackend(AttentionBackend):
     @staticmethod
     def get_metadata_cls() -> Type["PallasMetadata"]:
         return PallasMetadata
+
+    @staticmethod
+    def get_state_cls() -> Type["CommonAttentionState"]:
+        return CommonAttentionState
 
     @staticmethod
     def get_kv_cache_shape(

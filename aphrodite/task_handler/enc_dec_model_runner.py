@@ -7,6 +7,7 @@ from loguru import logger
 
 from aphrodite.attention.backends.abstract import (AttentionBackend,
                                                    AttentionMetadata)
+from aphrodite.attention.backends.utils import PAD_SLOT_ID
 from aphrodite.attention.selector import (_Backend,
                                           get_env_variable_attn_backend,
                                           get_global_forced_attn_backend,
@@ -23,7 +24,7 @@ from aphrodite.inputs import INPUT_REGISTRY, InputRegistry
 from aphrodite.modeling import SamplingMetadata
 from aphrodite.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from aphrodite.task_handler.model_runner import (
-    _PAD_SLOT_ID, GPUModelRunnerBase, ModelInputForGPUBuilder,
+    GPUModelRunnerBase, ModelInputForGPUBuilder,
     ModelInputForGPUWithSamplingMetadata)
 from aphrodite.task_handler.model_runner_base import (
     _add_attn_metadata_broadcastable_dict,
@@ -387,7 +388,7 @@ class EncoderDecoderModelRunner(GPUModelRunnerBase[EncoderDecoderModelInput]):
                     # initialized yet. In this case, we just use a dummy
                     # slot mapping.
                     # In embeddings, the block tables are {seq_id: None}.
-                    cross_slot_mapping.extend([_PAD_SLOT_ID] * seq_len)
+                    cross_slot_mapping.extend([PAD_SLOT_ID] * seq_len)
                 else:
                     for i in range(0, seq_len):
                         block_number = seq_group_metadata.cross_block_table[

@@ -10,7 +10,8 @@ from aphrodite.attention.backends.abstract import (AttentionBackend,
                                                    AttentionImpl,
                                                    AttentionMetadata,
                                                    AttentionType)
-from aphrodite.attention.backends.utils import CommonMetadataBuilder
+from aphrodite.attention.backends.utils import (CommonAttentionState,
+                                                CommonMetadataBuilder)
 from aphrodite.attention.ops.paged_attn import (PagedAttention,
                                                 PagedAttentionMetadata)
 
@@ -28,6 +29,10 @@ class ROCmFlashAttentionBackend(AttentionBackend):
     @staticmethod
     def get_metadata_cls() -> Type["AttentionMetadata"]:
         return ROCmFlashAttentionMetadata
+
+    @staticmethod
+    def get_state_cls() -> Type["CommonAttentionState"]:
+        return CommonAttentionState
 
     @staticmethod
     def get_builder_cls() -> Type["ROCmFlashAttentionMetadataBuilder"]:
