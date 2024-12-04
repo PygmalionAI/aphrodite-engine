@@ -9,9 +9,10 @@ from typing import TYPE_CHECKING, Callable, List, Optional, Tuple, Union
 
 import torch
 
+from aphrodite.common.utils import is_xpu
 from aphrodite.triton_utils import HAS_TRITON
 
-if HAS_TRITON:
+if HAS_TRITON and not is_xpu():
     from aphrodite.lora.ops.bgmv_expand import bgmv_expand
     from aphrodite.lora.ops.bgmv_expand_slice import bgmv_expand_slice
     from aphrodite.lora.ops.bgmv_shrink import bgmv_shrink
