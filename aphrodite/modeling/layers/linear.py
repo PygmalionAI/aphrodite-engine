@@ -595,7 +595,8 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
             # for the packing.
             if isinstance(param, PackedAphroditeParameter
                           ) and param.packed_dim == param.output_dim:
-                param.adjust_shard_indexes_for_packing(
+                shard_size, shard_offset = \
+                    param.adjust_shard_indexes_for_packing(
                     shard_size=shard_size, shard_offset=shard_offset)
 
             loaded_weight_shard = loaded_weight.narrow(param.output_dim,
@@ -753,7 +754,8 @@ class QKVParallelLinear(ColumnParallelLinear):
             # for the packing.
             if isinstance(param, PackedAphroditeParameter
                           ) and param.packed_dim == param.output_dim:
-                param.adjust_shard_indexes_for_packing(
+                shard_size, shard_offset = \
+                    param.adjust_shard_indexes_for_packing(
                     shard_size=shard_size, shard_offset=shard_offset)
 
             loaded_weight_shard = loaded_weight.narrow(param.output_dim,
