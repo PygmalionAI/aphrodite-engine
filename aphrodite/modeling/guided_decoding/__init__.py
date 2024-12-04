@@ -8,11 +8,6 @@ from aphrodite.modeling.guided_decoding.guided_fields import (
     GuidedDecodingRequest)
 from aphrodite.triton_utils import HAS_TRITON
 
-if HAS_TRITON:
-    from aphrodite.modeling.guided_decoding.outlines_decoding import (
-        get_local_outlines_guided_decoding_logits_processor,
-        get_outlines_guided_decoding_logits_processor)
-
 
 async def get_guided_decoding_logits_processor(
         guided_decoding_backend: str, request: Union[CompletionRequest,
@@ -20,6 +15,8 @@ async def get_guided_decoding_logits_processor(
         tokenizer) -> Optional[LogitsProcessorFunc]:
     request = _adapt_request_for_tool_use(request)
     if guided_decoding_backend == 'outlines':
+        from aphrodite.modeling.guided_decoding.outlines_decoding import (
+            get_outlines_guided_decoding_logits_processor)
         if HAS_TRITON:
             return await get_outlines_guided_decoding_logits_processor(
                 request, tokenizer)
@@ -42,6 +39,8 @@ def get_local_guided_decoding_logits_processor(
     # request = _adapt_request_for_tool_use(request)
 
     if guided_decoding_backend == 'outlines':
+        from aphrodite.modeling.guided_decoding.outlines_decoding import (
+            get_local_outlines_guided_decoding_logits_processor)
         return get_local_outlines_guided_decoding_logits_processor(
             guided_options, tokenizer)
     if guided_decoding_backend == 'lm-format-enforcer':
