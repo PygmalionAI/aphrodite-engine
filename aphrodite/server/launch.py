@@ -8,7 +8,7 @@ import uvicorn
 from fastapi import FastAPI, Response
 from loguru import logger
 
-from aphrodite.common.utils import in_windows
+from aphrodite.common.utils import find_process_using_port, in_windows
 from aphrodite.engine.async_aphrodite import AsyncEngineDeadError
 from aphrodite.engine.protocol import AsyncEngineClient
 
@@ -47,6 +47,12 @@ async def serve_http(app: FastAPI, engine: AsyncEngineClient,
         await server_task
         return dummy_shutdown()
     except asyncio.CancelledError:
+        port = uvicorn_kwargs["port"]
+        process = find_process_using_port(port)
+        if process is not None:
+            logger.debug(
+                f"port {port} is used by process {process} launched with "
+                f"command:\n{' '.join(process.cmdline())}")
         logger.info("Gracefully stopping http server")
         return server.shutdown()
 

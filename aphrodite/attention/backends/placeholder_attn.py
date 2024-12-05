@@ -7,6 +7,7 @@ from aphrodite.attention.backends.abstract import (AttentionBackend,
                                                    AttentionImpl,
                                                    AttentionMetadata,
                                                    AttentionMetadataBuilder)
+from aphrodite.attention.backends.utils import CommonAttentionState
 
 if TYPE_CHECKING:
     from aphrodite.task_handler.model_runner import ModelInputForGPUBuilder
@@ -33,6 +34,10 @@ class PlaceholderAttentionBackend(AttentionBackend):
     @staticmethod
     def get_metadata_cls() -> Type["PlaceholderAttentionMetadata"]:
         return PlaceholderAttentionMetadata
+
+    @staticmethod
+    def get_state_cls() -> Type["CommonAttentionState"]:
+        return CommonAttentionState
 
     @staticmethod
     def get_kv_cache_shape(
