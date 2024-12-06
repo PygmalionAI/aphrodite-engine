@@ -4,11 +4,20 @@
 # Copyright 2023 The PygmalionAI team.
 # Copyright 2023 The vLLM team.
 # Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
+# Copyright (C) 2024 THL A29 Limited, a Tencent company. All rights reserved.
 #
 # This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
 # and OPT implementations in this library. It has been modified from its
 # original forms to accommodate minor architectural differences compared
 # to GPT-NeoX and OPT used by the Meta AI team that trained the model.
+
+# Licensed under the TENCENT HUNYUAN COMMUNITY LICENSE AGREEMENT
+# (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://github.com/Tencent/Tencent-Hunyuan-Large/blob/main/License.docx
+#
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -382,6 +391,36 @@ class DynamicNTKScalingRotaryEmbedding(RotaryEmbedding):
         inv_freq = self._compute_inv_freq(base)
         t = torch.arange(max_len, dtype=torch.float)
 
+        freqs = torch.einsum("i,j -> ij", t, inv_freq)
+        cos = freqs.cos()
+        sin = freqs.sin()
+        cache = torch.cat((cos, sin), dim=-1)
+        return cache
+
+
+class DynamicNTKAlphaRotaryEmbedding(RotaryEmbedding):
+    """RotaryEmbedding extended with Dynamic NTK scaling.
+    Credits to the Reddit users /u/bloc97 and /u/emozilla
+    """
+    def __init__(
+        self,
+        head_size: int,
+        rotary_dim: int,
+        max_position_embeddings: int,
+        base: int,
+        is_neox_style: bool,
+        scaling_alpha: float,
+        dtype: torch.dtype,
+    ) -> None:
+        self.scaling_alpha = scaling_alpha
+        super().__init__(head_size, rotary_dim, max_position_embeddings, base,
+                         is_neox_style, dtype)
+    def _compute_cos_sin_cache(self) -> torch.Tensor:
+        max_len = self.max_position_embeddings
+        base = self.base * self.scaling_alpha ** (
+            self.rotary_dim / (self.rotary_dim - 2))
+        inv_freq = self._compute_inv_freq(base)
+        t = torch.arange(max_len, dtype=torch.float)
         freqs = torch.einsum("i,j -> ij", t, inv_freq)
         cos = freqs.cos()
         sin = freqs.sin()
@@ -835,9 +874,14 @@ def get_rope(
                                                       is_neox_style,
                                                       scaling_factor, dtype)
         elif scaling_type == "dynamic":
-            rotary_emb = DynamicNTKScalingRotaryEmbedding(
-                head_size, rotary_dim, max_position, base, is_neox_style,
-                scaling_factor, dtype)
+            if "alpha" in rope_scaling:
+                rotary_emb = DynamicNTKAlphaRotaryEmbedding(
+                    head_size, rotary_dim, max_position, base, is_neox_style,
+                    rope_scaling["alpha"], dtype)
+            else:
+                rotary_emb = DynamicNTKScalingRotaryEmbedding(
+                    head_size, rotary_dim, max_position, base, is_neox_style,
+                    scaling_factor, dtype)
         elif scaling_type == "yarn":
             original_max_position = rope_scaling[
                 "original_max_position_embeddings"]
