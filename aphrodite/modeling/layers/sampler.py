@@ -182,7 +182,10 @@ class Sampler(nn.Module):
                 0].sampling_params.sampler_priority
 
             # Warn if both custom order and temp_last are specified
-            if sampler_order is not None and do_temp_last:
+            if (sampling_metadata.seq_groups and 
+                sampling_metadata.seq_groups[0].is_prompt and
+                sampler_order is not None and 
+                do_temp_last):
                 logger.warning(
                     "Both sampler_priority and temperature_last=True "
                     "were specified. Using custom sampler_priority order "
