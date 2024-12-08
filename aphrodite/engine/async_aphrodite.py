@@ -3,8 +3,8 @@ import os
 import time
 from dataclasses import dataclass
 from functools import partial
-from typing import (AsyncGenerator, Callable, Dict, Iterable, List, Optional,
-                    Set, Tuple, Type, Union)
+from typing import (Any, AsyncGenerator, Callable, Dict, Iterable, List,
+                    Optional, Set, Tuple, Type, Union)
 
 import torch
 from loguru import logger
@@ -84,9 +84,8 @@ class AsyncStream:
 
     def put(self, item: Union[RequestOutput, EmbeddingRequestOutput,
                               Exception]) -> None:
-        if self._finished:
-            return
-        self._queue.put_nowait(item)
+        if not self._finished:
+            self._queue.put_nowait(item)
 
     def finish(
         self,
@@ -95,7 +94,7 @@ class AsyncStream:
         if not self._finished:
             self._finished = True
             self._queue.put_nowait(
-                exception if exception is not None else STOP_ITERATION)
+                exception if self._is_raisable(exception) else STOP_ITERATION)
 
     @property
     def finished(self) -> bool:
@@ -105,9 +104,9 @@ class AsyncStream:
         self
     ) -> AsyncGenerator[Union[RequestOutput, EmbeddingRequestOutput], None]:
         try:
-            while not self._finished:
+            while True:
                 result = await self._queue.get()
-                if isinstance(result, Exception):
+                if self._is_raisable(result):
                     if result == STOP_ITERATION:
                         return
                     raise result
@@ -115,6 +114,12 @@ class AsyncStream:
         except GeneratorExit:
             self._cancel(self.request_id)
             raise asyncio.CancelledError from None
+
+    @staticmethod
+    def _is_raisable(value: Any):
+        return isinstance(value, BaseException) or \
+                (isinstance(value, type) and \
+                 issubclass(value, BaseException))
 
 
 class RequestTracker:
