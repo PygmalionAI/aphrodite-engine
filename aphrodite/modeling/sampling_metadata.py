@@ -791,7 +791,9 @@ class SamplingTensors:
             pin_memory=pin_memory,
         )
         dry_sequence_breakers_t = torch.tensor(
-            dry_sequence_breaker_ids, 
+            [seq + [0] * (max(len(s) for s in
+                              dry_sequence_breaker_ids) - len(seq)) 
+             for seq in dry_sequence_breaker_ids],
             device="cpu",
             dtype=torch.long,
             pin_memory=pin_memory,
