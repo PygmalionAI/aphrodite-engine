@@ -153,6 +153,7 @@ class ModelConfig:
         rope_theta: Optional[float] = None,
         tokenizer_revision: Optional[str] = None,
         max_model_len: Optional[int] = None,
+        spec_target_max_model_len: Optional[int] = None,
         quantization: Optional[str] = None,
         deepspeed_fp_bits: Optional[int] = None,
         quant_llm_fp_bits: Optional[int] = None,
@@ -251,6 +252,7 @@ class ModelConfig:
             max_model_len=max_model_len,
             disable_sliding_window=self.disable_sliding_window,
             sliding_window_len=self.get_hf_config_sliding_window(),
+            spec_target_max_model_len=spec_target_max_model_len,
             rope_scaling_arg=self.rope_scaling)
         self.served_model_name = get_served_model_name(model,
                                                        served_model_name)
@@ -1308,6 +1310,7 @@ class SpeculativeConfig:
                 code_revision=draft_code_revision,
                 tokenizer_revision=target_model_config.tokenizer_revision,
                 max_model_len=None,
+                spec_target_max_model_len=target_model_config.max_model_len,
                 quantization=draft_quantization,
                 enforce_eager=target_model_config.enforce_eager,
                 max_seq_len_to_capture=target_model_config.
@@ -1739,6 +1742,7 @@ def _get_and_verify_max_len(
     disable_sliding_window: bool,
     sliding_window_len: Optional[Union[int, List[Optional[int]]]],
     rope_scaling_arg: Optional[Dict[str, Any]],
+    spec_target_max_model_len: Optional[int] = None,
 ) -> int:
     """Get and verify the model's maximum length."""
     derived_max_model_len = float("inf")
@@ -1784,6 +1788,11 @@ def _get_and_verify_max_len(
         if max_model_len is not None:
             # If max_model_len is specified, we use it.
             return max_model_len
+
+        if spec_target_max_model_len is not None:
+            # If this is a speculative draft model, we use the max model len
+            # from the target model.
+            return spec_target_max_model_len
 
         default_max_len = 2048
         logger.warning(
