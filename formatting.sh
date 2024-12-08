@@ -35,7 +35,25 @@ tool_version_check "ruff" $RUFF_VERSION "$(grep "ruff==" requirements-lint.txt |
 tool_version_check "isort" "$ISORT_VERSION" "$(grep isort requirements-lint.txt | cut -d'=' -f3)"
 tool_version_check "codespell" "$CODESPELL_VERSION" "$(grep codespell requirements-lint.txt | cut -d'=' -f3)"
 tool_version_check "clang-format" "$CLANGFORMAT_VERSION" "$(grep clang-format requirements-lint.txt | cut -d'=' -f3)"
+tool_version_check "mypy" "$MYPY_VERSION" "$(grep mypy requirements-lint.txt | cut -d'=' -f3)"
 
+
+# Run mypy
+echo 'Aphrodite mypy:'
+mypy --follow-imports skip
+mypy tests --follow-imports skip
+mypy aphrodite/attention --follow-imports skip
+mypy aphrodite/processing --follow-imports skip
+mypy aphrodite/distributed --follow-imports skip
+mypy aphrodite/engine  --follow-imports skip
+mypy aphrodite/executor --follow-imports skip
+mypy aphrodite/lora --follow-imports skip
+mypy aphrodite/modeling  --follow-imports skip
+mypy aphrodite/quantization  --follow-imports skip
+mypy aphrodite/prompt_adapter --follow-imports skip
+mypy aphrodite/spec_decode --follow-imports skip
+mypy aphrodite/task_handler --follow-imports skip
+echo 'Aphrodite mypy: Done'
 
 # If git diff returns a file that is in the skip list, the file may be checked anyway:
 # https://github.com/codespell-project/codespell/issues/1915
