@@ -20,7 +20,7 @@ The compute necessary for Aphrodite's development is provided by [Arc Compute](h
 ## Features
 
 - Continuous Batching
-- Efficient K/V management with [PagedAttention](./aphrodite/modeling/layers/attention.py) from vLLM
+- Efficient K/V management with [PagedAttention](./aphrodite/attention/ops/paged_attn.py) from vLLM
 - Optimized CUDA kernels for improved inference
 - Quantization support via AQLM, AWQ, Bitsandbytes, GGUF, GPTQ, QuIP#, Smoothquant+, SqueezeLLM, Marlin, FP2-FP12
 - Distributed inference
