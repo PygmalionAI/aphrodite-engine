@@ -21,7 +21,6 @@ If you only need to use the distributed environment without model/pipeline
  steps.
 """
 import contextlib
-import os
 import pickle
 import sys
 from collections import namedtuple
@@ -35,6 +34,8 @@ import torch
 import torch.distributed
 from loguru import logger
 from torch.distributed import Backend, ProcessGroup
+
+from aphrodite import envs
 
 
 @dataclass
@@ -866,7 +867,7 @@ def init_distributed_environment(
         # local rank not set, this usually happens in single-node
         # setting, where we can use rank as local rank
         if distributed_init_method == "env://":
-            local_rank = os.getenv("LOCAL_RANK", rank)
+            local_rank = envs.LOCAL_RANK
         else:
             local_rank = rank
     global _WORLD

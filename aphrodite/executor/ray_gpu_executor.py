@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 import msgspec
 from loguru import logger
 
+from aphrodite import envs
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.common.utils import (_run_task_with_lock,
                                     get_aphrodite_instance_id,
@@ -26,14 +27,12 @@ if TYPE_CHECKING:
 # If the env var is set, it uses the Ray's compiled DAG API
 # which optimizes the control plane overhead.
 # Run Aphrodite with APHRODITE_USE_RAY_COMPILED_DAG=1 to enable it.
-APHRODITE_USE_RAY_COMPILED_DAG = bool(
-    os.getenv("APHRODITE_USE_RAY_COMPILED_DAG", 0))
-APHRODITE_TRACE_FUNCTION = int(os.getenv("APHRODITE_TRACE_FUNCTION", 0))
-APHRODITE_USE_RAY_SPMD_WORKER = bool(
-    os.getenv("APHRODITE_USE_RAY_SPMD_WORKER", 0))
+APHRODITE_USE_RAY_COMPILED_DAG = envs.APHRODITE_USE_RAY_COMPILED_DAG
+APHRODITE_TRACE_FUNCTION = envs.APHRODITE_TRACE_FUNCTION
+APHRODITE_USE_RAY_SPMD_WORKER = envs.APHRODITE_USE_RAY_SPMD_WORKER
 
-APHRODITE_USE_RAY_COMPILED_DAG_NCCL_CHANNEL = bool(
-    int(os.getenv("APHRODITE_USE_RAY_COMPILED_DAG_NCCL_CHANNEL", 1)))
+APHRODITE_USE_RAY_COMPILED_DAG_NCCL_CHANNEL = (
+    envs.APHRODITE_USE_RAY_COMPILED_DAG_NCCL_CHANNEL)
 
 
 class RayGPUExecutor(DistributedGPUExecutor):

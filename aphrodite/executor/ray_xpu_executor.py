@@ -7,6 +7,7 @@ from typing import (TYPE_CHECKING, Any, Awaitable, Dict, List, Optional, Set,
 
 from loguru import logger
 
+from aphrodite import envs
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,
                                      PromptAdapterConfig, SchedulerConfig,
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
 # If the env var is set, it uses the Ray's compiled DAG API
 # which optimizes the control plane overhead.
 # Run Aphrodite with APHRODITE_USE_RAY_COMPILED_DAG=1 to enable it.
-USE_RAY_COMPILED_DAG = bool(os.getenv("APHRODITE_USE_RAY_COMPILED_DAG", 0))
+USE_RAY_COMPILED_DAG = envs.APHRODITE_USE_RAY_COMPILED_DAG
 
 
 class RayXPUExecutor(DistributedGPUExecutor):

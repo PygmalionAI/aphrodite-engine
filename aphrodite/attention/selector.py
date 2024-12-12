@@ -7,12 +7,13 @@ from typing import Generator, Optional, Type
 import torch
 from loguru import logger
 
+from aphrodite import envs
 from aphrodite.attention.backends.abstract import AttentionBackend
 from aphrodite.common.utils import (STR_BACKEND_ENV_VAR, is_cpu, is_hip,
                                     is_openvino, is_xpu)
 from aphrodite.platforms import current_platform
 
-APHRODITE_ATTENTION_BACKEND = os.getenv("APHRODITE_ATTENTION_BACKEND", None)
+APHRODITE_ATTENTION_BACKEND = envs.APHRODITE_ATTENTION_BACKEND
 
 
 class _Backend(enum.Enum):

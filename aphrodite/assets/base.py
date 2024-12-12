@@ -5,6 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+from aphrodite import envs
 from aphrodite.connections import global_http_connection
 
 
@@ -15,13 +16,8 @@ def get_default_cache_root():
     )
 
 vLLM_S3_BUCKET_URL = "https://vllm-public-assets.s3.us-west-2.amazonaws.com"
-APHRODITE_ASSETS_CACHE = os.path.expanduser(
-    os.getenv(
-        "APHRODITE_ASSETS_CACHE",
-        os.path.join(get_default_cache_root(), "aphrodite", "assets"),
-    ))
-APHRODITE_IMAGE_FETCH_TIMEOUT = int(os.getenv("APHRODITE_IMAGE_FETCH_TIMEOUT",
-                                              5))
+APHRODITE_ASSETS_CACHE = envs.APHRODITE_ASSETS_CACHE
+APHRODITE_IMAGE_FETCH_TIMEOUT = envs.APHRODITE_IMAGE_FETCH_TIMEOUT
 
 def get_cache_dir() -> Path:
     """Get the path to the cache for storing downloaded assets."""

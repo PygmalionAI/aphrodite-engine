@@ -1,4 +1,3 @@
-import os
 from typing import List, Set, Tuple
 
 import openvino as ov
@@ -6,6 +5,7 @@ import openvino.properties.hint as hints
 import torch
 from loguru import logger
 
+from aphrodite import envs
 from aphrodite.common.config import CacheConfig, ModelConfig
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.common.utils import (GiB_bytes, get_distributed_init_method,
@@ -13,10 +13,9 @@ from aphrodite.common.utils import (GiB_bytes, get_distributed_init_method,
 from aphrodite.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from aphrodite.lora.request import LoRARequest
 
-APHRODITE_OPENVINO_KVCACHE_SPACE = int(
-    os.getenv("APHRODITE_OPENVINO_KVCACHE_SPACE", 0))
-APHRODITE_OPENVINO_CPU_KV_CACHE_PRECISION = os.getenv(
-    "APHRODITE_OPENVINO_CPU_KV_CACHE_PRECISION", None)
+APHRODITE_OPENVINO_KVCACHE_SPACE = envs.APHRODITE_OPENVINO_KVCACHE_SPACE
+APHRODITE_OPENVINO_CPU_KV_CACHE_PRECISION = (
+    envs.APHRODITE_OPENVINO_CPU_KV_CACHE_PRECISION)
 
 
 class OpenVINOExecutor(ExecutorBase):

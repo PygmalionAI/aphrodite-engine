@@ -5,6 +5,7 @@ import torch
 import torch_xla.core.xla_model as xm
 import torch_xla.runtime as xr
 
+from aphrodite import envs
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      ModelConfig, ParallelConfig,
                                      SchedulerConfig)
@@ -99,8 +100,7 @@ class TPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # Use persistent cache to avoid XLA recompilation.
         # NOTE: Set per-rank cache path since different ranks
         # can have slightly different XLA graphs.
-        APHRODITE_XLA_CACHE_PATH = os.getenv("APHRODITE_XLA_CACHE_PATH",
-                                             "~/.aphrodite/xla_cache/")
+        APHRODITE_XLA_CACHE_PATH = envs.APHRODITE_XLA_CACHE_PATH
         world_size = self.parallel_config.world_size
         per_rank_path = os.path.join(APHRODITE_XLA_CACHE_PATH,
                                      f"tp{world_size}_rank{self.rank}")

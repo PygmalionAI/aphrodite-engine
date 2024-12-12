@@ -1,7 +1,6 @@
 import contextlib
 import enum
 import json
-import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Type, Union
 
@@ -14,6 +13,7 @@ from transformers.models.auto.modeling_auto import (
     MODEL_FOR_CAUSAL_LM_MAPPING_NAMES)
 from transformers.utils import CONFIG_NAME as HF_CONFIG_NAME
 
+from aphrodite import envs
 from aphrodite.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
                                                   InternVLChatConfig,
                                                   JAISConfig, MedusaConfig,
@@ -21,7 +21,7 @@ from aphrodite.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
                                                   MPTConfig, RWConfig)
 from aphrodite.transformers_utils.utils import check_gguf_file
 
-APHRODITE_USE_MODELSCOPE = os.getenv("APHRODITE_USE_MODELSCOPE", "0") == "1"
+APHRODITE_USE_MODELSCOPE = envs.APHRODITE_USE_MODELSCOPE
 
 if APHRODITE_USE_MODELSCOPE:
     from modelscope import AutoConfig

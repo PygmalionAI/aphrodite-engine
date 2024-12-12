@@ -11,6 +11,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from loguru import logger
 
+from aphrodite import envs
 from aphrodite.common.utils import (cuda_device_count_stateless,
                                     update_environment_variables)
 from aphrodite.distributed.device_communicators.cuda_wrapper import (
@@ -124,7 +125,7 @@ def can_actually_p2p(
     processes for testing all pairs of GPUs in batch. The trick is to reset
     the device after each test (which is not available in PyTorch).
     """  # noqa
-    cuda_visible_devices = os.getenv('CUDA_VISIBLE_DEVICES', None)
+    cuda_visible_devices = envs.CUDA_VISIBLE_DEVICES
     # pass the CUDA_VISIBLE_DEVICES to the child process
     # to make sure they see the same set of GPUs
 
@@ -183,13 +184,13 @@ def gpu_p2p_access_check(src: int, tgt: int) -> bool:
     is_distributed = dist.is_initialized()
 
     num_dev = cuda_device_count_stateless()
-    cuda_visible_devices = os.getenv('CUDA_VISIBLE_DEVICES', None)
+    cuda_visible_devices = envs.CUDA_VISIBLE_DEVICES
     if cuda_visible_devices is None:
         cuda_visible_devices = ",".join(str(i) for i in range(num_dev))
-    APHRODITE_CONFIG_ROOT = os.getenv("APHRODITE_CONFIG_ROOT", "~/.config")
-    path = os.path.expanduser(
-        f"{APHRODITE_CONFIG_ROOT}/aphrodite/gpu_p2p_access_cache_for_{cuda_visible_devices}.json"
-    )
+
+    path = os.path.join(
+        envs.APHRODITE_CACHE_ROOT,
+        f"gpu_p2p_access_cache_for_{cuda_visible_devices}.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     from aphrodite.distributed.parallel_state import get_world_group
     if ((not is_distributed or get_world_group().local_rank == 0)

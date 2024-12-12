@@ -1,4 +1,3 @@
-import os
 import time
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, ClassVar, Dict, Iterable, List, Optional
@@ -9,6 +8,7 @@ from loguru import logger
 from transformers import PreTrainedTokenizer
 from typing_extensions import assert_never
 
+from aphrodite import envs
 from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
                                      EngineConfig, LoadConfig, LoRAConfig,
                                      ModelConfig, ParallelConfig,
@@ -50,8 +50,7 @@ from aphrodite.version import __version__ as APHRODITE_VERSION
 
 _LOCAL_LOGGING_INTERVAL_SEC = 5
 
-APHRODITE_USE_RAY_SPMD_WORKER = bool(
-    os.getenv("APHRODITE_USE_RAY_SPMD_WORKER", 0))
+APHRODITE_USE_RAY_SPMD_WORKER = envs.APHRODITE_USE_RAY_SPMD_WORKER
 
 
 def _load_generation_config_dict(model_config: ModelConfig) -> Dict[str, Any]:

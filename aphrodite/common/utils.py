@@ -31,6 +31,7 @@ from rich.progress import (BarColumn, MofNCompleteColumn, Progress,
                            SpinnerColumn, TextColumn, TimeElapsedColumn)
 from typing_extensions import ParamSpec, TypeIs, assert_never
 
+from aphrodite import envs
 from aphrodite.common.logger import enable_trace_function_call
 from aphrodite.distributed import get_tensor_model_parallel_rank
 
@@ -382,8 +383,7 @@ def get_aphrodite_instance_id():
     Instance id represents an instance of the Aphrodite. All processes in the
     same instance should have the same instance id.
     """
-    return os.environ.get("APHRODITE_INSTANCE_ID",
-                          f"aphrodite-instance-{random_uuid()}")
+    return envs.APHRODITE_INSTANCE_ID or f"aphrodite-instance-{random_uuid()}"
 
 
 @lru_cache(maxsize=None)
@@ -520,9 +520,7 @@ def get_distributed_init_method(ip: str, port: int) -> str:
 
 def get_open_zmq_ipc_path() -> str:
     if not in_windows():
-        APHRODITE_RPC_BASE_PATH = os.getenv("APHRODITE_RPC_BASE_PATH",
-                                        tempfile.gettempdir())
-        base_rpc_path = APHRODITE_RPC_BASE_PATH
+        base_rpc_path = envs.APHRODITE_RPC_BASE_PATH
         return f"ipc://{base_rpc_path}/{uuid4()}"
     else:
         # windows doesn't support ipc://
@@ -530,8 +528,7 @@ def get_open_zmq_ipc_path() -> str:
         return f"tcp://127.0.0.1:{get_open_port()}"
      
 def get_open_port(port: Optional[int] = None) -> int:
-    port = int(os.getenv("APHRODITE_PORT", 0)
-                ) if "APHRODITE_PORT" in os.environ else None
+    port = envs.APHRODITE_PORT
     if port is not None:
         while True:
             try:
@@ -948,7 +945,7 @@ def find_library(lib_name: str) -> str:
     # libcuda.so.1 (libc6,x86-64) => /lib/x86_64-linux-gnu/libcuda.so.1
     locs = [line.split()[-1] for line in libs.splitlines() if lib_name in line]
     # `LD_LIBRARY_PATH` searches the library in the user-defined paths
-    env_ld_library_path = os.getenv("LD_LIBRARY_PATH")
+    env_ld_library_path = envs.LD_LIBRARY_PATH
     if not locs and env_ld_library_path:
         locs = [
             os.path.join(dir, lib_name)
@@ -967,7 +964,7 @@ def find_nccl_library() -> str:
     After importing `torch`, `libnccl.so.2` or `librccl.so.1` can be
     found by `ctypes` automatically.
     """
-    so_file = os.environ.get("APHRODITE_NCCL_SO_PATH", "")
+    so_file = envs.APHRODITE_NCCL_SO_PATH
 
     # manually load the nccl library
     if so_file:
@@ -985,7 +982,7 @@ def find_nccl_library() -> str:
 
 
 def enable_trace_function_call_for_thread() -> None:
-    if int(os.getenv("APHRODITE_TRACE_FUNCTION", "0")):
+    if envs.APHRODITE_TRACE_FUNCTION:
         tmp_dir = tempfile.gettempdir()
         filename = (f"APHRODITE_TRACE_FUNCTION_for_process_{os.getpid()}"
                     f"_thread_{threading.get_ident()}_"
@@ -1074,7 +1071,7 @@ def cuda_device_count_stateless() -> int:
     # This can be removed and simply replaced with torch.cuda.get_device_count
     # after https://github.com/pytorch/pytorch/pull/122815 is released.
 
-    return _cuda_device_count_stateless(os.environ.get("CUDA_VISIBLE_DEVICES"))
+    return _cuda_device_count_stateless(envs.CUDA_VISIBLE_DEVICES)
 
 
 #From: https://stackoverflow.com/a/4104188/2749989

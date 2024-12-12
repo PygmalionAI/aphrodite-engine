@@ -1,4 +1,3 @@
-import os
 from contextlib import contextmanager
 from typing import Any, List, Optional, Union
 
@@ -8,6 +7,7 @@ from loguru import logger
 from torch.distributed import ProcessGroup
 
 from aphrodite import _custom_ops as ops
+from aphrodite import envs
 from aphrodite.common.utils import cuda_device_count_stateless
 from aphrodite.distributed.device_communicators.custom_all_reduce_utils import (
     gpu_p2p_access_check)
@@ -95,7 +95,7 @@ class CustomAllreduce:
         assert isinstance(device, torch.device)
         self.device = device
 
-        cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", None)
+        cuda_visible_devices = envs.CUDA_VISIBLE_DEVICES
         if cuda_visible_devices:
             device_ids = list(map(int, cuda_visible_devices.split(",")))
         else:

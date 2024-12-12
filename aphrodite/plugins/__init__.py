@@ -1,9 +1,7 @@
-import os
-
 from loguru import logger
 
-APHRODITE_PLUGINS = None if "APHRODITE_PLUGINS" not in os.environ else \
-    os.environ["APHRODITE_PLUGINS"].split(",")
+from aphrodite import envs
+
 
 def load_general_plugins():
     """WARNING: plugins can be loaded for multiple times in different
@@ -16,7 +14,7 @@ def load_general_plugins():
     else:
         from importlib.metadata import entry_points
 
-    allowed_plugins = APHRODITE_PLUGINS
+    allowed_plugins = envs.APHRODITE_PLUGINS
 
     discovered_plugins = entry_points(group='aphrodite.general_plugins')
     for plugin in discovered_plugins:

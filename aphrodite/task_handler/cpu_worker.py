@@ -1,10 +1,10 @@
 """A CPU worker class."""
-import os
 from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.distributed
 
+from aphrodite import envs
 from aphrodite.attention import get_attn_backend
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,
@@ -19,8 +19,7 @@ from aphrodite.task_handler.worker_base import (LocalOrDistributedWorkerBase,
                                                 LoraNotSupportedWorkerBase,
                                                 WorkerInput)
 
-APHRODITE_CPU_OMP_THREADS_BIND = os.getenv("APHRODITE_CPU_OMP_THREADS_BIND",
-                                           "all")
+APHRODITE_CPU_OMP_THREADS_BIND = envs.APHRODITE_CPU_OMP_THREADS_BIND
 
 
 class CPUCacheEngine:

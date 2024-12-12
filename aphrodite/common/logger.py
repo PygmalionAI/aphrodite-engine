@@ -15,11 +15,12 @@ from rich.markup import escape
 from rich.progress import (BarColumn, MofNCompleteColumn, Progress,
                            TaskProgressColumn, TextColumn, TimeRemainingColumn)
 
+from aphrodite import envs
+
 RICH_CONSOLE = Console()
 LOG_LEVEL = os.getenv("APHRODITE_LOG_LEVEL", "INFO").upper()
 
-APHRODITE_CONFIGURE_LOGGING = int(os.getenv("APHRODITE_CONFIGURE_LOGGING",
-                                            "1"))
+APHRODITE_CONFIGURE_LOGGING = envs.APHRODITE_CONFIGURE_LOGGING
 
 
 def unwrap(wrapped, default=None):

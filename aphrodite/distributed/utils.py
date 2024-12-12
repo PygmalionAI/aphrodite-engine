@@ -3,12 +3,13 @@
 # Adapted from
 # https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/tensor_parallel/utils.py
 # Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
-import os
 from typing import Sequence, Tuple
 
 import torch
 
-APHRODITE_PP_LAYER_PARTITION = os.getenv("APHRODITE_PP_LAYER_PARTITION", None)
+from aphrodite import envs
+
+APHRODITE_PP_LAYER_PARTITION = envs.APHRODITE_PP_LAYER_PARTITION
 
 
 def ensure_divisibility(numerator, denominator):
