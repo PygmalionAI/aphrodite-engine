@@ -7,8 +7,15 @@ from aphrodite.inputs import PromptInputs
 from aphrodite.lora.request import LoRARequest
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
 
+# Success string used for RPC instructions.
 APHRODITE_RPC_SUCCESS_STR = "SUCCESS"
-APHRODITE_RPC_HEALTHY_STR = "HEALTHY"
+# Timeouts.
+APHRODITE_RPC_SERVER_START_TIMEOUT_MS = 1000
+APHRODITE_RPC_HEALTH_TIMEOUT_MS = 10000
+# Minimum value of ZMQ.SOCKET_LIMIT to run mp.
+APHRODITE_RPC_SOCKET_LIMIT_CUTOFF = 2000
+# HWM is set to Infinity.
+APHRODITE_RPC_ZMQ_HWM = 0
 
 
 @dataclass
@@ -33,7 +40,7 @@ class RPCUtilityRequest(Enum):
     GET_SCHEDULER_CONFIG = 5
     GET_LORA_CONFIG = 6
     DO_LOG_STATS = 7
-    CHECK_HEALTH = 8
+    IS_SERVER_HEALTHY = 8
 
 
 RPC_REQUEST_TYPE = Union[RPCGenerateRequest, RPCAbortRequest,
