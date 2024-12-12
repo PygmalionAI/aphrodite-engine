@@ -1188,6 +1188,10 @@ class AphroditeEngine:
             raise NotImplementedError(
                 "Pipeline parallelism is only supported through AsyncAphrodite "
                 "as performance will be severely degraded otherwise.")
+        if self.scheduler_config.num_scheduler_steps > 1:
+            raise NotImplementedError(
+                "Multiple scheduler steps (multi-step) are only supported "
+                "through AsyncAphrodite.")
         seq_group_metadata_list, scheduler_outputs = self.scheduler[
             0].schedule()
 
