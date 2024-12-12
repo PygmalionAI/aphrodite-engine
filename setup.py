@@ -1,3 +1,4 @@
+import importlib.util
 import io
 import logging
 import os
@@ -14,10 +15,16 @@ from setuptools import Extension, find_packages, setup
 from setuptools.command.build_ext import build_ext
 from torch.utils.cpp_extension import CUDA_HOME
 
+
+def load_module_from_path(module_name, path):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
 ROOT_DIR = os.path.dirname(__file__)
 logger = logging.getLogger(__name__)
-# Target device of Aphrodite, supporting [cuda (by default), rocm, neuron, cpu]
-APHRODITE_TARGET_DEVICE = os.getenv("APHRODITE_TARGET_DEVICE", "cuda")
 
 
 def embed_commit_hash():
@@ -46,6 +53,14 @@ def embed_commit_hash():
 
 
 embed_commit_hash()
+
+
+# cannot import envs directly because it depends on aphrodite,
+#  which is not installed yet
+envs = load_module_from_path('envs', os.path.join(
+    ROOT_DIR, 'aphrodite', 'envs.py'))
+
+APHRODITE_TARGET_DEVICE = envs.APHRODITE_TARGET_DEVICE
 
 if not sys.platform.startswith("linux"):
     logger.warning(
@@ -97,7 +112,7 @@ class cmake_build_ext(build_ext):
     def compute_num_jobs(self):
         # `num_jobs` is either the value of the MAX_JOBS environment variable
         # (if defined) or the number of CPUs available.
-        num_jobs = os.environ.get("MAX_JOBS", None)
+        num_jobs = envs.MAX_JOBS
         if num_jobs is not None:
             num_jobs = int(num_jobs)
             logger.info(f"Using MAX_JOBS={num_jobs} as the number of jobs.")
@@ -118,7 +133,7 @@ class cmake_build_ext(build_ext):
             # environment variable (if defined) or 1.
             # when it is set, we reduce `num_jobs` to avoid
             # overloading the system.
-            nvcc_threads = os.getenv("NVCC_THREADS", None)
+            nvcc_threads = envs.NVCC_THREADS
             if nvcc_threads is not None:
                 nvcc_threads = int(nvcc_threads)
                 logger.info(f"Using NVCC_THREADS={nvcc_threads} as the number"
@@ -143,7 +158,7 @@ class cmake_build_ext(build_ext):
         # Select the build type.
         # Note: optimization level + debug info are set by the build type
         default_cfg = "Debug" if self.debug else "RelWithDebInfo"
-        cfg = os.getenv("CMAKE_BUILD_TYPE", default_cfg)
+        cfg = envs.CMAKE_BUILD_TYPE or default_cfg
 
         # where .so files will be written, should be the same for all extensions
         # that use the same CMakeLists.txt.
@@ -161,7 +176,7 @@ class cmake_build_ext(build_ext):
             '-DAPHRODITE_TARGET_DEVICE={}'.format(APHRODITE_TARGET_DEVICE),
         ]
 
-        verbose = bool(int(os.getenv('VERBOSE', '0')))
+        verbose = envs.VERBOSE
         if verbose:
             cmake_args += ['-DCMAKE_VERBOSE_MAKEFILE=ON']
 
@@ -469,7 +484,7 @@ package_data = {
         "py.typed", "modeling/layers/fused_moe/configs/*.json"
     ]
 }
-if os.environ.get("APHRODITE_USE_PRECOMPILED"):
+if envs.APHRODITE_USE_PRECOMPILED:
     ext_modules = []
     package_data["aphrodite"].append("*.so")
 

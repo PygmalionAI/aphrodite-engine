@@ -1,5 +1,4 @@
 import base64
-import os
 from io import BytesIO
 from typing import Tuple, Union
 
@@ -8,14 +7,13 @@ import numpy as np
 import soundfile
 from PIL import Image
 
+from aphrodite import envs
 from aphrodite.common.connections import global_http_connection
 from aphrodite.multimodal.base import MultiModalDataDict
 
-APHRODITE_IMAGE_FETCH_TIMEOUT = int(
-    os.getenv("APHRODITE_IMAGE_FETCH_TIMEOUT", 10))
+APHRODITE_IMAGE_FETCH_TIMEOUT = envs.APHRODITE_IMAGE_FETCH_TIMEOUT
 
-APHRODITE_AUDIO_FETCH_TIMEOUT = int(
-    os.getenv("APHRODITE_AUDIO_FETCH_TIMEOUT", 10))
+APHRODITE_AUDIO_FETCH_TIMEOUT = envs.APHRODITE_AUDIO_FETCH_TIMEOUT
 
 
 def _load_image_from_bytes(b: bytes):

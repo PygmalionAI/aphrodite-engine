@@ -1,13 +1,13 @@
 import argparse
 import dataclasses
 import json
-import os
 from dataclasses import dataclass
 from typing import (TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Type,
                     Union)
 
 from loguru import logger
 
+from aphrodite import envs
 from aphrodite.common.config import (CacheConfig, ConfigFormat, DecodingConfig,
                                      DeviceConfig, EngineConfig, LoadConfig,
                                      LoadFormat, LoRAConfig, ModelConfig,
@@ -24,8 +24,7 @@ if TYPE_CHECKING:
     from aphrodite.transformers_utils.tokenizer_group import BaseTokenizerGroup
 
 
-APHRODITE_USE_RAY_SPMD_WORKER = bool(
-    os.getenv("APHRODITE_USE_RAY_SPMD_WORKER", 0))
+APHRODITE_USE_RAY_SPMD_WORKER = envs.APHRODITE_USE_RAY_SPMD_WORKER
 
 def nullable_kvs(val: str) -> Optional[Mapping[str, int]]:
     if len(val) == 0:

@@ -5,6 +5,7 @@ from typing import Any, Awaitable, List, Optional, Set, Tuple, Union
 import torch
 from loguru import logger
 
+from aphrodite import envs
 from aphrodite.common.config import CacheConfig, ModelConfig, SchedulerConfig
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.common.utils import (GiB_bytes, get_aphrodite_instance_id,
@@ -333,7 +334,7 @@ def _verify_and_get_cache_config(config: CacheConfig) -> CacheConfig:
         logger.warning("Prefix caching is not supported on CPU, disable it.")
         config.enable_prefix_caching = False
 
-    kv_cache_space_str = os.getenv("APHRODITE_CPU_KVCACHE_SPACE", "0")
+    kv_cache_space_str = envs.APHRODITE_CPU_KVCACHE_SPACE
     kv_cache_space = int(kv_cache_space_str)
 
     if kv_cache_space >= 0:

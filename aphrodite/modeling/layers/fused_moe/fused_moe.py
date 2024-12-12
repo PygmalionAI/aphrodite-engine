@@ -10,10 +10,10 @@ import triton.language as tl
 from loguru import logger
 
 from aphrodite import _custom_ops as ops
+from aphrodite import envs
 from aphrodite.platforms import current_platform
 
-APHRODITE_FUSED_MOE_CHUNK_SIZE = int(
-    os.getenv("APHRODITE_FUSED_MOE_CHUNK_SIZE", "65536"))
+APHRODITE_FUSED_MOE_CHUNK_SIZE = envs.APHRODITE_FUSED_MOE_CHUNK_SIZE
 
 
 @triton.jit

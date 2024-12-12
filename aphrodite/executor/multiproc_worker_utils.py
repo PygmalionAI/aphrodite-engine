@@ -14,6 +14,8 @@ from typing import (Any, Callable, Dict, Generic, List, Optional, TextIO,
 
 from loguru import logger
 
+from aphrodite import envs
+
 T = TypeVar('T')
 
 _TERMINATE = "TERMINATE"  # sentinel
@@ -26,7 +28,7 @@ JOIN_TIMEOUT_S = 2
 
 # Use dedicated multiprocess context for workers.
 # Both spawn and fork work
-mp_method = os.getenv("APHRODITE_WORKER_MULTIPROC_METHOD", "fork")
+mp_method = envs.APHRODITE_WORKER_MULTIPROC_METHOD
 mp = multiprocessing.get_context(mp_method)
 
 

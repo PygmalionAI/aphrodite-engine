@@ -1,5 +1,4 @@
 # ruff: noqa: SIM117
-import os
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -11,6 +10,7 @@ from openvino._offline_transformations import paged_attention_transformation
 from optimum.intel import OVModelForCausalLM
 from torch import nn
 
+from aphrodite import envs
 from aphrodite.attention.backends.openvino import OpenVINOAttentionMetadata
 from aphrodite.common.config import DeviceConfig, ModelConfig
 from aphrodite.common.sequence import SamplerOutput
@@ -19,8 +19,8 @@ from aphrodite.modeling.layers.logits_processor import (LogitsProcessor,
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 
-APHRODITE_OPENVINO_ENABLE_QUANTIZED_WEIGHTS = bool(
-    os.getenv("APHRODITE_OPENVINO_ENABLE_QUANTIZED_WEIGHTS", False))
+APHRODITE_OPENVINO_ENABLE_QUANTIZED_WEIGHTS = (
+    envs.APHRODITE_OPENVINO_ENABLE_QUANTIZED_WEIGHTS)
 
 
 def _flattenize_inputs(inputs):

@@ -9,6 +9,7 @@ import torch
 from loguru import logger
 from transformers import PretrainedConfig
 
+from aphrodite import envs
 from aphrodite.common.utils import (STR_NOT_IMPL_ENC_DEC_CUDAGRAPH, GiB_bytes,
                                     cuda_device_count_stateless,
                                     get_cpu_memory, is_cpu, is_hip, is_neuron,
@@ -30,8 +31,7 @@ if TYPE_CHECKING:
         BaseTokenizerGroup)
 
 # If true, will load models from ModelScope instead of Hugging Face Hub.
-APHRODITE_USE_MODELSCOPE = os.environ.get("APHRODITE_USE_MODELSCOPE",
-                                          "False").lower() == "true"
+APHRODITE_USE_MODELSCOPE = envs.APHRODITE_USE_MODELSCOPE
 
 _EMBEDDING_MODEL_MAX_NUM_BATCHED_TOKENS = 32768
 
@@ -1820,21 +1820,39 @@ def _get_and_verify_max_len(
                     "original_max_position_embeddings"]
             derived_max_model_len *= scaling_factor
 
+    # If the user specified a max length, make sure it is smaller than the
+    # derived length from the HF model config.
     if max_model_len is None:
-        max_model_len = derived_max_model_len
-    elif max_model_len > derived_max_model_len and rope_scaling_arg is None:
-        raise ValueError(
-            f"User-specified max_model_len {max_model_len} is higher than "
-            f"the original {derived_max_model_len}. "
-            "Please provide a rope_scaling dict to scale the model.")
-    elif max_model_len > derived_max_model_len and rope_scaling_arg is not None:
-        # hope this works
-        logger.warning(
-            f"User-specified max_model_len {max_model_len} is higher than "
-            f"the original {derived_max_model_len}. "
-            "Attempting to use RoPE scaling with the provided rope_scaling "
-            "dict.")
-        derived_max_model_len = max_model_len
+        max_model_len = int(derived_max_model_len)
+    elif max_model_len > derived_max_model_len:
+        # Some models might have a separate key for specifying model_max_length
+        # that will be bigger than derived_max_model_len. We compare user input
+        # with model_max_length and allow this override when it's smaller.
+        model_max_length = getattr(hf_config, "model_max_length", None)
+        if envs.APHRODITE_DYNAMIC_ROPE_SCALING:
+            scaling_factor = max_model_len / derived_max_model_len
+            hf_config.rope_scaling = {"factor": scaling_factor,
+                                      "type": "dynamic"}
+            logger.info(
+                "Using dynamic RoPE scaling to extend the model's max context "
+                f"length from {derived_max_model_len} to {max_model_len}.")
+            derived_max_model_len = max_model_len
+        elif model_max_length is not None and max_model_len <= model_max_length:
+            if disable_sliding_window:
+                # TODO: Find a model that has model_max_length
+                # with sliding window to see if this case should be allowed.
+                raise NotImplementedError(
+                    "Disabling sliding window is not supported for models "
+                    "model_max_length in the config. Please raise an issue "
+                    "so we can investigate.")
+        else:
+            raise ValueError(
+                f"User-specified max_model_len ({max_model_len}) is greater "
+                f"than the derived max_model_len ({max_len_key}="
+                f"{derived_max_model_len} or model_max_length="
+                f"{model_max_length} in model's config.json). To allow "
+                "greater lengths, please set the env var "
+                "APHRODITE_DYNAMIC_ROPE_SCALING=1")
 
     return int(max_model_len)
 

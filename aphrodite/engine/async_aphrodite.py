@@ -1,5 +1,4 @@
 import asyncio
-import os
 import time
 from dataclasses import dataclass
 from functools import partial
@@ -11,6 +10,7 @@ from loguru import logger
 from transformers import PreTrainedTokenizer
 from typing_extensions import assert_never
 
+from aphrodite import envs
 from aphrodite.common.config import (DecodingConfig, EngineConfig, LoRAConfig,
                                      ModelConfig, ParallelConfig,
                                      SchedulerConfig)
@@ -34,8 +34,7 @@ from aphrodite.lora.request import LoRARequest
 from aphrodite.processing.scheduler import SchedulerOutputs
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
 
-ENGINE_ITERATION_TIMEOUT_S = int(
-    os.environ.get("APHRODITE_ENGINE_ITERATION_TIMEOUT_S", "60"))
+ENGINE_ITERATION_TIMEOUT_S = envs.APHRODITE_ENGINE_ITERATION_TIMEOUT_S
 
 
 class AsyncEngineDeadError(RuntimeError):

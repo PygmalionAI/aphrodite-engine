@@ -1,6 +1,5 @@
 """A layer that samples the next tokens from the model's outputs."""
 import itertools
-import os
 import warnings
 from enum import IntEnum
 from math import inf
@@ -11,6 +10,7 @@ import torch.nn as nn
 from loguru import logger
 
 import aphrodite._custom_ops as ops
+from aphrodite import envs
 from aphrodite.common.sampling_params import SamplingType
 from aphrodite.common.sequence import (CompletionSequenceGroupOutput, Logprob,
                                        PromptLogprobs, SampleLogprobs,
@@ -34,8 +34,7 @@ _TEMPERATURE_MINIMUM = 2e-5
 
 # If enabled, we switch to a more performant implementation
 # of top-k and top-p
-APHRODITE_USE_SAMPLING_KERNELS = bool(int(
-    os.getenv("APHRODITE_USE_SAMPLING_KERNELS", "0")))
+APHRODITE_USE_SAMPLING_KERNELS = envs.APHRODITE_USE_SAMPLING_KERNELS
 
 
 class SamplerID(IntEnum):

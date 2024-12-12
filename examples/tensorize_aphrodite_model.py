@@ -1,10 +1,9 @@
 import argparse
 import dataclasses
 import json
-import os
 import uuid
 
-from aphrodite import LLM
+from aphrodite import LLM, envs
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.modeling.model_loader.tensorizer import (
     TensorizerArgs, TensorizerConfig, tensorize_aphrodite_model)
@@ -177,11 +176,11 @@ if __name__ == '__main__':
     args = parse_args()
 
     s3_access_key_id = (getattr(args, 's3_access_key_id', None)
-                        or os.environ.get("S3_ACCESS_KEY_ID", None))
+                        or envs.S3_ACCESS_KEY_ID)
     s3_secret_access_key = (getattr(args, 's3_secret_access_key', None)
-                            or os.environ.get("S3_SECRET_ACCESS_KEY", None))
+                            or envs.S3_SECRET_ACCESS_KEY)
     s3_endpoint = (getattr(args, 's3_endpoint', None)
-                or os.environ.get("S3_ENDPOINT_URL", None))
+                or envs.S3_ENDPOINT_URL)
 
     credentials = {
         "s3_access_key_id": s3_access_key_id,

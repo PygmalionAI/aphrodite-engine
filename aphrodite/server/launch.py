@@ -1,5 +1,4 @@
 import asyncio
-import os
 import signal
 from http import HTTPStatus
 from typing import Any
@@ -8,12 +7,13 @@ import uvicorn
 from fastapi import FastAPI, Response
 from loguru import logger
 
+from aphrodite import envs
 from aphrodite.common.utils import find_process_using_port, in_windows
 from aphrodite.engine.async_aphrodite import AsyncEngineDeadError
 from aphrodite.engine.protocol import AsyncEngineClient
 
-APHRODITE_KEEP_ALIVE_ON_ENGINE_DEATH = bool(os.getenv(
-    "APHRODITE_KEEP_ALIVE_ON_ENGINE_DEATH", 0))
+APHRODITE_KEEP_ALIVE_ON_ENGINE_DEATH = (
+    envs.APHRODITE_KEEP_ALIVE_ON_ENGINE_DEATH)
 
 
 async def serve_http(app: FastAPI, engine: AsyncEngineClient,

@@ -1,4 +1,3 @@
-import os
 from typing import Any, Dict, List, Optional
 
 import torch
@@ -7,6 +6,7 @@ from torch.nn import Module
 from torch.nn.parameter import Parameter
 
 from aphrodite import _custom_ops as ops
+from aphrodite import envs
 from aphrodite.common.utils import is_hip, print_warning_once
 from aphrodite.modeling.layers.fused_moe import FusedMoE, FusedMoEMethodBase
 from aphrodite.modeling.layers.linear import (LinearBase, LinearMethodBase,
@@ -26,8 +26,7 @@ from aphrodite.quantization.utils.w8a8_utils import (
     requantize_with_max_scale)
 
 ACTIVATION_SCHEMES = ["static", "dynamic"]
-APHRODITE_TEST_FORCE_FP8_MARLIN = os.environ.get(
-    "APHRODITE_TEST_FORCE_FP8_MARLIN", "0").strip().lower() in ("1", "true")
+APHRODITE_TEST_FORCE_FP8_MARLIN = envs.APHRODITE_TEST_FORCE_FP8_MARLIN
 
 
 class Fp8Config(QuantizationConfig):

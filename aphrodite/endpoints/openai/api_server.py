@@ -20,6 +20,7 @@ from fastapi.responses import (HTMLResponse, JSONResponse, Response,
 from loguru import logger
 from starlette.routing import Mount
 
+from aphrodite import envs
 from aphrodite.common.config import ModelConfig
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import _SAMPLING_EPS, SamplingParams
@@ -635,7 +636,7 @@ def build_app(args: Namespace) -> FastAPI:
         return JSONResponse(err.model_dump(),
                             status_code=HTTPStatus.BAD_REQUEST)
 
-    if token := os.environ.get("APHRODITE_API_KEY") or args.api_keys:
+    if token := envs.APHRODITE_API_KEY or args.api_keys:
         admin_key = os.environ.get("APHRODITE_ADMIN_KEY") or args.admin_key
 
         if admin_key is None:

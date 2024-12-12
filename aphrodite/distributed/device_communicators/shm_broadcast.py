@@ -1,4 +1,3 @@
-import os
 import pickle
 import time
 from contextlib import contextmanager
@@ -13,10 +12,11 @@ from loguru import logger
 from torch.distributed import ProcessGroup
 from zmq import SUB, SUBSCRIBE, XPUB, XPUB_VERBOSE, Context  # type: ignore
 
+from aphrodite import envs
 from aphrodite.common.utils import get_ip, get_open_port
 
-APHRODITE_RINGBUFFER_WARNING_INTERVAL = os.getenv(
-    "APHRODITE_RINGBUFFER_WARNING_INTERVAL", 60)
+APHRODITE_RINGBUFFER_WARNING_INTERVAL = (
+    envs.APHRODITE_RINGBUFFER_WARNING_INTERVAL)
 
 # time to wait if the queue is full or empty
 # if we sleep for too short, it will consume too much CPU

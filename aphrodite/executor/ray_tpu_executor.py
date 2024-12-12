@@ -7,6 +7,7 @@ from typing import (TYPE_CHECKING, Any, Awaitable, Dict, List, Optional, Tuple,
 
 from loguru import logger
 
+from aphrodite import envs
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.common.utils import (get_aphrodite_instance_id,
                                     get_distributed_init_method, get_ip,
@@ -21,7 +22,7 @@ if ray is not None:
 if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
 
-APHRODITE_TRACE_FUNCTION = int(os.getenv("APHRODITE_TRACE_FUNCTION", 0))
+APHRODITE_TRACE_FUNCTION = envs.APHRODITE_TRACE_FUNCTION
 
 
 class RayTPUExecutor(TPUExecutor):

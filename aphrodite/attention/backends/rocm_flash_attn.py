@@ -1,11 +1,11 @@
 """Attention layer ROCm GPUs."""
-import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 import torch
 from loguru import logger
 
+from aphrodite import envs
 from aphrodite.attention.backends.abstract import (AttentionBackend,
                                                    AttentionImpl,
                                                    AttentionMetadata,
@@ -280,9 +280,7 @@ class ROCmFlashAttentionImpl(AttentionImpl):
 
         self.use_naive_attn = False
         # NOTE: Allow for switching between Triton and CK. Defaulting to triton.
-        self.use_triton_flash_attn = (os.environ.get(
-            "APHRODITE_USE_TRITON_FLASH_ATTN", "True").lower()
-                                      in ("true", "1"))
+        self.use_triton_flash_attn = envs.APHRODITE_USE_TRITON_FLASH_ATTN
         if self.use_triton_flash_attn:
             from aphrodite.attention.ops.triton_flash_attn import (  # noqa: F401
                 triton_attention)
