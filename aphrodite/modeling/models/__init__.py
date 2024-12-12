@@ -64,6 +64,7 @@ _GENERATION_MODELS = {
     "PersimmonForCausalLM": ("persimmon", "PersimmonForCausalLM"),
     "SolarForCausalLM": ("solar", "SolarForCausalLM"),
     "ExaoneForCausalLM": ("exaone", "ExaoneForCausalLM"),
+    "HunYuanForCausalLM": ("hunyuan", "HunYuanForCausalLM"),
 }
 
 _EMBEDDING_MODELS = {
