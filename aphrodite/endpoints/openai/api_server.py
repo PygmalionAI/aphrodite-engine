@@ -10,7 +10,7 @@ from argparse import Namespace
 from contextlib import asynccontextmanager
 from distutils.util import strtobool
 from http import HTTPStatus
-from typing import AsyncGenerator, AsyncIterator, List, Set, Tuple
+from typing import AsyncGenerator, AsyncIterator, List, Optional, Set, Tuple
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -108,7 +108,14 @@ async def lifespan(app: FastAPI):
 
 
 @asynccontextmanager
-async def build_async_engine_client(args) -> AsyncIterator[AsyncEngineClient]:
+async def build_async_engine_client(
+        args: Namespace) -> AsyncIterator[Optional[AsyncEngineClient]]:
+    """
+    Create AsyncEngineClient, either:
+        - in-process using the AsyncAphrodite Directly
+        - multiprocess using AsyncAphrodite RPC
+    Returns the Client or None if the creation failed.
+    """
     # Context manager to handle async_engine_client lifecycle
     # Ensures everything is shutdown and cleaned up on error/exit
     global engine_args
@@ -168,11 +175,13 @@ async def build_async_engine_client(args) -> AsyncIterator[AsyncEngineClient]:
                 try:
                     await async_engine_client.setup()
                     break
-                except TimeoutError as e:
+                except TimeoutError:
                     if not rpc_server_process.is_alive():
-                        raise RuntimeError(
-                            "The server process died before "
-                            "responding to the readiness probe") from e
+                        logger.error(
+                            "RPCServer process died before responding "
+                            "to readiness probe")
+                        yield None
+                        return
             yield async_engine_client
         finally:
             # Ensure rpc server process was terminated
@@ -759,6 +768,9 @@ async def init_app(
 async def run_server(args, **uvicorn_kwargs) -> None:
 
     async with build_async_engine_client(args) as async_engine_client:
+        # If None, creation of the client failed and we exit.
+        if async_engine_client is None:
+            return
         app = await init_app(async_engine_client, args)
 
         protocol = "https" if args.ssl_certfile else "http"

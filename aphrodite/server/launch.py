@@ -60,7 +60,7 @@ async def serve_http(app: FastAPI, engine: AsyncEngineClient,
         port = uvicorn_kwargs["port"]
         process = find_process_using_port(port)
         if process is not None:
-            logger.debug(
+            logger.info(
                 f"port {port} is used by process {process} launched with "
                 f"command:\n{' '.join(process.cmdline())}")
         logger.info("Gracefully stopping http server")
