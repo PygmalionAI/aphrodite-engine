@@ -145,6 +145,13 @@ async def build_async_engine_client(args) -> AsyncIterator[AsyncEngineClient]:
         rpc_path = get_open_zmq_ipc_path()
         logger.info(f"Multiprocessing frontend to use {rpc_path} for RPC Path."
                     )
+
+        # Build RPCClient, which conforms to AsyncEngineClient Protocol.
+        # NOTE: Actually, this is not true yet. We still need to support
+        # embedding models via RPC (see TODO above)
+        rpc_client = AsyncEngineRPCClient(rpc_path)
+        async_engine_client = rpc_client  # type: ignore
+
         # Start RPCServer in separate process (holds the AsyncAphrodite).
         context = multiprocessing.get_context("spawn")
         # the current process might have CUDA context,
@@ -155,9 +162,6 @@ async def build_async_engine_client(args) -> AsyncIterator[AsyncEngineClient]:
         rpc_server_process.start()
         logger.info(
             f"Started engine process with PID {rpc_server_process.pid}")
-
-        # Build RPCClient, which conforms to AsyncEngineClient Protocol.
-        async_engine_client = AsyncEngineRPCClient(rpc_path)
 
         try:
             while True:

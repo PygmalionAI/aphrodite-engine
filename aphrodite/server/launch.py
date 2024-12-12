@@ -19,6 +19,16 @@ APHRODITE_KEEP_ALIVE_ON_ENGINE_DEATH = bool(os.getenv(
 async def serve_http(app: FastAPI, engine: AsyncEngineClient,
                      **uvicorn_kwargs: Any):
 
+    # Set concurrency limits in uvicorn if running in multiprocessing mode
+    # since zmq has maximum socket limit of zmq.constants.SOCKET_LIMIT (65536).
+    if engine.limit_concurrency is not None:
+        logger.info(
+            "Launching Uvicorn with --limit_concurrency "
+            f"{engine.limit_concurrency}. "
+            f"To avoid this limit at the expense of performance run with "
+            f"--disable-frontend-multiprocessing")
+        uvicorn_kwargs["limit_concurrency"] = engine.limit_concurrency
+
     config = uvicorn.Config(app, **uvicorn_kwargs)
     server = uvicorn.Server(config)
     _add_shutdown_handlers(app, server, engine)
