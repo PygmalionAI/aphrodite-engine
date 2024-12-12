@@ -184,6 +184,11 @@ class cmake_build_ext(build_ext):
             '-DAPHRODITE_PYTHON_EXECUTABLE={}'.format(python_executable)
         ]
 
+
+        # Pass the python path to cmake so it can reuse the build dependencies
+        # on subsequent calls to python.
+        cmake_args += ['-DAPHRODITE_PYTHON_PATH={}'.format(":".join(sys.path))]
+
         num_jobs, nvcc_threads = self.compute_num_jobs()
 
         if nvcc_threads:
