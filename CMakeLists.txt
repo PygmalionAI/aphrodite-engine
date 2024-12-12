@@ -255,7 +255,7 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
   # Generate sources:
   execute_process(
     COMMAND ${CMAKE_COMMAND} -E env 
-    PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/kernels/cutlass_extensions/:${CUTLASS_DIR}/python/:$PYTHONPATH 
+    PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/csrc/cutlass_extensions/:${CUTLASS_DIR}/python/:${APHRODITE_PYTHON_PATH}:$PYTHONPATH 
       ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/kernels/quantization/machete/generate.py
     RESULT_VARIABLE machete_generation_result
     OUTPUT_VARIABLE machete_generation_output
