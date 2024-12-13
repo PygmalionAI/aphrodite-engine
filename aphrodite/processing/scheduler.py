@@ -964,14 +964,16 @@ class Scheduler:
 
         # Schedule swapped out requests.
         # If preemption happens, it means we don't have space for swap-in.
-        if len(running_scheduled.preempted) + len(
-                running_scheduled.swapped_out) == 0:
+        if (budget.remaining_token_budget() > 0 and 
+                len(running_scheduled.preempted) + len(
+                    running_scheduled.swapped_out) == 0):
             swapped_in = self._schedule_swapped(budget, curr_loras)
 
         # Schedule new prefills.
-        prefills = self._schedule_prefills(budget,
-                                           curr_loras,
-                                           enable_chunking=True)
+        if budget.remaining_token_budget() > 0:
+            prefills = self._schedule_prefills(budget,
+                                            curr_loras,
+                                            enable_chunking=True)
 
         assert (budget.num_batched_tokens <=
                 self.scheduler_config.max_num_batched_tokens)
