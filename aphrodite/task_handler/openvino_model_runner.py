@@ -10,7 +10,7 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, MultiModalConfig,
                                      ParallelConfig, SchedulerConfig)
 from aphrodite.common.sequence import SamplerOutput, SequenceGroupMetadata
-from aphrodite.modeling import SamplingMetadata
+from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.model_loader.openvino import get_model
 from aphrodite.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                                   MultiModalInputs)

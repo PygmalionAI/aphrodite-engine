@@ -11,7 +11,7 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
 from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceGroupMetadata)
 from aphrodite.common.utils import make_tensor_with_pad
-from aphrodite.modeling import SamplingMetadata
+from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.model_loader import get_model
 from aphrodite.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                                   MultiModalInputs)

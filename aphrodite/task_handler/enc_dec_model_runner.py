@@ -21,7 +21,7 @@ from aphrodite.common.sequence import (IntermediateTensors, PoolerOutput,
 from aphrodite.common.utils import (STR_NOT_IMPL_ENC_DEC_BACKEND,
                                     make_tensor_with_pad)
 from aphrodite.inputs import INPUT_REGISTRY, InputRegistry
-from aphrodite.modeling import SamplingMetadata
+from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from aphrodite.task_handler.model_runner import (
     GPUModelRunnerBase, ModelInputForGPUBuilder,

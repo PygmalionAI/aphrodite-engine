@@ -5,7 +5,7 @@ import torch
 
 from aphrodite.common.sequence import (ExecuteModelRequest, SamplerOutput,
                                        SequenceGroupMetadata)
-from aphrodite.modeling import SamplingMetadata
+from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.spec_decode.interfaces import SpeculativeProposals
 from aphrodite.spec_decode.proposer_worker_base import NonLLMProposerWorkerBase
 from aphrodite.spec_decode.top1_proposer import Top1Proposer

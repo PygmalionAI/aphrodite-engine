@@ -1206,3 +1206,8 @@ class AsyncAphrodite:
         else:
             await self.engine.check_health_async()
         logger.debug(f"Health check took {time.perf_counter()-t}s")
+
+    async def start_profile(self) -> None:
+        self.engine.model_executor._run_workers("start_profile")
+    async def stop_profile(self) -> None:
+        self.engine.model_executor._run_workers("stop_profile")

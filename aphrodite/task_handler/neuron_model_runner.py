@@ -11,7 +11,7 @@ from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceGroupMetadata)
 from aphrodite.common.utils import (is_pin_memory_available,
                                     make_tensor_with_pad)
-from aphrodite.modeling import SamplingMetadata
+from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.model_loader.neuron import get_neuron_model
 from aphrodite.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                                   MultiModalInputs)

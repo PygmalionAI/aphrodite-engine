@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     APHRODITE_TEST_FORCE_FP8_MARLIN: bool = False
     APHRODITE_ALLOW_ENGINE_USE_RAY: bool = False
     APHRODITE_PLUGINS: Optional[List[str]] = None
+    APHRODITE_TORCH_PROFILER_DIR: Optional[str] = None
 
 
 def get_default_cache_root():
@@ -372,6 +373,13 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     "APHRODITE_PLUGINS":
     lambda: None if "APHRODITE_PLUGINS" not in os.environ else os.environ[
         "APHRODITE_PLUGINS"].split(","),
+
+    # Enables torch profiler if set. Path to the directory where torch profiler
+    # traces are saved. Note that it must be an absolute path.
+    "APHRODITE_TORCH_PROFILER_DIR":
+    lambda: (None if os.getenv("APHRODITE_TORCH_PROFILER_DIR",
+                               None) is None else os
+             .path.expanduser(os.getenv("APHRODITE_TORCH_PROFILER_DIR", "."))),
 }
 
 # end-env-vars-definition
