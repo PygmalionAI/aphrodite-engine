@@ -272,7 +272,8 @@ class Sampler(nn.Module):
                     sampling_tensors.output_tokens,
                     sampling_tensors.presence_penalties,
                     sampling_tensors.frequency_penalties,
-                    sampling_tensors.repetition_penalties)
+                    sampling_tensors.repetition_penalties.
+                    rep_range=rep_range)
 
             elif sampler_id == SamplerID.NO_REPEAT_NGRAM and \
                 do_no_repeat_ngrams:
@@ -507,24 +508,38 @@ def _apply_penalties(logits: torch.Tensor, prompt_tokens_tensor: torch.Tensor,
                      output_tokens_tensor: torch.Tensor,
                      presence_penalties: torch.Tensor,
                      frequency_penalties: torch.Tensor,
-                     repetition_penalties: torch.Tensor) -> torch.Tensor:
+                     repetition_penalties: torch.Tensor,
+                     rep_range: Optional[int] = None) -> torch.Tensor:
+    """Apply presence, frequency, and repetition penalties to the logits."""
     num_seqs, vocab_size = logits.shape
-    _, prompt_mask = _get_bin_counts_and_mask(prompt_tokens_tensor, vocab_size,
-                                              num_seqs)
-    output_bin_counts, output_mask = _get_bin_counts_and_mask(
-        output_tokens_tensor, vocab_size, num_seqs)
+    
+    if rep_range is not None and rep_range > 0:
+        # Just take the last rep_range tokens from output_tokens_tensor
+        # This is much more efficient as we're only looking at recent history
+        output_tokens_tensor = output_tokens_tensor[:, -rep_range:]
+        
+        # Only include prompt tokens if we're still within rep_range of them
+        prompt_end_idx = prompt_tokens_tensor.size(1)
+        output_len = output_tokens_tensor.size(1)
+        if output_len < rep_range:
+            # Calculate how many prompt tokens we should include
+            prompt_tokens_to_include = min(rep_range - output_len, prompt_end_idx)
+            prompt_tokens_tensor = prompt_tokens_tensor[:, -prompt_tokens_to_include:]
+        else:
+            # If we have enough output tokens, ignore prompt completely
+            prompt_tokens_tensor = torch.empty((num_seqs, 0), dtype=torch.long, device=logits.device)
+    
+    _, prompt_mask = _get_bin_counts_and_mask(prompt_tokens_tensor, vocab_size, num_seqs)
+    output_bin_counts, output_mask = _get_bin_counts_and_mask(output_tokens_tensor, vocab_size, num_seqs)
 
     repetition_penalties = repetition_penalties[:, None].repeat(1, vocab_size)
     repetition_penalties[~(prompt_mask | output_mask)] = 1.0
     logits = torch.where(logits > 0, logits / repetition_penalties,
                          logits * repetition_penalties)
 
-    # We follow the definition in OpenAI API.
-    # Refer to https://platform.openai.com/docs/api-reference/parameter-details
     logits -= frequency_penalties.unsqueeze_(dim=1) * output_bin_counts
     logits -= presence_penalties.unsqueeze_(dim=1) * output_mask
     return logits
-
 
 def _apply_temperatures(
     logits: torch.Tensor,
