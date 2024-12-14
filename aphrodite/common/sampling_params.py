@@ -9,12 +9,12 @@ import torch
 from loguru import logger
 from typing_extensions import Annotated
 
-from aphrodite import envs
+import os
 
 _SAMPLING_EPS = 1e-5
 _MAX_TEMP = 1e-2
 
-APHRODITE_NO_DEPRECATION_WARNING = envs.APHRODITE_NO_DEPRECATION_WARNING
+APHRODITE_NO_DEPRECATION_WARNING = bool(int(os.environ.get("APHRODITE_NO_DEPRECATION_WARNING", "0")))
 
 
 class SamplingType(IntEnum):
