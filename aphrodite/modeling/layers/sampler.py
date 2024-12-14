@@ -272,7 +272,7 @@ class Sampler(nn.Module):
                     sampling_tensors.output_tokens,
                     sampling_tensors.presence_penalties,
                     sampling_tensors.frequency_penalties,
-                    sampling_tensors.repetition_penalties.
+                    sampling_tensors.repetition_penalties,
                     rep_range=rep_range)
 
             elif sampler_id == SamplerID.NO_REPEAT_NGRAM and \
