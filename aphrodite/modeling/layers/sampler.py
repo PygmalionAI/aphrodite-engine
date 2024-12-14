@@ -10,7 +10,7 @@ import torch.nn as nn
 from loguru import logger
 
 import aphrodite._custom_ops as ops
-from aphrodite import envs
+import os
 from aphrodite.common.sampling_params import SamplingType
 from aphrodite.common.sequence import (CompletionSequenceGroupOutput, Logprob,
                                        PromptLogprobs, SampleLogprobs,
@@ -34,7 +34,7 @@ _TEMPERATURE_MINIMUM = 2e-5
 
 # If enabled, we switch to a more performant implementation
 # of top-k and top-p
-APHRODITE_USE_SAMPLING_KERNELS = envs.APHRODITE_USE_SAMPLING_KERNELS
+APHRODITE_USE_SAMPLING_KERNELS = bool(int(os.environ.get("APHRODITE_USE_SAMPLING_KERNELS", "0")))
 
 
 class SamplerID(IntEnum):
