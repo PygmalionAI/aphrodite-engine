@@ -23,7 +23,7 @@ from aphrodite.modeling.models.intern_vit import InternVisionModel
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
 from aphrodite.multimodal.base import MultiModalInputs
-from aphrodite.multimodal.image import cached_get_tokenizer
+from aphrodite.multimodal.utils import cached_get_tokenizer
 from aphrodite.quantization import QuantizationConfig
 
 from .clip import (dummy_image_for_clip, dummy_seq_data_for_clip,
