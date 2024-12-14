@@ -9,12 +9,12 @@ import torch
 from loguru import logger
 from typing_extensions import Annotated
 
-from aphrodite import envs
+import os
 
 _SAMPLING_EPS = 1e-5
 _MAX_TEMP = 1e-2
 
-APHRODITE_NO_DEPRECATION_WARNING = envs.APHRODITE_NO_DEPRECATION_WARNING
+APHRODITE_NO_DEPRECATION_WARNING = bool(int(os.environ.get("APHRODITE_NO_DEPRECATION_WARNING", "0")))
 
 
 class SamplingType(IntEnum):
@@ -229,6 +229,7 @@ class SamplingParams(
     presence_penalty: float = 0.0
     frequency_penalty: float = 0.0
     repetition_penalty: float = 1.0
+    rep_range: Optional[int] = None
     no_repeat_ngram_size: int = 0
     temperature: float = 1.0
     dynatemp_min: float = 0.0
@@ -287,6 +288,7 @@ class SamplingParams(
         "presence_penalty": 0.0,
         "frequency_penalty": 0.0,
         "repetition_penalty": 1.0,
+        "rep_range": None,
         "no_repeat_ngram_size": 0,
         "temperature": 1.0,
         "dynatemp_min": 0.0,
@@ -400,6 +402,9 @@ class SamplingParams(
         if self.repetition_penalty < 1.0:
             raise ValueError("repetition_penalty must be in [1, inf), got "
                              f"{self.repetition_penalty}.")
+        if self.rep_range is not None and self.rep_range < 1:
+            raise ValueError("rep_range must be at least 1 if specified, got "
+                             f"{self.rep_range}.")
         if self.temperature < 0.0:
             raise ValueError(
                 f"temperature must be non-negative, got {self.temperature}.")

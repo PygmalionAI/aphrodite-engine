@@ -137,6 +137,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
     smoothing_factor: Optional[float] = 0.0
     smoothing_curve: Optional[float] = 1.0
     repetition_penalty: Optional[float] = 1.0
+    rep_range: Optional[int] = None
     no_repeat_ngram_size: Optional[int] = 0
     length_penalty: Optional[float] = 1.0
     early_stopping: Optional[bool] = False
@@ -284,6 +285,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
             repetition_penalty=self.repetition_penalty,
+            rep_range=self.rep_range,
             no_repeat_ngram_size=self.no_repeat_ngram_size,
             temperature=self.temperature,
             top_p=self.top_p,
@@ -420,6 +422,7 @@ class CompletionRequest(OpenAIBaseModel):
     smoothing_factor: Optional[float] = 0.0
     smoothing_curve: Optional[float] = 1.0
     repetition_penalty: Optional[float] = 1.0
+    rep_range: Optional[int] = None
     no_repeat_ngram_size: Optional[int] = 0
     length_penalty: Optional[float] = 1.0
     early_stopping: Optional[bool] = False
@@ -529,6 +532,7 @@ class CompletionRequest(OpenAIBaseModel):
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
             repetition_penalty=self.repetition_penalty,
+            rep_range=self.rep_range,
             no_repeat_ngram_size=self.no_repeat_ngram_size,
             temperature=self.temperature,
             top_p=self.top_p,
