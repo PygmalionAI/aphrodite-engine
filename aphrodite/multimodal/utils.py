@@ -9,9 +9,9 @@ import soundfile
 from loguru import logger
 from PIL import Image
 
+from aphrodite.common.envs import (APHRODITE_AUDIO_FETCH_TIMEOUT,
+                                   APHRODITE_IMAGE_FETCH_TIMEOUT)
 from aphrodite.connections import global_http_connection
-from aphrodite.envs import (APHRODITE_AUDIO_FETCH_TIMEOUT,
-                            APHRODITE_IMAGE_FETCH_TIMEOUT)
 from aphrodite.multimodal.base import MultiModalDataDict
 from aphrodite.transformers_utils.tokenizer import AnyTokenizer, get_tokenizer
 

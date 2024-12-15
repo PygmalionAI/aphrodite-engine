@@ -3,9 +3,12 @@ Launch the aphrodite server with the following command:
 aphrodite serve fixie-ai/ultravox-v0_3
 """
 import base64
+
 import requests
 from openai import OpenAI
+
 from aphrodite.assets.audio import AudioAsset
+
 # Modify OpenAI's API key and API base to use aphrodite's API server.
 openai_api_key = "EMPTY"
 openai_api_base = "http://localhost:2242/v1"
