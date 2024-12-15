@@ -1,7 +1,7 @@
 from typing import List, Optional, Type
 
 import pytest
-from transformers import BatchEncoding
+from transformers import AutoModelForVision2Seq, BatchEncoding
 
 from aphrodite.common.utils import STR_DTYPE_TO_TORCH_DTYPE
 from aphrodite.multimodal.utils import rescale_image_size
@@ -74,7 +74,7 @@ def run_test(
     with hf_runner(model,
                    dtype=dtype,
                    postprocess_inputs=process,
-                   is_vision_model=True) as hf_model:
+                   auto_cls=AutoModelForVision2Seq) as hf_model:
         hf_outputs_per_image = [
             hf_model.generate_greedy_logprobs_limit(prompts,
                                                     max_tokens,
