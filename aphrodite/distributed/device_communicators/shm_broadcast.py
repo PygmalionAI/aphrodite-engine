@@ -12,7 +12,7 @@ from loguru import logger
 from torch.distributed import ProcessGroup
 from zmq import SUB, SUBSCRIBE, XPUB, XPUB_VERBOSE, Context  # type: ignore
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.common.utils import get_ip, get_open_port
 
 APHRODITE_RINGBUFFER_WARNING_INTERVAL = (

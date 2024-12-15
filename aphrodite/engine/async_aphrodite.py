@@ -10,7 +10,7 @@ from loguru import logger
 from transformers import PreTrainedTokenizer
 from typing_extensions import assert_never
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.common.config import (DecodingConfig, EngineConfig, LoRAConfig,
                                      ModelConfig, ParallelConfig,
                                      SchedulerConfig)

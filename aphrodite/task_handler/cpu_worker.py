@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple
 import torch
 import torch.distributed
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.attention import get_attn_backend
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,

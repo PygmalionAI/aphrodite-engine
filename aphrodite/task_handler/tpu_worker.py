@@ -5,7 +5,7 @@ import torch
 import torch_xla.core.xla_model as xm
 import torch_xla.runtime as xr
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      ModelConfig, ParallelConfig,
                                      SchedulerConfig)

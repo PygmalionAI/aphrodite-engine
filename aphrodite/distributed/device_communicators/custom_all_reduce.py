@@ -6,8 +6,8 @@ import torch.distributed as dist
 from loguru import logger
 from torch.distributed import ProcessGroup
 
+import aphrodite.common.envs as envs
 from aphrodite import _custom_ops as ops
-from aphrodite import envs
 from aphrodite.common.utils import cuda_device_count_stateless
 from aphrodite.distributed.device_communicators.custom_all_reduce_utils import (
     gpu_p2p_access_check)

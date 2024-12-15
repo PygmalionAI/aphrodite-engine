@@ -13,7 +13,7 @@ from loguru import logger
 from torch import nn
 from transformers import PretrainedConfig
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.common.config import ModelConfig, ParallelConfig
 from aphrodite.engine.aphrodite_engine import AphroditeEngine
 from aphrodite.engine.args_tools import EngineArgs

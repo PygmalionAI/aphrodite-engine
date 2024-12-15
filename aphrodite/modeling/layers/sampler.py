@@ -10,7 +10,7 @@ import torch.nn as nn
 from loguru import logger
 
 import aphrodite._custom_ops as ops
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.common.sampling_params import SamplingType
 from aphrodite.common.sequence import (CompletionSequenceGroupOutput, Logprob,
                                        PromptLogprobs, SampleLogprobs,
