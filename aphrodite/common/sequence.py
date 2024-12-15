@@ -18,6 +18,7 @@ from aphrodite.inputs.parse import is_valid_encoder_decoder_llm_inputs
 from aphrodite.lora.request import LoRARequest
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
 from aphrodite.spec_decode.metrics import SpecDecodeWorkerMetrics
+
 if TYPE_CHECKING:
     from aphrodite.inputs import LLMInputs
     from aphrodite.multimodal import MultiModalDataDict

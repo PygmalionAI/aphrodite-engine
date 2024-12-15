@@ -8,7 +8,6 @@ import torch
 import torch.distributed
 from loguru import logger
 
-from aphrodite import envs
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,
                                      PromptAdapterConfig, SchedulerConfig,
@@ -118,31 +117,6 @@ class Worker(LocalOrDistributedWorkerBase):
         # Initialize gpu_cache as embedding models don't initialize kv_caches
         self.gpu_cache: Optional[List[List[torch.Tensor]]] = None
         self._seq_group_metadata_cache: Dict[str, SequenceGroupMetadata] = {}
-
-        # Torch profiler. Enabled and configured through env vars:
-        # APHRODITE_TORCH_PROFILER_DIR=/path/to/save/trace
-        if envs.APHRODITE_TORCH_PROFILER_DIR:
-            torch_profiler_trace_dir = envs.APHRODITE_TORCH_PROFILER_DIR
-            logger.info("Profiling enabled. Traces will be saved to: "
-                        f"{torch_profiler_trace_dir}")
-            self.profiler = torch.profiler.profile(
-                activities=[
-                    torch.profiler.ProfilerActivity.CPU,
-                    torch.profiler.ProfilerActivity.CUDA,
-                ],
-                with_stack=True,
-                on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    torch_profiler_trace_dir, use_gzip=True))
-        else:
-            self.profiler = None
-    def start_profile(self):
-        if self.profiler is None:
-            raise RuntimeError("Profiler is not enabled.")
-        self.profiler.start()
-    def stop_profile(self):
-        if self.profiler is None:
-            raise RuntimeError("Profiler is not enabled.")
-        self.profiler.stop()
 
     def _is_encoder_decoder_model(self):
         return self.model_config.is_encoder_decoder_model

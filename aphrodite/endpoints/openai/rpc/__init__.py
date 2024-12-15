@@ -41,8 +41,6 @@ class RPCUtilityRequest(Enum):
     GET_LORA_CONFIG = 6
     DO_LOG_STATS = 7
     IS_SERVER_HEALTHY = 8
-    START_PROFILE = 9
-    STOP_PROFILE = 10
 
 
 RPC_REQUEST_TYPE = Union[RPCGenerateRequest, RPCAbortRequest,
