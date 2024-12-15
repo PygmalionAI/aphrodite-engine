@@ -132,7 +132,10 @@ environment_variables: Dict[str, Callable[[], Any]] = {
             os.path.join(get_default_cache_root(), "aphrodite"),
         )),
 
-    # used in distributed environment to determine the master address
+    # used in distributed environment to determine the ip address
+    # of the current node, when the node has multiple network interfaces.
+    # If you are using multi-node inference, you should set this differently
+    # on each node.
     'APHRODITE_HOST_IP':
     lambda: os.getenv('APHRODITE_HOST_IP', "") or os.getenv("HOST_IP", ""),
 
