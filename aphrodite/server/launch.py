@@ -7,7 +7,7 @@ import uvicorn
 from fastapi import FastAPI, Response
 from loguru import logger
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.common.utils import find_process_using_port, in_windows
 from aphrodite.engine.async_aphrodite import AsyncEngineDeadError
 from aphrodite.engine.protocol import AsyncEngineClient

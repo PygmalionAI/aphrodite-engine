@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 import torch
 from loguru import logger
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.attention.backends.abstract import (AttentionBackend,
                                                    AttentionImpl,
                                                    AttentionMetadata,

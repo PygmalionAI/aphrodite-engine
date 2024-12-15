@@ -7,7 +7,7 @@ from typing import Sequence, Tuple
 
 import torch
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 
 APHRODITE_PP_LAYER_PARTITION = envs.APHRODITE_PP_LAYER_PARTITION
 

@@ -5,8 +5,8 @@ from loguru import logger
 from torch.nn import Module
 from torch.nn.parameter import Parameter
 
+import aphrodite.common.envs as envs
 from aphrodite import _custom_ops as ops
-from aphrodite import envs
 from aphrodite.common.utils import is_hip, print_warning_once
 from aphrodite.modeling.layers.fused_moe import FusedMoE, FusedMoEMethodBase
 from aphrodite.modeling.layers.linear import (LinearBase, LinearMethodBase,

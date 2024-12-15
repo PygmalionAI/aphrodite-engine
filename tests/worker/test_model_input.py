@@ -5,8 +5,8 @@ import torch
 
 from aphrodite.attention import AttentionMetadata, AttentionMetadataBuilder
 from aphrodite.attention.backends.abstract import AttentionBackend
-from aphrodite.modeling import SamplingMetadata
 from aphrodite.modeling.pooling_metadata import PoolingMetadata
+from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.task_handler.embedding_model_runner import (
     ModelInputForGPUWithPoolingMetadata)
 from aphrodite.task_handler.model_runner import (

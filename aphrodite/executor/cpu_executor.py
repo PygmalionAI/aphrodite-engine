@@ -5,7 +5,7 @@ from typing import Any, Awaitable, List, Optional, Set, Tuple, Union
 import torch
 from loguru import logger
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.common.config import CacheConfig, ModelConfig, SchedulerConfig
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.common.utils import (GiB_bytes, get_aphrodite_instance_id,

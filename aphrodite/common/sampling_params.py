@@ -9,7 +9,7 @@ import torch
 from loguru import logger
 from typing_extensions import Annotated
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 
 _SAMPLING_EPS = 1e-5
 _MAX_TEMP = 1e-2

@@ -9,8 +9,8 @@ import triton
 import triton.language as tl
 from loguru import logger
 
+import aphrodite.common.envs as envs
 from aphrodite import _custom_ops as ops
-from aphrodite import envs
 from aphrodite.platforms import current_platform
 
 APHRODITE_FUSED_MOE_CHUNK_SIZE = envs.APHRODITE_FUSED_MOE_CHUNK_SIZE

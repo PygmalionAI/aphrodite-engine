@@ -12,7 +12,7 @@ from aphrodite.platforms import current_platform
 if TYPE_CHECKING:
     from aphrodite.attention import AttentionMetadata
     from aphrodite.attention.backends.abstract import AttentionBackend
-    from aphrodite.modeling import SamplingMetadata
+    from aphrodite.modeling.sampling_metadata import SamplingMetadata
 
 T = TypeVar('T', bound="BroadcastableModelInput")
 
@@ -54,7 +54,7 @@ def _init_sampling_metadata_from_tensor_dict(  # type: ignore
     Helper method to initialize SamplingMetadata based on broadcastable
     SamplingMetadata fields.
     """
-    from aphrodite.modeling import SamplingMetadata
+    from aphrodite.modeling.sampling_metadata import SamplingMetadata
 
     selected_token_indices = tensor_dict.pop("selected_token_indices", None)
     # An empty SamplingMetadata to signal that the worker should skip

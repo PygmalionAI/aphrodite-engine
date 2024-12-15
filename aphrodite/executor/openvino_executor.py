@@ -5,7 +5,7 @@ import openvino.properties.hint as hints
 import torch
 from loguru import logger
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.common.config import CacheConfig, ModelConfig
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.common.utils import (GiB_bytes, get_distributed_init_method,
