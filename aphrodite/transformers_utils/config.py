@@ -121,7 +121,10 @@ def get_config(
     if config_format == ConfigFormat.HF:
         config_dict, _ = PretrainedConfig.get_config_dict(
             model, revision=revision, code_revision=code_revision, **kwargs)
-
+        
+        # Store the original rope_scaling if it exists
+        original_rope_scaling = config_dict.get('rope_scaling')
+        
         # Use custom model class if it's in our registry
         model_type = config_dict.get("model_type")
         if model_type in _CONFIG_REGISTRY:
@@ -151,6 +154,11 @@ def get_config(
                     raise RuntimeError(err_msg) from e
                 else:
                     raise e
+        
+        # Restore the original rope_scaling if it was modified
+        if original_rope_scaling and getattr(config, 'rope_scaling', {}).get('type') == 'default':
+            if 'mrope_section' in original_rope_scaling:
+                config.rope_scaling = original_rope_scaling
 
     elif config_format == ConfigFormat.MISTRAL:
         config = load_params_config(model, revision)

@@ -24,11 +24,10 @@ scipy # for quip
 rich
 loguru
 hf_transfer # for faster downloads
-librosa  # Required for audio processing
-soundfile  # Required for audio processing
 gguf == 0.9.1
 importlib_metadata
 mistral_common >= 1.5.0
 protobuf
 pandas
 msgspec
+einops

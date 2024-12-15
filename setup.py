@@ -518,6 +518,8 @@ setup(
         "flash-attn": ["flash-attn==2.5.8"],
         "tensorizer": ["tensorizer>=2.9.0"],
         "ray": ["ray>=2.9"],
+        "video": ["opencv-python"],
+        "audio": ["librosa", "soundfile"]
     },
     ext_modules=ext_modules,
     cmdclass={"build_ext": cmake_build_ext} if len(ext_modules) > 0 else {},

@@ -144,6 +144,10 @@ def _mm_token_str(model_config: ModelConfig, tokenizer: PreTrainedTokenizer,
         if model_type == "ultravox":
             return "<|reserved_special_token_0|>"
         raise TypeError(f"Unknown model type: {model_type}")
+    elif modality == "video":
+        if model_type == "qwen2_vl":
+            return "<|vision_start|><|video_pad|><|vision_end|>"
+        raise TypeError(f"Unknown model type: {model_type}")
     else:
         raise TypeError(f"Unknown modality: {modality}")
 
@@ -167,7 +171,7 @@ def _parse_chat_message_content_parts(
 ) -> ChatMessageParseResult:
     texts: List[str] = []
     mm_futures: List[Awaitable[MultiModalDataDict]] = []
-    modality: Literal["image", "audio"] = "image"
+    modality: Literal["image", "audio", "video"] = "image"
 
     for part in parts:
         part_type = part["type"]
