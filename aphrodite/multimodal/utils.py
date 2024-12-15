@@ -1,19 +1,21 @@
 import base64
+from functools import lru_cache
 from io import BytesIO
-from typing import Tuple, Union
+from typing import List, Optional, Tuple, TypeVar, Union
 
 import librosa
 import numpy as np
 import soundfile
+from loguru import logger
 from PIL import Image
 
-import aphrodite.common.envs as envs
-from aphrodite.common.connections import global_http_connection
+from aphrodite.common.envs import (APHRODITE_AUDIO_FETCH_TIMEOUT,
+                                   APHRODITE_IMAGE_FETCH_TIMEOUT)
+from aphrodite.connections import global_http_connection
 from aphrodite.multimodal.base import MultiModalDataDict
+from aphrodite.transformers_utils.tokenizer import AnyTokenizer, get_tokenizer
 
-APHRODITE_IMAGE_FETCH_TIMEOUT = envs.APHRODITE_IMAGE_FETCH_TIMEOUT
-
-APHRODITE_AUDIO_FETCH_TIMEOUT = envs.APHRODITE_AUDIO_FETCH_TIMEOUT
+cached_get_tokenizer = lru_cache(get_tokenizer)
 
 
 def _load_image_from_bytes(b: bytes):
@@ -31,6 +33,7 @@ def _load_image_from_data_url(image_url: str):
 def fetch_image(image_url: str, *, image_mode: str = "RGB") -> Image.Image:
     """
     Load a PIL image from a HTTP or base64 data URL.
+
     By default, the image is converted into RGB format.
     """
     if image_url.startswith('http'):
@@ -52,6 +55,7 @@ async def async_fetch_image(image_url: str,
                             image_mode: str = "RGB") -> Image.Image:
     """
     Asynchronously load a PIL image from a HTTP or base64 data URL.
+
     By default, the image is converted into RGB format.
     """
     if image_url.startswith('http'):
@@ -132,6 +136,7 @@ def encode_image_base64(
 ) -> str:
     """
     Encode a pillow image to base64 format.
+
     By default, the image is converted into RGB format before being encoded.
     """
     buffered = BytesIO()
@@ -155,3 +160,84 @@ def rescale_image_size(image: Image.Image,
     if transpose >= 0:
         image = image.transpose(Image.Transpose(transpose))
     return image
+
+
+# Utilities for input processors
+_T = TypeVar("_T", str, int)
+
+
+def repeat_and_pad_token(
+    token: _T,
+    *,
+    repeat_count: int = 1,
+    pad_token_left: Optional[_T] = None,
+    pad_token_right: Optional[_T] = None,
+) -> List[_T]:
+    replacement = [token] * repeat_count
+    if pad_token_left is not None:
+        replacement = [pad_token_left] + replacement
+    if pad_token_right is not None:
+        replacement = replacement + [pad_token_right]
+
+    return replacement
+
+
+def repeat_and_pad_placeholder_tokens(
+    tokenizer: AnyTokenizer,
+    prompt: Optional[str],
+    prompt_token_ids: List[int],
+    *,
+    placeholder_token_id: int,
+    repeat_count: int = 1,
+    pad_token_left: Optional[int] = None,
+    pad_token_right: Optional[int] = None,
+) -> Tuple[Optional[str], List[int]]:
+    if prompt is None:
+        new_prompt = None
+    else:
+        placeholder_token_str = tokenizer.decode(placeholder_token_id)
+        pad_token_str_left = (None if pad_token_left is None else
+                              tokenizer.decode(pad_token_left))
+        pad_token_str_right = (None if pad_token_right is None else
+                               tokenizer.decode(pad_token_right))
+        replacement_str = "".join(
+            repeat_and_pad_token(
+                placeholder_token_str,
+                repeat_count=repeat_count,
+                pad_token_left=pad_token_str_left,
+                pad_token_right=pad_token_str_right,
+            ))
+
+        placeholder_token_count = prompt.count(placeholder_token_str)
+        # This is an arbitrary number to distinguish between the two cases
+        if placeholder_token_count > 16:
+            logger.warning(
+                "Please follow the prompt format that is "
+                "documented on HuggingFace which does not involve "
+                "repeating %s tokens.", placeholder_token_str)
+        elif placeholder_token_count > 1:
+            logger.warning("Multiple multi-modal input is not supported yet, "
+                           "so any extra placeholder tokens will be treated "
+                           "as plain text.")
+
+        # The image tokens are removed to be consistent with HuggingFace
+        new_prompt = prompt.replace(placeholder_token_str, replacement_str, 1)
+
+    new_token_ids: List[int] = []
+    for i, token in enumerate(prompt_token_ids):
+        if token == placeholder_token_id:
+            replacement_ids = repeat_and_pad_token(
+                placeholder_token_id,
+                repeat_count=repeat_count,
+                pad_token_left=pad_token_left,
+                pad_token_right=pad_token_right,
+            )
+            new_token_ids.extend(replacement_ids)
+
+            # No need to further scan the list since we only replace once
+            new_token_ids.extend(prompt_token_ids[i + 1:])
+            break
+        else:
+            new_token_ids.append(token)
+
+    return new_prompt, new_token_ids

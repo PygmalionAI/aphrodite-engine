@@ -37,8 +37,8 @@ from aphrodite.modeling.models.persimmon import PersimmonForCausalLM
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
 from aphrodite.multimodal.base import MultiModalInputs
-from aphrodite.multimodal.image import (cached_get_image_processor,
-                                        cached_get_tokenizer)
+from aphrodite.multimodal.image import cached_get_image_processor
+from aphrodite.multimodal.utils import cached_get_tokenizer
 from aphrodite.quantization.base_config import QuantizationConfig
 
 from .interfaces import SupportsMultiModal

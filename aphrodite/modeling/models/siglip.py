@@ -25,8 +25,8 @@ from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
-from aphrodite.multimodal.image import (cached_get_tokenizer,
-                                        repeat_and_pad_image_tokens)
+from aphrodite.multimodal.utils import (cached_get_tokenizer,
+                                        repeat_and_pad_placeholder_tokens)
 from aphrodite.quantization import QuantizationConfig
 
 
@@ -113,11 +113,11 @@ def input_processor_for_siglip(
     else:
         image_feature_size = image_feature_size_override
 
-    new_prompt, new_token_ids = repeat_and_pad_image_tokens(
+    new_prompt, new_token_ids = repeat_and_pad_placeholder_tokens(
         tokenizer,
         llm_inputs.get("prompt"),
         llm_inputs["prompt_token_ids"],
-        image_token_id=image_token_id,
+        placeholder_token_id=image_token_id,
         repeat_count=image_feature_size,
     )
 

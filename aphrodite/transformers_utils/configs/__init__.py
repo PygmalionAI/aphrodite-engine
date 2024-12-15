@@ -10,6 +10,7 @@ from aphrodite.transformers_utils.configs.medusa import MedusaConfig
 from aphrodite.transformers_utils.configs.mlp_speculator import (
     MLPSpeculatorConfig)
 from aphrodite.transformers_utils.configs.mpt import MPTConfig
+from aphrodite.transformers_utils.configs.ultravox import UltravoxConfig
 
 __all__ = [
     "ChatGLMConfig",
@@ -20,4 +21,5 @@ __all__ = [
     "JAISConfig",
     "MLPSpeculatorConfig",
     "MedusaConfig",
+    "UltravoxConfig",
 ]

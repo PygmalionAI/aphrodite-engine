@@ -38,7 +38,7 @@ from aphrodite.modeling.models.clip import CLIPVisionModel
 from aphrodite.modeling.models.llama import LlamaModel
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
-from aphrodite.multimodal.image import cached_get_tokenizer
+from aphrodite.multimodal.utils import cached_get_tokenizer
 from aphrodite.quantization.base_config import QuantizationConfig
 
 from .clip import (dummy_image_for_clip, dummy_seq_data_for_clip,

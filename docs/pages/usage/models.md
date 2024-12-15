@@ -71,6 +71,7 @@ On ROCm platforms, Mistral and Mixtral are capped to 4096 max context length due
 | `PaliGemmaForConditionalGeneration` |        Image         |        `google/paligemma-3b-pt-224` |
 | `Phi3VForCausalLM`                  |        Image         | `microsoft/Phi-3.5-vision-instruct` |
 | `MiniCPMV`                          |        Image         |             `openbmb/MiniCPM-V-2_6` |
+| `UltravoxModel`                     |        Audio         |            `fixie-ai/ultravox-v0_3` |
 
 
 If your model uses any of the architectures above, you can seamlessly run your model with Aphrodite.

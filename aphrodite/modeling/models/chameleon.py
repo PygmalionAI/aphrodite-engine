@@ -32,8 +32,8 @@ from aphrodite.modeling.model_loader.weight_utils import (
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
-from aphrodite.multimodal.image import (cached_get_tokenizer,
-                                        repeat_and_pad_image_tokens)
+from aphrodite.multimodal.utils import (cached_get_tokenizer,
+                                        repeat_and_pad_placeholder_tokens)
 from aphrodite.quantization.base_config import QuantizationConfig
 
 from .interfaces import SupportsMultiModal
@@ -122,11 +122,11 @@ def input_processor_for_chameleon(ctx: InputContext, llm_inputs: LLMInputs):
 
     model_config = ctx.model_config
     tokenizer = cached_get_tokenizer(model_config.tokenizer)
-    new_prompt, new_token_ids = repeat_and_pad_image_tokens(
+    new_prompt, new_token_ids = repeat_and_pad_placeholder_tokens(
         tokenizer,
         llm_inputs.get("prompt"),
         llm_inputs["prompt_token_ids"],
-        image_token_id=CHAMELEON_IMAGE_TOKEN_ID,
+        placeholder_token_id=CHAMELEON_IMAGE_TOKEN_ID,
         repeat_count=CHAMELEON_IMAGE_SEQ_LENGTH,
         pad_token_left=CHAMELEON_IMAGE_START_TOKEN_ID,
         pad_token_right=CHAMELEON_IMAGE_END_TOKEN_ID,
