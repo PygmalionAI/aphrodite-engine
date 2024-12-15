@@ -5,13 +5,13 @@ with the correct prompt format on vision language models.
 For most models, the prompt format should follow corresponding examples
 on HuggingFace model repository.
 """
+import os
+
+import librosa
 from transformers import AutoTokenizer
 
 from aphrodite import LLM, SamplingParams
 from aphrodite.common.utils import FlexibleArgumentParser
-
-import os
-import librosa
 
 # Input audio and question
 audio_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),

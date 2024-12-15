@@ -3,11 +3,17 @@ Launch the aphrodite server with the following command:
 aphrodite serve fixie-ai/ultravox-v0_3
 """
 import base64
+import os
 
-import requests
 from openai import OpenAI
 
-from aphrodite.assets.audio import AudioAsset
+# Get path to the audio file in ../audio directory
+audio_path = os.path.join(
+    os.path.dirname(os.path.realpath(__file__)),
+    "..",
+    "audio",
+    "mary_had_lamb.ogg",
+)
 
 # Modify OpenAI's API key and API base to use aphrodite's API server.
 openai_api_key = "EMPTY"
@@ -19,59 +25,31 @@ client = OpenAI(
 )
 models = client.models.list()
 model = models.data[0].id
-# Any format supported by librosa is supported
-audio_url = AudioAsset("winning_call").url
-# Use audio url in the payload
-chat_completion_from_url = client.chat.completions.create(
-    messages=[{
-        "role":
-        "user",
-        "content": [
-            {
-                "type": "text",
-                "text": "Transcribe this audio."
-            },
-            {
-                "type": "audio_url",
-                "audio_url": {
-                    "url": audio_url
-                },
-            },
-        ],
-    }],
-    model=model,
-    max_tokens=128,
-)
-result = chat_completion_from_url.choices[0].message.content
-print(f"Chat completion output:{result}")
+
+def encode_audio_base64_from_file(file_path: str) -> str:
+    """Encode an audio file to base64 format."""
+    with open(file_path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
+
 # Use base64 encoded audio in the payload
-def encode_audio_base64_from_url(audio_url: str) -> str:
-    """Encode an audio retrieved from a remote url to base64 format."""
-    with requests.get(audio_url) as response:
-        response.raise_for_status()
-        result = base64.b64encode(response.content).decode('utf-8')
-    return result
-audio_base64 = encode_audio_base64_from_url(audio_url=audio_url)
-chat_completion_from_base64 = client.chat.completions.create(
-    messages=[{
-        "role":
-        "user",
-        "content": [
-            {
-                "type": "text",
-                "text": "What's in this audio?"
-            },
-            {
-                "type": "audio_url",
-                "audio_url": {
-                    # Any format supported by librosa is supported
-                    "url": f"data:audio/ogg;base64,{audio_base64}"
+audio_base64 = encode_audio_base64_from_file(audio_path)
+chat_completion = client.chat.completions.create(
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What's in this audio?"},
+                {
+                    "type": "audio_url",
+                    "audio_url": {
+                        "url": f"data:audio/ogg;base64,{audio_base64}"
+                    },
                 },
-            },
-        ],
-    }],
+            ],
+        }  # type: ignore
+    ],
     model=model,
     max_tokens=128,
 )
-result = chat_completion_from_base64.choices[0].message.content
-print(f"Chat completion output:{result}")
+result = chat_completion.choices[0].message.content
+print(f"Chat completion output: {result}")
