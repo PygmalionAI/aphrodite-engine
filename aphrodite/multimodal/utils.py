@@ -7,7 +7,7 @@ import numpy as np
 import soundfile
 from PIL import Image
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.common.connections import global_http_connection
 from aphrodite.multimodal.base import MultiModalDataDict
 

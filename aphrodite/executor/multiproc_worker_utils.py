@@ -14,7 +14,7 @@ from typing import (Any, Callable, Dict, Generic, List, Optional, TextIO,
 
 from loguru import logger
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 
 T = TypeVar('T')
 

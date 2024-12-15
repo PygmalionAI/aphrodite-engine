@@ -31,7 +31,7 @@ from rich.progress import (BarColumn, MofNCompleteColumn, Progress,
                            SpinnerColumn, TextColumn, TimeElapsedColumn)
 from typing_extensions import ParamSpec, TypeIs, assert_never
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.common.logger import enable_trace_function_call
 from aphrodite.distributed import get_tensor_model_parallel_rank
 

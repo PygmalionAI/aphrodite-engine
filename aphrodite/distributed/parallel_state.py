@@ -35,7 +35,7 @@ import torch.distributed
 from loguru import logger
 from torch.distributed import Backend, ProcessGroup
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 
 
 @dataclass

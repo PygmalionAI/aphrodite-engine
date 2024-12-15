@@ -1,6 +1,6 @@
 from loguru import logger
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 
 
 def load_general_plugins():

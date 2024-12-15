@@ -11,7 +11,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from loguru import logger
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.common.utils import (cuda_device_count_stateless,
                                     update_environment_variables)
 from aphrodite.distributed.device_communicators.cuda_wrapper import (

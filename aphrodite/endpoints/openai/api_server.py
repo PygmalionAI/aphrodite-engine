@@ -20,7 +20,7 @@ from fastapi.responses import (HTMLResponse, JSONResponse, Response,
 from loguru import logger
 from starlette.routing import Mount
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.common.config import ModelConfig
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import _SAMPLING_EPS, SamplingParams

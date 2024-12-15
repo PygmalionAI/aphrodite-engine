@@ -7,7 +7,7 @@ from typing import (TYPE_CHECKING, Any, Awaitable, Dict, List, Optional, Set,
 
 from loguru import logger
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,
                                      PromptAdapterConfig, SchedulerConfig,

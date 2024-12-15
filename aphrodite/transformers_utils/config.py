@@ -13,7 +13,7 @@ from transformers.models.auto.modeling_auto import (
     MODEL_FOR_CAUSAL_LM_MAPPING_NAMES)
 from transformers.utils import CONFIG_NAME as HF_CONFIG_NAME
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
                                                   InternVLChatConfig,
                                                   JAISConfig, MedusaConfig,

@@ -7,7 +7,7 @@ from typing import (TYPE_CHECKING, Any, Awaitable, Dict, List, Optional, Tuple,
 
 from loguru import logger
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.common.utils import (get_aphrodite_instance_id,
                                     get_distributed_init_method, get_ip,

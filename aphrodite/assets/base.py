@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.connections import global_http_connection
 
 

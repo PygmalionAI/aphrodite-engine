@@ -7,7 +7,7 @@ from typing import Generator, Optional, Type
 import torch
 from loguru import logger
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.attention.backends.abstract import AttentionBackend
 from aphrodite.common.utils import (STR_BACKEND_ENV_VAR, is_cpu, is_hip,
                                     is_openvino, is_xpu)

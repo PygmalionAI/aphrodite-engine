@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 import msgspec
 from loguru import logger
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
 from aphrodite.common.utils import (_run_task_with_lock,
                                     get_aphrodite_instance_id,

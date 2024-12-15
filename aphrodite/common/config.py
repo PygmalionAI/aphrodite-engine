@@ -9,7 +9,7 @@ import torch
 from loguru import logger
 from transformers import PretrainedConfig
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.common.utils import (STR_NOT_IMPL_ENC_DEC_CUDAGRAPH, GiB_bytes,
                                     cuda_device_count_stateless,
                                     get_cpu_memory, is_cpu, is_hip, is_neuron,
