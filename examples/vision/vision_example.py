@@ -58,7 +58,7 @@ def run_phi3v(question):
     # In this example, we override max_num_seqs to 5 while
     # keeping the original context length of 128k.
     llm = LLM(
-        model="microsoft/Phi-3-vision-128k-instruct",
+        model="microsoft/Phi-3.5-vision-instruct",
         trust_remote_code=True,
         max_num_seqs=5,
     )

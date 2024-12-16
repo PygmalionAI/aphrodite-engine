@@ -9,6 +9,8 @@ from huggingface_hub import (file_exists, hf_hub_download,
                              try_to_load_from_cache)
 from loguru import logger
 from transformers import GenerationConfig, PretrainedConfig
+from transformers.models.auto.image_processing_auto import (
+    get_image_processor_config)
 from transformers.models.auto.modeling_auto import (
     MODEL_FOR_CAUSAL_LM_MAPPING_NAMES)
 from transformers.utils import CONFIG_NAME as HF_CONFIG_NAME
@@ -241,6 +243,17 @@ def load_params_config(model, revision) -> PretrainedConfig:
 
     config = recurse_elems(config_dict)
     return config
+
+
+def get_hf_image_processor_config(
+    model: Union[str, Path],
+    revision: Optional[str] = None,
+    **kwargs,
+) -> Dict[str, Any]:
+    # Separate model folder from file path for GGUF models
+    if Path(model).is_file() and Path(model).suffix == ".gguf":
+        model = Path(model).parent
+    return get_image_processor_config(model, revision=revision, **kwargs)
 
 
 def get_hf_text_config(config: PretrainedConfig):
