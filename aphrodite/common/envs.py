@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     APHRODITE_TEST_FORCE_FP8_MARLIN: bool = False
     APHRODITE_ALLOW_ENGINE_USE_RAY: bool = False
     APHRODITE_PLUGINS: Optional[List[str]] = None
+    APHRODITE_RPC_GET_DATA_TIMEOUT_MS: int = 5000
 
 
 def get_default_cache_root():
@@ -361,6 +362,11 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     lambda:
     (os.environ.get("APHRODITE_TEST_FORCE_FP8_MARLIN", "0").strip().lower() in
      ("1", "true")),
+
+    # Time in ms for the zmq client to wait for a response from the backend
+    # server for simple data operations
+    "APHRODITE_RPC_GET_DATA_TIMEOUT_MS":
+    lambda: int(os.getenv("APHRODITE_RPC_GET_DATA_TIMEOUT_MS", "5000")),
 
     # If set, allow running the engine as a separate ray actor,
     # which is a deprecated feature soon to be removed.

@@ -1,5 +1,5 @@
 import asyncio
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from typing import Any, AsyncGenerator, Optional
 from uuid import uuid4
 
@@ -10,13 +10,15 @@ from loguru import logger
 
 from aphrodite.common.config import (DecodingConfig, LoRAConfig, ModelConfig,
                                      ParallelConfig, SchedulerConfig)
+from aphrodite.common.envs import APHRODITE_RPC_GET_DATA_TIMEOUT_MS
 from aphrodite.common.outputs import EmbeddingRequestOutput, RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.endpoints.openai.rpc import (
-    APHRODITE_RPC_HEALTH_TIMEOUT_MS, APHRODITE_RPC_SERVER_START_TIMEOUT_MS,
-    APHRODITE_RPC_SOCKET_LIMIT_CUTOFF, APHRODITE_RPC_SUCCESS_STR,
-    APHRODITE_RPC_ZMQ_HWM, RPC_REQUEST_TYPE, RPCAbortRequest,
-    RPCGenerateRequest, RPCUtilityRequest)
+from aphrodite.endpoints.openai.rpc import (APHRODITE_RPC_SOCKET_LIMIT_CUTOFF,
+                                            APHRODITE_RPC_SUCCESS_STR,
+                                            APHRODITE_RPC_ZMQ_HWM,
+                                            RPC_REQUEST_TYPE, RPCAbortRequest,
+                                            RPCGenerateRequest,
+                                            RPCUtilityRequest)
 from aphrodite.inputs import PromptInputs
 from aphrodite.lora.request import LoRARequest
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
@@ -25,6 +27,18 @@ from aphrodite.transformers_utils.tokenizer_group import (
 
 # Path used for inprocess proxy.
 INPROC_PROXY_PATH = f"inproc://{uuid4()}"
+
+
+class RPCClientClosedError(Exception):
+    """Exception class raised when the client is used post-close.
+    
+    The client can be closed, which closes the ZMQ context. This normally
+    happens on server shutdown. In some cases, methods like abort and 
+    do_log_stats will still be called and then try to open a socket, which 
+    causes a ZMQError and creates a huge stack trace.
+    So, we throw this error such that we can suppress it.
+    """
+
 
 class AsyncEngineRPCClient:
     """
@@ -73,6 +87,8 @@ class AsyncEngineRPCClient:
 
     def __init__(self, rpc_path: str):
         self.context = zmq.asyncio.Context()
+        self._data_timeout = APHRODITE_RPC_GET_DATA_TIMEOUT_MS
+        self._errored = False
         # Maximum number of sockets that can be opened (typically 65536).
         # ZMQ_SOCKET_LIMIT (http://api.zeromq.org/4-2:zmq-ctx-get)
         socket_limit = self.context.get(zmq.constants.SOCKET_LIMIT)
@@ -125,7 +141,6 @@ class AsyncEngineRPCClient:
 
         # Wait until server is ready.
         await self._wait_for_server_rpc()
-        self._errored = False
 
         # Get the configs.
         self.model_config = await self._get_model_config_rpc()
@@ -152,6 +167,13 @@ class AsyncEngineRPCClient:
     @contextmanager
     def to_proxy_socket(self):
         # Connect to the RPCServer via the proxy.
+        # Raise a sensible error if the client was already closed.
+        # This can happen if a server shutdown is triggered but some coroutines
+        # are still running requests.
+        # There should not be a race condition with this check because we don't
+        # yield to the event loop between here and opening the socket.
+        if self.context.closed:
+            raise RPCClientClosedError("The ZMQ client has already shut down")
         # Note that we use DEALER to enable asynchronous communication
         # to enable streaming.
         socket = self.context.socket(zmq.constants.DEALER)
@@ -171,8 +193,17 @@ class AsyncEngineRPCClient:
             # Ping RPCServer with a request.
             await socket.send_multipart([cloudpickle.dumps(request)])
 
+            # Make sure the server responds
+            if await socket.poll(timeout=self._data_timeout) == 0:
+                raise TimeoutError("Server didn't reply within "
+                                   f"{self._data_timeout} ms")
+
             # Await the data from the Server.
             data = cloudpickle.loads(await socket.recv())
+
+        if isinstance(data, Exception):
+            # Re-raise exceptions returned by the server
+            raise data
 
         if not isinstance(data, expected_type):
             # LoRAConfig can be None.
@@ -190,25 +221,28 @@ class AsyncEngineRPCClient:
             self,
             request: RPC_REQUEST_TYPE,
             error_message: str,
-            timeout: Optional[int] = None,
             socket: Optional[zmq.asyncio.Socket] = None):
         """Send one-way RPC request to trigger an action."""
 
         async def do_rpc_call(socket: zmq.asyncio.Socket,
-                              request: RPC_REQUEST_TYPE,
-                              timeout=None):
+                              request: RPC_REQUEST_TYPE):
+
             await socket.send_multipart([cloudpickle.dumps(request)])
-            if timeout is not None and await socket.poll(timeout=timeout) == 0:
-                raise TimeoutError(f"Server didn't reply within {timeout} ms")
+
+            if await socket.poll(timeout=self._data_timeout) == 0:
+                raise TimeoutError("Server didn't reply within "
+                                   f"{self._data_timeout} ms")
+
             return cloudpickle.loads(await socket.recv())
 
         # Make a new socket connection.
         if socket is None:
             with self.to_proxy_socket() as socket:
-                response = await do_rpc_call(socket, request, timeout)
+                response = await do_rpc_call(socket, request)
+
         # Use existing socket connection.
         else:
-            response = await do_rpc_call(socket, request, timeout)
+            response = await do_rpc_call(socket, request)
 
         if not isinstance(
             response, str) or response != APHRODITE_RPC_SUCCESS_STR:
@@ -231,8 +265,7 @@ class AsyncEngineRPCClient:
 
         await self._send_one_way_rpc_request(
             request=RPCUtilityRequest.IS_SERVER_READY,
-            error_message="Unable to start RPC Server",
-            timeout=APHRODITE_RPC_SERVER_START_TIMEOUT_MS)
+            error_message="Unable to start RPC Server")
 
     async def _get_model_config_rpc(self) -> ModelConfig:
         """Get the ModelConfig object from the RPC Server"""
@@ -276,17 +309,17 @@ class AsyncEngineRPCClient:
 
     async def abort(self, request_id: str):
         """Send an ABORT_REQUEST signal to the RPC Server"""
-
-        await self._send_one_way_rpc_request(
-            request=RPCAbortRequest(request_id),
-            error_message=f"RPCAbortRequest {request_id} failed")
+        with suppress(RPCClientClosedError):
+            await self._send_one_way_rpc_request(
+                request=RPCAbortRequest(request_id),
+                error_message=f"RPCAbortRequest {request_id} failed")
 
     async def do_log_stats(self):
         """Send a DO_LOG_STATS signal to the RPC Server"""
-
-        await self._send_one_way_rpc_request(
-            request=RPCUtilityRequest.DO_LOG_STATS,
-            error_message="RPCRequest DO_LOG_STATS failed.")
+        with suppress(RPCClientClosedError):
+            await self._send_one_way_rpc_request(
+                request=RPCUtilityRequest.DO_LOG_STATS,
+                error_message="RPCRequest DO_LOG_STATS failed.")
 
     @property
     def is_running(self) -> bool:
@@ -358,7 +391,6 @@ class AsyncEngineRPCClient:
         await self._send_one_way_rpc_request(
             request=RPCUtilityRequest.IS_SERVER_HEALTHY,
             error_message="Got Unhealthy response from RPC Server",
-            timeout=APHRODITE_RPC_HEALTH_TIMEOUT_MS,
             socket=socket)
 
     async def encode(self, *args,

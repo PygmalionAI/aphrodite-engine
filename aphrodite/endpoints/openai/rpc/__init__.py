@@ -9,9 +9,6 @@ from aphrodite.prompt_adapter.request import PromptAdapterRequest
 
 # Success string used for RPC instructions.
 APHRODITE_RPC_SUCCESS_STR = "SUCCESS"
-# Timeouts.
-APHRODITE_RPC_SERVER_START_TIMEOUT_MS = 1000
-APHRODITE_RPC_HEALTH_TIMEOUT_MS = 10000
 # Minimum value of ZMQ.SOCKET_LIMIT to run mp.
 APHRODITE_RPC_SOCKET_LIMIT_CUTOFF = 2000
 # HWM is set to Infinity.
