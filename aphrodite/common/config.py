@@ -19,6 +19,7 @@ from aphrodite.modeling.models import ModelRegistry
 from aphrodite.platforms import current_platform
 from aphrodite.quantization import QUANTIZATION_METHODS
 from aphrodite.transformers_utils.config import (ConfigFormat, get_config,
+                                                 get_hf_image_processor_config,
                                                  get_hf_text_config)
 from aphrodite.triton_utils import HAS_TRITON
 
@@ -203,6 +204,8 @@ class ModelConfig:
                                     code_revision, rope_scaling, rope_theta,
                                     config_format)
         self.hf_text_config = get_hf_text_config(self.hf_config)
+        self.hf_image_processor_config = get_hf_image_processor_config(
+            self.model, revision)
         self.dtype = _get_and_verify_dtype(self.hf_text_config, dtype)
 
         # Choose a default enforce_eager value if the user did not specify
