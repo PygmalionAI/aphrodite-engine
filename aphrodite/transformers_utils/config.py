@@ -17,6 +17,7 @@ from transformers.utils import CONFIG_NAME as HF_CONFIG_NAME
 
 import aphrodite.common.envs as envs
 from aphrodite.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
+                                                  EAGLEConfig,
                                                   InternVLChatConfig,
                                                   JAISConfig, MedusaConfig,
                                                   MLPSpeculatorConfig,
@@ -44,6 +45,7 @@ _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     "medusa": MedusaConfig,
     "internvl_chat": InternVLChatConfig,
     "ultravox": UltravoxConfig,
+    "eagle": EAGLEConfig,
 }
 
 for name, cls in _CONFIG_REGISTRY.items():

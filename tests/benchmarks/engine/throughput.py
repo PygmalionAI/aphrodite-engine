@@ -88,6 +88,9 @@ def run_aphrodite(
     load_format: str = EngineArgs.load_format,
     max_num_seqs: Optional[int] = None,
     num_scheduler_steps: Optional[int] = None,
+    speculative_model: Optional[str] = None,
+    num_speculative_tokens: Optional[int] = None,
+    use_v2_block_manager: bool = False,
 ) -> float:
     from aphrodite import LLM, SamplingParams
     llm = LLM(
@@ -114,6 +117,9 @@ def run_aphrodite(
         load_format=load_format,
         max_num_seqs=max_num_seqs,
         num_scheduler_steps=num_scheduler_steps,
+        speculative_model=speculative_model,
+        num_speculative_tokens=num_speculative_tokens,
+        use_v2_block_manager=use_v2_block_manager,
     )
 
     # Add the requests to the engine.
@@ -242,7 +248,8 @@ def main(args: argparse.Namespace):
             args.enable_prefix_caching, args.enable_chunked_prefill,
             args.max_num_batched_tokens, args.distributed_executor_backend,
             args.gpu_memory_utilization, args.download_dir, args.load_format,
-            args.max_num_seqs, args.num_scheduler_steps)
+            args.max_num_seqs, args.num_scheduler_steps, args.speculative_model,
+            args.num_speculative_tokens, args.use_v2_block_manager)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -435,6 +442,20 @@ if __name__ == "__main__":
         'section for more information.\n'
         '* "bitsandbytes" will load the weights using bitsandbytes '
         'quantization.\n')
+    parser.add_argument(
+        '--speculative-model',
+        type=str,
+        default=None,
+        help='speculative model for spec decode.')
+    parser.add_argument(
+        '--num-speculative-tokens',
+        type=int,
+        default=None,
+        help='number of speculative tokens for spec decode.')
+    parser.add_argument(
+        '--use-v2-block-manager',
+        action='store_true',
+        help='use v2 block manager for spec decode.')
     args = parser.parse_args()
     if args.tokenizer is None:
         args.tokenizer = args.model
