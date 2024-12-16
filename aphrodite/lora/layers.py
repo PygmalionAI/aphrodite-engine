@@ -546,14 +546,13 @@ class MergedColumnParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
     def slice_lora_b(
         self, lora_b: List[Union[torch.Tensor, None]]
     ) -> List[Union[torch.Tensor, None]]:
-        if lora_b[0] is None or lora_b[1] is None:
-            return lora_b
+        #NOTE: lora_b contains 2 subloras, and each sublora could be None.
         shard_size = self.output_dim
         start_idx = self.tp_rank * shard_size
         end_idx = (self.tp_rank + 1) * shard_size
         lora_b = [
-            lora_b[0][:, start_idx:end_idx],
-            lora_b[1][:, start_idx:end_idx],
+            lora_b[0][:, start_idx:end_idx] if lora_b[0] is not None else None,
+            lora_b[1][:, start_idx:end_idx] if lora_b[1] is not None else None,
         ]
         return lora_b
 
