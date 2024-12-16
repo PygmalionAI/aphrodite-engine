@@ -1,5 +1,6 @@
 from aphrodite.transformers_utils.configs.chatglm import ChatGLMConfig
 from aphrodite.transformers_utils.configs.dbrx import DbrxConfig
+from aphrodite.transformers_utils.configs.eagle import EAGLEConfig
 # RWConfig is for the original tiiuae/falcon-40b(-instruct) and
 # tiiuae/falcon-7b(-instruct) models. Newer Falcon models will use the
 # `FalconConfig` class from the official HuggingFace transformers library.
@@ -22,4 +23,5 @@ __all__ = [
     "MLPSpeculatorConfig",
     "MedusaConfig",
     "UltravoxConfig",
+    "EAGLEConfig",
 ]

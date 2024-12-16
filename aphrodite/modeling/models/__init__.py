@@ -61,6 +61,7 @@ _GENERATION_MODELS = {
     "JambaForCausalLM": ("jamba", "JambaForCausalLM"),
     "MambaForCausalLM": ("mamba", "MambaForCausalLM"),
     "MedusaModel": ("medusa", "Medusa"),
+    "EAGLEModel": ("eagle", "EAGLE"),
     "PersimmonForCausalLM": ("persimmon", "PersimmonForCausalLM"),
     "SolarForCausalLM": ("solar", "SolarForCausalLM"),
     "ExaoneForCausalLM": ("exaone", "ExaoneForCausalLM"),
