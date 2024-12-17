@@ -80,8 +80,7 @@ class PlaceholderBlockSpaceManager(BlockSpaceManager):
                                       seq_group: SequenceGroup) -> List[int]:
         return None  # type: ignore
 
-    def mark_blocks_as_computed(self, seq_group: SequenceGroup,
-                                token_chunk_size: int):
+    def mark_blocks_as_computed(self, seq_group: SequenceGroup):
         pass
 
     def get_prefix_cache_hit_rate(self, device: Device) -> float:
