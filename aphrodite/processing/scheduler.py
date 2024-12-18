@@ -1226,7 +1226,8 @@ class Scheduler:
         # will crash the Aphrodite instance / will not retry.
         for scheduled_seq_group in scheduler_outputs.scheduled_seq_groups:
             self.block_manager.mark_blocks_as_computed(
-                scheduled_seq_group.seq_group)
+                scheduled_seq_group.seq_group,
+                scheduled_seq_group.token_chunk_size)
 
         self._seq_group_metadata_cache[self.next_cache_id].reset()
 
