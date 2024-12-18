@@ -3,16 +3,16 @@ from typing import Any, Dict, List, Optional
 import torch
 from pydantic import BaseModel
 
-from aphrodite.modeling.layers.linear import LinearBase, LinearMethodBase
+from aphrodite.modeling.layers.linear import (LinearBase, LinearMethodBase,
+                                              UnquantizedLinearMethod)
 from aphrodite.platforms import current_platform
 from aphrodite.quantization.base_config import (  # noqa: E501
     QuantizationConfig, QuantizeMethodBase)
 from aphrodite.quantization.compressed_tensors.schemes import (
     W4A16SPARSE24_SUPPORTED_BITS, WNA16_SUPPORTED_BITS,
-    CompressedTensorsScheme, CompressedTensorsUnquantized,
-    CompressedTensorsW4A16Sparse24, CompressedTensorsW8A8Fp8,
-    CompressedTensorsW8A8Int8, CompressedTensorsW8A16Fp8,
-    CompressedTensorsWNA16)
+    CompressedTensorsScheme, CompressedTensorsW4A16Sparse24,
+    CompressedTensorsW8A8Fp8, CompressedTensorsW8A8Int8,
+    CompressedTensorsW8A16Fp8, CompressedTensorsWNA16)
 from aphrodite.quantization.compressed_tensors.utils import (
     CompressionFormat, QuantizationArgs, QuantizationStrategy,
     QuantizationType, find_matched_target, is_activation_quantization_format,
@@ -52,8 +52,6 @@ class CompressedTensorsConfig(QuantizationConfig):
     def get_name(self) -> str:
         return "compressed_tensors"
 
-    # TODO: do layer skipping though here
-    # rather than though create_weights to match other methods
     def get_quant_method(
         self,
         layer: torch.nn.Module,
@@ -61,7 +59,14 @@ class CompressedTensorsConfig(QuantizationConfig):
     ) -> Optional["QuantizeMethodBase"]:
         from aphrodite.attention.layer import (
             Attention)  # Avoid circular import
+
+        # Check if the layer is skipped for quantization.
+        # TODO: support module names
+        if should_ignore_layer(prefix, ignore=self.ignore):
+            return UnquantizedLinearMethod()
         if isinstance(layer, LinearBase):
+            scheme = self.get_scheme(layer=layer, layer_name=prefix)
+            layer.scheme = scheme
             return CompressedTensorsLinearMethod(self)
         if isinstance(layer, Attention):
             return CompressedTensorsKVCacheMethod(self)
@@ -283,15 +288,11 @@ class CompressedTensorsConfig(QuantizationConfig):
         to select the CompressedTensorsScheme used for infernece.
         """
 
-        # Check if the layer is skipped for quantization.
-        # TODO: support module names
-        if should_ignore_layer(layer_name, ignore=self.ignore):
-            return CompressedTensorsUnquantized()
-
         # Find the "target" in the compressed-tensors config
         # that our layer conforms to.
         # TODO: add compressed-tensors as dep
         # so we do not have to re-write these functions
+         # need to make accelerate optional in ct to do this
         matched_target = find_matched_target(
             layer_name=layer_name,
             module=layer,
@@ -329,10 +330,7 @@ class CompressedTensorsLinearMethod(LinearMethodBase):
         details
         """
         weight_loader = extra_weight_attrs.get("weight_loader")
-        layer_name = extra_weight_attrs.get("prefix")
-
-        scheme = self.quantization_config.get_scheme(layer, layer_name)
-        scheme.create_weights(
+        layer.scheme.create_weights(
             layer=layer,
             input_size=input_size,
             input_size_per_partition=input_size_per_partition,
@@ -340,8 +338,6 @@ class CompressedTensorsLinearMethod(LinearMethodBase):
             output_size=output_size,
             params_dtype=params_dtype,
             weight_loader=weight_loader)
-
-        layer.scheme = scheme
 
     def apply(self,
               layer: torch.nn.Module,
