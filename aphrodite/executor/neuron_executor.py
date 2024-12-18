@@ -1,7 +1,8 @@
 from typing import List, Set, Tuple
 
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
-from aphrodite.common.utils import make_async
+from aphrodite.common.utils import (get_distributed_init_method, get_ip,
+                                    get_open_port, make_async)
 from aphrodite.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from aphrodite.lora.request import LoRARequest
 
@@ -21,14 +22,17 @@ class NeuronExecutor(ExecutorBase):
 
     def _init_worker(self):
         from aphrodite.task_handler.neuron_worker import NeuronWorker
-
+        distributed_init_method = get_distributed_init_method(
+            get_ip(), get_open_port())
         self.driver_worker = NeuronWorker(
-            self.model_config,
-            self.parallel_config,
-            self.scheduler_config,
-            self.device_config,
-            self.cache_config,
-        )
+            model_config=self.model_config,
+            parallel_config=self.parallel_config,
+            scheduler_config=self.scheduler_config,
+            device_config=self.device_config,
+            cache_config=self.cache_config,
+            local_rank=0,
+            rank=0,
+            distributed_init_method=distributed_init_method)
         self.driver_worker.init_device()
         self.driver_worker.load_model()
 
