@@ -2,6 +2,7 @@
 from typing import List
 
 import pytest
+import torch
 
 from ..utils import RemoteOpenAIServer
 
@@ -59,6 +60,9 @@ async def test_multi_step(
     num_scheduler_steps: int,
     num_prompts: int,
 ):
+    if (tp_size > 1 or pp_size > 1) and torch.cuda.device_count() < 2:
+        pytest.skip("Skipping multi-GPU tests on single GPU system")
+        
     prompts = example_prompts
     if len(prompts) < num_prompts:
         prompts = prompts * ((num_prompts // len(prompts)) + 1)
