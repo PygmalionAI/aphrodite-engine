@@ -15,6 +15,12 @@ if not current_platform.is_tpu():
     except ImportError as e:
         logger.warning(f"Failed to import from aphrodite._C with {e}")
 
+if current_platform.is_cuda():
+    try:
+        import aphrodite._hadamard_C
+    except ImportError as e:
+        logger.warning(f"Failed to import from aphrodite._hadamard_C with {e}")
+
 with contextlib.suppress(ImportError):
     # ruff: noqa: F401
     import aphrodite._moe_C
@@ -775,6 +781,20 @@ def top_k_top_p_sampling_from_probs(
             *_to_tensor_scalar_tuple(top_p), deterministic)
     else:
         raise ValueError(f"Invalid filter_apply_order: {filter_apply_order}")
+
+
+# hadamard
+# def fast_hadamard_transform(x: torch.Tensor, scale: float) -> torch.Tensor:
+#     return torch.ops._C_hadamard.fast_hadamard_transform(x, scale)
+
+# def fast_hadamard_transform_12N(x: torch.Tensor, scale: float) -> torch.Tensor:
+#     return torch.ops._C_hadamard.fast_hadamard_transform_12N(x, scale)
+
+# def fast_hadamard_transform_20N(x: torch.Tensor, scale: float) -> torch.Tensor:
+#     return torch.ops._C_hadamard.fast_hadamard_transform_20N(x, scale)
+
+# def fast_hadamard_transform_28N(x: torch.Tensor, scale: float) -> torch.Tensor:
+#     return torch.ops._C_hadamard.fast_hadamard_transform_28N(x, scale)
 
 
 # TODO: remove this later

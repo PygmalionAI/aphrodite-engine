@@ -328,10 +328,73 @@ define_gpu_extension_target(
   USE_SABI 3
   WITH_SOABI)
 
+#
+# _hadamard_C extension
+#
+
+set(APHRODITE_HADAMARD_EXT_SRC
+  "kernels/hadamard/fast_hadamard_transform.cpp"
+  "kernels/hadamard/fast_hadamard_transform_cuda.cu")
+
+#
+# Copy GPU compilation flags+update for hadamard
+#
+set(APHRODITE_HADAMARD_GPU_FLAGS ${APHRODITE_GPU_FLAGS})
+list(APPEND APHRODITE_HADAMARD_GPU_FLAGS
+  "-U__CUDA_NO_HALF_OPERATORS__"
+  "-U__CUDA_NO_HALF_CONVERSIONS__"
+  "-U__CUDA_NO_BFLOAT16_OPERATORS__"
+  "-U__CUDA_NO_BFLOAT16_CONVERSIONS__"
+  "-U__CUDA_NO_BFLOAT162_OPERATORS__"
+  "-U__CUDA_NO_BFLOAT162_CONVERSIONS__"
+  "--expt-relaxed-constexpr"
+  "--expt-extended-lambda"
+  "--use_fast_math"
+  "-lineinfo")
+
+#
+# Filter out CUDA architectures < 7.0 for hadamard.
+#
+if (${APHRODITE_GPU_LANG} STREQUAL "CUDA")
+  set(APHRODITE_HADAMARD_GPU_ARCHES)
+  foreach(ARCH ${APHRODITE_GPU_ARCHES})
+    string_to_ver(CODE_VER ${ARCH})
+    if (CODE_VER GREATER_EQUAL 6.0)
+      list(APPEND APHRODITE_HADAMARD_GPU_ARCHES ${ARCH})
+    endif()
+  endforeach()
+  message(STATUS "Hadamard target arches: ${APHRODITE_HADAMARD_GPU_ARCHES}")
+endif()
+
+if (APHRODITE_HADAMARD_GPU_ARCHES)
+  define_gpu_extension_target(
+    _hadamard_C
+    DESTINATION aphrodite
+    LANGUAGE ${APHRODITE_GPU_LANG}
+    SOURCES ${APHRODITE_HADAMARD_EXT_SRC}
+    COMPILE_FLAGS ${APHRODITE_HADAMARD_GPU_FLAGS}
+    ARCHITECTURES ${APHRODITE_HADAMARD_GPU_ARCHES}
+    USE_SABI 3
+    WITH_SOABI)
+else()
+  message(WARNING "Unable to create _hadamard_C target because none of the "
+    "requested architectures (${APHRODITE_GPU_ARCHES}) are supported, i.e. >= 6.0")
+endif()
+
+
 if(APHRODITE_GPU_LANG STREQUAL "CUDA" OR APHRODITE_GPU_LANG STREQUAL "HIP")
   message(STATUS "Enabling C extension.")
   add_dependencies(default _C)
 
   message(STATUS "Enabling moe extension.")
   add_dependencies(default _moe_C)
+
+  message(STATUS "APHRODITE_HADAMARD_GPU_ARCHES: ${APHRODITE_HADAMARD_GPU_ARCHES}")
+  message(STATUS "ENV{APHRODITE_INSTALL_HADAMARD_KERNELS}: $ENV{APHRODITE_INSTALL_HADAMARD_KERNELS}")
+  message(STATUS "APHRODITE_INSTALL_HADAMARD_KERNELS: ${APHRODITE_INSTALL_HADAMARD_KERNELS}")
+
+  if(APHRODITE_HADAMARD_GPU_ARCHES)
+    message(STATUS "Enabling hadamard extension.")
+    add_dependencies(default _hadamard_C)
+  endif()
 endif()
