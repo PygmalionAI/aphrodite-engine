@@ -5,8 +5,8 @@ from abc import ABC, abstractmethod
 from array import array
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import (TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple,
-                    Union, cast)
+from typing import (TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set,
+                    Tuple, Union, cast)
 
 import msgspec
 import torch
@@ -1310,6 +1310,8 @@ class ExecuteModelRequest(
     finished_requests_ids: List[str] = msgspec.field(default_factory=list)
     # The last sampled token ids for multi step decoding.
     last_sampled_token_ids: Optional[torch.Tensor] = None
+    # Async postprocessor
+    output_proc_callback_fn: Optional[Callable] = None
 
     @property
     def is_first_multi_step(self) -> bool:
@@ -1355,4 +1357,5 @@ class ExecuteModelRequest(
             num_steps=self.num_steps,
             finished_requests_ids=self.finished_requests_ids,
             last_sampled_token_ids=self.last_sampled_token_ids.clone()
-            if self.last_sampled_token_ids is not None else None)
+            if self.last_sampled_token_ids is not None else None,
+            output_proc_callback_fn=self.output_proc_callback_fn)

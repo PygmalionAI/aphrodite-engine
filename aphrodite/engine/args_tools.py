@@ -148,6 +148,7 @@ class EngineArgs:
     max_prompt_adapter_token: int = 0
     # Log Options
     disable_log_stats: bool = False
+    disable_async_output_proc: bool = False
 
     def __post_init__(self):
         if self.tokenizer is None:
@@ -855,6 +856,12 @@ class EngineArgs:
             help="Category: Log Options\n"
             "disable logging statistics",
         )
+        parser.add_argument(
+            "--disable-async-output-proc",
+            action="store_true",
+            default=EngineArgs.disable_async_output_proc,
+            help="Disable async output processing. THis may result in "
+            "lower performance.")
 
         return parser
 
@@ -919,6 +926,7 @@ class EngineArgs:
             skip_tokenizer_init=self.skip_tokenizer_init,
             served_model_name=self.served_model_name,
             limit_mm_per_prompt=self.limit_mm_per_prompt,
+            use_async_output_proc=not self.disable_async_output_proc,
             config_format=self.config_format,
         )
 
