@@ -32,7 +32,9 @@ def request_output_to_embedding_response(
         prompt_token_ids = final_res.prompt_token_ids
         embedding = final_res.outputs.embedding
         if encoding_format == "base64":
-            embedding_bytes = np.array(embedding).tobytes()
+            # Force to use float32 for base64 encoding
+            # to match the OpenAI python client behavior
+            embedding_bytes = np.array(embedding, dtype="float32").tobytes()
             embedding = base64.b64encode(embedding_bytes).decode("utf-8")
         embedding_data = EmbeddingResponseData(index=idx, embedding=embedding)
         data.append(embedding_data)
