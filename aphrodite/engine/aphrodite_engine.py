@@ -524,6 +524,8 @@ class AphroditeEngine:
         lora_request: Optional[LoRARequest],
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
     ) -> None:
+        # to prevent empty prompts crashing the engine
+        self._validate_model_inputs(processed_inputs)
         # Create the sequences.
         block_size = self.cache_config.block_size
         seq_id = next(self.seq_counter)
@@ -1466,6 +1468,13 @@ class AphroditeEngine:
 
     def is_embedding_model(self):
         return self.model_config.is_embedding_model
+
+    def _validate_model_inputs(self, inputs: Union[LLMInputs,
+                                                   EncoderDecoderLLMInputs]):
+        prompt_key = "encoder_prompt_token_ids" \
+            if self.is_encoder_decoder_model() else "prompt_token_ids"
+        if not inputs.get(prompt_key):
+            raise ValueError("Prompt cannot be empty")
 
 
 setup_logger()
