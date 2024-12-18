@@ -16,12 +16,6 @@ from aphrodite.modeling.guided_decoding.guided_fields import (
 from aphrodite.modeling.guided_decoding.lm_format_enforcer_logits_processors import (  # noqa: E501
     build_aphrodite_logits_processor,
     build_aphrodite_token_enforcer_tokenizer_data)
-from aphrodite.triton_utils import HAS_TRITON
-
-if HAS_TRITON:
-    from aphrodite.modeling.guided_decoding.outlines_decoding import (
-        get_local_outlines_guided_decoding_logits_processor,
-        get_outlines_guided_decoding_logits_processor)
 
 
 async def get_lm_format_enforcer_guided_decoding_logits_processor(
@@ -47,12 +41,21 @@ async def get_lm_format_enforcer_guided_decoding_logits_processor(
         character_level_parser = RegexParser(request.guided_regex)
     elif request.guided_grammar:
         # CFG grammar not supported by LMFE, revert to outlines
+        from aphrodite.modeling.guided_decoding.outlines_decoding import (
+            get_outlines_guided_decoding_logits_processor)
         return await get_outlines_guided_decoding_logits_processor(
             request, tokenizer)
     elif (request.response_format is not None
           and request.response_format.type == "json_object"):
         character_level_parser = JsonSchemaParser(
             None)  # None means any json object
+    elif (request.response_format is not None
+          and request.response_format.type == "json_schema"
+          and request.response_format.json_schema is not None
+          and request.response_format.json_schema.json_schema is not None):
+        schema = _normalize_json_schema_object(
+            request.response_format.json_schema.json_schema)
+        character_level_parser = JsonSchemaParser(schema)
     else:
         return None
 
@@ -83,6 +86,9 @@ def get_local_lm_format_enforcer_guided_decoding_logits_processor(
     elif guided_options.guided_regex:
         character_level_parser = RegexParser(guided_options.guided_regex)
     elif guided_options.guided_grammar:
+        from aphrodite.modeling.guided_decoding.outlines_decoding import (
+            get_local_outlines_guided_decoding_logits_processor)
+
         # CFG grammar not supported by LMFE, revert to outlines
         return get_local_outlines_guided_decoding_logits_processor(
             guided_options, tokenizer)
