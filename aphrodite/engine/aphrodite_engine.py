@@ -1484,25 +1484,19 @@ class AphroditeEngine:
         # KV Cache Usage in %
         num_total_gpu = self.cache_config.num_gpu_blocks
         gpu_cache_usage_sys = 0.
-        if num_total_gpu is not None:
+        if num_total_gpu:  # Guard against both None and 0
             num_free_gpu = sum(
                 scheduler.block_manager.get_num_free_gpu_blocks()
                 for scheduler in self.scheduler)
-            if not self.model_config.is_attention_free():
-                gpu_cache_usage_sys = 1.0 - (num_free_gpu / num_total_gpu)
-            else:
-                gpu_cache_usage_sys = 0.0
+            gpu_cache_usage_sys = 1.0 - (num_free_gpu / num_total_gpu)
 
         num_total_cpu = self.cache_config.num_cpu_blocks
         cpu_cache_usage_sys = 0.
-        if num_total_cpu is not None and num_total_cpu > 0:
+        if num_total_cpu:  # Guard against both None and 0
             num_free_cpu = sum(
                 scheduler.block_manager.get_num_free_cpu_blocks()
                 for scheduler in self.scheduler)
-            if not self.model_config.is_attention_free():
-                cpu_cache_usage_sys = 1.0 - (num_free_cpu / num_total_cpu)
-            else:
-                cpu_cache_usage_sys = 0.0
+            cpu_cache_usage_sys = 1.0 - (num_free_cpu / num_total_cpu)
 
         # Prefix Cache Hit Rate. Note that we always use
         # the cache hit rate of the first virtual engine.
@@ -1535,6 +1529,7 @@ class AphroditeEngine:
             # For async postprocessor, already finished sequences need to be
             # not counted (to avoid double counting)
             actual_num_batched_tokens = scheduler_outputs.num_batched_tokens  # type: ignore
+
             num_generation_tokens_from_prefill_groups = 0.
             # NOTE: if scheduler_outputs.num_prefill_groups > 0 and
             # the len of scheduler_outputs.scheduled_seq_groups is !=
@@ -1547,6 +1542,7 @@ class AphroditeEngine:
                 if finished_before and idx in finished_before:
                     actual_num_batched_tokens -= 1
                     continue
+
                 group_was_prefill = idx < scheduler_outputs.num_prefill_groups
                 seq_group = scheduled_seq_group.seq_group
 
@@ -1581,7 +1577,6 @@ class AphroditeEngine:
                     # Latency timings
                     time_e2e_requests.append(now -
                                              seq_group.metrics.arrival_time)
-
                     # Metadata
                     num_prompt_tokens_requests.append(
                         len(seq_group.prompt_token_ids))
@@ -1618,7 +1613,6 @@ class AphroditeEngine:
 
         return Stats(
             now=now,
-
             # System stats
             #   Scheduler State
             num_running_sys=num_running_sys,
@@ -1627,7 +1621,6 @@ class AphroditeEngine:
             #   KV Cache Usage in %
             gpu_cache_usage_sys=gpu_cache_usage_sys,
             cpu_cache_usage_sys=cpu_cache_usage_sys,
-
             #   Prefix Cache Hit Rate
             cpu_prefix_cache_hit_rate=cpu_prefix_cache_hit_rate,
             gpu_prefix_cache_hit_rate=gpu_prefix_cache_hit_rate,
