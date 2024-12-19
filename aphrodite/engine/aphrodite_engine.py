@@ -1456,7 +1456,7 @@ class AphroditeEngine:
             stats = self._get_stats(scheduler_outputs, model_output,
                                     finished_before)
             for loggers in self.stat_loggers.values():
-                logger.log(stats)
+                loggers.log(stats)
 
     def _get_stats(self,
                    scheduler_outputs: Optional[SchedulerOutputs],
