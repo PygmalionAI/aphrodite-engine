@@ -62,7 +62,6 @@ class BlockAllocatorBase(ABC):
     def update_hash(self, block_hash: int, block: PhysicalTokenBlock):
         pass
 
-
     @abstractmethod
     def get_prefix_cache_hit_rate(self) -> float:
         """Prefix cache hit rate. -1 means not supported or disabled."""
@@ -115,11 +114,13 @@ class CachedBlockAllocator(BlockAllocatorBase):
                  num_hashed_tokens: int = 0) -> PhysicalTokenBlock:
         if block_hash is None:
             block_hash = next(self.default_hash_ctr)
+
         if block_hash in self.evictor:
             assert block_hash not in self.cached_blocks
             block = self.evictor.remove(block_hash)
             assert block.ref_count == 0
             self.cached_blocks[block_hash] = block
+
         if block_hash in self.cached_blocks:
             self.cache_metric_data.query(hit=True)
         else:
@@ -680,20 +681,14 @@ class BlockSpaceManagerV1(BlockSpaceManager):
             for block in block_table:
                 block.last_accessed = access_time
 
-    def compute_full_blocks_in_seq(self, seq: Sequence, token_chunk_size: int):
+    def compute_full_blocks_in_seq(self, seq: Sequence):
         if seq.seq_id not in self.block_tables:
             return
-
-        # When chunked prefill is enabled, the computed full blocks
-        # should be calculated based on the number of computed tokens.
-        max_computed_tokens = (seq.data.get_num_computed_tokens() +
-                               token_chunk_size)
-        computed_full_blocks = max_computed_tokens // self.block_size
-
+        max_full_block = seq.get_len() // self.block_size - 1
         block_table = self.block_tables[seq.seq_id]
-        if computed_full_blocks == 0:
+        if max_full_block == -1:
             return
-        for i in reversed(range(computed_full_blocks)):
+        for i in reversed(range(max_full_block)):
             if block_table[i].computed:
                 break
             block_table[i].computed = True
@@ -723,11 +718,10 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         ids_list = [self.get_all_computed_blocks(seq) for seq in seqs]
         return commonprefix([ids for ids in ids_list if ids != []])
 
-    def mark_blocks_as_computed(self, seq_group: SequenceGroup,
-                                token_chunk_size: int):
+    def mark_blocks_as_computed(self, seq_group: SequenceGroup):
         if self.enable_caching:
             for seq in seq_group.get_seqs():
-                self.compute_full_blocks_in_seq(seq, token_chunk_size)
+                self.compute_full_blocks_in_seq(seq)
 
     def get_prefix_cache_hit_rate(self, device: Device) -> float:
         if device == Device.GPU:
