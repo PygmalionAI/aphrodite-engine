@@ -150,18 +150,9 @@ class SchedulerOutputs:
                 and not self.blocks_to_swap_out and not self.blocks_to_copy)
 
     def _sort_by_lora_ids(self):
-        assert 0 <= self.num_prefill_groups <= len(self.scheduled_seq_groups)
-
-        def key_fn(group: ScheduledSequenceGroup):
-            key = (group.seq_group.lora_int_id, group.seq_group.request_id)
-            if 0 < self.num_prefill_groups < len(self.scheduled_seq_groups):
-                # Sort sequence groups so that all prefills come before all
-                # decodes as required by chunked prefill.
-                return (not group.seq_group.is_prefill(), *key)
-            return key
-
-        self.scheduled_seq_groups = sorted(self.scheduled_seq_groups,
-                                           key=key_fn)
+        self.scheduled_seq_groups = sorted(
+            self.scheduled_seq_groups,
+            key=lambda g: (g.seq_group.lora_int_id, g.seq_group.request_id))
 
     @property
     def lora_requests(self) -> Set[LoRARequest]:
@@ -387,8 +378,8 @@ class Scheduler:
         self.output_proc_callback_fn = output_proc_callback_fn
         self.use_async_output_proc = self.output_proc_callback_fn is not None
         self.num_cache_iters = 2 if self.use_async_output_proc else 1
-        self.cache_id = 0
 
+        self.cache_id = 0
         for i in range(self.num_cache_iters):
             self._seq_group_metadata_cache.append(
                 PyObjectCache(seq_group_metadata_builder))
@@ -521,7 +512,7 @@ class Scheduler:
             SchedulerRunningOutputs.
         """
         ret: SchedulerRunningOutputs = \
-            self._scheduler_running_outputs_cache.get_object()
+            self._scheduler_running_outputs_cache[self.cache_id].get_object()
         ret.blocks_to_swap_out.clear()
         ret.blocks_to_copy.clear()
         ret.decode_seq_groups.clear()
@@ -554,7 +545,6 @@ class Scheduler:
 
         running_queue = self.running
         assert len(self._async_stopped) == 0
-
         while running_queue:
             seq_group = running_queue[0]
             num_running_tokens = self._get_num_new_tokens(
@@ -564,6 +554,7 @@ class Scheduler:
                 break
 
             running_queue.popleft()
+
             # With async postprocessor, an extra decode run is done
             # to process the final tokens. The check below avoids this extra
             # decode run when the model max len is reached, in order to avoid
@@ -572,6 +563,7 @@ class Scheduler:
             ) > self.scheduler_config.max_model_len:
                 self._async_stopped.append(seq_group)
                 continue
+
             # With async postprocessor, when preemption kicks in, we need
             # first to drain the async postprocessor, so that all async
             # block_table freeing is applied before the preemption freeing
@@ -820,9 +812,8 @@ class Scheduler:
 
             prompt_limit = self._get_prompt_limit(seq_group)
             if num_new_tokens > prompt_limit:
-                logger.warning(
-                    f"Input prompt ({num_new_tokens} tokens) is too long"
-                    f" and exceeds limit of {prompt_limit}")
+                logger.warning(f"Input prompt ({num_new_tokens} tokens) is "
+                               f"too long and exceeds limit of {prompt_limit}")
                 for seq in waiting_seqs:
                     seq.status = SequenceStatus.FINISHED_IGNORED
                 ignored_seq_groups.append(seq_group)
@@ -834,9 +825,9 @@ class Scheduler:
             if can_allocate == AllocStatus.LATER:
                 break
             elif can_allocate == AllocStatus.NEVER:
-                logger.warning(
-                    f"Input prompt ({num_new_tokens} tokens) is too long"
-                    " and exceeds the capacity of block_manager")
+                logger.warning(f"Input prompt ({num_new_tokens} tokens) is "
+                               "too long and exceeds the capacity of "
+                               "block_manager")
                 for seq in waiting_seqs:
                     seq.status = SequenceStatus.FINISHED_IGNORED
                 ignored_seq_groups.append(seq_group)
@@ -1095,6 +1086,7 @@ class Scheduler:
     def _allow_async_output_proc(self, seq_group: SequenceGroup) -> bool:
         no_beam_search = (seq_group.sampling_params.best_of == 1
                           and not seq_group.sampling_params.use_beam_search)
+
         return no_beam_search
 
     def schedule(
@@ -1223,16 +1215,16 @@ class Scheduler:
         # Now that the batch has been created, we can assume all blocks in the
         # batch will have been computed before the next scheduling invocation.
         # This is because the engine assumes that a failure in model execution
-        # will crash the Aphrodite instance / will not retry.
+        # will crash the vLLM instance / will not retry.
         for scheduled_seq_group in scheduler_outputs.scheduled_seq_groups:
             self.block_manager.mark_blocks_as_computed(
-                scheduled_seq_group.seq_group,
-                scheduled_seq_group.token_chunk_size)
+                scheduled_seq_group.seq_group)
 
         self._seq_group_metadata_cache[self.next_cache_id].reset()
 
         # Move to next cache (if exists)
         self.cache_id = self.next_cache_id
+
         # Return results
         return (seq_group_metadata_list, scheduler_outputs,
                 allow_async_output_proc)
@@ -1262,8 +1254,10 @@ class Scheduler:
                 self._finished_requests_ids.append(seq_group.request_id)
             else:
                 remaining.append(seq_group)
+
             # Free finished seqs
             self._free_finished_seqs(seq_group)
+
         self.running = remaining
 
         # Handle async stopped sequence groups
@@ -1272,8 +1266,10 @@ class Scheduler:
             for seq_group in self._async_stopped:
                 self._free_seq_group_cross_attn_blocks(seq_group)
                 self._finished_requests_ids.append(seq_group.request_id)
+
                 # Free finished seqs
                 self._free_finished_seqs(seq_group)
+
             self._async_stopped.clear()
 
     def _allocate_and_set_running(self, seq_group: SequenceGroup) -> None:
@@ -1443,27 +1439,10 @@ class Scheduler:
         for seq in seqs:
             num_new_tokens += seq.get_num_new_tokens()
         assert num_new_tokens > 0
-        # Chunk if a running request cannot fit in the given budget.
-        # If number of seq > 1, it means it is doing beam search
-        # in a decode phase. Do not chunk.
+        # Chunk if a running request cannot fit in.
+        # If number of seq > 1, it means it is doing beam search in a
+        # decode phase. Do not chunk in that case.
         if enable_chunking and len(seqs) == 1:
-            remaining_token_budget = budget.remaining_token_budget()
-            if self.cache_config.enable_prefix_caching:
-                # When prefix caching is enabled, we always allocate
-                # the number of new tokens that is dividable by the block size
-                # to avoid partial block matching.
-                block_size = self.cache_config.block_size
-                reminder = budget.token_budget % block_size
-                if reminder != 0:
-                    raise ValueError("When enabling chunked prefill and "
-                                     "prefix caching, max_num_batched_tokens "
-                                     "(chunk size) must be dividable by "
-                                     "block size, but got chunk_size "
-                                     f"({budget.token_budget}) % block_size "
-                                     f"({block_size}) = {reminder}")
-                if remaining_token_budget < num_new_tokens:
-                    num_new_tokens = (remaining_token_budget //
-                                      block_size) * block_size
-            else:
-                num_new_tokens = min(num_new_tokens, remaining_token_budget)
+            num_new_tokens = min(num_new_tokens,
+                                 budget.remaining_token_budget())
         return num_new_tokens
