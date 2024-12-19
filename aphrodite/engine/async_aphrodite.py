@@ -5,7 +5,6 @@ from typing import (Any, AsyncGenerator, Callable, Dict, Iterable, List,
                     Optional, Set, Tuple, Type, Union)
 
 from loguru import logger
-from transformers import PreTrainedTokenizer
 from typing_extensions import assert_never
 
 import aphrodite.common.envs as envs
@@ -16,6 +15,7 @@ from aphrodite.common.outputs import EmbeddingRequestOutput, RequestOutput
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
+from aphrodite.common.utils import print_warning_once
 from aphrodite.engine.aphrodite_engine import (AphroditeEngine,
                                                DecoderPromptComponents,
                                                PromptComponents,
@@ -31,6 +31,7 @@ from aphrodite.inputs.parse import is_explicit_encoder_decoder_prompt
 from aphrodite.lora.request import LoRARequest
 from aphrodite.processing.scheduler import SchedulerOutputs
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
+from aphrodite.transformers_utils.tokenizer import AnyTokenizer
 
 ENGINE_ITERATION_TIMEOUT_S = envs.APHRODITE_ENGINE_ITERATION_TIMEOUT_S
 
@@ -42,6 +43,7 @@ class AsyncEngineDeadError(RuntimeError):
 def _log_task_completion(task: asyncio.Task,
                          error_callback: Callable[[Exception], None]) -> None:
     """This function is only intended for the `engine.run_engine_loop()` task.
+
     In particular, that task runs a `while True` loop that can only exit if
     there is an exception.
     """
@@ -66,7 +68,7 @@ def _log_task_completion(task: asyncio.Task,
             "actual cause.") from e
 
 
-STOP_ITERATION = Exception() # Sentinel
+STOP_ITERATION = Exception()  # Sentinel
 
 
 class AsyncStream:
@@ -277,6 +279,7 @@ class _AsyncAphrodite(AphroditeEngine):
         seq_group_metadata_list = cached_outputs.seq_group_metadata_list
         scheduler_outputs = cached_outputs.scheduler_outputs
         allow_async_output_proc = cached_outputs.allow_async_output_proc
+
         # skip the scheduler if there are any remaining steps in the seq groups.
         # This ensures that the scheduler is only called again when the current
         # batch has completed.
@@ -284,11 +287,13 @@ class _AsyncAphrodite(AphroditeEngine):
             (seq_group_metadata_list, scheduler_outputs,
              allow_async_output_proc
              ) = self.scheduler[virtual_engine].schedule()
+
             # If current scheduler iteration has no async postprocessor,
             # then we need first to drain the pending async postprocessor
             # before moving forward
             if not allow_async_output_proc and len(self.output_queue) > 0:
                 self._process_model_outputs(is_async=True)
+
             if (self.scheduler_config.is_multi_step
                     and scheduler_outputs.num_lookahead_slots > 0):
                 # cache the scheduler outputs for the next iteration if we have
@@ -296,6 +301,7 @@ class _AsyncAphrodite(AphroditeEngine):
                 self._cache_scheduler_outputs_for_multi_step(
                     virtual_engine, seq_group_metadata_list, scheduler_outputs,
                     allow_async_output_proc)
+
         assert seq_group_metadata_list is not None
         assert scheduler_outputs is not None
 
@@ -305,12 +311,14 @@ class _AsyncAphrodite(AphroditeEngine):
         if not scheduler_outputs.is_empty():
             finished_requests_ids = self.scheduler[
                 virtual_engine].get_and_reset_finished_requests_ids()
+
             # Check if we have a cached last_output from the previous iteration.
             # For supporting PP this is probably the best way to pass the
             # sampled_token_ids, as a separate broadcast over all the PP stages
             # will cause one virtual engine's microbatch to block the pipeline.
             last_sampled_token_ids = \
                 self._get_last_sampled_token_ids(virtual_engine)
+
             execute_model_req = ExecuteModelRequest(
                 seq_group_metadata_list=seq_group_metadata_list,
                 blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,
@@ -323,9 +331,11 @@ class _AsyncAphrodite(AphroditeEngine):
                 # We use ExecuteModelRequest to pass the last sampled_token_ids
                 # to each of the non-last PP stages for in-place prepare_input.
                 last_sampled_token_ids=last_sampled_token_ids)
+
             if allow_async_output_proc:
                 execute_model_req.output_proc_callback_fn = \
                     self._process_model_outputs
+
             # Execute the model.
             output = await self.model_executor.execute_model_async(
                 execute_model_req)
@@ -343,6 +353,7 @@ class _AsyncAphrodite(AphroditeEngine):
         if self.scheduler_config.is_multi_step:
             for seq_group in seq_group_metadata_list:
                 seq_group.finish_step()
+
         if not self._has_remaining_steps(seq_group_metadata_list):
             # clear the cache if we have finished all the steps
             if self.scheduler_config.is_multi_step:
@@ -360,8 +371,10 @@ class _AsyncAphrodite(AphroditeEngine):
                 self._advance_to_next_step(
                     output[0], seq_group_metadata_list,
                     scheduler_outputs.scheduled_seq_groups)
+
             if not allow_async_output_proc:
                 self._process_model_outputs(is_async=False)
+
                 # Log stats.
                 self.do_log_stats(scheduler_outputs, output)
         else:
@@ -380,8 +393,8 @@ class _AsyncAphrodite(AphroditeEngine):
         lora_request: Optional[LoRARequest],
     ) -> List[int]:
         """Async version of :meth:`_tokenize_prompt`."""
-        tokenizer = self.get_tokenizer_group("prompts must be None if "
-                                             "skip_tokenizer_init is True")
+        tokenizer = self.get_tokenizer_group(
+            missing_msg="prompts must be None if skip_tokenizer_init is True")
 
         return await tokenizer.encode_async(request_id=request_id,
                                             prompt=prompt,
@@ -545,16 +558,13 @@ class _AsyncAphrodite(AphroditeEngine):
 
 
 class AsyncAphrodite:
-    """An asynchronous wrapper for AphroditeEngine.
+    """An asynchronous wrapper for :class:`AphroditeEngine`.
 
-    This class is used to wrap the AphroditeEngine class to make it
+    This class is used to wrap the :class:`AphroditeEngine` class to make it
     asynchronous. It uses asyncio to create a background loop that keeps
-    processing incoming requests. The AphroditeEngine is kicked by the
-    generate method when there are requests in the waiting queue.
-    The generate method yields the outputs from the AphroditeEngine
-    to the caller.
-
-    NOTE: For the comprehensive list of arguments, see `AphroditeEngine`.
+    processing incoming requests. The :class:`AphroditeEngine` is kicked by the
+    generate method when there are requests in the waiting queue. The generate
+    method yields the outputs from the :class:`AphroditeEngine` to the caller.
 
     Args:
         worker_use_ray: Whether to use Ray for model workers. Required for
@@ -566,8 +576,8 @@ class AsyncAphrodite:
         log_requests: Whether to log the requests.
         start_engine_loop: If True, the background task to run the engine
             will be automatically started in the generate call.
-        *args: Arguments for AphroditeEngine.
-        *kwargs: Arguments for AphroditeEngine.
+        *args: Arguments for :class:`AphroditeEngine`.
+        **kwargs: Arguments for :class:`AphroditeEngine`.
     """
 
     _engine_class: Type[_AsyncAphrodite] = _AsyncAphrodite
@@ -583,6 +593,20 @@ class AsyncAphrodite:
         self.engine_use_ray = engine_use_ray
         self.log_requests = log_requests
         self.engine = self._init_engine(*args, **kwargs)
+
+        if self.engine_use_ray:
+            print_warning_once(
+                "DEPRECATED. `--engine-use-ray` is deprecated and will "
+                "be removed in a future update.")
+
+            if envs.APHRODITE_ALLOW_ENGINE_USE_RAY:
+                print_warning_once(
+                    "APHRODITE_ALLOW_ENGINE_USE_RAY is set, "
+                    "force engine use Ray")
+            else:
+                raise ValueError("`--engine-use-ray` is deprecated. "
+                                 "Set `APHRODITE_ALLOW_ENGINE_USE_RAY=1` "
+                                 "to force use it")
 
         self.background_loop: Optional[asyncio.Future] = None
         # We need to keep a reference to unshielded
@@ -626,8 +650,8 @@ class AsyncAphrodite:
             executor_class = CPUExecutorAsync
         elif engine_config.device_config.device_type == "openvino":
             assert distributed_executor_backend is None, (
-                "Distributed execution is not supported with the OpenVINO "
-                "backend.")
+                "Distributed execution is not supported with "
+                "the OpenVINO backend.")
             from aphrodite.executor.openvino_executor import (
                 OpenVINOExecutorAsync)
             executor_class = OpenVINOExecutorAsync
@@ -642,7 +666,7 @@ class AsyncAphrodite:
                 executor_class = RayXPUExecutorAsync
             else:
                 raise RuntimeError(
-                    "Unsupported distributed executor backend for XPU.")
+                    "Not supported distributed execution model on XPU device.")
         elif distributed_executor_backend == "ray":
             initialize_ray_cluster(engine_config.parallel_config)
             from aphrodite.executor.ray_gpu_executor import RayGPUExecutorAsync
@@ -672,6 +696,7 @@ class AsyncAphrodite:
             ray_utils.assert_ray_available()
 
         executor_class = cls._get_executor_cls(engine_config)
+
         # Create the async LLM engine.
         engine = cls(
             executor_class.uses_ray,
@@ -716,7 +741,7 @@ class AsyncAphrodite:
     async def get_tokenizer(
         self,
         lora_request: Optional[LoRARequest] = None,
-    ) -> "PreTrainedTokenizer":
+    ) -> AnyTokenizer:
         if self.engine_use_ray:
             return await self.engine.get_tokenizer.remote(  # type: ignore
                 lora_request)
@@ -743,6 +768,7 @@ class AsyncAphrodite:
     def shutdown_background_loop(self) -> None:
         """
         Shut down the background loop.
+
         This method needs to be called during cleanup to remove
         references to `self` and properly GC the resources held
         by the async LLM engine (e.g., the executors as well as
@@ -897,9 +923,8 @@ class AsyncAphrodite:
         params: Union[SamplingParams, PoolingParams],
         arrival_time: Optional[float] = None,
         lora_request: Optional[LoRARequest] = None,
-        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        prompt_adapter_request: Optional[PromptAdapterRequest] = None
     ) -> AsyncGenerator[Union[RequestOutput, EmbeddingRequestOutput], None]:
-
         if not self.is_running:
             if self.start_engine_loop:
                 self.start_background_loop()
@@ -927,7 +952,7 @@ class AsyncAphrodite:
         sampling_params: SamplingParams,
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
-        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        prompt_adapter_request: Optional[PromptAdapterRequest] = None
     ) -> AsyncGenerator[RequestOutput, None]:
         """Generate outputs for a request.
 
@@ -936,12 +961,11 @@ class AsyncAphrodite:
         outputs from the AphroditeEngine to the caller.
 
         Args:
-            prompt: The prompt string. Can be None if prompt_token_ids is
-                provided.
+            inputs: The inputs to the LLM. See
+                :class:`~aphrodite.inputs.PromptInputs`
+                for more details about the format of each input.
             sampling_params: The sampling parameters of the request.
             request_id: The unique id of the request.
-            prompt_token_ids: The token IDs of the prompt. If None, we
-                use the tokenizer to convert the prompts to token IDs.
             lora_request: LoRA request to use for generation, if any.
             prompt_adapter_request: Prompt Adapter request to use 
                                             for generation, if any.
@@ -1011,21 +1035,23 @@ class AsyncAphrodite:
         lora_request: Optional[LoRARequest] = None,
     ) -> AsyncGenerator[EmbeddingRequestOutput, None]:
         """Generate outputs for a request from an embedding model.
+
         Generate outputs for a request. This method is a coroutine. It adds the
         request into the waiting queue of the AphroditeEngine and streams the
         outputs from the AphroditeEngine to the caller.
+
         Args:
-            prompt: The prompt string. Can be None if prompt_token_ids is
-                provided.
+            inputs: The inputs to the LLM. See
+                :class:`~aphrodite.inputs.PromptInputs`
+                for more details about the format of each input.
             pooling_params: The pooling parameters of the request.
             request_id: The unique id of the request.
-            prompt_token_ids: The token IDs of the prompt. If None, we
-                use the tokenizer to convert the prompts to token IDs.
             lora_request: LoRA request to use for generation, if any.
-            multi_modal_data: Multi modal data per request.
+
         Yields:
-            The output `EmbeddingRequestOutput` objects from the
-            AphroditeEngine for the request.
+            The output `EmbeddingRequestOutput` objects from the AphroditeEngine
+            for the request.
+
         Details:
             - If the engine is not running, start the background loop,
               which iteratively invokes
@@ -1036,7 +1062,11 @@ class AsyncAphrodite:
               the underlying engine.
               Also, a corresponding `AsyncStream` will be created.
             - Wait for the request outputs from `AsyncStream` and yield them.
+
         Example:
+            >>> # Please refer to endpoints/api_server.py for
+            >>> # the complete example.
+            >>>
             >>> # initialize the engine and the example input
             >>> engine = AsyncAphrodite.from_engine_args(engine_args)
             >>> example_input = {
@@ -1166,4 +1196,20 @@ class AsyncAphrodite:
                 raise RuntimeError("Engine is dead.") from e
         else:
             await self.engine.check_health_async()
-        logger.debug(f"Health check took {time.perf_counter()-t}s")
+        logger.debug(f"Health check took {time.perf_counter() - t}s")
+
+    def add_logger(self, logger_name: str, logger: StatLoggerBase) -> None:
+        if self.engine_use_ray:
+            ray.get(
+                self.engine.add_logger.remote(  # type: ignore
+                    logger_name=logger_name, logger=logger))
+        else:
+            self.engine.add_logger(logger_name=logger_name, logger=logger)
+
+    def remove_logger(self, logger_name: str) -> None:
+        if self.engine_use_ray:
+            ray.get(
+                self.engine.remove_logger.remote(  # type: ignore
+                    logger_name=logger_name))
+        else:
+            self.engine.remove_logger(logger_name=logger_name)

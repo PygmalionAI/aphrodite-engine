@@ -5,12 +5,11 @@ from dataclasses import dataclass
 from typing import (TYPE_CHECKING, Any, ClassVar, Deque, Dict, Iterable, List,
                     Optional)
 from typing import Sequence as GenericSequence
-from typing import Tuple, Type, TypeVar, Union
+from typing import Set, Tuple, Type, Union
 
 import torch
 from loguru import logger
-from transformers import PreTrainedTokenizer
-from typing_extensions import assert_never
+from typing_extensions import TypeVar, assert_never
 
 import aphrodite.common.envs as envs
 from aphrodite.common.config import (CacheConfig, DecodingConfig, DeviceConfig,
@@ -48,6 +47,7 @@ from aphrodite.processing.scheduler import (ScheduledSequenceGroup, Scheduler,
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
 from aphrodite.transformers_utils.config import try_get_generation_config
 from aphrodite.transformers_utils.detokenizer import Detokenizer
+from aphrodite.transformers_utils.tokenizer import AnyTokenizer
 from aphrodite.transformers_utils.tokenizer_group import (
     BaseTokenizerGroup, init_tokenizer_from_configs)
 from aphrodite.version import __version__ as APHRODITE_VERSION
@@ -70,6 +70,7 @@ def _load_generation_config_dict(model_config: ModelConfig) -> Dict[str, Any]:
     return config.to_diff_dict()
 
 
+_G = TypeVar("_G", bound=BaseTokenizerGroup, default=BaseTokenizerGroup)
 _O = TypeVar("_O", RequestOutput, EmbeddingRequestOutput)
 
 PromptComponents = Tuple[Optional[str], List[int],
@@ -264,7 +265,7 @@ class AphroditeEngine:
 
         # Ensure that the function doesn't contain a reference to self,
         # to avoid engine GC issues
-        def get_tokenizer_for_seq(sequence: Sequence) -> PreTrainedTokenizer:
+        def get_tokenizer_for_seq(sequence: Sequence) -> AnyTokenizer:
             assert tokenizer_group, ("tokenizer_group cannot be None, "
                                      "make sure skip_tokenizer_init is False")
             return tokenizer_group.get_lora_tokenizer(sequence.lora_request)
@@ -320,6 +321,7 @@ class AphroditeEngine:
                 # See https://prometheus.github.io/client_python/multiprocess/
                 from aphrodite.engine.metrics import (LoggingStatLogger,
                                                       PrometheusStatLogger)
+
                 self.stat_loggers = {
                     "logging":
                     LoggingStatLogger(
@@ -332,6 +334,7 @@ class AphroditeEngine:
                 }
                 self.stat_loggers["prometheus"].info("cache_config",
                                                      self.cache_config)
+
 
         # Create sequence output processor, e.g. for beam search or
         # speculative decoding.
@@ -427,7 +430,7 @@ class AphroditeEngine:
         elif distributed_executor_backend == "mp":
             from aphrodite.executor.multiproc_gpu_executor import (
                 MultiprocessingGPUExecutor)
-            assert not APHRODITE_USE_RAY_SPMD_WORKER, (
+            assert not envs.APHRODITE_USE_RAY_SPMD_WORKER, (
                 "multiprocessing distributed executor backend does not "
                 "support APHRODITE_USE_RAY_SPMD_WORKER=1")
             executor_class = MultiprocessingGPUExecutor
@@ -442,11 +445,10 @@ class AphroditeEngine:
         engine_args: EngineArgs,
         stat_loggers: Optional[Dict[str, StatLoggerBase]] = None,
     ) -> "AphroditeEngine":
-        """Creates an LLM engine from the engine arguments."""
+        """Creates an Aphrodite engine from the engine arguments."""
         # Create the engine configs.
         engine_config = engine_args.create_engine_config()
         executor_class = cls._get_executor_cls(engine_config)
-
         # Create the LLM engine.
         engine = cls(
             **engine_config.to_dict(),
@@ -454,6 +456,7 @@ class AphroditeEngine:
             log_stats=not engine_args.disable_log_stats,
             stat_loggers=stat_loggers,
         )
+
         return engine
 
     def __reduce__(self):
@@ -462,7 +465,7 @@ class AphroditeEngine:
         raise RuntimeError("AphroditeEngine should not be pickled!")
 
     def __del__(self):
-        # Shutdown the model executor when engine is garbage collected.
+        # Shutdown model executor when engine is garbage collected
         # Use getattr since __init__ can fail before the field is set
         if model_executor := getattr(self, "model_executor", None):
             model_executor.shutdown()
@@ -471,19 +474,27 @@ class AphroditeEngine:
                                    "skip_tokenizer_init is True")
 
     def get_tokenizer_group(
-            self,
-            fail_msg: str = MISSING_TOKENIZER_GROUP_MSG) -> BaseTokenizerGroup:
-        if self.tokenizer is None:
-            raise ValueError(fail_msg)
+        self,
+        group_type: Type[_G] = BaseTokenizerGroup,
+        *,
+        missing_msg: str = MISSING_TOKENIZER_GROUP_MSG,
+    ) -> _G:
+        tokenizer_group = self.tokenizer
 
-        return self.tokenizer
+        if tokenizer_group is None:
+            raise ValueError(missing_msg)
+        if not isinstance(tokenizer_group, group_type):
+            raise TypeError("Invalid type of tokenizer group. "
+                            f"Expected type: {group_type}, but "
+                            f"found type: {type(tokenizer_group)}")
+
+        return tokenizer_group
 
     def get_tokenizer(
-            self,
-            lora_request: Optional[LoRARequest] = None
-    ) -> "PreTrainedTokenizer":
+        self,
+        lora_request: Optional[LoRARequest] = None,
+    ) -> AnyTokenizer:
         return self.get_tokenizer_group().get_lora_tokenizer(lora_request)
-
 
     def _init_tokenizer(self) -> BaseTokenizerGroup:
         return init_tokenizer_from_configs(
@@ -556,9 +567,8 @@ class AphroditeEngine:
         params: Union[SamplingParams, PoolingParams],
         arrival_time: float,
         lora_request: Optional[LoRARequest],
-        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        prompt_adapter_request: Optional[PromptAdapterRequest],
     ) -> None:
-        # to prevent empty prompts crashing the engine
         self._validate_model_inputs(processed_inputs)
         # Create the sequences.
         block_size = self.cache_config.block_size
@@ -587,8 +597,7 @@ class AphroditeEngine:
                 arrival_time=arrival_time,
                 lora_request=lora_request,
                 prompt_adapter_request=prompt_adapter_request,
-                encoder_seq=encoder_seq,
-            )
+                encoder_seq=encoder_seq)
         elif isinstance(params, PoolingParams):
             seq_group = self._create_sequence_group_with_pooling(
                 request_id,
@@ -597,8 +606,7 @@ class AphroditeEngine:
                 arrival_time=arrival_time,
                 lora_request=lora_request,
                 prompt_adapter_request=prompt_adapter_request,
-                encoder_seq=encoder_seq,
-            )
+                encoder_seq=encoder_seq)
         else:
             raise ValueError(
                 "Either SamplingParams or PoolingParams must be provided.")
@@ -622,14 +630,21 @@ class AphroditeEngine:
     ) -> List[int]:
         """
         Prepares `decoder_input_ids` for generation with encoder-decoder models.
+
         Based on
+
         https://github.com/huggingface/transformers/blob/
         4037a2b5b1278736e566aec12e169100275545ea/
         src/transformers/generation/utils.py
+
         specifically GenerationMixin._prepare_decoder_input_ids_for_generation()
+
         Arguments:
+
         * decoder_input_ids: input token ids to preprocess
+
         Returns:
+
         * Processed token list
         """
 
@@ -655,16 +670,20 @@ class AphroditeEngine:
     ) -> List[int]:
         '''
         Wrapper around application of the model's tokenizer.
+
         Arguments:
+
         * prompt
         * request_id
         * lora_request
+
         Returns:
+
         * prompt token ids
         '''
 
-        tokenizer = self.get_tokenizer_group("prompts must be None if "
-                                             "skip_tokenizer_init is True")
+        tokenizer = self.get_tokenizer_group(
+            missing_msg="prompts must be None if skip_tokenizer_init is True")
 
         return tokenizer.encode(request_id=request_id,
                                 prompt=prompt,
@@ -678,11 +697,15 @@ class AphroditeEngine:
     ) -> PromptComponents:
         '''
         Extract the components of any single encoder or decoder input prompt.
+
         Arguments:
+
         * request_id
         * inputs: single encoder or decoder input prompt
         * lora_request: this is only valid for decoder prompts
+
         Returns:
+
         * prompt
         * prompt_token_ids
         * multi_modal_data
@@ -732,12 +755,14 @@ class AphroditeEngine:
         Specifically for encoder/decoder models:
         generate a default decoder prompt for when
         the user specifies only the encoder prompt.
+
         Encoder/decoder models utilize the decoder
         prompt in different ways; as new models are
         added, it is intended that this function
         will be extended to produce differing
         default decoder prompts, depending on the
         model variety.
+
         Absent a special case, the default behavior
         of this method is to mirror the behavior of
         the HuggingFace (HF) GenerationMixin for a None
@@ -745,12 +770,15 @@ class AphroditeEngine:
         setting to force the first decoded token to be <BOS>.
         Here, this behavior is approximated by having the
         "default" decoder prompt be <BOS>.
+
         However, it is possible that in the future
         other models may have different or more 
         complex logic for the default decoder prompt.
         This motivates having a special helper method
         for default decoder prompts.
+
         Returns:
+
         * prompt_token_ids
         '''
 
@@ -789,16 +817,19 @@ class AphroditeEngine:
         For encoder/decoder models only:
         Process an input prompt into an
         :class:`EncoderDecoderLLMInputs` instance.
+
         There are two types of input prompts:
         singleton prompts which carry only the
         encoder prompt, and explicit encoder/decoder
         prompts which carry both the encoder and the
         decoder prompts as member variables.
+
         This function handles the following scenarios:
         * Singleton encoder prompt: extract encoder prompt
           token ids & infer default decoder prompt token ids
         * Explicit encoder/decoder prompt: extract encoder
           and decoder prompt token ids
+
         Note that for Explicit encoder/decoder prompts,
         each sub-prompt (encoder or decoder prompt) can
         have any possible singleton type; thus this
@@ -806,9 +837,12 @@ class AphroditeEngine:
         token ids for the sub-prompts.
         
         Arguments:
+
         * inputs: an input prompt
         * request_id
+
         Returns:
+
         * :class:`EncoderDecoderLLMInputs` instance
         '''
 
@@ -862,12 +896,16 @@ class AphroditeEngine:
         '''
         For decoder-only models:
         Process an input prompt into an :class:`LLMInputs` instance.
+
         Arguments:
+
         * inputs: input prompt
         * request_id
         * lora_request
         * prompt_adapter_request
+
         Returns:
+
         * :class:`LLMInputs` instance
         '''
 
@@ -901,6 +939,7 @@ class AphroditeEngine:
             if is_explicit_encoder_decoder_prompt(inputs):
                 raise ValueError("Cannot pass encoder-decoder prompt "
                                  "to decoder-only models")
+
             # Decoder-only operation
             model_inputs = self._process_decoder_only_prompt(
                 inputs,
@@ -936,7 +975,6 @@ class AphroditeEngine:
                 use the tokenizer to convert the prompts to token IDs.
             arrival_time: The arrival time of the request. If None, we use
                 the current monotonic time.
-            multi_modal_data: Multi modal data per request.
 
         Details:
             - Set arrival_time to the current time if it is None.
@@ -1008,6 +1046,7 @@ class AphroditeEngine:
         # Defensive copy of SamplingParams, which are used by the sampler,
         # this doesn't deep-copy LogitsProcessor objects
         sampling_params = sampling_params.clone()
+
         sampling_params.update_from_generation_config(
             self.generation_config_fields, seq.eos_token_id)
 
@@ -1030,7 +1069,7 @@ class AphroditeEngine:
         pooling_params: PoolingParams,
         arrival_time: float,
         lora_request: Optional[LoRARequest],
-        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        prompt_adapter_request: Optional[PromptAdapterRequest],
         encoder_seq: Optional[Sequence] = None,
     ) -> SequenceGroup:
         """Creates a SequenceGroup with PoolingParams."""
@@ -1045,7 +1084,6 @@ class AphroditeEngine:
             pooling_params=pooling_params,
             prompt_adapter_request=prompt_adapter_request,
             encoder_seq=encoder_seq)
-
         return seq_group
 
     def abort_request(self, request_id: Union[str, Iterable[str]]) -> None:
@@ -1121,6 +1159,7 @@ class AphroditeEngine:
                                is_async: bool,
                                clear_outputs: bool = True) -> None:
         """Apply the model output to the sequences in the scheduled seq groups.
+
         is_async: Indicates whether this postprocessor runs in 
             parallel with the GPU forward pass and is processing 
             tokens from the previous step. If this is true, then
@@ -1132,16 +1171,21 @@ class AphroditeEngine:
         
         Returns RequestOutputs that can be returned to the client.
         """
+        now = time.time()
 
         if clear_outputs:
             self.request_outputs.clear()
+
         if len(self.output_queue) == 0:
             return None
+
         (outputs, seq_group_metadata_list,
          scheduler_outputs) = self.output_queue.popleft()
+
         # Sanity check
         assert len(seq_group_metadata_list) == len(
             scheduler_outputs.scheduled_seq_groups)
+
         # Organize outputs by [step][sequence group] instead of
         # [sequence group][step].
         if len(outputs) > 1:
@@ -1149,21 +1193,26 @@ class AphroditeEngine:
                 outputs, num_seq_groups=len(seq_group_metadata_list))
         else:
             outputs_by_sequence_group = outputs
+
         finished_before: List[int] = []
         for i, seq_group_meta in enumerate(seq_group_metadata_list):
             scheduled_seq_group = scheduler_outputs.scheduled_seq_groups[i]
 
             seq_group = scheduled_seq_group.seq_group
+
             if seq_group.is_finished():
                 finished_before.append(i)
                 continue
+
             if len(outputs) > 1:
                 output = outputs_by_sequence_group[i]
             else:
                 output = [outputs_by_sequence_group[0][i]]
+
             if not is_async:
                 seq_group.update_num_computed_tokens(
                     scheduled_seq_group.token_chunk_size)
+
             if self.model_config.embedding_mode:
                 self._process_sequence_group_outputs(seq_group, output)
                 continue
@@ -1180,20 +1229,25 @@ class AphroditeEngine:
         # Create the outputs.
         for i, _ in enumerate(seq_group_metadata_list):
             scheduled_seq_group = scheduler_outputs.scheduled_seq_groups[i]
+
             if i in finished_before:
                 continue  # Avoids double processing
-            seq_group = scheduled_seq_group.seq_group
 
+            seq_group = scheduled_seq_group.seq_group
+            seq_group.maybe_set_first_token_time(now)
             if (seq_group.is_finished()
                     if self.step_return_finished_only else True):
                 request_output = RequestOutputFactory.create(seq_group)
                 self.request_outputs.append(request_output)
+
         for seq_group in scheduler_outputs.ignored_seq_groups:
             request_output = RequestOutputFactory.create(seq_group)
             self.request_outputs.append(request_output)
+
         if is_async:
             # Log stats.
-            self.do_log_stats(scheduler_outputs, outputs)
+            self.do_log_stats(scheduler_outputs, outputs, finished_before)
+
         return None
 
     def _advance_to_next_step(
@@ -1207,16 +1261,20 @@ class AphroditeEngine:
         for seq_group_metadata, sequence_group_outputs, scheduled_seq_group in \
             zip(seq_group_metadata_list, output, scheduled_seq_groups):
             seq_group = scheduled_seq_group.seq_group
+
             if seq_group.is_finished():
                 continue
+
             seq_group.update_num_computed_tokens(
                 seq_group_metadata.token_chunk_size)
+
             if seq_group_metadata.do_sample:
                 assert len(sequence_group_outputs.samples) == 1, (
                     "Async output processor expects a single sample"
                     " (i.e sampling_params.n == 1 and no "
                     "sampling_params.best_of > 1)")
                 sample = sequence_group_outputs.samples[0]
+
                 assert len(seq_group.seqs) == 1
                 seq = seq_group.seqs[0]
                 seq.append_token_id(sample.output_token, sample.logprobs)
@@ -1261,7 +1319,7 @@ class AphroditeEngine:
             >>> while True:
             >>>     if example_inputs:
             >>>         req_id, prompt, sampling_params = example_inputs.pop(0)
-            >>>         engine.add_request(str(req_id), prompt, sampling_params)
+            >>>         engine.add_request(str(req_id),prompt,sampling_params)
             >>>
             >>>     # continue the request processing
             >>>     request_outputs = engine.step()
@@ -1283,14 +1341,17 @@ class AphroditeEngine:
         seq_group_metadata_list = cached_outputs.seq_group_metadata_list
         scheduler_outputs = cached_outputs.scheduler_outputs
         allow_async_output_proc = cached_outputs.allow_async_output_proc
+
         # Skip the scheduler if there are any remaining steps in the seq groups.
         # This ensures that the scheduler is only called again when the current
         # batch has completed.
         if not self._has_remaining_steps(seq_group_metadata_list):
             (seq_group_metadata_list, scheduler_outputs,
              allow_async_output_proc) = self.scheduler[0].schedule()
+
             if not allow_async_output_proc and len(self.output_queue) > 0:
                 self._process_model_outputs(is_async=True)
+
             if (self.scheduler_config.is_multi_step
                     and scheduler_outputs.num_lookahead_slots > 0):
                 # cache the scheduler outputs for the next iteration if we have
@@ -1298,6 +1359,7 @@ class AphroditeEngine:
                 self._cache_scheduler_outputs_for_multi_step(
                     0, seq_group_metadata_list, scheduler_outputs,
                     allow_async_output_proc)
+
         assert seq_group_metadata_list is not None
         assert scheduler_outputs is not None
 
@@ -1307,12 +1369,14 @@ class AphroditeEngine:
         if not scheduler_outputs.is_empty():
             finished_requests_ids = self.scheduler[
                 0].get_and_reset_finished_requests_ids()
+
             # Check if we have a cached last_output from the previous iteration.
             # For supporting PP this is probably the best way to pass the
             # sampled_token_ids, as a separate broadcast over all the PP stages
             # will cause one virtual engine's microbatch to block the pipeline.
             last_sampled_token_ids = \
                 self._get_last_sampled_token_ids(0)
+
             execute_model_req = ExecuteModelRequest(
                 seq_group_metadata_list=seq_group_metadata_list,
                 blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,
@@ -1331,6 +1395,7 @@ class AphroditeEngine:
 
             output = self.model_executor.execute_model(
                 execute_model_req=execute_model_req)
+
             # we need to do this here so that last step's sampled_token_ids can
             # be passed to the next iteration for PP.
             if self.scheduler_config.is_multi_step:
@@ -1345,6 +1410,7 @@ class AphroditeEngine:
         if self.scheduler_config.is_multi_step:
             for seq_group in seq_group_metadata_list:
                 seq_group.finish_step()
+
         if not self._has_remaining_steps(seq_group_metadata_list):
             # clear the cache if we have finished all the steps.
             if self.scheduler_config.is_multi_step:
@@ -1362,8 +1428,10 @@ class AphroditeEngine:
                 self._advance_to_next_step(
                     output[0], seq_group_metadata_list,
                     scheduler_outputs.scheduled_seq_groups)
+
             if not allow_async_output_proc:
                 self._process_model_outputs(is_async=False)
+
                 # Log stats.
                 self.do_log_stats(scheduler_outputs, output)
         else:
@@ -1375,6 +1443,7 @@ class AphroditeEngine:
                 assert not self.scheduler_config.is_multi_step
                 self._process_model_outputs(is_async=True, clear_outputs=False)
             assert len(self.output_queue) == 0
+
             # Stop the execute model loop in parallel workers until there are
             # more requests to process. This avoids waiting indefinitely in
             # torch.distributed ops which may otherwise timeout, and unblocks
@@ -1390,7 +1459,8 @@ class AphroditeEngine:
         if (not self.scheduler_config.is_multi_step
                 or not seq_group_metadata_list):
             return False
-        # TODO(will) this is a sanity check for nowto make sure that all the
+
+        # TODO: this is a sanity check for nowto make sure that all the
         # seqs are on the same steps. Eventually we will want to do some sort of
         # dynamic scheduling when doing multi-step decoding.
         ref_remaining_steps = seq_group_metadata_list[0].state.remaining_steps
@@ -1400,6 +1470,7 @@ class AphroditeEngine:
         ]):
             raise AssertionError(("All running sequence groups should "
                                   "have the same remaining steps."))
+
         return ref_remaining_steps > 0
 
     def _cache_scheduler_outputs_for_multi_step(
@@ -1408,6 +1479,7 @@ class AphroditeEngine:
             scheduler_outputs: SchedulerOutputs,
             allow_async_output_proc: bool) -> None:
         co = self.cached_scheduler_outputs[virtual_engine]
+
         co.seq_group_metadata_list = seq_group_metadata_list
         co.scheduler_outputs = scheduler_outputs
         co.allow_async_output_proc = allow_async_output_proc
@@ -1650,7 +1722,7 @@ class AphroditeEngine:
     def remove_lora(self, lora_id: int) -> bool:
         return self.model_executor.remove_lora(lora_id)
 
-    def list_loras(self) -> List[int]:
+    def list_loras(self) -> Set[int]:
         return self.model_executor.list_loras()
 
     def pin_lora(self, lora_id: int) -> bool:
