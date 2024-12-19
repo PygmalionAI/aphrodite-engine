@@ -40,7 +40,7 @@ def choose_mp_linear_kernel(
 
     failure_reasons = []
     for kernel in _POSSIBLE_KERNELS:
-        if kernel.__name__ in os.environ.get("VLLM_DISABLED_KERNELS", "")\
+        if kernel.__name__ in os.environ.get("APHRODITE_DISABLED_KERNELS", "")\
             .split(","):
             failure_reasons.append(
                 f' {kernel.__name__} disabled by environment variable')

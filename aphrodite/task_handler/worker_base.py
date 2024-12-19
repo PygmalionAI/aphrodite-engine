@@ -259,6 +259,12 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             broadcast_data.update(kwargs)
             broadcast_tensor_dict(broadcast_data, src=0)
 
+        if execute_model_req.output_proc_callback_fn:
+            model_input = dataclasses.replace(  # type: ignore
+                model_input,
+                output_proc_callback_fn=execute_model_req.
+                output_proc_callback_fn)
+    
         return model_input, worker_input, kwargs
 
     def prepare_input(

@@ -4,7 +4,8 @@ import random
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Deque, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import (Callable, Deque, Dict, Iterable, List, Optional, Set,
+                    Tuple, Union)
 
 from loguru import logger
 
@@ -149,18 +150,9 @@ class SchedulerOutputs:
                 and not self.blocks_to_swap_out and not self.blocks_to_copy)
 
     def _sort_by_lora_ids(self):
-        assert 0 <= self.num_prefill_groups <= len(self.scheduled_seq_groups)
-
-        def key_fn(group: ScheduledSequenceGroup):
-            key = (group.seq_group.lora_int_id, group.seq_group.request_id)
-            if 0 < self.num_prefill_groups < len(self.scheduled_seq_groups):
-                # Sort sequence groups so that all prefills come before all
-                # decodes as required by chunked prefill.
-                return (not group.seq_group.is_prefill(), *key)
-            return key
-
-        self.scheduled_seq_groups = sorted(self.scheduled_seq_groups,
-                                           key=key_fn)
+        self.scheduled_seq_groups = sorted(
+            self.scheduled_seq_groups,
+            key=lambda g: (g.seq_group.lora_int_id, g.seq_group.request_id))
 
     @property
     def lora_requests(self) -> Set[LoRARequest]:
@@ -308,6 +300,7 @@ class Scheduler:
         cache_config: CacheConfig,
         lora_config: Optional[LoRAConfig],
         pipeline_parallel_size: int = 1,
+        output_proc_callback_fn: Optional[Callable] = None,
     ) -> None:
         self.scheduler_config = scheduler_config
         self.cache_config = cache_config
@@ -374,10 +367,36 @@ class Scheduler:
         self.num_cumulative_preemption: int = 0
 
         # Used to cache python objects
-        self._scheduler_running_outputs_cache: PyObjectCache = PyObjectCache(
-            scheduler_running_outputs_builder)
-        self._scheduled_seq_group_cache: PyObjectCache = PyObjectCache(
-            scheduled_seq_group_builder)
+        self._seq_group_metadata_cache: List[PyObjectCache] = []
+        self._scheduler_running_outputs_cache: List[PyObjectCache] = []
+        self._scheduled_seq_group_cache: List[PyObjectCache] = []
+
+        # For async output processing, we need to swap cache buffers between
+        # iterations. I.e. since the output processing is lagged one step,
+        # we cannot reuse the cached objects immediately when the schedule()
+        # is called again, but only when schedule() is called the second time.
+        self.output_proc_callback_fn = output_proc_callback_fn
+        self.use_async_output_proc = self.output_proc_callback_fn is not None
+        self.num_cache_iters = 2 if self.use_async_output_proc else 1
+
+        self.cache_id = 0
+        for i in range(self.num_cache_iters):
+            self._seq_group_metadata_cache.append(
+                PyObjectCache(seq_group_metadata_builder))
+            self._scheduler_running_outputs_cache.append(
+                PyObjectCache(scheduler_running_outputs_builder))
+            self._scheduled_seq_group_cache.append(
+                PyObjectCache(scheduled_seq_group_builder))
+
+        # For async postprocessor, the extra decode run cannot be done
+        # when the request reaches max_model_len. In this case, the request
+        # will be stopped during schedule() call and added to this stop list
+        # for processing and deallocation by the free_finished_seq_groups()
+        self._async_stopped: List[SequenceGroup] = []
+
+    @property
+    def next_cache_id(self):
+        return (self.cache_id + 1) % self.num_cache_iters
 
     @property
     def lora_enabled(self) -> bool:
@@ -493,7 +512,7 @@ class Scheduler:
             SchedulerRunningOutputs.
         """
         ret: SchedulerRunningOutputs = \
-            self._scheduler_running_outputs_cache.get_object()
+            self._scheduler_running_outputs_cache[self.cache_id].get_object()
         ret.blocks_to_swap_out.clear()
         ret.blocks_to_copy.clear()
         ret.decode_seq_groups.clear()
@@ -520,8 +539,12 @@ class Scheduler:
         # NOTE: Preemption happens only when there is no available slot
         # to keep all the sequence groups in the RUNNING state.
 
-        running_queue = self.running
+        # Store original running requests for the case of async + preemption
+        if self.use_async_output_proc:
+            orig_running = self.running.copy()
 
+        running_queue = self.running
+        assert len(self._async_stopped) == 0
         while running_queue:
             seq_group = running_queue[0]
             num_running_tokens = self._get_num_new_tokens(
@@ -531,6 +554,28 @@ class Scheduler:
                 break
 
             running_queue.popleft()
+
+            # With async postprocessor, an extra decode run is done
+            # to process the final tokens. The check below avoids this extra
+            # decode run when the model max len is reached, in order to avoid
+            # a memory overflow.
+            if self.use_async_output_proc and seq_group.seqs[0].get_len(
+            ) > self.scheduler_config.max_model_len:
+                self._async_stopped.append(seq_group)
+                continue
+
+            # With async postprocessor, when preemption kicks in, we need
+            # first to drain the async postprocessor, so that all async
+            # block_table freeing is applied before the preemption freeing
+            # is applied.
+            if self.use_async_output_proc and not self._can_append_slots(
+                    seq_group):
+                tmp = self.running
+                self.running = orig_running
+                assert self.output_proc_callback_fn is not None
+                self.output_proc_callback_fn(is_async=True)
+                self.running = tmp
+
             while not self._can_append_slots(seq_group):
                 budget.subtract_num_batched_tokens(seq_group.request_id,
                                                    num_running_tokens)
@@ -566,7 +611,7 @@ class Scheduler:
                 is_prefill = seq_group.is_prefill()
 
                 scheduled_seq_group: ScheduledSequenceGroup = \
-                    self._scheduled_seq_group_cache.get_object()
+                    self._scheduled_seq_group_cache[self.cache_id].get_object()
                 scheduled_seq_group.seq_group = seq_group
                 if is_prefill:
                     scheduled_seq_group.token_chunk_size = num_running_tokens
@@ -589,8 +634,8 @@ class Scheduler:
                 if curr_loras is not None and seq_group.lora_int_id > 0:
                     curr_loras.add(seq_group.lora_int_id)
 
-        self._scheduler_running_outputs_cache.reset()
-        self._scheduled_seq_group_cache.reset()
+        self._scheduler_running_outputs_cache[self.next_cache_id].reset()
+        self._scheduled_seq_group_cache[self.next_cache_id].reset()
 
         return ret
 
@@ -767,9 +812,8 @@ class Scheduler:
 
             prompt_limit = self._get_prompt_limit(seq_group)
             if num_new_tokens > prompt_limit:
-                logger.warning(
-                    f"Input prompt ({num_new_tokens} tokens) is too long"
-                    f" and exceeds limit of {prompt_limit}")
+                logger.warning(f"Input prompt ({num_new_tokens} tokens) is "
+                               f"too long and exceeds limit of {prompt_limit}")
                 for seq in waiting_seqs:
                     seq.status = SequenceStatus.FINISHED_IGNORED
                 ignored_seq_groups.append(seq_group)
@@ -781,9 +825,9 @@ class Scheduler:
             if can_allocate == AllocStatus.LATER:
                 break
             elif can_allocate == AllocStatus.NEVER:
-                logger.warning(
-                    f"Input prompt ({num_new_tokens} tokens) is too long"
-                    " and exceeds the capacity of block_manager")
+                logger.warning(f"Input prompt ({num_new_tokens} tokens) is "
+                               "too long and exceeds the capacity of "
+                               "block_manager")
                 for seq in waiting_seqs:
                     seq.status = SequenceStatus.FINISHED_IGNORED
                 ignored_seq_groups.append(seq_group)
@@ -1039,7 +1083,15 @@ class Scheduler:
             num_lookahead_slots=self._get_num_lookahead_slots(is_prefill),
         )
 
-    def schedule(self) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs]:
+    def _allow_async_output_proc(self, seq_group: SequenceGroup) -> bool:
+        no_beam_search = (seq_group.sampling_params.best_of == 1
+                          and not seq_group.sampling_params.use_beam_search)
+
+        return no_beam_search
+
+    def schedule(
+            self
+    ) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs, bool]:
         # Schedule sequence groups.
         # This function call changes the internal states of the scheduler
         # such as self.running, self.swapped, and self.waiting.
@@ -1049,6 +1101,11 @@ class Scheduler:
         if not self.cache_config.enable_prefix_caching:
             common_computed_block_nums = []
 
+        # TODO: Combine multi-step and async postprocessor
+        allow_async_output_proc: bool = (
+            self.use_async_output_proc
+            and not self.scheduler_config.is_multi_step)
+
         # Create input data structures.
         seq_group_metadata_list: List[SequenceGroupMetadata] = []
         for i, scheduled_seq_group in enumerate(
@@ -1056,6 +1113,11 @@ class Scheduler:
             seq_group = scheduled_seq_group.seq_group
             token_chunk_size = scheduled_seq_group.token_chunk_size
             seq_group.maybe_set_first_scheduled_time(now)
+
+            seq_group_metadata = self._seq_group_metadata_cache[
+                self.cache_id].get_object()
+            seq_group_metadata.seq_data.clear()
+            seq_group_metadata.block_tables.clear()
 
             # seq_id -> SequenceData
             seq_data: Dict[int, SequenceData] = {}
@@ -1146,6 +1208,10 @@ class Scheduler:
                 )
             seq_group_metadata_list.append(seq_group_metadata)
 
+            if allow_async_output_proc:
+                allow_async_output_proc = self._allow_async_output_proc(
+                    seq_group)
+
         # Now that the batch has been created, we can assume all blocks in the
         # batch will have been computed before the next scheduling invocation.
         # This is because the engine assumes that a failure in model execution
@@ -1155,7 +1221,14 @@ class Scheduler:
                 scheduled_seq_group.seq_group,
                 scheduled_seq_group.token_chunk_size)
 
-        return seq_group_metadata_list, scheduler_outputs
+        self._seq_group_metadata_cache[self.next_cache_id].reset()
+
+        # Move to next cache (if exists)
+        self.cache_id = self.next_cache_id
+
+        # Return results
+        return (seq_group_metadata_list, scheduler_outputs,
+                allow_async_output_proc)
 
     def fork_seq(self, parent_seq: Sequence, child_seq: Sequence) -> None:
         self.block_manager.fork(parent_seq, child_seq)
@@ -1163,6 +1236,12 @@ class Scheduler:
     def free_seq(self, seq: Sequence) -> None:
         """Free a sequence from a block table."""
         self.block_manager.free(seq)
+
+    def _free_finished_seqs(self, seq_group: SequenceGroup) -> None:
+        """Free finished seqs in a sequence group."""
+        for seq in seq_group.get_seqs():
+            if seq.is_finished():
+                self.free_seq(seq)
 
     def free_finished_seq_groups(self) -> None:
         remaining: Deque[SequenceGroup] = deque()
@@ -1176,7 +1255,23 @@ class Scheduler:
                 self._finished_requests_ids.append(seq_group.request_id)
             else:
                 remaining.append(seq_group)
+
+            # Free finished seqs
+            self._free_finished_seqs(seq_group)
+
         self.running = remaining
+
+        # Handle async stopped sequence groups
+        # (ones that reached max model len)
+        if self._async_stopped:
+            for seq_group in self._async_stopped:
+                self._free_seq_group_cross_attn_blocks(seq_group)
+                self._finished_requests_ids.append(seq_group.request_id)
+
+                # Free finished seqs
+                self._free_finished_seqs(seq_group)
+
+            self._async_stopped.clear()
 
     def _allocate_and_set_running(self, seq_group: SequenceGroup) -> None:
         self.block_manager.allocate(seq_group)
