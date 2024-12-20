@@ -216,11 +216,33 @@ class Worker(LocalOrDistributedWorkerBase):
             num_gpu_blocks = 0
             num_cpu_blocks = 0
         else:
-            num_gpu_blocks = int(
-                (total_gpu_memory * self.cache_config.gpu_memory_utilization -
-                 peak_memory) // cache_block_size)
+            # if single_user_mode is set to True, we only allocate enough blocks
+            # for one sequence
+            if self.scheduler_config.single_user_mode:
+                num_gpu_blocks = (self.model_config.max_model_len +
+                                  self.cache_config.block_size - 1
+                                  ) // self.cache_config.block_size
+                max_possible_blocks = int(
+                    (total_gpu_memory *
+                     self.cache_config.gpu_memory_utilization -
+                     peak_memory) // cache_block_size)
+                num_gpu_blocks = min(num_gpu_blocks, max_possible_blocks)
+                if tp_rank == 0:
+                    logger.info(
+                        f"Single sequence mode: Allocating {num_gpu_blocks} "
+                        "blocks "
+                        f"({num_gpu_blocks * self.cache_config.block_size} "
+                        "tokens)")
+            else:
+                # Original logic for multi-sequence mode
+                num_gpu_blocks = int(
+                    (total_gpu_memory *
+                     self.cache_config.gpu_memory_utilization -
+                     peak_memory) // cache_block_size)
+
             num_cpu_blocks = int(self.cache_config.swap_space_bytes //
-                                 cache_block_size)
+                                cache_block_size)
+
         num_gpu_blocks = max(num_gpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
         if self.model_runner.lora_manager:

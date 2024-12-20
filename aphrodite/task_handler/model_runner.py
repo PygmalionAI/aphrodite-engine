@@ -1059,6 +1059,11 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         sampling_params = SamplingParams(top_p=0.99, top_k=self.vocab_size - 1)
         max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens
         max_num_seqs = self.scheduler_config.max_num_seqs
+
+        single_seq_mode = self.scheduler_config.single_user_mode
+        if single_seq_mode and rank == 0:
+            logger.info("Running in single sequence profiling mode")
+
         # This represents the maximum number of different requests
         # that will have unique loras, an therefore the max amount of memory
         # consumption create dummy lora request copies from the lora request
@@ -1078,10 +1083,13 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                     self.lora_manager.add_dummy_lora(dummy_lora_request,
                                                      rank=LORA_WARMUP_RANK)
                     dummy_lora_requests.append(dummy_lora_request)
-                dummy_lora_requests_per_seq = [
-                    dummy_lora_requests[idx % len(dummy_lora_requests)]
-                    for idx in range(max_num_seqs)
-                ]
+                if single_seq_mode:
+                    dummy_lora_requests_per_seq = [dummy_lora_requests[0]]
+                else:
+                    dummy_lora_requests_per_seq = [
+                        dummy_lora_requests[idx % len(dummy_lora_requests)]
+                        for idx in range(max_num_seqs)
+                    ]
 
         # Profile memory usage with max_num_sequences sequences and the total
         # number of tokens equal to max_num_batched_tokens.
@@ -1095,39 +1103,61 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
 
         max_mm_tokens = self.mm_registry.get_max_multimodal_tokens(
             self.model_config)
-        if max_mm_tokens > 0:
-            max_num_seqs_orig = max_num_seqs
-            max_num_seqs = min(max_num_seqs,
-                               max_num_batched_tokens // max_mm_tokens)
-            if max_num_seqs < 1:
-                expr = (f"min({max_num_seqs_orig}, "
+        if max_mm_tokens > 0 and not single_seq_mode:
+                max_num_seqs_orig = max_num_seqs
+                max_num_seqs = min(max_num_seqs,
+                                max_num_batched_tokens // max_mm_tokens)
+                if max_num_seqs < 1:
+                    expr = (f"min({max_num_seqs_orig}, "
                         f"{max_num_batched_tokens} // {max_mm_tokens})")
-                logger.warning(
-                    f"Computed max_num_seqs ({expr}) to be less than 1. "
-                    "Setting it to the minimum value of 1.")
-                max_num_seqs = 1
+                    logger.warning(
+                        f"Computed max_num_seqs ({expr}) to be less than 1. "
+                        "Setting it to the minimum value of 1.")
+                    max_num_seqs = 1
         batch_size = 0
-        for group_id in range(max_num_seqs):
-            seq_len = (max_num_batched_tokens // max_num_seqs +
-                       (group_id < max_num_batched_tokens % max_num_seqs))
-            batch_size += seq_len
-
+        if single_seq_mode:
+            seq_len = max_num_batched_tokens
+            batch_size = seq_len
+            
             seq_data, dummy_multi_modal_data = self.input_registry \
                 .dummy_data_for_profiling(self.model_config,
-                                          seq_len,
-                                          self.mm_registry)
+                                        seq_len,
+                                        self.mm_registry)
 
             seq = SequenceGroupMetadata(
-                request_id=str(group_id),
+                request_id="0",
                 is_prompt=True,
-                seq_data={group_id: seq_data},
+                seq_data={0: seq_data},
                 sampling_params=sampling_params,
                 block_tables=None,
-                lora_request=dummy_lora_requests_per_seq[group_id]
+                lora_request=dummy_lora_requests_per_seq[0]
                 if dummy_lora_requests_per_seq else None,
                 multi_modal_data=dummy_multi_modal_data,
             )
             seqs.append(seq)
+        else:
+            # Original multi-sequence profiling logic
+            for group_id in range(max_num_seqs):
+                seq_len = (max_num_batched_tokens // max_num_seqs +
+                        (group_id < max_num_batched_tokens % max_num_seqs))
+                batch_size += seq_len
+                
+                seq_data, dummy_multi_modal_data = self.input_registry \
+                    .dummy_data_for_profiling(self.model_config,
+                                            seq_len,
+                                            self.mm_registry)
+
+                seq = SequenceGroupMetadata(
+                    request_id=str(group_id),
+                    is_prompt=True,
+                    seq_data={group_id: seq_data},
+                    sampling_params=sampling_params,
+                    block_tables=None,
+                    lora_request=dummy_lora_requests_per_seq[group_id]
+                    if dummy_lora_requests_per_seq else None,
+                    multi_modal_data=dummy_multi_modal_data,
+                )
+                seqs.append(seq)
 
         # Run the model with the dummy inputs.
         num_layers = self.model_config.get_num_layers(self.parallel_config)

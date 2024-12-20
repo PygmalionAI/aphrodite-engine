@@ -10,6 +10,7 @@ from loguru import logger
 from typing_extensions import Annotated
 
 import aphrodite.common.envs as envs
+from aphrodite.common.config import SchedulerConfig
 
 _SAMPLING_EPS = 1e-5
 _MAX_TEMP = 1e-2
@@ -546,6 +547,15 @@ class SamplingParams(
             raise ValueError("top_p must be 1 when using greedy sampling.")
         if self.top_k != -1:
             raise ValueError("top_k must be -1 when using greedy sampling.")
+
+    def _verify_with_scheduler_config(
+            self, scheduler_config: "SchedulerConfig") -> None:
+        if scheduler_config.single_user_mode:
+            if self.n > 1:
+                raise ValueError("n must be 1 in single user mode.")
+            if self.use_beam_search:
+                raise ValueError(
+                    "beam search is not supported in single user mode.")
 
     def update_from_generation_config(
             self,

@@ -119,6 +119,7 @@ class EngineArgs:
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: int = 256
     num_scheduler_steps: int = 1
+    single_user_mode: bool = False
     # Speculative Decoding Options
     num_lookahead_slots: int = 0
     speculative_model: Optional[str] = None
@@ -641,6 +642,12 @@ class EngineArgs:
             help="Category: API Options\n"
             "maximum number of sequences per iteration",
         )
+        parser.add_argument('--single-user-mode',
+                            action='store_true',
+                            help='Category: API Options\n'
+                            'If True, we only allocate blocks for one sequence '
+                            'and use the maximum sequence length as the number '
+                            'of tokens.')
         parser.add_argument('--num-scheduler-steps',
                             type=int,
                             default=1,
@@ -1047,6 +1054,7 @@ class EngineArgs:
             max_num_batched_tokens=self.max_num_batched_tokens,
             max_num_seqs=self.max_num_seqs,
             max_model_len=model_config.max_model_len,
+            cache_config=cache_config,
             is_attention_free=model_config.is_attention_free(),
             use_v2_block_manager=self.use_v2_block_manager,
             num_lookahead_slots=num_lookahead_slots,
@@ -1057,6 +1065,7 @@ class EngineArgs:
             num_scheduler_steps=self.num_scheduler_steps,
             send_delta_data=(APHRODITE_USE_RAY_SPMD_WORKER and
                              parallel_config.use_ray),
+            single_user_mode=self.single_user_mode,
         )
 
         if not HAS_TRITON and self.enable_lora:
