@@ -420,6 +420,10 @@ class AphroditeEngine:
                 initialize_ray_cluster(engine_config.parallel_config)
                 from aphrodite.executor.ray_xpu_executor import RayXPUExecutor
                 executor_class = RayXPUExecutor
+            elif distributed_executor_backend == "mp":
+                logger.error(
+                    "Both start methods (spawn and fork) have issues "
+                    "on XPU if you use mp backend, Please try ray instead.")
             else:
                 from aphrodite.executor.xpu_executor import XPUExecutor
                 executor_class = XPUExecutor
