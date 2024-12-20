@@ -1049,6 +1049,7 @@ class AphroditeEngine:
 
         sampling_params.update_from_generation_config(
             self.generation_config_fields, seq.eos_token_id)
+        sampling_params._verify_with_scheduler_config(self.scheduler_config)
 
         # Create the sequence group.
         seq_group = SequenceGroup(
