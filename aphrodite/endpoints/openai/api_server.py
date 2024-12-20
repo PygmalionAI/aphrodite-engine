@@ -872,8 +872,12 @@ def build_app(args: Namespace) -> FastAPI:
             auth_header = request.headers.get("Authorization")
             api_key_header = request.headers.get("x-api-key")
 
-            if request.url.path.startswith(("/v1/lora", "/v1/soft_prompt")):
-                if admin_key is not None and api_key_header == admin_key:
+            if request.url.path.startswith(
+                ("/v1/lora", "/v1/soft_prompt", "/v1/model")):
+                if admin_key is not None and (
+                    api_key_header == admin_key or 
+                    auth_header == "Bearer " + admin_key
+                ):
                     return await call_next(request)
                 return JSONResponse(content={"error": "Unauthorized"},
                                     status_code=401)
