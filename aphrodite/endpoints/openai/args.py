@@ -151,6 +151,11 @@ def make_arg_parser(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
         action="store_true",
         help="If specified, will run the OpenAI frontend server in the same "
         "process as the model serving engine.")
+    parser.add_argument(
+        "--allow-inline-model-loading",
+        action="store_true",
+        help="If specified, will allow the model to be switched inline "
+        "in the same process as the OpenAI frontend server.")
 
     parser = AsyncEngineArgs.add_cli_args(parser)
     return parser
