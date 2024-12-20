@@ -215,9 +215,12 @@ async def _maybe_switch_model(
     
     if not model_is_loaded:
         return None
-        
-    if request_model in served_model_names:
-        return None
+
+    models = await openai_serving_completion.show_available_models()
+
+    for model in models.data:
+        if request_model in (model.id, model.root):
+            return None
 
     if not app_state.args.allow_inline_model_loading:
         return JSONResponse(
