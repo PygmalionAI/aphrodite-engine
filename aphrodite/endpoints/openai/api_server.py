@@ -57,6 +57,7 @@ from aphrodite.endpoints.openai.serving_tokenization import (
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
 from aphrodite.engine.protocol import AsyncEngineClient
+from aphrodite.modeling.model_loader.weight_utils import get_model_config_yaml
 from aphrodite.server import serve_http
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.version import __version__ as APHRODITE_VERSION
@@ -266,21 +267,36 @@ async def _maybe_switch_model(
                 status_code=401
             )  # type: ignore
     
-    # Need to switch models
     logger.info(f"Switching from {served_model_names[0]} to {request_model}")
-
+    
     try:
         args = app_state.args
         if not args.disable_frontend_multiprocessing:
             await async_engine_client.kill()
         else:
             await async_engine_client.shutdown_background_loop()
-
+            
         model_is_loaded = False
 
-        engine_args = AsyncEngineArgs(model=request_model)
+        yaml_config = get_model_config_yaml(request_model, args.download_dir)
 
-        if args.disable_frontend_multiprocessing:
+        if yaml_config:
+            parser = FlexibleArgumentParser()
+            parser = make_arg_parser(parser)
+            engine_args = parser.parse_args([])  # empty args
+
+            for key, value in yaml_config.items():
+                if hasattr(engine_args, key):
+                    setattr(engine_args, key, value)
+
+            engine_args.model = request_model
+            engine_args = AsyncEngineArgs.from_cli_args(engine_args)
+        else:
+            # Fallback to minimal config
+            engine_args = AsyncEngineArgs(model=request_model)
+        
+        if (model_is_embedding(engine_args.model, engine_args.trust_remote_code)
+                or args.disable_frontend_multiprocessing):
             async_engine_client = AsyncAphrodite.from_engine_args(engine_args)
             await async_engine_client.setup()
         else:
