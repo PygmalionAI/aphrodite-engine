@@ -73,6 +73,9 @@ async def test_multi_step(
         "--num-scheduler-steps",
         f"{num_scheduler_steps}",
     ]
+    # Disable output proc callback as its not supported
+    # with multi-step right now
+    ms_server_args += ["--disable-async-output-proc"]
     if eager_mode:
         ms_server_args.append("--enforce-eager")
     distributed_args = [

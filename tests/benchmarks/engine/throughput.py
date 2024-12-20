@@ -91,6 +91,7 @@ def run_aphrodite(
     speculative_model: Optional[str] = None,
     num_speculative_tokens: Optional[int] = None,
     use_v2_block_manager: bool = False,
+    disable_async_output_proc: bool = False,
 ) -> float:
     from aphrodite import LLM, SamplingParams
     llm = LLM(
@@ -120,6 +121,7 @@ def run_aphrodite(
         speculative_model=speculative_model,
         num_speculative_tokens=num_speculative_tokens,
         use_v2_block_manager=use_v2_block_manager,
+        disable_async_output_proc=disable_async_output_proc,
     )
 
     # Add the requests to the engine.
@@ -249,7 +251,8 @@ def main(args: argparse.Namespace):
             args.max_num_batched_tokens, args.distributed_executor_backend,
             args.gpu_memory_utilization, args.download_dir, args.load_format,
             args.max_num_seqs, args.num_scheduler_steps, args.speculative_model,
-            args.num_speculative_tokens, args.use_v2_block_manager)
+            args.num_speculative_tokens, args.use_v2_block_manager,
+            args.disable_async_output_proc)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -456,6 +459,11 @@ if __name__ == "__main__":
         '--use-v2-block-manager',
         action='store_true',
         help='use v2 block manager for spec decode.')
+    parser.add_argument(
+        "--disable-async-output-proc",
+        action='store_true',
+        default=False,
+        help="Disable async output processor for Aphrodite backend.")
     args = parser.parse_args()
     if args.tokenizer is None:
         args.tokenizer = args.model

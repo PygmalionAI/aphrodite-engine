@@ -5,15 +5,14 @@ from abc import ABC, abstractmethod
 from array import array
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import (TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple,
-                    Union, cast)
+from typing import (TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set,
+                    Tuple, Union, cast)
 
 import msgspec
 import torch
 
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.inputs.parse import is_valid_encoder_decoder_llm_inputs
 from aphrodite.lora.request import LoRARequest
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
@@ -21,9 +20,14 @@ from aphrodite.spec_decode.metrics import SpecDecodeWorkerMetrics
 
 if TYPE_CHECKING:
     from aphrodite.inputs import LLMInputs
-    from aphrodite.multimodal import MultiModalDataDict
+    from aphrodite.multimodal.base import MultiModalDataDict
+
+APHRODITE_TOKEN_ID_ARRAY_TYPE = "l"
 
 
+# We use dataclass for now because it is used for
+# openai server output, and msgspec is not serializable.
+# TODO: Fix it.
 @dataclass
 class Logprob:
     """Infos for supporting OpenAI compatible logprobs and token ranks.
@@ -104,21 +108,22 @@ class RequestMetrics:
 
 
 class SequenceDataDelta(
-    msgspec.Struct,
-    array_like=True,
-    omit_defaults=True):
+        msgspec.Struct,
+        array_like=True,  # type: ignore[call-arg]
+        omit_defaults=True):  # type: ignore[call-arg]
     """Delta SequenceData to send to workers per step."""
-    # a new token to be appended to existing SequenceData
+    # A new token to be appended to existing SequenceData.
     new_output_token_ids: List[int]
-    # overwriting existing `cumulative_logprob`
+    # Overwriting existing `cumulative_logprob`
     new_cumulative_logprob: float
-    # overwriting existing `num_computed_tokens`
+    # Overwriting existing `num_computed_tokens`.
     new_num_computed_tokens: int
-    # overwriting existing `stage`
+    # Overwriting existing `stage`.
     new_stage: SequenceStage
 
+
 class SequenceData(msgspec.Struct,
-                   omit_defaults=True):
+                   omit_defaults=True):  # type: ignore[call-arg]
     """Data associated with a sequence.
 
     Args:
@@ -131,20 +136,23 @@ class SequenceData(msgspec.Struct,
         output_token_ids: The token IDs of the output.
         cumulative_logprob: The cumulative log probability of the output.
     """
-
-    # NOTE: we can't use Union[List, array] because msgspec can't support
-    # union of 2 list types
+    # NOTE: we cannot use Union[List, array] because msgspec cannot support
+    # union of 2 list types.
     _prompt_token_ids: array
     _output_token_ids: array = msgspec.field(
         default_factory=lambda: array(APHRODITE_TOKEN_ID_ARRAY_TYPE, []))
 
+    ### The below fields should not be passed as an argument ###
     _cumulative_logprob: float = 0.0
-    _prompt_token_ids_tuple: Tuple[int, ...] = msgspec.field(
-        default_factory=tuple)
+    _prompt_token_ids_tuple: Tuple[int,
+                                   ...] = msgspec.field(default_factory=tuple)
+    # The number of tokens that are computed (that run against the model).
     _num_computed_tokens: int = 0
     _stage: SequenceStage = SequenceStage.PREFILL
     _cached_all_token_ids: List[int] = msgspec.field(default_factory=list)
 
+    # It is used to get delta input. It is reset when `get_delta_and_reset`
+    # is called.
     _new_appended_tokens: List[int] = msgspec.field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -156,7 +164,7 @@ class SequenceData(msgspec.Struct,
 
     def _update_cached_all_tokens(self):
         assert isinstance(self._prompt_token_ids, array)
-        assert isinstance(self._prompt_token_ids, array)
+        assert isinstance(self._output_token_ids, array)
         self._cached_all_token_ids: List[int] = list(self._prompt_token_ids +
                                                      self._output_token_ids)
 
@@ -175,10 +183,9 @@ class SequenceData(msgspec.Struct,
     @property
     def prompt_token_ids_array(self) -> array:
         """Return the prompt token ids in array type.
-        
-        Note that the array is in "I" type, and it's not
-        compatible with torch.long (2 bytes vs 4 bytes).
-        Beware!
+
+        Note that the array is in "I" type, and it is not compatible
+        with torch.long (2 bytes vs 4 bytes). So beware of the usage.
         """
         return self._prompt_token_ids
 
@@ -194,11 +201,10 @@ class SequenceData(msgspec.Struct,
 
     @property
     def output_token_ids_array(self) -> array:
-        """Return the output token ids in array type.
-        
-        Note that the array is in "I" type, and it's not
-        compatible with torch.long (2 bytes vs 4 bytes).
-        Beware!
+        """Return the prompt token ids in array type.
+
+        Note that the array is in "I" type, and it is not compatible
+        with torch.long (2 bytes vs 4 bytes). So beware of the usage.
         """
         assert isinstance(self._output_token_ids, array)
         return self._output_token_ids
@@ -275,8 +281,8 @@ class SequenceData(msgspec.Struct,
     def get_delta_and_reset(self) -> SequenceDataDelta:
         delta = SequenceDataDelta(self._new_appended_tokens,
                                   self._cumulative_logprob,
-                                  self.get_num_computed_tokens(),
-                                  self.stage)
+                                  self.get_num_computed_tokens(), self.stage)
+        # Reset delta state.
         self._new_appended_tokens = []
         return delta
 
@@ -301,13 +307,16 @@ class SequenceData(msgspec.Struct,
 
 class Sequence:
     """Stores the data, status, and block information of a sequence.
+
     The sequence is constructed from the LLMInputs instance passed
     in through the `inputs` constructor argument.
+
     For encoder/decoder models, LLMInputs encapsulates both a
     decoder and encoder prompt, creating an ambiguity about which
     prompt to construct the sequence from. The `from_decoder_prompt`
     constructor argument signals whether to construct the Sequence
     from the LLMInputs decoder prompt, or encoder prompt.
+
     Args:
         seq_id: The ID of the sequence.
         inputs: The inputs of the sequence.
@@ -319,6 +328,7 @@ class Sequence:
         from_decoder_prompt: Construct Sequence from LLMInputs decoder prompt
                              (True) or encoder prompt (False.) Must be True
                              for decoder-only model.
+
     """
 
     def __init__(
@@ -369,8 +379,7 @@ class Sequence:
                              "encoder input prompt fields?")
 
         self.data = SequenceData(
-            array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
-            self.prompt_token_ids))
+            array(APHRODITE_TOKEN_ID_ARRAY_TYPE, self.prompt_token_ids))
         self.output_logprobs: SampleLogprobs = []
         self.output_text = ""
 
@@ -420,8 +429,8 @@ class Sequence:
         return self._prompt_token_ids
 
     @property
-    def multi_modal_data(self) -> Optional["MultiModalDataDict"]:
-        return self.inputs.get("multi_modal_data")
+    def multi_modal_data(self) -> "MultiModalDataDict":
+        return self.inputs.get("multi_modal_data") or {}
 
     @property
     def lora_int_id(self) -> int:
@@ -455,11 +464,8 @@ class Sequence:
         """Reset the sequence states for recomputation."""
         self.data.reset_state_for_recompute()
 
-    def append_token_id(
-        self,
-        token_id: int,
-        logprobs: Dict[int, Logprob],
-    ) -> None:
+    def append_token_id(self, token_id: int, logprobs: Dict[int,
+                                                            Logprob]) -> None:
         assert token_id in logprobs
         self.output_logprobs.append(logprobs)
         self.data.append_token_id(token_id, logprobs[token_id].logprob)
@@ -535,8 +541,8 @@ class Sequence:
                 f"num_blocks={self.n_blocks}, ")
 
 
-class SequenceGroupState(
-    msgspec.Struct, omit_defaults=True):
+class SequenceGroupState(msgspec.Struct,
+                         omit_defaults=True):  # type: ignore[call-arg]
     """Mutable state tied to a specific sequence group"""
 
     # for multi-step decoding
@@ -563,7 +569,7 @@ class SequenceGroup:
             for an embedding model.
         encoder_seq: Optional, the single encoder sequence. Should be None
                      unless you are working with an encoder/decoder model.
-        prompt_adapter_request: Prompt adapter request.
+        prompt_adapter_request: Prompt Adapter request.
     """
 
     def __init__(
@@ -582,6 +588,7 @@ class SequenceGroup:
         self.seqs = seqs
         self.is_single_seq = len(seqs) == 1
         self.seqs_dict = {seq.seq_id: seq for seq in seqs}
+
         self.sampling_params = sampling_params
         self.metrics = RequestMetrics(arrival_time=arrival_time,
                                       last_token_time=arrival_time,
@@ -711,7 +718,7 @@ class SequenceGroup:
     ) -> List[Sequence]:
         if status is None:
             return self.seqs
-        
+
         if self.is_single_seq:
             return self.seqs if self.seqs[0].status == status else []
 
@@ -753,7 +760,7 @@ class SequenceGroup:
         # filter by states.
         if status is None:
             return len(self.seqs)
-        
+
         if self.is_single_seq:
             return 1 if self.seqs[0].status == status else 0
 
@@ -804,13 +811,13 @@ class SequenceGroup:
 
 
 class SequenceGroupMetadataDelta(
-    msgspec.Struct,
-    tag=True,
-    array_like=True,
-    omit_defaults=True):
+        msgspec.Struct,
+        tag=True,  # type: ignore[call-arg]
+        array_like=True,  # type: ignore[call-arg]
+        omit_defaults=True):  # type: ignore[call-arg]
     """Delta of SequenceGroupMetadata.
-    
-    After sending the first SequenceGroupMetadata, Aphrodite scheduler
+
+    After sending the first SequenceGroupMetadata, vLLM scheduler
     only sends delta to reduce the data payload size.
     """
     seq_data_delta: Dict[int, SequenceDataDelta]
@@ -825,11 +832,10 @@ class SequenceGroupMetadataDelta(
 
 
 class SequenceGroupMetadata(
-    msgspec.Struct,
-    tag=True,
-    array_like=True,
-    omit_defaults=True
-):
+        msgspec.Struct,
+        tag=True,  # type: ignore[call-arg]
+        array_like=True,  # type: ignore[call-arg]
+        omit_defaults=True):  # type: ignore[call-arg]
     """Metadata for a sequence group. Used to create `AttentionMetadata`.
 
     Args:
@@ -845,9 +851,9 @@ class SequenceGroupMetadata(
         token_chunk_size: The number of tokens to be processed (per sequence).
             None if chunking is not required.
         lora_request: LoRA request.
-        state: Internal state tied to this sequence group.
         computed_block_nums: The block numbers that are already computed,
             used in prefix caching.
+        state: Internal state tied to this sequence group.
         multi_modal_data: Multi modal data.
         encoder_seq_data: Optional sequence data for encoder prompt
                           (SequenceGroup.encoder_seq). Should be None 
@@ -861,52 +867,6 @@ class SequenceGroupMetadata(
         prompt_adapter_request: Prompt Adapter request.
     """
 
-    # def __init__(
-    #     self,
-    #     request_id: str,
-    #     is_prompt: bool,
-    #     seq_data: Dict[int, SequenceData],
-    #     sampling_params: SamplingParams,
-    #     block_tables: Dict[int, List[int]],
-    #     do_sample: bool = True,
-    #     pooling_params: Optional[PoolingParams] = None,
-    #     token_chunk_size: Optional[int] = None,
-    #     lora_request: Optional[LoRARequest] = None,
-    #     computed_block_nums: Optional[List[int]] = None,
-    #     state: Optional[SequenceGroupState] = None,
-    #     multi_modal_data: Optional["MultiModalDataDict"] = None,
-    #     encoder_seq_data: Optional[SequenceData] = None,
-    #     cross_block_table: Optional[List[int]] = None,
-    #     prompt_adapter_request: Optional[PromptAdapterRequest] = None,
-    # ) -> None:
-    #     self.request_id = request_id
-    #     self.is_prompt = is_prompt
-    #     self.seq_data = seq_data
-    #     self.sampling_params = sampling_params
-    #     self.block_tables = block_tables
-    #     self.pooling_params = pooling_params
-    #     self.lora_request = lora_request
-    #     self.prompt_adapter_request = prompt_adapter_request
-    #     self.computed_block_nums = computed_block_nums
-    #     self.multi_modal_data = multi_modal_data
-    #     self.state = SequenceGroupState() if state is None else state
-    #     self.encoder_seq_data = encoder_seq_data
-    #     self.cross_block_table = cross_block_table
-    #     self._token_chunk_size = token_chunk_size
-    #     self.do_sample = do_sample
-
-    #     # The number of speculative tokens adopted in this request.
-    #     # None means specuative decoding is not used.
-    #     # Zero means speculative decoding is disabled for some reasons.
-    #     # TODO: We should maintain this states out of the sequence group.
-    #     self.num_speculative_tokens = None
-
-    #     if seq_data is not None and self._token_chunk_size is None:
-    #         if is_prompt:
-    #             self._token_chunk_size = next(iter(
-    #                 seq_data.values())).get_len()
-    #         else:
-    #             self._token_chunk_size = 1
     request_id: str
     is_prompt: bool
     seq_data: Dict[int, SequenceData]
@@ -918,13 +878,15 @@ class SequenceGroupMetadata(
     computed_block_nums: Optional[List[int]] = None
     state: Optional[SequenceGroupState] = msgspec.field(
         default_factory=lambda: SequenceGroupState())
+    # "MultiModalDataDict" types. We have to use Any due to msgspec
+    # doesn't allow to have union of 2 different dicts.
     multi_modal_data: Optional[Any] = None
     encoder_seq_data: Optional[SequenceData] = None
     cross_block_table: Optional[List[int]] = None
     prompt_adapter_request: Optional[PromptAdapterRequest] = None
     token_chunk_size: Optional[int] = None
 
-    # Stateful fields that are lazily defined.
+    ### Stateful fields that are lazily defined. ###
     # The number of speculative tokens adopted in this request.
     # None means specuative decoding is not used.
     # Zero means speculative decoding is disabled for some reasons.
@@ -938,7 +900,6 @@ class SequenceGroupMetadata(
                     self.seq_data.values())).get_len()
             else:
                 self.token_chunk_size = 1
-
 
     @property
     def lora_int_id(self) -> int:
@@ -971,9 +932,9 @@ class SequenceGroupMetadata(
 
 
 class SequenceOutput(
-    msgspec.Struct,
-    omit_defaults=True,
-    array_like=True):
+        msgspec.Struct,
+        omit_defaults=True,  # type: ignore[call-arg]
+        array_like=True):  # type: ignore[call-arg]
     """The model output associated with a sequence.
 
     Args:
@@ -983,7 +944,6 @@ class SequenceOutput(
         logprobs: The logprobs of the output token.
             (Token id -> logP(x_i+1 | x_0, ..., x_i))
     """
-
     parent_seq_id: int
     output_token: int
     logprobs: Dict[int, Logprob]
@@ -1015,13 +975,13 @@ class SequenceGroupOutput(ABC):
 
 
 class CompletionSequenceGroupOutput(
-    msgspec.Struct,
-    omit_defaults=True,
-    array_like=True):
-    """The model output associated with a completion sequence group."""
+        msgspec.Struct,
+        omit_defaults=True,  # type: ignore[call-arg]
+        array_like=True):  # type: ignore[call-arg]
     __metaclass__ = SequenceGroupOutput
-
+    """The model output associated with a completion sequence group."""
     samples: List[SequenceOutput]
+    # Prompt logprob for each prompt query token.
     prompt_logprobs: Optional[PromptLogprobs]
 
     def __repr__(self) -> str:
@@ -1036,11 +996,11 @@ class CompletionSequenceGroupOutput(
 
 
 class EmbeddingSequenceGroupOutput(
-    msgspec.Struct,
-    omit_defaults=True,
-    array_like=True):
+        msgspec.Struct,
+        omit_defaults=True,  # type: ignore[call-arg]
+        array_like=True,  # type: ignore[call-arg]
+):
     """The model output associated with an embedding sequence group."""
-
     __metaclass__ = SequenceGroupOutput
     embeddings: List[int]
 
@@ -1055,9 +1015,9 @@ class EmbeddingSequenceGroupOutput(
 
 
 class IntermediateTensors(
-    msgspec.Struct,
-    omit_defaults=True,
-    array_like=True):
+        msgspec.Struct,
+        omit_defaults=True,  # type: ignore[call-arg]
+        array_like=True):  # type: ignore[call-arg]
     """For all pipeline stages except the last, we need to return the hidden
     states and residuals to be sent to the next stage. This data structure
     contains the hidden states and residuals for a request.
@@ -1085,9 +1045,9 @@ class IntermediateTensors(
 
 
 class SamplerOutput(
-    msgspec.Struct,
-    omit_defaults=True,
-    array_like=True):
+        msgspec.Struct,
+        omit_defaults=True,  # type: ignore[call-arg]
+        array_like=True):  # type: ignore[call-arg]
     """For each sequence group, we generate a list of SequenceOutput object,
     each of which contains one possible candidate for the next token.
 
@@ -1106,12 +1066,12 @@ class SamplerOutput(
     # On-device tensor containing the sampled token ids.
     sampled_token_ids: Optional[torch.Tensor] = None
     # CPU tensor containing the sampled token ids. Used during multi-step to
-    # return the sampled token ids from last rank to AsyncAphrodite to be
+    # return the sampled token ids from last rank to AsyncLLMEngine to be
     # 'broadcasted' to all other PP ranks for next step.
     sampled_token_ids_cpu: Optional[torch.Tensor] = None
 
     # Spec decode metrics populated by workers.
-    spec_decode_worker_metrics: Optional["SpecDecodeWorkerMetrics"] = None
+    spec_decode_worker_metrics: Optional[SpecDecodeWorkerMetrics] = None
 
     # Optional last hidden states from the model.
     hidden_states: Optional[torch.Tensor] = None
@@ -1151,13 +1111,13 @@ class SamplerOutput(
 
 
 class PoolerOutput(
-    msgspec.Struct,
-    omit_defaults=True,
-    array_like=True):
+        msgspec.Struct,
+        omit_defaults=True,  # type: ignore[call-arg]
+        array_like=True):  # type: ignore[call-arg]
     """The output from a pooling operation in the embedding model."""
     outputs: List[EmbeddingSequenceGroupOutput]
 
-    spec_decode_worker_metrics: Optional["SpecDecodeWorkerMetrics"] = None
+    spec_decode_worker_metrics: Optional[SpecDecodeWorkerMetrics] = None
 
     def __getitem__(self, idx: int):
         return self.outputs[idx]
@@ -1201,6 +1161,7 @@ class HiddenStates(msgspec.Struct, array_like=True,
     """Hidden states corresponding to in-progress sequences.
     Used in speculative decoding to pass hidden states from
     the target model to the proposer model.
+
     seq_ids are the sequence ids of each entry of the batch
     dimension of the hidden_states tensor"""
     # Scorer hidden states. For prefill step, it is used for hidden states of
@@ -1213,6 +1174,7 @@ class HiddenStates(msgspec.Struct, array_like=True,
     # last proposed token is accepted (i.e., in case of bonus tokens). For the
     # case of no bonus tokens, these are ignored.
     second_last_token_hidden_states: Optional[torch.Tensor] = None
+
     _seq_ids: List[int] = msgspec.field(default_factory=list)
 
     def __post_init__(self):
@@ -1268,21 +1230,22 @@ class HiddenStates(msgspec.Struct, array_like=True,
         if self.second_last_token_hidden_states is None \
             or not seq_with_bonus_token_in_last_step:
             return
+
         index = []
         for seq_id in self._seq_ids:
             i = self._seq_ids.index(seq_id)
             if seq_id in seq_with_bonus_token_in_last_step:
                 index.append(i + len(self._seq_ids))
             index.append(i)
+
         self.hidden_states = torch.cat(
             [self.hidden_states, self.second_last_token_hidden_states])[index]
 
 
 class ExecuteModelRequest(
-    msgspec.Struct,
-    omit_defaults=True,
-    array_like=True
-):
+        msgspec.Struct,
+        array_like=True,  # type: ignore[call-arg]
+        omit_defaults=True):  # type: ignore[call-arg]
     """The model execution request, containing CPU metadata only. The LLM
     engine should create an instance of this class for each request batch."""
     # The sequence group metadata list.
@@ -1310,6 +1273,8 @@ class ExecuteModelRequest(
     finished_requests_ids: List[str] = msgspec.field(default_factory=list)
     # The last sampled token ids for multi step decoding.
     last_sampled_token_ids: Optional[torch.Tensor] = None
+    # Async postprocessor
+    output_proc_callback_fn: Optional[Callable] = None
 
     @property
     def is_first_multi_step(self) -> bool:
@@ -1355,4 +1320,5 @@ class ExecuteModelRequest(
             num_steps=self.num_steps,
             finished_requests_ids=self.finished_requests_ids,
             last_sampled_token_ids=self.last_sampled_token_ids.clone()
-            if self.last_sampled_token_ids is not None else None)
+            if self.last_sampled_token_ids is not None else None,
+            output_proc_callback_fn=self.output_proc_callback_fn)

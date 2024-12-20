@@ -90,6 +90,9 @@ def test_models(
 # NOTE: Increasing this in this suite will fail CI because we currently cannot
 # reset distributed env properly. Use a value > 1 just when you test.
 @pytest.mark.parametrize("tensor_parallel_size", [1])
+# Due to low-precision numerical divergence, this test is too sensitive to
+# the async postprocessor
+@pytest.mark.parametrize("disable_async_output_proc", [True])
 def test_models_with_fp8_kv_cache(
     aphrodite_runner,
     example_prompts,
@@ -99,6 +102,7 @@ def test_models_with_fp8_kv_cache(
     chunked_prefill_token_size: int,
     enforce_eager: bool,
     tensor_parallel_size: int,
+    disable_async_output_proc: bool,
 ) -> None:
     """
     Only checks log probs match between chunked-prefill and
@@ -128,6 +132,7 @@ def test_models_with_fp8_kv_cache(
             enforce_eager=enforce_eager,
             max_num_seqs=max_num_seqs,
             kv_cache_dtype=kv_cache_dtype,
+            disable_async_output_proc=disable_async_output_proc,
             **extra_kwargs,
     ) as aphrodite_model:
         no_chunked_prefill_outputs = aphrodite_model.generate_greedy_logprobs(
@@ -141,6 +146,7 @@ def test_models_with_fp8_kv_cache(
             enforce_eager=enforce_eager,
             max_num_seqs=max_num_seqs,
             kv_cache_dtype=kv_cache_dtype,
+            disable_async_output_proc=disable_async_output_proc,
             **extra_kwargs,
     ) as aphrodite_model:
         chunked_prefill_outputs = aphrodite_model.generate_greedy_logprobs(
