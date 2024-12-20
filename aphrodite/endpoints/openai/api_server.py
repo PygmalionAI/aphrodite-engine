@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import importlib
 import inspect
 import json
@@ -204,6 +205,101 @@ async def build_async_engine_client(
             from prometheus_client import multiprocess
             multiprocess.mark_process_dead(rpc_server_process.pid)
 
+
+async def _maybe_switch_model(
+        request_model: str, app_state) -> Optional[ErrorResponse]:
+    """Switch to requested model if different from currently loaded one."""
+    global model_is_loaded, async_engine_client, engine_args, served_model_names
+
+    if not model_is_loaded:
+        return None
+
+    if request_model in served_model_names:
+        return None
+
+    # Need to switch models
+    logger.info(f"Switching from {served_model_names[0]} to {request_model}")
+
+    try:
+        # Unload current model
+        args = app_state.args
+        if not args.disable_frontend_multiprocessing:
+            await async_engine_client.kill()
+        else:
+            await async_engine_client.shutdown_background_loop()
+
+        model_is_loaded = False
+
+        # Create AsyncEngineArgs with minimal config
+        engine_args = AsyncEngineArgs(
+            model=request_model,
+            tokenizer=request_model,
+            tokenizer_mode="auto",
+            trust_remote_code=True,
+            max_model_len=8192,  # Default value
+            dtype="auto",
+            seed=0,
+        )
+
+        # Use the same frontend multiprocessing setting as the original instance
+        if args.disable_frontend_multiprocessing:
+            async_engine_client = AsyncAphrodite.from_engine_args(engine_args)
+            await async_engine_client.setup()
+        else:
+            # Initialize multiprocessing setup
+            if "PROMETHEUS_MULTIPROC_DIR" not in os.environ:
+                global prometheus_multiproc_dir
+                prometheus_multiproc_dir = tempfile.TemporaryDirectory()
+                os.environ[
+                    "PROMETHEUS_MULTIPROC_DIR"] = prometheus_multiproc_dir.name
+
+            rpc_path = get_open_zmq_ipc_path()
+            logger.info(
+                f"Multiprocessing frontend to use {rpc_path} for RPC Path.")
+
+            rpc_client = AsyncEngineRPCClient(rpc_path)
+            async_engine_client = rpc_client
+
+            context = multiprocessing.get_context("spawn")
+            rpc_server_process = context.Process(
+                target=run_rpc_server,
+                args=(engine_args, rpc_path))
+            rpc_server_process.start()
+            logger.info(
+                f"Started engine process with PID {rpc_server_process.pid}")
+
+            while True:
+                try:
+                    await async_engine_client.setup()
+                    break
+                except TimeoutError as e:
+                    if not rpc_server_process.is_alive():
+                        raise RuntimeError(
+                            "RPC Server died before responding to "
+                            "readiness probe") from e
+
+        # Create new args with updated model but preserving other settings
+        new_args = copy.deepcopy(args)
+        new_args.model = request_model
+
+        app = await init_app(async_engine_client, new_args)  # noqa: F841
+        served_model_names = [request_model]  # Update served model names
+        model_is_loaded = True
+        return None
+
+    except Exception as e:
+        error_msg = f"Error while switching models: {str(e)}"
+        logger.error(error_msg)
+        return JSONResponse(
+            content={
+                "error": {
+                    "message": error_msg,
+                    "type": "invalid_request_error",
+                    "code": "model_load_error"
+                }
+            },
+            status_code=500
+        )  # type: ignore
 
 def mount_metrics(app: FastAPI):
     # Lazy import for prometheus multiprocessing.
@@ -456,14 +552,10 @@ async def serviceinfo():
 @router.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,
                                  raw_request: Request):
-    if not model_is_loaded:
-        return JSONResponse(
-            content={
-                "status": "error",
-                "message": "No model loaded."
-            },
-            status_code=500
-        )
+    error_check_ret = await _maybe_switch_model(
+        request.model, raw_request.app.state)
+    if error_check_ret is not None:
+        return error_check_ret
     generator = await openai_serving_chat.create_chat_completion(
         request, raw_request)
     if isinstance(generator, ErrorResponse):
@@ -479,14 +571,10 @@ async def create_chat_completion(request: ChatCompletionRequest,
 
 @router.post("/v1/completions")
 async def create_completion(request: CompletionRequest, raw_request: Request):
-    if not model_is_loaded:
-        return JSONResponse(
-            content={
-                "status": "error",
-                "message": "No model loaded."
-            },
-            status_code=500
-        )
+    error_check_ret = await _maybe_switch_model(
+        request.model, raw_request.app.state)
+    if error_check_ret is not None:
+        return error_check_ret
     generator = await openai_serving_completion.create_completion(
         request, raw_request)
     if isinstance(generator, ErrorResponse):
