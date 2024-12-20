@@ -1094,6 +1094,8 @@ class SchedulerConfig:
             workers instead of an entire data. It should be enabled only
             when SPMD worker architecture is enabled. I.e.,
             APHRODITE_USE_RAY_SPMD_WORKER=1
+        single_user_mode: If True, we only allocate blocks for one sequence
+            and use the maximum sequence length as the number of tokens.
     """
 
     def __init__(self,
@@ -1108,7 +1110,8 @@ class SchedulerConfig:
                  embedding_mode: Optional[bool] = False,
                  preemption_mode: Optional[str] = None,
                  num_scheduler_steps: int = 1,
-                 send_delta_data: bool = False) -> None:
+                 send_delta_data: bool = False,
+                 single_user_mode: bool = False) -> None:
         if max_num_batched_tokens is not None:
             self.max_num_batched_tokens = max_num_batched_tokens
         else:
@@ -1130,6 +1133,8 @@ class SchedulerConfig:
             logger.info(
                 "Chunked prefill is enabled with "
                 f"max_num_batched_tokens={self.max_num_batched_tokens}.")
+        if single_user_mode:
+            max_num_seqs = 1
 
         self.max_num_seqs = max_num_seqs
         self.max_model_len = max_model_len
@@ -1142,7 +1147,7 @@ class SchedulerConfig:
         self.preemption_mode = preemption_mode
         self.num_scheduler_steps = num_scheduler_steps
         self.send_delta_data = send_delta_data
-
+        self.single_user_mode = single_user_mode
         self._verify_args()
 
     def _verify_args(self) -> None:
