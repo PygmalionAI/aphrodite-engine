@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     APHRODITE_ALLOW_ENGINE_USE_RAY: bool = False
     APHRODITE_PLUGINS: Optional[List[str]] = None
     APHRODITE_RPC_GET_DATA_TIMEOUT_MS: int = 5000
+    APHRODITE_FORCE_SINGLE_USER_PREFIX_CACHE: bool = False
 
 
 def get_default_cache_root():
@@ -381,6 +382,11 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     "APHRODITE_PLUGINS":
     lambda: None if "APHRODITE_PLUGINS" not in os.environ else os.environ[
         "APHRODITE_PLUGINS"].split(","),
+
+    # If set, forces prefix cache in single user mode
+    "APHRODITE_FORCE_SINGLE_USER_PREFIX_CACHE":
+    lambda: bool(int(os.getenv("APHRODITE_FORCE_SINGLE_USER_PREFIX_CACHE",
+                               "0"))),
 }
 
 # end-env-vars-definition

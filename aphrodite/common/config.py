@@ -1102,6 +1102,7 @@ class SchedulerConfig:
                  max_num_batched_tokens: Optional[int],
                  max_num_seqs: int,
                  max_model_len: int,
+                 cache_config: Optional["CacheConfig"] = None,
                  is_attention_free: bool = False,
                  use_v2_block_manager: bool = False,
                  num_lookahead_slots: int = 0,
@@ -1135,9 +1136,23 @@ class SchedulerConfig:
                 f"max_num_batched_tokens={self.max_num_batched_tokens}.")
         if single_user_mode:
             max_num_seqs = 1
+            if cache_config.enable_prefix_caching:
+                if not envs.APHRODITE_FORCE_SINGLE_USER_PREFIX_CACHE:
+                    logger.warning(
+                        "Chunked prefill is not supported in single user mode, "
+                        "this is not recommended and may lead to memory "
+                        "issues. Set APHRODITE_FORCE_SINGLE_USER_PREFIX_CACHE=1"
+                        " to force prefix caching.")
+                    cache_config.enable_prefix_caching = False
+                else:
+                    logger.warning(
+                        "Chunked prefill is enabled in single user mode, "
+                        "this is not recommended and may lead to memory "
+                        "issues.")
 
         self.max_num_seqs = max_num_seqs
         self.max_model_len = max_model_len
+        self.cache_config = cache_config
         self.is_attention_free = is_attention_free
         self.use_v2_block_manager = use_v2_block_manager
         self.num_lookahead_slots = num_lookahead_slots

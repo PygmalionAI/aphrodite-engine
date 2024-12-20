@@ -1054,6 +1054,7 @@ class EngineArgs:
             max_num_batched_tokens=self.max_num_batched_tokens,
             max_num_seqs=self.max_num_seqs,
             max_model_len=model_config.max_model_len,
+            cache_config=cache_config,
             is_attention_free=model_config.is_attention_free(),
             use_v2_block_manager=self.use_v2_block_manager,
             num_lookahead_slots=num_lookahead_slots,
