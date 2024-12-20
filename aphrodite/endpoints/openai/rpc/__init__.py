@@ -38,7 +38,7 @@ class RPCUtilityRequest(Enum):
     GET_LORA_CONFIG = 6
     DO_LOG_STATS = 7
     IS_SERVER_HEALTHY = 8
-
+    SHUTDOWN_SERVER = 9
 
 RPC_REQUEST_TYPE = Union[RPCGenerateRequest, RPCAbortRequest,
                          RPCUtilityRequest]
