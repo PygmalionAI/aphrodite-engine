@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     CUDA_VISIBLE_DEVICES: Optional[str] = None
     APHRODITE_ENGINE_ITERATION_TIMEOUT_S: int = 60
     APHRODITE_API_KEY: Optional[str] = None
+    APHRODITE_ADMIN_KEY: Optional[str] = None
     S3_ACCESS_KEY_ID: Optional[str] = None
     S3_SECRET_ACCESS_KEY: Optional[str] = None
     S3_ENDPOINT_URL: Optional[str] = None
@@ -210,6 +211,10 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # API key for APHRODITE API server
     "APHRODITE_API_KEY":
     lambda: os.environ.get("APHRODITE_API_KEY", None),
+
+    # Admin API key for APHRODITE API server
+    "APHRODITE_ADMIN_KEY":
+    lambda: os.environ.get("APHRODITE_ADMIN_KEY", None),
 
     # S3 access information, used for tensorizer to load model from S3
     "S3_ACCESS_KEY_ID":
