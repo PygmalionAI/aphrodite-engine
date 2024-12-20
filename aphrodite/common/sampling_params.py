@@ -550,8 +550,12 @@ class SamplingParams(
 
     def _verify_with_scheduler_config(
             self, scheduler_config: "SchedulerConfig") -> None:
-        if scheduler_config.single_user_mode and self.n > 1:
-            raise ValueError("n must be 1 in single user mode.")
+        if scheduler_config.single_user_mode:
+            if self.n > 1:
+                raise ValueError("n must be 1 in single user mode.")
+            if self.use_beam_search:
+                raise ValueError(
+                    "beam search is not supported in single user mode.")
 
     def update_from_generation_config(
             self,
