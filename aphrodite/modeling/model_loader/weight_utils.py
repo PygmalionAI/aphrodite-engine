@@ -428,12 +428,17 @@ def get_model_config_yaml(
     else:
         try:
             with get_lock(model_name_or_path, cache_dir):
-                config_path = hf_hub_download(
-                    model_name_or_path,
-                    filename="aphrodite_config.yaml",
-                    cache_dir=cache_dir,
-                    local_files_only=huggingface_hub.constants.HF_HUB_OFFLINE,
-                )
+                valid_names = ["aphrodite_config.yaml",
+                               "aphrodite_config.yml"]
+                for name in valid_names:
+                    config_path = hf_hub_download(
+                        model_name_or_path,
+                        filename=name,
+                        cache_dir=cache_dir,
+                        local_files_only=huggingface_hub.constants.HF_HUB_OFFLINE,
+                    )
+                    if os.path.exists(config_path):
+                        break
         except (huggingface_hub.utils.EntryNotFoundError,
                 huggingface_hub.utils.LocalEntryNotFoundError):
             return None
