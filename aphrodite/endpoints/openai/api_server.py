@@ -217,11 +217,23 @@ async def _maybe_switch_model(
     if request_model in served_model_names:
         return None
 
-    # Need to switch models
+    if not app_state.args.allow_inline_model_loading:
+        return JSONResponse(
+            content={
+                "error": {
+                    "message": "Requested model is not currently loaded. "
+                    "Inline model loading is disabled. Enable it with "
+                    "--allow-inline-model-loading.",
+                    "type": "invalid_request_error",
+                    "code": "model_not_loaded"
+                }
+            },
+            status_code=400
+        )  # type: ignore
+        
     logger.info(f"Switching from {served_model_names[0]} to {request_model}")
 
     try:
-        # Unload current model
         args = app_state.args
         if not args.disable_frontend_multiprocessing:
             await async_engine_client.kill()
@@ -230,23 +242,12 @@ async def _maybe_switch_model(
 
         model_is_loaded = False
 
-        # Create AsyncEngineArgs with minimal config
-        engine_args = AsyncEngineArgs(
-            model=request_model,
-            tokenizer=request_model,
-            tokenizer_mode="auto",
-            trust_remote_code=True,
-            max_model_len=8192,  # Default value
-            dtype="auto",
-            seed=0,
-        )
+        engine_args = AsyncEngineArgs(model=request_model)
 
-        # Use the same frontend multiprocessing setting as the original instance
         if args.disable_frontend_multiprocessing:
             async_engine_client = AsyncAphrodite.from_engine_args(engine_args)
             await async_engine_client.setup()
         else:
-            # Initialize multiprocessing setup
             if "PROMETHEUS_MULTIPROC_DIR" not in os.environ:
                 global prometheus_multiproc_dir
                 prometheus_multiproc_dir = tempfile.TemporaryDirectory()
@@ -278,12 +279,11 @@ async def _maybe_switch_model(
                             "RPC Server died before responding to "
                             "readiness probe") from e
 
-        # Create new args with updated model but preserving other settings
         new_args = copy.deepcopy(args)
         new_args.model = request_model
 
         app = await init_app(async_engine_client, new_args)  # noqa: F841
-        served_model_names = [request_model]  # Update served model names
+        served_model_names = [request_model]
         model_is_loaded = True
         return None
 
