@@ -407,3 +407,17 @@ class AsyncEngineRPCClient:
                      **kwargs) -> AsyncGenerator[EmbeddingRequestOutput, None]:
         raise NotImplementedError(
             "Embeddings not supported with multiprocessing backend")
+
+    async def kill(self):
+        """Cleanly shut down the RPC client and engine."""
+        try:
+            # Send shutdown signal to RPC server
+            await self._send_one_way_rpc_request(
+                request=RPCUtilityRequest.SHUTDOWN_SERVER,
+                error_message="Failed to send shutdown signal to RPC server"
+            )
+        except Exception as e:
+            logger.error(f"Error while shutting down RPC server: {str(e)}")
+        finally:
+            # Close local resources
+            self.close()

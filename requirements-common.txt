@@ -32,3 +32,4 @@ mistral_common >= 1.5.0
 protobuf
 pandas
 msgspec
+python-multipart

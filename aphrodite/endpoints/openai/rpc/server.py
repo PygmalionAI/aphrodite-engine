@@ -1,4 +1,5 @@
 import asyncio
+import os
 import signal
 from typing import Any, Coroutine, Union
 
@@ -146,6 +147,8 @@ class AsyncEngineRPCServer:
                 return self.is_server_ready(identity)
             elif request == RPCUtilityRequest.IS_SERVER_HEALTHY:
                 return self.check_health(identity)
+            elif request == RPCUtilityRequest.SHUTDOWN_SERVER:
+                return self.shutdown(identity)
             else:
                 raise ValueError(f"Unknown RPCUtilityRequest type: {request}")
 
@@ -170,6 +173,28 @@ class AsyncEngineRPCServer:
             # https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
             running_tasks.add(task)
             task.add_done_callback(running_tasks.discard)
+
+    async def shutdown(self, identity):
+        """Handle shutdown request from client."""
+        try:
+            # Clean shutdown of engine
+            self.engine.shutdown_background_loop()
+            await self.socket.send_multipart(
+                [identity, cloudpickle.dumps(APHRODITE_RPC_SUCCESS_STR)]
+            )
+        except Exception as e:
+            await self.socket.send_multipart([identity, cloudpickle.dumps(e)])
+        finally:
+            # Schedule server shutdown
+            asyncio.create_task(self._delayed_shutdown())
+    
+    async def _delayed_shutdown(self):
+        """Helper to shut down server after response is sent"""
+        await asyncio.sleep(1)
+        self.cleanup()
+        # Force exit the process
+        os._exit(0)
+
 
 
 async def run_server(server: AsyncEngineRPCServer):
