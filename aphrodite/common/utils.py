@@ -27,6 +27,7 @@ import psutil
 import torch
 import torch.types
 from loguru import logger
+from packaging.version import Version
 from rich.progress import (BarColumn, MofNCompleteColumn, Progress,
                            SpinnerColumn, TextColumn, TimeElapsedColumn)
 from typing_extensions import ParamSpec, TypeIs, assert_never
@@ -1157,3 +1158,11 @@ def tensor_progress_bar(iterable:Iterable[Tuple[str, torch.Tensor]],
                 progress.update(task, advance=steps)
     else:
         yield from iterable
+
+# Using dynamo with Aphrodite doesn't really work well with PyTorch
+# versions < 2.4.0.
+# In particular, the FakeScalarType is not supported for earlier versions of
+# PyTorch which breaks dynamo for any ops registered using ScalarType.
+def supports_dynamo() -> bool:
+    base_torch_version = Version(Version(torch.__version__).base_version)
+    return base_torch_version >= Version("2.4.0")
