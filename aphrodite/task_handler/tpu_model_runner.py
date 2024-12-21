@@ -18,6 +18,8 @@ from aphrodite.common.sequence import (CompletionSequenceGroupOutput,
                                        IntermediateTensors, Logprob,
                                        SamplerOutput, SequenceGroupMetadata,
                                        SequenceOutput)
+from aphrodite.compilation.wrapper import (
+    TorchCompileWrapperWithCustomDispacther)
 from aphrodite.modeling.model_loader import get_model
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.task_handler.model_runner_base import (
@@ -143,11 +145,7 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
             )
         model = model.eval()
         xm.wait_device_ops()
-        model = ModelWrapper(model)
-        self.model = torch.compile(model,
-                                   backend="openxla",
-                                   fullgraph=True,
-                                   dynamic=False)
+        self.model = ModelWrapper(model)
 
     def _dummy_run(
         self,
@@ -234,8 +232,15 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
             torch._dynamo.mark_dynamic(t, 0)
             torch._dynamo.mark_dynamic(p, 0)
         # Dummy run.
-        self.model(token_ids, position_ids, attn_metadata, input_lens, t, p,
-                   num_samples, kv_caches)
+        self.model(token_ids,
+                   position_ids,
+                   attn_metadata,
+                   input_lens,
+                   t,
+                   p,
+                   num_samples,
+                   kv_caches,
+                   is_prompt=is_prompt)
 
     def warmup_model(
         self,
@@ -537,7 +542,7 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
                     if getattr(arg, "context_lens", None) is not None:
                         arg.context_lens = _copy_to_device(arg.context_lens)
                 new_args.append(arg)
-            return self.model(*new_args)
+            return self.model(*new_args, is_prompt=is_prompt)
 
         num_prefills = model_input.attn_metadata.num_prefills
         is_prompt = num_prefills > 0
@@ -612,11 +617,31 @@ class TPUModelRunner(ModelRunnerBase[ModelInputForTPU]):
         return [SamplerOutput(sampler_outputs)]
 
 
-class ModelWrapper(nn.Module):
+class ModelWrapper(TorchCompileWrapperWithCustomDispacther):
 
     def __init__(self, model: nn.Module):
-        super().__init__()
         self.model = model
+        compiled_callable = torch.compile(self.forward,
+                                          backend="openxla",
+                                          fullgraph=True,
+                                          dynamic=False)
+        super().__init__(compiled_callable)
+    def __call__(self, *args, is_prompt: bool, **kwargs):
+        if len(self.compiled_codes) < 3 or not self.use_custom_dispatcher:
+            # not fully compiled yet, or not using the custom dispatcher,
+            # let PyTorch handle it
+            return self.compiled_callable(*args, **kwargs)
+        # the 3 compiled codes are:
+        # 0: for profiling
+        # 1: for prompt
+        # 2: for decode
+        # dispatch to the compiled code directly, skip PyTorch
+        if is_prompt:
+            with self.dispatch_to_code(1):
+                return self.forward(*args, **kwargs)
+        else:
+            with self.dispatch_to_code(2):
+                return self.forward(*args, **kwargs)
 
     def forward(
         self,
