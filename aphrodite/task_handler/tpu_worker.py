@@ -144,9 +144,6 @@ class TPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
                              block_size_bytes)
         num_cpu_blocks = (num_cpu_blocks // 8) * 8  # Round down to 8.
 
-        # reset and discard the guard and compiled bytecode for profiling runs
-        torch._dynamo.reset()
-
         return num_tpu_blocks, num_cpu_blocks
 
     def initialize_cache(
