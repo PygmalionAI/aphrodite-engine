@@ -253,15 +253,13 @@ class OpenAIServing:
         if truncate_prompt_tokens is None:
             encoded = tokenizer(prompt, add_special_tokens=add_special_tokens)
         else:
-            # Get original token count before truncation
             original_tokens = tokenizer(prompt,
                                         add_special_tokens=add_special_tokens)
             encoded = tokenizer(prompt,
                               add_special_tokens=add_special_tokens,
                               truncation=True,
                               max_length=truncate_prompt_tokens)
-            
-            # Log if truncation occurred
+
             if len(original_tokens.input_ids) > truncate_prompt_tokens:
                 tokens_removed = len(
                     original_tokens.input_ids) - truncate_prompt_tokens
@@ -284,7 +282,6 @@ class OpenAIServing:
         if truncate_prompt_tokens is None:
             input_ids = prompt_ids
         else:
-            # Log if truncation will occur
             if len(prompt_ids) > truncate_prompt_tokens:
                 tokens_removed = len(prompt_ids) - truncate_prompt_tokens
                 logger.warning(
