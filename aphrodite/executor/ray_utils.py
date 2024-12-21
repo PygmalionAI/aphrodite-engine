@@ -130,15 +130,15 @@ def _verify_bundles(placement_group: "PlacementGroup",
     for node_id, bundles in node_id_to_bundle.items():
         if len(bundles) < parallel_config.tensor_parallel_size:
             logger.warning(
-                "tensor_parallel_size=%d "
-                "is bigger than a reserved number of %ss (%d "
-                "%ss) in a node %s. Tensor parallel workers can be "
-                "spread out to 2+ nodes which can degrade the performance "
-                "unless you have fast interconnect across nodes, like "
-                "Infiniband. To resolve this issue, make sure you have more "
-                "than %d GPUs available at each node.",
-                parallel_config.tensor_parallel_size, device_str, len(bundles),
-                device_str, node_id, parallel_config.tensor_parallel_size)
+                f"tensor_parallel_size={parallel_config.tensor_parallel_size} "
+                f"is bigger than a reserved number of {device_str}s "
+                f"({len(bundles)} {device_str}s) in a node {node_id}. "
+                "Tensor parallel workers can be spread out to 2+ nodes which "
+                "can degrade the performance unless you have fast interconnect "
+                "across nodes, like Infiniband. To resolve this issue, make "
+                "sure you have more than "
+                f"than {parallel_config.tensor_parallel_size} GPUs available "
+                "at each node.")
 def _wait_until_pg_ready(current_placement_group: "PlacementGroup"):
     """Wait until a placement group is ready.
     It prints the informative log messages if the placement group is
@@ -158,10 +158,9 @@ def _wait_until_pg_ready(current_placement_group: "PlacementGroup"):
         # Exponential backoff for warning print.
         wait_interval *= 2
         logger.info(
-            "Waiting for creating a placement group of specs for "
-            "%d seconds. specs=%s. Check "
-            "`ray status` to see if you have enough resources.",
-            int(time.time() - s), placement_group_specs)
+            f"Waiting for creating a placement group of specs for "
+            f"{int(time.time() - s)} seconds. specs={placement_group_specs}. "
+            "Check `ray status` to see if you have enough resources.")
     try:
         ray.get(pg_ready_ref, timeout=0)
     except ray.exceptions.GetTimeoutError:

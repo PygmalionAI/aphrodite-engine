@@ -318,6 +318,11 @@ set(APHRODITE_MOE_EXT_SRC
   "kernels/moe/torch_bindings.cpp"
   "kernels/moe/softmax.cu")
 
+if(APHRODITE_GPU_LANG STREQUAL "CUDA")
+  list(APPEND APHRODITE_MOE_EXT_SRC
+      "kernels/moe/marlin_moe_ops.cu")
+endif()
+
 define_gpu_extension_target(
   _moe_C
   DESTINATION aphrodite

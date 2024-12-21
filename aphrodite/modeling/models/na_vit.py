@@ -72,11 +72,10 @@ class SiglipVisionConfig(PretrainedConfig):
                 cls,
                 "model_type") and config_dict["model_type"] != cls.model_type:
             logger.warning(
-                "You are using a model of type %s to "
-                "instantiate a model of type %s. "
-                "This is not supported for all configurations"
-                "of models and can yield errors.", config_dict['model_type'],
-                cls.model_type)
+                f"You are using a model of type {config_dict['model_type']} to"
+                f" instantiate a model of type {cls.model_type}. "
+                "This is not supported for all configurations of models and "
+                "can yield errors.")
 
         return cls.from_dict(config_dict, **kwargs)
 
@@ -428,7 +427,7 @@ class SiglipFlashAttention2(SiglipAttention):
                 "this might be related to the fact "
                 "you have upcasted embedding or layer norm layers in float32. "
                 "We will cast back the input in"
-                " %s.", target_dtype)
+                f" {target_dtype}.")
 
             query_states = query_states.to(target_dtype)
             key_states = key_states.to(target_dtype)

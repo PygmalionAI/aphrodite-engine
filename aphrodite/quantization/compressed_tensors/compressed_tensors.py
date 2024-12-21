@@ -3,11 +3,14 @@ from typing import Any, Dict, List, Optional
 import torch
 from pydantic import BaseModel
 
+from aphrodite.modeling.layers.fused_moe import FusedMoE
 from aphrodite.modeling.layers.linear import (LinearBase, LinearMethodBase,
                                               UnquantizedLinearMethod)
 from aphrodite.platforms import current_platform
 from aphrodite.quantization.base_config import (  # noqa: E501
     QuantizationConfig, QuantizeMethodBase)
+from aphrodite.quantization.compressed_tensors.compressed_tensors_moe import (
+    CompressedTensorsMoEMethod)
 from aphrodite.quantization.compressed_tensors.schemes import (
     W4A16SPARSE24_SUPPORTED_BITS, WNA16_SUPPORTED_BITS,
     CompressedTensorsScheme, CompressedTensorsW4A16Sparse24,
@@ -70,6 +73,8 @@ class CompressedTensorsConfig(QuantizationConfig):
             return CompressedTensorsLinearMethod(self)
         if isinstance(layer, Attention):
             return CompressedTensorsKVCacheMethod(self)
+        if isinstance(layer, FusedMoE):
+            return CompressedTensorsMoEMethod(self)
         return None
 
     @classmethod

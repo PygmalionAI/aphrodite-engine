@@ -579,10 +579,9 @@ class LoRAModelManager(AdapterModelManager):
 
     def add_adapter(self, adapter: LoRAModel) -> bool:
         logger.debug(
-            "Adding lora. Model id: %d, "
-            "int id: %d, "
-            "scaling factor: %s", adapter.id, adapter.id,
-            adapter.scaling_factor)
+            f"Adding lora. Model id: {adapter.id}, "
+            f"int id: {adapter.id}, "
+            f"scaling factor: {adapter.scaling_factor}")
         return add_adapter(adapter, self._registered_adapters, self.capacity,
                            self._add_adapter)
 
@@ -633,9 +632,9 @@ class LRUCacheLoRAModelManager(LoRAModelManager):
     def add_adapter(self, lora: LoRAModel) -> bool:
         """Add a LoRAModel to the manager."""
         logger.debug(
-            "Adding lora. Model id: %d, "
-            "int id: %d, "
-            "scaling factor: %s", lora.id, lora.id, lora.scaling_factor)
+            f"Adding lora. Model id: {lora.id}, "
+            f"int id: {lora.id}, "
+            f"scaling factor: {lora.scaling_factor}")
         if lora.id not in self._registered_adapters:
             self._add_adapter(lora)
             was_added = True

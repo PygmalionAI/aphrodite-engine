@@ -43,7 +43,7 @@ class ImagePlugin(MultiModalPlugin):
                     .preprocess(data, return_tensors="pt") \
                     .data
             except Exception:
-                logger.error("Failed to process image (%s)", data)
+                logger.error(f"Failed to process image ({data})")
                 raise
 
             return MultiModalInputs(batch_data)

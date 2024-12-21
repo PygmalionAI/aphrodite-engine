@@ -175,11 +175,7 @@ def get_config(
     ]:
         if value is not None:
             logger.info(
-                "Updating %s from %r to %r",
-                key,
-                getattr(config, key, None),
-                value,
-            )
+                f"Updating {key} from {getattr(config, key, None)} to {value}")
             config.update({key: value})
 
 

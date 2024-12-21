@@ -214,7 +214,7 @@ def repeat_and_pad_placeholder_tokens(
             logger.warning(
                 "Please follow the prompt format that is "
                 "documented on HuggingFace which does not involve "
-                "repeating %s tokens.", placeholder_token_str)
+                f"repeating {placeholder_token_str} tokens.")
         elif placeholder_token_count > 1:
             logger.warning("Multiple multi-modal input is not supported yet, "
                            "so any extra placeholder tokens will be treated "
