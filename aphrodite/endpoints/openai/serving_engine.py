@@ -253,15 +253,23 @@ class OpenAIServing:
         if truncate_prompt_tokens is None:
             encoded = tokenizer(prompt, add_special_tokens=add_special_tokens)
         else:
+            original_tokens = tokenizer(prompt,
+                                        add_special_tokens=add_special_tokens)
             encoded = tokenizer(prompt,
-                                add_special_tokens=add_special_tokens,
-                                truncation=True,
-                                max_length=truncate_prompt_tokens)
+                              add_special_tokens=add_special_tokens,
+                              truncation=True,
+                              max_length=truncate_prompt_tokens)
+
+            if len(original_tokens.input_ids) > truncate_prompt_tokens:
+                tokens_removed = len(
+                    original_tokens.input_ids) - truncate_prompt_tokens
+                logger.warning(
+                    f"Prompt truncated: Removed {tokens_removed} tokens "
+                    f"({len(original_tokens.input_ids)} -> "
+                    f"{truncate_prompt_tokens})")
 
         input_ids = encoded.input_ids
-
         input_text = prompt
-
         return self._validate_input(request, input_ids, input_text)
 
     def _normalize_prompt_tokens_to_input(
@@ -274,10 +282,14 @@ class OpenAIServing:
         if truncate_prompt_tokens is None:
             input_ids = prompt_ids
         else:
+            if len(prompt_ids) > truncate_prompt_tokens:
+                tokens_removed = len(prompt_ids) - truncate_prompt_tokens
+                logger.warning(
+                    f"Prompt truncated: Removed {tokens_removed} tokens "
+                    f"({len(prompt_ids)} -> {truncate_prompt_tokens})")
             input_ids = prompt_ids[-truncate_prompt_tokens:]
 
         input_text = tokenizer.decode(input_ids)
-
         return self._validate_input(request, input_ids, input_text)
 
     def _validate_input(
