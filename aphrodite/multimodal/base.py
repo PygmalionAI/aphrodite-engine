@@ -13,7 +13,7 @@ from torch import nn
 from typing_extensions import TypeAlias
 
 from aphrodite.common.config import ModelConfig
-from aphrodite.common.utils import json_map_leaves
+from aphrodite.common.utils import is_list_of, json_map_leaves
 from aphrodite.inputs import InputContext
 
 NestedTensors = Union[List["NestedTensors"], List[torch.Tensor], torch.Tensor]
@@ -52,7 +52,8 @@ class MultiModalInputs(_MultiModalInputsBase):
             return nested_tensors
 
         stacked = [MultiModalInputs._try_stack(t) for t in nested_tensors]
-        if any(isinstance(t, list) for t in stacked):
+        if not is_list_of(stacked, torch.Tensor, check="all"):
+            # Only tensors (not lists) can be stacked.
             return stacked
 
         tensors_ = cast(List[torch.Tensor], stacked)
