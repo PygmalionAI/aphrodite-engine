@@ -13,6 +13,7 @@ from typing_extensions import NotRequired
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
 from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
+from aphrodite.common.utils import is_list_of
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
@@ -218,6 +219,13 @@ def input_processor_for_llava_next(ctx: InputContext, llm_inputs: LLMInputs):
             input_height=height,
             input_width=width,
         )
+    elif is_list_of(image_data, Image.Image):
+        image_feature_size = [
+            get_llava_next_image_feature_size(hf_config,
+                                              input_height=img.height,
+                                              input_width=img.width)
+            for img in image_data
+        ]
     elif isinstance(image_data, torch.Tensor):
         image_feature_size = image_data.shape[0]
     else:
@@ -420,7 +428,9 @@ class LlavaNextForConditionalGeneration(nn.Module, SupportsMultiModal):
                     self.config.image_grid_pinpoints,
                     self.config.vision_config.image_size,
                 )
-                other_patch_embeds = other_patch_embeds \
+                num_patches = num_patch_height * num_patch_width
+                # Image patches might be padded for batch processing
+                other_patch_embeds = other_patch_embeds[:num_patches] \
                     .view(num_patch_height, num_patch_width, height, width, -1)
 
                 if "unpad" in strategy:
