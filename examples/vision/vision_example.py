@@ -69,7 +69,7 @@ def run_phi3v(question):
 def run_paligemma(question):
 
     prompt = "caption en"
-    llm = LLM(model="google/paligemma-3b-mix-224")
+    llm = LLM(model="google/paligemma2-3b-ft-docci-448")
 
     return llm, prompt
 

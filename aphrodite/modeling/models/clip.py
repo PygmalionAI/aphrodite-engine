@@ -1,7 +1,7 @@
 """Minimal implementation of CLIPVisionModel intended to be only used 
 within a vision language model."""
 from array import array
-from typing import Optional
+from typing import List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -84,7 +84,7 @@ def input_processor_for_clip(
     llm_inputs: LLMInputs,
     *,
     image_token_id: int,
-    image_feature_size_override: Optional[int] = None,
+    image_feature_size_override: Optional[Union[int, List[int]]] = None,
 ):
     multi_modal_data = llm_inputs.get("multi_modal_data")
     if multi_modal_data is None or "image" not in multi_modal_data:
