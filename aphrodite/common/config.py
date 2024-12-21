@@ -307,7 +307,7 @@ class ModelConfig:
 
     def _verify_quantization(self) -> None:
         supported_quantization = [*QUANTIZATION_METHODS]
-        rocm_supported_quantization = ["gptq", "squeezellm", "fp8"]
+        rocm_supported_quantization = ["awq", "gptq", "squeezellm", "fp8"]
         tpu_supported_quantization = ["tpu_int8"]
         if self.quantization is not None:
             self.quantization = self.quantization.lower()
@@ -439,6 +439,14 @@ class ModelConfig:
                 raise ValueError(
                     "deepspeed_fp_bits must be specified when using "
                     "deepspeedfp quantization.")
+
+            if (self.quantization == "awq" and is_hip()
+                    and not envs.APHRODITE_USE_TRITON_AWQ):
+                logger.warning(
+                    "Using AWQ quantization with ROCm, but "
+                    "APHRODITE_USE_TRITON_AWQ is not set, enabling "
+                    "APHRODITE_USE_TRITON_AWQ.")
+                envs.APHRODITE_USE_TRITON_AWQ = True
 
     def _verify_cuda_graph(self) -> None:
         if self.max_seq_len_to_capture is None:

@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     APHRODITE_RPC_GET_DATA_TIMEOUT_MS: int = 5000
     APHRODITE_FORCE_SINGLE_USER_PREFIX_CACHE: bool = False
     APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE: int = 0
+    APHRODITE_USE_TRITON_AWQ: bool = False
 
 
 def get_default_cache_root():
@@ -393,6 +394,10 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     "APHRODITE_FORCE_SINGLE_USER_PREFIX_CACHE":
     lambda: bool(int(os.getenv("APHRODITE_FORCE_SINGLE_USER_PREFIX_CACHE",
                                "0"))),
+
+    # If set, Aphrodite will use Triton implementations of AWQ.
+    "APHRODITE_USE_TRITON_AWQ":
+    lambda: bool(int(os.getenv("APHRODITE_USE_TRITON_AWQ", "0"))),
 }
 
 # end-env-vars-definition

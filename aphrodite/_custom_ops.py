@@ -5,6 +5,7 @@ from typing import List, Optional, Tuple, Type, Union
 import torch
 from loguru import logger
 
+import aphrodite.common.envs as envs
 from aphrodite._core_ext import ScalarType
 from aphrodite.common.utils import is_hip
 from aphrodite.platforms import current_platform
@@ -177,12 +178,18 @@ def advance_step(num_seqs: int, num_queries: int, block_size: int,
 def awq_dequantize(qweight: torch.Tensor, scales: torch.Tensor,
                    zeros: torch.Tensor, split_k_iters: int, thx: int,
                    thy: int) -> torch.Tensor:
+    if envs.APHRODITE_USE_TRITON_AWQ:
+        from aphrodite.quantization.awq_triton import awq_dequantize_triton
+        return awq_dequantize_triton(qweight, scales, zeros)
     return torch.ops._C.awq_dequantize(qweight, scales, zeros, split_k_iters,
                                        thx, thy)
 
 
 def awq_gemm(input: torch.Tensor, qweight: torch.Tensor, qzeros: torch.Tensor,
              scales: torch.Tensor, split_k_iters: int) -> torch.Tensor:
+    if envs.APHRODITE_USE_TRITON_AWQ:
+        from aphrodite.quantization.awq_triton import awq_gemm_triton
+        return awq_gemm_triton(input, qweight, qzeros, scales, split_k_iters)
     return torch.ops._C.awq_gemm(input, qweight, qzeros, scales, split_k_iters)
 
 
