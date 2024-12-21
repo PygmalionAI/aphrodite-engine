@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     APHRODITE_FORCE_SINGLE_USER_PREFIX_CACHE: bool = False
     APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE: int = 0
     APHRODITE_USE_TRITON_AWQ: bool = False
+    APHRODITE_DYNAMO_USE_CUSTOM_DISPATCHER: bool = False
 
 
 def get_default_cache_root():
@@ -196,6 +197,10 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # Internal flag to enable Dynamo graph capture
     "APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE":
     lambda: int(os.environ.get("APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE", "0")),
+    "APHRODITE_DYNAMO_USE_CUSTOM_DISPATCHER":
+    lambda:
+    (os.environ.get("APHRODITE_DYNAMO_USE_CUSTOM_DISPATCHER", "True").lower() in
+     ("true", "1")),
 
     # local rank of the process in the distributed setting, used to determine
     # the GPU device id
