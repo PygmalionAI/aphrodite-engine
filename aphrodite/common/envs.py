@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     APHRODITE_PLUGINS: Optional[List[str]] = None
     APHRODITE_RPC_GET_DATA_TIMEOUT_MS: int = 5000
     APHRODITE_FORCE_SINGLE_USER_PREFIX_CACHE: bool = False
+    APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE: int = 0
 
 
 def get_default_cache_root():

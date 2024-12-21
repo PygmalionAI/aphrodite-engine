@@ -2,7 +2,6 @@ import dataclasses
 import gc
 import inspect
 import itertools
-import os
 import time
 import warnings
 import weakref
@@ -16,6 +15,7 @@ import torch.distributed
 import torch.nn as nn
 from loguru import logger
 
+import aphrodite.common.envs as envs
 from aphrodite.attention import AttentionMetadata, get_attn_backend
 from aphrodite.attention.backends.abstract import AttentionState
 from aphrodite.attention.backends.utils import CommonAttentionState
@@ -27,7 +27,7 @@ from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
                                        SequenceGroupMetadata)
 from aphrodite.common.utils import (CudaMemoryProfiler, PyObjectCache,
                                     async_tensor_h2d, flatten_2d_lists, is_hip,
-                                    is_pin_memory_available)
+                                    is_pin_memory_available, supports_dynamo)
 from aphrodite.distributed import get_pp_group
 from aphrodite.distributed.parallel_state import (
     get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size,
@@ -67,8 +67,6 @@ _BATCH_SIZES_TO_CAPTURE = [1, 2, 4] + [
     _BATCH_SIZE_ALIGNMENT * i for i in range(1, 33)
 ]
 _NUM_WARMUP_ITERS = 2
-APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE = int(
-    os.environ.get("APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE", "0"))
 
 TModelInputForGPU = TypeVar('TModelInputForGPU', bound="ModelInputForGPU")
 
@@ -983,7 +981,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                     "provided. Defaulting to scaling factors of 1.0. "
                     "This may lead to less accurate results!")
 
-        if APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE:
+        if envs.APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE and supports_dynamo:
             logger.info("Compiling the model using torch.compile...")
             start_time = time.time()
             self.model = torch.compile(self.model,
