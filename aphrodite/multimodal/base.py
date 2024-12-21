@@ -16,7 +16,7 @@ from aphrodite.common.config import ModelConfig
 from aphrodite.common.utils import json_map_leaves
 from aphrodite.inputs import InputContext
 
-NestedTensors = Union[List["NestedTensors"], torch.Tensor]
+NestedTensors = Union[List["NestedTensors"], List[torch.Tensor], torch.Tensor]
 """
 Uses a list instead of a tensor if the dimensions of each element do not match.
 """
