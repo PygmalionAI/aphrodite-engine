@@ -36,7 +36,7 @@ from aphrodite.distributed.communication_op import (
   tensor_model_parallel_all_gather)
 from aphrodite.distributed.utils import split_tensor_along_last_dim
 from aphrodite.modeling.layers.activation import SiluAndMul
-from aphrodite.model_executor.layers.layernorm import RMSNorm
+from aphrodite.modeling.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (MergedColumnParallelLinear,
                                               QKVParallelLinear,
                                               RowParallelLinear)
