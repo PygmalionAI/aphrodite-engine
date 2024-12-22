@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 
-from aphrodite.common.sequence import (ExecuteModelRequest, SamplerOutput,
-                                       SequenceOutput)
+from aphrodite.common.sequence import ExecuteModelRequest, SequenceOutput
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.utils import set_random_seed
 from aphrodite.spec_decode.interfaces import SpeculativeProposals
 from aphrodite.spec_decode.metrics import (AsyncMetricsCollector,

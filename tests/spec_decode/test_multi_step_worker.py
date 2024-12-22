@@ -6,7 +6,8 @@ import pytest
 import torch
 
 from aphrodite.common.sequence import (ExecuteModelRequest, HiddenStates,
-                                       Logprob, SamplerOutput, get_all_seq_ids)
+                                       Logprob, get_all_seq_ids)
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.utils import set_random_seed
 from aphrodite.spec_decode.draft_model_runner import TP1DraftModelRunner
 from aphrodite.spec_decode.multi_step_worker import MultiStepWorker
