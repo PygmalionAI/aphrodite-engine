@@ -26,7 +26,7 @@ loguru
 hf_transfer # for faster downloads
 librosa  # Required for audio processing
 soundfile  # Required for audio processing
-gguf == 0.9.1
+gguf >= 0.10.0
 importlib_metadata
 mistral_common >= 1.5.0
 protobuf
