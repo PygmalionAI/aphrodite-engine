@@ -13,7 +13,7 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      PromptAdapterConfig, SchedulerConfig,
                                      SpeculativeConfig)
 from aphrodite.common.sequence import (ExecuteModelRequest,
-                                       IntermediateTensors, SamplerOutput,
+                                       IntermediateTensors,
                                        SequenceGroupMetadata,
                                        SequenceGroupMetadataDelta)
 from aphrodite.distributed import (ensure_model_parallel_initialized,
@@ -22,6 +22,7 @@ from aphrodite.distributed import (ensure_model_parallel_initialized,
                                    set_custom_all_reduce)
 from aphrodite.lora.request import LoRARequest
 from aphrodite.modeling import set_random_seed
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.model_loader.tensorizer import TensorizerConfig
 from aphrodite.platforms import current_platform
 from aphrodite.prompt_adapter.request import PromptAdapterRequest

@@ -5,8 +5,8 @@ from typing import Dict, List, Set, Tuple
 import torch
 
 from aphrodite.common.sequence import (ExecuteModelRequest, HiddenStates,
-                                       SamplerOutput, SequenceData,
-                                       SequenceGroupMetadata)
+                                       SequenceData, SequenceGroupMetadata)
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.spec_decode.draft_model_runner import TP1DraftModelRunner
 from aphrodite.spec_decode.interfaces import (SpeculativeProposals,
                                               SpeculativeProposer)

@@ -8,7 +8,7 @@ import msgspec
 from loguru import logger
 
 import aphrodite.common.envs as envs
-from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
+from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.common.utils import (_run_task_with_lock,
                                     get_aphrodite_instance_id,
                                     get_distributed_init_method, get_ip,
@@ -17,6 +17,7 @@ from aphrodite.executor.distributed_gpu_executor import (  # yapf: disable
     DistributedGPUExecutor, DistributedGPUExecutorAsync)
 from aphrodite.executor.msgspec_utils import encode_hook
 from aphrodite.executor.ray_utils import RayWorkerWrapper, ray
+from aphrodite.modeling.layers.sampler import SamplerOutput
 
 if ray is not None:
     from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy

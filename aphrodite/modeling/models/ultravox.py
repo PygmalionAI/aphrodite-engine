@@ -20,12 +20,13 @@ from transformers.models.whisper.modeling_whisper import WhisperEncoder
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
 from aphrodite.common.sequence import (APHRODITE_TOKEN_ID_ARRAY_TYPE,
-                                       SamplerOutput, SequenceData)
+                                       SequenceData)
 from aphrodite.inputs import INPUT_REGISTRY
 from aphrodite.inputs.data import LLMInputs
 from aphrodite.inputs.registry import InputContext
 from aphrodite.modeling.layers.activation import SiluAndMul, get_act_fn
 from aphrodite.modeling.layers.layernorm import RMSNorm
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.models.interfaces import SupportsMultiModal
 from aphrodite.modeling.models.utils import (filter_weights,

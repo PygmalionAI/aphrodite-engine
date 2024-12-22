@@ -4,8 +4,9 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 
-from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
+from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.distributed import broadcast_tensor_dict, get_pp_group
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.task_handler.model_runner_base import BroadcastableModelInput
 from aphrodite.task_handler.multi_step_model_runner import (
     MultiStepModelRunner, StatefulModelInput)

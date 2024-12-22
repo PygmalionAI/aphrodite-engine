@@ -16,10 +16,10 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      SchedulerConfig)
 from aphrodite.common.sequence import (CompletionSequenceGroupOutput,
                                        IntermediateTensors, Logprob,
-                                       SamplerOutput, SequenceGroupMetadata,
-                                       SequenceOutput)
+                                       SequenceGroupMetadata, SequenceOutput)
 from aphrodite.compilation.wrapper import (
     TorchCompileWrapperWithCustomDispacther)
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.model_loader import get_model
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.task_handler.model_runner_base import (

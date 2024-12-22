@@ -10,9 +10,8 @@ from transformers import PretrainedConfig
 
 from aphrodite.common.config import (ModelConfig, ParallelConfig,
                                      SchedulerConfig)
-from aphrodite.common.sequence import SamplerOutput
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
-from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.sampler import Sampler, SamplerOutput
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 
 TORCH_DTYPE_TO_NEURON_AMP = {

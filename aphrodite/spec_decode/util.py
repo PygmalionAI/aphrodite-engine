@@ -5,8 +5,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import torch
 
 from aphrodite.common.sequence import (CompletionSequenceGroupOutput, Logprob,
-                                       SamplerOutput, SequenceGroupMetadata,
-                                       SequenceOutput)
+                                       SequenceGroupMetadata, SequenceOutput)
+from aphrodite.modeling.layers.sampler import SamplerOutput
 
 SeqId = int
 

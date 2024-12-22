@@ -24,9 +24,9 @@ from aphrodite.common.outputs import (EmbeddingRequestOutput, RequestOutput,
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (EmbeddingSequenceGroupOutput,
-                                       ExecuteModelRequest, SamplerOutput,
-                                       Sequence, SequenceGroup,
-                                       SequenceGroupMetadata, SequenceStatus)
+                                       ExecuteModelRequest, Sequence,
+                                       SequenceGroup, SequenceGroupMetadata,
+                                       SequenceStatus)
 from aphrodite.common.utils import Counter, Device
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.metrics_types import StatLoggerBase, Stats
@@ -42,6 +42,7 @@ from aphrodite.inputs import (INPUT_REGISTRY, EncoderDecoderLLMInputs,
                               SingletonPromptInputs)
 from aphrodite.inputs.parse import is_explicit_encoder_decoder_prompt
 from aphrodite.lora.request import LoRARequest
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.multimodal import MultiModalDataDict
 from aphrodite.processing.scheduler import (ScheduledSequenceGroup, Scheduler,
                                             SchedulerOutputs)

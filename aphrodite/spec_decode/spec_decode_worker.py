@@ -8,11 +8,11 @@ from loguru import logger
 from aphrodite.common.config import ParallelConfig, SpeculativeConfig
 from aphrodite.common.sequence import (CompletionSequenceGroupOutput,
                                        ExecuteModelRequest, HiddenStates,
-                                       SamplerOutput, SequenceGroupMetadata,
-                                       get_all_seq_ids,
+                                       SequenceGroupMetadata, get_all_seq_ids,
                                        get_all_seq_ids_and_request_ids)
 from aphrodite.distributed.communication_op import broadcast_tensor_dict
 from aphrodite.modeling.layers.rejection_sampler import RejectionSampler
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.layers.spec_decode_base_sampler import (
     SpecDecodeBaseSampler, SpecDecodeStochasticBaseSampler)
 from aphrodite.modeling.layers.typical_acceptance_sampler import (
