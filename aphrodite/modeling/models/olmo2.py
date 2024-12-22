@@ -66,23 +66,23 @@ class Olmo2Attention(nn.Module):
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
-        tensor_model_parallel_world_size = (
+        self.tp_size = (
             get_tensor_model_parallel_world_size())
         self.total_num_heads = config.num_attention_heads
 
         assert self.hidden_size % self.total_num_heads == 0
-        assert self.total_num_heads % tensor_model_parallel_world_size == 0
+        assert self.total_num_heads % self.tp_size == 0
 
         self.num_heads = (self.total_num_heads //
-                          tensor_model_parallel_world_size)
+                          self.tp_size)
         self.total_num_kv_heads = (self.config.num_key_value_heads
                                    or self.total_num_heads)
-        if self.total_num_kv_heads >= tensor_model_parallel_world_size:
-            assert self.total_num_kv_heads % tensor_model_parallel_world_size == 0
+        if self.total_num_kv_heads >= self.tp_size:
+            assert self.total_num_kv_heads % self.tp_size == 0
         else:
-            assert tensor_model_parallel_world_size % self.total_num_kv_heads == 0
+            assert self.tp_size % self.total_num_kv_heads == 0
 
-        self.num_kv_heads = max(1, self.total_num_kv_heads // tensor_model_parallel_world_size)
+        self.num_kv_heads = max(1, self.total_num_kv_heads // self.tp_size)
         self.head_dim = self.hidden_size // self.total_num_heads
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
@@ -132,14 +132,14 @@ class Olmo2Attention(nn.Module):
 
     def _apply_qk_norm(self, q: torch.Tensor,
                        k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        if get_tensor_model_parallel_world_size() > 1:
+        if self.tp_size > 1:
             q = tensor_model_parallel_all_gather(q.contiguous())
             k = tensor_model_parallel_all_gather(k.contiguous())
         q = self.q_norm.forward_native(q)
         k = self.k_norm.forward_native(k)
-        if get_tensor_model_parallel_world_size() > 1:
+        if self.tp_size > 1:
             splitter = partial(split_tensor_along_last_dim,
-                               num_partitions=get_tensor_model_parallel_world_size())
+                               num_partitions=self.tp_size)
             q = splitter(q)[self.tp_rank]
             k = splitter(k)[self.tp_rank]
         return q, k
