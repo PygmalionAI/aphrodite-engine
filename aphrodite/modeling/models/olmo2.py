@@ -77,12 +77,12 @@ class Olmo2Attention(nn.Module):
                           tensor_model_parallel_world_size)
         self.total_num_kv_heads = (self.config.num_key_value_heads
                                    or self.total_num_heads)
-        if self.total_num_kv_heads >= self.tp_size:
-            assert self.total_num_kv_heads % self.tp_size == 0
+        if self.total_num_kv_heads >= tensor_model_parallel_world_size:
+            assert self.total_num_kv_heads % tensor_model_parallel_world_size == 0
         else:
-            assert self.tp_size % self.total_num_kv_heads == 0
+            assert tensor_model_parallel_world_size % self.total_num_kv_heads == 0
 
-        self.num_kv_heads = max(1, self.total_num_kv_heads // self.tp_size)
+        self.num_kv_heads = max(1, self.total_num_kv_heads // tensor_model_parallel_world_size)
         self.head_dim = self.hidden_size // self.total_num_heads
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
@@ -137,9 +137,9 @@ class Olmo2Attention(nn.Module):
             k = tensor_model_parallel_all_gather(k.contiguous())
         q = self.q_norm.forward_native(q)
         k = self.k_norm.forward_native(k)
-        if self.tp_size > 1:
+        if get_tensor_model_parallel_world_size() > 1:
             splitter = partial(split_tensor_along_last_dim,
-                               num_partitions=self.tp_size)
+                               num_partitions=get_tensor_model_parallel_world_size())
             q = splitter(q)[self.tp_rank]
             k = splitter(k)[self.tp_rank]
         return q, k
