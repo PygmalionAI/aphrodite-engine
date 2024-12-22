@@ -21,6 +21,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only OLMo2 model compatible with HuggingFace weights."""
+from functools import partial
 from typing import Iterable, List, Optional, Tuple
 
 import torch
@@ -32,7 +33,9 @@ from aphrodite.common.config import CacheConfig
 from aphrodite.common.sequence import IntermediateTensors
 from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.distributed.communication_op import tensor_model_parallel_all_gather
+from aphrodite.distributed.utils import split_tensor_along_last_dim
 from aphrodite.modeling.layers.activation import SiluAndMul
+from aphrodite.model_executor.layers.layernorm import RMSNorm
 from aphrodite.modeling.layers.linear import (MergedColumnParallelLinear,
                                               QKVParallelLinear,
                                               RowParallelLinear)
@@ -306,7 +309,7 @@ class Olmo2ForCausalLM(nn.Module):
     """
 
     def __init__(self,
-                 config: OlmoConfig,
+                 config: Olmo2Config,
                  cache_config: Optional[CacheConfig] = None,
                  quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
