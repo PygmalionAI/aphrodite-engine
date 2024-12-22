@@ -50,16 +50,12 @@ async def completions_with_server_args(
 @pytest.mark.parametrize("eager_mode", [False, True])
 @pytest.mark.parametrize("num_scheduler_steps", NUM_SCHEDULER_STEPS)
 @pytest.mark.parametrize("num_prompts", NUM_PROMPTS)
+@pytest.mark.parametrize("is_async", [False, True])
 @pytest.mark.asyncio
-async def test_multi_step(
-    example_prompts,
-    model: str,
-    tp_size: int,
-    pp_size: int,
-    eager_mode: int,
-    num_scheduler_steps: int,
-    num_prompts: int,
-):
+async def test_multi_step(example_prompts, model: str, tp_size: int,
+                          pp_size: int, eager_mode: int,
+                          num_scheduler_steps: int, num_prompts: int,
+                          is_async: bool):
     if (tp_size > 1 or pp_size > 1) and torch.cuda.device_count() < 2:
         pytest.skip("Skipping multi-GPU tests on single GPU system")
         
@@ -73,9 +69,8 @@ async def test_multi_step(
         "--num-scheduler-steps",
         f"{num_scheduler_steps}",
     ]
-    # Disable output proc callback as its not supported
-    # with multi-step right now
-    ms_server_args += ["--disable-async-output-proc"]
+    if not is_async:
+        ms_server_args += ["--disable-async-output-proc"]
     if eager_mode:
         ms_server_args.append("--enforce-eager")
     distributed_args = [
