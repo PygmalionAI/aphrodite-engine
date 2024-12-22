@@ -218,6 +218,8 @@ class Olmo2DecoderLayer(nn.Module):
                  cache_config: Optional[CacheConfig] = None,
                  quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
+        self.config = config
+        
         # Attention block.
         self.self_attn = Olmo2Attention(config, cache_config, quant_config)
 
