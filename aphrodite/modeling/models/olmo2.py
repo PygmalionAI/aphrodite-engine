@@ -227,9 +227,9 @@ class Olmo2DecoderLayer(nn.Module):
         self.mlp = Olmo2MLP(config, quant_config)
 
         # LayerNorm
-        self.post_attention_norm = RMSNorm(config.hidden_size,
+        self.post_attention_layernorm = RMSNorm(config.hidden_size,
                                                   eps=self.config.rms_norm_eps)
-        self.post_feedforward_norm = RMSNorm(config.hidden_size,
+        self.post_feedforward_layernorm = RMSNorm(config.hidden_size,
                                                   eps=config.rms_norm_eps)
 
     def forward(
@@ -243,13 +243,13 @@ class Olmo2DecoderLayer(nn.Module):
         residual = hidden_states
         hidden_states = self.self_attn(positions, hidden_states, kv_cache,
                                        attn_metadata)
-        hidden_states = self.post_attention_norm(hidden_states)
+        hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = hidden_states + residual
 
         # MLP block.
         residual = hidden_states
         hidden_states = self.mlp(hidden_states)
-        hidden_states = self.post_feedforward_norm(hidden_states)
+        hidden_states = self.post_feedforward_layernorm(hidden_states)
         hidden_states = residual + hidden_states
         return hidden_states
 
