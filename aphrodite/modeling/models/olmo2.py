@@ -132,7 +132,7 @@ class Olmo2Attention(nn.Module):
 
     def _apply_qk_norm(self, q: torch.Tensor,
                        k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        if self.tp_size > 1:
+        if get_tensor_model_parallel_world_size() > 1:
             q = tensor_model_parallel_all_gather(q.contiguous())
             k = tensor_model_parallel_all_gather(k.contiguous())
         q = self.q_norm.forward_native(q)
