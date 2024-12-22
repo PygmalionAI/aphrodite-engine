@@ -8,6 +8,7 @@ from transformers import PretrainedConfig
 
 from aphrodite.common.config import (CacheConfig, LoRAConfig, MultiModalConfig,
                                      SchedulerConfig)
+from aphrodite.common.sequence import IntermediateTensors
 from aphrodite.common.utils import is_pin_memory_available, progress_bar
 from aphrodite.modeling.model_loader.loader import build_model
 from aphrodite.modeling.models import ModelRegistry
@@ -271,3 +272,18 @@ def is_pp_missing_parameter(name: str, model: torch.nn.Module) -> bool:
         if name.startswith(missing_layer_name):
             return True
     return False
+
+
+def make_empty_intermediate_tensors_factory(keys: List[str], hidden_size: int):
+
+    def make_empty_intermediate_tensors(
+            batch_size: int, dtype: torch.dtype,
+            device: torch.device) -> IntermediateTensors:
+        return IntermediateTensors({
+            key: torch.zeros((batch_size, hidden_size),
+                             dtype=dtype,
+                             device=device)
+            for key in keys
+        })
+
+    return make_empty_intermediate_tensors
