@@ -68,9 +68,9 @@ async def test_multi_step(
       num_logprobs: corresponds to the `logprobs` argument to the OpenAI
                     completions endpoint; `None` -> no logprobs
     """
-    if (tp_size > 1 or pp_size > 1) and torch.cuda.device_count() < 2:
+    if (tp_size > 1 or pp_size > 1) and torch.cuda.device_count() == 1:
         pytest.skip("Skipping multi-GPU tests on single GPU system")
-        
+
     prompts = example_prompts
     if len(prompts) < num_prompts:
         prompts = prompts * ((num_prompts // len(prompts)) + 1)
