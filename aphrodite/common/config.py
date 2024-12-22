@@ -48,6 +48,8 @@ _PP_SUPPORTED_MODELS = [
     "NemotronForCausalLM",
     "Qwen2ForCausalLM",
     "Qwen2MoeForCausalLM",
+    "InternLM2ForCausalLM",
+    "InternVLChatModel",
 ]
 
 _OPTIMIZED_QUANTS = [
