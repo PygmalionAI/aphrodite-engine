@@ -32,7 +32,8 @@ from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig
 from aphrodite.common.sequence import IntermediateTensors
 from aphrodite.distributed import get_tensor_model_parallel_world_size
-from aphrodite.distributed.communication_op import tensor_model_parallel_all_gather
+from aphrodite.distributed.communication_op import (
+  tensor_model_parallel_all_gather)
 from aphrodite.distributed.utils import split_tensor_along_last_dim
 from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.model_executor.layers.layernorm import RMSNorm
