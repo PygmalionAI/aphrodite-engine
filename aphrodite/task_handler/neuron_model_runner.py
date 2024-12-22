@@ -7,10 +7,11 @@ from torch import nn
 
 from aphrodite.common.config import (DeviceConfig, ModelConfig, ParallelConfig,
                                      SchedulerConfig)
-from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
+from aphrodite.common.sequence import (IntermediateTensors,
                                        SequenceGroupMetadata)
 from aphrodite.common.utils import (is_pin_memory_available,
                                     make_tensor_with_pad)
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.model_loader.neuron import get_neuron_model
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,

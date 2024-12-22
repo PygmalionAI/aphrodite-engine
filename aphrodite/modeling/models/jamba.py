@@ -11,7 +11,7 @@ from transformers import JambaConfig
 from aphrodite.attention.backends.abstract import AttentionMetadata
 from aphrodite.attention.layer import Attention
 from aphrodite.common.config import CacheConfig, LoRAConfig, SchedulerConfig
-from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
+from aphrodite.common.sequence import IntermediateTensors
 # yapf: disable
 from aphrodite.distributed import (get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size)
@@ -28,7 +28,7 @@ from aphrodite.modeling.layers.mamba import (causal_conv1d_fn,
                                              causal_conv1d_update,
                                              selective_scan_fn,
                                              selective_state_update)
-from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.sampler import Sampler, SamplerOutput
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader

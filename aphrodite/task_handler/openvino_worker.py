@@ -9,11 +9,12 @@ from aphrodite.attention import get_attn_backend
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, MultiModalConfig,
                                      ParallelConfig, SchedulerConfig)
-from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
+from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.distributed import (broadcast_tensor_dict,
                                    ensure_model_parallel_initialized,
                                    init_distributed_environment)
 from aphrodite.modeling import set_random_seed
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.task_handler.openvino_model_runner import OpenVINOModelRunner
 from aphrodite.task_handler.worker_base import LoraNotSupportedWorkerBase
 

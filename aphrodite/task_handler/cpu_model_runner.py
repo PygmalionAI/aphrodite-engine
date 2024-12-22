@@ -8,9 +8,10 @@ from aphrodite.attention import AttentionMetadata, get_attn_backend
 from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,
                                      PromptAdapterConfig, SchedulerConfig)
-from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
+from aphrodite.common.sequence import (IntermediateTensors,
                                        SequenceGroupMetadata)
 from aphrodite.common.utils import make_tensor_with_pad
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.model_loader import get_model
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,

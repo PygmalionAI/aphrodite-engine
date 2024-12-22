@@ -5,8 +5,9 @@ from typing import (TYPE_CHECKING, Any, Dict, Generic, List, Optional, Type,
 
 import torch
 
-from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
+from aphrodite.common.sequence import (IntermediateTensors,
                                        SequenceGroupMetadata)
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.platforms import current_platform
 
 if TYPE_CHECKING:

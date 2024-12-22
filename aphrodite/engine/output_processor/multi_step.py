@@ -11,6 +11,8 @@ from aphrodite.common.sequence import (Sequence, SequenceGroup,
 from aphrodite.common.utils import Counter
 from aphrodite.engine.output_processor.interfaces import (
     SequenceGroupOutputProcessor)
+from aphrodite.engine.output_processor.single_step import (
+    single_step_process_prompt_logprob)
 from aphrodite.engine.output_processor.stop_checker import StopChecker
 from aphrodite.processing.scheduler import Scheduler
 from aphrodite.transformers_utils.detokenizer import Detokenizer
@@ -46,9 +48,15 @@ class MultiStepOutputProcessor(SequenceGroupOutputProcessor):
 
     def process_prompt_logprob(self, seq_group: SequenceGroup,
                                outputs: List[SequenceGroupOutput]) -> None:
-        # TODO: Prompt logprob currently not implemented in multi step
-        # workers.
-        self._log_prompt_logprob_unsupported_warning_once()
+        """Process prompt logprobs associated with each step of a multi-step-
+        scheduled computation.
+        Args:
+          seq_group: the outputs are associated with this :class:`SequenceGroup`
+          outputs: the :class:`SequenceGroupOutput`s for all scheduler steps
+        """
+        for output in outputs:
+            # Concatenate single-step prompt logprob processing results.
+            single_step_process_prompt_logprob(self, seq_group, output)
 
     @staticmethod
     @functools.lru_cache()

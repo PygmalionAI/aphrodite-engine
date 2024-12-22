@@ -6,9 +6,9 @@ import torch
 
 from aphrodite import SamplingParams
 from aphrodite.common.sequence import (APHRODITE_TOKEN_ID_ARRAY_TYPE,
-                                       ExecuteModelRequest, SamplerOutput,
-                                       SequenceData, SequenceGroupMetadata,
-                                       get_all_seq_ids)
+                                       ExecuteModelRequest, SequenceData,
+                                       SequenceGroupMetadata, get_all_seq_ids)
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.spec_decode.interfaces import (SpeculativeProposals,
                                               SpeculativeScorer,
                                               SpeculativeScores)

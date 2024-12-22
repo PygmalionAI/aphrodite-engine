@@ -6,9 +6,9 @@ from aphrodite.common.config import DecodingConfig, ModelConfig
 from aphrodite.common.outputs import EmbeddingRequestOutput, RequestOutput
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.common.sequence import SamplerOutput
 from aphrodite.inputs.data import PromptInputs
 from aphrodite.lora.request import LoRARequest
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.processing.scheduler import SchedulerOutputs
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
 

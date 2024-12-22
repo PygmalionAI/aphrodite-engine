@@ -7,7 +7,7 @@ from loguru import logger
 
 import aphrodite.common.envs as envs
 from aphrodite.common.config import CacheConfig, ModelConfig, SchedulerConfig
-from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
+from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.common.utils import (GiB_bytes, get_aphrodite_instance_id,
                                     get_distributed_init_method, get_open_port,
                                     make_async)
@@ -16,6 +16,7 @@ from aphrodite.executor.multiproc_worker_utils import (ProcessWorkerWrapper,
                                                        ResultHandler,
                                                        WorkerMonitor)
 from aphrodite.lora.request import LoRARequest
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
 from aphrodite.task_handler.worker_base import WorkerWrapperBase
 

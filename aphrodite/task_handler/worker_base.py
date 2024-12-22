@@ -7,13 +7,13 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 import torch
 from loguru import logger
 
-from aphrodite.common.sequence import (ExecuteModelRequest,
-                                       IntermediateTensors, SamplerOutput)
+from aphrodite.common.sequence import ExecuteModelRequest, IntermediateTensors
 from aphrodite.common.utils import (enable_trace_function_call_for_thread,
                                     update_environment_variables)
 from aphrodite.distributed import (broadcast_tensor_dict, get_pp_group,
                                    get_tp_group)
 from aphrodite.lora.request import LoRARequest
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.platforms import current_platform
 from aphrodite.task_handler.model_runner_base import (BroadcastableModelInput,
                                                       ModelRunnerBase,

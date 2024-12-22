@@ -4,8 +4,9 @@ import torch
 import torch.nn as nn
 
 from aphrodite.attention.backends.abstract import AttentionMetadata
-from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
+from aphrodite.common.sequence import IntermediateTensors
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead)
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader

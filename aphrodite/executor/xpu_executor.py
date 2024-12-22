@@ -7,11 +7,11 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      LoRAConfig, ModelConfig, ParallelConfig,
                                      PromptAdapterConfig, SchedulerConfig,
                                      SpeculativeConfig)
-from aphrodite.common.sequence import (ExecuteModelRequest, PoolerOutput,
-                                       SamplerOutput)
+from aphrodite.common.sequence import ExecuteModelRequest, PoolerOutput
 from aphrodite.common.utils import make_async
 from aphrodite.executor.executor_base import ExecutorAsyncBase
 from aphrodite.executor.gpu_executor import GPUExecutor
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.task_handler.worker_base import WorkerBase
 
 

@@ -8,13 +8,14 @@ from typing import (TYPE_CHECKING, Any, Awaitable, Dict, List, Optional, Tuple,
 from loguru import logger
 
 import aphrodite.common.envs as envs
-from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
+from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.common.utils import (get_aphrodite_instance_id,
                                     get_distributed_init_method, get_ip,
                                     get_open_port, make_async)
 from aphrodite.executor.executor_base import ExecutorAsyncBase
 from aphrodite.executor.ray_utils import RayWorkerWrapper, ray
 from aphrodite.executor.tpu_executor import TPUExecutor
+from aphrodite.modeling.layers.sampler import SamplerOutput
 
 if ray is not None:
     from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy

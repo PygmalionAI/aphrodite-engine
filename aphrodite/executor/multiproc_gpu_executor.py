@@ -9,7 +9,7 @@ from typing import Any, List, Optional
 import torch
 from loguru import logger
 
-from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
+from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.common.utils import (_run_task_with_lock,
                                     cuda_device_count_stateless,
                                     get_aphrodite_instance_id,
@@ -21,6 +21,7 @@ from aphrodite.executor.gpu_executor import create_worker
 from aphrodite.executor.multiproc_worker_utils import (ProcessWorkerWrapper,
                                                        ResultHandler,
                                                        WorkerMonitor)
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.triton_utils import maybe_set_triton_cache_manager
 
 
