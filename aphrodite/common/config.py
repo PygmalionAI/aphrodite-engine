@@ -466,10 +466,10 @@ class ModelConfig:
                            "with pipeline parallel")
             self.use_async_output_proc = False
             return
-        if device_config.device_type != "cuda":
+        if device_config.device_type not in ("cuda", "tpu"):
             logger.warning(
-                "Async output processing is only supported for CUDA."
-                " Disabling it for other platforms.")
+                "Async output processing is only supported for CUDA or TPU. "
+                "Disabling it for other platforms.")
             self.use_async_output_proc = False
             return
         if envs.APHRODITE_USE_RAY_SPMD_WORKER:
