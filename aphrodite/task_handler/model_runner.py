@@ -46,6 +46,7 @@ from aphrodite.modeling.sampling_metadata import (SamplingMetadata,
                                                   SamplingMetadataCache)
 from aphrodite.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                                   MultiModalInputs, MultiModalRegistry)
+from aphrodite.processing.scheduler import SchedulerOutputs
 from aphrodite.prompt_adapter.layers import PromptAdapterMapping
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
 from aphrodite.prompt_adapter.worker_manager import (
@@ -98,7 +99,8 @@ class ModelInputForGPU(ModelRunnerInputBase):
     finished_requests_ids: Optional[List[str]] = None
     virtual_engine: int = 0
     async_callback: Optional[Callable] = None
-    use_async_and_multi_step: bool = False
+    seq_group_metadata_list: Optional[List[SequenceGroupMetadata]] = None
+    scheduler_outputs: Optional[SchedulerOutputs] = None
 
     def as_broadcastable_tensor_dict(self) -> Dict[str, Any]:
         tensor_dict = {
