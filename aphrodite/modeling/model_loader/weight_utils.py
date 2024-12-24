@@ -226,7 +226,8 @@ def download_weights_from_hf(
             if len(matching) > 0:
                 allow_patterns = [pattern]
                 break
-    rank = get_tensor_model_parallel_rank()
+    rank = (get_tensor_model_parallel_rank() if
+            torch.distributed.is_initialized() else 0)
     if rank == 0:
         logger.info(f"Using model weights format {allow_patterns}")
     # Use file lock to prevent multiple processes from
