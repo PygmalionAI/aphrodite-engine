@@ -30,7 +30,9 @@ from aphrodite.common.utils import (STR_DTYPE_TO_TORCH_DTYPE,
                                     is_cpu)
 from aphrodite.connections import global_http_connection
 from aphrodite.distributed import (destroy_distributed_environment,
-                                   destroy_model_parallel)
+                                   destroy_model_parallel,
+                                   init_distributed_environment,
+                                   initialize_model_parallel)
 from aphrodite.inputs import (ExplicitEncoderDecoderPrompt, TextPrompt,
                               to_enc_dec_tuple_list, zip_enc_dec_prompts)
 
@@ -38,10 +40,10 @@ _TEST_DIR = os.path.dirname(__file__)
 _TEST_PROMPTS = [os.path.join(_TEST_DIR, "prompts", "example.txt")]
 _LONG_PROMPTS = [os.path.join(_TEST_DIR, "prompts", "summary.txt")]
 
-
 PromptImageInput = Union[List[Image.Image], List[List[Image.Image]]]
 PromptAudioInput = Union[List[Tuple[np.ndarray, int]],
                          List[List[Tuple[np.ndarray, int]]]]
+
 
 def _read_prompts(filename: str) -> List[str]:
     with open(filename, "r") as f:
@@ -91,6 +93,21 @@ def init_test_http_connection():
     # pytest_asyncio may use a different event loop per test
     # so we need to make sure the async client is created anew
     global_http_connection.reuse_client = False
+
+
+@pytest.fixture
+def dist_init():
+    temp_file = tempfile.mkstemp()[1]
+    init_distributed_environment(
+        world_size=1,
+        rank=0,
+        distributed_init_method=f"file://{temp_file}",
+        local_rank=0,
+        backend="nccl",
+    )
+    initialize_model_parallel(1, 1)
+    yield
+    cleanup()
 
 
 def cleanup():
@@ -147,7 +164,7 @@ def example_encoder_decoder_prompts(
     decoder prompt) tuple.
 
     Returns:
-    
+
     * Encoder prompt list
     * Decoder prompt list (reverse of encoder prompt list)
     '''
