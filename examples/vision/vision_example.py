@@ -134,6 +134,17 @@ def run_internvl(question):
     return llm, prompt
 
 
+# Qwen
+def run_qwen_vl(question):
+    llm = LLM(
+        model="Qwen/Qwen-VL",
+        trust_remote_code=True,
+        max_num_seqs=5,
+    )
+    prompt = f"{question}Picture 1: <img></img>\n"
+    return llm, prompt
+
+
 model_example_map = {
     "llava": run_llava,
     "llava-next": run_llava_next,
@@ -144,6 +155,7 @@ model_example_map = {
     "minicpmv": run_minicpmv,
     "blip-2": run_blip2,
     "internvl_chat": run_internvl,
+    "qwen_vl": run_qwen_vl,
 }
 
 
