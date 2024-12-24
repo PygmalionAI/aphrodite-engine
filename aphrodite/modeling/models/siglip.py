@@ -445,8 +445,18 @@ class SiglipVisionTransformer(nn.Module):
             quant_config=quant_config,
             num_hidden_layers_override=num_hidden_layers_override,
         )
-        self.post_layernorm = nn.LayerNorm(embed_dim,
-                                           eps=config.layer_norm_eps)
+        if len(self.encoder.layers) > config.num_hidden_layers:
+            raise ValueError(
+                f"The original encoder only has {config.num_hidden_layers} "
+                f"layers, but you requested {len(self.encoder.layers)} layers."
+            )
+        elif len(self.encoder.layers) == config.num_hidden_layers:
+            self.post_layernorm = nn.LayerNorm(embed_dim,
+                                               eps=config.layer_norm_eps)
+        else:
+          # post_layernorm is unused when we extract intermediate features
+            # In this case, we can skip it to conserve memory
+            self.post_layernorm = None
         self.use_head = (True if not hasattr(config, "vision_use_head") else
                          config.vision_use_head)
         if self.use_head:
@@ -464,6 +474,9 @@ class SiglipVisionTransformer(nn.Module):
         )
 
         encoder_outputs = self.encoder(inputs_embeds=hidden_states)
+
+        if self.post_layernorm is None:
+            return encoder_outputs
 
         last_hidden_state = self.post_layernorm(encoder_outputs)
 
@@ -494,6 +507,10 @@ class SiglipVisionModel(nn.Module):
             num_hidden_layers_override=num_hidden_layers_override,
         )
 
+    @property
+    def _require_post_layernorm(self) -> bool:
+        return self.vision_model.post_layernorm is not None
+
     def get_input_embeddings(self) -> nn.Module:
         return self.vision_model.embeddings.patch_embedding
 
@@ -508,17 +525,36 @@ class SiglipVisionModel(nn.Module):
         )
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
+        stacked_params_mapping = [
+            # (param_name, shard_name, shard_id)
+            ("qkv_proj", "q_proj", "q"),
+            ("qkv_proj", "k_proj", "k"),
+            ("qkv_proj", "v_proj", "v"),
+        ] if self.shard_weight else []
         params_dict = dict(self.named_parameters())
         layer_count = len(self.vision_model.encoder.layers)
 
         for name, loaded_weight in weights:
+            # post_layernorm is optional in SiglipVisionModel
+            if ("vision_model.post_layernorm" in name
+                    and not self._require_post_layernorm):
+                continue
             # omit layers when num_hidden_layers_override is set
             if "vision_model.encoder.layers." in name:
                 layer_idx = int(name.split(".")[3])
                 if layer_idx >= layer_count:
                     continue
 
-            param = params_dict[name]
-            weight_loader = getattr(param, "weight_loader",
-                                    default_weight_loader)
-            weight_loader(param, loaded_weight)
+            for (param_name, weight_name, shard_id) in stacked_params_mapping:
+                if weight_name not in name:
+                    continue
+
+                param = params_dict[name.replace(weight_name, param_name)]
+                weight_loader = param.weight_loader
+                weight_loader(param, loaded_weight, shard_id)
+                break
+            else:
+                param = params_dict[name]
+                weight_loader = getattr(param, "weight_loader",
+                                        default_weight_loader)
+                weight_loader(param, loaded_weight)
