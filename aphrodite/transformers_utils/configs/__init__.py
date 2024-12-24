@@ -5,6 +5,7 @@ from aphrodite.transformers_utils.configs.eagle import EAGLEConfig
 # tiiuae/falcon-7b(-instruct) models. Newer Falcon models will use the
 # `FalconConfig` class from the official HuggingFace transformers library.
 from aphrodite.transformers_utils.configs.falcon import RWConfig
+from aphrodite.transformers_utils.configs.granite import GraniteConfig
 from aphrodite.transformers_utils.configs.internvl import InternVLChatConfig
 from aphrodite.transformers_utils.configs.jais import JAISConfig
 from aphrodite.transformers_utils.configs.medusa import MedusaConfig
@@ -24,4 +25,5 @@ __all__ = [
     "MedusaConfig",
     "UltravoxConfig",
     "EAGLEConfig",
+    "GraniteConfig",
 ]
