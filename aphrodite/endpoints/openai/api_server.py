@@ -88,11 +88,13 @@ model_is_loaded = True
 _running_tasks: Set[asyncio.Task] = set()
 
 
-def model_is_embedding(model_name: str, trust_remote_code: bool) -> bool:
+def model_is_embedding(model_name: str, trust_remote_code: bool,
+                       quantization: Optional[str]) -> bool:
     return ModelConfig(model=model_name,
                        tokenizer=model_name,
                        tokenizer_mode="auto",
                        trust_remote_code=trust_remote_code,
+                       quantization=quantization,
                        seed=0,
                        dtype="auto").embedding_mode
 
@@ -116,12 +118,7 @@ async def lifespan(app: FastAPI):
 @asynccontextmanager
 async def build_async_engine_client(
         args: Namespace) -> AsyncIterator[Optional[AsyncEngineClient]]:
-    """
-    Create AsyncEngineClient, either:
-        - in-process using the AsyncAphrodite Directly
-        - multiprocess using AsyncAphrodite RPC
-    Returns the Client or None if the creation failed.
-    """
+
     # Context manager to handle async_engine_client lifecycle
     # Ensures everything is shutdown and cleaned up on error/exit
     global engine_args
@@ -130,12 +127,37 @@ async def build_async_engine_client(
     # Backend itself still global for the silly lil' health handler
     global async_engine_client
 
+    async with build_async_engine_client_from_engine_args(
+            engine_args, args.disable_frontend_multiprocessing) as engine:
+
+        async_engine_client = engine  # type: ignore[assignment]
+        yield engine
+
+
+@asynccontextmanager
+async def build_async_engine_client_from_engine_args(
+    engine_args: AsyncEngineArgs,
+    disable_frontend_multiprocessing: bool = False,
+) -> AsyncIterator[Optional[AsyncEngineClient]]:
+    """
+    Create AsyncEngineClient, either:
+        - in-process using the AsyncAphrodite Directly
+        - multiprocess using AsyncAphrodite RPC
+
+    Returns the Client or None if the creation failed.
+    """
+
     # If manually triggered or embedding model, use AsyncAphrodite in process.
     # TODO: support embedding model via RPC.
-    if (model_is_embedding(args.model, args.trust_remote_code)
-            or args.disable_frontend_multiprocessing):
-        async_engine_client = AsyncAphrodite.from_engine_args(engine_args)
-        yield async_engine_client
+    if (model_is_embedding(engine_args.model, engine_args.trust_remote_code,
+                           engine_args.quantization)
+            or disable_frontend_multiprocessing):
+        engine_client = AsyncAphrodite.from_engine_args(
+            engine_args)
+        try:
+            yield engine_client
+        finally:
+            engine_client.shutdown_background_loop()
         return
 
     # Otherwise, use the multiprocessing AsyncAphrodite.
@@ -154,6 +176,7 @@ async def build_async_engine_client(
                 "This directory must be wiped between Aphrodite runs or "
                 "you will find inaccurate metrics. Unset the variable "
                 "and Aphrodite will properly handle cleanup.")
+
         # Select random path for IPC.
         rpc_path = get_open_zmq_ipc_path()
         logger.info(f"Multiprocessing frontend to use {rpc_path} for RPC Path."
@@ -163,7 +186,6 @@ async def build_async_engine_client(
         # NOTE: Actually, this is not true yet. We still need to support
         # embedding models via RPC (see TODO above)
         rpc_client = AsyncEngineRPCClient(rpc_path)
-        async_engine_client = rpc_client  # type: ignore
 
         # Start RPCServer in separate process (holds the AsyncAphrodite).
         context = multiprocessing.get_context("spawn")
@@ -179,7 +201,7 @@ async def build_async_engine_client(
         try:
             while True:
                 try:
-                    await async_engine_client.setup()
+                    await rpc_client.setup()
                     break
                 except TimeoutError:
                     if not rpc_server_process.is_alive():
@@ -188,13 +210,14 @@ async def build_async_engine_client(
                             "to readiness probe")
                         yield None
                         return
-            yield async_engine_client
+
+            yield rpc_client  # type: ignore[misc]
         finally:
             # Ensure rpc server process was terminated
             rpc_server_process.terminate()
 
             # Close all open connections to the backend
-            async_engine_client.close()
+            rpc_client.close()
 
             # Wait for server process to join
             rpc_server_process.join()
