@@ -141,6 +141,10 @@ class ModelConfig:
             per prompt. Only applicable for multimodal models.
         config_format: The config format which will be loaded. Defaults to
             'auto' which defaults to 'hf'.
+        override_neuron_config: Initialize non default neuron config or 
+            override default neuron config that are specific to Neuron devices, 
+            this argument will be used to configure the neuron config that 
+            can not be gathered from the Aphrodite arguments. 
     """
 
     def __init__(
@@ -173,6 +177,7 @@ class ModelConfig:
         limit_mm_per_prompt: Optional[Mapping[str, int]] = None,
         use_async_output_proc: bool = True,
         config_format: ConfigFormat = ConfigFormat.AUTO,
+        override_neuron_config: Optional[Dict[str, Any]] = None
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -268,6 +273,8 @@ class ModelConfig:
 
         if not self.skip_tokenizer_init:
             self._verify_tokenizer_mode()
+        self.override_neuron_config = override_neuron_config if is_neuron(
+        ) else None
         self._verify_embedding_mode()
         self._verify_quantization()
         self._verify_cuda_graph()
@@ -312,6 +319,7 @@ class ModelConfig:
         supported_quantization = [*QUANTIZATION_METHODS]
         rocm_supported_quantization = ["awq", "gptq", "squeezellm", "fp8"]
         tpu_supported_quantization = ["tpu_int8"]
+        neuron_supported_quantization = ["neuron_quant"]
         if self.quantization is not None:
             self.quantization = self.quantization.lower()
 
@@ -450,6 +458,12 @@ class ModelConfig:
                     "APHRODITE_USE_TRITON_AWQ is not set, enabling "
                     "APHRODITE_USE_TRITON_AWQ.")
                 envs.APHRODITE_USE_TRITON_AWQ = True
+
+            if is_neuron(
+            ) and self.quantization not in neuron_supported_quantization:
+                raise ValueError(
+                    f"{self.quantization} quantization is currently not "
+                    f"supported in Neuron Backend.")
 
     def _verify_cuda_graph(self) -> None:
         if self.max_seq_len_to_capture is None:
