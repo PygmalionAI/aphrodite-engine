@@ -7,7 +7,7 @@ from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 from aphrodite.common.outputs import EmbeddingRequestOutput, RequestOutput
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.common.utils import Counter, deprecate_kwargs
+from aphrodite.common.utils import Counter, deprecate_kwargs, is_list_of
 from aphrodite.endpoints.chat_utils import (ChatCompletionMessageParam,
                                             apply_chat_template,
                                             parse_chat_messages)
@@ -349,13 +349,15 @@ class LLM:
         add_generation_prompt: bool = True,
     ) -> List[RequestOutput]:
         """
-        Generates responses for chat messages.
-        Converts the messages to prompts using the tokenizer and calls
-        the :meth:`generate` method to generate the responses.
+        Generate responses for a chat conversation.
+        The chat conversation is converted into a text prompt using the
+        tokenizer and calls the :meth:`generate` method to generate the
+        responses.
+        Multi-modal inputs can be passed in the same way you would pass them
+        to the OpenAI API.
         Args:
-            messages: A list of messages to generate responses for. Each
-                message is a list of dictionaries with 'role' and 'content'
-                keys.
+            messages: A single conversation represented as a list of messages.
+                Each message is a dictionary with 'role' and 'content' keys.
             sampling_params: The sampling parameters for text generation.
                 If None, we use the default sampling parameters. When it
                 is a single value, it is applied to every prompt. When it
@@ -375,18 +377,28 @@ class LLM:
         tokenizer = self.get_tokenizer()
         model_config = self.llm_engine.get_model_config()
 
-        conversations, _ = parse_chat_messages(messages, model_config,
-                                               tokenizer)
+        conversation, mm_data = parse_chat_messages(messages, model_config,
+                                                    tokenizer)
 
-        prompts = apply_chat_template(
+        prompt = apply_chat_template(
             tokenizer,
-            conversations,
+            conversation,
             chat_template=chat_template,
-            add_generation_prompt=add_generation_prompt)
+            add_generation_prompt=add_generation_prompt,
+        )
+
+        inputs: PromptInputs
+        if is_list_of(prompt, int):
+            inputs = TokensPrompt(prompt_token_ids=prompt)
+        else:
+            inputs = TextPrompt(prompt=prompt)
+
+        if mm_data is not None:
+            inputs["multi_modal_data"] = mm_data
 
         return self.generate(
-            prompts,
-            sampling_params,
+            inputs,
+            sampling_params=sampling_params,
             use_tqdm=use_tqdm,
             lora_request=lora_request,
         )

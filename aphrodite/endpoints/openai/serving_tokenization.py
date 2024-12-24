@@ -8,7 +8,7 @@ from aphrodite.common.utils import random_uuid
 # yapf: disable
 from aphrodite.endpoints.chat_utils import (apply_chat_template,
                                             load_chat_template,
-                                            parse_chat_messages)
+                                            parse_chat_messages_futures)
 from aphrodite.endpoints.logger import RequestLogger
 from aphrodite.endpoints.openai.protocol import (DetokenizeRequest,
                                                  DetokenizeResponse,
@@ -64,10 +64,11 @@ class OpenAIServingTokenization(OpenAIServing):
         if isinstance(request, TokenizeChatRequest):
             model_config = self.model_config
 
-            conversation, mm_data_future = parse_chat_messages(
+            conversation, mm_data_future = parse_chat_messages_futures(
                 request.messages, model_config, tokenizer)
 
-            if mm_data_future:
+            mm_data = await mm_data_future
+            if mm_data:
                 logger.warning(
                     "Multi-modal inputs are ignored during tokenization")
 
