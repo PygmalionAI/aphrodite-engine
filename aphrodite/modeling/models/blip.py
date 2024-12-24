@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 from PIL import Image
 from transformers import Blip2VisionConfig, BlipVisionConfig
-from xformers import ops as xops
+from transformers.models.blip.modeling_blip import BlipAttention
 
 from aphrodite.common.config import ModelConfig
 from aphrodite.common.sequence import SequenceData
@@ -21,6 +21,12 @@ from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
 from aphrodite.multimodal.utils import (cached_get_tokenizer,
                                         repeat_and_pad_placeholder_tokens)
 from aphrodite.quantization import QuantizationConfig
+
+try:
+    from xformers import ops as xops
+    USE_XFORMERS_OPS = True
+except ImportError:
+    USE_XFORMERS_OPS = False
 
 
 def get_blip_patch_grid_length(*, image_size: int, patch_size: int) -> int:
@@ -157,7 +163,7 @@ class BlipVisionEmbeddings(nn.Module):
         return embeddings
 
 
-class BlipAttention(nn.Module):
+class BlipParallelAttention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
     def __init__(
         self,
@@ -219,7 +225,7 @@ class BlipAttention(nn.Module):
                                                       scale=self.scale)
         out = out.view(bsz, tgt_len, -1)
         attn_output, _ = self.projection(out)
-        return attn_output
+        return attn_output, None
 
 
 class BlipMLP(nn.Module):
@@ -256,7 +262,16 @@ class BlipEncoderLayer(nn.Module):
                  quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
 
-        self.self_attn = BlipAttention(config, quant_config=quant_config)
+        # fallback to sdpa attention if tp unavailable
+        num_heads = config.num_attention_heads
+        tp_size = get_tensor_model_parallel_world_size()
+        if USE_XFORMERS_OPS and num_heads % tp_size == 0:
+            self.self_attn = BlipParallelAttention(config,
+                                                   quant_config=quant_config)
+        else:
+            # Blip doesn't have SDPA attention implemented in transformers
+            # use eager attention instead for cpu backend
+            self.self_attn = BlipAttention(config)
         self.layer_norm1 = nn.LayerNorm(config.hidden_size,
                                         eps=config.layer_norm_eps)
         self.mlp = BlipMLP(config, quant_config=quant_config)
@@ -267,7 +282,7 @@ class BlipEncoderLayer(nn.Module):
         residual = hidden_states
 
         hidden_states = self.layer_norm1(hidden_states)
-        hidden_states = self.self_attn(hidden_states=hidden_states)
+        hidden_states, _ = self.self_attn(hidden_states=hidden_states)
         hidden_states = residual + hidden_states
 
         residual = hidden_states
