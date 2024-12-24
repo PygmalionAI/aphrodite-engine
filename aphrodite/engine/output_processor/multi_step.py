@@ -86,9 +86,16 @@ class MultiStepOutputProcessor(SequenceGroupOutputProcessor):
         """
         # TODO: Add support for async if necessary
         assert not is_async
-        seqs = sequence_group.get_seqs(status=SequenceStatus.RUNNING)
 
-        assert seqs, "expected running sequences"
+        # Sequences can be in RUNNING or FINISHED_ABORTED state
+        # once scheduled, as a sequence is moved to FINSIHED_ABORTED
+        # if a client disconnects from the api server.
+        seqs = sequence_group.get_seqs(status=SequenceStatus.RUNNING)
+        if seqs is None:
+            seqs = sequence_group.get_seqs(
+                status=SequenceStatus.FINISHED_ABORTED)
+
+        assert seqs, "Expected RUNNING or FINISHED_ABORTED sequences"
         assert len(seqs) == 1, (
             "Beam search not supported in multi-step decoding.")
         seq = seqs[0]
