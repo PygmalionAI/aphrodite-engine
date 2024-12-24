@@ -16,8 +16,8 @@ from aphrodite.distributed import (ensure_model_parallel_initialized,
 from aphrodite.modeling import set_random_seed
 from aphrodite.worker.tpu_model_runner import TPUModelRunner
 from aphrodite.worker.worker_base import (LocalOrDistributedWorkerBase,
-                                                LoraNotSupportedWorkerBase,
-                                                WorkerInput)
+                                          LoraNotSupportedWorkerBase,
+                                          WorkerInput)
 
 
 class TPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
@@ -100,10 +100,10 @@ class TPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # Use persistent cache to avoid XLA recompilation.
         # NOTE: Set per-rank cache path since different ranks
         # can have slightly different XLA graphs.
-        APHRODITE_XLA_CACHE_PATH = envs.APHRODITE_XLA_CACHE_PATH
         world_size = self.parallel_config.world_size
-        per_rank_path = os.path.join(APHRODITE_XLA_CACHE_PATH,
-                                     f"tp{world_size}_rank{self.rank}")
+        rank = xr.global_ordinal()
+        per_rank_path = os.path.join(envs.APHRODITE_XLA_CACHE_PATH,
+                                     f"tp{world_size}_rank{rank}")
         xr.initialize_cache(per_rank_path, readonly=False)
 
     def load_model(self):
