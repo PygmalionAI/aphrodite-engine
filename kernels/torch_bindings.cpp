@@ -247,6 +247,9 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
   ops.impl("top_p_renorm_prob", torch::kCUDA, &top_p_renorm_prob);
   ops.def("top_k_mask_logits", &top_k_mask_logits);
   ops.impl("top_k_mask_logits", torch::kCUDA, &top_k_mask_logits);
+  ops.def("chain_speculative_sampling", &chain_speculative_sampling);
+  ops.impl("chain_speculative_sampling", torch::kCUDA,
+           &chain_speculative_sampling);
 
 #endif
 

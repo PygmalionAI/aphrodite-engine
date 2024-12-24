@@ -1360,6 +1360,131 @@ cudaError_t TopKMaskLogits(DType* logits, DType* masked_logits,
   return cudaSuccess;
 }
 
+template <uint32_t BLOCK_THREADS, BlockScanAlgorithm SCAN_ALGORITHM,
+          BlockReduceAlgorithm REDUCE_ALGORITHM, uint32_t VEC_SIZE, bool DETERMINISTIC,
+          typename DType, typename IdType>
+__global__ void ChainSpeculativeSampling(DType* draft_probs, IdType* draft_token_ids,
+                                         DType* uniform_samples, DType* target_probs,
+                                         IdType* output_token_ids,
+                                         IdType* output_accepted_token_num,
+                                         IdType* output_emitted_token_num,
+                                         uint32_t num_speculative_tokens, uint32_t d) {
+  const uint32_t bx = blockIdx.x, tx = threadIdx.x;
+  const uint32_t row_idx = bx;
+
+  extern __shared__ __align__(
+      alignof(SamplingTempStorage<DType, BLOCK_THREADS, SCAN_ALGORITHM, REDUCE_ALGORITHM>))
+      uint8_t smem_sampling[];
+  auto& temp_storage = reinterpret_cast<
+      SamplingTempStorage<DType, BLOCK_THREADS, SCAN_ALGORITHM, REDUCE_ALGORITHM>&>(smem_sampling);
+
+  uint32_t pos = num_speculative_tokens;
+  for (uint32_t i = 0; i < num_speculative_tokens; ++i) {
+    IdType draft_id = draft_token_ids[row_idx * num_speculative_tokens + i];
+    float q = target_probs[(row_idx * (num_speculative_tokens + 1) + i) * d + draft_id],
+          p = draft_probs[(row_idx * num_speculative_tokens + i) * d + draft_id];
+    DType u = uniform_samples[row_idx * (num_speculative_tokens + 1) + i];
+    if (u * p < q) {
+      // accept the draft models output
+      output_token_ids[row_idx * (num_speculative_tokens + 1) + i] = draft_id;
+    } else {
+      pos = i;
+      break;
+    }
+  }
+
+  uint32_t emitted_token_num = pos;
+  uint32_t accepted_token_num = pos;
+  for (uint32_t i = pos; i < num_speculative_tokens; ++i) {
+    IdType draft_id = draft_token_ids[row_idx * num_speculative_tokens + i];
+    float q = target_probs[(row_idx * (num_speculative_tokens + 1) + i) * d + draft_id],
+          p = draft_probs[(row_idx * num_speculative_tokens + i) * d + draft_id];
+    DType u = uniform_samples[row_idx * (num_speculative_tokens + 1) + i];
+    if (u * p < q) {
+      ++accepted_token_num;
+    }
+  }
+
+  if (tx == 0) {
+    output_accepted_token_num[row_idx] += accepted_token_num;
+    output_emitted_token_num[row_idx] += emitted_token_num;
+  }
+
+  // sample from relu(target_probs - draft_probs)
+  DType sum_relu_q_minus_p(0);
+  vec_t<DType, VEC_SIZE> q_vec, p_vec;
+  DType relu_q_minus_p[VEC_SIZE];
+  for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+    q_vec.fill(DType(0));
+    p_vec.fill(DType(0));
+    if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
+      q_vec.load(target_probs + (row_idx * (num_speculative_tokens + 1) + pos) * d +
+                 i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
+      if (pos != num_speculative_tokens) {
+        // there is no draft_probs for the bonus token
+        p_vec.load(draft_probs + (row_idx * num_speculative_tokens + pos) * d +
+                   i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
+      }
+    }
+#pragma unroll
+    for (uint32_t j = 0; j < VEC_SIZE; ++j) {
+      relu_q_minus_p[j] = max(q_vec[j] - p_vec[j], DType(0));
+    }
+    sum_relu_q_minus_p +=
+        BlockReduce<DType, BLOCK_THREADS, REDUCE_ALGORITHM>(temp_storage.block_prim.reduce)
+            .Sum<VEC_SIZE>(relu_q_minus_p);
+    __syncthreads();
+  }
+  if (tx == 0) {
+    temp_storage.data.block_aggregate.value = sum_relu_q_minus_p;
+  }
+  // init the first rejected token to (d - 1)
+  temp_storage.data.sampled_id = d - 1;
+  __syncthreads();
+  sum_relu_q_minus_p = temp_storage.data.block_aggregate.value;
+  DType u = uniform_samples[row_idx * (num_speculative_tokens + 1) +
+                            min(pos + 1, num_speculative_tokens)] *
+            sum_relu_q_minus_p;
+
+  DType aggregate_relu_q_minus_p(0);
+  for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+    q_vec.fill(DType(0));
+    p_vec.fill(DType(0));
+    if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
+      q_vec.load(target_probs + (row_idx * (num_speculative_tokens + 1) + pos) * d +
+                 i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
+      if (pos != num_speculative_tokens) {
+        // there is no draft_probs for the bonus token
+        p_vec.load(draft_probs + (row_idx * num_speculative_tokens + pos) * d +
+                   i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
+      }
+    }
+
+    vec_t<DType, VEC_SIZE> relu_q_minus_p_vec;
+#pragma unroll
+    for (uint32_t j = 0; j < VEC_SIZE; ++j) {
+      relu_q_minus_p_vec[j] = max(q_vec[j] - p_vec[j], DType(0));
+    }
+
+    DeviceSamplingFromProb<VEC_SIZE, BLOCK_THREADS, SCAN_ALGORITHM, REDUCE_ALGORITHM, DETERMINISTIC,
+                           DType>(i, d, DType(0), u, relu_q_minus_p_vec, aggregate_relu_q_minus_p,
+                                  &temp_storage);
+    if (aggregate_relu_q_minus_p > u) {
+      break;
+    }
+  }
+  __syncthreads();
+  // set the first rejected token
+  output_token_ids[row_idx * (num_speculative_tokens + 1) + pos] = temp_storage.data.sampled_id;
+  // move to the next token
+  pos++;
+
+  // pad remaining tokens with -1
+  for (; pos < num_speculative_tokens + 1; ++pos) {
+    output_token_ids[row_idx * (num_speculative_tokens + 1) + pos] = -1;
+  }
+}
+
 template <typename T, typename IdType>
 cudaError_t ParallelTopPSamplingFromProb(
     T* probs, T* uniform_samples, IdType* output, bool* success,

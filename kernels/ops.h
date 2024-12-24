@@ -135,5 +135,9 @@ torch::Tensor top_k_renorm_prob(torch::Tensor probs,
 torch::Tensor top_k_mask_logits(torch::Tensor logits,
                                 std::optional<torch::Tensor> maybe_top_k_arr,
                                 int64_t top_k_val);
+std::vector<torch::Tensor> chain_speculative_sampling(
+    torch::Tensor draft_probs, torch::Tensor draft_token_ids, torch::Tensor uniform_samples,
+    torch::Tensor target_probs, std::optional<torch::Tensor> maybe_output_accepted_token_num,
+    std::optional<torch::Tensor> maybe_output_emitted_token_num, bool deterministic);
 
 #endif
