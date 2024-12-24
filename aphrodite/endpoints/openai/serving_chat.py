@@ -15,7 +15,7 @@ from aphrodite.common.utils import iterate_with_cancellation, random_uuid
 from aphrodite.endpoints.chat_utils import (ConversationMessage,
                                             apply_chat_template,
                                             load_chat_template,
-                                            parse_chat_messages)
+                                            parse_chat_messages_futures)
 from aphrodite.endpoints.logger import RequestLogger
 from aphrodite.endpoints.openai.protocol import (
     ChatCompletionLogProb, ChatCompletionLogProbs,
@@ -30,7 +30,6 @@ from aphrodite.endpoints.openai.serving_engine import (LoRAModulePath,
                                                        TextTokensPrompt)
 from aphrodite.engine.protocol import AsyncEngineClient
 from aphrodite.inputs import PromptInputs
-from aphrodite.multimodal import MultiModalDataDict
 
 
 class OpenAIServingChat(OpenAIServing):
@@ -98,7 +97,7 @@ class OpenAIServingChat(OpenAIServing):
             model_config = self.model_config
             tokenizer = await self.async_engine_client.get_tokenizer(
                 lora_request)
-            conversation, mm_data_future = parse_chat_messages(
+            conversation, mm_data_future = parse_chat_messages_futures(
                 request.messages, model_config, tokenizer)
 
             tool_dicts = None if request.tools is None else [
@@ -118,10 +117,8 @@ class OpenAIServingChat(OpenAIServing):
             logger.error(f"Error in applying chat template from request: {e}")
             return self.create_error_response(str(e))
 
-        mm_data: Optional[MultiModalDataDict] = None
         try:
-            if mm_data_future:
-                mm_data = await mm_data_future
+            mm_data = await mm_data_future
         except Exception as e:
             logger.error(f"Error in loading multi-modal data: {e}")
             return self.create_error_response(str(e))
