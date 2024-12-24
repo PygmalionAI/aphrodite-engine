@@ -16,7 +16,7 @@ from aphrodite.modeling.model_loader.neuron import get_neuron_model
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                                   MultiModalInputs)
-from aphrodite.task_handler.model_runner_base import (ModelRunnerBase,
+from aphrodite.worker.model_runner_base import (ModelRunnerBase,
                                                       ModelRunnerInputBase)
 
 if TYPE_CHECKING:

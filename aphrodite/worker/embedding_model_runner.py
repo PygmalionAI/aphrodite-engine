@@ -11,7 +11,7 @@ from aphrodite.common.sequence import (IntermediateTensors, PoolerOutput,
                                        SequenceData, SequenceGroupMetadata)
 from aphrodite.modeling.pooling_metadata import PoolingMetadata
 from aphrodite.multimodal import MultiModalInputs
-from aphrodite.task_handler.model_runner import (GPUModelRunnerBase,
+from aphrodite.worker.model_runner import (GPUModelRunnerBase,
                                                  ModelInputForGPU,
                                                  ModelInputForGPUBuilder)
 

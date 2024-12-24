@@ -51,7 +51,7 @@ from aphrodite.prompt_adapter.layers import PromptAdapterMapping
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
 from aphrodite.prompt_adapter.worker_manager import (
     LRUCacheWorkerPromptAdapterManager)
-from aphrodite.task_handler.model_runner_base import (
+from aphrodite.worker.model_runner_base import (
     ModelRunnerBase, ModelRunnerInputBase, ModelRunnerInputBuilderBase,
     _add_attn_metadata_broadcastable_dict,
     _add_sampling_metadata_broadcastable_dict,

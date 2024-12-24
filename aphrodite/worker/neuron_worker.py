@@ -10,8 +10,8 @@ from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.distributed import (ensure_model_parallel_initialized,
                                    init_distributed_environment)
 from aphrodite.modeling import set_random_seed
-from aphrodite.task_handler.neuron_model_runner import NeuronModelRunner
-from aphrodite.task_handler.worker_base import (LocalOrDistributedWorkerBase,
+from aphrodite.worker.neuron_model_runner import NeuronModelRunner
+from aphrodite.worker.worker_base import (LocalOrDistributedWorkerBase,
                                                 LoraNotSupportedWorkerBase,
                                                 WorkerInput)
 

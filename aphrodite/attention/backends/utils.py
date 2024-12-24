@@ -9,7 +9,7 @@ from aphrodite.attention import (AttentionMetadata, AttentionMetadataBuilder,
 from aphrodite.common.utils import async_tensor_h2d, make_tensor_with_pad
 
 if TYPE_CHECKING:
-    from aphrodite.task_handler.model_runner_base import ModelRunnerBase
+    from aphrodite.worker.model_runner_base import ModelRunnerBase
 
 # Error string(s) for encoder/decoder
 # unsupported attention scenarios
@@ -23,7 +23,7 @@ PAD_SLOT_ID = -1
 _COMPUTE_SLOT_MAPPING_NUMPY_NUMEL = 256
 
 if TYPE_CHECKING:
-    from aphrodite.task_handler.model_runner import ModelInputForGPUBuilder
+    from aphrodite.worker.model_runner import ModelInputForGPUBuilder
 
 
 def is_block_tables_empty(block_tables: Union[None, Dict]):

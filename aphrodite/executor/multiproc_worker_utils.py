@@ -142,7 +142,7 @@ class WorkerMonitor(threading.Thread):
 
 
 class ProcessWorkerWrapper:
-    """Local process wrapper for aphrodite.task_handler.Worker,
+    """Local process wrapper for aphrodite.worker.Worker,
     for handling single-node multi-GPU tensor parallel."""
 
     def __init__(self, result_handler: ResultHandler,

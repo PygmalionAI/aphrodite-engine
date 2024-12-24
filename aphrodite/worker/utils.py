@@ -3,7 +3,7 @@ Worker-related helper functions.
 '''
 
 from aphrodite.common.utils import STR_NOT_IMPL_ENC_DEC_ERR_STRS
-from aphrodite.task_handler.model_runner import GPUModelRunnerBase
+from aphrodite.worker.model_runner import GPUModelRunnerBase
 
 
 def assert_enc_dec_mr_supported_scenario(

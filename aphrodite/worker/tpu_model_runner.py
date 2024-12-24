@@ -23,7 +23,7 @@ from aphrodite.compilation.wrapper import (
 from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.model_loader import get_model
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.task_handler.model_runner_base import (
+from aphrodite.worker.model_runner_base import (
     ModelRunnerBase, ModelRunnerInputBase,
     _add_attn_metadata_broadcastable_dict,
     _init_attn_metadata_from_tensor_dict)

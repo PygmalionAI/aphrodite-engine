@@ -33,7 +33,7 @@ from aphrodite.common.utils import (async_tensor_h2d, get_kv_cache_torch_dtype,
                                     make_tensor_with_pad)
 
 if TYPE_CHECKING:
-    from aphrodite.task_handler.model_runner import ModelInputForGPUBuilder
+    from aphrodite.worker.model_runner import ModelInputForGPUBuilder
 
 
 class FlashInferBackend(AttentionBackend):

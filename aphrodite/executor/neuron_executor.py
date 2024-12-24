@@ -22,7 +22,7 @@ class NeuronExecutor(ExecutorBase):
         self._init_worker()
 
     def _init_worker(self):
-        from aphrodite.task_handler.neuron_worker import NeuronWorker
+        from aphrodite.worker.neuron_worker import NeuronWorker
         distributed_init_method = get_distributed_init_method(
             get_ip(), get_open_port())
         self.driver_worker = NeuronWorker(

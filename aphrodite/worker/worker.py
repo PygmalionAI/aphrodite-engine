@@ -26,12 +26,12 @@ from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.model_loader.tensorizer import TensorizerConfig
 from aphrodite.platforms import current_platform
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
-from aphrodite.task_handler.cache_engine import CacheEngine
-from aphrodite.task_handler.embedding_model_runner import EmbeddingModelRunner
-from aphrodite.task_handler.enc_dec_model_runner import (
+from aphrodite.worker.cache_engine import CacheEngine
+from aphrodite.worker.embedding_model_runner import EmbeddingModelRunner
+from aphrodite.worker.enc_dec_model_runner import (
     EncoderDecoderModelRunner)
-from aphrodite.task_handler.model_runner import GPUModelRunnerBase, ModelRunner
-from aphrodite.task_handler.worker_base import (LocalOrDistributedWorkerBase,
+from aphrodite.worker.model_runner import GPUModelRunnerBase, ModelRunner
+from aphrodite.worker.worker_base import (LocalOrDistributedWorkerBase,
                                                 WorkerInput)
 
 
