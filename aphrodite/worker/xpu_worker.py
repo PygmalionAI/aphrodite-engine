@@ -17,10 +17,10 @@ from aphrodite.distributed import (ensure_model_parallel_initialized,
                                    init_distributed_environment)
 from aphrodite.distributed.parallel_state import get_pp_group
 from aphrodite.modeling import set_random_seed
-from aphrodite.task_handler.cache_engine import CacheEngine
-from aphrodite.task_handler.worker import Worker
-from aphrodite.task_handler.worker_base import LoraNotSupportedWorkerBase
-from aphrodite.task_handler.xpu_model_runner import XPUModelRunner
+from aphrodite.worker.cache_engine import CacheEngine
+from aphrodite.worker.worker import Worker
+from aphrodite.worker.worker_base import LoraNotSupportedWorkerBase
+from aphrodite.worker.xpu_model_runner import XPUModelRunner
 
 
 class XPUWorker(LoraNotSupportedWorkerBase, Worker):

@@ -15,7 +15,7 @@ from aphrodite.distributed import (broadcast_tensor_dict, get_pp_group,
 from aphrodite.lora.request import LoRARequest
 from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.platforms import current_platform
-from aphrodite.task_handler.model_runner_base import (BroadcastableModelInput,
+from aphrodite.worker.model_runner_base import (BroadcastableModelInput,
                                                       ModelRunnerBase,
                                                       ModelRunnerInputBase)
 

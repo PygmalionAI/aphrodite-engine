@@ -4,7 +4,7 @@ from typing import List, Optional, Set, Tuple
 from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.spec_decode.interfaces import SpeculativeProposer
-from aphrodite.task_handler.worker_base import LoraNotSupportedWorkerBase
+from aphrodite.worker.worker_base import LoraNotSupportedWorkerBase
 
 
 class ProposerWorkerBase(LoraNotSupportedWorkerBase, SpeculativeProposer):

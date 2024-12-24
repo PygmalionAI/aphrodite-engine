@@ -33,7 +33,7 @@ class OpenVINOExecutor(ExecutorBase):
         self._init_worker()
 
     def _init_worker(self):
-        from aphrodite.task_handler.openvino_worker import OpenVINOWorker
+        from aphrodite.worker.openvino_worker import OpenVINOWorker
 
         assert (
             self.parallel_config.world_size == 1

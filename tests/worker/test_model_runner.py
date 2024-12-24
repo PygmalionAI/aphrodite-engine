@@ -12,8 +12,7 @@ from aphrodite.distributed.parallel_state import (
     ensure_model_parallel_initialized, init_distributed_environment)
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
-from aphrodite.task_handler.model_runner import (ModelRunner,
-                                                 _get_graph_batch_size)
+from aphrodite.worker.model_runner import ModelRunner, _get_graph_batch_size
 
 
 def _create_model_runner(model: str, *args, **kwargs) -> ModelRunner:

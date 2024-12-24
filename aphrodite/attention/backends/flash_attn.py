@@ -18,7 +18,7 @@ from aphrodite.attention.backends.utils import (PAD_SLOT_ID,
 from aphrodite.common.utils import async_tensor_h2d, make_tensor_with_pad
 
 if TYPE_CHECKING:
-    from aphrodite.task_handler.model_runner import ModelInputForGPUBuilder
+    from aphrodite.worker.model_runner import ModelInputForGPUBuilder
 
 from aphrodite_flash_attn import (
     flash_attn_varlen_func as _flash_attn_varlen_func)

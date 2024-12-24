@@ -14,8 +14,8 @@ from aphrodite.common.utils import STR_DTYPE_TO_TORCH_DTYPE
 from aphrodite.distributed import (ensure_model_parallel_initialized,
                                    init_distributed_environment)
 from aphrodite.modeling import set_random_seed
-from aphrodite.task_handler.cpu_model_runner import CPUModelRunner
-from aphrodite.task_handler.worker_base import (LocalOrDistributedWorkerBase,
+from aphrodite.worker.cpu_model_runner import CPUModelRunner
+from aphrodite.worker.worker_base import (LocalOrDistributedWorkerBase,
                                                 LoraNotSupportedWorkerBase,
                                                 WorkerInput)
 

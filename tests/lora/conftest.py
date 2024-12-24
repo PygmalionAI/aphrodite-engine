@@ -256,7 +256,7 @@ def llama_2_7b_engine_extra_embeddings():
                              device_config=device_config,
                              **kwargs)
 
-    with patch("aphrodite.task_handler.model_runner.get_model",
+    with patch("aphrodite.worker.model_runner.get_model",
                get_model_patched):
         engine = aphrodite.LLM("meta-llama/Llama-2-7b-hf", enable_lora=False)
     yield engine.llm_engine

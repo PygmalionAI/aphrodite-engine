@@ -11,7 +11,7 @@ from aphrodite.common.sequence import ExecuteModelRequest, IntermediateTensors
 from aphrodite.common.utils import get_ip, is_hip, is_xpu
 from aphrodite.executor.msgspec_utils import decode_hook, encode_hook
 from aphrodite.platforms import current_platform
-from aphrodite.task_handler.worker_base import WorkerWrapperBase
+from aphrodite.worker.worker_base import WorkerWrapperBase
 
 PG_WAIT_TIMEOUT = 1800
 
@@ -22,7 +22,7 @@ try:
     from ray.util.placement_group import PlacementGroup
 
     class RayWorkerWrapper(WorkerWrapperBase):
-        """Ray wrapper for aphrodite.task_handler.Worker, allowing Worker to be
+        """Ray wrapper for aphrodite.worker.Worker, allowing Worker to be
         lazliy initialized after Ray sets CUDA_VISIBLE_DEVICES."""
 
         def __init__(self, *args, **kwargs) -> None:

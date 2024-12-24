@@ -9,8 +9,7 @@ from aphrodite.common.sequence import (SamplingParams, SequenceData,
 from aphrodite.common.utils import is_cpu
 from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.engine.args_tools import EngineArgs
-from aphrodite.task_handler.enc_dec_model_runner import (
-    EncoderDecoderModelRunner)
+from aphrodite.worker.enc_dec_model_runner import EncoderDecoderModelRunner
 
 # CUDA graph scenarios to test
 #

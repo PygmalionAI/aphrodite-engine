@@ -35,9 +35,8 @@ from aphrodite.spec_decode.util import (Timer, create_sequence_group_output,
                                         get_all_num_logprobs,
                                         get_sampled_token_logprobs, nvtx_range,
                                         split_batch_by_proposal_len)
-from aphrodite.task_handler.worker import Worker
-from aphrodite.task_handler.worker_base import (LoraNotSupportedWorkerBase,
-                                                WorkerBase)
+from aphrodite.worker.worker import Worker
+from aphrodite.worker.worker_base import LoraNotSupportedWorkerBase, WorkerBase
 
 
 def create_spec_worker(*args, **kwargs) -> "SpecDecodeWorker":

@@ -70,7 +70,7 @@ class RayTPUExecutor(TPUExecutor):
             )
 
             assert self.speculative_config is None
-            worker_module_name = "aphrodite.task_handler.tpu_worker"
+            worker_module_name = "aphrodite.worker.tpu_worker"
             worker_class_name = "TPUWorker"
 
             # GKE does not fetch environment information from metadata server

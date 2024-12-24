@@ -25,9 +25,9 @@ from aphrodite.modeling.layers.sampler import (PromptLogprobs, SampleLogprobs,
                                                get_logprobs,
                                                get_pythonized_sample_results)
 from aphrodite.modeling.model_loader.tensorizer import TensorizerConfig
-from aphrodite.task_handler.model_runner import (
+from aphrodite.worker.model_runner import (
     GPUModelRunnerBase, ModelInputForGPUWithSamplingMetadata)
-from aphrodite.task_handler.model_runner_base import (
+from aphrodite.worker.model_runner_base import (
     BroadcastableModelInput, _init_attn_metadata_from_tensor_dict,
     _init_frozen_model_input_from_tensor_dict,
     _init_sampling_metadata_from_tensor_dict)

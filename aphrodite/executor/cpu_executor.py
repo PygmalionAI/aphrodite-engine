@@ -18,7 +18,7 @@ from aphrodite.executor.multiproc_worker_utils import (ProcessWorkerWrapper,
 from aphrodite.lora.request import LoRARequest
 from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
-from aphrodite.task_handler.worker_base import WorkerWrapperBase
+from aphrodite.worker.worker_base import WorkerWrapperBase
 
 
 class CPUExecutor(ExecutorBase):
@@ -121,7 +121,7 @@ class CPUExecutor(ExecutorBase):
         local_rank: int = 0,
         rank: int = 0,
     ):
-        worker_module_name = "aphrodite.task_handler.cpu_worker"
+        worker_module_name = "aphrodite.worker.cpu_worker"
         worker_class_name = "CPUWorker"
 
         wrapper = WorkerWrapperBase(

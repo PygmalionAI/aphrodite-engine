@@ -22,9 +22,9 @@ from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.model_loader import get_model
 from aphrodite.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                                   MultiModalInputs, MultiModalRegistry)
-from aphrodite.task_handler.model_runner import (AttentionMetadata,
+from aphrodite.worker.model_runner import (AttentionMetadata,
                                                  SamplingMetadata)
-from aphrodite.task_handler.model_runner_base import (
+from aphrodite.worker.model_runner_base import (
     ModelRunnerBase, ModelRunnerInputBase, ModelRunnerInputBuilderBase,
     _add_attn_metadata_broadcastable_dict,
     _add_sampling_metadata_broadcastable_dict,

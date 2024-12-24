@@ -15,8 +15,8 @@ from aphrodite.distributed import (broadcast_tensor_dict,
                                    init_distributed_environment)
 from aphrodite.modeling import set_random_seed
 from aphrodite.modeling.layers.sampler import SamplerOutput
-from aphrodite.task_handler.openvino_model_runner import OpenVINOModelRunner
-from aphrodite.task_handler.worker_base import LoraNotSupportedWorkerBase
+from aphrodite.worker.openvino_model_runner import OpenVINOModelRunner
+from aphrodite.worker.worker_base import LoraNotSupportedWorkerBase
 
 
 class OpenVINOCacheEngine:

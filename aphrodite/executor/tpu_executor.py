@@ -60,7 +60,7 @@ class TPUExecutor(ExecutorBase):
         rank: int = 0,
         distributed_init_method: Optional[str] = None,
     ):
-        from aphrodite.task_handler.tpu_worker import TPUWorker
+        from aphrodite.worker.tpu_worker import TPUWorker
 
         worker = TPUWorker(**self._get_worker_kwargs(local_rank, rank,
                                                      distributed_init_method))

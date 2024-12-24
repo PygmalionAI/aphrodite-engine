@@ -1,6 +1,6 @@
 import pytest
 
-from aphrodite.task_handler.model_runner import _get_graph_batch_size
+from aphrodite.worker.model_runner import _get_graph_batch_size
 from tests.models.utils import check_outputs_equal
 
 MODELS = ["ai21labs/Jamba-tiny-random"]

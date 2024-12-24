@@ -24,13 +24,13 @@ from aphrodite.inputs import INPUT_REGISTRY, InputRegistry
 from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
-from aphrodite.task_handler.model_runner import (
+from aphrodite.worker.model_runner import (
     GPUModelRunnerBase, ModelInputForGPUBuilder,
     ModelInputForGPUWithSamplingMetadata)
-from aphrodite.task_handler.model_runner_base import (
+from aphrodite.worker.model_runner_base import (
     _add_attn_metadata_broadcastable_dict,
     _add_sampling_metadata_broadcastable_dict)
-from aphrodite.task_handler.utils import assert_enc_dec_mr_supported_scenario
+from aphrodite.worker.utils import assert_enc_dec_mr_supported_scenario
 
 
 @dataclasses.dataclass(frozen=True)
