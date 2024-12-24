@@ -8,6 +8,7 @@ from torch.nn.parameter import Parameter, UninitializedParameter
 from aphrodite.distributed import (divide, get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size,
                                    tensor_model_parallel_all_reduce)
+from aphrodite.modeling.parameter import BaseAphroditeParameter
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase, method_has_implemented_embedding)
@@ -368,10 +369,12 @@ class VocabParallelEmbedding(torch.nn.Module):
         # If param packed on the same dim we are sharding on, then
         # need to adjust offsets of loaded weight by pack_factor.
         if packed_dim is not None and packed_dim == output_dim:
+            packed_factor = param.packed_factor if isinstance(
+                param, BaseAphroditeParameter) else param.pack_factor
             assert loaded_weight.shape[output_dim] == (self.org_vocab_size //
-                                                       param.pack_factor)
-            start_idx = start_idx // param.pack_factor
-            shard_size = shard_size // param.pack_factor
+                                                       param.packed_factor)
+            start_idx = start_idx // packed_factor
+            shard_size = shard_size // packed_factor
         else:
             assert loaded_weight.shape[output_dim] == self.org_vocab_size
 
