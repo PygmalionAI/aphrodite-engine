@@ -3,6 +3,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
+from aphrodite.common.config import MultiModalConfig
 from aphrodite.endpoints.openai.protocol import ChatCompletionRequest
 from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
@@ -20,6 +21,7 @@ class MockModelConfig:
     max_model_len = 100
     tokenizer_revision = None
     embedding_mode = False
+    multimodal_config = MultiModalConfig()
 
 
 @dataclass
