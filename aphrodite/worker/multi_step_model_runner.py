@@ -14,7 +14,6 @@ except ModuleNotFoundError:
 
 import torch
 
-from aphrodite import _custom_ops as ops
 from aphrodite.common.sequence import (CompletionSequenceGroupOutput,
                                        IntermediateTensors, Logprob,
                                        SequenceGroupMetadata, SequenceOutput)
@@ -490,19 +489,10 @@ class MultiStepModelRunner(GPUModelRunnerBase[StatefulModelInput]):
         assert num_seqs >= num_queries
         attn_metadata = frozen_model_input.attn_metadata
         assert isinstance(attn_metadata, FlashAttentionMetadata)
-        attn_metadata.advance_step(num_seqs, num_queries)
-        # Update GPU tensors
-        ops.advance_step(
-            num_seqs=num_seqs,
-            num_queries=num_queries,
-            block_size=self.block_size,
-            input_tokens=frozen_model_input.input_tokens,
-            sampled_token_ids=model_input.cached_outputs[-1].sampled_token_ids,
-            input_positions=frozen_model_input.input_positions,
-            seq_lens=attn_metadata.seq_lens_tensor,
-            slot_mapping=attn_metadata.slot_mapping,
-            block_tables=attn_metadata.block_tables,
-        )
+        attn_metadata.advance_step(
+            frozen_model_input,
+            model_input.cached_outputs[-1].sampled_token_ids, self.block_size,
+            num_seqs, num_queries)
         if frozen_model_input.seq_lens is not None:
             for i in range(num_queries):
                 frozen_model_input.seq_lens[i] = attn_metadata.seq_lens[i]
