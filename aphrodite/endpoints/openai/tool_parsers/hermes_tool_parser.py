@@ -6,12 +6,11 @@ import partial_json_parser
 from loguru import logger
 from partial_json_parser.core.options import Allow
 
+from aphrodite.common.utils import random_uuid
 from aphrodite.endpoints.openai.protocol import (DeltaFunctionCall,
                                                  DeltaMessage, DeltaToolCall,
                                                  ExtractedToolCallInformation,
-                                                 FunctionCall,
-                                                 InitialDeltaToolCall,
-                                                 ToolCall)
+                                                 FunctionCall, ToolCall)
 from aphrodite.endpoints.openai.tool_parsers.abstract_tool_parser import (
     ToolParser)
 from aphrodite.endpoints.openai.tool_parsers.utils import (
@@ -30,7 +29,6 @@ class Hermes2ProToolParser(ToolParser):
         self.prev_tool_call_arr: List[Dict] = []
         self.current_tool_id: int = -1
         self.current_tool_name_sent = False
-        self.current_tool_initial_sent: bool = False
         self.streamed_args_for_tool: List[
             str
         ] = []  # map what has been streamed for each tool so far to a list
@@ -171,7 +169,6 @@ class Hermes2ProToolParser(ToolParser):
                 # set cursors and state appropriately
                 self.current_tool_id += 1
                 self.current_tool_name_sent = False
-                self.current_tool_initial_sent = False
                 self.streamed_args_for_tool.append("")
                 logger.debug(f"Starting on a new tool {self.current_tool_id}")
             # case -- we're updating an existing tool call
@@ -227,33 +224,20 @@ class Hermes2ProToolParser(ToolParser):
             except partial_json_parser.core.exceptions.MalformedJSON:
                 logger.debug("not enough tokens to parse into JSON yet")
                 return None
-            # case - we haven't sent the initial delta with the tool call ID
-            #   (it will be sent)
-            if not self.current_tool_initial_sent:
-                self.current_tool_initial_sent = True
-                return DeltaMessage(
-                    tool_calls=[
-                        InitialDeltaToolCall(
-                            index=self.current_tool_id
-                        ).model_dump(exclude_none=True)
-                    ]
-                )
             # case - we haven't sent the tool name yet. If it's available, send
             #   it. otherwise, wait until it's available.
-            elif not self.current_tool_name_sent:
+            if not self.current_tool_name_sent:
                 function_name: Union[str, None] = current_tool_call.get("name")
                 if function_name:
                     self.current_tool_name_sent = True
-                    return DeltaMessage(
-                        tool_calls=[
-                            DeltaToolCall(
-                                index=self.current_tool_id,
-                                function=DeltaFunctionCall(
-                                    name=function_name
-                                ).model_dump(exclude_none=True),
-                            )
-                        ]
-                    )
+                    return DeltaMessage(tool_calls=[
+                        DeltaToolCall(index=self.current_tool_id,
+                                      type="function",
+                                      id=f"chatcmpl-tool-{random_uuid()}",
+                                      function=DeltaFunctionCall(
+                                          name=function_name).model_dump(
+                                              exclude_none=True))
+                    ])
                 else:
                     return None
             # case -- otherwise, send the tool call delta

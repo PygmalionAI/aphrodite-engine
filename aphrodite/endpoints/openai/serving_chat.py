@@ -259,7 +259,10 @@ class OpenAIServingChat(OpenAIServing):
                     for i in range(num_choices):
                         choice_data = ChatCompletionResponseStreamChoice(
                             index=i,
-                            delta=DeltaMessage(role=role),
+                            delta=DeltaMessage(
+                                role=role,
+                                content="",
+                            ),
                             logprobs=None,
                             finish_reason=None)
                         chunk = ChatCompletionStreamResponse(
