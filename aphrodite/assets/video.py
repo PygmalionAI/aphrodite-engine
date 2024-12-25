@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import List, Literal
+from typing import List, Optional
 
 import numpy as np
 import numpy.typing as npt
@@ -68,17 +68,20 @@ def video_to_pil_images_list(
 
 @dataclass(frozen=True)
 class VideoAsset:
-    name: Literal["sample_demo_1.mp4"]
+    name: str = "sample_demo_1.mp4"
     num_frames: int = -1
+    local_path: Optional[str] = None
 
     @property
     def pil_images(self) -> List[Image.Image]:
-        video_path = download_video_asset(self.name)
+        video_path = (self.local_path if self.local_path else
+                      download_video_asset(self.name))
         ret = video_to_pil_images_list(video_path, self.num_frames)
         return ret
 
     @property
     def np_ndarrays(self) -> List[npt.NDArray]:
-        video_path = download_video_asset(self.name)
+        video_path = (self.local_path if self.local_path else
+                      download_video_asset(self.name))
         ret = video_to_ndarrays(video_path, self.num_frames)
         return ret

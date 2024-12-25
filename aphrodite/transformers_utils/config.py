@@ -17,12 +17,12 @@ from transformers.utils import CONFIG_NAME as HF_CONFIG_NAME
 
 import aphrodite.common.envs as envs
 from aphrodite.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
-                                                  EAGLEConfig, GraniteConfig,
+                                                  EAGLEConfig,
                                                   InternVLChatConfig,
                                                   JAISConfig, MedusaConfig,
                                                   MLPSpeculatorConfig,
-                                                  MPTConfig, RWConfig,
-                                                  UltravoxConfig)
+                                                  MPTConfig, Qwen2VLConfig,
+                                                  RWConfig, UltravoxConfig)
 from aphrodite.transformers_utils.utils import check_gguf_file
 
 APHRODITE_USE_MODELSCOPE = envs.APHRODITE_USE_MODELSCOPE
@@ -46,7 +46,7 @@ _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     "internvl_chat": InternVLChatConfig,
     "ultravox": UltravoxConfig,
     "eagle": EAGLEConfig,
-    "granite": GraniteConfig,
+    "qwen2_vl": Qwen2VLConfig,
 }
 
 for name, cls in _CONFIG_REGISTRY.items():
