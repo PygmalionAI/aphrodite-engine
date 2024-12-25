@@ -19,6 +19,7 @@ from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
 from aphrodite.common.sequence import IntermediateTensors
 from aphrodite.common.utils import is_list_of
+from aphrodite.distributed import get_pp_group
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
@@ -477,7 +478,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal):
         **kwargs: object,
     ) -> SamplerOutput:
         image_input = self._parse_and_validate_image_input(**kwargs)
-        if image_input is not None:
+        if image_input is not None and get_pp_group().is_first_rank:
             inputs_embeds = self.language_model.model.get_input_embeddings(
                 input_ids)
             vision_embeddings = self._process_image_input(image_input)
