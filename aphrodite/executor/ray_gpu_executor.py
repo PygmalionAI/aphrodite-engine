@@ -249,6 +249,9 @@ class RayGPUExecutor(DistributedGPUExecutor):
             APHRODITE_INSTANCE_ID,
             "APHRODITE_TRACE_FUNCTION":
             str(APHRODITE_TRACE_FUNCTION),
+            **({
+                "APHRODITE_ATTENTION_BACKEND": envs.APHRODITE_ATTENTION_BACKEND
+            } if envs.APHRODITE_ATTENTION_BACKEND is not None else {})
         }, ) for (node_id, _) in worker_node_and_gpu_ids]
         self._env_vars_for_all_workers = (
             all_args_to_update_environment_variables)
