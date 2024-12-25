@@ -4,11 +4,13 @@ from typing import (Iterable, List, Literal, Mapping, Optional, Tuple,
 
 import torch
 import torch.nn as nn
+from PIL import Image
 from transformers import CLIPVisionConfig, LlavaConfig, SiglipVisionConfig
 
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
 from aphrodite.common.sequence import IntermediateTensors
+from aphrodite.common.utils import is_list_of
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.sampler import SamplerOutput
@@ -24,7 +26,8 @@ from .interfaces import SupportsMultiModal
 from .siglip import (SiglipVisionModel, dummy_image_for_siglip,
                      dummy_seq_data_for_siglip, get_max_siglip_image_tokens,
                      input_processor_for_siglip)
-from .utils import (filter_weights, init_aphrodite_registered_model,
+from .utils import (filter_weights, flatten_bn,
+                    init_aphrodite_registered_model,
                     merge_multimodal_embeddings)
 
 
@@ -132,7 +135,18 @@ def input_processor_for_llava(ctx: InputContext, llm_inputs: LLMInputs):
     hf_config = ctx.get_hf_config(LlavaConfig)
     vision_config = hf_config.vision_config
 
-    image_feature_size = get_max_llava_image_tokens(ctx)
+    image_data = multi_modal_data["image"]
+    if isinstance(image_data, Image.Image):
+        image_feature_size = get_max_llava_image_tokens(ctx)
+    elif is_list_of(image_data, Image.Image):
+        image_feature_size = [get_max_llava_image_tokens(ctx)
+                              ] * len(image_data)
+    elif isinstance(image_data, torch.Tensor):
+        num_images, image_feature_size, hidden_size = image_data.shape
+    elif is_list_of(image_data, torch.Tensor):
+        image_feature_size = [item.shape[1] for item in image_data]
+    else:
+        raise TypeError(f"Invalid image type: {type(image_data)}")
 
     if isinstance(vision_config, CLIPVisionConfig):
         return input_processor_for_clip(
@@ -229,25 +243,23 @@ class LlavaForConditionalGeneration(nn.Module, SupportsMultiModal):
             return None
 
         if pixel_values is not None:
-            if not isinstance(pixel_values, torch.Tensor):
+            if not isinstance(pixel_values, (torch.Tensor, list)):
                 raise ValueError("Incorrect type of pixel values. "
                                  f"Got type: {type(pixel_values)}")
-            # Remove the N dimension until multiple images are supported.
-            pixel_values = pixel_values.squeeze(1)
             return LlavaImagePixelInputs(
                 type="pixel_values",
-                data=self._validate_pixel_values(pixel_values),
+                data=self._validate_pixel_values(
+                    flatten_bn(pixel_values, concat=True)),
             )
 
         if image_embeds is not None:
-            if not isinstance(image_embeds, torch.Tensor):
+            if not isinstance(image_embeds, (torch.Tensor, list)):
                 raise ValueError("Incorrect type of image embeddings. "
                                  f"Got type: {type(image_embeds)}")
-            # Remove the N dimension until multiple images are supported.
-            image_embeds = image_embeds.squeeze(1)
+
             return LlavaImageEmbeddingInputs(
                 type="image_embeds",
-                data=image_embeds,
+                data=flatten_bn(image_embeds, concat=True),
             )
 
         raise AssertionError("This line should be unreachable.")

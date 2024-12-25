@@ -1,16 +1,16 @@
 import types
-from typing import List, Optional, Tuple, Type
+from typing import List, Optional, Tuple, Type, Union
 
 import pytest
 import torch
-from huggingface_hub import snapshot_download
 from PIL.Image import Image
 from transformers import AutoConfig
 
 from aphrodite.common.utils import is_cpu
 from aphrodite.multimodal.utils import rescale_image_size
 
-from ..conftest import IMAGE_ASSETS, AphroditeRunner, HfRunner, _ImageAssets
+from ..conftest import (IMAGE_ASSETS, AphroditeRunner, HfRunner,
+                        PromptImageInput, _ImageAssets)
 from .utils import check_logprobs_close
 
 pytestmark = pytest.mark.vlm
@@ -21,18 +21,14 @@ HF_IMAGE_PROMPTS = IMAGE_ASSETS.prompts({
     "cherry_blossom":
     "<|im_start|>User\n<image>\nWhat is the season?<|im_end|>\n<|im_start|>Assistant\n",  # noqa: E501
 })
+HF_MULTIIMAGE_IMAGE_PROMPT = "<|im_start|>User\nImage-1: <image>\nImage-2: <image>\nDescribe the two images in detail.<|im_end|>\n<|im_start|>Assistant\n"  # noqa: E501
 
-# we use snapshot_download to prevent conflicts between
-# dynamic_module and trust_remote_code for hf_runner
-DOWNLOAD_PATTERN = ["*.json", "*.py", "*.safetensors", "*.txt", "*.model"]
 models = [
-    snapshot_download("OpenGVLab/InternVL2-1B",
-                      allow_patterns=DOWNLOAD_PATTERN),
-    snapshot_download("OpenGVLab/InternVL2-2B",
-                      allow_patterns=DOWNLOAD_PATTERN),
+    "OpenGVLab/InternVL2-1B",
+    "OpenGVLab/InternVL2-2B",
     # Broken due to outdated implementation of Phi-3
     # See: https://huggingface.co/OpenGVLab/InternVL2-4B/discussions/3
-    # snapshot_download("OpenGVLab/InternVL2-4B"),
+    # "OpenGVLab/InternVL2-4B",
 ]
 
 
@@ -70,13 +66,13 @@ def generate(
 def run_test(
     hf_runner: Type[HfRunner],
     aphrodite_runner: Type[AphroditeRunner],
-    image_assets: _ImageAssets,
+    inputs: List[Tuple[List[str], PromptImageInput]],
     model: str,
     *,
-    size_factors: List[float],
     dtype: str,
     max_tokens: int,
     num_logprobs: int,
+    mm_limit: int,
     tensor_parallel_size: int,
     distributed_executor_backend: Optional[str] = None,
 ):
@@ -89,38 +85,42 @@ def run_test(
     Note, the text input is also adjusted to abide by aphrodite contract.
     The text output is sanitized to be able to compare with hf.
     """
-    images = [asset.pil_image for asset in image_assets]
-
-    inputs_per_image = [(
-        [prompt for _ in size_factors],
-        [rescale_image_size(image, factor) for factor in size_factors],
-    ) for image, prompt in zip(images, HF_IMAGE_PROMPTS)]
 
     # NOTE: take care of the order. run Aphrodite first, and then run HF.
     # Aphrodite needs a fresh new process without cuda initialization.
     # if we run HF first, the cuda initialization will be done and it
     # will hurt multiprocessing backend with fork method (the default method).
 
-
     class InternVLProcessor:
         """A simple processor for InternVL2 which misses a processor."""
+
         def __init__(self, hf_runner: HfRunner):
             self.num_image_token = hf_runner.model.num_image_token
             self.tokenizer = hf_runner.tokenizer
             self.dtype = hf_runner.model.dtype
+
             self.config = AutoConfig.from_pretrained(hf_runner.model_name)
             self.vision_config = self.config.vision_config
             self.use_thumbnail = self.config.use_thumbnail
             self.min_num = self.config.min_dynamic_patch
             self.max_num = self.config.max_dynamic_patch
             self.image_size = self.vision_config.image_size
-        def __call__(self, text: str, images: Image, **kwargs):
+
+        def __call__(self, text: str, images: Union[Image, List[Image]],
+                     **kwargs):
             from aphrodite.modeling.models.internvl import (
                 IMG_CONTEXT, IMG_END, IMG_START, image_to_pixel_values)
-            pixel_values = image_to_pixel_values(
-                images, self.image_size, self.min_num, self.max_num,
-                self.use_thumbnail).to(self.dtype)
-            num_patches_list = [pixel_values.shape[0]]
+            images = [images] if isinstance(images, Image) else images
+            pixel_values = [
+                image_to_pixel_values(image, self.image_size, self.min_num,
+                                      self.max_num,
+                                      self.use_thumbnail).to(self.dtype)
+                for image in images
+            ]
+            num_patches_list = [
+                pixel_value.shape[0] for pixel_value in pixel_values
+            ]
+            pixel_values = torch.cat(pixel_values, dim=0)
             for num_patches in num_patches_list:
                 context_tokens = IMG_CONTEXT * self.num_image_token \
                     * num_patches
@@ -134,6 +134,7 @@ def run_test(
     with aphrodite_runner(model,
                      max_model_len=4096,
                      dtype=dtype,
+                     limit_mm_per_prompt={"image": mm_limit},
                      tensor_parallel_size=tensor_parallel_size,
                      distributed_executor_backend=distributed_executor_backend,
                      enforce_eager=True) as aphrodite_model:
@@ -142,7 +143,7 @@ def run_test(
                                                 max_tokens,
                                                 num_logprobs=num_logprobs,
                                                 images=images)
-            for prompts, images in inputs_per_image
+            for prompts, images in inputs
         ]
 
     with hf_runner(model, dtype=dtype) as hf_model:
@@ -160,7 +161,7 @@ def run_test(
                                                     num_logprobs=num_logprobs,
                                                     images=hf_images,
                                                     eos_token_id=eos_token_id)
-            for prompts, hf_images in inputs_per_image
+            for prompts, hf_images in inputs
         ]
 
     for hf_outputs, aphrodite_outputs in zip(hf_outputs_per_image,
@@ -188,15 +189,19 @@ def run_awq_test(
     distributed_executor_backend: Optional[str] = None,
 ):
     source_model, quant_model = models
+
     images = [asset.pil_image for asset in image_assets]
+
     inputs_per_image = [(
         [prompt for _ in size_factors],
         [rescale_image_size(image, factor) for factor in size_factors],
     ) for image, prompt in zip(images, HF_IMAGE_PROMPTS)]
+
     # NOTE: take care of the order. run Aphrodite first, and then run HF.
     # Aphrodite needs a fresh new process without cuda initialization.
     # if we run HF first, the cuda initialization will be done and it
     # will hurt multiprocessing backend with fork method (the default method).
+
     # max_model_len should be greater than image_feature_size
     with aphrodite_runner(source_model,
                      max_model_len=4096,
@@ -211,6 +216,7 @@ def run_awq_test(
                                                 images=images)
             for prompts, images in inputs_per_image
         ]
+
     with aphrodite_runner(quant_model,
                      quantization="awq",
                      max_model_len=4096,
@@ -225,6 +231,7 @@ def run_awq_test(
                                                 images=images)
             for prompts, images in inputs_per_image
         ]
+
     for source_outputs, quant_outputs in zip(source_outputs_per_image,
                                              quant_outputs_per_image):
         # TODO: Check whether using original CLIPVisionModel can improve
@@ -262,15 +269,64 @@ if is_cpu():
 @torch.inference_mode()
 def test_models(hf_runner, aphrodite_runner, image_assets, model, size_factors,
                 dtype: str, max_tokens: int, num_logprobs: int) -> None:
+    images = [asset.pil_image for asset in image_assets]
+
+    inputs_per_image = [(
+        [prompt for _ in size_factors],
+        [rescale_image_size(image, factor) for factor in size_factors],
+    ) for image, prompt in zip(images, HF_IMAGE_PROMPTS)]
+
     run_test(
         hf_runner,
         aphrodite_runner,
-        image_assets,
+        inputs_per_image,
         model,
-        size_factors=size_factors,
         dtype=dtype,
         max_tokens=max_tokens,
         num_logprobs=num_logprobs,
+        mm_limit=1,
+        tensor_parallel_size=1,
+    )
+
+
+@pytest.mark.parametrize("model", models)
+@pytest.mark.parametrize(
+    "size_factors",
+    [
+        # No image
+        [],
+        # Single-scale
+        [1.0],
+        # Single-scale, batched
+        [1.0, 1.0, 1.0],
+        # Multi-scale
+        [0.5, 0.75, 1.0],
+    ],
+)
+@pytest.mark.parametrize("dtype", [target_dtype])
+@pytest.mark.parametrize("max_tokens", [128])
+@pytest.mark.parametrize("num_logprobs", [5])
+@torch.inference_mode()
+def test_multi_images_models(hf_runner, aphrodite_runner, image_assets, model,
+                             size_factors, dtype: str, max_tokens: int,
+                             num_logprobs: int) -> None:
+    images = [asset.pil_image for asset in image_assets]
+
+    inputs_per_case = [
+        ([HF_MULTIIMAGE_IMAGE_PROMPT for _ in size_factors],
+         [[rescale_image_size(image, factor) for image in images]
+          for factor in size_factors])
+    ]
+
+    run_test(
+        hf_runner,
+        aphrodite_runner,
+        inputs_per_case,
+        model,
+        dtype=dtype,
+        max_tokens=max_tokens,
+        num_logprobs=num_logprobs,
+        mm_limit=2,
         tensor_parallel_size=1,
     )
 
