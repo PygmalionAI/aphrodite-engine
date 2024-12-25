@@ -54,21 +54,22 @@ _PP_SUPPORTED_MODELS = [
 ]
 
 _OPTIMIZED_QUANTS = [
+    "awq_marlin",
+    "compressed-tensors",
+    "compressed_tensors",
+    "experts_int8", 
+    "fbgemm_fp8",
     "fp2",
-    "fp3",
+    "fp3", 
     "fp4",
     "fp5",
     "fp6",
     "fp7",
     "fp8",
-    "marlin",
-    "gptq_marlin_24",
     "gptq_marlin",
-    "awq_marlin",
-    "fbgemm_fp8",
-    "compressed-tensors",
-    "compressed_tensors",
-    "experts_int8",
+    "gptq_marlin_24",
+    "marlin",
+    "modelopt",
     "quant_llm",
 ]
 
