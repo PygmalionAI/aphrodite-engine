@@ -78,6 +78,10 @@ _NUM_WARMUP_ITERS = 2
 TModelInputForGPU = TypeVar('TModelInputForGPU', bound="ModelInputForGPU")
 
 
+# For now, bump up cache limits for recompilations during CUDA graph warmups.
+torch._dynamo.config.cache_size_limit = 128
+torch._dynamo.config.accumulated_cache_size_limit = 128
+
 @dataclass(frozen=True)
 class ModelInputForGPU(ModelRunnerInputBase):
     """
@@ -1068,9 +1072,10 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         if envs.APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE and supports_dynamo:
             logger.info("Compiling the model using torch.compile...")
             start_time = time.time()
-            self.model = torch.compile(self.model,
-                                       fullgraph=True,
-                                       backend="eager")
+            self.model = torch.compile(
+                self.model,
+                fullgraph=envs.APHRODITE_TEST_DYNAMO_FULLGRAPH_CAPTURE,
+                backend="eager")
             end_time = time.time()
             logger.info(
                 f"Model compiled in {end_time - start_time:.2f} seconds.")

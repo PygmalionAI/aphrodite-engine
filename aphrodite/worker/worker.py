@@ -28,11 +28,10 @@ from aphrodite.platforms import current_platform
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
 from aphrodite.worker.cache_engine import CacheEngine
 from aphrodite.worker.embedding_model_runner import EmbeddingModelRunner
-from aphrodite.worker.enc_dec_model_runner import (
-    EncoderDecoderModelRunner)
+from aphrodite.worker.enc_dec_model_runner import EncoderDecoderModelRunner
 from aphrodite.worker.model_runner import GPUModelRunnerBase, ModelRunner
 from aphrodite.worker.worker_base import (LocalOrDistributedWorkerBase,
-                                                WorkerInput)
+                                          WorkerInput)
 
 
 class Worker(LocalOrDistributedWorkerBase):
@@ -141,6 +140,7 @@ class Worker(LocalOrDistributedWorkerBase):
             torch.cuda.set_device(self.device)
 
             _check_if_gpu_supports_dtype(self.model_config.dtype)
+            gc.collect()
             torch.cuda.empty_cache()
             self.init_gpu_memory = torch.cuda.mem_get_info()[0]
         else:

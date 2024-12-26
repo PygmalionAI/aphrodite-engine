@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     APHRODITE_RPC_GET_DATA_TIMEOUT_MS: int = 5000
     APHRODITE_FORCE_SINGLE_USER_PREFIX_CACHE: bool = False
     APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE: int = 0
+    APHRODITE_TEST_DYNAMO_FULLGRAPH_CAPTURE: int = 0
     APHRODITE_USE_TRITON_AWQ: bool = False
     APHRODITE_DYNAMO_USE_CUSTOM_DISPATCHER: bool = False
 
@@ -202,6 +203,11 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     (os.environ.get("APHRODITE_DYNAMO_USE_CUSTOM_DISPATCHER", "True").lower() in
      ("true", "1")),
 
+    # Internal flag to enable Dynamo fullgraph capture
+    "APHRODITE_TEST_DYNAMO_FULLGRAPH_CAPTURE":
+    lambda: bool(
+        os.environ.get("APHRODITE_TEST_DYNAMO_FULLGRAPH_CAPTURE", "1") != "0"),
+
     # local rank of the process in the distributed setting, used to determine
     # the GPU device id
     "LOCAL_RANK":
@@ -261,7 +267,7 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     "APHRODITE_ATTENTION_BACKEND":
     lambda: os.getenv("APHRODITE_ATTENTION_BACKEND", None),
 
-    # If set, aphrodite will use flashinfer sampler
+    # If set, aphrodite will use custom sampling kernels
     "APHRODITE_USE_SAMPLING_KERNELS":
     lambda: bool(int(os.getenv("APHRODITE_USE_SAMPLING_KERNELS", "0"))),
 
