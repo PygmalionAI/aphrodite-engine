@@ -1144,7 +1144,6 @@ class EngineArgs:
 class AsyncEngineArgs(EngineArgs):
     """Arguments for asynchronous Aphrodite engine."""
 
-    engine_use_ray: bool = False
     disable_log_requests: bool = False
     uvloop: bool = False
 
@@ -1153,10 +1152,6 @@ class AsyncEngineArgs(EngineArgs):
                      async_args_only: bool = False) -> FlexibleArgumentParser:
         if not async_args_only:
             parser = EngineArgs.add_cli_args(parser)
-        parser.add_argument('--engine-use-ray',
-                            action='store_true',
-                            help='Use Ray to start the LLM engine in a '
-                            'separate process as the server process.')
         parser.add_argument('--disable-log-requests',
                             action='store_true',
                             help='Disable logging requests.')
