@@ -25,6 +25,7 @@ from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
 from aphrodite.common.sequence import (APHRODITE_TOKEN_ID_ARRAY_TYPE,
                                        IntermediateTensors, SequenceData)
+from aphrodite.common.utils import is_list_of
 from aphrodite.distributed import (get_pp_group,
                                    get_tensor_model_parallel_world_size)
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
@@ -682,9 +683,12 @@ def input_processor_for_qwen(ctx: InputContext,
             raise ValueError(
                 f"Expected img embeds to be have 3 dimensions, got {num_dims}")
         num_images = 1 if num_dims == 2 else image_data.shape[0]
-    else:
-        # TODO - handle multiple image inputs once the API is solidified
+    elif isinstance(image_data, Image.Image):
         num_images = 1
+    elif is_list_of(image_data, Image.Image):
+        num_images = len(image_data)
+    else:
+        raise TypeError(f"Invalid image type: {type(image_data)}")
 
     if prompt is None:
         prompt = tokenizer.decode(prompt_token_ids)
@@ -768,8 +772,9 @@ def input_mapper_for_qwen(ctx: InputContext, data: object) -> MultiModalInputs:
 
     else:
         transform = build_normalization_transform(image_size)
-        # TODO - handle multiple image inputs once the API is solidified
-        transformed_images = [transform(data)]
+        if not isinstance(data, (list, tuple)):
+            data = [data]
+        transformed_images = [transform(datum) for datum in data]
         pixel_values = torch.stack(transformed_images, dim=0)
     return MultiModalInputs({"pixel_values": pixel_values})
 
