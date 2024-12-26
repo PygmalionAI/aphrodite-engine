@@ -10,7 +10,8 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
                                      PromptAdapterConfig, SchedulerConfig)
 from aphrodite.common.sequence import (IntermediateTensors,
                                        SequenceGroupMetadata)
-from aphrodite.common.utils import make_tensor_with_pad
+from aphrodite.common.utils import (STR_NOT_IMPL_ENC_DEC_ERR_STRS,
+                                    make_tensor_with_pad)
 from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.model_loader import get_model
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
@@ -117,6 +118,10 @@ class CPUModelRunner(ModelRunnerBase[CPUModelInput]):
 
         # Lazy initialization.
         self.model: nn.Module  # Set after init_Model
+
+        if self.model_config.is_encoder_decoder_model:
+            raise NotImplementedError(
+                STR_NOT_IMPL_ENC_DEC_ERR_STRS['STR_NOT_IMPL_ENC_DEC_CPU'])
 
     def load_model(self) -> None:
         self.model = get_model(model_config=self.model_config,
