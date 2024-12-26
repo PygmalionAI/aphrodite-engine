@@ -18,16 +18,11 @@ def server():
         "--max-model-len",
         "2048",
         "--enforce-eager",
-        "--engine-use-ray",
         "--chat-template",
         str(chatml_jinja_path),
     ]
 
-    # Allow `--engine-use-ray`, otherwise the launch of the server throw
-    # an error due to try to use a deprecated feature
-    env_dict = {"APHRODITE_ALLOW_ENGINE_USE_RAY": "1"}
-    with RemoteOpenAIServer(MODEL_NAME, args,
-                            env_dict=env_dict) as remote_server:
+    with RemoteOpenAIServer(MODEL_NAME, args) as remote_server:
         yield remote_server
 
 

@@ -15,7 +15,6 @@ from aphrodite.common.outputs import EmbeddingRequestOutput, RequestOutput
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import ExecuteModelRequest
-from aphrodite.common.utils import print_warning_once
 from aphrodite.engine.aphrodite_engine import (AphroditeEngine,
                                                DecoderPromptComponents,
                                                PromptComponents,
@@ -24,7 +23,7 @@ from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_timeout import asyncio_timeout
 from aphrodite.engine.metrics_types import StatLoggerBase
 from aphrodite.executor.executor_base import ExecutorAsyncBase
-from aphrodite.executor.ray_utils import initialize_ray_cluster, ray
+from aphrodite.executor.ray_utils import initialize_ray_cluster
 from aphrodite.inputs import (EncoderDecoderLLMInputs, LLMInputs, PromptInputs,
                               SingletonPromptInputs)
 from aphrodite.inputs.parse import is_explicit_encoder_decoder_prompt
@@ -581,9 +580,6 @@ class AsyncAphrodite:
         worker_use_ray: Whether to use Ray for model workers. Required for
             distributed execution. Should be the same as
             `parallel_config.worker_use_ray`.
-        engine_use_ray: Whether to make AphroditeEngine a Ray actor. If so, the
-            async frontend will be executed in a separate process as the
-            model workers.
         log_requests: Whether to log the requests.
         start_engine_loop: If True, the background task to run the engine
             will be automatically started in the generate call.
@@ -595,40 +591,23 @@ class AsyncAphrodite:
 
     def __init__(self,
                  worker_use_ray: bool,
-                 engine_use_ray: bool,
                  *args,
                  log_requests: bool = True,
                  start_engine_loop: bool = True,
                  **kwargs) -> None:
         self.worker_use_ray = worker_use_ray
-        self.engine_use_ray = engine_use_ray
         self.log_requests = log_requests
-        self.engine = self._init_engine(*args, **kwargs)
+        self.engine = self._engine_class(*args, **kwargs)
 
 
         # This ensures quick processing of request outputs
         # so the append to asyncio queues is not delayed,
         # especially for multi-step.
         #
-        # TODO: Currently, disabled for engine_use_ray
-        self.use_process_request_outputs_callback = not self.engine_use_ray
+        self.use_process_request_outputs_callback = True
         if self.use_process_request_outputs_callback:
             self.engine.process_request_outputs_callback = \
                 self.process_request_outputs
-
-        if self.engine_use_ray:
-            print_warning_once(
-                "DEPRECATED. `--engine-use-ray` is deprecated and will "
-                "be removed in a future update.")
-
-            if envs.APHRODITE_ALLOW_ENGINE_USE_RAY:
-                print_warning_once(
-                    "APHRODITE_ALLOW_ENGINE_USE_RAY is set, "
-                    "force engine use Ray")
-            else:
-                raise ValueError("`--engine-use-ray` is deprecated. "
-                                 "Set `APHRODITE_ALLOW_ENGINE_USE_RAY=1` "
-                                 "to force use it")
 
         self.background_loop: Optional[asyncio.Future] = None
         # We need to keep a reference to unshielded
@@ -718,16 +697,11 @@ class AsyncAphrodite:
         # Create the engine configs.
         engine_config = engine_args.create_engine_config()
 
-        if engine_args.engine_use_ray:
-            from aphrodite.executor import ray_utils
-            ray_utils.assert_ray_available()
-
         executor_class = cls._get_executor_cls(engine_config)
 
         # Create the async LLM engine.
         engine = cls(
             executor_class.uses_ray,
-            engine_args.engine_use_ray,
             **engine_config.to_dict(),
             executor_class=executor_class,
             log_requests=not engine_args.disable_log_requests,
@@ -769,9 +743,6 @@ class AsyncAphrodite:
         self,
         lora_request: Optional[LoRARequest] = None,
     ) -> AnyTokenizer:
-        if self.engine_use_ray:
-            return await self.engine.get_tokenizer.remote(  # type: ignore
-                lora_request)
 
         return await (self.engine.get_tokenizer_group().
                       get_lora_tokenizer_async(lora_request))
@@ -806,26 +777,6 @@ class AsyncAphrodite:
             self._background_loop_unshielded = None
         self.background_loop = None
 
-    def _init_engine(self, *args,
-                     **kwargs) -> Union[_AsyncAphrodite, "ray.ObjectRef"]:
-        if not self.engine_use_ray:
-            engine_class = self._engine_class
-        elif self.worker_use_ray:
-            engine_class = ray.remote(num_cpus=0)(self._engine_class).remote
-        else:
-            # FIXME: This is a bit hacky. Be careful when changing the
-            # order of the arguments.
-            cache_config = kwargs["cache_config"]
-            parallel_config = kwargs["parallel_config"]
-            if (parallel_config.tensor_parallel_size == 1
-                    and parallel_config.pipeline_parallel_size == 1):
-                num_gpus = cache_config.gpu_memory_utilization
-            else:
-                num_gpus = 1
-            engine_class = ray.remote(num_gpus=num_gpus)(
-                self._engine_class).remote
-        return engine_class(*args, **kwargs)
-
     async def engine_step(self, virtual_engine: int) -> bool:
         """Kick the engine to process the waiting requests.
 
@@ -836,13 +787,8 @@ class AsyncAphrodite:
 
         for new_request in new_requests:
             # Add the request into the Aphrodite engine's waiting queue.
-            # TODO: Maybe add add_request_batch to reduce Ray overhead
             try:
-                if self.engine_use_ray:
-                    await self.engine.add_request.remote(  # type: ignore
-                        **new_request)
-                else:
-                    await self.engine.add_request_async(**new_request)
+                await self.engine.add_request_async(**new_request)
             except ValueError as e:
                 # TODO: use an Aphrodite specific error for failed validation
                 self._request_tracker.process_exception(
@@ -854,10 +800,7 @@ class AsyncAphrodite:
         if aborted_requests:
             await self._engine_abort(aborted_requests)
 
-        if self.engine_use_ray:
-            request_outputs = await self.engine.step.remote()  # type: ignore
-        else:
-            request_outputs = await self.engine.step_async(virtual_engine)
+        request_outputs = await self.engine.step_async(virtual_engine)
 
         # Put the outputs into the corresponding streams.
         # If used as a callback, then already invoked inside
@@ -881,16 +824,10 @@ class AsyncAphrodite:
         return all_finished
 
     async def _engine_abort(self, request_ids: Iterable[str]):
-        if self.engine_use_ray:
-            await self.engine.abort_request.remote(request_ids)  # type: ignore
-        else:
-            self.engine.abort_request(request_ids)
+        self.engine.abort_request(request_ids)
 
     async def run_engine_loop(self):
-        if self.engine_use_ray:
-            pipeline_parallel_size = 1  # type: ignore
-        else:
-            pipeline_parallel_size = \
+        pipeline_parallel_size = \
                 self.engine.parallel_config.pipeline_parallel_size
         has_requests_in_progress = [False] * pipeline_parallel_size
         while True:
@@ -902,12 +839,7 @@ class AsyncAphrodite:
                 # timeout, and unblocks the RPC thread in the workers so that
                 # they can process any other queued control plane messages,
                 # such as add/remove lora adapters.
-                if self.engine_use_ray:
-                    await (self.engine.stop_remote_worker_execution_loop.
-                           remote()  # type: ignore
-                           )
-                else:
-                    await self.engine.stop_remote_worker_execution_loop_async()
+                await self.engine.stop_remote_worker_execution_loop_async()
                 await self._request_tracker.wait_for_new_requests()
                 logger.debug("Got new requests!")
                 requests_in_progress = [
@@ -928,17 +860,9 @@ class AsyncAphrodite:
                 for task in done:
                     result = task.result()
                     virtual_engine = requests_in_progress.index(task)
-                    if self.engine_use_ray:
-                        has_unfinished_requests = (
-                            await (self.engine.
-                                   has_unfinished_requests_for_virtual_engine.
-                                   remote(  # type: ignore
-                                       virtual_engine)))
-                    else:
-                        has_unfinished_requests = (
-                            self.engine.
-                            has_unfinished_requests_for_virtual_engine(
-                                virtual_engine))
+                    has_unfinished_requests = (
+                        self.engine.has_unfinished_requests_for_virtual_engine(
+                            virtual_engine))
                     if result or has_unfinished_requests:
                         requests_in_progress[virtual_engine] = (
                             asyncio.create_task(
@@ -1174,52 +1098,29 @@ class AsyncAphrodite:
 
     async def get_model_config(self) -> ModelConfig:
         """Get the model configuration of the Aphrodite engine."""
-        if self.engine_use_ray:
-            return await self.engine.get_model_config.remote()  # type: ignore
-        else:
-            return self.engine.get_model_config()
+        return self.engine.get_model_config()
 
     async def get_parallel_config(self) -> ParallelConfig:
         """Get the parallel configuration of the Aphrodite engine."""
-        if self.engine_use_ray:
-            return await self.engine.get_parallel_config.remote(  # type: ignore
-            )
-        else:
-            return self.engine.get_parallel_config()
+        return self.engine.get_parallel_config()
 
     async def get_decoding_config(self) -> DecodingConfig:
         """Get the decoding configuration of the Aphrodite engine."""
-        if self.engine_use_ray:
-            return await self.engine.get_decoding_config.remote(  # type: ignore
-            )
-        else:
-            return self.engine.get_decoding_config()
+        return self.engine.get_decoding_config()
 
     async def get_scheduler_config(self) -> SchedulerConfig:
         """Get the scheduling configuration of the Aphrodite engine."""
-        if self.engine_use_ray:
-            return await self.engine.get_scheduler_config.remote(  # type: ignore
-            )
-        else:
-            return self.engine.get_scheduler_config()
+        return self.engine.get_scheduler_config()
 
     async def get_lora_config(self) -> LoRAConfig:
         """Get the lora configuration of the Aphrodite engine."""
-        if self.engine_use_ray:
-            return await self.engine.get_lora_config.remote(  # type: ignore
-            )
-        else:
-            return self.engine.get_lora_config()
+        return self.engine.get_lora_config()
 
     async def do_log_stats(
             self,
             scheduler_outputs: Optional[SchedulerOutputs] = None,
             model_output: Optional[List[SamplerOutput]] = None) -> None:
-        if self.engine_use_ray:
-            await self.engine.do_log_stats.remote(  # type: ignore
-                scheduler_outputs, model_output)
-        else:
-            self.engine.do_log_stats()
+        self.engine.do_log_stats()
 
     async def check_health(self) -> None:
         """Raises an error if engine is unhealthy."""
@@ -1228,27 +1129,11 @@ class AsyncAphrodite:
         if self.is_stopped:
             raise AsyncEngineDeadError("Background loop is stopped.")
 
-        if self.engine_use_ray:
-            try:
-                await self.engine.check_health.remote()  # type: ignore
-            except ray.exceptions.RayActorError as e:
-                raise RuntimeError("Engine is dead.") from e
-        else:
-            await self.engine.check_health_async()
+        await self.engine.check_health_async()
         logger.debug(f"Health check took {time.perf_counter() - t}s")
 
     def add_logger(self, logger_name: str, logger: StatLoggerBase) -> None:
-        if self.engine_use_ray:
-            ray.get(
-                self.engine.add_logger.remote(  # type: ignore
-                    logger_name=logger_name, logger=logger))
-        else:
-            self.engine.add_logger(logger_name=logger_name, logger=logger)
+        self.engine.add_logger(logger_name=logger_name, logger=logger)
 
     def remove_logger(self, logger_name: str) -> None:
-        if self.engine_use_ray:
-            ray.get(
-                self.engine.remove_logger.remote(  # type: ignore
-                    logger_name=logger_name))
-        else:
-            self.engine.remove_logger(logger_name=logger_name)
+        self.engine.remove_logger(logger_name=logger_name)
