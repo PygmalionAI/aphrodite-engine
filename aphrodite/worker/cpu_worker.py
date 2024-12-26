@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.distributed
+from loguru import logger
 
 import aphrodite.common.envs as envs
 from aphrodite.attention import get_attn_backend
@@ -16,8 +17,8 @@ from aphrodite.distributed import (ensure_model_parallel_initialized,
 from aphrodite.modeling import set_random_seed
 from aphrodite.worker.cpu_model_runner import CPUModelRunner
 from aphrodite.worker.worker_base import (LocalOrDistributedWorkerBase,
-                                                LoraNotSupportedWorkerBase,
-                                                WorkerInput)
+                                          LoraNotSupportedWorkerBase,
+                                          WorkerInput)
 
 APHRODITE_CPU_OMP_THREADS_BIND = envs.APHRODITE_CPU_OMP_THREADS_BIND
 
@@ -180,7 +181,8 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
     def init_device(self) -> None:
         if self.local_omp_cpuid != "all":
-            torch.ops._C_utils.init_cpu_threads_env(self.local_omp_cpuid)
+            ret = torch.ops._C_utils.init_cpu_threads_env(self.local_omp_cpuid)
+            logger.info(ret)
         self.init_distributed_environment()
         # Set random seed.
         set_random_seed(self.model_config.seed)
