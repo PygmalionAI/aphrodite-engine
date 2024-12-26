@@ -95,6 +95,8 @@ _MULTIMODAL_MODELS = {
     "QWenLMHeadModel": ("qwen", "QWenLMHeadModel"),
     "Qwen2VLForConditionalGeneration": ("qwen2_vl",
                                         "Qwen2VLForConditionalGeneration"),
+    "PixtralForConditionalGeneration": ("pixtral",
+                                        "PixtralForConditionalGeneration"),
 }
 
 _CONDITIONAL_GENERATION_MODELS = {
