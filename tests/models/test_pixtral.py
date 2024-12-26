@@ -3,6 +3,7 @@ sampling.
 Run `pytest tests/models/test_pixtral.py`.
 """
 import pickle
+import uuid
 from typing import Any, Dict, List
 
 import pytest

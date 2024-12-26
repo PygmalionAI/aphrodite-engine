@@ -1,4 +1,3 @@
-import math
 from array import array
 from dataclasses import dataclass, fields
 from itertools import tee
