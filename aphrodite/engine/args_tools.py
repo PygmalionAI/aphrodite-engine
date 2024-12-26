@@ -26,6 +26,16 @@ if TYPE_CHECKING:
 
 APHRODITE_USE_RAY_SPMD_WORKER = envs.APHRODITE_USE_RAY_SPMD_WORKER
 
+DEVICE_OPTIONS = [
+    "auto",
+    "cuda",
+    "neuron",
+    "cpu",
+    "openvino",
+    "tpu",
+    "xpu",
+]
+
 def nullable_kvs(val: str) -> Optional[Mapping[str, int]]:
     if len(val) == 0:
         return None
@@ -357,9 +367,7 @@ class EngineArgs:
             "--device",
             type=str,
             default=EngineArgs.device,
-            choices=[
-                "auto", "cuda", "neuron", "cpu", "openvino", "tpu", "xpu"
-            ],
+            choices=DEVICE_OPTIONS,
             help=("Category: Model Options\n"
                   "Device to use for model execution."),
         )

@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from aphrodite import LLM, SamplingParams
 from aphrodite.common.utils import FlexibleArgumentParser
-from aphrodite.engine.args_tools import EngineArgs
+from aphrodite.engine.args_tools import DEVICE_OPTIONS, EngineArgs
 from aphrodite.inputs import PromptInputs
 from aphrodite.quantization import QUANTIZATION_METHODS
 
@@ -212,7 +212,7 @@ if __name__ == '__main__':
         "--device",
         type=str,
         default="auto",
-        choices=["auto", "cuda", "cpu", "openvino", "tpu", "xpu"],
+        choices=DEVICE_OPTIONS,
         help='device type for Aphrodite execution, supporting CUDA, OpenVINO '
         'and CPU.')
     parser.add_argument('--block-size',

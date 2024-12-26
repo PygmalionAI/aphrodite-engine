@@ -15,7 +15,8 @@ from aphrodite.common.utils import (FlexibleArgumentParser,
                                     merge_async_iterators)
 from aphrodite.endpoints.openai.api_server import (
     build_async_engine_client_from_engine_args)
-from aphrodite.engine.args_tools import AsyncEngineArgs, EngineArgs
+from aphrodite.engine.args_tools import (DEVICE_OPTIONS, AsyncEngineArgs,
+                                         EngineArgs)
 from aphrodite.quantization import QUANTIZATION_METHODS
 
 
@@ -456,7 +457,7 @@ if __name__ == "__main__":
         "--device",
         type=str,
         default="auto",
-        choices=["auto", "cuda", "cpu", "openvino", "tpu", "xpu"],
+        choices=DEVICE_OPTIONS,
         help='device type for Aphrodite execution, supporting CUDA, OpenVINO '
         'and CPU.')
     parser.add_argument(
