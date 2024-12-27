@@ -432,7 +432,7 @@ def grouped_topk(hidden_states: torch.Tensor,
 
     if renormalize:
         topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
-    return topk_weights, topk_ids
+    return topk_weights, topk_ids.to(torch.int32)
 
 
 def fused_marlin_moe(hidden_states: torch.Tensor,
