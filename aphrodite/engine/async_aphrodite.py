@@ -5,7 +5,6 @@ from typing import (Any, AsyncGenerator, Callable, Dict, Iterable, List,
                     Optional, Set, Tuple, Type, Union)
 
 from loguru import logger
-from typing_extensions import assert_never
 
 import aphrodite.common.envs as envs
 from aphrodite.common.config import (DecodingConfig, EngineConfig, LoRAConfig,
@@ -16,17 +15,13 @@ from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.engine.aphrodite_engine import (AphroditeEngine,
-                                               DecoderPromptComponents,
-                                               PromptComponents,
                                                SchedulerOutputState)
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_timeout import asyncio_timeout
 from aphrodite.engine.metrics_types import StatLoggerBase
 from aphrodite.executor.executor_base import ExecutorAsyncBase
 from aphrodite.executor.ray_utils import initialize_ray_cluster
-from aphrodite.inputs import (EncoderDecoderLLMInputs, LLMInputs, PromptInputs,
-                              SingletonPromptInputs)
-from aphrodite.inputs.parse import is_explicit_encoder_decoder_prompt
+from aphrodite.inputs import PromptInputs
 from aphrodite.lora.request import LoRARequest
 from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.processing.scheduler import SchedulerOutputs
@@ -396,139 +391,6 @@ class _AsyncAphrodite(AphroditeEngine):
         """Stop the remote worker execution loop."""
         await self.model_executor.stop_remote_worker_execution_loop_async()
 
-    async def _tokenize_prompt_async(
-        self,
-        prompt: str,
-        request_id: str,
-        lora_request: Optional[LoRARequest],
-    ) -> List[int]:
-        """Async version of :meth:`_tokenize_prompt`."""
-        tokenizer = self.get_tokenizer_group(
-            missing_msg="prompts must be None if skip_tokenizer_init is True")
-
-        return await tokenizer.encode_async(request_id=request_id,
-                                            prompt=prompt,
-                                            lora_request=lora_request)
-
-    async def _extract_prompt_components_async(
-        self,
-        inputs: SingletonPromptInputs,
-        request_id: str,
-        lora_request: Optional[LoRARequest] = None,
-    ) -> PromptComponents:
-        """Async version of :meth:`_extract_prompt_components`."""
-        if isinstance(inputs, str):
-            prompt = inputs
-            prompt_token_ids = await self._tokenize_prompt_async(
-                prompt,
-                request_id=request_id,
-                lora_request=lora_request,
-            )
-            multi_modal_data = None
-        elif isinstance(inputs, dict):
-            if "prompt_token_ids" in inputs:
-                prompt = None
-                prompt_token_ids = inputs["prompt_token_ids"]
-            else:
-                # NOTE: This extra assignment is required to pass mypy
-                prompt = parsed_prompt = inputs["prompt"]
-                prompt_token_ids = await self._tokenize_prompt_async(
-                    parsed_prompt,
-                    request_id=request_id,
-                    lora_request=lora_request,
-                )
-
-            multi_modal_data = inputs.get("multi_modal_data")
-        else:
-            assert_never(inputs)
-
-        return prompt, prompt_token_ids, multi_modal_data
-
-    async def _process_encoder_decoder_prompt_async(
-        self,
-        inputs: PromptInputs,
-        request_id: str,
-    ) -> EncoderDecoderLLMInputs:
-        """Async version of :meth:`_process_encoder_decoder_prompt`."""
-        encoder_comps: PromptComponents
-        decoder_comps: DecoderPromptComponents
-
-        if is_explicit_encoder_decoder_prompt(inputs):
-            encoder_task = self._extract_prompt_components_async(
-                inputs["encoder_prompt"],
-                request_id=request_id,
-            )
-
-            if (decoder_input := inputs["decoder_prompt"]) is None:
-                encoder_comps = await encoder_task
-                decoder_comps = None, None, None
-            else:
-                decoder_task = self._extract_prompt_components_async(
-                    decoder_input,
-                    request_id=request_id,
-                )
-
-                encoder_comps, decoder_comps = await asyncio.gather(
-                    encoder_task, decoder_task)
-        else:
-            encoder_comps = await self._extract_prompt_components_async(
-                inputs,
-                request_id=request_id,
-            )
-
-            decoder_comps = None, None, None
-
-        return self._build_enc_dec_llm_inputs(encoder_comps, decoder_comps)
-
-    async def _process_decoder_only_prompt_async(
-        self,
-        inputs: SingletonPromptInputs,
-        request_id: str,
-        lora_request: Optional[LoRARequest] = None,
-        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
-    ) -> LLMInputs:
-        """Async version of :meth:`_process_decoder_only_prompt`."""
-        prompt_comps = await self._extract_prompt_components_async(
-            inputs,
-            request_id=request_id,
-            lora_request=lora_request,
-        )
-
-        return self._build_decoder_only_llm_inputs(
-            prompt_comps,
-            prompt_adapter_request=prompt_adapter_request,
-        )
-
-    async def process_model_inputs_async(
-        self,
-        inputs: PromptInputs,
-        request_id: str,
-        lora_request: Optional[LoRARequest] = None,
-        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
-    ) -> Union[LLMInputs, EncoderDecoderLLMInputs]:
-        """Async version of :meth:`process_model_inputs`."""
-        if self.is_encoder_decoder_model():
-            # Encoder-decoder model requires special mapping of
-            # input prompts to encoder & decoder
-            model_inputs = await self._process_encoder_decoder_prompt_async(
-                inputs,
-                request_id=request_id,
-            )
-        else:
-            if is_explicit_encoder_decoder_prompt(inputs):
-                raise ValueError("Cannot pass encoder-decoder prompt "
-                                 "to decoder-only models")
-
-            # Decoder-only operation
-            model_inputs = await self._process_decoder_only_prompt_async(
-                inputs,
-                request_id=request_id,
-                lora_request=lora_request,
-                prompt_adapter_request=prompt_adapter_request,
-            )
-
-        return self.input_processor(model_inputs)
-
     async def add_request_async(
         self,
         request_id: str,
@@ -545,12 +407,13 @@ class _AsyncAphrodite(AphroditeEngine):
         if arrival_time is None:
             arrival_time = time.time()
 
-        processed_inputs = await self.process_model_inputs_async(
+        preprocessed_inputs = await self.input_preprocessor.preprocess_async(
             inputs,
             request_id=request_id,
             lora_request=lora_request,
             prompt_adapter_request=prompt_adapter_request,
         )
+        processed_inputs = self.input_processor(preprocessed_inputs)
 
         self._add_processed_request(
             request_id=request_id,
