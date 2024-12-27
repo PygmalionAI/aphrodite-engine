@@ -278,10 +278,12 @@ class EngineArgs:
         parser.add_argument("--max-seq-len-to-capture",
                             type=int,
                             default=EngineArgs.max_seq_len_to_capture,
-                            help="Category: Model Options\n"
-                            "Maximum sequence length covered by CUDA "
-                            "graphs. When a sequence has context length "
-                            "larger than this, we fall back to eager mode.")
+                            help='Maximum sequence length covered by CUDA '
+                            'graphs. When a sequence has context length '
+                            'larger than this, we fall back to eager mode. '
+                            'Additionally for encoder-decoder models, if the '
+                            'sequence length of the encoder input is larger '
+                            'than this, we fall back to the eager mode.')
         parser.add_argument('--rope-scaling',
                             default=None,
                             type=json.loads,
