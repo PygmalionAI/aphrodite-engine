@@ -1,5 +1,6 @@
 from contextlib import contextmanager
-from typing import ClassVar, List, Optional, Sequence, Union, cast, overload
+from typing import (Any, ClassVar, Dict, List, Optional, Sequence, Union, cast,
+                    overload)
 
 from tqdm import tqdm
 
@@ -353,6 +354,7 @@ class LLM:
         lora_request: Optional[LoRARequest] = None,
         chat_template: Optional[str] = None,
         add_generation_prompt: bool = True,
+        tools: Optional[List[Dict[str, Any]]] = None,
     ) -> List[RequestOutput]:
         """
         Generate responses for a chat conversation.
@@ -397,6 +399,7 @@ class LLM:
                 messages=messages,
                 chat_template=chat_template,
                 add_generation_prompt=add_generation_prompt,
+                tools=tools,
             )
         else:
             prompt = apply_hf_chat_template(
@@ -404,6 +407,7 @@ class LLM:
                 conversation=conversation,
                 chat_template=chat_template,
                 add_generation_prompt=add_generation_prompt,
+                tools=tools,
             )
 
         inputs: PromptInputs
