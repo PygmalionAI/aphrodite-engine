@@ -33,7 +33,7 @@ from aphrodite.endpoints.openai.serving_engine import (LoRAModulePath,
 from aphrodite.endpoints.openai.tool_parsers import (Hermes2ProToolParser,
                                                      MistralToolParser,
                                                      ToolParser)
-from aphrodite.engine.protocol import AsyncEngineClient
+from aphrodite.engine.protocol import EngineClient
 from aphrodite.inputs import TokensPrompt
 from aphrodite.transformers_utils.tokenizer import (AnyTokenizer,
                                                     MistralTokenizer)
@@ -42,7 +42,7 @@ from aphrodite.transformers_utils.tokenizer import (AnyTokenizer,
 class OpenAIServingChat(OpenAIServing):
 
     def __init__(self,
-                 async_engine_client: AsyncEngineClient,
+                 engine_client: EngineClient,
                  model_config: ModelConfig,
                  served_model_names: List[str],
                  response_role: str,
@@ -54,7 +54,7 @@ class OpenAIServingChat(OpenAIServing):
                  return_tokens_as_token_ids: bool = False,
                  enable_auto_tools: bool = False,
                  tool_parser: Optional[str] = None):
-        super().__init__(async_engine_client=async_engine_client,
+        super().__init__(engine_client=engine_client,
                          model_config=model_config,
                          served_model_names=served_model_names,
                          lora_modules=lora_modules,
@@ -102,6 +102,12 @@ class OpenAIServingChat(OpenAIServing):
             logger.error(f"Error with model {error_check_ret}")
             return error_check_ret
 
+        # If the engine is dead, raise the engine's DEAD_ERROR.
+        # This is required for the streaming case, where we return a
+        # success status before we actually start generating text :).
+        if self.engine_client.errored:
+            raise self.engine_client.dead_error
+
         try:
             (
                 lora_request,
@@ -109,8 +115,7 @@ class OpenAIServingChat(OpenAIServing):
             ) = self._maybe_get_adapters(request)
 
             model_config = self.model_config
-            tokenizer = await self.async_engine_client.get_tokenizer(
-                lora_request)
+            tokenizer = await self.engine_client.get_tokenizer(lora_request)
 
             conversation, mm_data_future = parse_chat_messages_futures(
                 request.messages, model_config, tokenizer)
@@ -204,7 +209,7 @@ class OpenAIServingChat(OpenAIServing):
             if mm_data is not None:
                 engine_inputs["multi_modal_data"] = mm_data
 
-            result_generator = self.async_engine_client.generate(
+            result_generator = self.engine_client.generate(
                 engine_inputs,
                 sampling_params,
                 request_id,

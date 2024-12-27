@@ -1,7 +1,7 @@
 import asyncio
 import signal
 from http import HTTPStatus
-from typing import Any, Optional
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, Request, Response
@@ -10,23 +10,13 @@ from loguru import logger
 import aphrodite.common.envs as envs
 from aphrodite.common.utils import find_process_using_port, in_windows
 from aphrodite.engine.async_aphrodite import AsyncEngineDeadError
+from aphrodite.engine.multiprocessing import MQEngineDeadError
 
 APHRODITE_KEEP_ALIVE_ON_ENGINE_DEATH = (
     envs.APHRODITE_KEEP_ALIVE_ON_ENGINE_DEATH)
 
 
-async def serve_http(app: FastAPI, limit_concurrency: Optional[int],
-                     **uvicorn_kwargs: Any):
-
-    # Set concurrency limits in uvicorn if running in multiprocessing mode
-    # since zmq has maximum socket limit of zmq.constants.SOCKET_LIMIT (65536).
-    if limit_concurrency is not None:
-        logger.info(
-            "Launching Uvicorn with --limit_concurrency "
-            f"{limit_concurrency}. "
-            f"To avoid this limit at the expense of performance run with "
-            "--disable-frontend-multiprocessing", limit_concurrency)
-        uvicorn_kwargs["limit_concurrency"] = limit_concurrency
+async def serve_http(app: FastAPI, **uvicorn_kwargs: Any):
 
     config = uvicorn.Config(app, **uvicorn_kwargs)
     server = uvicorn.Server(config)
@@ -62,7 +52,7 @@ async def serve_http(app: FastAPI, limit_concurrency: Optional[int],
             logger.info(
                 f"port {port} is used by process {process} launched with "
                 f"command:\n{' '.join(process.cmdline())}")
-        logger.info("Gracefully stopping http server")
+        logger.info("Shutting down FastAPI HTTP server.")
         return server.shutdown()
 
 
@@ -89,7 +79,7 @@ def _add_shutdown_handlers(app: FastAPI, server: uvicorn.Server) -> None:
         return Response(status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
     @app.exception_handler(AsyncEngineDeadError)
-    async def engine_dead_handler(_, __):
+    async def async_engine_dead_handler(_, __):
         """Kill the server if the async engine is already dead. It will
         not handle any further requests."""
         if not APHRODITE_KEEP_ALIVE_ON_ENGINE_DEATH:
@@ -97,4 +87,15 @@ def _add_shutdown_handlers(app: FastAPI, server: uvicorn.Server) -> None:
                          "process")
             server.should_exit = True
 
+        return Response(status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
+
+
+    @app.exception_handler(MQEngineDeadError)
+    async def mq_engine_dead_handler(_, __):
+        """Kill the server if the mq engine is already dead. It will
+        not handle any further requests."""
+        if not envs.APHRODITE_KEEP_ALIVE_ON_ENGINE_DEATH:
+            logger.error("MQLLMEngine is already dead, terminating server "
+                         "process")
+            server.should_exit = True
         return Response(status_code=HTTPStatus.INTERNAL_SERVER_ERROR)

@@ -1185,6 +1185,7 @@ class AphroditeEngine:
             # torch.distributed ops which may otherwise timeout, and unblocks
             # the RPC thread in the workers so that they can process any other
             # queued control plane messages, such as add/remove lora adapters.
+            logger.debug("Stopping remote worker execution loop.")
             self.model_executor.stop_remote_worker_execution_loop()
 
         return ctx.request_outputs
@@ -1497,6 +1498,22 @@ class AphroditeEngine:
         if self.tokenizer:
             self.tokenizer.check_health()
         self.model_executor.check_health()
+
+    def shutdown(self) -> None:
+        self.model_executor.stop_remote_worker_execution_loop()
+        if hasattr(self, 'tokenizer') and self.tokenizer is not None:
+            self.tokenizer = None
+        if hasattr(self, 'scheduler'):
+            self.scheduler.clear()
+        if hasattr(self, 'cached_scheduler_outputs'):
+            self.cached_scheduler_outputs.clear()
+        if hasattr(self, 'scheduler_contexts'):
+            self.scheduler_contexts.clear()
+        if hasattr(self, 'stat_loggers'):
+            self.stat_loggers.clear()
+        if hasattr(self, 'model_executor'):
+            self.model_executor.shutdown()
+        
 
     def is_encoder_decoder_model(self):
         return self.input_preprocessor.is_encoder_decoder_model()
