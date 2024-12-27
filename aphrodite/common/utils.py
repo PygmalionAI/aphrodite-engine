@@ -6,6 +6,7 @@ import enum
 import gc
 import math
 import os
+import random
 import socket
 import subprocess
 import sys
@@ -36,6 +37,7 @@ from typing_extensions import ParamSpec, TypeIs, assert_never
 import aphrodite.common.envs as envs
 from aphrodite.common.logger import enable_trace_function_call
 from aphrodite.distributed import get_tensor_model_parallel_rank
+from aphrodite.platforms import current_platform
 
 # Exception strings for non-implemented encoder/decoder scenarios
 
@@ -370,6 +372,21 @@ def get_max_shared_memory_bytes(gpu: int = 0) -> int:
 def get_cpu_memory() -> int:
     """Returns the total CPU memory of the node in bytes."""
     return psutil.virtual_memory().total
+
+def seed_everything(seed: int) -> None:
+    """
+    Set the seed of each random module.
+
+    Loosely based on: https://github.com/Lightning-AI/pytorch-lightning/blob/2.4.0/src/lightning/fabric/utilities/seed.py#L20
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+
+    if current_platform.is_cuda():
+        torch.cuda.manual_seed_all(seed)
+
+    if is_xpu():
+        torch.xpu.manual_seed_all(seed)
 
 
 def random_uuid() -> str:
