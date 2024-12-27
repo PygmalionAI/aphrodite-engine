@@ -111,9 +111,7 @@ class NewGELU(CustomOp):
     def forward_xpu(self, x: torch.Tensor) -> torch.Tensor:
         from aphrodite._ipex_ops import ipex_ops as ops
 
-        out = torch.empty_like(x)
-        ops.gelu_new(out, x)
-        return out
+        return ops.gelu_new(x)
 
 
 class FastGELU(CustomOp):
@@ -132,9 +130,7 @@ class FastGELU(CustomOp):
     def forward_xpu(self, x: torch.Tensor) -> torch.Tensor:
         from aphrodite._ipex_ops import ipex_ops as ops
 
-        out = torch.empty_like(x)
-        ops.gelu_fast(out, x)
-        return out
+        return ops.gelu_fast(x)
 
 
 class QuickGELU(CustomOp):
@@ -147,6 +143,12 @@ class QuickGELU(CustomOp):
     def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
         from aphrodite import _custom_ops as ops
 
+        out = torch.empty_like(x)
+        ops.gelu_quick(out, x)
+        return out
+
+    def forward_xpu(self, x: torch.Tensor) -> torch.Tensor:
+        from aphrodite._ipex_ops import ipex_ops as ops
         out = torch.empty_like(x)
         ops.gelu_quick(out, x)
         return out
