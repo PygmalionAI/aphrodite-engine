@@ -50,7 +50,6 @@ class AsyncEngineRPCServer:
         """Cleanup all resources."""
         self.socket.close()
         self.context.destroy()
-        self.engine.shutdown_background_loop()
         # Clear the engine reference so that it can be GC'ed.
         self.engine = None
 
@@ -225,6 +224,11 @@ async def run_server(server: AsyncEngineRPCServer):
         server.cleanup()
 
 
-def run_rpc_server(async_engine_args: AsyncEngineArgs, rpc_path: str):
+def run_rpc_server(async_engine_args: AsyncEngineArgs,
+                   rpc_path: str):
+    def signal_handler(*_) -> None:
+        # Interrupt server on sigterm while initializing
+        raise KeyboardInterrupt("AsyncEngineRPCServer terminated")
+    signal.signal(signal.SIGTERM, signal_handler)
     server = AsyncEngineRPCServer(async_engine_args, rpc_path)
     uvloop.run(run_server(server))

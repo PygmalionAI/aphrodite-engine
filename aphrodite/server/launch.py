@@ -1,37 +1,36 @@
 import asyncio
 import signal
 from http import HTTPStatus
-from typing import Any
+from typing import Any, Optional
 
 import uvicorn
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Request, Response
 from loguru import logger
 
 import aphrodite.common.envs as envs
 from aphrodite.common.utils import find_process_using_port, in_windows
 from aphrodite.engine.async_aphrodite import AsyncEngineDeadError
-from aphrodite.engine.protocol import AsyncEngineClient
 
 APHRODITE_KEEP_ALIVE_ON_ENGINE_DEATH = (
     envs.APHRODITE_KEEP_ALIVE_ON_ENGINE_DEATH)
 
 
-async def serve_http(app: FastAPI, engine: AsyncEngineClient,
+async def serve_http(app: FastAPI, limit_concurrency: Optional[int],
                      **uvicorn_kwargs: Any):
 
     # Set concurrency limits in uvicorn if running in multiprocessing mode
     # since zmq has maximum socket limit of zmq.constants.SOCKET_LIMIT (65536).
-    if engine.limit_concurrency is not None:
+    if limit_concurrency is not None:
         logger.info(
             "Launching Uvicorn with --limit_concurrency "
-            f"{engine.limit_concurrency}. "
+            f"{limit_concurrency}. "
             f"To avoid this limit at the expense of performance run with "
-            f"--disable-frontend-multiprocessing")
-        uvicorn_kwargs["limit_concurrency"] = engine.limit_concurrency
+            "--disable-frontend-multiprocessing", limit_concurrency)
+        uvicorn_kwargs["limit_concurrency"] = limit_concurrency
 
     config = uvicorn.Config(app, **uvicorn_kwargs)
     server = uvicorn.Server(config)
-    _add_shutdown_handlers(app, server, engine)
+    _add_shutdown_handlers(app, server)
 
     loop = asyncio.get_running_loop()
 
@@ -67,15 +66,15 @@ async def serve_http(app: FastAPI, engine: AsyncEngineClient,
         return server.shutdown()
 
 
-def _add_shutdown_handlers(app: FastAPI, server: uvicorn.Server,
-                           engine: AsyncEngineClient) -> None:
+def _add_shutdown_handlers(app: FastAPI, server: uvicorn.Server) -> None:
     """Adds handlers for fatal errors that should crash the server"""
 
     @app.exception_handler(RuntimeError)
-    async def runtime_error_handler(_, __):
+    async def runtime_error_handler(request: Request, __):
         """On generic runtime error, check to see if the engine has died.
         It probably has, in which case the server will no longer be able to
         handle requests. Trigger a graceful shutdown with a SIGTERM."""
+        engine = request.app.state.engine_client
         if (not APHRODITE_KEEP_ALIVE_ON_ENGINE_DEATH and engine.errored
                 and not engine.is_running):
             logger.error("AsyncAphrodite has failed, terminating server "

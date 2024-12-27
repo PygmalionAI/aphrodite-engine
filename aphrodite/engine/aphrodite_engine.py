@@ -1,8 +1,8 @@
-import functools
 import time
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
 from typing import (TYPE_CHECKING, Any, Callable, ClassVar, Deque, Dict,
                     Iterable, List, NamedTuple, Optional)
 from typing import Sequence as GenericSequence
@@ -27,7 +27,7 @@ from aphrodite.common.sequence import (EmbeddingSequenceGroupOutput,
                                        ExecuteModelRequest, Sequence,
                                        SequenceGroup, SequenceGroupMetadata,
                                        SequenceStatus)
-from aphrodite.common.utils import Counter, Device
+from aphrodite.common.utils import Counter, Device, weak_bind
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.engine.metrics_types import StatLoggerBase, Stats
 from aphrodite.engine.output_processor.interfaces import (
@@ -330,11 +330,15 @@ class AphroditeEngine:
             SchedulerContext()
             for _ in range(self.parallel_config.pipeline_parallel_size)
         ]
-        self.async_callbacks = [
-            functools.partial(self._process_model_outputs,
-                              ctx=self.scheduler_contexts[v_id])
-            for v_id in range(self.parallel_config.pipeline_parallel_size)
-        ]
+        if model_config.use_async_output_proc:
+            process_model_outputs = weak_bind(self._process_model_outputs)
+            self.async_callbacks = [
+                partial(process_model_outputs,
+                        ctx=self.scheduler_contexts[v_id])
+                for v_id in range(self.parallel_config.pipeline_parallel_size)
+            ]
+        else:
+            self.async_callbacks = []
         # Currently used by AsyncLLMEngine to ensure quick append
         # of request outputs to asyncio queues
         self.process_request_outputs_callback: Optional[Callable] = None
@@ -801,8 +805,8 @@ class AphroditeEngine:
         """
         return self.scheduler[virtual_engine].has_unfinished_seqs()
 
+    @staticmethod
     def _process_sequence_group_outputs(
-        self,
         seq_group: SequenceGroup,
         outputs: List[EmbeddingSequenceGroupOutput],
     ) -> None:
