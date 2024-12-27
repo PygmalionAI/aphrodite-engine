@@ -439,11 +439,12 @@ class GraniteForCausalLM(nn.Module, SupportsLoRA):
         return model_output
 
     def compute_logits(
-        self, hidden_states: torch.Tensor, sampling_metadata: SamplingMetadata
-    ) -> Optional[torch.Tensor]:
-        logits = self.logits_processor(
-            self.lm_head, hidden_states, sampling_metadata
-        )
+            self, hidden_states: torch.Tensor,
+            sampling_metadata: SamplingMetadata) -> Optional[torch.Tensor]:
+        logits = self.logits_processor(self.lm_head, hidden_states,
+                                       sampling_metadata)
+        if logits is not None:
+            logits /= self.config.logits_scaling
         return logits
 
     def sample(
