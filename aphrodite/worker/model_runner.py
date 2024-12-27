@@ -1069,13 +1069,15 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                     "provided. Defaulting to scaling factors of 1.0. "
                     "This may lead to less accurate results!")
 
-        if envs.APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE and supports_dynamo:
+        if envs.APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE and supports_dynamo():
             logger.info("Compiling the model using torch.compile...")
+            from aphrodite.plugins import get_torch_compile_backend
+            backend = get_torch_compile_backend() or "eager"
             start_time = time.time()
             self.model = torch.compile(
                 self.model,
                 fullgraph=envs.APHRODITE_TEST_DYNAMO_FULLGRAPH_CAPTURE,
-                backend="eager")
+                backend=backend)
             end_time = time.time()
             logger.info(
                 f"Model compiled in {end_time - start_time:.2f} seconds.")
