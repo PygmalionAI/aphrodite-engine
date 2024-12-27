@@ -1071,8 +1071,9 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
 
         if envs.APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE and supports_dynamo():
             logger.info("Compiling the model using torch.compile...")
+            from aphrodite.compilation.backends import aphrodite_backend
             from aphrodite.plugins import get_torch_compile_backend
-            backend = get_torch_compile_backend() or "eager"
+            backend = get_torch_compile_backend() or aphrodite_backend
             start_time = time.time()
             self.model = torch.compile(
                 self.model,
