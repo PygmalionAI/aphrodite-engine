@@ -478,6 +478,9 @@ if _is_cuda() or _is_hip():
 if _build_custom_ops():
     ext_modules.append(CMakeExtension(name="aphrodite._C"))
 
+if _is_hip():
+    ext_modules.append(CMakeExtension(name="aphrodite._rocm_C"))
+
 package_data = {
     "aphrodite": [
         "endpoints/kobold/klite.embd", "quantization/hadamard.safetensors",
