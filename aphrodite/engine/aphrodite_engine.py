@@ -22,7 +22,7 @@ from aphrodite.common.logger import setup_logger
 from aphrodite.common.outputs import (EmbeddingRequestOutput, RequestOutput,
                                       RequestOutputFactory)
 from aphrodite.common.pooling_params import PoolingParams
-from aphrodite.common.sampling_params import SamplingParams
+from aphrodite.common.sampling_params import RequestOutputKind, SamplingParams
 from aphrodite.common.sequence import (EmbeddingSequenceGroupOutput,
                                        ExecuteModelRequest, Sequence,
                                        SequenceGroup, SequenceGroupMetadata,
@@ -220,9 +220,6 @@ class AphroditeEngine:
         log_stats: bool,
         stat_loggers: Optional[Dict[str, StatLoggerBase]] = None,
         input_registry: InputRegistry = INPUT_REGISTRY,
-        # To improve performance, only final requests outputs may be required.
-        # If this set to true, then no intermediate outputs will be returned.
-        step_return_finished_only: bool = False,
     ) -> None:
         try:
             import aphrodite.commit_id
@@ -284,7 +281,6 @@ class AphroditeEngine:
         self.decoding_config = decoding_config or DecodingConfig()
         self.prompt_adapter_config = prompt_adapter_config
         self.log_stats = log_stats
-        self.step_return_finished_only = step_return_finished_only
 
         if not self.model_config.skip_tokenizer_init:
             self.tokenizer = self._init_tokenizer()
@@ -1290,7 +1286,8 @@ class AphroditeEngine:
             seq_group = scheduled_seq_group.seq_group
             seq_group.maybe_set_first_token_time(now)
             request_output = RequestOutputFactory.create(seq_group)
-            ctx.request_outputs.append(request_output)
+            if request_output:
+                ctx.request_outputs.append(request_output)
 
         # When we process a single request, we skip it for the next time,
         # and invoke the request output callback (if there was final output)
@@ -1323,14 +1320,18 @@ class AphroditeEngine:
             scheduled_seq_group = scheduler_outputs.scheduled_seq_groups[i]
             seq_group = scheduled_seq_group.seq_group
             seq_group.maybe_set_first_token_time(now)
-            if (seq_group.is_finished()
-                    if self.step_return_finished_only else True):
-                request_output = RequestOutputFactory.create(seq_group)
+            request_output = RequestOutputFactory.create(seq_group)
+            if request_output:
                 ctx.request_outputs.append(request_output)
 
         for seq_group in scheduler_outputs.ignored_seq_groups:
+            params = seq_group.sampling_params
+            if params is not None and params.output_kind == (
+                    RequestOutputKind.DELTA) and not seq_group.is_finished():
+                continue
             request_output = RequestOutputFactory.create(seq_group)
-            ctx.request_outputs.append(request_output)
+            if request_output:
+                ctx.request_outputs.append(request_output)
 
         # Immediately process request outputs here (if callback is given)
         if (ctx.request_outputs

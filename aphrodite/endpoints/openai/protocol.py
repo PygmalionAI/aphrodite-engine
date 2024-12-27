@@ -13,6 +13,7 @@ from typing_extensions import Annotated, Required, TypedDict
 
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import (LogitsProcessorFunc,
+                                              RequestOutputKind,
                                               SamplingParams)
 from aphrodite.common.sequence import Logprob
 from aphrodite.common.utils import random_uuid
@@ -356,6 +357,8 @@ class ChatCompletionRequest(OpenAIBaseModel):
             skew=self.skew,
             custom_token_bans=self.custom_token_bans,
             sampler_priority=self.sampler_priority,
+            output_kind=RequestOutputKind.DELTA if self.stream \
+            else RequestOutputKind.FINAL_ONLY,
         )
 
     @model_validator(mode='before')
@@ -638,6 +641,8 @@ class CompletionRequest(OpenAIBaseModel):
             skew=self.skew,
             custom_token_bans=self.custom_token_bans,
             sampler_priority=self.sampler_priority,
+            output_kind=RequestOutputKind.DELTA if self.stream \
+            else RequestOutputKind.FINAL_ONLY,
         )
 
     @model_validator(mode="before")
