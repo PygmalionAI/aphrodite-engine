@@ -90,7 +90,8 @@ def _register_group(group: "GroupCoordinator") -> None:
     # looks like Python 3.8 does not understand `ReferenceType`
     _groups[group.unique_name] = weakref.ref(group)  # type: ignore
 
-@torch.library.custom_op("vllm::inplace_all_reduce", mutates_args=["tensor"])
+@torch.library.custom_op("aphrodite::inplace_all_reduce",
+                         mutates_args=["tensor"])
 def inplace_all_reduce(tensor: torch.Tensor, group_name: str) -> None:
     assert group_name in _groups, f"Group {group_name} is not found."
     group = _groups[group_name]()
@@ -101,7 +102,7 @@ def inplace_all_reduce(tensor: torch.Tensor, group_name: str) -> None:
 @inplace_all_reduce.register_fake
 def _(tensor: torch.Tensor, group_name: str) -> None:
     return
-@torch.library.custom_op("vllm::outplace_all_reduce", mutates_args=[])
+@torch.library.custom_op("aphrodite::outplace_all_reduce", mutates_args=[])
 def outplace_all_reduce(tensor: torch.Tensor, group_name: str) -> torch.Tensor:
     assert group_name in _groups, f"Group {group_name} is not found."
     group = _groups[group_name]()
