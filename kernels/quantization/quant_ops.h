@@ -171,10 +171,12 @@ torch::Tensor fp_eXmY_linear_forward_cuda(int64_t EXPONENT, int64_t MANTISSA,
 #endif
 
 void static_scaled_int8_quant(torch::Tensor& out, torch::Tensor const& input,
-                              torch::Tensor const& scale);
+                              torch::Tensor const& scale,
+                              c10::optional<torch::Tensor> const& azp);
 
 void dynamic_scaled_int8_quant(torch::Tensor& out, torch::Tensor const& input,
-                               torch::Tensor& scales);
+                               torch::Tensor& scales,
+                               c10::optional<torch::Tensor> const& azp);
 
 // SqueezeLLM
 void squeezellm_gemm(torch::Tensor vec, torch::Tensor mat, torch::Tensor mul,
