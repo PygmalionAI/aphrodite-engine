@@ -4,14 +4,6 @@ from dataclasses import dataclass, field
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple,
                     Union)
 
-try:
-    from aphrodite.attention.backends.flash_attn import FlashAttentionMetadata
-except ModuleNotFoundError:
-    # aphrodite_flash_attn is not installed, use the identical ROCm FA metadata
-    from aphrodite.attention.backends.rocm_flash_attn import (
-        ROCmFlashAttentionMetadata as FlashAttentionMetadata,
-    )
-
 import torch
 
 from aphrodite.common.sequence import (CompletionSequenceGroupOutput,
@@ -33,6 +25,9 @@ from aphrodite.worker.model_runner_base import (
 
 if TYPE_CHECKING:
     from aphrodite.attention.backends.abstract import AttentionBackend
+
+
+MULTI_STEP_ATTENTION_BACKENDS = ["flash-attn", "flashinfer"]
 
 
 def seq_output_builder():
@@ -479,26 +474,31 @@ class MultiStepModelRunner(GPUModelRunnerBase[StatefulModelInput]):
             assert seq_group.seq_len is None  # Decode
             assert seq_group.query_len is None  # Decode
 
-    def _advance_step(
-        self, model_input: StatefulModelInput, out: SamplerOutput
-    ) -> StatefulModelInput:
-        frozen_model_input = model_input.frozen_model_input
-        assert frozen_model_input is not None
-        assert frozen_model_input.attn_metadata is not None
+    def _advance_step(self, model_input: StatefulModelInput,
+                      out: SamplerOutput) -> StatefulModelInput:
+        if self.attn_backend.get_name() not in MULTI_STEP_ATTENTION_BACKENDS:
+            raise ValueError(
+                f"Multi-step not supported for attention backend: "
+                f"{self.attn_backend.get_name()}. Set "
+                "APHRODITE_ATTENTION_BACKEND to a value from "
+                f"{MULTI_STEP_ATTENTION_BACKENDS}.")
+
+        sampled_token_ids = model_input.cached_outputs[-1].sampled_token_ids
         num_seqs = model_input.num_seqs
         num_queries = model_input.num_queries
-        assert num_seqs > 0
-        assert num_queries > 0
-        assert num_seqs >= num_queries
+        frozen_model_input = model_input.frozen_model_input
+        assert frozen_model_input is not None
         attn_metadata = frozen_model_input.attn_metadata
-        assert isinstance(attn_metadata, FlashAttentionMetadata)
+        assert attn_metadata is not None
+
         attn_metadata.advance_step(
             frozen_model_input,
-            model_input.cached_outputs[-1].sampled_token_ids, self.block_size,
-            num_seqs, num_queries)
-        if frozen_model_input.seq_lens is not None:
-            for i in range(num_queries):
-                frozen_model_input.seq_lens[i] = attn_metadata.seq_lens[i]
+            sampled_token_ids,
+            self.block_size,
+            num_seqs,
+            num_queries,
+        )
+
         return model_input
 
     def load_model(self) -> None:
