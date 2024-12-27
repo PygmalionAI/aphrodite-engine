@@ -8,7 +8,7 @@ from loguru import logger
 from transformers import (AutoTokenizer, PreTrainedTokenizer,
                           PreTrainedTokenizerFast)
 
-from aphrodite.common.config import APHRODITE_USE_MODELSCOPE
+from aphrodite.common.envs import APHRODITE_USE_MODELSCOPE
 from aphrodite.common.utils import make_async
 from aphrodite.lora.request import LoRARequest
 from aphrodite.transformers_utils.tokenizers import (BaichuanTokenizer,
@@ -17,6 +17,7 @@ from aphrodite.transformers_utils.utils import check_gguf_file
 
 AnyTokenizer = Union[PreTrainedTokenizer, PreTrainedTokenizerFast,
                      MistralTokenizer]
+
 
 def get_cached_tokenizer(tokenizer: AnyTokenizer) -> AnyTokenizer:
     """Get tokenizer with cached properties.
@@ -65,7 +66,8 @@ def get_tokenizer(
     download_dir: Optional[str] = None,
     **kwargs,
 ) -> AnyTokenizer:
-    """Gets a tokenizer for the given model name via Huggingface/modelscope."""
+    """Gets a tokenizer for the given model name via HuggingFace or ModelScope.
+    """
     if APHRODITE_USE_MODELSCOPE:
         # download model from ModelScope hub,
         # lazy import so that modelscope is not required for normal use.
@@ -159,7 +161,7 @@ def get_tokenizer(
 
 
 def get_lora_tokenizer(lora_request: LoRARequest, *args,
-                       **kwargs) -> Optional[PreTrainedTokenizer]:
+                       **kwargs) -> Optional[AnyTokenizer]:
     if lora_request is None:
         return None
     try:
