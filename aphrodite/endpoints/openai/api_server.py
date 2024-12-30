@@ -42,6 +42,7 @@ from aphrodite.endpoints.openai.protocol import (ChatCompletionRequest,
                                                  EmbeddingRequest,
                                                  ErrorResponse,
                                                  KAIGenerationInputSchema,
+                                                 ModelLoadRequest,
                                                  TokenizeRequest,
                                                  TokenizeResponse)
 # yapf: enable
@@ -79,7 +80,6 @@ kobold_lite_ui = ""
 sampler_json = ""
 gen_cache: dict = {}
 prometheus_multiproc_dir: tempfile.TemporaryDirectory
-model_is_loaded = True
 
 _running_tasks: Set[asyncio.Task] = set()
 
@@ -292,9 +292,7 @@ async def unload_model(raw_request: Request):
             raw_request.app.state.openai_serving_completion = None 
             raw_request.app.state.openai_serving_embedding = None
             raw_request.app.state.openai_serving_tokenization = None
-
-            global model_is_loaded
-            model_is_loaded = False
+            raw_request.app.state.model_is_loaded = False
 
             return JSONResponse(content={"status": "success"})
 
@@ -316,6 +314,106 @@ async def unload_model(raw_request: Request):
             status_code=400
         )
 
+@router.post("/v1/model/load")
+async def load_model(request: ModelLoadRequest, raw_request: Request):
+    """Load a new model after unloading the previous one."""
+    if raw_request.app.state.model_is_loaded:
+        return JSONResponse(
+            content={
+                "status": "error",
+                "message": "A model is already loaded. Please unload it first."
+            },
+            status_code=400
+        )
+
+    try:
+        parser = FlexibleArgumentParser()
+        parser = make_arg_parser(parser)
+        new_args = parser.parse_args([])
+
+        # TODO: This is a hack to get the default values for the arguments
+        #       This should be replaced with a proper way to get the default
+        #       values from the parser.
+        original_args = api_server_args
+        essential_params = [
+            'host',
+            'port',
+            'api_keys',
+            'admin_key',
+            'disable_frontend_multiprocessing',
+            'root_path',
+            'ssl_keyfile',
+            'ssl_certfile'
+        ]
+
+        for param in essential_params:
+            if hasattr(original_args, param):
+                setattr(new_args, param, getattr(original_args, param))
+
+        new_args.model = request.model
+
+        engine_args = AsyncEngineArgs.from_cli_args(new_args)
+
+        if (MQAphroditeEngineClient.is_unsupported_config(engine_args)
+                or new_args.disable_frontend_multiprocessing):
+            return JSONResponse(
+                content={
+                    "status": "error",
+                    "message": "Model loading only supported with the "
+                    "multiprocessing backend."
+                },
+                status_code=400
+            )
+
+        ipc_path = get_open_zmq_ipc_path()
+
+        context = multiprocessing.get_context("spawn")
+        engine_process = context.Process(
+            target=run_mp_engine,
+            args=(engine_args, ipc_path)
+        )
+        engine_process.start()
+
+        engine_config = engine_args.create_engine_config()
+        engine_client = MQAphroditeEngineClient(ipc_path, engine_config)
+
+        try:
+            while True:
+                try:
+                    await engine_client.setup()
+                    break
+                except TimeoutError:
+                    if not engine_process.is_alive():
+                        return JSONResponse(
+                            content={
+                                "status": "error",
+                                "message": "Engine process died before "
+                                "responding to readiness probe."
+                            },
+                            status_code=500
+                        )
+
+            model_config = await engine_client.get_model_config()
+            init_app_state(
+                engine_client, model_config, raw_request.app.state, new_args)
+            raw_request.app.state.model_is_loaded = True
+
+            return JSONResponse(content={"status": "success"})
+
+        except Exception as e:
+            engine_process.terminate()
+            engine_client.close()
+            raise e
+
+    except Exception as e:
+        return JSONResponse(
+            content={
+                "status": "error", 
+                "message": f"Failed to load model: {str(e)}"
+            },
+            status_code=500
+        )
+
 @router.get("/health")
 async def health(raw_request: Request) -> Response:
     """Health check."""
@@ -325,7 +423,7 @@ async def health(raw_request: Request) -> Response:
 
 @router.post("/v1/tokenize")
 async def tokenize(request: TokenizeRequest, raw_request: Request):
-    if not model_is_loaded:
+    if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
                 "status": "error",
@@ -344,7 +442,7 @@ async def tokenize(request: TokenizeRequest, raw_request: Request):
 
 @router.post("/v1/detokenize")
 async def detokenize(request: DetokenizeRequest, raw_request: Request):
-    if not model_is_loaded:
+    if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
                 "status": "error",
@@ -407,7 +505,7 @@ async def serviceinfo():
 @router.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,
                                  raw_request: Request):
-    if not model_is_loaded:
+    if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
                 "status": "error",
@@ -430,7 +528,7 @@ async def create_chat_completion(request: ChatCompletionRequest,
 
 @router.post("/v1/completions")
 async def create_completion(request: CompletionRequest, raw_request: Request):
-    if not model_is_loaded:
+    if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
                 "status": "error",
@@ -452,7 +550,7 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
 
 @router.post("/v1/embeddings")
 async def create_embedding(request: EmbeddingRequest, raw_request: Request):
-    if not model_is_loaded:
+    if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
                 "status": "error",
@@ -471,7 +569,7 @@ async def create_embedding(request: EmbeddingRequest, raw_request: Request):
 
 @router.post("/v1/lora/load")
 async def load_lora(lora: LoRAModulePath, raw_request: Request):
-    if not model_is_loaded:
+    if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
                 "status": "error",
@@ -489,7 +587,7 @@ async def load_lora(lora: LoRAModulePath, raw_request: Request):
 
 @router.delete("/v1/lora/unload")
 async def unload_lora(lora_name: str, raw_request: Request):
-    if not model_is_loaded:
+    if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
                 "status": "error",
@@ -504,7 +602,7 @@ async def unload_lora(lora_name: str, raw_request: Request):
 @router.post("/v1/soft_prompt/load")
 async def load_soft_prompt(soft_prompt: PromptAdapterPath,
                            raw_request: Request):
-    if not model_is_loaded:
+    if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
                 "status": "error",
@@ -521,7 +619,7 @@ async def load_soft_prompt(soft_prompt: PromptAdapterPath,
 
 @router.delete("/v1/soft_prompt/unload")
 async def unload_soft_prompt(soft_prompt_name: str, raw_request: Request):
-    if not model_is_loaded:
+    if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
                 "status": "error",
@@ -778,6 +876,7 @@ def build_app(args: Namespace) -> FastAPI:
     app.include_router(router)
     app.root_path = args.root_path
     app.state.args = args
+    app.state.model_is_loaded = False
     if args.launch_kobold_api:
         logger.warning("Kobold API is now enabled by default. "
                        "This flag will be removed in the future.")
