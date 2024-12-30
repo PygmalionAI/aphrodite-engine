@@ -324,6 +324,7 @@ def _prepare_seq_groups(
             sample_indices.extend(range(logit_idx, logit_idx + sample_len))
             categorized_sample_indices[sampling_params.sampling_type].extend(
                 list(range(logit_idx, logit_idx + sample_len)))
+            logit_idx += sample_len
 
         if cache is not None:
             sample_obj.sampling_params = sampling_params
