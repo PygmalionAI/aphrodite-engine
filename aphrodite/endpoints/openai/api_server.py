@@ -59,6 +59,7 @@ from aphrodite.engine.multiprocessing import (APHRODITE_RPC_SUCCESS_STR,
 from aphrodite.engine.multiprocessing.client import MQAphroditeEngineClient
 from aphrodite.engine.multiprocessing.engine import run_mp_engine
 from aphrodite.engine.protocol import EngineClient
+from aphrodite.modeling.model_loader.weight_utils import get_model_config_yaml
 from aphrodite.server import serve_http
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.version import __version__ as APHRODITE_VERSION
@@ -245,6 +246,55 @@ def mount_metrics(app: FastAPI):
     # Workaround for 307 Redirect for /metrics
     metrics_route.path_regex = re.compile('^/metrics(?P<path>.*)$')
     app.routes.append(metrics_route)
+
+
+async def _handle_model_switch(
+        raw_request: Request,
+        requested_model: str
+) -> Optional[JSONResponse]:
+    """Helper function to handle model switching if needed.
+    Returns error response if something went wrong, None if successful."""
+
+    if not raw_request.app.state.args.allow_inline_model_loading:
+        return None
+
+    if not raw_request.app.state.model_is_loaded:
+        config = get_model_config_yaml(requested_model)
+        request_data = {"model": requested_model}
+        if config:
+            config.pop("model", None)
+            request_data.update(config)
+            
+        load_response = await load_model(
+            raw_request,
+            request=json.dumps(request_data)
+        )
+        if load_response.status_code != 200:
+            return load_response
+        return None
+
+    current_model = raw_request.app.state.current_model
+    if current_model == requested_model:
+        return None
+
+    unload_response = await unload_model(raw_request)
+    if unload_response.status_code != 200:
+        return unload_response
+
+    config = get_model_config_yaml(requested_model)
+    request_data = {"model": requested_model}
+    if config:
+        config.pop("model", None)
+        request_data.update(config)
+
+    load_response = await load_model(
+        raw_request,
+        request=json.dumps(request_data)
+    )
+    if load_response.status_code != 200:
+        return load_response
+
+    return None
 
 
 def chat(request: Request) -> OpenAIServingChat:
@@ -444,6 +494,7 @@ async def load_model(
             init_app_state(
                 engine_client, model_config, raw_request.app.state, new_args)
             raw_request.app.state.model_is_loaded = True
+            raw_request.app.state.current_model = new_args.model
 
             return JSONResponse(content={"status": "success"})
 
@@ -470,6 +521,11 @@ async def health(raw_request: Request) -> Response:
 
 @router.post("/v1/tokenize")
 async def tokenize(request: TokenizeRequest, raw_request: Request):
+    if hasattr(request, "model"):
+        error_response = await _handle_model_switch(raw_request, request.model)
+        if error_response is not None:
+            return error_response
+
     if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
@@ -489,6 +545,12 @@ async def tokenize(request: TokenizeRequest, raw_request: Request):
 
 @router.post("/v1/detokenize")
 async def detokenize(request: DetokenizeRequest, raw_request: Request):
+    if hasattr(request, "model"):
+        error_response = await _handle_model_switch(
+            raw_request, request.model)
+        if error_response is not None:
+            return error_response
+
     if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
@@ -508,6 +570,14 @@ async def detokenize(request: DetokenizeRequest, raw_request: Request):
 
 @router.get("/v1/models")
 async def show_available_models(raw_request: Request):
+    if not raw_request.app.state.model_is_loaded:
+        return JSONResponse(
+            content={
+                "status": "error",
+                "message": "No model loaded."
+            },
+            status_code=500
+        )
     models = await completion(raw_request).show_available_models()
     return JSONResponse(content=models.model_dump())
 
@@ -552,6 +622,11 @@ async def serviceinfo():
 @router.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,
                                  raw_request: Request):
+    if hasattr(request, "model"):
+        error_response = await _handle_model_switch(raw_request, request.model)
+        if error_response is not None:
+            return error_response
+
     if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
@@ -575,6 +650,11 @@ async def create_chat_completion(request: ChatCompletionRequest,
 
 @router.post("/v1/completions")
 async def create_completion(request: CompletionRequest, raw_request: Request):
+    if hasattr(request, "model"):
+        error_response = await _handle_model_switch(raw_request, request.model)
+        if error_response is not None:
+            return error_response
+
     if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
@@ -597,6 +677,11 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
 
 @router.post("/v1/embeddings")
 async def create_embedding(request: EmbeddingRequest, raw_request: Request):
+    if hasattr(request, "model"):
+        error_response = await _handle_model_switch(raw_request, request.model)
+        if error_response is not None:
+            return error_response
+
     if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
@@ -1035,6 +1120,7 @@ def init_app_state(
 
     state.engine_client = engine_client
     state.log_stats = not args.disable_log_stats
+    state.current_model = args.model
 
     state.openai_serving_chat = OpenAIServingChat(
         engine_client,
