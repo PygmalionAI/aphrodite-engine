@@ -15,7 +15,8 @@ from functools import partial
 from http import HTTPStatus
 from typing import AsyncGenerator, AsyncIterator, List, Optional, Set, Tuple
 
-from fastapi import APIRouter, FastAPI, Request
+import yaml
+from fastapi import APIRouter, FastAPI, Form, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (HTMLResponse, JSONResponse, Response,
@@ -33,7 +34,6 @@ from aphrodite.common.utils import (FlexibleArgumentParser,
                                     random_uuid)
 from aphrodite.endpoints.logger import RequestLogger
 from aphrodite.endpoints.openai.args import make_arg_parser
-from aphrodite.endpoints.openai.model_management import ModelLoadRequest
 from aphrodite.endpoints.openai.protocol import (ChatCompletionRequest,
                                                  ChatCompletionResponse,
                                                  CompletionRequest,
@@ -321,8 +321,13 @@ async def unload_model(raw_request: Request):
         )
 
 @router.post("/v1/model/load")
-async def load_model(request: ModelLoadRequest, raw_request: Request):
-    """Load a new model after unloading the previous one."""
+async def load_model(
+    raw_request: Request,
+    config_file: Optional[UploadFile] = None,
+    request: Optional[str] = Form(None)
+):
+    """Load a new model after unloading the previous one.
+    Accept either a config file, a JSON request body, or both."""
     if raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
@@ -347,9 +352,53 @@ async def load_model(request: ModelLoadRequest, raw_request: Request):
             if hasattr(original_args, param):
                 setattr(new_args, param, getattr(original_args, param))
 
-        for key, value in request.model_dump().items():
-            if hasattr(new_args, key):
-                setattr(new_args, key, value)
+        if config_file:
+            yaml_content = await config_file.read()
+            config_args = yaml.safe_load(yaml_content)
+            if config_args:
+                for key, value in config_args.items():
+                    if hasattr(new_args, key):
+                        setattr(new_args, key, value)
+
+        json_args = None
+        if request:
+            try:
+                json_args = json.loads(request)
+            except json.JSONDecodeError:
+                return JSONResponse(
+                    content={
+                        "status": "error",
+                        "message": "Invalid JSON in request form field."
+                    },
+                    status_code=400
+                )
+        else:
+            try:
+                json_args = await raw_request.json()
+            except Exception:
+                if not config_file:
+                    return JSONResponse(
+                        content={
+                            "status": "error",
+                            "message": "Must provide either config_file or "
+                            "valid JSON request body."
+                        },
+                        status_code=400
+                    )
+
+        if json_args:
+            for key, value in json_args.items():
+                if hasattr(new_args, key):
+                    setattr(new_args, key, value)
+
+        if not hasattr(new_args, 'model') or not new_args.model:
+            return JSONResponse(
+                content={
+                    "status": "error",
+                    "message": "No model specified in config or request body."
+                },
+                status_code=400
+            )
 
         engine_args = AsyncEngineArgs.from_cli_args(new_args)
 
@@ -1054,6 +1103,8 @@ async def run_server(args, **uvicorn_kwargs) -> None:
         root_path = args.root_path.rstrip("/") if args.root_path else ""
         host_name = args.host if args.host else "localhost"
         port_str = str(args.port)
+
+        app.state.model_is_loaded = True
 
 
         if SERVE_KOBOLD_LITE_UI:
