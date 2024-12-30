@@ -970,9 +970,6 @@ class DetokenizeRequest(OpenAIBaseModel):
 class DetokenizeResponse(OpenAIBaseModel):
     prompt: str
 
-class ModelLoadRequest(OpenAIBaseModel):
-    model: str
-
 
 # ========== KoboldAI ========== #
 

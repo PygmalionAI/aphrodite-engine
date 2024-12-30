@@ -33,7 +33,7 @@ from aphrodite.common.utils import (FlexibleArgumentParser,
                                     random_uuid)
 from aphrodite.endpoints.logger import RequestLogger
 from aphrodite.endpoints.openai.args import make_arg_parser
-# yapf: disable
+from aphrodite.endpoints.openai.model_management import ModelLoadRequest
 from aphrodite.endpoints.openai.protocol import (ChatCompletionRequest,
                                                  ChatCompletionResponse,
                                                  CompletionRequest,
@@ -42,10 +42,8 @@ from aphrodite.endpoints.openai.protocol import (ChatCompletionRequest,
                                                  EmbeddingRequest,
                                                  ErrorResponse,
                                                  KAIGenerationInputSchema,
-                                                 ModelLoadRequest,
                                                  TokenizeRequest,
                                                  TokenizeResponse)
-# yapf: enable
 from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
 from aphrodite.endpoints.openai.serving_completions import (
     OpenAIServingCompletion)
@@ -268,6 +266,14 @@ def engine_client(request: Request) -> EngineClient:
 @router.delete("/v1/model/unload")
 async def unload_model(raw_request: Request):
     """Unload the model and shut down the engine process."""
+    if not raw_request.app.state.model_is_loaded:
+        return JSONResponse(
+            content={
+                "status": "error",
+                "message": "No model loaded."
+            },
+            status_code=500
+        )
     client = raw_request.app.state.engine_client
     
     if isinstance(client, MQAphroditeEngineClient):
@@ -331,26 +337,19 @@ async def load_model(request: ModelLoadRequest, raw_request: Request):
         parser = make_arg_parser(parser)
         new_args = parser.parse_args([])
 
-        # TODO: This is a hack to get the default values for the arguments
-        #       This should be replaced with a proper way to get the default
-        #       values from the parser.
         original_args = api_server_args
         essential_params = [
-            'host',
-            'port',
-            'api_keys',
-            'admin_key',
-            'disable_frontend_multiprocessing',
-            'root_path',
-            'ssl_keyfile',
-            'ssl_certfile'
+            'host', 'port', 'api_keys', 'admin_key',
+            'disable_frontend_multiprocessing', 'root_path',
+            'ssl_keyfile', 'ssl_certfile'
         ]
-
         for param in essential_params:
             if hasattr(original_args, param):
                 setattr(new_args, param, getattr(original_args, param))
 
-        new_args.model = request.model
+        for key, value in request.model_dump().items():
+            if hasattr(new_args, key):
+                setattr(new_args, key, value)
 
         engine_args = AsyncEngineArgs.from_cli_args(new_args)
 
@@ -359,14 +358,13 @@ async def load_model(request: ModelLoadRequest, raw_request: Request):
             return JSONResponse(
                 content={
                     "status": "error",
-                    "message": "Model loading only supported with the "
+                    "message": "Model loading only supported with "
                     "multiprocessing backend."
                 },
                 status_code=400
             )
 
         ipc_path = get_open_zmq_ipc_path()
-
         context = multiprocessing.get_context("spawn")
         engine_process = context.Process(
             target=run_mp_engine,
