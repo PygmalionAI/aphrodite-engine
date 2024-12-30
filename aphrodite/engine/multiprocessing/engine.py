@@ -1,5 +1,7 @@
+import os
 import pickle
 import signal
+import sys
 from contextlib import contextmanager
 from typing import Iterator, List, Optional, Union
 
@@ -19,6 +21,7 @@ from aphrodite.engine.multiprocessing import (APHRODITE_RPC_SUCCESS_STR,
                                               RPCAbortRequest, RPCError,
                                               RPCGenerateRequest,
                                               RPCHealthRequest,
+                                              RPCShutdownRequest,
                                               RPCStartupRequest,
                                               RPCStartupResponse)
 
@@ -217,6 +220,10 @@ class MQAphroditeEngine:
                     self._handle_abort_request(request)
                 elif isinstance(request, RPCHealthRequest):
                     self._handle_health_request()
+                elif isinstance(request, RPCShutdownRequest):
+                    self.engine.shutdown()
+                    self._send_outputs(APHRODITE_RPC_SUCCESS_STR)
+                    break
                 else:
                     raise ValueError("Unknown RPCRequest Type: {request}")
 
@@ -300,13 +307,19 @@ class MQAphroditeEngine:
 
 
 def run_mp_engine(engine_args: AsyncEngineArgs, ipc_path: str):
-
     def signal_handler(*_) -> None:
-        # Interrupt server on sigterm
+        with open(os.devnull, 'w') as devnull:
+            sys.stderr = devnull
         raise KeyboardInterrupt("MQAphroditeEngine terminated")
 
     signal.signal(signal.SIGTERM, signal_handler)
 
-    engine = MQAphroditeEngine.from_engine_args(engine_args=engine_args,
-                                          ipc_path=ipc_path)
-    engine.start()
+    try:
+        engine = MQAphroditeEngine.from_engine_args(engine_args=engine_args,
+                                              ipc_path=ipc_path)
+        engine.start()
+    except KeyboardInterrupt as e:
+        if str(e) == "MQAphroditeEngine terminated":
+            pass
+        else:
+            raise

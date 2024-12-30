@@ -2,11 +2,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import List, Mapping, Optional, Union
 
+from aphrodite.common.outputs import RequestOutput
+from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.inputs import PromptInputs
 from aphrodite.lora.request import LoRARequest
-from aphrodite.common.outputs import RequestOutput
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
-from aphrodite.common.sampling_params import SamplingParams
 
 APHRODITE_RPC_SUCCESS_STR = "SUCCESS"
 
@@ -55,12 +55,17 @@ class RPCStartupResponse:
     tracing_enabled: bool
 
 
+@dataclass
+class RPCShutdownRequest:
+    pass
+
 
 RPC_REQUEST_T = Union[
     RPCGenerateRequest,
     RPCAbortRequest,
     RPCHealthRequest,
     RPCStartupRequest,
+    RPCShutdownRequest,
 ]
 
 REQUEST_OUTPUTS_T = Union[List[RequestOutput], RPCError]

@@ -1,10 +1,10 @@
 import asyncio
-import copy
 import importlib
 import inspect
 import json
 import multiprocessing
 import os
+import pickle
 import re
 import signal
 import tempfile
@@ -13,11 +13,9 @@ from contextlib import asynccontextmanager
 from distutils.util import strtobool
 from functools import partial
 from http import HTTPStatus
-from typing import (Any, AsyncGenerator, AsyncIterator, Dict, List, Optional,
-                    Set, Tuple)
+from typing import AsyncGenerator, AsyncIterator, List, Optional, Set, Tuple
 
-import yaml
-from fastapi import APIRouter, FastAPI, Request, UploadFile
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (HTMLResponse, JSONResponse, Response,
@@ -57,10 +55,11 @@ from aphrodite.endpoints.openai.serving_tokenization import (
     OpenAIServingTokenization)
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
-from aphrodite.engine.protocol import EngineClient
+from aphrodite.engine.multiprocessing import (APHRODITE_RPC_SUCCESS_STR,
+                                              RPCShutdownRequest)
 from aphrodite.engine.multiprocessing.client import MQAphroditeEngineClient
 from aphrodite.engine.multiprocessing.engine import run_mp_engine
-from aphrodite.modeling.model_loader.weight_utils import get_model_config_yaml
+from aphrodite.engine.protocol import EngineClient
 from aphrodite.server import serve_http
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
 from aphrodite.version import __version__ as APHRODITE_VERSION
@@ -227,172 +226,6 @@ async def build_engine_client_from_engine_args(
             multiprocess.mark_process_dead(engine_process.pid)
 
 
-async def _maybe_switch_model(
-        request_model: str, app_state,
-        raw_request: Request) -> Optional[ErrorResponse]:
-    """Switch to requested model if different from currently loaded one."""
-    global model_is_loaded, engine_client, engine_args, served_model_names
-    
-    if not model_is_loaded:
-        return None
-
-    models = await completion(raw_request).show_available_models()
-
-    for model in models.data:
-        if request_model in (model.id, model.root):
-            return None
-
-    if not app_state.args.allow_inline_model_loading:
-        return JSONResponse(
-            content={
-                "error": {
-                    "message": "Requested model is not currently loaded. "
-                    "Inline model loading is disabled. Enable it with "
-                    "--allow-inline-model-loading.",
-                    "type": "invalid_request_error",
-                    "code": "model_not_loaded"
-                }
-            },
-            status_code=400
-        )  # type: ignore
-
-    # Authentication checks
-    api_key = envs.APHRODITE_API_KEY or app_state.args.api_keys
-    admin_key = envs.APHRODITE_ADMIN_KEY or app_state.args.admin_key
-
-    if api_key:
-        api_key_header = raw_request.headers.get("x-api-key")
-        auth_header = raw_request.headers.get("Authorization")
-
-        if not admin_key:
-            return JSONResponse(
-                content={
-                    "error": {
-                        "message": "Admin key not configured. "
-                        "Inline model loading is disabled.",
-                        "type": "invalid_request_error",
-                        "code": "admin_key_required"
-                    }
-                },
-                status_code=401
-            )  # type: ignore
-
-        if not (api_key_header == admin_key or
-                auth_header == f"Bearer {admin_key}"):
-            return JSONResponse(
-                content={
-                    "error": {
-                        "message": "Admin privileges required for inline "
-                        "model loading.",
-                        "type": "invalid_request_error",
-                        "code": "unauthorized"
-                    }
-                },
-                status_code=401
-            )  # type: ignore
-    
-    logger.info(f"Switching from {served_model_names[0]} to {request_model}")
-    
-    try:
-        args = app_state.args
-        current_client = engine_client(raw_request)
-        
-        # First shut down the current engine
-        if not args.disable_frontend_multiprocessing:
-            await current_client.kill()
-        else:
-            await current_client.shutdown_background_loop()
-            
-        model_is_loaded = False
-
-        yaml_config = get_model_config_yaml(request_model, args.download_dir)
-
-        if yaml_config:
-            parser = FlexibleArgumentParser()
-            parser = make_arg_parser(parser)
-            engine_args = parser.parse_args([])  # empty args
-
-            for key, value in yaml_config.items():
-                if hasattr(engine_args, key):
-                    setattr(engine_args, key, value)
-
-            engine_args.model = request_model
-            engine_args = AsyncEngineArgs.from_cli_args(engine_args)
-        else:
-            # Fallback to minimal config
-            engine_args = AsyncEngineArgs(model=request_model)
-
-        # Create new engine client without context manager
-        if (MQAphroditeEngineClient.is_unsupported_config(engine_args)
-                or args.disable_frontend_multiprocessing):
-            new_engine_client = AsyncAphrodite.from_engine_args(engine_args)
-            await new_engine_client.setup()
-        else:
-            if "PROMETHEUS_MULTIPROC_DIR" not in os.environ:
-                global prometheus_multiproc_dir
-                prometheus_multiproc_dir = tempfile.TemporaryDirectory()
-                os.environ[
-                    "PROMETHEUS_MULTIPROC_DIR"] = prometheus_multiproc_dir.name
-
-            rpc_path = get_open_zmq_ipc_path()
-            logger.info(
-                f"Multiprocessing frontend to use {rpc_path} for RPC Path.")
-
-            rpc_client = AsyncEngineRPCClient(rpc_path)
-
-            context = multiprocessing.get_context("spawn")
-            rpc_server_process = context.Process(
-                target=run_rpc_server,
-                args=(engine_args, rpc_path))
-            rpc_server_process.start()
-            logger.info(
-                f"Started engine process with PID {rpc_server_process.pid}")
-
-            try:
-                while True:
-                    try:
-                        await rpc_client.setup()
-                        break
-                    except TimeoutError as e:
-                        if not rpc_server_process.is_alive():
-                            raise RuntimeError(
-                                "RPC Server died before responding to "
-                                "readiness probe") from e
-                
-                new_engine_client = rpc_client
-                model_config = await new_engine_client.get_model_config()
-                new_args = copy.deepcopy(args)
-                new_args.model = request_model
-                
-                init_app_state(
-                    new_engine_client, model_config,
-                    raw_request.app.state, new_args)
-                
-                served_model_names = [request_model]
-                model_is_loaded = True
-                return None
-
-            except Exception as e:
-                # Clean up RPC resources on error
-                rpc_server_process.terminate()
-                rpc_client.close()
-                rpc_server_process.join()
-                raise e
-
-    except Exception as e:
-        error_msg = f"Error while switching models: {str(e)}"
-        logger.error(error_msg)
-        return JSONResponse(
-            content={
-                "error": {
-                    "message": error_msg,
-                    "type": "invalid_request_error",
-                    "code": "model_load_error"
-                }
-            },
-            status_code=500
-        )  # type: ignore
-
 def mount_metrics(app: FastAPI):
     # Lazy import for prometheus multiprocessing.
     # We need to set PROMETHEUS_MULTIPROC_DIR environment variable
@@ -434,148 +267,53 @@ def engine_client(request: Request) -> EngineClient:
 
 @router.delete("/v1/model/unload")
 async def unload_model(raw_request: Request):
-    """Unload the current model and shut down the server."""
-    logger.info("Received request to unload model.")
-
-    try:
-        current_client = engine_client(raw_request)
-        
+    """Unload the model and shut down the engine process."""
+    client = raw_request.app.state.engine_client
+    
+    if isinstance(client, MQAphroditeEngineClient):
         try:
-            await current_client.shutdown_background_loop()
-        finally:
+            shutdown_req = RPCShutdownRequest()
+            await client.input_socket.send_multipart(
+                (pickle.dumps(shutdown_req),), copy=False
+            )
+
+            response = await client.output_socket.recv_multipart()
+            if pickle.loads(response[0]) != APHRODITE_RPC_SUCCESS_STR:
+                raise RuntimeError("Engine shutdown failed")
+
+            client.output_loop.cancel()
+            if client.health_loop is not None:
+                client.health_loop.cancel()
+
+            client.close()
+
+            raw_request.app.state.engine_client = None
+            raw_request.app.state.openai_serving_chat = None
+            raw_request.app.state.openai_serving_completion = None 
+            raw_request.app.state.openai_serving_embedding = None
+            raw_request.app.state.openai_serving_tokenization = None
+
             global model_is_loaded
             model_is_loaded = False
-            
-            # Clean up the client reference from app state
-            if hasattr(raw_request.app.state, 'engine_client'):
-                del raw_request.app.state.engine_client
 
+            return JSONResponse(content={"status": "success"})
+
+        except Exception as e:
+            return JSONResponse(
+                content={
+                    "status": "error",
+                    "message": f"Failed to shutdown engine: {str(e)}"
+                },
+                status_code=500
+            )
+    else:
         return JSONResponse(
             content={
-                "status": "success",
-                "message": "Model unloaded successfully"
-            }
-        )
-
-    except Exception as e:
-        error_msg = f"Error while unloading model: {str(e)}"
-        logger.error(error_msg)
-        return JSONResponse(
-            content={"status": "error", "message": error_msg},
-            status_code=500
-        )
-
-
-@router.post("/v1/model/load")
-async def load_model(config_file: UploadFile, raw_request: Request):
-    """Load a model using a YAML configuration file."""
-    global model_is_loaded, engine_client, engine_args
-
-    if model_is_loaded:
-        return JSONResponse(
-            content={
-                "error": {
-                    "message": "A model is already loaded. "
-                    "Please unload it first.",
-                    "type": "invalid_request_error",
-                    "code": "model_already_loaded"
-                }
+                "status": "error",
+                "message": "Model unloading only supported with multiprocessing"
+                " backend"
             },
             status_code=400
-        )
-
-    try:
-        config_text = await config_file.read()
-        config: Dict[Any, Any] = yaml.safe_load(config_text)
-
-        args = []
-        for key, value in config.items():
-            key = key.replace('_', '-')
-
-            if isinstance(value, bool):
-                if value:
-                    args.append(f"--{key}")
-            elif isinstance(value, (list, tuple)):
-                if key in ['lora-modules', 'prompt-adapters']:
-                    for item in value:
-                        args.append(f"--{key}")
-                        args.append(f"{item['name']}={item['path']}")
-                else:
-                    for item in value:
-                        args.append(f"--{key}")
-                        args.append(str(item))
-            else:
-                args.append(f"--{key}")
-                args.append(str(value))
-
-        parser = FlexibleArgumentParser()
-        parser = make_arg_parser(parser)
-        parsed_args = parser.parse_args(args)
-        engine_args = AsyncEngineArgs.from_cli_args(parsed_args)
-
-        # Create new engine client without context manager
-        if (model_is_embedding(engine_args.model,
-                               engine_args.trust_remote_code, 
-                               engine_args.quantization)
-                or parsed_args.disable_frontend_multiprocessing):
-            new_engine_client = AsyncAphrodite.from_engine_args(engine_args)
-            await new_engine_client.setup()
-        else:
-            if "PROMETHEUS_MULTIPROC_DIR" not in os.environ:
-                global prometheus_multiproc_dir
-                prometheus_multiproc_dir = tempfile.TemporaryDirectory()
-                os.environ[
-                    "PROMETHEUS_MULTIPROC_DIR"] = prometheus_multiproc_dir.name
-
-            rpc_path = get_open_zmq_ipc_path()
-            logger.info(
-                f"Multiprocessing frontend to use {rpc_path} for RPC Path.")
-
-            rpc_client = AsyncEngineRPCClient(rpc_path)
-            new_engine_client = rpc_client
-
-            context = multiprocessing.get_context("spawn")
-            rpc_server_process = context.Process(
-                target=run_rpc_server,
-                args=(engine_args, rpc_path))
-            rpc_server_process.start()
-            logger.info(
-                f"Started engine process with PID {rpc_server_process.pid}")
-
-            while True:
-                try:
-                    await new_engine_client.setup()
-                    break
-                except TimeoutError as e:
-                    if not rpc_server_process.is_alive():
-                        raise RuntimeError(
-                            "RPC Server died before responding to readiness "
-                            "probe") from e
-
-        model_config = await engine_client(raw_request).get_model_config()
-        init_app_state(engine_client(raw_request), model_config,
-                       raw_request.app.state, parsed_args)
-        
-        model_is_loaded = True
-        return JSONResponse(
-            content={
-                "status": "success",
-                "message": "Model loaded successfully"
-            }
-        )
-
-    except Exception as e:
-        error_msg = f"Error while loading model: {str(e)}"
-        logger.error(error_msg)
-        return JSONResponse(
-            content={
-                "error": {
-                    "message": error_msg,
-                    "type": "invalid_request_error",
-                    "code": "model_load_error"
-                }
-            },
-            status_code=500
         )
 
 @router.get("/health")
@@ -669,10 +407,14 @@ async def serviceinfo():
 @router.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,
                                  raw_request: Request):
-    error_check_ret = await _maybe_switch_model(
-        request.model, raw_request.app.state, raw_request)
-    if error_check_ret is not None:
-        return error_check_ret
+    if not model_is_loaded:
+        return JSONResponse(
+            content={
+                "status": "error",
+                "message": "No model loaded."
+            },
+            status_code=500
+        )
     generator = await chat(raw_request).create_chat_completion(
         request, raw_request)
     if isinstance(generator, ErrorResponse):
@@ -688,10 +430,14 @@ async def create_chat_completion(request: ChatCompletionRequest,
 
 @router.post("/v1/completions")
 async def create_completion(request: CompletionRequest, raw_request: Request):
-    error_check_ret = await _maybe_switch_model(
-        request.model, raw_request.app.state, raw_request)
-    if error_check_ret is not None:
-        return error_check_ret
+    if not model_is_loaded:
+        return JSONResponse(
+            content={
+                "status": "error",
+                "message": "No model loaded."
+            },
+            status_code=500
+        )
     generator = await completion(raw_request).create_completion(
         request, raw_request)
     if isinstance(generator, ErrorResponse):
@@ -734,7 +480,7 @@ async def load_lora(lora: LoRAModulePath, raw_request: Request):
             status_code=500
         )
     completion(raw_request).add_lora(lora)
-    if engine_args.enable_lora is False:
+    if args.enable_lora is False:
         logger.error("LoRA is not enabled in the engine. "
                      "Please start the server with the "
                      "--enable-lora flag!")
@@ -767,7 +513,7 @@ async def load_soft_prompt(soft_prompt: PromptAdapterPath,
             status_code=500
         )
     completion(raw_request).add_prompt_adapter(soft_prompt)
-    if engine_args.enable_prompt_adapter is False:
+    if args.enable_prompt_adapter is False:
         logger.error("Prompt Adapter is not enabled in the engine. "
                      "Please start the server with the "
                      "--enable-prompt-adapter flag!")
@@ -988,7 +734,7 @@ async def get_max_length() -> JSONResponse:
 @kai_api.get("/config/max_context_length")
 @extra_api.get("/true_max_context_length")
 async def get_max_context_length() -> JSONResponse:
-    max_context_length = engine_args.max_model_len
+    max_context_length = args.max_model_len
     return JSONResponse({"value": max_context_length})
 
 
