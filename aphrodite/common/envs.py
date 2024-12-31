@@ -54,7 +54,7 @@ if TYPE_CHECKING:
     APHRODITE_DYNAMIC_ROPE_SCALING: bool = False
     APHRODITE_TEST_FORCE_FP8_MARLIN: bool = False
     APHRODITE_PLUGINS: Optional[List[str]] = None
-    APHRODITE_RPC_GET_DATA_TIMEOUT_MS: int = 5000
+    APHRODITE_RPC_TIMEOUT: int = 5000
     APHRODITE_FORCE_SINGLE_USER_PREFIX_CACHE: bool = False
     APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE: int = 0
     APHRODITE_TEST_DYNAMO_FULLGRAPH_CAPTURE: int = 0
@@ -383,8 +383,8 @@ environment_variables: Dict[str, Callable[[], Any]] = {
 
     # Time in ms for the zmq client to wait for a response from the backend
     # server for simple data operations
-    "APHRODITE_RPC_GET_DATA_TIMEOUT_MS":
-    lambda: int(os.getenv("APHRODITE_RPC_GET_DATA_TIMEOUT_MS", "5000")),
+    "APHRODITE_RPC_TIMEOUT":
+    lambda: int(os.getenv("APHRODITE_RPC_TIMEOUT", "5000")),
 
     # a list of plugin names to load, separated by commas.
     # if this is not set, it means all plugins will be loaded

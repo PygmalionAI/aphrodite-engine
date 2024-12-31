@@ -14,7 +14,7 @@ from transformers import (AutoModelForCausalLM, AutoTokenizer,
 from aphrodite.common.utils import (FlexibleArgumentParser,
                                     merge_async_iterators)
 from aphrodite.endpoints.openai.api_server import (
-    build_async_engine_client_from_engine_args)
+    build_engine_client_from_engine_args)
 from aphrodite.engine.args_tools import (DEVICE_OPTIONS, AsyncEngineArgs,
                                          EngineArgs)
 from aphrodite.quantization import QUANTIZATION_METHODS
@@ -192,12 +192,10 @@ async def run_aphrodite_async(
         num_scheduler_steps=num_scheduler_steps,
         use_v2_block_manager=use_v2_block_manager,
         disable_async_output_proc=disable_async_output_proc,
-        worker_use_ray=False,
-        engine_use_ray=False,
         disable_log_requests=True,
     )
 
-    async with build_async_engine_client_from_engine_args(
+    async with build_engine_client_from_engine_args(
             engine_args, disable_frontend_multiprocessing) as llm:
 
         # Add the requests to the engine.

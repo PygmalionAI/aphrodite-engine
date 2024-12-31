@@ -14,8 +14,8 @@ from aphrodite.prompt_adapter.request import PromptAdapterRequest
 
 
 @runtime_checkable
-class AsyncEngineClient(Protocol):
-    """Protocol class for Clients to AsyncAphrodite"""
+class EngineClient(Protocol):
+    """Protocol class for Clients to Engine"""
 
     @property
     def is_running(self) -> bool:
@@ -30,8 +30,7 @@ class AsyncEngineClient(Protocol):
         ...
 
     @property
-    def limit_concurrency(self) -> Optional[int]:
-        """Maximum number of concurrently running requests."""
+    def dead_error(self) -> BaseException:
         ...
 
     def generate(
