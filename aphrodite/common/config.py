@@ -293,7 +293,11 @@ class ModelConfig:
 
     def _verify_quantization(self) -> None:
         supported_quantization = [*QUANTIZATION_METHODS]
-        rocm_supported_quantization = ["awq", "gptq", "squeezellm", "fp8"]
+        rocm_supported_quantization = [
+            "awq", "gptq", "squeezellm", "fp8",
+            "compressed_tensors", "compressed-tensors",
+            "fbgemm_fp8"
+        ]
         tpu_supported_quantization = ["tpu_int8"]
         neuron_supported_quantization = ["neuron_quant"]
         if self.quantization is not None:

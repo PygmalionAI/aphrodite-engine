@@ -4,6 +4,7 @@ import torch
 from torch.nn import Module
 from torch.nn.parameter import Parameter
 
+from aphrodite.common.utils import is_hip
 from aphrodite.modeling.layers.linear import (LinearBase, LinearMethodBase,
                                               UnquantizedLinearMethod)
 from aphrodite.modeling.parameter import (ChannelQuantScaleParameter,
@@ -15,7 +16,8 @@ from aphrodite.quantization.fp8 import cutlass_fp8_supported
 from aphrodite.quantization.utils.marlin_utils_fp8 import (
     apply_fp8_marlin_linear, prepare_fp8_layer_for_marlin)
 from aphrodite.quantization.utils.quant_utils import is_layer_skipped
-from aphrodite.quantization.utils.w8a8_utils import apply_fp8_linear
+from aphrodite.quantization.utils.w8a8_utils import (
+    apply_fp8_linear, normalize_e4m3fn_to_e4m3fnuz)
 
 
 class FBGEMMFp8Config(QuantizationConfig):
@@ -121,6 +123,16 @@ class FBGEMMFp8LinearMethod(LinearMethodBase):
                                        requires_grad=False)
         layer.weight = Parameter(layer.weight.data, requires_grad=False)
         weight = layer.weight
+
+        if is_hip():
+            weight, weight_scale, input_scale = \
+                normalize_e4m3fn_to_e4m3fnuz(
+                    weight=weight,
+                    weight_scale=layer.weight_scale,
+                    input_scale=None)
+            if input_scale is not None:
+                layer.input_scale = Parameter(input_scale, requires_grad=False)
+            layer.weight_scale = Parameter(weight_scale, requires_grad=False)
         layer.weight = Parameter(weight.t(), requires_grad=False)
 
         if self.quant_config.use_marlin:
