@@ -16,7 +16,8 @@ from aphrodite.endpoints.openai.protocol import (
     CompletionLogProbs, CompletionRequest, CompletionResponse,
     CompletionResponseChoice, CompletionResponseStreamChoice,
     CompletionStreamResponse, ErrorResponse, UsageInfo)
-from aphrodite.endpoints.openai.serving_engine import (LoRAModulePath,
+from aphrodite.endpoints.openai.serving_engine import (BaseModelPath,
+                                                       LoRAModulePath,
                                                        OpenAIServing,
                                                        PromptAdapterPath)
 from aphrodite.engine.protocol import EngineClient
@@ -34,7 +35,7 @@ class OpenAIServingCompletion(OpenAIServing):
         self,
         engine_client: EngineClient,
         model_config: ModelConfig,
-        served_model_names: List[str],
+        base_model_paths: List[BaseModelPath],
         *,
         lora_modules: Optional[List[LoRAModulePath]],
         prompt_adapters: Optional[List[PromptAdapterPath]],
@@ -43,7 +44,7 @@ class OpenAIServingCompletion(OpenAIServing):
     ):
         super().__init__(engine_client=engine_client,
                          model_config=model_config,
-                         served_model_names=served_model_names,
+                         base_model_paths=base_model_paths,
                          lora_modules=lora_modules,
                          prompt_adapters=prompt_adapters,
                          request_logger=request_logger,
@@ -78,7 +79,7 @@ class OpenAIServingCompletion(OpenAIServing):
             return self.create_error_response(
                 "suffix is not currently supported")
 
-        model_name = self.served_model_names[0]
+        model_name = self.base_model_paths[0].name
         request_id = f"cmpl-{random_uuid()}"
         created_time = int(time.time())
 
