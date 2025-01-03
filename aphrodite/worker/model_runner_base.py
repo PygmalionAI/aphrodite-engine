@@ -113,8 +113,8 @@ def dump_input_when_exception(exclude_args: Optional[List[int]] = None,
             except Exception as err:
                 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
                 filename = f"/tmp/err_{func.__name__}_input_{timestamp}.pkl"
-                logger.info("Writing input of failed execution to %s...",
-                            filename)
+                logger.info("Writing input of failed execution to "
+                            f"{filename}...")
                 with open(filename, "wb") as filep:
                     dumped_inputs = {
                         k: v
@@ -135,8 +135,8 @@ def dump_input_when_exception(exclude_args: Optional[List[int]] = None,
 
                     pickle.dump(dumped_inputs, filep)
                     logger.info(
-                        "Completed writing input of failed execution to %s.",
-                        filename)
+                        f"Completed writing input of failed execution to "
+                        f"{filename}.")
                 raise type(err)(
                     f"Error in model execution (input dumped to {filename}): "
                     f"{str(err)}") from err

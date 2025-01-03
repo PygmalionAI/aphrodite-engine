@@ -55,7 +55,7 @@ class VideoPlugin(ImagePlugin):
             try:
                 batch_data = video_processor(data, return_tensors="pt").data
             except Exception:
-                logger.error("Failed to process image (%s)", data)
+                logger.error(f"Failed to process image ({data})")
                 raise
             return MultiModalInputs(batch_data)
         elif is_list_of(data, np.ndarray):

@@ -368,8 +368,8 @@ class LoRAModelManager(AdapterModelManager):
         index, _ = first_free_slot
         self._active_adapters[lora_id] = None
         lora_model = self._registered_adapters[lora_id]
-        logger.debug("Activating LoRA. int id: %d, slot index: %d",
-                     lora_model.id, index)
+        logger.debug(f"Activating LoRA. int id: {lora_model.id}, "
+                     f"slot index: {index}")
         self.lora_index_to_id[index] = lora_model.id
         for module_name, module in self.modules.items():
             module_lora = lora_model.get_lora(module_name)
