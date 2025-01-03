@@ -125,7 +125,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 #################### OPENAI API SERVER ####################
 # openai api server alternative
-FROM aphrodite-base AS aphrodite-openai
+FROM aphrodite-base AS aphrodite-aarch64
 
 # install additional dependencies for openai api server
 RUN --mount=type=cache,target=/root/.cache/pip \
