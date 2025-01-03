@@ -16,7 +16,8 @@ from aphrodite.endpoints.openai.protocol import (EmbeddingRequest,
                                                  EmbeddingResponse,
                                                  EmbeddingResponseData,
                                                  ErrorResponse, UsageInfo)
-from aphrodite.endpoints.openai.serving_engine import OpenAIServing
+from aphrodite.endpoints.openai.serving_engine import (BaseModelPath,
+                                                       OpenAIServing)
 from aphrodite.engine.protocol import EngineClient
 
 TypeTokenIDs = List[int]
@@ -61,13 +62,13 @@ class OpenAIServingEmbedding(OpenAIServing):
         self,
         engine_client: EngineClient,
         model_config: ModelConfig,
-        served_model_names: List[str],
+        base_model_paths: List[BaseModelPath],
         *,
         request_logger: Optional[RequestLogger],
     ):
         super().__init__(engine_client=engine_client,
                          model_config=model_config,
-                         served_model_names=served_model_names,
+                         base_model_paths=base_model_paths,
                          lora_modules=None,
                          prompt_adapters=None,
                          request_logger=request_logger)

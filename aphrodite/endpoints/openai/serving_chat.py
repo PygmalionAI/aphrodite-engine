@@ -26,7 +26,8 @@ from aphrodite.endpoints.openai.protocol import (
     ChatCompletionResponseChoice, ChatCompletionResponseStreamChoice,
     ChatCompletionStreamResponse, ChatMessage, DeltaFunctionCall, DeltaMessage,
     DeltaToolCall, ErrorResponse, FunctionCall, ToolCall, UsageInfo)
-from aphrodite.endpoints.openai.serving_engine import (LoRAModulePath,
+from aphrodite.endpoints.openai.serving_engine import (BaseModelPath,
+                                                       LoRAModulePath,
                                                        OpenAIServing,
                                                        PromptAdapterPath,
                                                        TextTokensPrompt)
@@ -44,7 +45,7 @@ class OpenAIServingChat(OpenAIServing):
     def __init__(self,
                  engine_client: EngineClient,
                  model_config: ModelConfig,
-                 served_model_names: List[str],
+                 base_model_paths: List[BaseModelPath],
                  response_role: str,
                  *,
                  lora_modules: Optional[List[LoRAModulePath]],
@@ -56,7 +57,7 @@ class OpenAIServingChat(OpenAIServing):
                  tool_parser: Optional[str] = None):
         super().__init__(engine_client=engine_client,
                          model_config=model_config,
-                         served_model_names=served_model_names,
+                         base_model_paths=base_model_paths,
                          lora_modules=lora_modules,
                          prompt_adapters=prompt_adapters,
                          request_logger=request_logger,
@@ -249,7 +250,7 @@ class OpenAIServingChat(OpenAIServing):
         conversation: List[ConversationMessage],
         tokenizer: AnyTokenizer,
     ) -> AsyncGenerator[str, None]:
-        model_name = self.served_model_names[0]
+        model_name = self.base_model_paths[0].name
         created_time = int(time.time())
         chunk_object_type: Final = "chat.completion.chunk"
         first_iteration = True
@@ -583,7 +584,7 @@ class OpenAIServingChat(OpenAIServing):
         tokenizer: AnyTokenizer,
     ) -> Union[ErrorResponse, ChatCompletionResponse]:
 
-        model_name = self.served_model_names[0]
+        model_name = self.base_model_paths[0].name
         created_time = int(time.time())
         final_res: Optional[RequestOutput] = None
 

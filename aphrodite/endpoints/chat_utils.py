@@ -325,7 +325,7 @@ def load_chat_template(
         # ensure we decode so our escape are interpreted correctly
         resolved_chat_template = codecs.decode(chat_template, "unicode_escape")
 
-    logger.info("Using supplied chat template:\n%s", resolved_chat_template)
+    logger.info(f"Using supplied chat template:\n{resolved_chat_template}")
     return resolved_chat_template
 
 

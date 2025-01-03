@@ -703,9 +703,10 @@ def input_processor_for_qwen(ctx: InputContext,
 
     if num_matched_images != num_images:
         logger.warning(
-            "Number of matched image placeholders %s doesn't match the number "
-            "of expected images %s; check your placeholder formatting.",
-            num_matched_images, num_images)
+            f"Number of matched image placeholders {num_matched_images} "
+            f"doesn't match the number of expected images {num_images}; "
+            "check your placeholder formatting."
+        )
 
     new_prompt_token_ids = tokenizer.encode(new_prompt)
 

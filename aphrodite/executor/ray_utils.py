@@ -185,8 +185,8 @@ def _wait_until_pg_removed(current_placement_group: "PlacementGroup"):
         # Exponential backoff for warning print.
         wait_interval *= 2
         logger.info(
-            "Waiting for removing a placement group of specs for "
-            "%d seconds.", int(time.time() - s))
+            f"Waiting for removing a placement group of specs for "
+            f"{int(time.time() - s)} seconds.")
         time.sleep(wait_interval)
 
 

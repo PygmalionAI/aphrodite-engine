@@ -48,7 +48,8 @@ from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
 from aphrodite.endpoints.openai.serving_completions import (
     OpenAIServingCompletion)
 from aphrodite.endpoints.openai.serving_embedding import OpenAIServingEmbedding
-from aphrodite.endpoints.openai.serving_engine import (LoRAModulePath,
+from aphrodite.endpoints.openai.serving_engine import (BaseModelPath,
+                                                       LoRAModulePath,
                                                        PromptAdapterPath)
 from aphrodite.endpoints.openai.serving_tokenization import (
     OpenAIServingTokenization)
@@ -1116,6 +1117,11 @@ def init_app_state(
     else:
         request_logger = RequestLogger(max_log_len=args.max_log_len)
 
+    base_model_paths = [
+        BaseModelPath(name=name, model_path=args.model)
+        for name in served_model_names
+    ]
+
     state.engine_client = engine_client
     state.log_stats = not args.disable_log_stats
     state.current_model = args.model
@@ -1123,7 +1129,7 @@ def init_app_state(
     state.openai_serving_chat = OpenAIServingChat(
         engine_client,
         model_config,
-        served_model_names,
+        base_model_paths,
         args.response_role,
         lora_modules=args.lora_modules,
         prompt_adapters=args.prompt_adapters,
@@ -1136,7 +1142,7 @@ def init_app_state(
     state.openai_serving_completion = OpenAIServingCompletion(
         engine_client,
         model_config,
-        served_model_names,
+        base_model_paths,
         lora_modules=args.lora_modules,
         prompt_adapters=args.prompt_adapters,
         request_logger=request_logger,
@@ -1145,13 +1151,13 @@ def init_app_state(
     state.openai_serving_embedding = OpenAIServingEmbedding(
         engine_client,
         model_config,
-        served_model_names,
+        base_model_paths,
         request_logger=request_logger,
     )
     state.openai_serving_tokenization = OpenAIServingTokenization(
         engine_client,
         model_config,
-        served_model_names,
+        base_model_paths,
         lora_modules=args.lora_modules,
         request_logger=request_logger,
         chat_template=args.chat_template,
