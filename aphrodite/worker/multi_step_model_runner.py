@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from aphrodite.attention.backends.abstract import AttentionBackend
 
 
-MULTI_STEP_ATTENTION_BACKENDS = ["flash-attn", "flashinfer"]
+MULTI_STEP_ATTENTION_BACKENDS = ["flash-attn", "flashinfer", "rocm-flash-attn"]
 
 
 def seq_output_builder():
