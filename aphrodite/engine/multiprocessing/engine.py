@@ -9,7 +9,7 @@ import cloudpickle
 import zmq
 from loguru import logger
 
-from aphrodite import AphroditeEngine, AsyncEngineArgs
+from aphrodite import AphroditeEngine, AsyncEngineArgs, SamplingParams
 from aphrodite.common.config import (DecodingConfig, LoRAConfig, ModelConfig,
                                      ParallelConfig, SchedulerConfig)
 from aphrodite.common.outputs import RequestOutput
@@ -19,8 +19,8 @@ from aphrodite.engine.multiprocessing import (APHRODITE_RPC_SUCCESS_STR,
                                               IPC_OUTPUT_EXT,
                                               REQUEST_OUTPUTS_T,
                                               RPCAbortRequest, RPCError,
-                                              RPCGenerateRequest,
                                               RPCHealthRequest,
+                                              RPCProcessRequest,
                                               RPCShutdownRequest,
                                               RPCStartupRequest,
                                               RPCStartupResponse)
@@ -210,12 +210,13 @@ class MQAphroditeEngine:
                 frames = self.input_socket.recv_multipart(copy=False)
                 request = pickle.loads(frames[0].buffer)
 
-                if isinstance(request, RPCGenerateRequest):
+                if isinstance(request, RPCProcessRequest):
                     if len(frames) > 1:
                         # Use cloudpickle for logits processors
+                        assert isinstance(request.params, SamplingParams)
                         lprocs = cloudpickle.loads(frames[1].buffer)
-                        request.sampling_params.logits_processors = lprocs
-                    self._handle_generate_request(request)
+                        request.params.logits_processors = lprocs
+                    self._handle_process_request(request)
                 elif isinstance(request, RPCAbortRequest):
                     self._handle_abort_request(request)
                 elif isinstance(request, RPCHealthRequest):
@@ -232,8 +233,8 @@ class MQAphroditeEngine:
             self._send_unhealthy(e)
             raise e
 
-    def _handle_generate_request(self, request: RPCGenerateRequest):
-        """Handle RPCGenerateRequest by adding it to the AphroditeEngine."""
+    def _handle_process_request(self, request: RPCProcessRequest):
+        """Handle RPCProcessRequest by  adding it to the AphroditeEngine."""
         request_id = request.request_id
 
         if self._errored_with is not None:
@@ -246,7 +247,7 @@ class MQAphroditeEngine:
             self.engine.add_request(
                 request_id=request_id,
                 inputs=request.inputs,
-                params=request.sampling_params,
+                params=request.params,
                 lora_request=request.lora_request,
                 prompt_adapter_request=request.prompt_adapter_request)
 

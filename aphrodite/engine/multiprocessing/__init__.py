@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import List, Mapping, Optional, Union
 
+from aphrodite import PoolingParams
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.inputs import PromptInputs
@@ -21,9 +22,9 @@ class MQEngineDeadError(RuntimeError):
 
 
 @dataclass
-class RPCGenerateRequest:
+class RPCProcessRequest:
     inputs: PromptInputs
-    sampling_params: SamplingParams
+    params: Union[SamplingParams, PoolingParams]
     request_id: str
     lora_request: Optional[LoRARequest] = None
     trace_headers: Optional[Mapping[str, str]] = None
@@ -61,7 +62,7 @@ class RPCShutdownRequest:
 
 
 RPC_REQUEST_T = Union[
-    RPCGenerateRequest,
+    RPCProcessRequest,
     RPCAbortRequest,
     RPCHealthRequest,
     RPCStartupRequest,

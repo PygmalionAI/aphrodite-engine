@@ -2,8 +2,7 @@ import asyncio
 import copy
 import pickle
 from contextlib import contextmanager, suppress
-from typing import (Any, AsyncGenerator, Dict, Iterator, Mapping, Optional,
-                    Union)
+from typing import Any, AsyncGenerator, Dict, Iterator, Optional, Union
 
 import cloudpickle
 import zmq
@@ -12,6 +11,7 @@ from loguru import logger
 from zmq import Frame  # type: ignore[attr-defined]
 from zmq.asyncio import Socket
 
+from aphrodite import PoolingParams
 from aphrodite.common.config import DecodingConfig, EngineConfig, ModelConfig
 from aphrodite.common.envs import APHRODITE_RPC_TIMEOUT
 from aphrodite.common.outputs import EmbeddingRequestOutput, RequestOutput
@@ -22,8 +22,8 @@ from aphrodite.engine.multiprocessing import (APHRODITE_RPC_SUCCESS_STR,
                                               IPC_HEALTH_EXT, IPC_INPUT_EXT,
                                               IPC_OUTPUT_EXT, RPC_REQUEST_T,
                                               RPCAbortRequest, RPCError,
-                                              RPCGenerateRequest,
                                               RPCHealthRequest,
+                                              RPCProcessRequest,
                                               RPCStartupRequest,
                                               RPCStartupResponse)
 from aphrodite.inputs import PromptInputs
@@ -109,20 +109,8 @@ class MQAphroditeEngineClient:
 
     @staticmethod
     def is_unsupported_config(engine_args: AsyncEngineArgs):
-        if engine_args.pipeline_parallel_size > 1:
-            return True
-
-        is_embedding = ModelConfig(
-            model=engine_args.model,
-            revision=engine_args.revision,
-            tokenizer=engine_args.model,
-            tokenizer_mode="auto",
-            trust_remote_code=engine_args.trust_remote_code,
-            quantization=engine_args.quantization,
-            seed=0,
-            dtype="auto").embedding_mode
-
-        return is_embedding
+        # Pipeline parallel not yet supported
+        return engine_args.pipeline_parallel_size > 1
 
     @contextmanager
     def get_data_socket(self) -> Iterator[Socket]:
@@ -383,20 +371,67 @@ class MQAphroditeEngineClient:
 
     @property
     def dead_error(self) -> BaseException:
-        if self._errored_with is not None:
-            return ENGINE_DEAD_ERROR(self._errored_with)
-        else:
-            return ENGINE_DEAD_ERROR()
+        return ENGINE_DEAD_ERROR(self._errored_with)
 
-    async def generate(
+    def generate(
         self,
         inputs: PromptInputs,
         sampling_params: SamplingParams,
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
-        trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None
     ) -> AsyncGenerator[RequestOutput, None]:
+        """Generate outputs for a request.
+        Generate outputs for a request. This method is a coroutine. It adds the
+        request into the waiting queue of the AphroditeEngine and streams the
+        outputs from the AphroditeEngine to the caller.
+        Args:
+            inputs: The inputs to the LLM. See
+                :class:`~aphrodite.inputs.PromptInputs`
+                for more details about the format of each input.
+            sampling_params: The sampling parameters of the request.
+            request_id: The unique id of the request.
+            lora_request: LoRA request to use for generation, if any.
+            prompt_adapter_request: Prompt Adapter request to use
+                                            for generation, if any.
+        """
+        return self._process_request(inputs, sampling_params, request_id,
+                                     lora_request, prompt_adapter_request)
+
+    def encode(
+        self,
+        inputs: PromptInputs,
+        pooling_params: PoolingParams,
+        request_id: str,
+        lora_request: Optional[LoRARequest] = None,
+    ) -> AsyncGenerator[EmbeddingRequestOutput, None]:
+        """Generate outputs for a request from an embedding model.
+        Generate outputs for a request. This method is a coroutine. It adds the
+        request into the waiting queue of the AphroditeEngine and streams the
+        outputs from the AphroditeEngine to the caller.
+        Args:
+            inputs: The inputs to the LLM. See
+                :class:`~aphrodite.inputs.PromptInputs`
+                for more details about the format of each input.
+            pooling_params: The pooling parameters of the request.
+            request_id: The unique id of the request.
+            lora_request: LoRA request to use for generation, if any.
+        Yields:
+            The output `EmbeddingRequestOutput` objects from the AphroditeEngine
+            for the request.
+        """
+        return self._process_request(inputs, pooling_params, request_id,
+                                     lora_request)
+
+    async def _process_request(
+        self,
+        inputs: PromptInputs,
+        params: Union[SamplingParams, PoolingParams],
+        request_id: str,
+        lora_request: Optional[LoRARequest] = None,
+        prompt_adapter_request: Optional[PromptAdapterRequest] = None
+    ) -> Union[AsyncGenerator[RequestOutput, None], AsyncGenerator[
+            EmbeddingRequestOutput, None]]:
         """Send an RPCGenerateRequest to the RPCServer and stream responses."""
 
         # If already dead, error out.
@@ -411,22 +446,21 @@ class MQAphroditeEngineClient:
         try:
             # 2) Detach logits processors so that they can be pickled
             # separately (may require cloudpickle which is slower)
-            if sampling_params.logits_processors:
+            if isinstance(params, SamplingParams) and params.logits_processors:
                 # Defensive shallow copy
-                sampling_params = copy.copy(sampling_params)
-                logits_processors = sampling_params.logits_processors
-                sampling_params.logits_processors = None
+                params = copy.copy(params)
+                logits_processors = params.logits_processors
+                params.logits_processors = None
                 lp_bytes = cloudpickle.dumps(logits_processors)
             else:
                 lp_bytes = None
 
             request_bytes = pickle.dumps(
-                RPCGenerateRequest(
+                RPCProcessRequest(
                     inputs=inputs,
-                    sampling_params=sampling_params,
+                    params=params,
                     request_id=request_id,
                     lora_request=lora_request,
-                    trace_headers=trace_headers,
                     prompt_adapter_request=prompt_adapter_request))
 
             # 3) Send the RPCGenerateRequest to the MQAphroditeEngine.
@@ -453,8 +487,3 @@ class MQAphroditeEngineClient:
                     await self.abort(request_id)
         finally:
             self.output_queues.pop(request_id)
-
-    async def encode(self, *args,
-                     **kwargs) -> AsyncGenerator[EmbeddingRequestOutput, None]:
-        raise NotImplementedError(
-            "Embeddings not supported with multiprocessing backend")
