@@ -98,6 +98,7 @@ _MULTIMODAL_MODELS = {
                                         "Qwen2VLForConditionalGeneration"),
     "PixtralForConditionalGeneration": ("pixtral",
                                         "PixtralForConditionalGeneration"),
+    "MolmoForCausalLM": ("molmo", "MolmoForCausalLM"),
 }
 
 _CONDITIONAL_GENERATION_MODELS = {
