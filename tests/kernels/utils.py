@@ -11,7 +11,6 @@ import torch
 
 from aphrodite.attention import (AttentionBackend, AttentionMetadata,
                                  AttentionType)
-from aphrodite.attention.backends.xformers import XFormersBackend
 from aphrodite.common.utils import (STR_BACKEND_ENV_VAR, STR_XFORMERS_ATTN_VAL,
                                     make_tensor_with_pad)
 
@@ -22,6 +21,7 @@ DEFAULT_OPCHECK_TEST_UTILS: Tuple[str, ...] = (
     "test_autograd_registration",
     "test_faketensor",
 )
+
 ALL_OPCHECK_TEST_UTILS: Tuple[str, ...] = (
     "test_schema",
     "test_autograd_registration",
@@ -211,8 +211,8 @@ def make_causal_mask(
 def override_backend_env_variable(mpatch: pytest.MonkeyPatch,
                                   backend_name: str) -> None:
     '''
-    Override the environment variable indicating the vLLM backend temporarily,
-    using pytest monkeypatch to ensure that the env vars get
+    Override the environment variable indicating the Aphrodite backend 
+    temporarily, using pytest monkeypatch to ensure that the env vars get
     reset once the test context exits.
 
     Arguments:
@@ -521,6 +521,9 @@ def make_backend(backend_name: str) -> AttentionBackend:
     * Backend instance
     '''
     if backend_name == STR_XFORMERS_ATTN_VAL:
+        # NOTE: xFormers backend cannot be imported for CPU and AMD GPUs.
+        from aphrodite.attention.backends.xformers import XFormersBackend
+
         return XFormersBackend()
     raise AssertionError(
         f"Unrecognized backend_name {backend_name} for unit test")

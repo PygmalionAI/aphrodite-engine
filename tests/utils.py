@@ -10,18 +10,20 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import openai
+import pytest
 import requests
 from openai.types.completion import Completion
 from transformers import AutoTokenizer
 from typing_extensions import ParamSpec
 
-from aphrodite.common.utils import (FlexibleArgumentParser, get_open_port,
+from aphrodite.common.utils import (FlexibleArgumentParser,
+                                    cuda_device_count_stateless, get_open_port,
                                     is_hip)
 from aphrodite.distributed import (ensure_model_parallel_initialized,
                                    init_distributed_environment)
 from aphrodite.endpoints.openai.args import make_arg_parser
 from aphrodite.engine.args_tools import AsyncEngineArgs
-from aphrodite.modeling.model_loader.loader import DefaultModelLoader
+from aphrodite.modeling.model_loader.loader import get_model_loader
 from aphrodite.platforms import current_platform
 from tests.models.utils import TextTextLogprobs
 
@@ -90,11 +92,11 @@ class RemoteOpenAIServer:
         is_local = os.path.isdir(model)
         if not is_local:
             engine_args = AsyncEngineArgs.from_cli_args(args)
-            engine_config = engine_args.create_engine_config()
-            dummy_loader = DefaultModelLoader(engine_config.load_config)
-            dummy_loader._prepare_weights(engine_config.model_config.model,
-                                          engine_config.model_config.revision,
-                                          fall_back_to_pt=True)
+            model_config = engine_args.create_model_config()
+            load_config = engine_args.create_load_config()
+
+            model_loader = get_model_loader(load_config)
+            model_loader.download_model(model_config)
 
         env = os.environ.copy()
         # the current process might initialize cuda,
@@ -103,7 +105,7 @@ class RemoteOpenAIServer:
         if env_dict is not None:
             env.update(env_dict)
         self.proc = subprocess.Popen(
-            ["aphrodite", "run", model, *aphrodite_serve_args],
+            ["aphrodite", "serve", model, *aphrodite_serve_args],
             env=env,
             stdout=sys.stdout,
             stderr=sys.stderr,
@@ -118,7 +120,7 @@ class RemoteOpenAIServer:
     def __exit__(self, exc_type, exc_value, traceback):
         self.proc.terminate()
         try:
-            self.proc.wait(3)
+            self.proc.wait(8)
         except subprocess.TimeoutExpired:
             # force kill if needed
             self.proc.kill()
@@ -179,7 +181,12 @@ def compare_two_settings(model: str,
         env2: The second set of environment variables to pass to the API server.
     """
 
-    tokenizer = AutoTokenizer.from_pretrained(model)
+    trust_remote_code = "--trust-remote-code"
+    if trust_remote_code in arg1 or trust_remote_code in arg2:
+        tokenizer = AutoTokenizer.from_pretrained(model,
+                                                  trust_remote_code=True)
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(model)
 
     prompt = "Hello, my name is"
     token_ids = tokenizer(prompt)["input_ids"]
@@ -356,6 +363,7 @@ def get_physical_device_indices(devices):
     visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
     if visible_devices is None:
         return devices
+
     visible_indices = [int(x) for x in visible_devices.split(",")]
     index_mapping = {i: physical for i, physical in enumerate(visible_indices)}
     return [index_mapping[i] for i in devices if i in index_mapping]
@@ -446,6 +454,22 @@ def fork_new_process_for_each_test(
     return wrapper
 
 
+def multi_gpu_test(*, num_gpus: int):
+    """
+    Decorate a test to be run only when multiple GPUs are available.
+    """
+    test_selector = getattr(pytest.mark, f"distributed_{num_gpus}_gpus")
+    test_skipif = pytest.mark.skipif(
+        cuda_device_count_stateless() < num_gpus,
+        reason=f"Need at least {num_gpus} GPUs to run the test.",
+    )
+
+    def wrapper(f: Callable[_P, None]) -> Callable[_P, None]:
+        return test_selector(test_skipif(fork_new_process_for_each_test(f)))
+
+    return wrapper
+
+
 async def completions_with_server_args(
     prompts: List[str],
     model_name: str,
@@ -469,7 +493,7 @@ async def completions_with_server_args(
     '''
 
     outputs = None
-    max_wait_seconds = 240 * 3  # 240 is the default
+    max_wait_seconds = 240 * 3  # 240 is default
     with RemoteOpenAIServer(model_name,
                             server_cli_args,
                             max_wait_seconds=max_wait_seconds) as server:
