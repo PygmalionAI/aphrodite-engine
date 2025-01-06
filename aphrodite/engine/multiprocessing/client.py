@@ -26,7 +26,7 @@ from aphrodite.engine.multiprocessing import (APHRODITE_RPC_SUCCESS_STR,
                                               RPCProcessRequest,
                                               RPCStartupRequest,
                                               RPCStartupResponse)
-from aphrodite.inputs import PromptInputs
+from aphrodite.inputs import PromptType
 from aphrodite.lora.request import LoRARequest
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
 from aphrodite.transformers_utils.tokenizer_group import (
@@ -375,7 +375,7 @@ class MQAphroditeEngineClient:
 
     def generate(
         self,
-        inputs: PromptInputs,
+        prompt: PromptType,
         sampling_params: SamplingParams,
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
@@ -386,8 +386,8 @@ class MQAphroditeEngineClient:
         request into the waiting queue of the AphroditeEngine and streams the
         outputs from the AphroditeEngine to the caller.
         Args:
-            inputs: The inputs to the LLM. See
-                :class:`~aphrodite.inputs.PromptInputs`
+            prompt: The prompt to the LLM. See
+                :class:`~aphrodite.inputs.PromptType`
                 for more details about the format of each input.
             sampling_params: The sampling parameters of the request.
             request_id: The unique id of the request.
@@ -395,12 +395,12 @@ class MQAphroditeEngineClient:
             prompt_adapter_request: Prompt Adapter request to use
                                             for generation, if any.
         """
-        return self._process_request(inputs, sampling_params, request_id,
+        return self._process_request(prompt, sampling_params, request_id,
                                      lora_request, prompt_adapter_request)
 
     def encode(
         self,
-        inputs: PromptInputs,
+        prompt: PromptType,
         pooling_params: PoolingParams,
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
@@ -410,8 +410,8 @@ class MQAphroditeEngineClient:
         request into the waiting queue of the AphroditeEngine and streams the
         outputs from the AphroditeEngine to the caller.
         Args:
-            inputs: The inputs to the LLM. See
-                :class:`~aphrodite.inputs.PromptInputs`
+            prompt: The prompt to the LLM. See
+                :class:`~aphrodite.inputs.PromptType`
                 for more details about the format of each input.
             pooling_params: The pooling parameters of the request.
             request_id: The unique id of the request.
@@ -420,12 +420,12 @@ class MQAphroditeEngineClient:
             The output `EmbeddingRequestOutput` objects from the AphroditeEngine
             for the request.
         """
-        return self._process_request(inputs, pooling_params, request_id,
+        return self._process_request(prompt, pooling_params, request_id,
                                      lora_request)
 
     async def _process_request(
         self,
-        inputs: PromptInputs,
+        prompt: PromptType,
         params: Union[SamplingParams, PoolingParams],
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
@@ -457,7 +457,7 @@ class MQAphroditeEngineClient:
 
             request_bytes = pickle.dumps(
                 RPCProcessRequest(
-                    inputs=inputs,
+                    prompt=prompt,
                     params=params,
                     request_id=request_id,
                     lora_request=lora_request,

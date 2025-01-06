@@ -246,7 +246,7 @@ class MQAphroditeEngine:
         try:
             self.engine.add_request(
                 request_id=request_id,
-                inputs=request.inputs,
+                prompt=request.prompt,
                 params=request.params,
                 lora_request=request.lora_request,
                 prompt_adapter_request=request.prompt_adapter_request)

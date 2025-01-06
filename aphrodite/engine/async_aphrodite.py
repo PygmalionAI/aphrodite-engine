@@ -24,7 +24,7 @@ from aphrodite.engine.async_timeout import asyncio_timeout
 from aphrodite.engine.metrics_types import StatLoggerBase
 from aphrodite.executor.executor_base import ExecutorAsyncBase
 from aphrodite.executor.ray_utils import initialize_ray_cluster
-from aphrodite.inputs import PromptInputs
+from aphrodite.inputs import PromptType
 from aphrodite.lora.request import LoRARequest
 from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.processing.scheduler import SchedulerOutputs
@@ -397,7 +397,7 @@ class _AsyncAphrodite(AphroditeEngine):
     async def add_request_async(
         self,
         request_id: str,
-        inputs: PromptInputs,
+        prompt: PromptType,
         params: Union[SamplingParams, PoolingParams],
         arrival_time: Optional[float] = None,
         lora_request: Optional[LoRARequest] = None,
@@ -411,7 +411,7 @@ class _AsyncAphrodite(AphroditeEngine):
             arrival_time = time.time()
 
         preprocessed_inputs = await self.input_preprocessor.preprocess_async(
-            inputs,
+            prompt,
             request_id=request_id,
             lora_request=lora_request,
             prompt_adapter_request=prompt_adapter_request,
@@ -766,7 +766,7 @@ class AsyncAphrodite:
     async def add_request(
         self,
         request_id: str,
-        inputs: PromptInputs,
+        prompt: PromptType,
         params: Union[SamplingParams, PoolingParams],
         arrival_time: Optional[float] = None,
         lora_request: Optional[LoRARequest] = None,
@@ -785,7 +785,7 @@ class AsyncAphrodite:
         stream = self._request_tracker.add_request(
             request_id,
             verbose=self.log_requests,
-            inputs=inputs,
+            prompt=prompt,
             params=params,
             arrival_time=arrival_time or time.time(),
             lora_request=lora_request,
@@ -795,7 +795,7 @@ class AsyncAphrodite:
 
     async def generate(
         self,
-        inputs: PromptInputs,
+        prompt: PromptType,
         sampling_params: SamplingParams,
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
@@ -808,9 +808,8 @@ class AsyncAphrodite:
         outputs from the AphroditeEngine to the caller.
 
         Args:
-            inputs: The inputs to the LLM. See
-                :class:`~aphrodite.inputs.PromptInputs`
-                for more details about the format of each input.
+            prompt: The prompt to the LLM. See
+                :class:`~aphrodite.inputs.PromptType`
             sampling_params: The sampling parameters of the request.
             request_id: The unique id of the request.
             lora_request: LoRA request to use for generation, if any.
@@ -867,7 +866,7 @@ class AsyncAphrodite:
         """
         async for output in await self.add_request(
                 request_id,
-                inputs,
+                prompt,
                 sampling_params,
                 lora_request=lora_request,
                 prompt_adapter_request=prompt_adapter_request,
@@ -876,7 +875,7 @@ class AsyncAphrodite:
 
     async def encode(
         self,
-        inputs: PromptInputs,
+        prompt: PromptType,
         pooling_params: PoolingParams,
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
@@ -888,8 +887,8 @@ class AsyncAphrodite:
         outputs from the AphroditeEngine to the caller.
 
         Args:
-            inputs: The inputs to the LLM. See
-                :class:`~aphrodite.inputs.PromptInputs`
+            prompt: The prompt to the LLM. See
+                :class:`~aphrodite.inputs.PromptType`
                 for more details about the format of each input.
             pooling_params: The pooling parameters of the request.
             request_id: The unique id of the request.
@@ -942,7 +941,7 @@ class AsyncAphrodite:
         """
         async for output in await self.add_request(
                 request_id,
-                inputs,
+                prompt,
                 pooling_params,
                 lora_request=lora_request,
         ):

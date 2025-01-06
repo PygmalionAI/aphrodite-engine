@@ -5,7 +5,7 @@ from typing import List, Mapping, Optional, Union
 from aphrodite import PoolingParams
 from aphrodite.common.outputs import RequestOutput
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.inputs import PromptInputs
+from aphrodite.inputs import PromptType
 from aphrodite.lora.request import LoRARequest
 from aphrodite.prompt_adapter.request import PromptAdapterRequest
 
@@ -23,7 +23,7 @@ class MQEngineDeadError(RuntimeError):
 
 @dataclass
 class RPCProcessRequest:
-    inputs: PromptInputs
+    prompt: PromptType
     params: Union[SamplingParams, PoolingParams]
     request_id: str
     lora_request: Optional[LoRARequest] = None

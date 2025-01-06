@@ -6,7 +6,7 @@ from aphrodite.common.config import DecodingConfig, ModelConfig
 from aphrodite.common.outputs import EmbeddingRequestOutput, RequestOutput
 from aphrodite.common.pooling_params import PoolingParams
 from aphrodite.common.sampling_params import SamplingParams
-from aphrodite.inputs.data import PromptInputs
+from aphrodite.inputs.data import PromptType
 from aphrodite.lora.request import LoRARequest
 from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.processing.scheduler import SchedulerOutputs
@@ -35,7 +35,7 @@ class EngineClient(Protocol):
 
     def generate(
         self,
-        inputs: PromptInputs,
+        prompt: PromptType,
         sampling_params: SamplingParams,
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
@@ -46,7 +46,7 @@ class EngineClient(Protocol):
 
     def encode(
         self,
-        inputs: PromptInputs,
+        prompt: PromptType,
         pooling_params: PoolingParams,
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
