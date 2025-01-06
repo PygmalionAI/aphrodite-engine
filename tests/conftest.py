@@ -6,8 +6,8 @@ import sys
 import tempfile
 from collections import UserList
 from enum import Enum
-from typing import (Any, Callable, Dict, List, Optional, Tuple, TypedDict,
-                    TypeVar, Union)
+from typing import (Any, Callable, Dict, List, Optional, Tuple, Type,
+                    TypedDict, TypeVar, Union)
 
 import numpy as np
 import pytest
@@ -15,10 +15,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from huggingface_hub import snapshot_download
-from loguru import logger
 from PIL import Image
 from transformers import (AutoModelForCausalLM, AutoTokenizer, BatchEncoding,
                           BatchFeature)
+from transformers.models.auto.auto_factory import _BaseAutoModelClass
 
 from aphrodite import LLM, SamplingParams
 from aphrodite.assets.image import ImageAsset
@@ -89,18 +89,25 @@ class _ImageAssets(_ImageAssetsBase):
 
 class _VideoAssetPrompts(TypedDict):
     sample_demo_1: str
+
+
 if sys.version_info < (3, 9):
     # UserList cannot be subscripted
     class _VideoAssetsBase(UserList):
         pass
 else:
+
     class _VideoAssetsBase(UserList[VideoAsset]):
         pass
+
+
 class _VideoAssets(_VideoAssetsBase):
+
     def __init__(self) -> None:
         super().__init__([
             VideoAsset("sample_demo_1.mp4"),
         ])
+
     def prompts(self, prompts: _VideoAssetPrompts) -> List[str]:
         return [prompts["sample_demo_1"]]
 
@@ -150,10 +157,7 @@ def should_do_global_cleanup_after_test(request) -> bool:
     to initialize torch.
     """
 
-    if request.node.get_closest_marker("skip_global_cleanup"):
-        return False
-
-    return True
+    return not request.node.get_closest_marker("skip_global_cleanup")
 
 
 @pytest.fixture(autouse=True)
@@ -253,7 +257,7 @@ class HfRunner:
         *,
         model_kwargs: Optional[Dict[str, Any]] = None,
         is_embedding_model: bool = False,
-        auto_cls=AutoModelForCausalLM,
+        auto_cls: Type[_BaseAutoModelClass] = AutoModelForCausalLM,
         postprocess_inputs: Callable[[BatchEncoding],
                                      BatchEncoding] = identity,
     ) -> None:
@@ -285,20 +289,14 @@ class HfRunner:
             trust_remote_code=True,
         )
 
-        try:
-            # don't put this import at the top level
-            # it will call torch.cuda.device_count()
-            from transformers import AutoProcessor  # noqa: F401
-            self.processor = AutoProcessor.from_pretrained(
-                model_name,
-                torch_dtype=torch_dtype,
-                trust_remote_code=True,
-            )
-        except Exception as exc:
-            logger.warning(
-                f"Unable to auto-load HuggingFace processor for model "
-                f"({model_name}). Using tokenizer instead. Reason: {exc}")
-            self.processor = self.tokenizer
+        # don't put this import at the top level
+        # it will call torch.cuda.device_count()
+        from transformers import AutoProcessor  # noqa: F401
+        self.processor = AutoProcessor.from_pretrained(
+            model_name,
+            torch_dtype=torch_dtype,
+            trust_remote_code=True,
+        )
 
         self.postprocess_inputs = postprocess_inputs
 
@@ -682,6 +680,7 @@ class AphroditeRunner:
 
         if videos is not None:
             assert len(prompts) == len(videos)
+
         inputs = [TextPrompt(prompt=prompt) for prompt in prompts]
         if images is not None:
             for i, image in enumerate(images):
@@ -698,6 +697,7 @@ class AphroditeRunner:
 
         req_outputs = self.model.generate(inputs,
                                           sampling_params=sampling_params)
+
         toks_str_logsprobs_prompt_logprobs = (
             self._final_steps_generate_w_logprobs(req_outputs))
         # Omit prompt logprobs if not required by sampling params
@@ -754,6 +754,7 @@ class AphroditeRunner:
             logprobs=num_logprobs,
             prompt_logprobs=(num_prompt_logprobs),
             stop_token_ids=stop_token_ids)
+
         return self.generate_w_logprobs(prompts,
                                         greedy_logprobs_params,
                                         images=images,

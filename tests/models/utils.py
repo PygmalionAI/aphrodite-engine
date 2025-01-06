@@ -67,7 +67,6 @@ TokensTextLogprobsPromptLogprobs = Tuple[
     Optional[Union[List[Optional[Dict[int, float]]], PromptLogprobs]]]
 
 
-
 def check_logprobs_close(
     *,
     outputs_0_lst: Sequence[Union[TokensTextLogprobs,
@@ -91,6 +90,7 @@ def check_logprobs_close(
     * `always_check_logprobs == False`: highest-logprob token ids are
       only compared at sampled token offsets for which generated token
       ids don't match
+
     Prompt logprobs must be provided either for both input sequences, or
     for neither. If prompt logprobs are provided, then highest-logprob
     prompt token ids must match between seq0 and seq1 at all prompt token
@@ -139,6 +139,7 @@ def check_logprobs_close(
                 logprobs_1,
                 prompt_logprobs_1,
             ) = outputs_1
+
             # Test prompt logprobs closeness
             if (prompt_logprobs_0 is not None
                     and prompt_logprobs_1 is not None):
@@ -151,6 +152,7 @@ def check_logprobs_close(
                         f"Prompt logprobs test:"
                         f"\n{name_0}:\tPrompt index {idx}\t{logprobs_elem_0}"
                         f"\n{name_1}:\tPrompt index {idx}\t{logprobs_elem_1}")
+
                     if logprobs_elem_0 is None:
                         # If the seq 0 token's logprobs are `None`,
                         # the seq 1 token's logprobs must be `None`
@@ -167,6 +169,7 @@ def check_logprobs_close(
                 fail_msg = (f"Prompt logprobs test:"
                             f"\n{name_0}:\tlogprobs\t{prompt_logprobs_0}"
                             f"\n{name_1}:\tlogprobs\t{prompt_logprobs_1}")
+
                 assert (prompt_logprobs_0 is None
                         and prompt_logprobs_1 is None), fail_msg
         else:
