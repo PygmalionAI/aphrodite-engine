@@ -136,7 +136,7 @@ def test_models_distributed(
 
 def test_model_with_failure(aphrodite_runner) -> None:
     try:
-        with patch("aphrodite.model_executor.models.opt.OPTForCausalLM.forward",
+        with patch("aphrodite.modeling.models.opt.OPTForCausalLM.forward",
                    side_effect=ValueError()):
             with pytest.raises(ValueError) as exc_info:
                 aphrodite_runner("facebook/opt-125m",
