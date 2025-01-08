@@ -53,11 +53,11 @@ if TYPE_CHECKING:
     VERBOSE: bool = False
     APHRODITE_DYNAMIC_ROPE_SCALING: bool = False
     APHRODITE_TEST_FORCE_FP8_MARLIN: bool = False
-    APHRODITE_ALLOW_ENGINE_USE_RAY: bool = False
     APHRODITE_PLUGINS: Optional[List[str]] = None
-    APHRODITE_RPC_GET_DATA_TIMEOUT_MS: int = 5000
+    APHRODITE_RPC_TIMEOUT: int = 5000
     APHRODITE_FORCE_SINGLE_USER_PREFIX_CACHE: bool = False
     APHRODITE_TEST_DYNAMO_GRAPH_CAPTURE: int = 0
+    APHRODITE_TEST_DYNAMO_FULLGRAPH_CAPTURE: int = 0
     APHRODITE_USE_TRITON_AWQ: bool = False
     APHRODITE_DYNAMO_USE_CUSTOM_DISPATCHER: bool = False
 
@@ -202,6 +202,11 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     (os.environ.get("APHRODITE_DYNAMO_USE_CUSTOM_DISPATCHER", "True").lower() in
      ("true", "1")),
 
+    # Internal flag to enable Dynamo fullgraph capture
+    "APHRODITE_TEST_DYNAMO_FULLGRAPH_CAPTURE":
+    lambda: bool(
+        os.environ.get("APHRODITE_TEST_DYNAMO_FULLGRAPH_CAPTURE", "1") != "0"),
+
     # local rank of the process in the distributed setting, used to determine
     # the GPU device id
     "LOCAL_RANK":
@@ -261,7 +266,7 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     "APHRODITE_ATTENTION_BACKEND":
     lambda: os.getenv("APHRODITE_ATTENTION_BACKEND", None),
 
-    # If set, aphrodite will use flashinfer sampler
+    # If set, aphrodite will use custom sampling kernels
     "APHRODITE_USE_SAMPLING_KERNELS":
     lambda: bool(int(os.getenv("APHRODITE_USE_SAMPLING_KERNELS", "0"))),
 
@@ -378,15 +383,8 @@ environment_variables: Dict[str, Callable[[], Any]] = {
 
     # Time in ms for the zmq client to wait for a response from the backend
     # server for simple data operations
-    "APHRODITE_RPC_GET_DATA_TIMEOUT_MS":
-    lambda: int(os.getenv("APHRODITE_RPC_GET_DATA_TIMEOUT_MS", "5000")),
-
-    # If set, allow running the engine as a separate ray actor,
-    # which is a deprecated feature soon to be removed.
-    "APHRODITE_ALLOW_ENGINE_USE_RAY":
-    lambda:
-    (os.environ.get("APHRODITE_ALLOW_ENGINE_USE_RAY", "0").strip().lower() in
-     ("1", "true")),
+    "APHRODITE_RPC_TIMEOUT":
+    lambda: int(os.getenv("APHRODITE_RPC_TIMEOUT", "5000")),
 
     # a list of plugin names to load, separated by commas.
     # if this is not set, it means all plugins will be loaded

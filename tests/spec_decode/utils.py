@@ -17,9 +17,9 @@ from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.utils import set_random_seed
-from aphrodite.task_handler.cache_engine import CacheEngine
-from aphrodite.task_handler.model_runner import ModelRunner
-from aphrodite.task_handler.worker import Worker
+from aphrodite.worker.cache_engine import CacheEngine
+from aphrodite.worker.model_runner import ModelRunner
+from aphrodite.worker.worker import Worker
 
 T = TypeVar("T", bound=Worker)
 

@@ -21,8 +21,8 @@ from aphrodite.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
                                                   InternVLChatConfig,
                                                   JAISConfig, MedusaConfig,
                                                   MLPSpeculatorConfig,
-                                                  MPTConfig, RWConfig,
-                                                  UltravoxConfig)
+                                                  MPTConfig, Qwen2VLConfig,
+                                                  RWConfig, UltravoxConfig)
 from aphrodite.transformers_utils.utils import check_gguf_file
 
 APHRODITE_USE_MODELSCOPE = envs.APHRODITE_USE_MODELSCOPE
@@ -46,6 +46,7 @@ _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     "internvl_chat": InternVLChatConfig,
     "ultravox": UltravoxConfig,
     "eagle": EAGLEConfig,
+    "qwen2_vl": Qwen2VLConfig,
 }
 
 for name, cls in _CONFIG_REGISTRY.items():
@@ -248,6 +249,9 @@ def get_hf_image_processor_config(
     revision: Optional[str] = None,
     **kwargs,
 ) -> Dict[str, Any]:
+    # ModelScope does not provide an interface for image_processor
+    if APHRODITE_USE_MODELSCOPE:
+        return dict()
     # Separate model folder from file path for GGUF models
     if Path(model).is_file() and Path(model).suffix == ".gguf":
         model = Path(model).parent

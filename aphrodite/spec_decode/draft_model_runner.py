@@ -3,8 +3,6 @@ from typing import List, Optional
 import torch
 from loguru import logger
 
-from aphrodite import _custom_ops as ops
-
 try:
     from aphrodite.attention.backends.flash_attn import FlashAttentionMetadata
 except ModuleNotFoundError:
@@ -18,7 +16,7 @@ from aphrodite.common.config import (CacheConfig, DeviceConfig, LoadConfig,
 from aphrodite.common.sequence import ExecuteModelRequest, IntermediateTensors
 from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.multimodal import MultiModalInputs
-from aphrodite.task_handler.model_runner import (
+from aphrodite.worker.model_runner import (
     ModelInputForGPUWithSamplingMetadata, ModelRunner)
 
 # A flag to enable debug prints for the updated input tensors
@@ -114,18 +112,8 @@ class TP1DraftModelRunner(ModelRunner):
         # Update attn_metadata
         attn_metadata = model_input.attn_metadata
         assert isinstance(attn_metadata, FlashAttentionMetadata)
-        attn_metadata.advance_step(num_seqs, num_queries)
-
-        # Update GPU tensors
-        ops.advance_step(num_seqs=num_seqs,
-                         num_queries=num_queries,
-                         block_size=self.block_size,
-                         input_tokens=model_input.input_tokens,
-                         sampled_token_ids=sampled_token_ids,
-                         input_positions=model_input.input_positions,
-                         seq_lens=attn_metadata.seq_lens_tensor,
-                         slot_mapping=attn_metadata.slot_mapping,
-                         block_tables=attn_metadata.block_tables)
+        attn_metadata.advance_step(model_input, sampled_token_ids,
+                                   self.block_size, num_seqs, num_queries)
 
         # Update sampling_metadata
         sampling_metadata = model_input.sampling_metadata

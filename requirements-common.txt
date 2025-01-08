@@ -33,3 +33,6 @@ protobuf
 pandas
 msgspec
 python-multipart
+partial-json-parser
+opencv-python
+einops

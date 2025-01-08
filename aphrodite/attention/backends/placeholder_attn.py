@@ -10,7 +10,7 @@ from aphrodite.attention.backends.abstract import (AttentionBackend,
 from aphrodite.attention.backends.utils import CommonAttentionState
 
 if TYPE_CHECKING:
-    from aphrodite.task_handler.model_runner import ModelInputForGPUBuilder
+    from aphrodite.worker.model_runner import ModelInputForGPUBuilder
 
 # Placeholder attention backend for models like Mamba and embedding models that
 # lack attention.

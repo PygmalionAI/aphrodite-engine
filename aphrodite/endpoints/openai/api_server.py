@@ -1,26 +1,28 @@
 import asyncio
-import copy
 import importlib
 import inspect
 import json
 import multiprocessing
 import os
+import pickle
 import re
+import signal
 import tempfile
 from argparse import Namespace
 from contextlib import asynccontextmanager
 from distutils.util import strtobool
+from functools import partial
 from http import HTTPStatus
-from typing import (Any, AsyncGenerator, AsyncIterator, Dict, List, Optional,
-                    Set, Tuple)
+from typing import AsyncGenerator, AsyncIterator, List, Optional, Set, Tuple
 
 import yaml
-from fastapi import APIRouter, FastAPI, Request, UploadFile
+from fastapi import APIRouter, FastAPI, Form, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (HTMLResponse, JSONResponse, Response,
                                StreamingResponse)
 from loguru import logger
+from starlette.datastructures import State
 from starlette.routing import Mount
 
 import aphrodite.common.envs as envs
@@ -32,7 +34,6 @@ from aphrodite.common.utils import (FlexibleArgumentParser,
                                     random_uuid)
 from aphrodite.endpoints.logger import RequestLogger
 from aphrodite.endpoints.openai.args import make_arg_parser
-# yapf: disable
 from aphrodite.endpoints.openai.protocol import (ChatCompletionRequest,
                                                  ChatCompletionResponse,
                                                  CompletionRequest,
@@ -43,20 +44,22 @@ from aphrodite.endpoints.openai.protocol import (ChatCompletionRequest,
                                                  KAIGenerationInputSchema,
                                                  TokenizeRequest,
                                                  TokenizeResponse)
-from aphrodite.endpoints.openai.rpc.client import AsyncEngineRPCClient
-from aphrodite.endpoints.openai.rpc.server import run_rpc_server
-# yapf: enable
 from aphrodite.endpoints.openai.serving_chat import OpenAIServingChat
 from aphrodite.endpoints.openai.serving_completions import (
     OpenAIServingCompletion)
 from aphrodite.endpoints.openai.serving_embedding import OpenAIServingEmbedding
-from aphrodite.endpoints.openai.serving_engine import (LoRAModulePath,
+from aphrodite.endpoints.openai.serving_engine import (BaseModelPath,
+                                                       LoRAModulePath,
                                                        PromptAdapterPath)
 from aphrodite.endpoints.openai.serving_tokenization import (
     OpenAIServingTokenization)
 from aphrodite.engine.args_tools import AsyncEngineArgs
 from aphrodite.engine.async_aphrodite import AsyncAphrodite
-from aphrodite.engine.protocol import AsyncEngineClient
+from aphrodite.engine.multiprocessing import (APHRODITE_RPC_SUCCESS_STR,
+                                              RPCShutdownRequest)
+from aphrodite.engine.multiprocessing.client import MQAphroditeEngineClient
+from aphrodite.engine.multiprocessing.engine import run_mp_engine
+from aphrodite.engine.protocol import EngineClient
 from aphrodite.modeling.model_loader.weight_utils import get_model_config_yaml
 from aphrodite.server import serve_http
 from aphrodite.transformers_utils.tokenizer import get_tokenizer
@@ -70,12 +73,6 @@ else:
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 SERVE_KOBOLD_LITE_UI = strtobool(os.getenv("SERVE_KOBOLD_LITE_UI", "1"))
 
-async_engine_client: AsyncEngineClient
-engine_args: AsyncEngineArgs
-openai_serving_chat: OpenAIServingChat
-openai_serving_completion: OpenAIServingCompletion
-openai_serving_embedding: OpenAIServingEmbedding
-openai_serving_tokenization: OpenAIServingTokenization
 router = APIRouter()
 kai_api = APIRouter()
 extra_api = APIRouter()
@@ -83,59 +80,79 @@ kobold_lite_ui = ""
 sampler_json = ""
 gen_cache: dict = {}
 prometheus_multiproc_dir: tempfile.TemporaryDirectory
-model_is_loaded = True
 
 _running_tasks: Set[asyncio.Task] = set()
-
-
-def model_is_embedding(model_name: str, trust_remote_code: bool) -> bool:
-    return ModelConfig(model=model_name,
-                       tokenizer=model_name,
-                       tokenizer_mode="auto",
-                       trust_remote_code=trust_remote_code,
-                       seed=0,
-                       dtype="auto").embedding_mode
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    async def _force_log():
-        while True:
-            await asyncio.sleep(10)
-            await async_engine_client.do_log_stats()
-
-    if not engine_args.disable_log_stats:
-        task = asyncio.create_task(_force_log())
-        _running_tasks.add(task)
-        task.add_done_callback(_running_tasks.remove)
-
-    yield
+    try:
+        if app.state.log_stats:
+            engine_client: EngineClient = app.state.engine_client
+            async def _force_log():
+                while True:
+                    await asyncio.sleep(10.)
+                    await engine_client.do_log_stats()
+            task = asyncio.create_task(_force_log())
+            _running_tasks.add(task)
+            task.add_done_callback(_running_tasks.remove)
+        else:
+            task = None
+        try:
+            yield
+        finally:
+            if task is not None:
+                task.cancel()
+    finally:
+        # Ensure app state including engine ref is gc'd
+        del app.state
 
 
 @asynccontextmanager
-async def build_async_engine_client(
-        args: Namespace) -> AsyncIterator[Optional[AsyncEngineClient]]:
-    """
-    Create AsyncEngineClient, either:
-        - in-process using the AsyncAphrodite Directly
-        - multiprocess using AsyncAphrodite RPC
-    Returns the Client or None if the creation failed.
-    """
-    # Context manager to handle async_engine_client lifecycle
+async def build_engine_client(
+        args: Namespace) -> AsyncIterator[EngineClient]:
+
+    # Context manager to handle engine_client lifecycle
     # Ensures everything is shutdown and cleaned up on error/exit
-    global engine_args
     engine_args = AsyncEngineArgs.from_cli_args(args)
 
-    # Backend itself still global for the silly lil' health handler
-    global async_engine_client
+    async with build_engine_client_from_engine_args(
+            engine_args, args.disable_frontend_multiprocessing) as engine:
 
-    # If manually triggered or embedding model, use AsyncAphrodite in process.
-    # TODO: support embedding model via RPC.
-    if (model_is_embedding(args.model, args.trust_remote_code)
-            or args.disable_frontend_multiprocessing):
-        async_engine_client = AsyncAphrodite.from_engine_args(engine_args)
-        yield async_engine_client
+        yield engine
+
+
+@asynccontextmanager
+async def build_engine_client_from_engine_args(
+    engine_args: AsyncEngineArgs,
+    disable_frontend_multiprocessing: bool = False,
+) -> AsyncIterator[EngineClient]:
+    """
+    Create EngineClient, either:
+        - in-process using the AsyncAphrodite Directly
+        - multiprocess using AsyncAphrodite RPC
+
+    Returns the Client or None if the creation failed.
+    """
+
+    # Fall back
+    # TODO: fill out feature matrix.
+    if (MQAphroditeEngineClient.is_unsupported_config(engine_args)
+            or disable_frontend_multiprocessing):
+        engine_config = engine_args.create_engine_config()
+        uses_ray = getattr(AsyncAphrodite._get_executor_cls(engine_config),
+                           "uses_ray", False)
+        build_engine = partial(AsyncAphrodite.from_engine_args,
+                               engine_args=engine_args,
+                               engine_config=engine_config)
+        if uses_ray:
+            # Must run in main thread with ray for its signal handlers to work
+            engine_client = build_engine()
+        else:
+            engine_client = await asyncio.get_running_loop().run_in_executor(
+                None, build_engine)
+        yield engine_client
         return
 
     # Otherwise, use the multiprocessing AsyncAphrodite.
@@ -154,207 +171,58 @@ async def build_async_engine_client(
                 "This directory must be wiped between Aphrodite runs or "
                 "you will find inaccurate metrics. Unset the variable "
                 "and Aphrodite will properly handle cleanup.")
+
         # Select random path for IPC.
-        rpc_path = get_open_zmq_ipc_path()
-        logger.info(f"Multiprocessing frontend to use {rpc_path} for RPC Path."
-                    )
+        ipc_path = get_open_zmq_ipc_path()
+        logger.info(
+            f"Multiprocessing frontend to use {ipc_path} for IPC Path.")
 
-        # Build RPCClient, which conforms to AsyncEngineClient Protocol.
-        # NOTE: Actually, this is not true yet. We still need to support
-        # embedding models via RPC (see TODO above)
-        rpc_client = AsyncEngineRPCClient(rpc_path)
-        async_engine_client = rpc_client  # type: ignore
-
-        # Start RPCServer in separate process (holds the AsyncAphrodite).
-        context = multiprocessing.get_context("spawn")
+        # Start RPCServer in separate process (holds the LLMEngine).
         # the current process might have CUDA context,
         # so we need to spawn a new process
-        rpc_server_process = context.Process(
-            target=run_rpc_server,
-            args=(engine_args, rpc_path))
-        rpc_server_process.start()
-        logger.info(
-            f"Started engine process with PID {rpc_server_process.pid}")
+        context = multiprocessing.get_context("spawn")
+        engine_process = context.Process(target=run_mp_engine,
+                                         args=(engine_args,
+                                               ipc_path))
+        engine_process.start()
+        logger.info(f"Started engine process with PID {engine_process.pid}")
+        # Build RPCClient, which conforms to EngineClient Protocol.
+        # NOTE: Actually, this is not true yet. We still need to support
+        # embedding models via RPC (see TODO above)
+        engine_config = engine_args.create_engine_config()
+        mp_engine_client = MQAphroditeEngineClient(ipc_path, engine_config)
 
         try:
             while True:
                 try:
-                    await async_engine_client.setup()
+                    await mp_engine_client.setup()
                     break
                 except TimeoutError:
-                    if not rpc_server_process.is_alive():
-                        logger.error(
-                            "RPCServer process died before responding "
-                            "to readiness probe")
-                        yield None
-                        return
-            yield async_engine_client
+                    if not engine_process.is_alive():
+                        raise RuntimeError(
+                            "Engine process failed to start") from None
+
+            yield mp_engine_client  # type: ignore[misc]
         finally:
             # Ensure rpc server process was terminated
-            rpc_server_process.terminate()
+            engine_process.terminate()
 
             # Close all open connections to the backend
-            async_engine_client.close()
+            mp_engine_client.close()
 
-            # Wait for server process to join
-            rpc_server_process.join()
+            # Wait for engine process to join
+            engine_process.join(4)
+            if engine_process.exitcode is None:
+                # Kill if taking longer than 5 seconds to stop
+                engine_process.kill()
 
             # Lazy import for prometheus multiprocessing.
             # We need to set PROMETHEUS_MULTIPROC_DIR environment variable
             # before prometheus_client is imported.
             # See https://prometheus.github.io/client_python/multiprocess/
             from prometheus_client import multiprocess
-            multiprocess.mark_process_dead(rpc_server_process.pid)
+            multiprocess.mark_process_dead(engine_process.pid)
 
-
-async def _maybe_switch_model(
-        request_model: str, app_state,
-        raw_request: Request) -> Optional[ErrorResponse]:
-    """Switch to requested model if different from currently loaded one."""
-    global model_is_loaded, async_engine_client, engine_args, served_model_names
-    
-    if not model_is_loaded:
-        return None
-
-    models = await openai_serving_completion.show_available_models()
-
-    for model in models.data:
-        if request_model in (model.id, model.root):
-            return None
-
-    if not app_state.args.allow_inline_model_loading:
-        return JSONResponse(
-            content={
-                "error": {
-                    "message": "Requested model is not currently loaded. "
-                    "Inline model loading is disabled. Enable it with "
-                    "--allow-inline-model-loading.",
-                    "type": "invalid_request_error",
-                    "code": "model_not_loaded"
-                }
-            },
-            status_code=400
-        )  # type: ignore
-
-    api_key = envs.APHRODITE_API_KEY or app_state.args.api_keys
-    admin_key = envs.APHRODITE_ADMIN_KEY or app_state.args.admin_key
-
-    if api_key:
-        api_key_header = raw_request.headers.get("x-api-key")
-        auth_header = raw_request.headers.get("Authorization")
-
-        if not admin_key:
-            return JSONResponse(
-                content={
-                    "error": {
-                        "message": "Admin key not configured. "
-                        "Inline model loading is disabled.",
-                        "type": "invalid_request_error",
-                        "code": "admin_key_required"
-                    }
-                },
-                status_code=401
-            )  # type: ignore
-
-        if not (api_key_header == admin_key or
-                auth_header == f"Bearer {admin_key}"):
-            return JSONResponse(
-                content={
-                    "error": {
-                        "message": "Admin privileges required for inline "
-                        "model loading.",
-                        "type": "invalid_request_error",
-                        "code": "unauthorized"
-                    }
-                },
-                status_code=401
-            )  # type: ignore
-    
-    logger.info(f"Switching from {served_model_names[0]} to {request_model}")
-    
-    try:
-        args = app_state.args
-        if not args.disable_frontend_multiprocessing:
-            await async_engine_client.kill()
-        else:
-            await async_engine_client.shutdown_background_loop()
-            
-        model_is_loaded = False
-
-        yaml_config = get_model_config_yaml(request_model, args.download_dir)
-
-        if yaml_config:
-            parser = FlexibleArgumentParser()
-            parser = make_arg_parser(parser)
-            engine_args = parser.parse_args([])  # empty args
-
-            for key, value in yaml_config.items():
-                if hasattr(engine_args, key):
-                    setattr(engine_args, key, value)
-
-            engine_args.model = request_model
-            engine_args = AsyncEngineArgs.from_cli_args(engine_args)
-        else:
-            # Fallback to minimal config
-            engine_args = AsyncEngineArgs(model=request_model)
-        
-        if (model_is_embedding(engine_args.model, engine_args.trust_remote_code)
-                or args.disable_frontend_multiprocessing):
-            async_engine_client = AsyncAphrodite.from_engine_args(engine_args)
-            await async_engine_client.setup()
-        else:
-            if "PROMETHEUS_MULTIPROC_DIR" not in os.environ:
-                global prometheus_multiproc_dir
-                prometheus_multiproc_dir = tempfile.TemporaryDirectory()
-                os.environ[
-                    "PROMETHEUS_MULTIPROC_DIR"] = prometheus_multiproc_dir.name
-
-            rpc_path = get_open_zmq_ipc_path()
-            logger.info(
-                f"Multiprocessing frontend to use {rpc_path} for RPC Path.")
-
-            rpc_client = AsyncEngineRPCClient(rpc_path)
-            async_engine_client = rpc_client
-
-            context = multiprocessing.get_context("spawn")
-            rpc_server_process = context.Process(
-                target=run_rpc_server,
-                args=(engine_args, rpc_path))
-            rpc_server_process.start()
-            logger.info(
-                f"Started engine process with PID {rpc_server_process.pid}")
-
-            while True:
-                try:
-                    await async_engine_client.setup()
-                    break
-                except TimeoutError as e:
-                    if not rpc_server_process.is_alive():
-                        raise RuntimeError(
-                            "RPC Server died before responding to "
-                            "readiness probe") from e
-
-        new_args = copy.deepcopy(args)
-        new_args.model = request_model
-
-        app = await init_app(async_engine_client, new_args)  # noqa: F841
-        served_model_names = [request_model]
-        model_is_loaded = True
-        return None
-
-    except Exception as e:
-        error_msg = f"Error while switching models: {str(e)}"
-        logger.error(error_msg)
-        return JSONResponse(
-            content={
-                "error": {
-                    "message": error_msg,
-                    "type": "invalid_request_error",
-                    "code": "model_load_error"
-                }
-            },
-            status_code=500
-        )  # type: ignore
 
 def mount_metrics(app: FastAPI):
     # Lazy import for prometheus multiprocessing.
@@ -379,153 +247,75 @@ def mount_metrics(app: FastAPI):
     app.routes.append(metrics_route)
 
 
+async def _handle_model_switch(
+        raw_request: Request,
+        requested_model: str
+) -> Optional[JSONResponse]:
+    """Helper function to handle model switching if needed.
+    Returns error response if something went wrong, None if successful."""
+
+    if not raw_request.app.state.args.allow_inline_model_loading:
+        return None
+
+    if not raw_request.app.state.model_is_loaded:
+        config = get_model_config_yaml(requested_model)
+        request_data = {"model": requested_model}
+        if config:
+            config.pop("model", None)
+            request_data.update(config)
+            
+        load_response = await load_model(
+            raw_request,
+            request=json.dumps(request_data)
+        )
+        if load_response.status_code != 200:
+            return load_response
+        return None
+
+    current_model = raw_request.app.state.current_model
+    if current_model == requested_model:
+        return None
+
+    unload_response = await unload_model(raw_request)
+    if unload_response.status_code != 200:
+        return unload_response
+
+    config = get_model_config_yaml(requested_model)
+    request_data = {"model": requested_model}
+    if config:
+        config.pop("model", None)
+        request_data.update(config)
+
+    load_response = await load_model(
+        raw_request,
+        request=json.dumps(request_data)
+    )
+    if load_response.status_code != 200:
+        return load_response
+
+    return None
+
+
+def chat(request: Request) -> OpenAIServingChat:
+    return request.app.state.openai_serving_chat
+
+def completion(request: Request) -> OpenAIServingCompletion:
+    return request.app.state.openai_serving_completion
+
+def tokenization(request: Request) -> OpenAIServingTokenization:
+    return request.app.state.openai_serving_tokenization
+
+def embedding(request: Request) -> OpenAIServingEmbedding:
+    return request.app.state.openai_serving_embedding
+
+def engine_client(request: Request) -> EngineClient:
+    return request.app.state.engine_client
+
+
 @router.delete("/v1/model/unload")
-async def unload_model(request: Request):
-    """Unload the current model and shut down the server."""
-    logger.info("Received request to unload model.")
-
-    try:
-        args = request.app.state.args
-        if not args.disable_frontend_multiprocessing:
-            await async_engine_client.kill()
-        else:
-            await async_engine_client.shutdown_background_loop()
-
-        global model_is_loaded
-        model_is_loaded = False
-        return JSONResponse(
-            content={
-                "status": "success",
-                "message": "Model unloaded successfully"
-            }
-        )
-
-    except Exception as e:
-        error_msg = f"Error while unloading model: {str(e)}"
-        logger.error(error_msg)
-        return JSONResponse(
-            content={"status": "error", "message": error_msg},
-            status_code=500
-        )
-
-
-@router.post("/v1/model/load")
-async def load_model(config_file: UploadFile):
-    """Load a model using a YAML configuration file."""
-    global model_is_loaded, async_engine_client, engine_args
-
-    if model_is_loaded:
-        return JSONResponse(
-            content={
-                "error": {
-                    "message": "A model is already loaded. "
-                    "Please unload it first.",
-                    "type": "invalid_request_error",
-                    "code": "model_already_loaded"
-                }
-            },
-            status_code=400
-        )
-
-    try:
-        # basically the same logic as the one in aphrodite.endpoints.cli
-        config_text = await config_file.read()
-        config: Dict[Any, Any] = yaml.safe_load(config_text)
-
-        args = []
-        for key, value in config.items():
-            key = key.replace('_', '-')
-
-            if isinstance(value, bool):
-                if value:
-                    args.append(f"--{key}")
-            elif isinstance(value, (list, tuple)):
-                if key in ['lora-modules', 'prompt-adapters']:
-                    for item in value:
-                        args.append(f"--{key}")
-                        args.append(f"{item['name']}={item['path']}")
-                else:
-                    for item in value:
-                        args.append(f"--{key}")
-                        args.append(str(item))
-            else:
-                args.append(f"--{key}")
-                args.append(str(value))
-
-        parser = FlexibleArgumentParser()
-        parser = make_arg_parser(parser)
-        parsed_args = parser.parse_args(args)
-
-        if (model_is_embedding(parsed_args.model, parsed_args.trust_remote_code)
-                or parsed_args.disable_frontend_multiprocessing):
-            async_engine_client = AsyncAphrodite.from_engine_args(engine_args)
-            await async_engine_client.setup()
-        else:
-            if "PROMETHEUS_MULTIPROC_DIR" not in os.environ:
-                global prometheus_multiproc_dir
-                prometheus_multiproc_dir = tempfile.TemporaryDirectory()
-                os.environ[
-                    "PROMETHEUS_MULTIPROC_DIR"] = prometheus_multiproc_dir.name
-
-            rpc_path = get_open_zmq_ipc_path()
-            logger.info(
-                f"Multiprocessing frontend to use {rpc_path} for RPC Path.")
-
-            rpc_client = AsyncEngineRPCClient(rpc_path)
-            async_engine_client = rpc_client
-
-            context = multiprocessing.get_context("spawn")
-            rpc_server_process = context.Process(
-                target=run_rpc_server,
-                args=(engine_args, rpc_path))
-            rpc_server_process.start()
-            logger.info(
-                f"Started engine process with PID {rpc_server_process.pid}")
-
-            while True:
-                try:
-                    await async_engine_client.setup()
-                    break
-                except TimeoutError as e:
-                    if not rpc_server_process.is_alive():
-                        raise RuntimeError(
-                            "RPC Server died before responding to readiness "
-                            "probe") from e
-
-        app = await init_app(async_engine_client, parsed_args)  # noqa: F841
-        model_is_loaded = True
-
-        return JSONResponse(
-            content={
-                "status": "success",
-                "message": "Model loaded successfully"
-            }
-        )
-
-    except Exception as e:
-        error_msg = f"Error while loading model: {str(e)}"
-        logger.error(error_msg)
-        return JSONResponse(
-            content={
-                "error": {
-                    "message": error_msg,
-                    "type": "invalid_request_error",
-                    "code": "model_load_error"
-                }
-            },
-            status_code=500
-        )
-
-@router.get("/health")
-async def health() -> Response:
-    """Health check."""
-    await async_engine_client.check_health()
-    return Response(status_code=200)
-
-
-@router.post("/v1/tokenize")
-async def tokenize(request: TokenizeRequest):
-    if not model_is_loaded:
+async def unload_model(raw_request: Request):
+    """Unload the model and shut down the engine process."""
+    if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
                 "status": "error",
@@ -533,7 +323,217 @@ async def tokenize(request: TokenizeRequest):
             },
             status_code=500
         )
-    generator = await openai_serving_tokenization.create_tokenize(request)
+    client = raw_request.app.state.engine_client
+    
+    if isinstance(client, MQAphroditeEngineClient):
+        try:
+            shutdown_req = RPCShutdownRequest()
+            await client.input_socket.send_multipart(
+                (pickle.dumps(shutdown_req),), copy=False
+            )
+
+            response = await client.output_socket.recv_multipart()
+            if pickle.loads(response[0]) != APHRODITE_RPC_SUCCESS_STR:
+                raise RuntimeError("Engine shutdown failed")
+
+            client.output_loop.cancel()
+            if client.health_loop is not None:
+                client.health_loop.cancel()
+
+            client.close()
+
+            raw_request.app.state.engine_client = None
+            raw_request.app.state.openai_serving_chat = None
+            raw_request.app.state.openai_serving_completion = None 
+            raw_request.app.state.openai_serving_embedding = None
+            raw_request.app.state.openai_serving_tokenization = None
+            raw_request.app.state.model_is_loaded = False
+
+            return JSONResponse(content={"status": "success"})
+
+        except Exception as e:
+            return JSONResponse(
+                content={
+                    "status": "error",
+                    "message": f"Failed to shutdown engine: {str(e)}"
+                },
+                status_code=500
+            )
+    else:
+        return JSONResponse(
+            content={
+                "status": "error",
+                "message": "Model unloading only supported with multiprocessing"
+                " backend"
+            },
+            status_code=400
+        )
+
+@router.post("/v1/model/load")
+async def load_model(
+    raw_request: Request,
+    config_file: Optional[UploadFile] = None,
+    request: Optional[str] = Form(None)
+):
+    """Load a new model after unloading the previous one.
+    Accept either a config file, a JSON request body, or both."""
+    if raw_request.app.state.model_is_loaded:
+        return JSONResponse(
+            content={
+                "status": "error",
+                "message": "A model is already loaded. Please unload it first."
+            },
+            status_code=400
+        )
+
+    try:
+        parser = FlexibleArgumentParser()
+        parser = make_arg_parser(parser)
+        new_args = parser.parse_args([])
+
+        original_args = api_server_args
+        essential_params = [
+            'host', 'port', 'api_keys', 'admin_key',
+            'disable_frontend_multiprocessing', 'root_path',
+            'ssl_keyfile', 'ssl_certfile'
+        ]
+        for param in essential_params:
+            if hasattr(original_args, param):
+                setattr(new_args, param, getattr(original_args, param))
+
+        if config_file:
+            yaml_content = await config_file.read()
+            config_args = yaml.safe_load(yaml_content)
+            if config_args:
+                for key, value in config_args.items():
+                    if hasattr(new_args, key):
+                        setattr(new_args, key, value)
+
+        json_args = None
+        if request:
+            try:
+                json_args = json.loads(request)
+            except json.JSONDecodeError:
+                return JSONResponse(
+                    content={
+                        "status": "error",
+                        "message": "Invalid JSON in request form field."
+                    },
+                    status_code=400
+                )
+        else:
+            try:
+                json_args = await raw_request.json()
+            except Exception:
+                if not config_file:
+                    return JSONResponse(
+                        content={
+                            "status": "error",
+                            "message": "Must provide either config_file or "
+                            "valid JSON request body."
+                        },
+                        status_code=400
+                    )
+
+        if json_args:
+            for key, value in json_args.items():
+                if hasattr(new_args, key):
+                    setattr(new_args, key, value)
+
+        if not hasattr(new_args, 'model') or not new_args.model:
+            return JSONResponse(
+                content={
+                    "status": "error",
+                    "message": "No model specified in config or request body."
+                },
+                status_code=400
+            )
+
+        engine_args = AsyncEngineArgs.from_cli_args(new_args)
+
+        if (MQAphroditeEngineClient.is_unsupported_config(engine_args)
+                or new_args.disable_frontend_multiprocessing):
+            return JSONResponse(
+                content={
+                    "status": "error",
+                    "message": "Model loading only supported with "
+                    "multiprocessing backend."
+                },
+                status_code=400
+            )
+
+        ipc_path = get_open_zmq_ipc_path()
+        context = multiprocessing.get_context("spawn")
+        engine_process = context.Process(
+            target=run_mp_engine,
+            args=(engine_args, ipc_path)
+        )
+        engine_process.start()
+
+        engine_config = engine_args.create_engine_config()
+        engine_client = MQAphroditeEngineClient(ipc_path, engine_config)
+
+        try:
+            while True:
+                try:
+                    await engine_client.setup()
+                    break
+                except TimeoutError:
+                    if not engine_process.is_alive():
+                        return JSONResponse(
+                            content={
+                                "status": "error",
+                                "message": "Engine process died before "
+                                "responding to readiness probe."
+                            },
+                            status_code=500
+                        )
+
+            model_config = await engine_client.get_model_config()
+            init_app_state(
+                engine_client, model_config, raw_request.app.state, new_args)
+            raw_request.app.state.model_is_loaded = True
+            raw_request.app.state.current_model = new_args.model
+
+            return JSONResponse(content={"status": "success"})
+
+        except Exception as e:
+            engine_process.terminate()
+            engine_client.close()
+            raise e
+
+    except Exception as e:
+        return JSONResponse(
+            content={
+                "status": "error", 
+                "message": f"Failed to load model: {str(e)}"
+            },
+            status_code=500
+        )
+
+@router.get("/health")
+async def health(raw_request: Request) -> Response:
+    """Health check."""
+    await engine_client(raw_request).check_health()
+    return Response(status_code=200)
+
+
+@router.post("/v1/tokenize")
+async def tokenize(request: TokenizeRequest, raw_request: Request):
+    if hasattr(request, "model"):
+        error_response = await _handle_model_switch(raw_request, request.model)
+        if error_response is not None:
+            return error_response
+
+    if not raw_request.app.state.model_is_loaded:
+        return JSONResponse(
+            content={
+                "status": "error",
+                "message": "No model loaded."
+            },
+            status_code=500
+        )
+    generator = await tokenization(raw_request).create_tokenize(request)
     if isinstance(generator, ErrorResponse):
         return JSONResponse(content=generator.model_dump(),
                             status_code=generator.code)
@@ -543,8 +543,14 @@ async def tokenize(request: TokenizeRequest):
 
 
 @router.post("/v1/detokenize")
-async def detokenize(request: DetokenizeRequest):
-    if not model_is_loaded:
+async def detokenize(request: DetokenizeRequest, raw_request: Request):
+    if hasattr(request, "model"):
+        error_response = await _handle_model_switch(
+            raw_request, request.model)
+        if error_response is not None:
+            return error_response
+
+    if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
                 "status": "error",
@@ -552,7 +558,7 @@ async def detokenize(request: DetokenizeRequest):
             },
             status_code=500
         )
-    generator = await openai_serving_tokenization.create_detokenize(request)
+    generator = await tokenization(raw_request).create_detokenize(request)
     if isinstance(generator, ErrorResponse):
         return JSONResponse(content=generator.model_dump(),
                             status_code=generator.code)
@@ -562,8 +568,16 @@ async def detokenize(request: DetokenizeRequest):
 
 
 @router.get("/v1/models")
-async def show_available_models():
-    models = await openai_serving_completion.show_available_models()
+async def show_available_models(raw_request: Request):
+    if not raw_request.app.state.model_is_loaded:
+        return JSONResponse(
+            content={
+                "status": "error",
+                "message": "No model loaded."
+            },
+            status_code=500
+        )
+    models = await completion(raw_request).show_available_models()
     return JSONResponse(content=models.model_dump())
 
 
@@ -607,11 +621,20 @@ async def serviceinfo():
 @router.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,
                                  raw_request: Request):
-    error_check_ret = await _maybe_switch_model(
-        request.model, raw_request.app.state, raw_request)
-    if error_check_ret is not None:
-        return error_check_ret
-    generator = await openai_serving_chat.create_chat_completion(
+    if hasattr(request, "model"):
+        error_response = await _handle_model_switch(raw_request, request.model)
+        if error_response is not None:
+            return error_response
+
+    if not raw_request.app.state.model_is_loaded:
+        return JSONResponse(
+            content={
+                "status": "error",
+                "message": "No model loaded."
+            },
+            status_code=500
+        )
+    generator = await chat(raw_request).create_chat_completion(
         request, raw_request)
     if isinstance(generator, ErrorResponse):
         return JSONResponse(content=generator.model_dump(),
@@ -626,11 +649,20 @@ async def create_chat_completion(request: ChatCompletionRequest,
 
 @router.post("/v1/completions")
 async def create_completion(request: CompletionRequest, raw_request: Request):
-    error_check_ret = await _maybe_switch_model(
-        request.model, raw_request.app.state, raw_request)
-    if error_check_ret is not None:
-        return error_check_ret
-    generator = await openai_serving_completion.create_completion(
+    if hasattr(request, "model"):
+        error_response = await _handle_model_switch(raw_request, request.model)
+        if error_response is not None:
+            return error_response
+
+    if not raw_request.app.state.model_is_loaded:
+        return JSONResponse(
+            content={
+                "status": "error",
+                "message": "No model loaded."
+            },
+            status_code=500
+        )
+    generator = await completion(raw_request).create_completion(
         request, raw_request)
     if isinstance(generator, ErrorResponse):
         return JSONResponse(content=generator.model_dump(),
@@ -644,7 +676,12 @@ async def create_completion(request: CompletionRequest, raw_request: Request):
 
 @router.post("/v1/embeddings")
 async def create_embedding(request: EmbeddingRequest, raw_request: Request):
-    if not model_is_loaded:
+    if hasattr(request, "model"):
+        error_response = await _handle_model_switch(raw_request, request.model)
+        if error_response is not None:
+            return error_response
+
+    if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
                 "status": "error",
@@ -652,7 +689,7 @@ async def create_embedding(request: EmbeddingRequest, raw_request: Request):
             },
             status_code=500
         )
-    generator = await openai_serving_embedding.create_embedding(
+    generator = await embedding(raw_request).create_embedding(
         request, raw_request)
     if isinstance(generator, ErrorResponse):
         return JSONResponse(content=generator.model_dump(),
@@ -662,8 +699,8 @@ async def create_embedding(request: EmbeddingRequest, raw_request: Request):
     
 
 @router.post("/v1/lora/load")
-async def load_lora(lora: LoRAModulePath):
-    if not model_is_loaded:
+async def load_lora(lora: LoRAModulePath, raw_request: Request):
+    if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
                 "status": "error",
@@ -671,8 +708,8 @@ async def load_lora(lora: LoRAModulePath):
             },
             status_code=500
         )
-    openai_serving_completion.add_lora(lora)
-    if engine_args.enable_lora is False:
+    completion(raw_request).add_lora(lora)
+    if args.enable_lora is False:
         logger.error("LoRA is not enabled in the engine. "
                      "Please start the server with the "
                      "--enable-lora flag!")
@@ -680,8 +717,8 @@ async def load_lora(lora: LoRAModulePath):
 
 
 @router.delete("/v1/lora/unload")
-async def unload_lora(lora_name: str):
-    if not model_is_loaded:
+async def unload_lora(lora_name: str, raw_request: Request):
+    if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
                 "status": "error",
@@ -689,13 +726,14 @@ async def unload_lora(lora_name: str):
             },
             status_code=500
         )
-    openai_serving_completion.remove_lora(lora_name)
+    completion(raw_request).remove_lora(lora_name)
     return JSONResponse(content={"status": "success"})
 
 
 @router.post("/v1/soft_prompt/load")
-async def load_soft_prompt(soft_prompt: PromptAdapterPath):
-    if not model_is_loaded:
+async def load_soft_prompt(soft_prompt: PromptAdapterPath,
+                           raw_request: Request):
+    if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
                 "status": "error",
@@ -703,16 +741,16 @@ async def load_soft_prompt(soft_prompt: PromptAdapterPath):
             },
             status_code=500
         )
-    openai_serving_completion.add_prompt_adapter(soft_prompt)
-    if engine_args.enable_prompt_adapter is False:
+    completion(raw_request).add_prompt_adapter(soft_prompt)
+    if args.enable_prompt_adapter is False:
         logger.error("Prompt Adapter is not enabled in the engine. "
                      "Please start the server with the "
                      "--enable-prompt-adapter flag!")
     return JSONResponse(content={"status": "success"})
 
 @router.delete("/v1/soft_prompt/unload")
-async def unload_soft_prompt(soft_prompt_name: str):
-    if not model_is_loaded:
+async def unload_soft_prompt(soft_prompt_name: str, raw_request: Request):
+    if not raw_request.app.state.model_is_loaded:
         return JSONResponse(
             content={
                 "status": "error",
@@ -720,7 +758,7 @@ async def unload_soft_prompt(soft_prompt_name: str):
             },
             status_code=500
         )
-    openai_serving_completion.remove_prompt_adapter(soft_prompt_name)
+    completion(raw_request).remove_prompt_adapter(soft_prompt_name)
     return JSONResponse(content={"status": "success"})
 
 
@@ -793,9 +831,10 @@ def prepare_engine_payload(
 
 
 @kai_api.post("/generate")
-async def generate(kai_payload: KAIGenerationInputSchema) -> JSONResponse:
+async def generate(kai_payload: KAIGenerationInputSchema,
+                   raw_request: Request) -> JSONResponse:
     sampling_params, input_tokens = prepare_engine_payload(kai_payload)
-    result_generator = async_engine_client.generate(
+    result_generator = engine_client(raw_request).generate(
         {
             "prompt": kai_payload.prompt,
             "prompt_token_ids": input_tokens,
@@ -823,10 +862,11 @@ async def generate(kai_payload: KAIGenerationInputSchema) -> JSONResponse:
 
 @extra_api.post("/generate/stream")
 async def generate_stream(
-        kai_payload: KAIGenerationInputSchema) -> StreamingResponse:
+        kai_payload: KAIGenerationInputSchema,
+        raw_request: Request) -> StreamingResponse:
 
     sampling_params, input_tokens = prepare_engine_payload(kai_payload)
-    results_generator = async_engine_client.generate(
+    results_generator = engine_client(raw_request).generate(
         {
             "prompt": kai_payload.prompt,
             "prompt_token_ids": input_tokens,
@@ -866,11 +906,11 @@ async def check_generation(request: Request):
 
 
 @extra_api.post("/abort")
-async def abort_generation(request: Request):
+async def abort_generation(raw_request: Request):
     try:
-        request_dict = await request.json()
+        request_dict = await raw_request.json()
         if "genkey" in request_dict:
-            await async_engine_client.abort(request_dict["genkey"])
+            await engine_client(raw_request).abort(request_dict["genkey"])
     except json.JSONDecodeError:
         pass
 
@@ -878,10 +918,10 @@ async def abort_generation(request: Request):
 
 
 @extra_api.post("/tokencount")
-async def count_tokens(request: TokenizeRequest):
+async def count_tokens(request: TokenizeRequest, raw_request: Request):
     """Tokenize string and return token count"""
 
-    generator = await openai_serving_tokenization.create_tokenize(request)
+    generator = await tokenization(raw_request).create_tokenize(request)
     return JSONResponse({"value": generator.model_dump()["tokens"]})
 
 
@@ -923,7 +963,7 @@ async def get_max_length() -> JSONResponse:
 @kai_api.get("/config/max_context_length")
 @extra_api.get("/true_max_context_length")
 async def get_max_context_length() -> JSONResponse:
-    max_context_length = engine_args.max_model_len
+    max_context_length = args.max_model_len
     return JSONResponse({"value": max_context_length})
 
 
@@ -967,6 +1007,7 @@ def build_app(args: Namespace) -> FastAPI:
     app.include_router(router)
     app.root_path = args.root_path
     app.state.args = args
+    app.state.model_is_loaded = False
     if args.launch_kobold_api:
         logger.warning("Kobold API is now enabled by default. "
                        "This flag will be removed in the future.")
@@ -988,7 +1029,8 @@ def build_app(args: Namespace) -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(_, exc):
-        err = openai_serving_completion.create_error_response(message=str(exc))
+        chat = app.state.openai_serving_chat
+        err = chat.create_error_response(message=str(exc))
         return JSONResponse(err.model_dump(),
                             status_code=HTTPStatus.BAD_REQUEST)
 
@@ -1048,13 +1090,14 @@ def build_app(args: Namespace) -> FastAPI:
     return app
 
 
-async def init_app(
-    async_engine_client: AsyncEngineClient,
+def init_app_state(
+    engine_client: EngineClient,
+    model_config: ModelConfig,
+    state: State,
     args: Namespace,
-) -> FastAPI:
+) -> None:
     global api_server_args
     api_server_args = args
-    app = build_app(args)
 
     logger.debug(f"args: {args}")
 
@@ -1069,79 +1112,86 @@ async def init_app(
 
     global tokenizer
 
-    model_config = await async_engine_client.get_model_config()
-
     if args.disable_log_requests:
         request_logger = None
     else:
         request_logger = RequestLogger(max_log_len=args.max_log_len)
 
-    global openai_serving_chat
-    global openai_serving_completion
-    global openai_serving_embedding
-    global openai_serving_tokenization
+    base_model_paths = [
+        BaseModelPath(name=name, model_path=args.model)
+        for name in served_model_names
+    ]
 
-    openai_serving_chat = OpenAIServingChat(
-        async_engine_client,
+    state.engine_client = engine_client
+    state.log_stats = not args.disable_log_stats
+    state.current_model = args.model
+
+    state.openai_serving_chat = OpenAIServingChat(
+        engine_client,
         model_config,
-        served_model_names,
+        base_model_paths,
         args.response_role,
         lora_modules=args.lora_modules,
         prompt_adapters=args.prompt_adapters,
         request_logger=request_logger,
         chat_template=args.chat_template,
         return_tokens_as_token_ids=args.return_tokens_as_token_ids,
+        enable_auto_tools=args.enable_auto_tool_choice,
+        tool_parser=args.tool_call_parser
     )
-    openai_serving_completion = OpenAIServingCompletion(
-        async_engine_client,
+    state.openai_serving_completion = OpenAIServingCompletion(
+        engine_client,
         model_config,
-        served_model_names,
+        base_model_paths,
         lora_modules=args.lora_modules,
         prompt_adapters=args.prompt_adapters,
         request_logger=request_logger,
         return_tokens_as_token_ids=args.return_tokens_as_token_ids,
     )
-    openai_serving_embedding = OpenAIServingEmbedding(
-        async_engine_client,
+    state.openai_serving_embedding = OpenAIServingEmbedding(
+        engine_client,
         model_config,
-        served_model_names,
+        base_model_paths,
         request_logger=request_logger,
     )
-    openai_serving_tokenization = OpenAIServingTokenization(
-        async_engine_client,
+    state.openai_serving_tokenization = OpenAIServingTokenization(
+        engine_client,
         model_config,
-        served_model_names,
+        base_model_paths,
         lora_modules=args.lora_modules,
         request_logger=request_logger,
         chat_template=args.chat_template,
     )
-    app.root_path = args.root_path
 
     tokenizer = get_tokenizer(
-        tokenizer_name=engine_args.tokenizer,
-        tokenizer_mode=engine_args.tokenizer_mode,
-        trust_remote_code=engine_args.trust_remote_code,
-        revision=engine_args.revision,
+        tokenizer_name=args.tokenizer if args.tokenizer else args.model,
+        tokenizer_mode=args.tokenizer_mode,
+        trust_remote_code=args.trust_remote_code,
+        revision=args.revision,
     )
 
     if args.launch_kobold_api:
         _set_badwords(tokenizer, model_config.hf_config)
     
-    return app
-
 
 async def run_server(args, **uvicorn_kwargs) -> None:
 
-    async with build_async_engine_client(args) as async_engine_client:
-        # If None, creation of the client failed and we exit.
-        if async_engine_client is None:
-            return
-        app = await init_app(async_engine_client, args)
+    def signal_handler(*_) -> None:
+        # Interrupt server on sigterm while initializing
+        raise KeyboardInterrupt("terminated")
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    async with build_engine_client(args) as engine_client:
+        app = build_app(args)
+        model_config = await engine_client.get_model_config()
+        init_app_state(engine_client, model_config, app.state, args)
 
         protocol = "https" if args.ssl_certfile else "http"
         root_path = args.root_path.rstrip("/") if args.root_path else ""
         host_name = args.host if args.host else "localhost"
         port_str = str(args.port)
+
+        app.state.model_is_loaded = True
 
 
         if SERVE_KOBOLD_LITE_UI:
@@ -1156,7 +1206,6 @@ async def run_server(args, **uvicorn_kwargs) -> None:
 
         shutdown_task = await serve_http(
             app,
-            engine=async_engine_client,
             host=args.host,
             port=args.port,
             log_level=args.uvicorn_log_level,
@@ -1180,4 +1229,5 @@ if __name__ == "__main__":
         description="Aphrodite OpenAI-Compatible RESTful API Server")
     parser = make_arg_parser(parser)
     args = parser.parse_args()
-    asyncio.run(run_server(args))
+
+    uvloop.run(run_server(args))

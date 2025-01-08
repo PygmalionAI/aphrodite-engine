@@ -6,6 +6,7 @@ import enum
 import gc
 import math
 import os
+import random
 import socket
 import subprocess
 import sys
@@ -13,6 +14,7 @@ import tempfile
 import threading
 import uuid
 import warnings
+import weakref
 from asyncio import FIRST_COMPLETED, ensure_future
 from functools import lru_cache, partial, wraps
 from platform import uname
@@ -35,6 +37,7 @@ from typing_extensions import ParamSpec, TypeIs, assert_never
 import aphrodite.common.envs as envs
 from aphrodite.common.logger import enable_trace_function_call
 from aphrodite.distributed import get_tensor_model_parallel_rank
+from aphrodite.platforms import current_platform
 
 # Exception strings for non-implemented encoder/decoder scenarios
 
@@ -72,10 +75,6 @@ STR_NOT_IMPL_ENC_DEC_SPEC_DEC = ("Speculative decoding is not "
                                  "currently supported with encoder/"
                                  "decoder models.")
 
-STR_NOT_IMPL_ENC_DEC_CUDAGRAPH = ("CUDAGraph is not "
-                                  "currently supported with encoder/"
-                                  "decoder models.")
-
 STR_NOT_IMPL_ENC_DEC_BACKEND = ("XFormers is the only backend "
                                 "currently supported with encoder/"
                                 "decoder models.")
@@ -83,6 +82,9 @@ STR_NOT_IMPL_ENC_DEC_BACKEND = ("XFormers is the only backend "
 STR_NOT_IMPL_ENC_DEC_PROMPT_ADAPTER = ("Prompt adapters are not "
                                        "currently supported with encoder/"
                                        "decoder models.")
+
+STR_NOT_IMPL_ENC_DEC_CPU = ("CPU is not currently supported with "
+                            "encoder/decoder models.")
 
 # Efficiently import all enc/dec error strings
 # rather than having to import all of the above
@@ -96,9 +98,9 @@ STR_NOT_IMPL_ENC_DEC_ERR_STRS = {
     "STR_NOT_IMPL_ENC_DEC_PP": STR_NOT_IMPL_ENC_DEC_PP,
     "STR_NOT_IMPL_ENC_DEC_MM": STR_NOT_IMPL_ENC_DEC_MM,
     "STR_NOT_IMPL_ENC_DEC_SPEC_DEC": STR_NOT_IMPL_ENC_DEC_SPEC_DEC,
-    "STR_NOT_IMPL_ENC_DEC_CUDA_GRAPH": STR_NOT_IMPL_ENC_DEC_CUDAGRAPH,
     "STR_NOT_IMPL_ENC_DEC_BACKEND": STR_NOT_IMPL_ENC_DEC_BACKEND,
     "STR_NOT_IMPL_ENC_DEC_PROMPT_ADAPTER": STR_NOT_IMPL_ENC_DEC_PROMPT_ADAPTER,
+    "STR_NOT_IMPL_ENC_DEC_CPU": STR_NOT_IMPL_ENC_DEC_CPU
 }
 
 # Constants related to forcing the attention backend selection
@@ -370,6 +372,21 @@ def get_max_shared_memory_bytes(gpu: int = 0) -> int:
 def get_cpu_memory() -> int:
     """Returns the total CPU memory of the node in bytes."""
     return psutil.virtual_memory().total
+
+def seed_everything(seed: int) -> None:
+    """
+    Set the seed of each random module.
+
+    Loosely based on: https://github.com/Lightning-AI/pytorch-lightning/blob/2.4.0/src/lightning/fabric/utilities/seed.py#L20
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+
+    if current_platform.is_cuda():
+        torch.cuda.manual_seed_all(seed)
+
+    if is_xpu():
+        torch.xpu.manual_seed_all(seed)
 
 
 def random_uuid() -> str:
@@ -837,15 +854,6 @@ def async_tensor_h2d(
     return t.to(device=target_device, non_blocking=True)
 
 
-def maybe_expand_dim(tensor: torch.Tensor,
-                     target_dims: int,
-                     size: int = 1) -> torch.Tensor:
-    """Expand the tensor to the target_dims."""
-    if tensor.ndim < target_dims:
-        tensor = tensor.view(-1, *([size] * (target_dims - tensor.ndim)))
-    return tensor
-
-
 def get_dtype_size(dtype: torch.dtype) -> int:
     """Get the size of the data type in bytes."""
     return torch.tensor([], dtype=dtype).element_size()
@@ -1073,6 +1081,18 @@ def cuda_device_count_stateless() -> int:
     # after https://github.com/pytorch/pytorch/pull/122815 is released.
 
     return _cuda_device_count_stateless(envs.CUDA_VISIBLE_DEVICES)
+
+
+def weak_bind(bound_method: Callable[..., Any], ) -> Callable[..., None]:
+    """Make an instance method that weakly references
+    its associated instance and no-ops once that
+    instance is collected."""
+    ref = weakref.ref(bound_method.__self__)  # type: ignore[attr-defined]
+    unbound = bound_method.__func__  # type: ignore[attr-defined]
+    def weak_bound(*args, **kwargs) -> None:
+        if inst := ref():
+            unbound(inst, *args, **kwargs)
+    return weak_bound
 
 
 #From: https://stackoverflow.com/a/4104188/2749989

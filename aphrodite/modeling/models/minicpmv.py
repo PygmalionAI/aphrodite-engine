@@ -26,24 +26,24 @@ import re
 from array import array
 from functools import partial
 from typing import (Any, Callable, Iterable, List, Mapping, Optional, Tuple,
-                    TypedDict, Union)
+                    TypedDict)
 
-import numpy as np
 import torch
-import torch.nn.functional as F
 import torch.types
 from PIL import Image
 from torch import nn
 from torch.nn.init import trunc_normal_
-from transformers.configuration_utils import PretrainedConfig
+from transformers import PretrainedConfig
 
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
-from aphrodite.common.sequence import IntermediateTensors, SequenceData
-from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
+from aphrodite.common.sequence import (APHRODITE_TOKEN_ID_ARRAY_TYPE,
+                                       IntermediateTensors, SequenceData)
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.layers.linear import ReplicatedLinear
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
+from aphrodite.modeling.layers.resampler import (Resampler2,
+                                                 get_2d_sincos_pos_embed)
 from aphrodite.modeling.layers.sampler import Sampler, SamplerOutput
 from aphrodite.modeling.layers.vocab_parallel_embedding import ParallelLMHead
 from aphrodite.modeling.model_loader.utils import set_default_torch_dtype
@@ -56,7 +56,7 @@ from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
 from aphrodite.multimodal.image import cached_get_image_processor
 from aphrodite.multimodal.utils import cached_get_tokenizer
-from aphrodite.quantization.base_config import QuantizationConfig
+from aphrodite.quantization import QuantizationConfig
 
 from .idefics2_vision_model import Idefics2VisionTransformer
 
@@ -95,101 +95,6 @@ MiniCPMVImageInputs = MiniCPMVImagePixelInputs
 DEFAULT_LN = partial(nn.LayerNorm, eps=1e-6)
 
 
-def get_abs_pos(abs_pos: torch.Tensor, tgt_size: torch.Tensor):
-    # abs_pos: L, C
-    # tgt_size: (H, W)
-    # return: M, C
-    src_size = int(math.sqrt(abs_pos.size(0)))
-    # tgt_size = int(math.sqrt(tgt_size))
-    dtype = abs_pos.dtype
-
-    return (F.interpolate(
-        abs_pos.float().reshape(1, src_size, src_size, -1).permute(0, 3, 1, 2),
-        size=(tgt_size[0], tgt_size[1]),
-        mode="bicubic",
-        align_corners=False,
-    ).permute(0, 2, 3, 1).flatten(0, 2).to(dtype=dtype))
-
-
-# https://github.com/facebookresearch/mae/blob/efb2a8062c206524e35e47d04501ed4f544c0ae8/util/pos_embed.py#L20
-def get_2d_sincos_pos_embed(
-        embed_dim: int,
-        grid_size: Union[int, Tuple[int, int]],
-        cls_token: bool = False,
-        version: Tuple[int, int] = (2, 0),
-):
-    """
-    grid_size: int of the grid height and width
-    return:
-    pos_embed: [grid_size*grid_size, embed_dim] or
-                [1+grid_size*grid_size, embed_dim] (w/ or w/o cls_token)
-    """
-    if isinstance(grid_size, int):
-        grid_h_size, grid_w_size = grid_size, grid_size
-    else:
-        grid_h_size, grid_w_size = grid_size[0], grid_size[1]
-
-    grid_h = np.arange(grid_h_size, dtype=np.float32)
-    grid_w = np.arange(grid_w_size, dtype=np.float32)
-    grid = np.meshgrid(grid_w, grid_h)  # here w goes first
-    grid = np.stack(grid, axis=0)
-
-    if version == (2, 0):
-        grid = grid.reshape([2, 1, grid_h_size, grid_w_size])
-        pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid, version)
-        if cls_token:
-            pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed],
-                                       axis=0)
-    else:
-        pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid, version)
-    return pos_embed
-
-
-def get_2d_sincos_pos_embed_from_grid(embed_dim: int,
-                                      grid: np.ndarray,
-                                      version: Tuple[int, int] = (2, 0)):
-    assert embed_dim % 2 == 0
-
-    # use half of dimensions to encode grid_h
-    emb_h = get_1d_sincos_pos_embed_from_grid(
-        embed_dim // 2, grid[0], version)  # (H*W, D/2) or (H, W, D/2)
-    emb_w = get_1d_sincos_pos_embed_from_grid(
-        embed_dim // 2, grid[1], version)  # (H*W, D/2) or (H, W, D/2)
-
-    if version == (2, 0):
-        emb = np.concatenate([emb_h, emb_w], axis=1)  # (H*W, D)
-    else:
-        emb = np.concatenate([emb_h, emb_w], axis=-1)  # (H, W, D)
-    return emb
-
-
-def get_1d_sincos_pos_embed_from_grid(embed_dim: int,
-                                      pos: np.ndarray,
-                                      version: Tuple[int, int] = (2, 0)):
-    """
-    embed_dim: output dimension for each position
-    pos: a list of positions to be encoded: size (M,) / (H, W)
-    out: (M, D) / (H, W, D)
-    """
-    assert embed_dim % 2 == 0
-    omega = np.arange(embed_dim // 2, dtype=np.float32)
-    omega /= embed_dim / 2.0
-    omega = 1.0 / 10000**omega  # (D/2,)
-
-    if version == (2, 0):
-        pos = pos.reshape(-1)  # (M,)
-        out = np.einsum("m,d->md", pos, omega)  # (M, D/2), outer product
-        emb_sin = np.sin(out)  # (M, D/2)
-        emb_cos = np.cos(out)  # (M, D/2)
-        emb = np.concatenate([emb_sin, emb_cos], axis=1)  # (M, D)
-    else:
-        out = np.einsum("hw,d->hwd", pos, omega)  # (H, W, D/2), outer product
-        emb_sin = np.sin(out)  # (H, W, D/2)
-        emb_cos = np.cos(out)  # (H, W, D/2)
-        emb = np.concatenate([emb_sin, emb_cos], axis=-1)  # (H, W, D)
-    return emb
-
-
 class BaseResampler(nn.Module):
     """
     A 2D perceiver-resampler network with one cross attention layers by
@@ -214,7 +119,6 @@ class BaseResampler(nn.Module):
 
         self.query = nn.Parameter(torch.zeros(self.num_queries, embed_dim))
         trunc_normal_(self.query, std=0.02)
-
         if kv_dim is not None and kv_dim != embed_dim:
             self.kv_proj = ReplicatedLinear(kv_dim, embed_dim, bias=False)
         else:
@@ -223,7 +127,6 @@ class BaseResampler(nn.Module):
                 nn.Identity()(*args, **kwargs),
                 None,
             )
-
         self.attn = nn.MultiheadAttention(embed_dim, num_heads)
         self.ln_q = norm_layer(embed_dim)
         self.ln_kv = norm_layer(embed_dim)
@@ -242,63 +145,6 @@ class BaseResampler(nn.Module):
 
     def _repeat(self, query, N: int):
         return query.unsqueeze(1).repeat(1, N, 1)
-
-
-class Resampler2(BaseResampler):
-
-    def __init__(
-        self,
-        grid_size: int,
-        embed_dim: int,
-        num_heads: int,
-        kv_dim: Optional[int] = None,
-        norm_layer: Callable[[int], nn.LayerNorm] = DEFAULT_LN,
-        adaptive: bool = False,
-    ) -> None:
-        super().__init__(grid_size**2, embed_dim, num_heads, kv_dim,
-                         norm_layer)
-
-        self.adaptive = adaptive
-
-        pos_embed_arr = get_2d_sincos_pos_embed(embed_dim,
-                                                grid_size,
-                                                version=(2, 0))
-        self.pos_embed = nn.Parameter(
-            torch.from_numpy(pos_embed_arr).float()).requires_grad_(False)
-
-        self.apply(self._init_weights)
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        tgt_sizes: torch.Tensor,
-        attn_mask: Optional[torch.Tensor] = None,
-    ):
-        if self.adaptive:
-            pos_embed_arr = get_2d_sincos_pos_embed(self.embed_dim,
-                                                    tgt_sizes,
-                                                    version=(2, 0))
-            pos_embed = torch.from_numpy(pos_embed_arr).to(device=x.device,
-                                                           dtype=x.dtype)
-        else:
-            pos_embed = get_abs_pos(self.pos_embed, tgt_sizes)
-
-        x, _ = self.kv_proj(x)
-        x = self.ln_kv(x).permute(1, 0, 2)
-
-        N = x.shape[1]
-        q = self.ln_q(self.query)
-        out = self.attn(
-            self._repeat(q, N) + self.pos_embed.unsqueeze(1),
-            x + pos_embed.unsqueeze(1),
-            x,
-            attn_mask=attn_mask,
-        )[0]
-        x = out.permute(1, 0, 2)
-
-        x = self.ln_post(x)
-        x = x @ self.proj
-        return x
 
 
 class Resampler2_5(BaseResampler):
@@ -405,7 +251,7 @@ def get_version_by_config(config: PretrainedConfig) -> Tuple[int, ...]:
 
 
 def get_max_minicpmv_image_tokens(ctx: InputContext):
-    hf_config = ctx.get_hf_config(PretrainedConfig)
+    hf_config = ctx.get_hf_config()
     return getattr(hf_config, "query_num", 64)
 
 
@@ -496,6 +342,10 @@ class MiniCPMVBaseModel(nn.Module, SupportsMultiModal):
         quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__()
+        # All MiniCPM-V models disable `tie_word_embeddings` but
+        # `PretrainedConfig.tie_word_embeddings` defaults to True; we cannot
+        # check `tie_word_embeddings` until vLLM integrate MiniCPM-V model
+        # and config class
         self.config = config
         self.multimodal_config = multimodal_config
 
@@ -594,6 +444,7 @@ class MiniCPMVBaseModel(nn.Module, SupportsMultiModal):
             if len(pixel_b) != len(tgt_b):
                 raise ValueError("Inconsistent N lengths, found: "
                                  f"{len(pixel_b)} vs {len(tgt_b)}")
+
             for pixel_n, tgt_n in zip(pixel_b, tgt_b):
                 pixel_values_flat += pixel_n
                 tgt_sizes_flat += tgt_n
@@ -724,7 +575,7 @@ class MiniCPMVBaseModel(nn.Module, SupportsMultiModal):
         raise NotImplementedError
 
 
-class MiniCPMV2(MiniCPMVBaseModel):
+class MiniCPMV2_0(MiniCPMVBaseModel):
 
     def __init__(
         self,
@@ -777,7 +628,8 @@ class MiniCPMV2(MiniCPMVBaseModel):
                 num_heads=embed_dim // 128,
                 grid_size=int(math.sqrt(self.config.query_num)),
                 kv_dim=vision_dim,
-                adaptive=True,
+                adaptive=False,
+                do_post_projection=True,
             )
 
         return resampler
@@ -897,10 +749,7 @@ class MiniCPMV2_5(MiniCPMVBaseModel):
         return "resampler" in name
 
 
-# NOTE: Currently, information about this model is unavailable. We are
-# temporarily using `MiniCPMVQwen2` as it's name. The name may need
-# to be modified in the future.
-class MiniCPMVQwen2(MiniCPMVBaseModel):
+class MiniCPMV2_6(MiniCPMVBaseModel):
 
     def __init__(
         self,
@@ -910,6 +759,7 @@ class MiniCPMVQwen2(MiniCPMVBaseModel):
         quant_config: Optional[QuantizationConfig] = None,
     ):
         super().__init__(config, multimodal_config, cache_config, quant_config)
+        assert self.version == (2, 6)
 
     def init_llm(
         self,
@@ -937,6 +787,7 @@ class MiniCPMVQwen2(MiniCPMVBaseModel):
 
     def init_resampler(self, embed_dim: int, vision_dim: int) -> nn.Module:
         with set_default_torch_dtype(torch.float16):
+            # The resampler in 2.6 remains consistent with the one in 2.5.
             resampler = Resampler2_5(
                 num_queries=self.config.query_num,
                 embed_dim=embed_dim,
@@ -996,6 +847,13 @@ class MiniCPMVQwen2(MiniCPMVBaseModel):
         return "resampler" in name or "vpm" in name
 
 
+_SUPPORT_VERSION = {
+    (2, 0): MiniCPMV2_0,
+    (2, 5): MiniCPMV2_5,
+    (2, 6): MiniCPMV2_6
+}
+
+
 @MULTIMODAL_REGISTRY.register_image_input_mapper()
 @MULTIMODAL_REGISTRY.register_max_image_tokens(get_max_minicpmv_image_tokens)
 @INPUT_REGISTRY.register_dummy_data(dummy_data_for_minicpmv)
@@ -1004,7 +862,7 @@ class MiniCPMV(MiniCPMVBaseModel):
     """
     Different versions of MiniCPMV use different visual encoders and LLMs,
     which is not conducive to the current integration logic of LoRA and
-    bitsandbytes in aphrodite. Therefore, it is necessary to separate them.
+    bitsandbytes in vLLM. Therefore, it is necessary to separate them.
     """
 
     def __new__(
@@ -1023,11 +881,9 @@ class MiniCPMV(MiniCPMVBaseModel):
             version = str(config.version).split(".")
             version = tuple([int(x) for x in version])
         # Dispatch class based on version
-        if version == (2, 0):
-            instance_class = MiniCPMV2
-        elif version == (2, 5):
-            instance_class = MiniCPMV2_5
-        else:
-            instance_class = MiniCPMVQwen2
+        instance_class = _SUPPORT_VERSION.get(version, None)
+        if instance_class is None:
+            raise ValueError(
+                "Currently, MiniCPMV only supports versions 2.0, 2.5, and 2.6")
         return instance_class(config, multimodal_config, cache_config,
                               quant_config)

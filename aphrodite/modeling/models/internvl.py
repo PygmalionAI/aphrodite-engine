@@ -5,6 +5,7 @@
 # Licensed under The MIT License [see LICENSE for details]
 # --------------------------------------------------------
 import itertools
+import re
 from typing import (Iterable, List, Literal, Mapping, Optional, Tuple,
                     TypedDict, Union)
 
@@ -17,6 +18,8 @@ from transformers import PretrainedConfig
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
 from aphrodite.common.sequence import IntermediateTensors
+from aphrodite.common.utils import is_list_of
+from aphrodite.distributed import get_pp_group
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
@@ -95,9 +98,9 @@ def find_closest_aspect_ratio(aspect_ratio, target_ratios, width, height,
     return best_ratio
 
 
-def calculate_num_blocks(orig_width: int, orig_height: int,
-                         min_num: int, max_num: int,
-                         image_size: int) -> Tuple[int, int, int]:
+def calculate_num_blocks(orig_width: int, orig_height: int, min_num: int,
+                         max_num: int, image_size: int,
+                         use_thumbnail: bool) -> Tuple[int, int, int]:
     aspect_ratio = orig_width / orig_height
 
     # calculate the existing image aspect ratio
@@ -115,17 +118,26 @@ def calculate_num_blocks(orig_width: int, orig_height: int,
     target_width = image_size * target_aspect_ratio[0]
     target_height = image_size * target_aspect_ratio[1]
     blocks = target_aspect_ratio[0] * target_aspect_ratio[1]
+    # add thumbnail image if num_blocks > 1
+    if use_thumbnail and blocks > 1:
+        blocks += 1
     return blocks, target_width, target_height
 
 
 # adapted from https://huggingface.co/OpenGVLab/InternVL2-1B
-def dynamic_preprocess(image: Image.Image, min_num: int,
-                       max_num: int, image_size: int,
-                       use_thumbnail: int) -> List[Image.Image]:
+def dynamic_preprocess(image: Image.Image, min_num: int, max_num: int,
+                       image_size: int,
+                       use_thumbnail: bool) -> List[Image.Image]:
     orig_width, orig_height = image.size
 
+    # calculate the number of blocks without thumbnail
     blocks, target_width, target_height = calculate_num_blocks(
-        orig_width, orig_height, min_num, max_num, image_size)
+        orig_width,
+        orig_height,
+        min_num,
+        max_num,
+        image_size,
+        use_thumbnail=False)
     # resize the image
     resized_img = image.resize((target_width, target_height))
     processed_images = []
@@ -186,7 +198,7 @@ def input_processor_for_internvl(ctx: InputContext, llm_inputs: LLMInputs):
         return llm_inputs
 
     model_config = ctx.model_config
-    hf_config = ctx.get_hf_config(PretrainedConfig)
+    hf_config = ctx.get_hf_config()
     vision_config = hf_config.vision_config
 
     image_size = vision_config.image_size
@@ -196,19 +208,25 @@ def input_processor_for_internvl(ctx: InputContext, llm_inputs: LLMInputs):
                                            downsample_ratio)
 
     image_data = multi_modal_data["image"]
+    min_num = hf_config.min_dynamic_patch
+    max_num = hf_config.max_dynamic_patch
+    use_thumbnail = hf_config.use_thumbnail
     if isinstance(image_data, Image.Image):
         width, height = image_data.size
-        min_num = hf_config.min_dynamic_patch
-        max_num = hf_config.max_dynamic_patch
         num_blocks, _, _ = calculate_num_blocks(width, height, min_num,
-                                                max_num, image_size)
-        # add thumbnail image if num_blocks > 1
-        if hf_config.use_thumbnail and num_blocks > 1:
-            num_blocks += 1
-        image_feature_size = num_blocks * num_patches
-
+                                                max_num, image_size,
+                                                use_thumbnail)
+        image_feature_size = [num_blocks * num_patches]
+    elif is_list_of(image_data, Image.Image):
+        image_feature_size = []
+        for image in image_data:
+            width, height = image.size
+            num_blocks, _, _ = calculate_num_blocks(width, height, min_num,
+                                                    max_num, image_size,
+                                                    use_thumbnail)
+            image_feature_size.append(num_blocks * num_patches)
     elif isinstance(image_data, torch.Tensor):
-        image_feature_size = image_data.shape[0]
+        num_images, image_feature_size, hidden_size = image_data.shape
     else:
         raise TypeError(f"Invalid image type: {type(image_data)}")
 
@@ -219,8 +237,13 @@ def input_processor_for_internvl(ctx: InputContext, llm_inputs: LLMInputs):
     prompt_token_ids = llm_inputs["prompt_token_ids"]
     if prompt is None:
         prompt = tokenizer.decode(prompt_token_ids)
-    image_prompt = IMG_START + IMG_CONTEXT * image_feature_size + IMG_END
-    new_prompt = prompt.replace('<image>', image_prompt, 1)
+    new_prompt = prompt
+    image_idx = sorted(map(int, re.findall(r"Image-(\d+): <image>\n", prompt)))
+    for idx, feature_size in enumerate(image_feature_size, start=1):
+        image_prompt = IMG_START + IMG_CONTEXT * feature_size + IMG_END
+        if not image_idx:
+            image_prompt = f"Image-{idx}: {image_prompt}"
+        new_prompt = new_prompt.replace('<image>', image_prompt, 1)
     new_prompt_token_ids = tokenizer.encode(new_prompt)
 
     return LLMInputs(prompt=prompt,
@@ -244,6 +267,15 @@ def input_mapper_for_internvl(ctx: InputContext, data: object):
                                      use_thumbnail=use_thumbnail)
         # Add an N dimension for number of images per prompt (currently 1).
         data = data.unsqueeze(0)
+    elif is_list_of(data, Image.Image):
+        # we can't stack here because the images may have different num_patches
+        data = [
+            image_to_pixel_values(img,
+                                  image_size,
+                                  min_num,
+                                  max_num,
+                                  use_thumbnail=use_thumbnail) for img in data
+        ]
     model_config = ctx.model_config
     tokenizer = cached_get_tokenizer(model_config.tokenizer,
                                      trust_remote_code=True)
@@ -339,6 +371,8 @@ class InternVLChatModel(nn.Module, SupportsMultiModal):
             nn.Linear(llm_hidden_size, llm_hidden_size))
 
         self.img_context_token_id = None
+        self.make_empty_intermediate_tensors = (
+            self.language_model.make_empty_intermediate_tensors)
 
     def pixel_shuffle(self, x, scale_factor=0.5):
         n, w, h, c = x.size()
@@ -412,11 +446,12 @@ class InternVLChatModel(nn.Module, SupportsMultiModal):
             if not isinstance(pixel_values, (torch.Tensor, list)):
                 raise ValueError("Incorrect type of pixel values. "
                                  f"Got type: {type(pixel_values)}")
-
+            # We need to flatten (B, N, P) to (B*N*P),
+            # so we call flatten_bn twice.
             return InternVLImagePixelInputs(
                 type="pixel_values",
                 data=self._validate_pixel_values(
-                    flatten_bn(pixel_values, concat=True).flatten(0, 1)),
+                    flatten_bn(flatten_bn(pixel_values), concat=True)),
             )
 
         raise AssertionError("This line should be unreachable.")
@@ -444,7 +479,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal):
         **kwargs: object,
     ) -> SamplerOutput:
         image_input = self._parse_and_validate_image_input(**kwargs)
-        if image_input is not None:
+        if image_input is not None and get_pp_group().is_first_rank:
             inputs_embeds = self.language_model.model.get_input_embeddings(
                 input_ids)
             vision_embeddings = self._process_image_input(image_input)
@@ -459,7 +494,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal):
                                                   positions,
                                                   kv_caches,
                                                   attn_metadata,
-                                                  None,
+                                                  intermediate_tensors,
                                                   inputs_embeds=inputs_embeds)
         return hidden_states
 

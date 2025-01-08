@@ -2,8 +2,8 @@ import argparse
 import dataclasses
 import json
 from dataclasses import dataclass
-from typing import (TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Type,
-                    Union)
+from typing import (TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple,
+                    Type, Union)
 
 from loguru import logger
 
@@ -25,6 +25,16 @@ if TYPE_CHECKING:
 
 
 APHRODITE_USE_RAY_SPMD_WORKER = envs.APHRODITE_USE_RAY_SPMD_WORKER
+
+DEVICE_OPTIONS = [
+    "auto",
+    "cuda",
+    "neuron",
+    "cpu",
+    "openvino",
+    "tpu",
+    "xpu",
+]
 
 def nullable_kvs(val: str) -> Optional[Mapping[str, int]]:
     if len(val) == 0:
@@ -114,7 +124,7 @@ class EngineArgs:
     # Scheduler Options
     use_v2_block_manager: bool = False
     scheduler_delay_factor: float = 0.0
-    enable_chunked_prefill: bool = False
+    enable_chunked_prefill: Optional[bool] = None
     guided_decoding_backend: str = 'lm-format-enforcer'
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: int = 256
@@ -150,6 +160,7 @@ class EngineArgs:
     # Log Options
     disable_log_stats: bool = False
     disable_async_output_proc: bool = False
+    override_neuron_config: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if self.tokenizer is None:
@@ -267,10 +278,12 @@ class EngineArgs:
         parser.add_argument("--max-seq-len-to-capture",
                             type=int,
                             default=EngineArgs.max_seq_len_to_capture,
-                            help="Category: Model Options\n"
-                            "Maximum sequence length covered by CUDA "
-                            "graphs. When a sequence has context length "
-                            "larger than this, we fall back to eager mode.")
+                            help='Maximum sequence length covered by CUDA '
+                            'graphs. When a sequence has context length '
+                            'larger than this, we fall back to eager mode. '
+                            'Additionally for encoder-decoder models, if the '
+                            'sequence length of the encoder input is larger '
+                            'than this, we fall back to the eager mode.')
         parser.add_argument('--rope-scaling',
                             default=None,
                             type=json.loads,
@@ -356,9 +369,7 @@ class EngineArgs:
             "--device",
             type=str,
             default=EngineArgs.device,
-            choices=[
-                "auto", "cuda", "neuron", "cpu", "openvino", "tpu", "xpu"
-            ],
+            choices=DEVICE_OPTIONS,
             help=("Category: Model Options\n"
                   "Device to use for model execution."),
         )
@@ -869,6 +880,15 @@ class EngineArgs:
             default=EngineArgs.disable_async_output_proc,
             help="Disable async output processing. THis may result in "
             "lower performance.")
+        parser.add_argument(
+            '--override-neuron-config',
+            type=lambda configs: {
+                str(key): value
+                for key, value in
+                (config.split(':') for config in configs.split(','))
+            },
+            default=None,
+            help="override or set neuron device configuration.")
 
         return parser
 
@@ -935,7 +955,15 @@ class EngineArgs:
             limit_mm_per_prompt=self.limit_mm_per_prompt,
             use_async_output_proc=not self.disable_async_output_proc,
             config_format=self.config_format,
+            override_neuron_config=self.override_neuron_config
         )
+
+        if model_config.is_multimodal_model:
+            if self.enable_prefix_caching:
+                logger.warning(
+                    "--enable-prefix-caching is currently not "
+                    "supported for multimodal models and has been disabled.")
+            self.enable_prefix_caching = False
 
         cache_config = CacheConfig(
             block_size=self.block_size if self.device != "neuron" else
@@ -970,7 +998,9 @@ class EngineArgs:
             # If not explicitly set, enable chunked prefill by default for
             # long context (> 32K) models. This is to avoid OOM errors in the
             # initial memory profiling phase.
-            if use_long_context:
+            # Chunked prefill is currently disabled for multimodal models by
+            # default.
+            if use_long_context and not model_config.is_multimodal_model:
                 is_gpu = device_config.device_type == "cuda"
                 use_sliding_window = (model_config.get_sliding_window()
                                       is not None)
@@ -981,7 +1011,6 @@ class EngineArgs:
                 if (is_gpu and not use_sliding_window and not use_spec_decode
                         and not self.enable_lora
                         and not self.enable_prompt_adapter
-                        and not self.enable_prefix_caching
                         and not has_seqlen_agnostic_layers):
                     self.enable_chunked_prefill = True
                     logger.warning(
@@ -1061,6 +1090,7 @@ class EngineArgs:
             delay_factor=self.scheduler_delay_factor,
             enable_chunked_prefill=self.enable_chunked_prefill,
             embedding_mode=model_config.embedding_mode,
+            is_multimodal_model=model_config.is_multimodal_model,
             preemption_mode=self.preemption_mode,
             num_scheduler_steps=self.num_scheduler_steps,
             send_delta_data=(APHRODITE_USE_RAY_SPMD_WORKER and
@@ -1125,7 +1155,6 @@ class EngineArgs:
 class AsyncEngineArgs(EngineArgs):
     """Arguments for asynchronous Aphrodite engine."""
 
-    engine_use_ray: bool = False
     disable_log_requests: bool = False
     uvloop: bool = False
 
@@ -1134,10 +1163,6 @@ class AsyncEngineArgs(EngineArgs):
                      async_args_only: bool = False) -> FlexibleArgumentParser:
         if not async_args_only:
             parser = EngineArgs.add_cli_args(parser)
-        parser.add_argument('--engine-use-ray',
-                            action='store_true',
-                            help='Use Ray to start the LLM engine in a '
-                            'separate process as the server process.')
         parser.add_argument('--disable-log-requests',
                             action='store_true',
                             help='Disable logging requests.')

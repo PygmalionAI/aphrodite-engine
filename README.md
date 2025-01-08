@@ -7,9 +7,9 @@ Breathing Life into Language
 
 Aphrodite is the official backend engine for PygmalionAI. It is designed to serve as the inference endpoint for the PygmalionAI website, and to allow serving Hugging Face-compatible models to a large number of users with blazing fast speeds (thanks to vLLM's Paged Attention).
 
-Aphrodite builds upon and integrates the exceptional work from [various projects](#acknowledgements).
+Aphrodite builds upon and integrates the exceptional work from [various projects](#acknowledgements), primarily [vLLM](https://vllm.ai).
 
-The compute necessary for Aphrodite's development is provided by [Arc Compute](https://www.arccompute.io).
+**Aphrodite is developed in collaboration with [Ruliad](https://ruliad.co).**
 
 
 ## 🔥 News
@@ -68,10 +68,8 @@ This will pull the Aphrodite Engine image (~8GiB download), and launch the engin
 
 ## Requirements
 
-- Operating System: Linux (or WSL for Windows)
+- Operating System: Linux, Windows (Needs building from source)
 - Python: 3.8 to 3.12
-
-For windows users, it's recommended to use [tabbyAPI](https://github.com/theroyallab/tabbyAPI) instead, if you do not need batching support.
 
 #### Build Requirements:
 - CUDA >= 11
@@ -83,7 +81,7 @@ For supported devices, see [here](https://aphrodite.pygmalion.chat/pages/quantiz
 
 ### Notes
 
-1. By design, Aphrodite takes up 90% of your GPU's VRAM. If you're not serving an LLM at scale, you may want to limit the amount of memory it takes up. You can do this in the API example by launching the server with the `--gpu-memory-utilization 0.6` (0.6 means 60%).
+1. By design, Aphrodite takes up 90% of your GPU's VRAM. If you're not serving an LLM at scale, you may want to limit the amount of memory it takes up. You can do this in the API example by launching the server with the `--gpu-memory-utilization 0.6` (0.6 means 60%), or `--single-user-mode` to only allocate as much memory as needed for a single sequence.
 
 2. You can view the full list of commands by running `aphrodite run --help`.
 

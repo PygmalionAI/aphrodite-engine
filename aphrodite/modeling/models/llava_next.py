@@ -82,17 +82,19 @@ def _get_llava_next_num_unpadded_features(
     current_height = npatches * num_patch_height
     current_width = npatches * num_patch_width
 
-    aspect_ratio = original_width / original_height
+    original_aspect_ratio = original_width / original_height
     current_aspect_ratio = current_width / current_height
 
-    if aspect_ratio > current_aspect_ratio:
-        new_height = (original_height * current_width) // original_width
+    if original_aspect_ratio > current_aspect_ratio:
+        scale_factor = current_width / original_width
+        new_height = int(original_height * scale_factor)
         padding = (current_height - new_height) // 2
-        current_height -= padding * 2
+        current_height -= 2 * padding
     else:
-        new_width = (original_width * current_height) // original_height
+        scale_factor = current_height / original_height
+        new_width = int(original_width * scale_factor)
         padding = (current_width - new_width) // 2
-        current_width -= padding * 2
+        current_width -= 2 * padding
 
     unpadded_features = current_height * current_width
     newline_features = current_height
@@ -228,7 +230,9 @@ def input_processor_for_llava_next(ctx: InputContext, llm_inputs: LLMInputs):
             for img in image_data
         ]
     elif isinstance(image_data, torch.Tensor):
-        image_feature_size = image_data.shape[0]
+        num_images, image_feature_size, hidden_size = image_data.shape
+    elif is_list_of(image_data, torch.Tensor):
+        image_feature_size = [item.shape[1] for item in image_data]
     else:
         raise TypeError(f"Invalid image type: {type(image_data)}")
 

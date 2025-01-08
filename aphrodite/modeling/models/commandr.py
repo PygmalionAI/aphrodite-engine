@@ -46,6 +46,8 @@ from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import QuantizationConfig
 
+from .interfaces import SupportsLoRA
+
 
 @torch.compile
 def layer_norm_func(hidden_states, weight, variance_epsilon):
@@ -291,7 +293,7 @@ class CohereModel(nn.Module):
         return hidden_states
 
 
-class CohereForCausalLM(nn.Module):
+class CohereForCausalLM(nn.Module, SupportsLoRA):
 
     packed_modules_mapping = {
         "qkv_proj": [

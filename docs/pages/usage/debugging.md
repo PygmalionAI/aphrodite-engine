@@ -28,7 +28,7 @@ Set these environment variables:
 
 ***
 
-If your instance crashes and the error trace shows somewhere around `self.graph.replay()` in `aphrodite/task_handler/model_runner.py`, then it's very likely a CUDA error inside the CUDAGraph. To know the particular operation that causes the error, you can add `--enforce-eager` in the CLI, `- enforce_eager: true` in the YAML config, or `enforce_eager=True` in the `LLM` class. This will disable CUDAGraph optimization, which might make it easier to find the root cause.
+If your instance crashes and the error trace shows somewhere around `self.graph.replay()` in `aphrodite/worker/model_runner.py`, then it's very likely a CUDA error inside the CUDAGraph. To know the particular operation that causes the error, you can add `--enforce-eager` in the CLI, `- enforce_eager: true` in the YAML config, or `enforce_eager=True` in the `LLM` class. This will disable CUDAGraph optimization, which might make it easier to find the root cause.
 
 Here's some other common issues that might cause freezes:
 

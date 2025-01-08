@@ -13,7 +13,7 @@ from aphrodite.spec_decode.interfaces import (SpeculativeProposals,
                                               SpeculativeScorer,
                                               SpeculativeScores)
 from aphrodite.spec_decode.util import nvtx_range, split_batch_by_proposal_len
-from aphrodite.task_handler.worker_base import WorkerBase
+from aphrodite.worker.worker_base import WorkerBase
 
 SeqId = int
 TargetSeqId = int

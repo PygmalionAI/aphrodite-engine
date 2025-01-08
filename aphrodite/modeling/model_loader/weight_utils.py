@@ -184,9 +184,15 @@ def get_quant_config(model_config: ModelConfig,
     quant_config_file = quant_config_files[0]
     with open(quant_config_file, "r") as f:
         config = json.load(f)
-
         if model_config.quantization == "bitsandbytes":
             config["adapter_name_or_path"] = model_name_or_path
+        elif model_config.quantization == "modelopt":
+            if config["producer"]["name"] == "modelopt":
+                return quant_cls.from_config(config)
+            else:
+                raise ValueError(
+                    f"Unsupported quantization config"
+                    f" found for {model_config.quantization} in {f}.")
 
     return quant_cls.from_config(config)
 
@@ -226,7 +232,8 @@ def download_weights_from_hf(
             if len(matching) > 0:
                 allow_patterns = [pattern]
                 break
-    rank = get_tensor_model_parallel_rank()
+    rank = (get_tensor_model_parallel_rank() if
+            torch.distributed.is_initialized() else 0)
     if rank == 0:
         logger.info(f"Using model weights format {allow_patterns}")
     # Use file lock to prevent multiple processes from

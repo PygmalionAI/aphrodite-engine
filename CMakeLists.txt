@@ -231,8 +231,12 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     FetchContent_Declare(
           cutlass
           GIT_REPOSITORY https://github.com/nvidia/cutlass.git
-          # CUTLASS 3.5.1
-          GIT_TAG 06b21349bcf6ddf6a1686a47a137ad1446579db9 
+          GIT_TAG v3.5.1
+          GIT_PROGRESS TRUE
+          # Speed up CUTLASS download by retrieving only the specified GIT_TAG instead of the history.
+          # Important: If GIT_SHALLOW is enabled then GIT_TAG works only with branch names and tags.
+          # So if the GIT_TAG above is updated to a commit hash, GIT_SHALLOW must be set to FALSE
+          GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(cutlass)
 
@@ -310,6 +314,11 @@ define_gpu_extension_target(
   USE_SABI 3
   WITH_SOABI)
 
+# If CUTLASS is compiled on NVCC >= 12.5, it by default uses 
+# cudaGetDriverEntryPointByVersion as a wrapper to avoid directly calling the 
+# driver API. This causes problems when linking with earlier versions of CUDA.
+# Setting this variable sidesteps the issue by calling the driver directly.
+target_compile_definitions(_C PRIVATE CUTLASS_ENABLE_DIRECT_CUDA_DRIVER_CALL=1)
 #
 # _moe_C extension
 #
@@ -333,10 +342,35 @@ define_gpu_extension_target(
   USE_SABI 3
   WITH_SOABI)
 
+
+if(APHRODITE_GPU_LANG STREQUAL "HIP")
+  #
+  # _rocm_C extension
+  #
+  set(APHRODITE_ROCM_EXT_SRC
+    "kernels/rocm/torch_bindings.cpp"
+    "kernels/rocm/attention.cu")
+  define_gpu_extension_target(
+    _rocm_C
+    DESTINATION aphrodite
+    LANGUAGE ${APHRODITE_GPU_LANG}
+    SOURCES ${APHRODITE_ROCM_EXT_SRC}
+    COMPILE_FLAGS ${APHRODITE_GPU_FLAGS}
+    ARCHITECTURES ${APHRODITE_GPU_ARCHES}
+    USE_SABI 3
+    WITH_SOABI)
+endif()
+
+
 if(APHRODITE_GPU_LANG STREQUAL "CUDA" OR APHRODITE_GPU_LANG STREQUAL "HIP")
   message(STATUS "Enabling C extension.")
   add_dependencies(default _C)
 
   message(STATUS "Enabling moe extension.")
   add_dependencies(default _moe_C)
+endif()
+
+if(APHRODITE_GPU_LANG STREQUAL "HIP")
+  message(STATUS "Enabling rocm extension.")
+  add_dependencies(default _rocm_C)
 endif()

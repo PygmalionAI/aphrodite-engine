@@ -121,7 +121,8 @@ class WorkerMonitor(threading.Thread):
                     logger.error(f"Worker {process.name} pid {process.pid} "
                                  f"died, exit code: {process.exitcode}")
             # Cleanup any remaining workers
-            logger.info("Killing local Aphrodite worker processes")
+            if logger:
+                logger.info("Killing local Aphrodite worker processes")
             for worker in self.workers:
                 worker.kill_worker()
             # Must be done after worker task queues are all closed
@@ -142,7 +143,7 @@ class WorkerMonitor(threading.Thread):
 
 
 class ProcessWorkerWrapper:
-    """Local process wrapper for aphrodite.task_handler.Worker,
+    """Local process wrapper for aphrodite.worker.Worker,
     for handling single-node multi-GPU tensor parallel."""
 
     def __init__(self, result_handler: ResultHandler,
@@ -168,6 +169,8 @@ class ProcessWorkerWrapper:
         self.tasks[task_id] = future
         try:
             self._task_queue.put((task_id, method, args, kwargs))
+        except SystemExit:
+            raise
         except BaseException as e:
             del self.tasks[task_id]
             raise ChildProcessError("worker died") from e
@@ -222,6 +225,10 @@ def _run_worker_process(
             try:
                 executor = getattr(worker, method)
                 output = executor(*args, **kwargs)
+            except SystemExit:
+                raise
+            except KeyboardInterrupt:
+                break
             except BaseException as e:
                 tb = traceback.format_exc()
                 logger.error(f"Exception in worker {process_name} while "
