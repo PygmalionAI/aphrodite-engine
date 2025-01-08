@@ -1,12 +1,10 @@
 import itertools
-from array import array
 from typing import List
 
 import pytest
 import torch
 
-from aphrodite.common.sequence import (APHRODITE_TOKEN_ID_ARRAY_TYPE,
-                                       SamplingParams, SequenceData,
+from aphrodite.common.sequence import (SamplingParams, SequenceData,
                                        SequenceGroupMetadata)
 from aphrodite.common.utils import is_cpu, make_tensor_with_pad
 from aphrodite.engine.args_tools import EngineArgs
@@ -120,12 +118,10 @@ def test_prepare_prompt(batch_size):
         # make sure all tokens fit into one block
         seq_len = i % (model_runner.block_size - 1) + 1
         seq_lens.append(seq_len)
-        seq_data = SequenceData(array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
-                                      range(seq_len)))
+        seq_data = SequenceData.from_seqs(range(seq_len))
         encoder_seq_len = (i + 1) % (model_runner.block_size - 1) + 1
         encoder_seq_lens.append(encoder_seq_len)
-        encoder_seq_data = SequenceData(
-            array(APHRODITE_TOKEN_ID_ARRAY_TYPE, range(encoder_seq_len)))
+        encoder_seq_data = SequenceData.from_seqs(range(encoder_seq_len))
         seq_group_metadata = SequenceGroupMetadata(
             request_id=f"test_{i}",
             is_prompt=True,
@@ -318,11 +314,9 @@ def test_prepare_decode(batch_size, multiple_seqs_per_seq_group):
     for i in range(batch_size):
         # make sure all tokens fit into one block
         seq_len = i % (model_runner.block_size - 1) + 1
-        seq_data = SequenceData(
-            array(APHRODITE_TOKEN_ID_ARRAY_TYPE, (range(seq_len))))
+        seq_data = SequenceData.from_seqs(range(seq_len))
         encoder_seq_len = (i + 1) % (model_runner.block_size - 1) + 1
-        encoder_seq_data = SequenceData(
-            array(APHRODITE_TOKEN_ID_ARRAY_TYPE, (range(encoder_seq_len))))
+        encoder_seq_data = SequenceData.from_seqs(range(encoder_seq_len))
 
         seq_group_metadata = SequenceGroupMetadata(
             request_id=f"test_{i}",
@@ -524,11 +518,9 @@ def test_prepare_decode_cuda_graph(batch_size, multiple_seqs_per_seq_group):
     for i in range(batch_size):
         # make sure all tokens fit into one block
         seq_len = i % (model_runner.block_size - 1) + 1
-        seq_data = SequenceData(
-            array(APHRODITE_TOKEN_ID_ARRAY_TYPE, (range(seq_len))))
+        seq_data = SequenceData.from_seqs(range(seq_len))
         encoder_seq_len = (i + 1) % (model_runner.block_size - 1) + 1
-        encoder_seq_data = SequenceData(
-            array(APHRODITE_TOKEN_ID_ARRAY_TYPE, (range(encoder_seq_len))))
+        encoder_seq_data = SequenceData.from_seqs(range(encoder_seq_len))
         seq_group_metadata = SequenceGroupMetadata(
             request_id=f"test_{i}",
             is_prompt=False,
