@@ -42,8 +42,10 @@ def test_models(
     with hf_runner(model, dtype=dtype) as hf_model:
         hf_outputs = hf_model.generate_greedy(example_prompts, max_tokens)
 
-    with aphrodite_runner(model, dtype=dtype, enforce_eager=True) as aphrodite_model:
-        aphrodite_outputs = aphrodite_model.generate_greedy(example_prompts, max_tokens)
+    with aphrodite_runner(model, dtype=dtype,
+                          enforce_eager=True) as aphrodite_model:
+        aphrodite_outputs = aphrodite_model.generate_greedy(
+            example_prompts, max_tokens)
 
     check_outputs_equal(
         outputs_0_lst=hf_outputs,
@@ -60,7 +62,8 @@ def test_model_print(
     model: str,
     dtype: str,
 ) -> None:
-    with aphrodite_runner(model, dtype=dtype, enforce_eager=True) as aphrodite_model:
+    with aphrodite_runner(
+        model, dtype=dtype, enforce_eager=True) as aphrodite_model:
         # This test is for verifying whether the model's extra_repr
         # can be printed correctly.
         print(aphrodite_model.model.llm_engine.model_executor.driver_worker.

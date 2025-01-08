@@ -6,10 +6,10 @@ import torch.types
 from PIL import Image
 from transformers import BatchEncoding
 
+from aphrodite.common.sequence import SampleLogprobs
 from aphrodite.multimodal.utils import rescale_image_size
-from aphrodite.sequence import SampleLogprobs
 
-from ....conftest import IMAGE_ASSETS, HfRunner, AphroditeRunner
+from ....conftest import IMAGE_ASSETS, AphroditeRunner, HfRunner
 from ...utils import check_logprobs_close
 
 # The image token is placed before "user" on purpose so that the test can pass

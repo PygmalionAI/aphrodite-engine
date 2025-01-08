@@ -164,7 +164,8 @@ def run_multi_audio_test(
 def test_models(hf_runner, aphrodite_runner, audio, dtype: str, max_tokens: int,
                 num_logprobs: int) -> None:
 
-    aphrodite_prompt = _get_prompt(1, "Describe the audio above.", APHRODITE_PLACEHOLDER)
+    aphrodite_prompt = _get_prompt(
+        1, "Describe the audio above.", APHRODITE_PLACEHOLDER)
     hf_prompt = _get_prompt(1, "Describe the audio above.", HF_PLACEHOLDER)
     run_test(
         hf_runner,

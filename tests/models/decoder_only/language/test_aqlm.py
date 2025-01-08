@@ -59,7 +59,8 @@ def test_models(
 
     # loop through the prompts to compare against the ground truth generations
     for prompt_idx in range(len(example_prompts)):
-        aphrodite_output_ids, aphrodite_output_str, aphrodite_logprobs = aphrodite_outputs[
+        (aphrodite_output_ids, aphrodite_output_str,
+        aphrodite_logprobs) = aphrodite_outputs[
             prompt_idx]
 
         print("Prompt:          ", repr(example_prompts[prompt_idx]))

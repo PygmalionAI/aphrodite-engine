@@ -4,12 +4,12 @@ import pytest
 from transformers import (AutoConfig, AutoModelForVision2Seq, AutoTokenizer,
                           BatchEncoding)
 
+from aphrodite.common.sequence import SampleLogprobs
+from aphrodite.common.utils import STR_DTYPE_TO_TORCH_DTYPE
 from aphrodite.multimodal.utils import rescale_image_size
-from aphrodite.sequence import SampleLogprobs
-from aphrodite.utils import STR_DTYPE_TO_TORCH_DTYPE
 
-from ....conftest import (IMAGE_ASSETS, HfRunner, PromptImageInput, AphroditeRunner,
-                          _ImageAssets)
+from ....conftest import (IMAGE_ASSETS, AphroditeRunner, HfRunner,
+                          PromptImageInput, _ImageAssets)
 from ...utils import check_logprobs_close
 
 _LIMIT_IMAGE_PER_PROMPT = 4

@@ -3,9 +3,9 @@ from typing import List, Optional, Tuple, Type
 import pytest
 from transformers import AutoConfig, AutoModelForVision2Seq, AutoTokenizer
 
-from aphrodite.sequence import SampleLogprobs
+from aphrodite.common.sequence import SampleLogprobs
 
-from ....conftest import IMAGE_ASSETS, HfRunner, AphroditeRunner, _ImageAssets
+from ....conftest import IMAGE_ASSETS, AphroditeRunner, HfRunner, _ImageAssets
 from ...utils import check_logprobs_close
 
 HF_IMAGE_PROMPTS = IMAGE_ASSETS.prompts({

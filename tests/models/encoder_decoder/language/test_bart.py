@@ -1,4 +1,5 @@
-"""Compare the outputs of HF and Aphrodite for BART models using greedy sampling.
+"""Compare the outputs of HF and Aphrodite for BART models using greedy
+sampling.
 
 Run `pytest tests/models/encoder_decoder/language/test_bart.py`.
 """
@@ -50,8 +51,8 @@ if not is_cpu():
         distributed_executor_backend: Optional[str] = None,
     ) -> None:
         '''
-        Test the Aphrodite BART model for a variety of encoder/decoder input prompts,
-        by validating it against HuggingFace (HF) BART.
+        Test the Aphrodite BART model for a variety of encoder/decoder input
+        prompts, by validating it against HuggingFace (HF) BART.
 
         Arguments:
 
@@ -87,20 +88,21 @@ if not is_cpu():
           then (4) after computing logits during prefill, override the model
           logits & force <BOS> to be the first generated token.
         
-        * Aphrodite will (1) tokenize the None prompt as [<BOS>], (2) append decoder-
-          start-token to the beginning, yielding [<decoder-start-token><BOS>],
-          (3) pass these tokens to the model & proceed with generation.
+        * Aphrodite will (1) tokenize the None prompt as [<BOS>], (2) append
+          <decoder-start-token> to the beginning, yielding
+          [<decoder-start-token><BOS>], (3) pass these tokens to the model &
+          proceed with generation.
         
-        The net effect is that compared to Aphrodite, the list of HF *decoded* tokens
-        will contain one more initial <BOS> than the Aphrodite generated tokens,
-        because Aphrodite's <BOS> token is injected into the prompt rather than into
-        the generated output. This is in spite of the fact that overall, the
-        complete sequences (prompt + decoded tokens) produced by Aphrodite will match
-        HF.
+        The net effect is that compared to Aphrodite, the list of HF *decoded*
+        tokens will contain one more initial <BOS> than the Aphrodite generated
+        tokens, because Aphrodite's <BOS> token is injected into the prompt
+        rather than into the generated output. This is in spite of the fact
+        that overall, the complete sequences (prompt + decoded tokens) produced
+        by Aphrodite will match HF.
         
-        So when we use HF decoded token output to validate Aphrodite's decoded token
-        output, the testing process must account for the difference in decoded
-        token sequences between Aphrodite and HF specifically in the
+        So when we use HF decoded token output to validate Aphrodite's decoded
+        token output, the testing process must account for the difference in
+        decoded token sequences between Aphrodite and HF specifically in the
         decoder-prompt-is-None case. 
         
         One option is to disable the logit processor feature that forces the
@@ -126,19 +128,21 @@ if not is_cpu():
         # for encoder/decoder models Aphrodite will
         # default to enforce_eager=True if enforce_eager
         # is left unspecified. However, the
-        # AphroditeRunner test fixture (which wraps around the LLM class) defaults to
-        # enforce_eager=False (a behavior which a number of already-exisitng
-        # decoder-only unit tests expect), so when testing an encoder/decoder
-        # model we must explicitly specify enforce_eager=True in the AphroditeRunner
-        # constructor.
+        # AphroditeRunner test fixture (which wraps around the LLM class)
+        # defaults to enforce_eager=False (a behavior which a number of
+        # already-exisitng decoder-only unit tests expect), so when testing
+        # an encoder/decoder model we must explicitly specify enforce_eager=True
+        # in the AphroditeRunner constructor.
         with aphrodite_runner(
                 model,
                 dtype=dtype,
                 tensor_parallel_size=tensor_parallel_size,
                 distributed_executor_backend=distributed_executor_backend,
                 enforce_eager=True) as aphrodite_model:
-            aphrodite_outputs = aphrodite_model.generate_encoder_decoder_greedy_logprobs(
-                prompts, max_tokens, num_logprobs)
+            aphrodite_outputs = (
+                aphrodite_model.generate_encoder_decoder_greedy_logprobs(
+                    prompts, max_tokens, num_logprobs)
+            )
 
         # Configuration settings for HF baseline
         hf_kwargs = {
@@ -181,7 +185,8 @@ if not is_cpu():
     @pytest.mark.parametrize("max_tokens", [64])
     @pytest.mark.parametrize("num_logprobs", [5])
     @pytest.mark.parametrize("decoder_prompt_type", list(DecoderPromptType))
-    def test_models(hf_runner, aphrodite_runner, example_encoder_decoder_prompts,
+    def test_models(hf_runner, aphrodite_runner,
+                    example_encoder_decoder_prompts,
                     model, dtype, max_tokens, num_logprobs,
                     decoder_prompt_type) -> None:
 

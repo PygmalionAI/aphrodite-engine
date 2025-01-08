@@ -26,15 +26,18 @@ def test_models(
         hf_outputs = hf_model.generate_greedy(example_prompts, max_tokens)
 
     with aphrodite_runner(model, dtype=dtype) as aphrodite_model:
-        aphrodite_outputs = aphrodite_model.generate_greedy(example_prompts, max_tokens)
+        aphrodite_outputs = aphrodite_model.generate_greedy(
+            example_prompts, max_tokens)
 
     for i in range(len(example_prompts)):
         hf_output_ids, hf_output_str = hf_outputs[i]
         aphrodite_output_ids, aphrodite_output_str = aphrodite_outputs[i]
         assert hf_output_str == aphrodite_output_str, (
-            f"Test{i}:\nHF: {hf_output_str!r}\nAPHRODITE: {aphrodite_output_str!r}")
+            f"Test{i}:\nHF: {hf_output_str!r}\nAPHRODITE: "
+            f"{aphrodite_output_str!r}")
         assert hf_output_ids == aphrodite_output_ids, (
-            f"Test{i}:\nHF: {hf_output_ids}\nAPHRODITE: {aphrodite_output_ids}")
+            f"Test{i}:\nHF: {hf_output_ids}\nAPHRODITE: "
+            f"{aphrodite_output_ids}")
 
 
 @pytest.mark.parametrize("model", MODELS)
@@ -113,7 +116,8 @@ def test_models_preemption_recompute(
 
         aphrodite_model.model.llm_engine.scheduler[
             0].ENABLE_ARTIFICIAL_PREEMPT = False
-        aphrodite_outputs = aphrodite_model.generate_greedy(example_prompts, max_tokens)
+        aphrodite_outputs = aphrodite_model.generate_greedy(
+            example_prompts, max_tokens)
 
     check_outputs_equal(
         outputs_0_lst=preempt_aphrodite_outputs,
@@ -138,7 +142,11 @@ def test_fail_upon_inc_requests_and_finished_requests_lt_available_blocks(
     # statelessness mechanism where it can cleanup new incoming requests in
     # a single step.
     try:
-        with aphrodite_runner(model, dtype=dtype, max_num_seqs=10) as aphrodite_model:
+        with aphrodite_runner(
+            model,
+            dtype=dtype,
+            max_num_seqs=10,
+        ) as aphrodite_model:
             aphrodite_model.generate_greedy([example_prompts[0]] * 100, 10)
     except ValueError:
         pytest.fail("Jamba inner state wasn't cleaned up properly between"
