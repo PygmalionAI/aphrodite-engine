@@ -5,7 +5,7 @@ Breathing Life into Language
 
 ![aphrodite](https://raw.githubusercontent.com/PygmalionAI/aphrodite-engine/main/assets/aphrodite.png)
 
-Aphrodite is the official backend engine for PygmalionAI. It is designed to serve as the inference endpoint for the PygmalionAI website, and to allow serving Hugging Face-compatible models to a large number of users with blazing fast speeds (thanks to vLLM's Paged Attention).
+Aphrodite is an inference engine that optimizes the serving of HuggingFace-compatible models at scale. Built on vLLM's Paged Attention technology, it delivers high-performance model inference for multiple concurrent users. Developed through a collaboration between [PygmalionAI](https://pygmalion.chat) and [Ruliad](https://ruliad.co), Aphrodite serves as the backend engine powering both organizations' chat platforms and API infrastructure.
 
 Aphrodite builds upon and integrates the exceptional work from [various projects](#acknowledgements), primarily [vLLM](https://vllm.ai).
 
@@ -22,9 +22,10 @@ Aphrodite builds upon and integrates the exceptional work from [various projects
 - Continuous Batching
 - Efficient K/V management with [PagedAttention](https://vllm.ai) from vLLM
 - Optimized CUDA kernels for improved inference
-- Quantization support via AQLM, AWQ, Bitsandbytes, GGUF, GPTQ, QuIP#, Smoothquant+, SqueezeLLM, Marlin, FP2-FP12
+- Quantization support via AQLM, AWQ, Bitsandbytes, GGUF, GPTQ, QuIP#, Smoothquant+, SqueezeLLM, Marlin, FP2-FP12, and more
 - Distributed inference
-- 8-bit KV Cache for higher context lengths and throughput, at both FP8 E5M3 and E4M3 formats.
+- 8-bit KV Cache for higher context lengths and throughput, at both FP8 E5M3 and E4M3 formats
+- Support for modern samplers such as DRY, XTC, and more
 
 
 ## Quickstart
