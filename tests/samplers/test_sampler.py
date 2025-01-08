@@ -1,6 +1,5 @@
 import itertools
 import random
-from array import array
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 from unittest.mock import Mock, patch
@@ -12,7 +11,6 @@ from transformers import GenerationConfig, GenerationMixin
 from aphrodite.common.sequence import (SamplingParams, SequenceData,
                                        SequenceGroupMetadata)
 from aphrodite.common.utils import Counter, is_pin_memory_available
-from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.modeling.layers.sampler import Sampler
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.utils import set_random_seed
@@ -60,10 +58,7 @@ def _do_sample(
             SequenceGroupMetadata(
                 request_id=f"test_{i}",
                 is_prompt=True,
-                seq_data={
-                    0: SequenceData(array(
-                        APHRODITE_TOKEN_ID_ARRAY_TYPE, [1, 2, 3]))
-                },
+                seq_data={0: SequenceData.from_seqs([1, 2, 3])},
                 sampling_params=sampling_params,
                 block_tables={0: [1]},
             ))
@@ -207,9 +202,8 @@ def test_sampler_min_tokens_penalty(seed: int, device: str):
         return sampling_params
 
     def create_sequence_data(num_input=3, num_generated=0):
-        seq_data = SequenceData(
-            array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
-                  random.choices(range(0, VOCAB_SIZE), k=num_input)))
+        seq_data = SequenceData.from_seqs(
+            random.choices(range(0, VOCAB_SIZE), k=num_input))
         if num_generated > 0:
             seq_data.output_token_ids = random.choices(range(0, VOCAB_SIZE),
                                                        k=num_generated)
@@ -512,10 +506,7 @@ def test_sampler_mixed(seed: int, device: str):
             SequenceGroupMetadata(
                 request_id=f"test_{i}",
                 is_prompt=True,
-                seq_data={
-                    0: SequenceData(array(
-                        APHRODITE_TOKEN_ID_ARRAY_TYPE, [1, 2, 3]))
-                },
+                seq_data={0: SequenceData.from_seqs([1, 2, 3])},
                 sampling_params=sampling_params,
                 block_tables={0: [1]},
             ))
@@ -620,10 +611,7 @@ def test_sampler_top_k_top_p(seed: int, device: str):
             SequenceGroupMetadata(
                 request_id=f"test_{i}",
                 is_prompt=True,
-                seq_data={
-                    0: SequenceData(array(
-                        APHRODITE_TOKEN_ID_ARRAY_TYPE, [1, 2, 3]))
-                },
+                seq_data={0: SequenceData.from_seqs([1, 2, 3])},
                 sampling_params=SamplingParams(
                     temperature=1,
                     top_k=top_k,
@@ -673,11 +661,7 @@ def test_sampler_repetition_penalty_mixed(device: str):
                 SequenceGroupMetadata(
                     request_id=f"test_{i}",
                     is_prompt=True,
-                    seq_data={
-                        0:
-                        SequenceData(array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
-                                           [1, 2, 3]))
-                    },
+                    seq_data={0: SequenceData.from_seqs([1, 2, 3])},
                     sampling_params=sampling_params[i],
                     block_tables={0: [1]},
                 ))
@@ -818,8 +802,7 @@ def test_sampler_dry(device: str):
                     request_id=f"test_{i}",
                     is_prompt=True,
                     seq_data={
-                        0: SequenceData(array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
-                                            [1, 2, 3, 1, 2]))
+                        0: SequenceData.from_seqs([1, 2, 3, 1, 2])
                     },
                     sampling_params=sampling_params[i],
                     block_tables={0: [1]},
@@ -899,10 +882,7 @@ def test_sampler_dry_sequence_breakers(device: str):
     seq_group_metadata = SequenceGroupMetadata(
         request_id="test_0",
         is_prompt=True,
-        seq_data={
-            0: SequenceData(array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
-                                  input_sequence))
-        },
+        seq_data={0: SequenceData.from_seqs(input_sequence)},
         sampling_params=SamplingParams(
             temperature=0.0,
             dry_multiplier=1.0,
