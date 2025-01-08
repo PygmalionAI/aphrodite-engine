@@ -1,5 +1,4 @@
 import functools
-from array import array
 from collections import UserDict
 from dataclasses import dataclass
 from typing import (TYPE_CHECKING, Any, Callable, Dict, Mapping, Optional,
@@ -9,8 +8,6 @@ from loguru import logger
 from torch import nn
 from transformers import PretrainedConfig
 from typing_extensions import TypeVar
-
-from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 
 from .data import LLMInputs
 
@@ -121,8 +118,7 @@ class InputRegistry:
         # Avoid circular import
         from aphrodite.common.sequence import SequenceData
 
-        dummy_seq_data = SequenceData(
-            array(APHRODITE_TOKEN_ID_ARRAY_TYPE, [0]) * seq_len)
+        dummy_seq_data = SequenceData.from_counts({0: seq_len})
         dummy_multi_modal_data = None
 
         return dummy_seq_data, dummy_multi_modal_data
