@@ -4,11 +4,11 @@ from typing import List, Optional, Tuple, Type
 import pytest
 from transformers import AutoConfig, AutoModelForVision2Seq, AutoTokenizer
 
+from aphrodite.common.sequence import SampleLogprobs
+from aphrodite.common.utils import is_hip
 from aphrodite.multimodal.utils import rescale_image_size
-from aphrodite.sequence import SampleLogprobs
-from aphrodite.utils import is_hip
 
-from ....conftest import IMAGE_ASSETS, HfRunner, AphroditeRunner, _ImageAssets
+from ....conftest import IMAGE_ASSETS, AphroditeRunner, HfRunner, _ImageAssets
 from ...utils import check_logprobs_close
 
 HF_IMAGE_PROMPTS = IMAGE_ASSETS.prompts({
@@ -24,7 +24,7 @@ models = ["google/paligemma-3b-mix-224"]
 # excessive use of shared memory. Use other backends in the meantime.
 # FIXME (mattwong, gshtrasb, hongxiayan)
 if is_hip():
-    os.environ["Aphrodite_USE_TRITON_FLASH_ATTN"] = "0"
+    os.environ["APHRODITE_USE_TRITON_FLASH_ATTN"] = "0"
 
 
 def aphrodite_to_hf_output(aphrodite_output: Tuple[List[int], str,

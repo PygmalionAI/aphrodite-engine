@@ -1,6 +1,7 @@
-"""Compare the outputs of HF and Aphrodite for Mistral models using greedy sampling.
+"""Compare the outputs of HF and Aphrodite for Mistral models using greedy
+sampling.
 
-Run `pytest tests/models/test_mistral.py`.
+Run `pytest tests/models/decoder_only/vision_language/test_pixtral.py`.
 """
 import json
 import uuid

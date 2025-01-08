@@ -38,7 +38,7 @@ from aphrodite.engine.output_processor.util import (
 from aphrodite.executor.executor_base import ExecutorBase
 from aphrodite.executor.ray_utils import initialize_ray_cluster
 from aphrodite.inputs import (INPUT_REGISTRY, EncoderDecoderLLMInputs,
-                              InputRegistry, LLMInputs, PromptInputs)
+                              InputRegistry, LLMInputs, PromptType)
 from aphrodite.inputs.preprocess import InputPreprocessor
 from aphrodite.lora.request import LoRARequest
 from aphrodite.modeling.layers.sampler import SamplerOutput
@@ -613,7 +613,7 @@ class AphroditeEngine:
     def add_request(
         self,
         request_id: str,
-        inputs: PromptInputs,
+        prompt: PromptType,
         params: Union[SamplingParams, PoolingParams],
         arrival_time: Optional[float] = None,
         lora_request: Optional[LoRARequest] = None,
@@ -627,8 +627,9 @@ class AphroditeEngine:
 
         Args:
             request_id: The unique ID of the request.
-            prompt: The prompt string. Can be None if prompt_token_ids is
-                provided.
+            prompt: The prompt to the LLM. See
+                :class:`~aphrodite.common.inputs.PromptType`
+                for more details about the format of each input.
             params: Parameters for sampling or pooling. SamplingParams
                 for text generation. PoolingParams for pooling.
             prompt_token_ids: The token IDs of the prompt. If None, we
@@ -669,7 +670,7 @@ class AphroditeEngine:
             arrival_time = time.time()
 
         preprocessed_inputs = self.input_preprocessor.preprocess(
-            inputs,
+            prompt,
             request_id=request_id,
             lora_request=lora_request,
             prompt_adapter_request=prompt_adapter_request,

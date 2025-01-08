@@ -1,6 +1,7 @@
-"""Compare the outputs of HF and Aphrodite for Mistral models using greedy sampling.
+"""Compare the outputs of HF and Aphrodite for Mistral models using greedy
+sampling.
 
-Run `pytest tests/models/test_llama_embedding.py`.
+Run `pytest tests/models/embedding/language/test_embedding.py`.
 """
 import pytest
 import torch

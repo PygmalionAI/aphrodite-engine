@@ -5,11 +5,12 @@ from typing import List, Optional, Tuple, Type
 import pytest
 from transformers import AutoTokenizer
 
+from aphrodite.common.sequence import SampleLogprobs
+from aphrodite.common.utils import is_cpu, is_hip
 from aphrodite.multimodal.utils import rescale_image_size
-from aphrodite.sequence import SampleLogprobs
-from aphrodite.utils import is_cpu, is_hip
 
-from ....conftest import IMAGE_ASSETS, HfRunner, PromptImageInput, AphroditeRunner
+from ....conftest import (IMAGE_ASSETS, AphroditeRunner, HfRunner,
+                          PromptImageInput)
 from ...utils import check_logprobs_close
 
 HF_IMAGE_PROMPTS = IMAGE_ASSETS.prompts({

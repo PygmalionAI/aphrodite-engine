@@ -2,11 +2,11 @@ from typing import List, Optional, Tuple, Type
 
 import pytest
 
-from aphrodite.multimodal.utils import rescale_image_size
 from aphrodite.common.sequence import SampleLogprobs
 from aphrodite.common.utils import is_cpu
+from aphrodite.multimodal.utils import rescale_image_size
 
-from ....conftest import IMAGE_ASSETS, HfRunner, AphroditeRunner, _ImageAssets
+from ....conftest import IMAGE_ASSETS, AphroditeRunner, HfRunner, _ImageAssets
 from ...utils import check_logprobs_close
 
 HF_IMAGE_PROMPTS = IMAGE_ASSETS.prompts({
@@ -97,7 +97,8 @@ def run_test(
         check_logprobs_close(
             outputs_0_lst=hf_outputs,
             outputs_1_lst=[
-                aphrodite_to_hf_output(aphrodite_output) for aphrodite_output in aphrodite_outputs
+                aphrodite_to_hf_output(
+                    aphrodite_output) for aphrodite_output in aphrodite_outputs
             ],
             name_0="hf",
             name_1="aphrodite",

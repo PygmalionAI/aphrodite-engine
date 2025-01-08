@@ -1,4 +1,5 @@
-"""Compare the outputs of HF and Aphrodite for Granite models using greedy sampling.
+"""Compare the outputs of HF and Aphrodite for Granite models using greedy
+sampling.
 
 Run `pytest tests/models/test_granite.py`.
 """

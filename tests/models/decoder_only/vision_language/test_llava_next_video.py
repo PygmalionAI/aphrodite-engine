@@ -4,11 +4,11 @@ import pytest
 import transformers
 from transformers import AutoConfig, AutoModelForVision2Seq, AutoTokenizer
 
+from aphrodite.common.sequence import SampleLogprobs
 from aphrodite.multimodal.utils import (rescale_video_size, resize_video,
-                                   sample_frames_from_video)
-from aphrodite.sequence import SampleLogprobs
+                                        sample_frames_from_video)
 
-from ....conftest import VIDEO_ASSETS, HfRunner, AphroditeRunner, _VideoAssets
+from ....conftest import VIDEO_ASSETS, AphroditeRunner, HfRunner, _VideoAssets
 from ...utils import check_logprobs_close
 
 _PREFACE = (
@@ -217,8 +217,8 @@ def test_models(hf_runner, aphrodite_runner, video_assets, model, size_factors,
 @pytest.mark.parametrize("max_tokens", [128])
 @pytest.mark.parametrize("num_logprobs", [5])
 @pytest.mark.parametrize("num_frames", [16])
-def test_models_fixed_sizes(hf_runner, aphrodite_runner, video_assets, model, sizes,
-                            dtype, max_tokens, num_logprobs,
+def test_models_fixed_sizes(hf_runner, aphrodite_runner, video_assets, model,
+                            sizes, dtype, max_tokens, num_logprobs,
                             num_frames) -> None:
     run_test(
         hf_runner,
