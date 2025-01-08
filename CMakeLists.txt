@@ -343,6 +343,31 @@ define_gpu_extension_target(
   WITH_SOABI)
 
 
+#
+# _aphrodite_flash_attn_C extension
+#
+
+if(APHRODITE_GPU_LANG STREQUAL "CUDA")
+    file(GLOB APHRODITE_FLASH_ATTN_EXT_SRC 
+        "kernels/flash_attn/*.cu"
+        "kernels/flash_attn/*.cpp"
+    )
+else()
+    set(APHRODITE_FLASH_ATTN_EXT_SRC)
+endif()
+
+define_gpu_extension_target(
+  _aphrodite_flash_attn_C
+  DESTINATION aphrodite
+  LANGUAGE ${APHRODITE_GPU_LANG}
+  SOURCES ${APHRODITE_FLASH_ATTN_EXT_SRC}
+  COMPILE_FLAGS ${APHRODITE_GPU_FLAGS}
+  ARCHITECTURES ${APHRODITE_GPU_ARCHES}
+  INCLUDE_DIRECTORIES ${CUTLASS_INCLUDE_DIR}
+  USE_SABI 3
+  WITH_SOABI)
+
+
 if(APHRODITE_GPU_LANG STREQUAL "HIP")
   #
   # _rocm_C extension
@@ -368,6 +393,9 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA" OR APHRODITE_GPU_LANG STREQUAL "HIP")
 
   message(STATUS "Enabling moe extension.")
   add_dependencies(default _moe_C)
+
+  message(STATUS "Enabling flash_attn extension.")
+  add_dependencies(default _aphrodite_flash_attn_C)
 endif()
 
 if(APHRODITE_GPU_LANG STREQUAL "HIP")
