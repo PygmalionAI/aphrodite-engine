@@ -9,8 +9,6 @@ Aphrodite is an inference engine that optimizes the serving of HuggingFace-compa
 
 Aphrodite builds upon and integrates the exceptional work from [various projects](#acknowledgements), primarily [vLLM](https://vllm.ai).
 
-**Aphrodite is developed in collaboration with [Ruliad](https://ruliad.co).**
-
 
 ## 🔥 News
 (09/2024) v0.6.1 is here. You can now load FP16 models in FP2 to FP7 quant formats, to achieve extremely high throughput and save on memory.
