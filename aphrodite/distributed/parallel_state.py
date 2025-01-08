@@ -90,29 +90,39 @@ def _register_group(group: "GroupCoordinator") -> None:
     # looks like Python 3.8 does not understand `ReferenceType`
     _groups[group.unique_name] = weakref.ref(group)  # type: ignore
 
-@torch.library.custom_op("aphrodite::inplace_all_reduce",
-                         mutates_args=["tensor"])
-def inplace_all_reduce(tensor: torch.Tensor, group_name: str) -> None:
-    assert group_name in _groups, f"Group {group_name} is not found."
-    group = _groups[group_name]()
-    if group is None:
-        raise ValueError(f"Group {group_name} is destroyed.")
-    group._all_reduce(tensor)
+# Some backends use pytorch version < 2.4.0 which doesn't
+# support `torch.library.custom_op`.
+def supports_custom_op() -> bool:
+    return hasattr(torch.library, "custom_op")
 
-@inplace_all_reduce.register_fake
-def _(tensor: torch.Tensor, group_name: str) -> None:
-    return
-@torch.library.custom_op("aphrodite::outplace_all_reduce", mutates_args=[])
-def outplace_all_reduce(tensor: torch.Tensor, group_name: str) -> torch.Tensor:
-    assert group_name in _groups, f"Group {group_name} is not found."
-    group = _groups[group_name]()
-    if group is None:
-        raise ValueError(f"Group {group_name} is destroyed.")
-    return group._all_reduce(tensor)
 
-@outplace_all_reduce.register_fake
-def _(tensor: torch.Tensor, group_name: str) -> torch.Tensor:
-    return torch.empty_like(tensor)
+if supports_custom_op():
+
+    @torch.library.custom_op("aphrodite::inplace_all_reduce",
+                             mutates_args=["tensor"])
+    def inplace_all_reduce(tensor: torch.Tensor, group_name: str) -> None:
+        assert group_name in _groups, f"Group {group_name} is not found."
+        group = _groups[group_name]()
+        if group is None:
+            raise ValueError(f"Group {group_name} is destroyed.")
+        group._all_reduce(tensor)
+
+    @inplace_all_reduce.register_fake
+    def _(tensor: torch.Tensor, group_name: str) -> None:
+        return
+
+    @torch.library.custom_op("aphrodite::outplace_all_reduce", mutates_args=[])
+    def outplace_all_reduce(tensor: torch.Tensor,
+                            group_name: str) -> torch.Tensor:
+        assert group_name in _groups, f"Group {group_name} is not found."
+        group = _groups[group_name]()
+        if group is None:
+            raise ValueError(f"Group {group_name} is destroyed.")
+        return group._all_reduce(tensor)
+
+    @outplace_all_reduce.register_fake
+    def _(tensor: torch.Tensor, group_name: str) -> torch.Tensor:
+        return torch.empty_like(tensor)
 
 
 class GroupCoordinator:
@@ -324,6 +334,10 @@ class GroupCoordinator:
         # Bypass the function if we are using only 1 GPU.
         if self.world_size == 1:
             return input_
+
+        if not supports_custom_op():
+            return self._all_reduce(input_)
+
         if self.tpu_communicator is not None and \
             not self.tpu_communicator.disabled:
             # TPU handles Dynamo with its own logic.
