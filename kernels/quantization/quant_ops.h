@@ -84,8 +84,16 @@ torch::Tensor gptq_marlin_repack(torch::Tensor& b_q_weight, torch::Tensor& perm,
                                  int64_t size_k, int64_t size_n,
                                  int64_t num_bits);
 
+torch::Tensor gptq_marlin_repack_meta(torch::Tensor& b_q_weight,
+                                      torch::Tensor& perm, c10::SymInt size_k,
+                                      c10::SymInt size_n, int64_t num_bits);
+
 torch::Tensor awq_marlin_repack(torch::Tensor& b_q_weight, int64_t size_k,
                                 int64_t size_n, int64_t num_bits);
+
+torch::Tensor awq_marlin_repack_meta(torch::Tensor& b_q_weight,
+                                     c10::SymInt size_k, c10::SymInt size_n,
+                                     int64_t num_bits);
 
 torch::Tensor fp8_marlin_gemm(torch::Tensor& a, torch::Tensor& b_q_weight,
                               torch::Tensor& b_scales, torch::Tensor& workspace,
@@ -163,10 +171,12 @@ torch::Tensor fp_eXmY_linear_forward_cuda(int64_t EXPONENT, int64_t MANTISSA,
 #endif
 
 void static_scaled_int8_quant(torch::Tensor& out, torch::Tensor const& input,
-                              torch::Tensor const& scale);
+                              torch::Tensor const& scale,
+                              c10::optional<torch::Tensor> const& azp);
 
 void dynamic_scaled_int8_quant(torch::Tensor& out, torch::Tensor const& input,
-                               torch::Tensor& scales);
+                               torch::Tensor& scales,
+                               c10::optional<torch::Tensor> const& azp);
 
 // SqueezeLLM
 void squeezellm_gemm(torch::Tensor vec, torch::Tensor mat, torch::Tensor mul,

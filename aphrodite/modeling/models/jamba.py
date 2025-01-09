@@ -11,7 +11,7 @@ from transformers import JambaConfig
 from aphrodite.attention.backends.abstract import AttentionMetadata
 from aphrodite.attention.layer import Attention
 from aphrodite.common.config import CacheConfig, LoRAConfig, SchedulerConfig
-from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
+from aphrodite.common.sequence import IntermediateTensors
 # yapf: disable
 from aphrodite.distributed import (get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size)
@@ -28,7 +28,7 @@ from aphrodite.modeling.layers.mamba import (causal_conv1d_fn,
                                              causal_conv1d_update,
                                              selective_scan_fn,
                                              selective_state_update)
-from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.sampler import Sampler, SamplerOutput
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
@@ -37,8 +37,10 @@ from aphrodite.modeling.models.mamba_cache import MambaCacheManager
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import QuantizationConfig
-from aphrodite.task_handler.model_runner import (_BATCH_SIZES_TO_CAPTURE,
-                                                 _get_graph_batch_size)
+from aphrodite.worker.model_runner import (_BATCH_SIZES_TO_CAPTURE,
+                                           _get_graph_batch_size)
+
+from .interfaces import SupportsLoRA
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 
@@ -541,7 +543,7 @@ class JambaModel(nn.Module):
         return hidden_states
 
 
-class JambaForCausalLM(nn.Module, HasInnerState):
+class JambaForCausalLM(nn.Module, HasInnerState, SupportsLoRA):
     packed_modules_mapping = {
         "qkv_proj": [
             "q_proj",
@@ -741,7 +743,7 @@ class JambaForCausalLM(nn.Module, HasInnerState):
                     weight_loader = param.weight_loader
                     weight_loader(param,
                                   loaded_weight,
-                                  weight_name,
+                                  name,
                                   shard_id=shard_id,
                                   expert_id=expert_id)
                     break

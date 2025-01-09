@@ -15,6 +15,7 @@ from aphrodite.common.config import PromptAdapterConfig
 from aphrodite.prompt_adapter.layers import (
     VocabParallelEmbeddingWithPromptAdapter)  # yapf: disable
 from aphrodite.prompt_adapter.layers import PromptAdapterMapping
+from aphrodite.prompt_adapter.utils import load_peft_weights
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,6 @@ class PromptAdapterModel(AdapterModel):
         config: PromptAdapterConfig,
         device: str = "cuda",
     ) -> "PromptAdapterModel":
-        from peft.utils import load_peft_weights
 
         if num_virtual_tokens > config.max_prompt_adapter_token:
             raise ValueError(

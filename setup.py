@@ -58,7 +58,7 @@ embed_commit_hash()
 # cannot import envs directly because it depends on aphrodite,
 #  which is not installed yet
 envs = load_module_from_path('envs', os.path.join(
-    ROOT_DIR, 'aphrodite', 'envs.py'))
+    ROOT_DIR, 'aphrodite', 'common', 'envs.py'))
 
 APHRODITE_TARGET_DEVICE = envs.APHRODITE_TARGET_DEVICE
 
@@ -477,6 +477,9 @@ if _is_cuda() or _is_hip():
 
 if _build_custom_ops():
     ext_modules.append(CMakeExtension(name="aphrodite._C"))
+
+if _is_hip():
+    ext_modules.append(CMakeExtension(name="aphrodite._rocm_C"))
 
 package_data = {
     "aphrodite": [

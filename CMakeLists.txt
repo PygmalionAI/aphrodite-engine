@@ -10,6 +10,9 @@ message(STATUS "Target device: ${APHRODITE_TARGET_DEVICE}")
 
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/utils.cmake)
 
+# Suppress potential warnings about unused manually-specified variables
+set(ignoreMe "${APHRODITE_PYTHON_PATH}")
+
 #
 # Supported python versions.  These versions will be searched in order, the
 # first match will be selected.  These should be kept in sync with setup.py.
@@ -228,8 +231,12 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     FetchContent_Declare(
           cutlass
           GIT_REPOSITORY https://github.com/nvidia/cutlass.git
-          # CUTLASS 3.5.1
-          GIT_TAG 06b21349bcf6ddf6a1686a47a137ad1446579db9 
+          GIT_TAG v3.5.1
+          GIT_PROGRESS TRUE
+          # Speed up CUTLASS download by retrieving only the specified GIT_TAG instead of the history.
+          # Important: If GIT_SHALLOW is enabled then GIT_TAG works only with branch names and tags.
+          # So if the GIT_TAG above is updated to a commit hash, GIT_SHALLOW must be set to FALSE
+          GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(cutlass)
 
@@ -250,35 +257,37 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
   endif()
 
   #
-  # For the Machete kernels we automatically generate sources for various 
-  # preselected input type pairs and schedules.
-  # Generate sources:
-  execute_process(
-    COMMAND ${CMAKE_COMMAND} -E env 
-    PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/kernels/cutlass_extensions/:${CUTLASS_DIR}/python/:${APHRODITE_PYTHON_PATH}:$PYTHONPATH 
-      ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/kernels/quantization/machete/generate.py
-    RESULT_VARIABLE machete_generation_result
-    OUTPUT_VARIABLE machete_generation_output
-    OUTPUT_FILE ${CMAKE_CURRENT_BINARY_DIR}/machete_generation.log
-    ERROR_FILE ${CMAKE_CURRENT_BINARY_DIR}/machete_generation.log
-  )
+  # Machete kernels
 
-  if (NOT machete_generation_result EQUAL 0)
-    message(FATAL_ERROR "Machete generation failed."
-                        " Result: \"${machete_generation_result}\"" 
-                        "\nCheck the log for details: "
-                        "${CMAKE_CURRENT_BINARY_DIR}/machete_generation.log")
-  else()
-    message(STATUS "Machete generation completed successfully.")
-  endif()
-
-  # Add machete generated sources
-  file(GLOB MACHETE_GEN_SOURCES "kernels/quantization/machete/generated/*.cu")
-  list(APPEND APHRODITE_EXT_SRC ${MACHETE_GEN_SOURCES})
-  message(STATUS "Machete generated sources: ${MACHETE_GEN_SOURCES}")
-
-  # See comment above for scaled_mm_c3x (same if condition)
+  # The machete kernels only work on hopper and require CUDA 12.0 or later.
   if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER 12.0)
+    #
+    # For the Machete kernels we automatically generate sources for various 
+    # preselected input type pairs and schedules.
+    # Generate sources:
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} -E env 
+      PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/kernels/cutlass_extensions/:${CUTLASS_DIR}/python/:${APHRODITE_PYTHON_PATH}:$PYTHONPATH 
+        ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/kernels/quantization/machete/generate.py
+      RESULT_VARIABLE machete_generation_result
+      OUTPUT_VARIABLE machete_generation_output
+      OUTPUT_FILE ${CMAKE_CURRENT_BINARY_DIR}/machete_generation.log
+      ERROR_FILE ${CMAKE_CURRENT_BINARY_DIR}/machete_generation.log
+    )
+    if (NOT machete_generation_result EQUAL 0)
+      message(FATAL_ERROR "Machete generation failed."
+                          " Result: \"${machete_generation_result}\"" 
+                          "\nCheck the log for details: "
+                          "${CMAKE_CURRENT_BINARY_DIR}/machete_generation.log")
+    else()
+      message(STATUS "Machete generation completed successfully.")
+    endif()
+
+    # Add machete generated sources
+    file(GLOB MACHETE_GEN_SOURCES "kernels/quantization/machete/generated/*.cu")
+    list(APPEND APHRODITE_EXT_SRC ${MACHETE_GEN_SOURCES})
+    message(STATUS "Machete generated sources: ${MACHETE_GEN_SOURCES}")
+
     set_source_files_properties(
           ${MACHETE_GEN_SOURCES}
           PROPERTIES
@@ -286,7 +295,9 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA")
           "-gencode arch=compute_90a,code=sm_90a")
   endif()
 
-  # Add pytorch binding
+  # Add pytorch binding for machete (add on even CUDA < 12.0 so that we can
+  #  raise an error if the user that this was built with an incompatible 
+  #  CUDA version)
   list(APPEND APHRODITE_EXT_SRC
     kernels/quantization/machete/machete_pytorch.cu)
 endif()
@@ -303,6 +314,11 @@ define_gpu_extension_target(
   USE_SABI 3
   WITH_SOABI)
 
+# If CUTLASS is compiled on NVCC >= 12.5, it by default uses 
+# cudaGetDriverEntryPointByVersion as a wrapper to avoid directly calling the 
+# driver API. This causes problems when linking with earlier versions of CUDA.
+# Setting this variable sidesteps the issue by calling the driver directly.
+target_compile_definitions(_C PRIVATE CUTLASS_ENABLE_DIRECT_CUDA_DRIVER_CALL=1)
 #
 # _moe_C extension
 #
@@ -310,6 +326,11 @@ define_gpu_extension_target(
 set(APHRODITE_MOE_EXT_SRC
   "kernels/moe/torch_bindings.cpp"
   "kernels/moe/softmax.cu")
+
+if(APHRODITE_GPU_LANG STREQUAL "CUDA")
+  list(APPEND APHRODITE_MOE_EXT_SRC
+      "kernels/moe/marlin_moe_ops.cu")
+endif()
 
 define_gpu_extension_target(
   _moe_C
@@ -321,10 +342,35 @@ define_gpu_extension_target(
   USE_SABI 3
   WITH_SOABI)
 
+
+if(APHRODITE_GPU_LANG STREQUAL "HIP")
+  #
+  # _rocm_C extension
+  #
+  set(APHRODITE_ROCM_EXT_SRC
+    "kernels/rocm/torch_bindings.cpp"
+    "kernels/rocm/attention.cu")
+  define_gpu_extension_target(
+    _rocm_C
+    DESTINATION aphrodite
+    LANGUAGE ${APHRODITE_GPU_LANG}
+    SOURCES ${APHRODITE_ROCM_EXT_SRC}
+    COMPILE_FLAGS ${APHRODITE_GPU_FLAGS}
+    ARCHITECTURES ${APHRODITE_GPU_ARCHES}
+    USE_SABI 3
+    WITH_SOABI)
+endif()
+
+
 if(APHRODITE_GPU_LANG STREQUAL "CUDA" OR APHRODITE_GPU_LANG STREQUAL "HIP")
   message(STATUS "Enabling C extension.")
   add_dependencies(default _C)
 
   message(STATUS "Enabling moe extension.")
   add_dependencies(default _moe_C)
+endif()
+
+if(APHRODITE_GPU_LANG STREQUAL "HIP")
+  message(STATUS "Enabling rocm extension.")
+  add_dependencies(default _rocm_C)
 endif()

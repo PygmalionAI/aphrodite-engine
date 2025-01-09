@@ -30,14 +30,14 @@ from transformers.activations import ReLUSquaredActivation
 
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig
-from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
+from aphrodite.common.sequence import IntermediateTensors
 from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               QKVParallelLinear,
                                               RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.rotary_embedding import get_rope
-from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.sampler import Sampler, SamplerOutput
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
@@ -213,10 +213,10 @@ class PersimmonModel(nn.Module):
                  cache_config: Optional[CacheConfig] = None,
                  quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
-        self.vocab_size = config.vocab_size
+        self.vocab_size = config.text_config.vocab_size
 
-        self.embed_tokens = VocabParallelEmbedding(config.vocab_size,
-                                                   config.hidden_size)
+        self.embed_tokens = VocabParallelEmbedding(
+            config.text_config.vocab_size, config.hidden_size)
         self.layers = nn.ModuleList([
             PersimmonDecoderLayer(config,
                                   cache_config=cache_config,
@@ -257,14 +257,14 @@ class PersimmonForCausalLM(nn.Module):
                  quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
         self.config = config
-        self.vocab_size = config.vocab_size
+        self.vocab_size = config.text_config.vocab_size
         self.model = PersimmonModel(config,
                                     cache_config=cache_config,
                                     quant_config=quant_config)
-        self.lm_head = ParallelLMHead(config.vocab_size,
+        self.lm_head = ParallelLMHead(config.text_config.vocab_size,
                                       config.hidden_size,
                                       bias=False)
-        self.logits_processor = LogitsProcessor(config.vocab_size)
+        self.logits_processor = LogitsProcessor(config.text_config.vocab_size)
         self.sampler = Sampler()
 
     def forward(

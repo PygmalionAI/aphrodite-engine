@@ -25,14 +25,14 @@ from transformers import BartConfig
 
 from aphrodite.attention import Attention, AttentionMetadata, AttentionType
 from aphrodite.common.config import CacheConfig, LoRAConfig
-from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
+from aphrodite.common.sequence import IntermediateTensors
 from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
                                               QKVParallelLinear,
                                               RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
-from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.sampler import Sampler, SamplerOutput
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
@@ -842,11 +842,13 @@ class BartForConditionalGeneration(nn.Module):
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        encoder_input_ids: torch.Tensor,
-        encoder_positions: torch.Tensor,
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
         intermediate_tensors: Optional[IntermediateTensors] = None,
+        *,
+        encoder_input_ids: torch.Tensor,
+        encoder_positions: torch.Tensor,
+        **kwargs,
     ) -> torch.Tensor:
         r"""
         Args:

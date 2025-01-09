@@ -1,19 +1,28 @@
-from typing import List, Optional, Tuple, Union
+import os
+import time
+from collections import defaultdict
+from typing import Dict, List, Optional, Tuple, Union
 
 import msgspec
+from loguru import logger
 
 from aphrodite.common.config import ParallelConfig
 from aphrodite.common.sequence import ExecuteModelRequest, IntermediateTensors
 from aphrodite.common.utils import get_ip, is_hip, is_xpu
 from aphrodite.executor.msgspec_utils import decode_hook, encode_hook
 from aphrodite.platforms import current_platform
-from aphrodite.task_handler.worker_base import WorkerWrapperBase
+from aphrodite.worker.worker_base import WorkerWrapperBase
+
+PG_WAIT_TIMEOUT = 1800
 
 try:
     import ray
+    from ray._private.state import available_resources_per_node
+    from ray.util import placement_group_table
+    from ray.util.placement_group import PlacementGroup
 
     class RayWorkerWrapper(WorkerWrapperBase):
-        """Ray wrapper for aphrodite.task_handler.Worker, allowing Worker to be
+        """Ray wrapper for aphrodite.worker.Worker, allowing Worker to be
         lazliy initialized after Ray sets CUDA_VISIBLE_DEVICES."""
 
         def __init__(self, *args, **kwargs) -> None:
@@ -72,6 +81,9 @@ try:
                 output = self.output_encoder.encode(output)
             return output
 
+        def override_env_vars(self, vars: Dict[str, str]):
+            os.environ.update(vars)
+
     ray_import_err = None
 
 except ImportError as e:
@@ -90,6 +102,92 @@ def assert_ray_available():
     if ray is None:
         raise ValueError("Failed to import Ray, please install Ray with "
                          "`pip install ray`.") from ray_import_err
+
+
+def _verify_bundles(placement_group: "PlacementGroup",
+                    parallel_config: ParallelConfig, device_str: str):
+    """Verify a given placement group has bundles located in the right place.
+    There are 2 rules.
+    - Warn if all tensor parallel workers cannot fit in a single node.
+    - Fail if driver node is not included in a placement group.
+    """
+    assert ray.is_initialized(), (
+        "Ray is not initialized although distributed-executor-backend is ray.")
+    pg_data = placement_group_table(placement_group)
+    # bundle_idx -> node_id
+    bundle_to_node_ids = pg_data["bundles_to_node_id"]
+    # bundle_idx -> bundle (e.g., {"GPU": 1})
+    bundles = pg_data["bundles"]
+    # node_id -> List of bundle (e.g., {"GPU": 1})
+    node_id_to_bundle: Dict[str, List[Dict[str, float]]] = defaultdict(list)
+    for bundle_idx, node_id in bundle_to_node_ids.items():
+        node_id_to_bundle[node_id].append(bundles[bundle_idx])
+    driver_node_id = ray.get_runtime_context().get_node_id()
+    if driver_node_id not in node_id_to_bundle:
+        raise RuntimeError(
+            f"driver node id {driver_node_id} is not included in a placement "
+            f"group {placement_group.id}. Node id -> bundles "
+            f"{node_id_to_bundle}. "
+            "You don't have enough GPUs available in a current node. Check "
+            "`ray status` to see if you have available GPUs in a node "
+            f"{driver_node_id} before starting an vLLM engine.")
+    for node_id, bundles in node_id_to_bundle.items():
+        if len(bundles) < parallel_config.tensor_parallel_size:
+            logger.warning(
+                f"tensor_parallel_size={parallel_config.tensor_parallel_size} "
+                f"is bigger than a reserved number of {device_str}s "
+                f"({len(bundles)} {device_str}s) in a node {node_id}. "
+                "Tensor parallel workers can be spread out to 2+ nodes which "
+                "can degrade the performance unless you have fast interconnect "
+                "across nodes, like Infiniband. To resolve this issue, make "
+                "sure you have more than "
+                f"than {parallel_config.tensor_parallel_size} GPUs available "
+                "at each node.")
+
+def _wait_until_pg_ready(current_placement_group: "PlacementGroup"):
+    """Wait until a placement group is ready.
+    It prints the informative log messages if the placement group is
+    not created within time.
+    """
+    # Wait until PG is ready - this will block until all
+    # requested resources are available, and will timeout
+    # if they cannot be provisioned.
+    placement_group_specs = current_placement_group.bundle_specs
+    s = time.time()
+    pg_ready_ref = current_placement_group.ready()
+    wait_interval = 10
+    while time.time() - s < PG_WAIT_TIMEOUT:
+        ready, _ = ray.wait([pg_ready_ref], timeout=wait_interval)
+        if len(ready) > 0:
+            break
+        # Exponential backoff for warning print.
+        wait_interval *= 2
+        logger.info(
+            f"Waiting for creating a placement group of specs for "
+            f"{int(time.time() - s)} seconds. specs={placement_group_specs}. "
+            "Check `ray status` to see if you have enough resources.")
+    try:
+        ray.get(pg_ready_ref, timeout=0)
+    except ray.exceptions.GetTimeoutError:
+        raise ValueError(
+            "Cannot provide a placement group of "
+            f"{placement_group_specs=} within {PG_WAIT_TIMEOUT} seconds. See "
+            "`ray status` to make sure the cluster has enough resources."
+        ) from None
+def _wait_until_pg_removed(current_placement_group: "PlacementGroup"):
+    ray.util.remove_placement_group(current_placement_group)
+    s = time.time()
+    wait_interval = 10
+    while time.time() - s < PG_WAIT_TIMEOUT:
+        pg = ray.util.get_current_placement_group()
+        if pg is None:
+            break
+        # Exponential backoff for warning print.
+        wait_interval *= 2
+        logger.info(
+            f"Waiting for removing a placement group of specs for "
+            f"{int(time.time() - s)} seconds.")
+        time.sleep(wait_interval)
 
 
 def initialize_ray_cluster(
@@ -150,15 +248,53 @@ def initialize_ray_cluster(
                 f"The number of required {device_str}s exceeds the total "
                 f"number of available {device_str}s in the placement group.")
         # Create a new placement group
-        placement_group_specs = ([{
-            device_str: 1
-        }] * parallel_config.world_size)
+        placement_group_specs: List[Dict[str, float]] = ([{
+            device_str: 1.0
+        } for _ in range(parallel_config.world_size)])
+        # Aphrodite engine is also a worker to execute model with an accelerator
+        # so it requires to have the device in a current node. Check if
+        # the current node has at least one device.
+        current_ip = get_ip()
+        current_node_id = ray.get_runtime_context().get_node_id()
+        current_node_resource = available_resources_per_node()[current_node_id]
+        if current_node_resource.get(device_str, 0) < 1:
+            raise ValueError(
+                f"Current node has no {device_str} available. "
+                f"{current_node_resource=}. Aphrodite engine cannot start "
+                f"without {device_str}. Make sure you have at least 1 "
+                f"{device_str} available in a node {current_node_id=} "
+                f"{current_ip=}.")
+        # This way, at least bundle is required to be created in a current
+        # node.
+        placement_group_specs[0][f"node:{current_ip}"] = 0.001
+        # By default, Ray packs resources as much as possible.
         current_placement_group = ray.util.placement_group(
-            placement_group_specs)
-        # Wait until PG is ready - this will block until all
-        # requested resources are available, and will timeout
-        # if they cannot be provisioned.
-        ray.get(current_placement_group.ready(), timeout=1800)
+            placement_group_specs, strategy="PACK")
+        _wait_until_pg_ready(current_placement_group)
 
+    assert current_placement_group is not None
+    _verify_bundles(current_placement_group, parallel_config, device_str)
     # Set the placement group in the parallel config
     parallel_config.placement_group = current_placement_group
+
+
+def get_num_tpu_nodes() -> int:
+    from ray._private.accelerators import TPUAcceleratorManager
+    cluster_resources = ray.cluster_resources()
+    total_tpus = int(cluster_resources["TPU"])
+    tpus_per_node = TPUAcceleratorManager.get_current_node_num_accelerators()
+    assert total_tpus % tpus_per_node == 0
+    return total_tpus // tpus_per_node
+
+def get_num_nodes_in_placement_group() -> int:
+    pg_table = ray.util.placement_group_table()
+    current_pg = ray.util.get_current_placement_group()
+    num_nodes = 0
+    if current_pg:
+        nodes_in_pg = set()
+        for pg_key, pg in pg_table.items():
+            if pg_key == current_pg.id.hex():
+                for _, node in pg["bundles_to_node_id"].items():
+                    nodes_in_pg.add(node)
+        num_nodes = len(nodes_in_pg)
+    return num_nodes

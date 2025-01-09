@@ -7,7 +7,7 @@ from typing import Generator, Optional, Type
 import torch
 from loguru import logger
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.attention.backends.abstract import AttentionBackend
 from aphrodite.common.utils import (STR_BACKEND_ENV_VAR, is_cpu, is_hip,
                                     is_openvino, is_xpu)
@@ -235,6 +235,10 @@ def which_attn_to_use(
         elif kv_cache_dtype is not None and kv_cache_dtype.startswith("fp8"):
             logger.info(
                 "Cannot use FlashAttention-2 backend for FP8 KV cache.")
+            logger.warning(
+                "Please use FlashInfer backend with FP8 KV Cache for "
+                "better performance by setting the environment "
+                "variable APHRODITE_ATTENTION_BACKEND=FLASHINFER")
             selected_backend = _Backend.XFORMERS
         elif block_size % 16 != 0:
             logger.info(

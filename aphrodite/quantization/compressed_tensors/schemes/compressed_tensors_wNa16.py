@@ -78,8 +78,8 @@ class CompressedTensorsWNA16(CompressedTensorsScheme):
         kernel_type = choose_mp_linear_kernel(mp_linear_kernel_config)
 
         if kernel_type.__name__ not in self._kernel_backends_being_used:
-            logger.info("Using %s for CompressedTensorsWNA16",
-                        kernel_type.__name__)
+            logger.info(
+                f"Using {kernel_type.__name__} for CompressedTensorsWNA16")
             self._kernel_backends_being_used.add(kernel_type.__name__)
 
         # If group_size is -1, we are in channelwise case.

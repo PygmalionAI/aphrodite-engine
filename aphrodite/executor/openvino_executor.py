@@ -5,13 +5,14 @@ import openvino.properties.hint as hints
 import torch
 from loguru import logger
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.common.config import CacheConfig, ModelConfig
-from aphrodite.common.sequence import ExecuteModelRequest, SamplerOutput
+from aphrodite.common.sequence import ExecuteModelRequest
 from aphrodite.common.utils import (GiB_bytes, get_distributed_init_method,
                                     get_ip, get_open_port, make_async)
 from aphrodite.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from aphrodite.lora.request import LoRARequest
+from aphrodite.modeling.layers.sampler import SamplerOutput
 
 APHRODITE_OPENVINO_KVCACHE_SPACE = envs.APHRODITE_OPENVINO_KVCACHE_SPACE
 APHRODITE_OPENVINO_CPU_KV_CACHE_PRECISION = (
@@ -32,7 +33,7 @@ class OpenVINOExecutor(ExecutorBase):
         self._init_worker()
 
     def _init_worker(self):
-        from aphrodite.task_handler.openvino_worker import OpenVINOWorker
+        from aphrodite.worker.openvino_worker import OpenVINOWorker
 
         assert (
             self.parallel_config.world_size == 1

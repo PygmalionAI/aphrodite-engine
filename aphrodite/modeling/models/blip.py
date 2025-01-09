@@ -12,13 +12,21 @@ from transformers.models.blip.modeling_blip import BlipAttention
 from aphrodite.common.config import ModelConfig
 from aphrodite.common.sequence import SequenceData
 from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
+from aphrodite.distributed import divide, get_tensor_model_parallel_world_size
 from aphrodite.inputs import LLMInputs
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.linear import (ColumnParallelLinear,
+                                              QKVParallelLinear,
                                               RowParallelLinear)
-from aphrodite.multimodal.image import (cached_get_tokenizer,
-                                        repeat_and_pad_image_tokens)
+from aphrodite.multimodal.utils import (cached_get_tokenizer,
+                                        repeat_and_pad_placeholder_tokens)
 from aphrodite.quantization import QuantizationConfig
+
+try:
+    from xformers import ops as xops
+    USE_XFORMERS_OPS = True
+except ImportError:
+    USE_XFORMERS_OPS = False
 
 
 def get_blip_patch_grid_length(*, image_size: int, patch_size: int) -> int:
@@ -98,11 +106,11 @@ def input_processor_for_blip(
     else:
         image_feature_size = image_feature_size_override
 
-    new_prompt, new_token_ids = repeat_and_pad_image_tokens(
+    new_prompt, new_token_ids = repeat_and_pad_placeholder_tokens(
         tokenizer,
         llm_inputs.get("prompt"),
         llm_inputs["prompt_token_ids"],
-        image_token_id=image_token_id,
+        placeholder_token_id=image_token_id,
         repeat_count=image_feature_size,
     )
 
@@ -155,6 +163,71 @@ class BlipVisionEmbeddings(nn.Module):
         return embeddings
 
 
+class BlipParallelAttention(nn.Module):
+    """Multi-headed attention from 'Attention Is All You Need' paper"""
+    def __init__(
+        self,
+        config: BlipVisionConfig,
+        quant_config: Optional[QuantizationConfig] = None,
+    ):
+        super().__init__()
+        self.config = config
+        self.embed_dim = config.hidden_size
+        self.num_heads = config.num_attention_heads
+        self.head_dim = self.embed_dim // self.num_heads
+        if self.head_dim * self.num_heads != self.embed_dim:
+            raise ValueError(
+                "embed_dim must be divisible by num_heads "
+                f"(got `embed_dim`: {self.embed_dim} and `num_heads`:"
+                f" {self.num_heads}).")
+        self.scale = self.head_dim**-0.5
+        self.dropout = config.attention_dropout
+        self.qkv = QKVParallelLinear(
+            self.embed_dim,
+            self.head_dim,
+            self.num_heads,
+            bias=config.qkv_bias,
+            quant_config=quant_config,
+        )
+        self.projection = RowParallelLinear(
+            self.embed_dim,
+            self.embed_dim,
+            quant_config=quant_config,
+        )
+        self.tp_size = get_tensor_model_parallel_world_size()
+        self.num_heads_per_partition = divide(self.num_heads, self.tp_size)
+
+    def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
+        return tensor.view(bsz, seq_len, self.num_heads,
+                           self.head_dim).transpose(1, 2).contiguous()
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+    ):
+        """Input shape: Batch x Time x Channel"""
+        bsz, tgt_len, _ = hidden_states.size()
+        qkv_states, _ = self.qkv(hidden_states)
+        query_states, key_states, value_states = qkv_states.chunk(3, dim=-1)
+        query_states = query_states.view(bsz, tgt_len,
+                                         self.num_heads_per_partition,
+                                         self.head_dim)
+        key_states = key_states.view(bsz, tgt_len,
+                                     self.num_heads_per_partition,
+                                     self.head_dim)
+        value_states = value_states.view(bsz, tgt_len,
+                                         self.num_heads_per_partition,
+                                         self.head_dim)
+        out = xops.memory_efficient_attention_forward(query_states,
+                                                      key_states,
+                                                      value_states,
+                                                      p=self.dropout,
+                                                      scale=self.scale)
+        out = out.view(bsz, tgt_len, -1)
+        attn_output, _ = self.projection(out)
+        return attn_output, None
+
+
 class BlipMLP(nn.Module):
 
     def __init__(self,
@@ -189,7 +262,16 @@ class BlipEncoderLayer(nn.Module):
                  quant_config: Optional[QuantizationConfig] = None):
         super().__init__()
 
-        self.self_attn = BlipAttention(config)
+        # fallback to sdpa attention if tp unavailable
+        num_heads = config.num_attention_heads
+        tp_size = get_tensor_model_parallel_world_size()
+        if USE_XFORMERS_OPS and num_heads % tp_size == 0:
+            self.self_attn = BlipParallelAttention(config,
+                                                   quant_config=quant_config)
+        else:
+            # Blip doesn't have SDPA attention implemented in transformers
+            # use eager attention instead for cpu backend
+            self.self_attn = BlipAttention(config)
         self.layer_norm1 = nn.LayerNorm(config.hidden_size,
                                         eps=config.layer_norm_eps)
         self.mlp = BlipMLP(config, quant_config=quant_config)

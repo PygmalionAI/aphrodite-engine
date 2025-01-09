@@ -31,7 +31,7 @@ from transformers import PretrainedConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig
-from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
+from aphrodite.common.sequence import IntermediateTensors
 from aphrodite.common.utils import print_warning_once
 from aphrodite.distributed import (get_pp_group,
                                    get_tensor_model_parallel_world_size,
@@ -45,7 +45,7 @@ from aphrodite.modeling.layers.linear import (MergedColumnParallelLinear,
                                               RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.rotary_embedding import get_rope
-from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.sampler import Sampler, SamplerOutput
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
@@ -466,7 +466,8 @@ class Qwen2MoeForCausalLM(nn.Module):
                     continue
                 name = name.replace(weight_name, param_name)
                 # Skip loading extra bias for GPTQ models.
-                if name.endswith(".bias") and name not in params_dict:
+                if ((name.endswith(".bias") or name.endswith("_bias"))
+                        and name not in params_dict):
                     continue
                 # Skip layers on other devices.
                 if is_pp_missing_parameter(name, self):
@@ -487,6 +488,10 @@ class Qwen2MoeForCausalLM(nn.Module):
                     # Skip layers on other devices.
                     if is_pp_missing_parameter(name, self):
                         continue
+                    # Skip loading extra bias for GPTQ models.
+                    if ((name.endswith(".bias") or name.endswith("_bias"))
+                            and name not in params_dict):
+                        continue
                     param = params_dict[name]
                     weight_loader = param.weight_loader
                     weight_loader(param,
@@ -497,7 +502,8 @@ class Qwen2MoeForCausalLM(nn.Module):
                     break
                 else:
                     # Skip loading extra bias for GPTQ models.
-                    if name.endswith(".bias") and name not in params_dict:
+                    if ((name.endswith(".bias") or name.endswith("_bias"))
+                            and name not in params_dict):
                         continue
                     # Skip layers on other devices.
                     if is_pp_missing_parameter(name, self):

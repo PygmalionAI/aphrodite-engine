@@ -15,7 +15,7 @@ from rich.markup import escape
 from rich.progress import (BarColumn, MofNCompleteColumn, Progress,
                            TaskProgressColumn, TextColumn, TimeRemainingColumn)
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 
 RICH_CONSOLE = Console()
 LOG_LEVEL = os.getenv("APHRODITE_LOG_LEVEL", "INFO").upper()

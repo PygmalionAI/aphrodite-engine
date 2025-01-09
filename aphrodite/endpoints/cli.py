@@ -1,12 +1,12 @@
 # The CLI entrypoint to Aphrodite.
 import argparse
-import asyncio
 import os
 import signal
 import subprocess
 import sys
 from typing import Optional
 
+import uvloop
 import yaml
 from openai import OpenAI
 
@@ -28,7 +28,7 @@ def serve(args: argparse.Namespace) -> None:
     # EngineArgs expects the model name to be passed as --model.
     args.model = args.model_tag
 
-    asyncio.run(run_server(args))
+    uvloop.run(run_server(args))
 
 
 def interactive_cli(args: argparse.Namespace) -> None:

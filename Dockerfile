@@ -15,6 +15,7 @@ RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
     && echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections \
     && apt-get update -y \
     && apt-get install -y ccache software-properties-common \
+    && apt-get install -y ffmpeg libsm6 libxext6 libgl1 \
     && add-apt-repository ppa:deadsnakes/ppa \
     && apt-get update -y \
     && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv python3-pip \
@@ -35,7 +36,6 @@ WORKDIR /workspace
 
 # install build and runtime dependencies
 COPY requirements-common.txt requirements-common.txt
-COPY requirements-adag.txt requirements-adag.txt
 COPY requirements-cuda.txt requirements-cuda.txt
 RUN pip install packaging wheel
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -69,7 +69,6 @@ COPY setup.py setup.py
 COPY cmake cmake
 COPY CMakeLists.txt CMakeLists.txt
 COPY requirements-common.txt requirements-common.txt
-COPY requirements-adag.txt requirements-adag.txt
 COPY requirements-cuda.txt requirements-cuda.txt
 COPY pyproject.toml pyproject.toml
 COPY aphrodite aphrodite

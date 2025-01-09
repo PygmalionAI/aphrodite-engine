@@ -1,4 +1,3 @@
-from array import array
 from itertools import count
 from typing import Callable, Dict, List, Optional
 from typing import Sequence as GenericSequence
@@ -9,16 +8,16 @@ import torch
 
 from aphrodite.common.sampling_params import SamplingParams
 from aphrodite.common.sequence import (CompletionSequenceGroupOutput, Logprob,
-                                       SamplerOutput, SequenceData,
-                                       SequenceGroupMetadata, SequenceOutput)
+                                       SequenceData, SequenceGroupMetadata,
+                                       SequenceOutput)
 from aphrodite.common.utils import (get_distributed_init_method, get_ip,
                                     get_open_port)
-from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.engine.args_tools import EngineArgs
+from aphrodite.modeling.layers.sampler import SamplerOutput
 from aphrodite.modeling.utils import set_random_seed
-from aphrodite.task_handler.cache_engine import CacheEngine
-from aphrodite.task_handler.model_runner import ModelRunner
-from aphrodite.task_handler.worker import Worker
+from aphrodite.worker.cache_engine import CacheEngine
+from aphrodite.worker.model_runner import ModelRunner
+from aphrodite.worker.worker import Worker
 
 T = TypeVar("T", bound=Worker)
 
@@ -139,12 +138,8 @@ def create_seq_group_metadata_from_prompts(
             request_id=str(i),
             is_prompt=len(cont_token_ids) == 0,
             seq_data={
-                i:
-                SequenceData(
-                    array(APHRODITE_TOKEN_ID_ARRAY_TYPE, prompt_token_ids[:]),
-                    _output_token_ids=array(APHRODITE_TOKEN_ID_ARRAY_TYPE,
-                                            cont_token_ids[:]),
-                ),
+                i: SequenceData.from_seqs(prompt_token_ids[:],
+                                          cont_token_ids[:]),
             },
             sampling_params=SamplingParams(temperature=0.0, ),
             block_tables={i: block_allocations[i][:]},

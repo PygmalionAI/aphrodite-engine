@@ -125,9 +125,10 @@ class GGUFLinearMethod(LinearMethodBase):
                     offset:offset +
                     shard_size[id][0], :shard_size[id][1]].contiguous()
                 qweight_type = layer.qweight_type.shard_weight_type[id]
-                result.append(_fuse_mul_mat(x, shard_weight, qweight_type))
+                result.append(_fuse_mul_mat(x, shard_weight,
+                                            qweight_type).contiguous())
                 offset += shard_size[id][0]
-            out = torch.cat(result, axis=1)
+            out = torch.cat(result, dim=-1)
         else:
             qweight = layer.qweight
             qweight_type = layer.qweight_type.weight_type

@@ -11,8 +11,7 @@ from transformers import ChameleonConfig, ChameleonVQVAEConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
-from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
-                                       SequenceData)
+from aphrodite.common.sequence import IntermediateTensors, SequenceData
 from aphrodite.common.utils import print_warning_once
 from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.distributed import get_tensor_model_parallel_world_size
@@ -24,7 +23,7 @@ from aphrodite.modeling.layers.linear import (MergedColumnParallelLinear,
                                               RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.rotary_embedding import get_rope
-from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.sampler import Sampler, SamplerOutput
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import (
@@ -32,8 +31,8 @@ from aphrodite.modeling.model_loader.weight_utils import (
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
-from aphrodite.multimodal.image import (cached_get_tokenizer,
-                                        repeat_and_pad_image_tokens)
+from aphrodite.multimodal.utils import (cached_get_tokenizer,
+                                        repeat_and_pad_placeholder_tokens)
 from aphrodite.quantization.base_config import QuantizationConfig
 
 from .interfaces import SupportsMultiModal
@@ -51,7 +50,7 @@ CHAMELEON_SEP_TOKEN_ID = 8710
 class ChameleonImagePixelInputs(TypedDict):
     type: Literal["pixel_values"]
     data: torch.Tensor
-    """Shape: `(batch_size, num_channels, height, width)`"""
+    """Shape: `(batch_size * num_images, num_channels, height, width)`"""
 
 
 def get_max_chameleon_image_tokens(ctx: InputContext):
@@ -122,11 +121,11 @@ def input_processor_for_chameleon(ctx: InputContext, llm_inputs: LLMInputs):
 
     model_config = ctx.model_config
     tokenizer = cached_get_tokenizer(model_config.tokenizer)
-    new_prompt, new_token_ids = repeat_and_pad_image_tokens(
+    new_prompt, new_token_ids = repeat_and_pad_placeholder_tokens(
         tokenizer,
         llm_inputs.get("prompt"),
         llm_inputs["prompt_token_ids"],
-        image_token_id=CHAMELEON_IMAGE_TOKEN_ID,
+        placeholder_token_id=CHAMELEON_IMAGE_TOKEN_ID,
         repeat_count=CHAMELEON_IMAGE_SEQ_LENGTH,
         pad_token_left=CHAMELEON_IMAGE_START_TOKEN_ID,
         pad_token_right=CHAMELEON_IMAGE_END_TOKEN_ID,
@@ -943,6 +942,9 @@ class ChameleonForConditionalGeneration(nn.Module, SupportsMultiModal):
         if not isinstance(pixel_values, torch.Tensor):
             raise ValueError("Incorrect type of pixel values. "
                              f"Got type: {type(pixel_values)}")
+
+        # Remove the N dimension until multiple images are supported.
+        pixel_values = pixel_values.squeeze(1)
 
         return ChameleonImagePixelInputs(
             type="pixel_values",

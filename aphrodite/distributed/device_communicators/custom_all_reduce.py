@@ -6,8 +6,8 @@ import torch.distributed as dist
 from loguru import logger
 from torch.distributed import ProcessGroup
 
+import aphrodite.common.envs as envs
 from aphrodite import _custom_ops as ops
-from aphrodite import envs
 from aphrodite.common.utils import cuda_device_count_stateless
 from aphrodite.distributed.device_communicators.custom_all_reduce_utils import (
     gpu_p2p_access_check)
@@ -30,6 +30,12 @@ def _can_p2p(rank: int, world_size: int) -> bool:
         if not gpu_p2p_access_check(rank, i):
             return False
     return True
+
+
+def is_weak_contiguous(inp: torch.Tensor):
+    return inp.is_contiguous() or (inp.storage().nbytes() -
+                                   inp.storage_offset() * inp.element_size()
+                                   == inp.numel() * inp.element_size())
 
 
 class CustomAllreduce:
@@ -230,8 +236,19 @@ class CustomAllreduce:
         ops.register_graph_buffers(self._ptr, handles, offsets)
 
     def should_custom_ar(self, inp: torch.Tensor):
-        return ops.should_custom_ar(inp, self.max_size, self.world_size,
-                                    self.full_nvlink)
+        if self.disabled:
+            return False
+        inp_size = inp.numel() * inp.element_size()
+        # custom allreduce requires input byte size to be multiples of 16
+        if inp_size % 16 != 0:
+            return False
+        if not is_weak_contiguous(inp):
+            return False
+        # for 4 or more non NVLink-capable GPUs, custom allreduce provides
+        # little performance improvement over NCCL.
+        if self.world_size == 2 or self.full_nvlink:
+            return inp_size < self.max_size
+        return False
 
     # all reduce, assuming inp tensor is IPC registered with register_buffer,
     # or, in the context of cuda graphs, register_graph_buffers

@@ -10,7 +10,7 @@ from transformers import MambaConfig
 
 from aphrodite.attention.backends.abstract import AttentionMetadata
 from aphrodite.common.config import CacheConfig, LoRAConfig, SchedulerConfig
-from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
+from aphrodite.common.sequence import IntermediateTensors
 from aphrodite.distributed import (get_tensor_model_parallel_rank,
                                    get_tensor_model_parallel_world_size)
 from aphrodite.modeling.layers.activation import SiluAndMul
@@ -23,7 +23,7 @@ from aphrodite.modeling.layers.mamba.ops.causal_conv1d import (
     causal_conv1d_fn, causal_conv1d_update)
 from aphrodite.modeling.layers.mamba.ops.mamba_ssm import (
     selective_scan_fn, selective_state_update)
-from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.sampler import Sampler, SamplerOutput
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
@@ -32,8 +32,8 @@ from aphrodite.modeling.models.mamba_cache import MambaCacheManager
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import QuantizationConfig
-from aphrodite.task_handler.model_runner import (_BATCH_SIZES_TO_CAPTURE,
-                                                 _get_graph_batch_size)
+from aphrodite.worker.model_runner import (_BATCH_SIZES_TO_CAPTURE,
+                                           _get_graph_batch_size)
 
 KVCache = Tuple[torch.Tensor, torch.Tensor]
 

@@ -1,3 +1,4 @@
+import itertools
 from typing import (Iterable, List, Literal, Mapping, Optional, Tuple,
                     TypedDict, Union)
 
@@ -8,37 +9,34 @@ from transformers import PaliGemmaConfig
 
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
-from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
+from aphrodite.common.sequence import IntermediateTensors
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
-from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.sampler import Sampler, SamplerOutput
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
-from aphrodite.modeling.models.gemma import GemmaModel
+from aphrodite.modeling.models.gemma import GemmaForCausalLM
+from aphrodite.modeling.models.gemma2 import Gemma2ForCausalLM
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
-from aphrodite.multimodal.image import cached_get_tokenizer
+from aphrodite.multimodal.utils import cached_get_tokenizer
 from aphrodite.quantization.base_config import QuantizationConfig
 
 from .interfaces import SupportsMultiModal
 from .siglip import (SiglipVisionModel, dummy_image_for_siglip,
                      dummy_seq_data_for_siglip, get_max_siglip_image_tokens)
-from .utils import merge_multimodal_embeddings
-
-_KEYS_TO_MODIFY_MAPPING = {
-    "language_model.model": "language_model",
-}
+from .utils import filter_weights, merge_multimodal_embeddings
 
 
 class PaliGemmaImagePixelInputs(TypedDict):
     type: Literal["pixel_values"]
     data: torch.Tensor
-    """Shape: (batch_size, num_channels, height, width)"""
+    """Shape: `(batch_size * num_images, num_channels, height, width)`"""
 
 
 class PaliGemmaImageEmbeddingInputs(TypedDict):
     type: Literal["image_embeds"]
     data: torch.Tensor
-    """Shape: `(batch_size, image_feature_size, hidden_size)`
+    """Shape: `(batch_size * num_images, image_feature_size, hidden_size)`
     `hidden_size` must match the hidden size of language model backbone.
     """
 
@@ -105,6 +103,9 @@ def input_processor_for_paligemma(ctx: InputContext, llm_inputs: LLMInputs):
         orig_prompt_ids.remove(hf_config.image_token_index)
 
     new_prompt = f"{image_token_str_pad}{bos_token}{orig_prompt}\n"
+    # The PaliGemma 2 tokenizer does not include a starting BOS token
+    if orig_prompt_ids[0] != hf_config.bos_token_id:
+        orig_prompt_ids = [hf_config.bos_token_id] + orig_prompt_ids
     new_token_ids = image_token_ids_pad + orig_prompt_ids + [108]  #newline
 
     # NOTE: Create a defensive copy of the original inputs
@@ -141,19 +142,24 @@ class PaliGemmaForConditionalGeneration(nn.Module, SupportsMultiModal):
         self.config = config
         self.multimodal_config = multimodal_config
 
-        # TODO: Port over SiglipVisionModel & TP
         self.vision_tower = SiglipVisionModel(config.vision_config)
         self.multi_modal_projector = PaliGemmaMultiModalProjector(
             vision_hidden_size=config.vision_config.hidden_size,
             projection_dim=config.vision_config.projection_dim)
 
         self.quant_config = quant_config
-        self.language_model = GemmaModel(config.text_config, cache_config,
-                                         quant_config)
+        if config.text_config.model_type == "gemma":
+            self.language_model = GemmaForCausalLM(config.text_config,
+                                                cache_config, quant_config)
+        else:
+            self.language_model = Gemma2ForCausalLM(config.text_config,
+                                                    cache_config,
+                                                    quant_config)
         self.unpadded_vocab_size = config.text_config.vocab_size
         logit_scale = getattr(config, "logit_scale", 1.0)
         self.logits_processor = LogitsProcessor(self.unpadded_vocab_size,
-                                                config.vocab_size, logit_scale)
+                                                config.text_config.vocab_size,
+                                                logit_scale)
         self.sampler = Sampler()
 
     def _validate_pixel_values(self, data: torch.Tensor) -> torch.Tensor:
@@ -181,6 +187,8 @@ class PaliGemmaForConditionalGeneration(nn.Module, SupportsMultiModal):
             if not isinstance(pixel_values, torch.Tensor):
                 raise ValueError("Incorrect type of pixel values. "
                                  f"Got type: {type(pixel_values)}")
+            # Remove the N dimension until multiple images are supported.
+            pixel_values = pixel_values.squeeze(1)
             return PaliGemmaImagePixelInputs(
                 type="pixel_values",
                 data=self._validate_pixel_values(pixel_values),
@@ -190,6 +198,8 @@ class PaliGemmaForConditionalGeneration(nn.Module, SupportsMultiModal):
             if not isinstance(image_embeds, torch.Tensor):
                 raise ValueError("Incorrect type of image embeddings. "
                                  f"Got type: {type(image_embeds)}")
+            # Remove the N dimension until multiple images are supported.
+            image_embeds = image_embeds.squeeze(1)
             return PaliGemmaImageEmbeddingInputs(
                 type="image_embeds",
                 data=image_embeds,
@@ -241,7 +251,8 @@ class PaliGemmaForConditionalGeneration(nn.Module, SupportsMultiModal):
             vision_embeddings = vision_embeddings * (self.config.hidden_size**
                                                      -0.5)
 
-            inputs_embeds = self.language_model.get_input_embeddings(input_ids)
+            inputs_embeds = self.language_model.model.get_input_embeddings(
+                input_ids)
 
             inputs_embeds = merge_multimodal_embeddings(
                 input_ids, inputs_embeds, vision_embeddings,
@@ -251,90 +262,47 @@ class PaliGemmaForConditionalGeneration(nn.Module, SupportsMultiModal):
         else:
             inputs_embeds = None
 
-        hidden_states = self.language_model(input_ids,
-                                            positions,
-                                            kv_caches,
-                                            attn_metadata,
-                                            None,
-                                            inputs_embeds=inputs_embeds)
+        hidden_states = self.language_model.model(input_ids,
+                                                  positions,
+                                                  kv_caches,
+                                                  attn_metadata,
+                                                  None,
+                                                  inputs_embeds=inputs_embeds)
 
         return hidden_states
 
-    # Copied from vllm/modeling/models/gemma.py
     def compute_logits(
         self,
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[torch.Tensor]:
-        logits = self.logits_processor(self.language_model.embed_tokens,
-                                       hidden_states, sampling_metadata)
-        return logits
+        return self.language_model.compute_logits(hidden_states,
+                                                  sampling_metadata)
 
-    # Copied from vllm/modeling/models/gemma.py
     def sample(
         self,
         logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
-        next_tokens = self.sampler(logits, sampling_metadata)
-        return next_tokens
+        return self.language_model.sample(logits, sampling_metadata)
 
-    # Adapted from vllm/modeling/models/gemma.py
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
-        stacked_params_mapping = [
-            # (param_name, shard_name, shard_id)
-            ("qkv_proj", "q_proj", "q"),
-            ("qkv_proj", "k_proj", "k"),
-            ("qkv_proj", "v_proj", "v"),
-            ("gate_up_proj", "gate_proj", 0),
-            ("gate_up_proj", "up_proj", 1),
-        ]
-        params_dict = dict(self.named_parameters())
-        loaded_params = set()
-        for name, loaded_weight in weights:
-            for key_to_modify, new_key in _KEYS_TO_MODIFY_MAPPING.items():
-                if key_to_modify in name:
-                    name = name.replace(key_to_modify, new_key)
-            use_default_weight_loading = False
-            if "vision" in name:
-                if self.vision_tower is not None:
-                    # We only do sharding for language model and
-                    # not vision model for now.
-                    use_default_weight_loading = True
-            else:
-                for (param_name, shard_name,
-                     shard_id) in stacked_params_mapping:
-                    if shard_name not in name:
-                        continue
-                    name = name.replace(shard_name, param_name)
-                    # Skip loading extra bias for GPTQ models.
-                    if name.endswith(".bias") and name not in params_dict:
-                        continue
-                    param = params_dict[name]
-                    weight_loader = param.weight_loader
-                    weight_loader(param, loaded_weight, shard_id)
-                    break
-                else:
-                    # lm_head is not used in vllm as it is tied with
-                    # embed_token. To prevent errors, skip loading
-                    # lm_head.weight.
-                    if "lm_head.weight" in name:
-                        continue
-                    # Skip loading extra bias for GPTQ models.
-                    if name.endswith(".bias") and name not in params_dict:
-                        continue
-                    use_default_weight_loading = True
+        # prepare weight iterators for components
+        vit_weights, mlp_weights, llm_weights = itertools.tee(weights, 3)
 
-            if use_default_weight_loading:
-                param = params_dict[name]
-                weight_loader = getattr(param, "weight_loader",
-                                        default_weight_loader)
-                weight_loader(param, loaded_weight)
+        # load vision tower
+        vit_weights = filter_weights(vit_weights, "vision_tower")
+        self.vision_tower.load_weights(vit_weights)
 
-            loaded_params.add(name)
+        # load mlp projector
+        mlp_weights = filter_weights(mlp_weights, "multi_modal_projector")
+        mlp_params_dict = dict(self.multi_modal_projector.named_parameters())
+        for name, loaded_weight in mlp_weights:
+            param = mlp_params_dict[name]
+            weight_loader = getattr(param, "weight_loader",
+                                    default_weight_loader)
+            weight_loader(param, loaded_weight)
 
-        unloaded_params = params_dict.keys() - loaded_params
-        if unloaded_params:
-            logger.warning(
-                "Some weights are not initialized from checkpoints: "
-                f"{unloaded_params}")
+        # load llm backbone
+        llm_weights = filter_weights(llm_weights, "language_model")
+        self.language_model.load_weights(llm_weights)

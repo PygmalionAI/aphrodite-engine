@@ -10,13 +10,12 @@ from openvino._offline_transformations import paged_attention_transformation
 from optimum.intel import OVModelForCausalLM
 from torch import nn
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.attention.backends.openvino import OpenVINOAttentionMetadata
 from aphrodite.common.config import DeviceConfig, ModelConfig
-from aphrodite.common.sequence import SamplerOutput
 from aphrodite.modeling.layers.logits_processor import (LogitsProcessor,
                                                         _prune_hidden_states)
-from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.sampler import Sampler, SamplerOutput
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 
 APHRODITE_OPENVINO_ENABLE_QUANTIZED_WEIGHTS = (

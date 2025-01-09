@@ -3,7 +3,8 @@ import dataclasses
 import json
 import uuid
 
-from aphrodite import LLM, envs
+import aphrodite.common.envs as envs
+from aphrodite import LLM
 from aphrodite.engine.args_tools import EngineArgs
 from aphrodite.modeling.model_loader.tensorizer import (
     TensorizerArgs, TensorizerConfig, tensorize_aphrodite_model)

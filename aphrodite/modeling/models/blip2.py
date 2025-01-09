@@ -9,13 +9,12 @@ from transformers import (Blip2Config, Blip2QFormerConfig, Blip2VisionConfig,
 
 from aphrodite.attention import AttentionMetadata
 from aphrodite.common.config import CacheConfig, MultiModalConfig
-from aphrodite.common.sequence import (IntermediateTensors, SamplerOutput,
-                                       SequenceData)
+from aphrodite.common.sequence import IntermediateTensors, SequenceData
 from aphrodite.constants import APHRODITE_TOKEN_ID_ARRAY_TYPE
 from aphrodite.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from aphrodite.modeling.layers.activation import get_act_fn
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
-from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.sampler import Sampler, SamplerOutput
 from aphrodite.modeling.model_loader.weight_utils import default_weight_loader
 from aphrodite.modeling.models.opt import OPTModel
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
@@ -41,13 +40,13 @@ BLIP2_IMAGE_TOKEN_ID = 50265
 class Blip2ImagePixelInputs(TypedDict):
     type: Literal["pixel_values"]
     data: torch.Tensor
-    """Shape: (batch_size, num_channels, height, width)"""
+    """Shape: `(batch_size * num_images, num_channels, height, width)`"""
 
 
 class Blip2ImageEmbeddingInputs(TypedDict):
     type: Literal["image_embeds"]
     data: torch.Tensor
-    """Shape: `(batch_size, image_feature_size, hidden_size)`
+    """Shape: `(batch_size * num_images, image_feature_size, hidden_size)`
     `hidden_size` must match the hidden size of language model backbone.
     """
 
@@ -552,6 +551,9 @@ class Blip2ForConditionalGeneration(nn.Module, SupportsMultiModal):
                 raise ValueError("Incorrect type of pixel values. "
                                  f"Got type: {type(pixel_values)}")
 
+            # Remove the N dimension until multiple images are supported.
+            pixel_values = pixel_values.squeeze(1)
+
             return Blip2ImagePixelInputs(
                 type="pixel_values",
                 data=self._validate_pixel_values(pixel_values),
@@ -561,6 +563,8 @@ class Blip2ForConditionalGeneration(nn.Module, SupportsMultiModal):
             if not isinstance(image_embeds, torch.Tensor):
                 raise ValueError("Incorrect type of image embeddings. "
                                  f"Got type: {type(image_embeds)}")
+            # Remove the N dimension until multiple images are supported.
+            image_embeds = image_embeds.squeeze(1)
             return Blip2ImageEmbeddingInputs(
                 type="image_embeds",
                 data=image_embeds,
@@ -696,8 +700,7 @@ class Blip2ForConditionalGeneration(nn.Module, SupportsMultiModal):
             use_default_weight_loading = False
             if "vision" in name:
                 if self.vision_model is not None:
-                    # We only do sharding for language model and
-                    # not vision model for now.
+                    # BlipVisionModel does not need sharding
                     use_default_weight_loading = True
             else:
                 for (param_name, weight_name,

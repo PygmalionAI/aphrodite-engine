@@ -29,7 +29,7 @@ from transformers import CohereConfig
 
 from aphrodite.attention import Attention, AttentionMetadata
 from aphrodite.common.config import CacheConfig, LoRAConfig
-from aphrodite.common.sequence import IntermediateTensors, SamplerOutput
+from aphrodite.common.sequence import IntermediateTensors
 from aphrodite.distributed import get_tensor_model_parallel_world_size
 from aphrodite.modeling.layers.activation import SiluAndMul
 from aphrodite.modeling.layers.linear import (MergedColumnParallelLinear,
@@ -37,7 +37,7 @@ from aphrodite.modeling.layers.linear import (MergedColumnParallelLinear,
                                               RowParallelLinear)
 from aphrodite.modeling.layers.logits_processor import LogitsProcessor
 from aphrodite.modeling.layers.rotary_embedding import get_rope
-from aphrodite.modeling.layers.sampler import Sampler
+from aphrodite.modeling.layers.sampler import Sampler, SamplerOutput
 from aphrodite.modeling.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
 from aphrodite.modeling.model_loader.weight_utils import (
@@ -45,6 +45,8 @@ from aphrodite.modeling.model_loader.weight_utils import (
 from aphrodite.modeling.sampling_metadata import SamplingMetadata
 from aphrodite.modeling.utils import set_weight_attrs
 from aphrodite.quantization.base_config import QuantizationConfig
+
+from .interfaces import SupportsLoRA
 
 
 @torch.compile
@@ -291,7 +293,7 @@ class CohereModel(nn.Module):
         return hidden_states
 
 
-class CohereForCausalLM(nn.Module):
+class CohereForCausalLM(nn.Module, SupportsLoRA):
 
     packed_modules_mapping = {
         "qkv_proj": [

@@ -9,16 +9,20 @@ from huggingface_hub import (file_exists, hf_hub_download,
                              try_to_load_from_cache)
 from loguru import logger
 from transformers import GenerationConfig, PretrainedConfig
+from transformers.models.auto.image_processing_auto import (
+    get_image_processor_config)
 from transformers.models.auto.modeling_auto import (
     MODEL_FOR_CAUSAL_LM_MAPPING_NAMES)
 from transformers.utils import CONFIG_NAME as HF_CONFIG_NAME
 
-from aphrodite import envs
+import aphrodite.common.envs as envs
 from aphrodite.transformers_utils.configs import (ChatGLMConfig, DbrxConfig,
+                                                  EAGLEConfig,
                                                   InternVLChatConfig,
                                                   JAISConfig, MedusaConfig,
                                                   MLPSpeculatorConfig,
-                                                  MPTConfig, RWConfig)
+                                                  MPTConfig, Qwen2VLConfig,
+                                                  RWConfig, UltravoxConfig)
 from aphrodite.transformers_utils.utils import check_gguf_file
 
 APHRODITE_USE_MODELSCOPE = envs.APHRODITE_USE_MODELSCOPE
@@ -40,6 +44,9 @@ _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
     "mlp_speculator": MLPSpeculatorConfig,
     "medusa": MedusaConfig,
     "internvl_chat": InternVLChatConfig,
+    "ultravox": UltravoxConfig,
+    "eagle": EAGLEConfig,
+    "qwen2_vl": Qwen2VLConfig,
 }
 
 for name, cls in _CONFIG_REGISTRY.items():
@@ -169,11 +176,7 @@ def get_config(
     ]:
         if value is not None:
             logger.info(
-                "Updating %s from %r to %r",
-                key,
-                getattr(config, key, None),
-                value,
-            )
+                f"Updating {key} from {getattr(config, key, None)} to {value}")
             config.update({key: value})
 
 
@@ -239,6 +242,20 @@ def load_params_config(model, revision) -> PretrainedConfig:
 
     config = recurse_elems(config_dict)
     return config
+
+
+def get_hf_image_processor_config(
+    model: Union[str, Path],
+    revision: Optional[str] = None,
+    **kwargs,
+) -> Dict[str, Any]:
+    # ModelScope does not provide an interface for image_processor
+    if APHRODITE_USE_MODELSCOPE:
+        return dict()
+    # Separate model folder from file path for GGUF models
+    if Path(model).is_file() and Path(model).suffix == ".gguf":
+        model = Path(model).parent
+    return get_image_processor_config(model, revision=revision, **kwargs)
 
 
 def get_hf_text_config(config: PretrainedConfig):
