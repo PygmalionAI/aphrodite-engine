@@ -1008,26 +1008,26 @@ __global__ void burst_attention_kernel(
     const cache_t* __restrict__ v_cache,  // [num_blocks, num_kv_heads,
                                           // head_size, block_size]
     const int num_kv_heads,               // [num_heads]
-    const float scale,
+    const double scale,
     const int* __restrict__ block_tables,  // [num_seqs, max_num_blocks_per_seq]
     const int* __restrict__ seq_lens,      // [num_seqs]
     const int max_num_blocks_per_seq,
     const float* __restrict__ alibi_slopes,  // [num_heads]
-    const int q_stride, const int kv_block_stride, const int kv_head_stride,
-    const float k_scale, const float v_scale, const int tp_rank,
-    const int blocksparse_local_blocks, const int blocksparse_vert_stride,
-    const int blocksparse_block_size, const int blocksparse_head_sliding_step,
+    const int64_t q_stride, const int64_t kv_block_stride, const int64_t kv_head_stride,
+    const double k_scale, const double v_scale, const int tp_rank,
+    const int64_t blocksparse_local_blocks, const int64_t blocksparse_vert_stride,
+    const int64_t blocksparse_block_size, const int64_t blocksparse_head_sliding_step,
     // IPC related parameters
     cudaIpcMemHandle_t* ipc_handles, // Array of IPC handles for K and V
     int* ipc_offsets, // Array of offsets into the IPC buffers
     volatile aphrodite::Signal* shared_signals, // Shared memory for sync
-    int world_size,
-    int rank,
+    int64_t world_size,
+    int64_t rank,
     scalar_t* __restrict__ dq, // Gradient for Q
     scalar_t* __restrict__ dk, // Gradient for K
     scalar_t* __restrict__ dv, // Gradient for V
     const scalar_t* __restrict__ do_, // Incoming gradient
-    int tile_size // Tile size for LAO
+    int64_t tile_size // Tile size for LAO
 ) {
     // --- Assertions and Checks ---
     static_assert(BLOCK_SIZE % tile_size == 0, "BLOCK_SIZE must be a multiple of tile_size");
@@ -1035,12 +1035,12 @@ __global__ void burst_attention_kernel(
     static_assert(HEAD_SIZE % THREAD_GROUP_SIZE == 0, "HEAD_SIZE must be a multiple of THREAD_GROUP_SIZE");
     static_assert((16 % (THREAD_GROUP_SIZE * sizeof(scalar_t))) == 0, "16 must be a multiple of THREAD_GROUP_SIZE * sizeof(scalar_t)");
 
-    const int seq_idx = blockIdx.y;
-    const int head_idx = blockIdx.x;
-    const int num_heads = gridDim.x;
-    const int seq_len = seq_lens[seq_idx];
-    const int num_queries_per_kv = num_heads / num_kv_heads;
-    const int kv_head_idx = head_idx / num_queries_per_kv;
+    const int64_t seq_idx = blockIdx.y;
+    const int64_t head_idx = blockIdx.x;
+    const int64_t num_heads = gridDim.x;
+    const int64_t seq_len = seq_lens[seq_idx];
+    const int64_t num_queries_per_kv = num_heads / num_kv_heads;
+    const int64_t kv_head_idx = head_idx / num_queries_per_kv;
     const float alibi_slope =
         alibi_slopes == nullptr ? 0.f : alibi_slopes[head_idx];
 
@@ -1086,8 +1086,8 @@ __global__ void burst_attention_kernel(
     char* remote_v_ptr;
 
     // Initialize shared memory for max and sum
-    __shared__ float max_logit;
-    __shared__ float exp_sum;
+    __shared__ double max_logit;
+    __shared__ double exp_sum;
     if (threadIdx.x == 0) {
         max_logit = -FLT_MAX;
         exp_sum = 0.0f;
@@ -1102,7 +1102,7 @@ __global__ void burst_attention_kernel(
     __syncthreads();
 
     // Forward Pass
-    float accs[NUM_ELEMS_PER_THREAD] = {0.0f};
+    double accs[NUM_ELEMS_PER_THREAD] = {0.0f};
     for (int r = 0; r < world_size; ++r) {
         int current_remote_rank = (rank + r) % world_size;
         if (threadIdx.x == 0) {
@@ -1137,8 +1137,8 @@ __global__ void burst_attention_kernel(
         }
         __syncthreads();
 
-        float qk_max = -FLT_MAX;
-        float local_exp_sum = 0.0f;
+        double qk_max = -DBL_MAX;
+        double local_exp_sum = 0.0f;
         for (int tile_start = 0; tile_start < BLOCK_SIZE; tile_start += tile_size) {
             for (int i = thread_group_idx; i < NUM_ELEMS_PER_THREAD; i += NUM_THREAD_GROUPS) {
                 float qk = 0.0f;
@@ -1202,9 +1202,9 @@ __global__ void burst_attention_kernel(
 
     // Backward Pass
     // Recompute attention scores
-    __shared__ float d_q[NUM_ELEMS_PER_THREAD];
-    __shared__ float d_k[NUM_ELEMS_PER_THREAD];
-    __shared__ float d_v[NUM_ELEMS_PER_THREAD];
+    __shared__ double d_q[NUM_ELEMS_PER_THREAD];
+    __shared__ double d_k[NUM_ELEMS_PER_THREAD];
+    __shared__ double d_v[NUM_ELEMS_PER_THREAD];
     if (threadIdx.x < NUM_ELEMS_PER_THREAD) {
         d_q[threadIdx.x] = 0.0f;
         d_k[threadIdx.x] = 0.0f;
@@ -1213,7 +1213,7 @@ __global__ void burst_attention_kernel(
     __syncthreads();
 
     // Get incoming gradient (do)
-    float do_val = to_float(do_[seq_idx * num_heads * HEAD_SIZE + head_idx * HEAD_SIZE]);
+    double do_val = to_float(do_[seq_idx * num_heads * HEAD_SIZE + head_idx * HEAD_SIZE]);
 
     for (int r = world_size - 1; r >= 0; --r) {
         int current_remote_rank = (rank + r) % world_size;
@@ -1249,9 +1249,9 @@ __global__ void burst_attention_kernel(
         }
         __syncthreads();
 
-        float qk_max = -FLT_MAX;
-        float local_exp_sum = 0.0f;
-        float local_accs[NUM_ELEMS_PER_THREAD] = {0.0f};
+        double qk_max = -DBL_MAX;
+        double local_exp_sum = 0.0f;
+        double local_accs[NUM_ELEMS_PER_THREAD] = {0.0f};
         for (int tile_start = 0; tile_start < BLOCK_SIZE; tile_start += tile_size) {
             for (int i = thread_group_idx; i < NUM_ELEMS_PER_THREAD; i += NUM_THREAD_GROUPS) {
                 float qk = 0.0f;
@@ -1305,7 +1305,7 @@ __global__ void burst_attention_kernel(
 
         // Gradient Calculation
         for (int i = thread_group_idx; i < NUM_ELEMS_PER_THREAD; i += NUM_THREAD_GROUPS) {
-            float p = expf(qk_max - max_logit);
+            double p = expf(qk_max - max_logit);
             float dv_val = (local_accs[i] / exp_sum) * do_val;
             d_v[i] += dv_val;
             for (int j = 0; j < tile_size; ++j) {
@@ -1362,31 +1362,31 @@ template <typename T, typename CACHE_T, int BLOCK_SIZE,
           int NUM_THREADS>
 void burst_attention_launcher(
     torch::Tensor& out, torch::Tensor& query, torch::Tensor& key_cache,
-    torch::Tensor& value_cache, int num_kv_heads, float scale,
+    torch::Tensor& value_cache, int num_kv_heads, double scale,
     torch::Tensor& block_tables, torch::Tensor& seq_lens, int max_seq_len,
-    const c10::optional<torch::Tensor>& alibi_slopes, float k_scale,
-    float v_scale, const int tp_rank, const int blocksparse_local_blocks,
+    const c10::optional<torch::Tensor>& alibi_slopes, double k_scale,
+    double v_scale, const int tp_rank, const int blocksparse_local_blocks,
     const int blocksparse_vert_stride, const int blocksparse_block_size,
     const int blocksparse_head_sliding_step,
     // IPC related parameters
     torch::Tensor& ipc_handles_tensor, // Tensor of IPC handles
     torch::Tensor& ipc_offsets_tensor, // Tensor of offsets
     torch::Tensor& shared_signals_tensor, // Tensor of shared memory
-    int world_size,
-    int rank,
+    int64_t world_size,
+    int64_t rank,
     torch::Tensor& dq,
     torch::Tensor& dk,
     torch::Tensor& dv,
     torch::Tensor& do_,
-    int tile_size // Tile size parameter
+    int64_t tile_size // Tile size parameter
 ) {
-    int num_seqs = query.size(0);
-    int num_heads = query.size(1);
-    int head_size = query.size(2);
-    int max_num_blocks_per_seq = block_tables.size(1);
-    int q_stride = query.stride(0);
-    int kv_block_stride = key_cache.stride(0);
-    int kv_head_stride = key_cache.stride(1);
+    int64_t num_seqs = query.size(0);
+    int64_t num_heads = query.size(1);
+    int64_t head_size = query.size(2);
+    int64_t max_num_blocks_per_seq = block_tables.size(1);
+    int64_t q_stride = query.stride(0);
+    int64_t kv_block_stride = key_cache.stride(0);
+    int64_t kv_head_stride = key_cache.stride(1);
 
     [[maybe_unused]] int thread_group_size = MAX(WARP_SIZE / BLOCK_SIZE, 1);
     assert(head_size % thread_group_size == 0);
@@ -1414,7 +1414,7 @@ void burst_attention_launcher(
     T* do_ptr = reinterpret_cast<T*>(do_.data_ptr());
 
     constexpr int NUM_WARPS = NUM_THREADS / WARP_SIZE;
-    int padded_max_seq_len =
+    int64_t padded_max_seq_len =
         DIVIDE_ROUND_UP(max_seq_len, BLOCK_SIZE) * BLOCK_SIZE;
     int shared_mem_size = 0; // No shared memory needed for this kernel
 
@@ -1630,13 +1630,13 @@ void burst_attention(
     torch::Tensor& ipc_handles, // Tensor of IPC handles
     torch::Tensor& ipc_offsets, // Tensor of offsets
     torch::Tensor& shared_signals, // Tensor of shared memory
-    int world_size,
-    int rank,
+    int64_t world_size,
+    int64_t rank,
     torch::Tensor& dq,
     torch::Tensor& dk,
     torch::Tensor& dv,
     torch::Tensor& do_,
-    int tile_size
+    int64_t tile_size
 ) {
   const bool is_block_sparse = (blocksparse_vert_stride > 1);
   DISPATCH_BY_KV_CACHE_DTYPE(query.dtype(), kv_cache_dtype,
