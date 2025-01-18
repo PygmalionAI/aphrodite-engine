@@ -807,8 +807,10 @@ __global__ void burst_attention_kernel(
 
         double qk_max = -DBL_MAX;
         double local_exp_sum = 0.0f;
-        for (int tile_start = 0; tile_start < BLOCK_SIZE; tile_start += tile_size) {
-            for (int i = thread_group_idx; i < NUM_ELEMS_PER_THREAD; i += NUM_THREAD_GROUPS) {
+        double qk_max = -DBL_MAX;
+        double local_exp_sum = 0.0f;
+        for (int i = thread_group_idx; i < NUM_ELEMS_PER_THREAD; i += NUM_THREAD_GROUPS) {
+            for (int tile_start = 0; tile_start < BLOCK_SIZE; tile_start += tile_size) {
                 float qk = 0.0f;
                 for (int j = 0; j < tile_size; ++j) {
                     int k_idx = tile_start + j;
@@ -818,9 +820,9 @@ __global__ void burst_attention_kernel(
                             k_vec = *reinterpret_cast<const K_vec*>(&k_buffer[current_buffer][k_idx * HEAD_SIZE + i * THREAD_GROUP_SIZE + thread_group_offset]);
                         } else {
                             Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(&k_buffer[current_buffer][k_idx * HEAD_SIZE + i * THREAD_GROUP_SIZE + thread_group_offset]);
-                            k_vec = fp8::scaled_convert<K_vec, Quant_vec, KV_DTYPE>(k_vec_quant, k_scale);
+                            k_vec = aphrodite::fp8::scaled_convert<K_vec, Quant_vec, KV_DTYPE>(k_vec_quant, k_scale);
                         }
-                        qk += scale * Qk_dot<scalar_t, THREAD_GROUP_SIZE>::dot(q_vecs[thread_group_offset], &k_vec);
+                        qk += scale * aphrodite::Qk_dot<scalar_t, THREAD_GROUP_SIZE>::dot(q_vecs[thread_group_offset], &k_vec);
                     }
                 }
                 qk_max = fmaxf(qk_max, qk);
@@ -833,13 +835,12 @@ __global__ void burst_attention_kernel(
                             v_vec = *reinterpret_cast<const V_vec*>(&v_buffer[current_buffer][v_idx * HEAD_SIZE + i * THREAD_GROUP_SIZE + thread_group_offset]);
                         } else {
                             Quant_vec v_vec_quant = *reinterpret_cast<const Quant_vec*>(&v_buffer[current_buffer][v_idx * HEAD_SIZE + i * THREAD_GROUP_SIZE + thread_group_offset]);
-                            v_vec = fp8::scaled_convert<V_vec, Quant_vec, KV_DTYPE>(v_vec_quant, v_scale);
+                            v_vec = aphrodite::fp8::scaled_convert<V_vec, Quant_vec, KV_DTYPE>(v_vec_quant, v_scale);
                         }
-                        accs[i] += expf(qk) * sum(v_vec);
+                        accs[i] += expf(qk) * aphrodite::sum(v_vec);
                     }
                 }
             }
-        }
 
         // Online Softmax Aggregation
         if (threadIdx.x == 0) {
