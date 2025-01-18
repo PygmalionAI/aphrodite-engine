@@ -696,7 +696,6 @@ __global__ void burst_attention_kernel(
     int64_t rank,
     int64_t tile_size // Tile size for LAO
 ) {
-    constexpr int THREAD_GROUP_SIZE = MAX(WARP_SIZE / BLOCK_SIZE, 1);
     const int64_t seq_idx = blockIdx.y;
     const int64_t head_idx = blockIdx.x;
     const int64_t num_heads = gridDim.x;
@@ -807,8 +806,6 @@ __global__ void burst_attention_kernel(
 
         double qk_max = -DBL_MAX;
         double local_exp_sum = 0.0f;
-        double qk_max = -DBL_MAX;
-        double local_exp_sum = 0.0f;
         for (int i = thread_group_idx; i < NUM_ELEMS_PER_THREAD; i += NUM_THREAD_GROUPS) {
             for (int tile_start = 0; tile_start < BLOCK_SIZE; tile_start += tile_size) {
                 float qk = 0.0f;
@@ -866,7 +863,7 @@ __global__ void burst_attention_kernel(
         for (int i = 0; i < NUM_ELEMS_PER_THREAD; ++i) {
             acc += accs[i];
         }
-        out[seq_idx * num_heads * HEAD_SIZE + head_idx * HEAD_SIZE] = from_float(acc / exp_sum);
+        out[seq_idx * num_heads * HEAD_SIZE + head_idx * HEAD_SIZE] = from_float((float)(acc / exp_sum));
     }
 
     // Cleanup: Close IPC handles
@@ -1214,6 +1211,7 @@ void paged_attention_v2(
   const bool is_block_sparse = (blocksparse_vert_stride > 1);
   DISPATCH_BY_KV_CACHE_DTYPE(query.dtype(), kv_cache_dtype,
                              CALL_V2_LAUNCHER_BLOCK_SIZE)
+  }
 
 template <typename T, typename CACHE_T, int BLOCK_SIZE,
           aphrodite::Fp8KVCacheDataType KV_DTYPE, bool IS_BLOCK_SPARSE,
@@ -1486,7 +1484,6 @@ void burst_attention(
   const bool is_block_sparse = (blocksparse_vert_stride > 1);
   DISPATCH_BY_KV_CACHE_DTYPE(query.dtype(), kv_cache_dtype,
                              CALL_BURST_ATTENTION_LAUNCHER_BLOCK_SIZE)
-}
 }
 
 #undef WARP_SIZE
