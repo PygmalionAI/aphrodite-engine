@@ -45,13 +45,9 @@ void burst_attention(
     torch::Tensor& ipc_handles, // Tensor of IPC handles
     torch::Tensor& ipc_offsets, // Tensor of offsets
     torch::Tensor& shared_signals, // Tensor of shared memory
-    int world_size,
-    int rank,
-    torch::Tensor& dq,
-    torch::Tensor& dk,
-    torch::Tensor& dv,
-    torch::Tensor& do_,
-    int tile_size
+    int64_t world_size,
+    int64_t rank,
+    int64_t tile_size
 );
 
 void rms_norm(torch::Tensor& out, torch::Tensor& input, torch::Tensor& weight,

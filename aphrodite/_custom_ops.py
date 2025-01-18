@@ -180,10 +180,6 @@ def burst_attention(
     shared_signals: torch.Tensor,
     world_size: int,
     rank: int,
-    dq: torch.Tensor,
-    dk: torch.Tensor,
-    dv: torch.Tensor,
-    do_: torch.Tensor,
     tile_size: int
 ) -> None:
     torch.ops._C.burst_attention(
@@ -192,7 +188,7 @@ def burst_attention(
         k_scale, v_scale, tp_rank, blocksparse_local_blocks,
         blocksparse_vert_stride, blocksparse_block_size,
         blocksparse_head_sliding_step, ipc_handles, ipc_offsets,
-        shared_signals, world_size, rank, dq, dk, dv, do_, tile_size
+        shared_signals, world_size, rank, tile_size
     )
 
 # pos encoding ops

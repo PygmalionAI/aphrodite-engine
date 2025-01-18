@@ -60,7 +60,6 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "    int blocksparse_head_sliding_step,"
       "    Tensor ipc_handles, Tensor ipc_offsets, Tensor shared_signals,"
       "    int world_size, int rank,"
-      "    Tensor dq, Tensor dk, Tensor dv, Tensor do_,"
       "    int tile_size) -> ()");
   ops.impl("burst_attention", torch::kCUDA, &burst_attention);
 
