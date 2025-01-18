@@ -997,6 +997,652 @@ void paged_attention_v2(
                              CALL_V2_LAUNCHER_BLOCK_SIZE)
 }
 
+template <typename scalar_t, typename cache_t, int HEAD_SIZE, int BLOCK_SIZE,
+          int NUM_THREADS, aphrodite::Fp8KVCacheDataType KV_DTYPE,
+          bool IS_BLOCK_SPARSE>
+__global__ void burst_attention_kernel(
+    scalar_t* __restrict__ out,           // [num_seqs, num_heads, head_size]
+    const scalar_t* __restrict__ q,       // [num_seqs, num_heads, head_size]
+    const cache_t* __restrict__ k_cache,  // [num_blocks, num_kv_heads,
+                                          // head_size/x, block_size, x]
+    const cache_t* __restrict__ v_cache,  // [num_blocks, num_kv_heads,
+                                          // head_size, block_size]
+    const int num_kv_heads,               // [num_heads]
+    const float scale,
+    const int* __restrict__ block_tables,  // [num_seqs, max_num_blocks_per_seq]
+    const int* __restrict__ seq_lens,      // [num_seqs]
+    const int max_num_blocks_per_seq,
+    const float* __restrict__ alibi_slopes,  // [num_heads]
+    const int q_stride, const int kv_block_stride, const int kv_head_stride,
+    const float k_scale, const float v_scale, const int tp_rank,
+    const int blocksparse_local_blocks, const int blocksparse_vert_stride,
+    const int blocksparse_block_size, const int blocksparse_head_sliding_step,
+    // IPC related parameters
+    cudaIpcMemHandle_t* ipc_handles, // Array of IPC handles for K and V
+    int* ipc_offsets, // Array of offsets into the IPC buffers
+    volatile aphrodite::Signal* shared_signals, // Shared memory for sync
+    int world_size,
+    int rank,
+    scalar_t* __restrict__ dq, // Gradient for Q
+    scalar_t* __restrict__ dk, // Gradient for K
+    scalar_t* __restrict__ dv, // Gradient for V
+    const scalar_t* __restrict__ do_, // Incoming gradient
+    int tile_size // Tile size for LAO
+) {
+    // --- Assertions and Checks ---
+    static_assert(BLOCK_SIZE % tile_size == 0, "BLOCK_SIZE must be a multiple of tile_size");
+    static_assert(NUM_THREADS % WARP_SIZE == 0, "NUM_THREADS must be a multiple of WARP_SIZE");
+    static_assert(HEAD_SIZE % THREAD_GROUP_SIZE == 0, "HEAD_SIZE must be a multiple of THREAD_GROUP_SIZE");
+    static_assert((16 % (THREAD_GROUP_SIZE * sizeof(scalar_t))) == 0, "16 must be a multiple of THREAD_GROUP_SIZE * sizeof(scalar_t)");
+
+    const int seq_idx = blockIdx.y;
+    const int head_idx = blockIdx.x;
+    const int num_heads = gridDim.x;
+    const int seq_len = seq_lens[seq_idx];
+    const int num_queries_per_kv = num_heads / num_kv_heads;
+    const int kv_head_idx = head_idx / num_queries_per_kv;
+    const float alibi_slope =
+        alibi_slopes == nullptr ? 0.f : alibi_slopes[head_idx];
+
+    constexpr int THREAD_GROUP_SIZE = MAX(WARP_SIZE / BLOCK_SIZE, 1);
+    constexpr int NUM_THREAD_GROUPS =
+        NUM_THREADS / THREAD_GROUP_SIZE;
+
+    constexpr int VEC_SIZE = MAX(16 / (THREAD_GROUP_SIZE * sizeof(scalar_t)), 1);
+    using K_vec = typename Vec<scalar_t, VEC_SIZE>::Type;
+    using Q_vec = typename Vec<scalar_t, VEC_SIZE>::Type;
+    using Quant_vec = typename Vec<cache_t, VEC_SIZE>::Type;
+    using V_vec = typename Vec<scalar_t, VEC_SIZE>::Type;
+
+    constexpr int NUM_ELEMS_PER_THREAD = HEAD_SIZE / THREAD_GROUP_SIZE;
+    constexpr int NUM_VECS_PER_THREAD = NUM_ELEMS_PER_THREAD / VEC_SIZE;
+
+    const int thread_idx = threadIdx.x;
+    const int thread_group_idx = thread_idx / THREAD_GROUP_SIZE;
+    const int thread_group_offset = thread_idx % THREAD_GROUP_SIZE;
+
+    // Load the query to registers.
+    const scalar_t* q_ptr = q + seq_idx * q_stride + head_idx * HEAD_SIZE;
+    __shared__ Q_vec q_vecs[THREAD_GROUP_SIZE][NUM_VECS_PER_THREAD];
+#pragma unroll
+    for (int i = thread_group_idx; i < NUM_VECS_PER_THREAD;
+         i += NUM_THREAD_GROUPS) {
+      const int vec_idx = thread_group_offset + i * THREAD_GROUP_SIZE;
+      q_vecs[thread_group_offset][i] =
+          *reinterpret_cast<const Q_vec*>(q_ptr + vec_idx * VEC_SIZE);
+    }
+    __syncthreads();
+
+    // Double buffering for K and V
+    constexpr int NUM_BUFFERS = 2;
+    __shared__ cache_t k_buffer[NUM_BUFFERS][BLOCK_SIZE * HEAD_SIZE];
+    __shared__ cache_t v_buffer[NUM_BUFFERS][BLOCK_SIZE * HEAD_SIZE];
+    int current_buffer = 0;
+    int next_buffer = 1;
+
+    // IPC access for K and V
+    // Calculate the offset into the remote K and V buffers
+    char* remote_k_ptr;
+    char* remote_v_ptr;
+
+    // Initialize shared memory for max and sum
+    __shared__ float max_logit;
+    __shared__ float exp_sum;
+    if (threadIdx.x == 0) {
+        max_logit = -FLT_MAX;
+        exp_sum = 0.0f;
+    }
+    __syncthreads();
+
+    // Synchronization variables
+    __shared__ volatile int stage;
+    if (threadIdx.x == 0) {
+        stage = 0;
+    }
+    __syncthreads();
+
+    // Forward Pass
+    float accs[NUM_ELEMS_PER_THREAD] = {0.0f};
+    for (int r = 0; r < world_size; ++r) {
+        int current_remote_rank = (rank + r) % world_size;
+        if (threadIdx.x == 0) {
+            // Open the IPC handles and get the remote pointers
+            void* temp_k_ptr;
+            void* temp_v_ptr;
+            cudaError_t err;
+            err = cudaIpcOpenMemHandle(&temp_k_ptr, ipc_handles[current_remote_rank], cudaIpcMemLazyEnablePeerAccess);
+            if (err != cudaSuccess) {
+                printf("Error opening K IPC handle: %s\n", cudaGetErrorString(err));
+            }
+            err = cudaIpcOpenMemHandle(&temp_v_ptr, ipc_handles[current_remote_rank + world_size], cudaIpcMemLazyEnablePeerAccess);
+            if (err != cudaSuccess) {
+                printf("Error opening V IPC handle: %s\n", cudaGetErrorString(err));
+            }
+            remote_k_ptr = reinterpret_cast<char*>(temp_k_ptr) + ipc_offsets[current_remote_rank];
+            remote_v_ptr = reinterpret_cast<char*>(temp_v_ptr) + ipc_offsets[current_remote_rank + world_size];
+            stage = 1;
+        }
+        __syncthreads();
+
+        // Load K and V from remote memory using IPC
+        for (int i = thread_idx; i < BLOCK_SIZE * HEAD_SIZE; i += NUM_THREADS) {
+            k_buffer[current_buffer][i] = reinterpret_cast<cache_t*>(remote_k_ptr)[i];
+            v_buffer[current_buffer][i] = reinterpret_cast<cache_t*>(remote_v_ptr)[i];
+        }
+        __syncthreads();
+
+        // Stage 1: Local Attention Computation with Tiling (LAO)
+        if (threadIdx.x == 0) {
+            stage = 2;
+        }
+        __syncthreads();
+
+        float qk_max = -FLT_MAX;
+        float local_exp_sum = 0.0f;
+        for (int tile_start = 0; tile_start < BLOCK_SIZE; tile_start += tile_size) {
+            for (int i = thread_group_idx; i < NUM_ELEMS_PER_THREAD; i += NUM_THREAD_GROUPS) {
+                float qk = 0.0f;
+                for (int j = 0; j < tile_size; ++j) {
+                    int k_idx = tile_start + j;
+                    if (k_idx < BLOCK_SIZE) {
+                        K_vec k_vec;
+                        if constexpr (KV_DTYPE == Fp8KVCacheDataType::kAuto) {
+                            k_vec = *reinterpret_cast<const K_vec*>(&k_buffer[current_buffer][k_idx * HEAD_SIZE + i * THREAD_GROUP_SIZE + thread_group_offset]);
+                        } else {
+                            Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(&k_buffer[current_buffer][k_idx * HEAD_SIZE + i * THREAD_GROUP_SIZE + thread_group_offset]);
+                            k_vec = fp8::scaled_convert<K_vec, Quant_vec, KV_DTYPE>(k_vec_quant, k_scale);
+                        }
+                        qk += scale * Qk_dot<scalar_t, THREAD_GROUP_SIZE>::dot(q_vecs[thread_group_offset], &k_vec);
+                    }
+                }
+                qk_max = fmaxf(qk_max, qk);
+                local_exp_sum += expf(qk);
+                for (int j = 0; j < tile_size; ++j) {
+                    int v_idx = tile_start + j;
+                    if (v_idx < BLOCK_SIZE) {
+                        V_vec v_vec;
+                        if constexpr (KV_DTYPE == Fp8KVCacheDataType::kAuto) {
+                            v_vec = *reinterpret_cast<const V_vec*>(&v_buffer[current_buffer][v_idx * HEAD_SIZE + i * THREAD_GROUP_SIZE + thread_group_offset]);
+                        } else {
+                            Quant_vec v_vec_quant = *reinterpret_cast<const Quant_vec*>(&v_buffer[current_buffer][v_idx * HEAD_SIZE + i * THREAD_GROUP_SIZE + thread_group_offset]);
+                            v_vec = fp8::scaled_convert<V_vec, Quant_vec, KV_DTYPE>(v_vec_quant, v_scale);
+                        }
+                        accs[i] += expf(qk) * sum(v_vec);
+                    }
+                }
+            }
+        }
+
+        // Online Softmax Aggregation
+        if (threadIdx.x == 0) {
+            float mnew = fmaxf(max_logit, qk_max);
+            exp_sum = expf(max_logit - mnew) * exp_sum + expf(qk_max - mnew) * local_exp_sum;
+            max_logit = mnew;
+            stage = 3;
+        }
+        __syncthreads();
+
+        // Stage 3: Swap buffers for next iteration
+        if (threadIdx.x == 0) {
+            current_buffer = 1 - current_buffer;
+            next_buffer = 1 - next_buffer;
+            stage = 0;
+        }
+        __syncthreads();
+    }
+
+    // Final output
+    if (threadIdx.x == 0) {
+        float acc = 0.0f;
+        for (int i = 0; i < NUM_ELEMS_PER_THREAD; ++i) {
+            acc += accs[i];
+        }
+        out[seq_idx * num_heads * HEAD_SIZE + head_idx * HEAD_SIZE] = from_float(acc / exp_sum);
+    }
+
+    // Backward Pass
+    // Recompute attention scores
+    __shared__ float d_q[NUM_ELEMS_PER_THREAD];
+    __shared__ float d_k[NUM_ELEMS_PER_THREAD];
+    __shared__ float d_v[NUM_ELEMS_PER_THREAD];
+    if (threadIdx.x < NUM_ELEMS_PER_THREAD) {
+        d_q[threadIdx.x] = 0.0f;
+        d_k[threadIdx.x] = 0.0f;
+        d_v[threadIdx.x] = 0.0f;
+    }
+    __syncthreads();
+
+    // Get incoming gradient (do)
+    float do_val = to_float(do_[seq_idx * num_heads * HEAD_SIZE + head_idx * HEAD_SIZE]);
+
+    for (int r = world_size - 1; r >= 0; --r) {
+        int current_remote_rank = (rank + r) % world_size;
+        if (threadIdx.x == 0) {
+            // Open the IPC handles and get the remote pointers
+            void* temp_k_ptr;
+            void* temp_v_ptr;
+            cudaError_t err;
+            err = cudaIpcOpenMemHandle(&temp_k_ptr, ipc_handles[current_remote_rank], cudaIpcMemLazyEnablePeerAccess);
+            if (err != cudaSuccess) {
+                printf("Error opening K IPC handle: %s\n", cudaGetErrorString(err));
+            }
+            err = cudaIpcOpenMemHandle(&temp_v_ptr, ipc_handles[current_remote_rank + world_size], cudaIpcMemLazyEnablePeerAccess);
+            if (err != cudaSuccess) {
+                printf("Error opening V IPC handle: %s\n", cudaGetErrorString(err));
+            }
+            remote_k_ptr = reinterpret_cast<char*>(temp_k_ptr) + ipc_offsets[current_remote_rank];
+            remote_v_ptr = reinterpret_cast<char*>(temp_v_ptr) + ipc_offsets[current_remote_rank + world_size];
+            stage = 1;
+        }
+        __syncthreads();
+
+        // Load K and V from remote memory using IPC
+        for (int i = thread_idx; i < BLOCK_SIZE * HEAD_SIZE; i += NUM_THREADS) {
+            k_buffer[current_buffer][i] = reinterpret_cast<cache_t*>(remote_k_ptr)[i];
+            v_buffer[current_buffer][i] = reinterpret_cast<cache_t*>(remote_v_ptr)[i];
+        }
+        __syncthreads();
+
+        // Stage 1: Local Attention Backward Computation with Tiling (LAO)
+        if (threadIdx.x == 0) {
+            stage = 2;
+        }
+        __syncthreads();
+
+        float qk_max = -FLT_MAX;
+        float local_exp_sum = 0.0f;
+        float local_accs[NUM_ELEMS_PER_THREAD] = {0.0f};
+        for (int tile_start = 0; tile_start < BLOCK_SIZE; tile_start += tile_size) {
+            for (int i = thread_group_idx; i < NUM_ELEMS_PER_THREAD; i += NUM_THREAD_GROUPS) {
+                float qk = 0.0f;
+                for (int j = 0; j < tile_size; ++j) {
+                    int k_idx = tile_start + j;
+                    if (k_idx < BLOCK_SIZE) {
+                        K_vec k_vec;
+                        if constexpr (KV_DTYPE == Fp8KVCacheDataType::kAuto) {
+                            k_vec = *reinterpret_cast<const K_vec*>(&k_buffer[current_buffer][k_idx * HEAD_SIZE + i * THREAD_GROUP_SIZE + thread_group_offset]);
+                        } else {
+                            Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(&k_buffer[current_buffer][k_idx * HEAD_SIZE + i * THREAD_GROUP_SIZE + thread_group_offset]);
+                            k_vec = fp8::scaled_convert<K_vec, Quant_vec, KV_DTYPE>(k_vec_quant, k_scale);
+                        }
+                        qk += scale * Qk_dot<scalar_t, THREAD_GROUP_SIZE>::dot(q_vecs[thread_group_offset], &k_vec);
+                    }
+                }
+                qk_max = fmaxf(qk_max, qk);
+                local_exp_sum += expf(qk);
+                for (int j = 0; j < tile_size; ++j) {
+                    int v_idx = tile_start + j;
+                    if (v_idx < BLOCK_SIZE) {
+                        V_vec v_vec;
+                        if constexpr (KV_DTYPE == Fp8KVCacheDataType::kAuto) {
+                            v_vec = *reinterpret_cast<const V_vec*>(&v_buffer[current_buffer][v_idx * HEAD_SIZE + i * THREAD_GROUP_SIZE + thread_group_offset]);
+                        } else {
+                            Quant_vec v_vec_quant = *reinterpret_cast<const Quant_vec*>(&v_buffer[current_buffer][v_idx * HEAD_SIZE + i * THREAD_GROUP_SIZE + thread_group_offset]);
+                            v_vec = fp8::scaled_convert<V_vec, Quant_vec, KV_DTYPE>(v_vec_quant, v_scale);
+                        }
+                        local_accs[i] += expf(qk) * sum(v_vec);
+                    }
+                }
+            }
+        }
+
+        // Online Softmax Aggregation
+        if (threadIdx.x == 0) {
+            float mnew = fmaxf(max_logit, qk_max);
+            exp_sum = expf(max_logit - mnew) * exp_sum + expf(qk_max - mnew) * local_exp_sum;
+            max_logit = mnew;
+            stage = 3;
+        }
+        __syncthreads();
+
+        // Stage 3: Swap buffers for next iteration
+        if (threadIdx.x == 0) {
+            current_buffer = 1 - current_buffer;
+            next_buffer = 1 - next_buffer;
+            stage = 0;
+        }
+        __syncthreads();
+
+        // Gradient Calculation
+        for (int i = thread_group_idx; i < NUM_ELEMS_PER_THREAD; i += NUM_THREAD_GROUPS) {
+            float p = expf(qk_max - max_logit);
+            float dv_val = (local_accs[i] / exp_sum) * do_val;
+            d_v[i] += dv_val;
+            for (int j = 0; j < tile_size; ++j) {
+                int k_idx = tile_start + j;
+                if (k_idx < BLOCK_SIZE) {
+                    K_vec k_vec;
+                    if constexpr (KV_DTYPE == Fp8KVCacheDataType::kAuto) {
+                        k_vec = *reinterpret_cast<const K_vec*>(&k_buffer[current_buffer][k_idx * HEAD_SIZE + i * THREAD_GROUP_SIZE + thread_group_offset]);
+                    } else {
+                        Quant_vec k_vec_quant = *reinterpret_cast<const Quant_vec*>(&k_buffer[current_buffer][k_idx * HEAD_SIZE + i * THREAD_GROUP_SIZE + thread_group_offset]);
+                        k_vec = fp8::scaled_convert<K_vec, Quant_vec, KV_DTYPE>(k_vec_quant, k_scale);
+                    }
+                    d_k[i] += scale * dot(q_vecs[thread_group_offset], k_vec) * do_val * p;
+                    d_q[i] += scale * dot(k_vec, q_vecs[thread_group_offset]) * do_val * p;
+                }
+            }
+        }
+        __syncthreads();
+    }
+
+    // Accumulate gradients to output tensors
+    scalar_t* dq_ptr = dq + seq_idx * q_stride + head_idx * HEAD_SIZE;
+    scalar_t* dk_ptr = dk + seq_idx * kv_block_stride + kv_head_idx * kv_head_stride;
+    scalar_t* dv_ptr = dv + seq_idx * kv_block_stride + kv_head_idx * kv_head_stride;
+    for (int i = thread_group_idx; i < NUM_ELEMS_PER_THREAD; i += NUM_THREAD_GROUPS) {
+        if (thread_group_offset == 0) {
+            from_float(dq_ptr[i], d_q[i]);
+            from_float(dk_ptr[i], d_k[i]);
+            from_float(dv_ptr[i], d_v[i]);
+        }
+    }
+    __syncthreads();
+
+    // Cleanup: Close IPC handles
+    if (threadIdx.x == 0) {
+        for (int r = 0; r < world_size; ++r) {
+            void* temp_k_ptr;
+            void* temp_v_ptr;
+            cudaError_t err;
+            err = cudaIpcOpenMemHandle(&temp_k_ptr, ipc_handles[r], cudaIpcMemLazyEnablePeerAccess);
+            if (err == cudaSuccess) {
+                cudaIpcCloseMemHandle(temp_k_ptr);
+            }
+            err = cudaIpcOpenMemHandle(&temp_v_ptr, ipc_handles[r + world_size], cudaIpcMemLazyEnablePeerAccess);
+            if (err == cudaSuccess) {
+                cudaIpcCloseMemHandle(temp_v_ptr);
+            }
+        }
+    }
+}
+
+template <typename T, typename CACHE_T, int BLOCK_SIZE,
+          aphrodite::Fp8KVCacheDataType KV_DTYPE, bool IS_BLOCK_SPARSE,
+          int NUM_THREADS>
+void burst_attention_launcher(
+    torch::Tensor& out, torch::Tensor& query, torch::Tensor& key_cache,
+    torch::Tensor& value_cache, int num_kv_heads, float scale,
+    torch::Tensor& block_tables, torch::Tensor& seq_lens, int max_seq_len,
+    const c10::optional<torch::Tensor>& alibi_slopes, float k_scale,
+    float v_scale, const int tp_rank, const int blocksparse_local_blocks,
+    const int blocksparse_vert_stride, const int blocksparse_block_size,
+    const int blocksparse_head_sliding_step,
+    // IPC related parameters
+    torch::Tensor& ipc_handles_tensor, // Tensor of IPC handles
+    torch::Tensor& ipc_offsets_tensor, // Tensor of offsets
+    torch::Tensor& shared_signals_tensor, // Tensor of shared memory
+    int world_size,
+    int rank,
+    torch::Tensor& dq,
+    torch::Tensor& dk,
+    torch::Tensor& dv,
+    torch::Tensor& do_,
+    int tile_size // Tile size parameter
+) {
+    int num_seqs = query.size(0);
+    int num_heads = query.size(1);
+    int head_size = query.size(2);
+    int max_num_blocks_per_seq = block_tables.size(1);
+    int q_stride = query.stride(0);
+    int kv_block_stride = key_cache.stride(0);
+    int kv_head_stride = key_cache.stride(1);
+
+    [[maybe_unused]] int thread_group_size = MAX(WARP_SIZE / BLOCK_SIZE, 1);
+    assert(head_size % thread_group_size == 0);
+
+    // NOTE: alibi_slopes is optional.
+    const float* alibi_slopes_ptr =
+        alibi_slopes
+            ? reinterpret_cast<const float*>(alibi_slopes.value().data_ptr())
+            : nullptr;
+
+    T* out_ptr = reinterpret_cast<T*>(out.data_ptr());
+    T* query_ptr = reinterpret_cast<T*>(query.data_ptr());
+    CACHE_T* key_cache_ptr = reinterpret_cast<CACHE_T*>(key_cache.data_ptr());
+    CACHE_T* value_cache_ptr = reinterpret_cast<CACHE_T*>(value_cache.data_ptr());
+    int* block_tables_ptr = block_tables.data_ptr<int>();
+    int* seq_lens_ptr = seq_lens.data_ptr<int>();
+
+    cudaIpcMemHandle_t* ipc_handles_ptr = reinterpret_cast<cudaIpcMemHandle_t*>(ipc_handles_tensor.data_ptr());
+    int* ipc_offsets_ptr = reinterpret_cast<int*>(ipc_offsets_tensor.data_ptr());
+    volatile aphrodite::Signal* shared_signals_ptr = reinterpret_cast<volatile aphrodite::Signal*>(shared_signals_tensor.data_ptr());
+
+    T* dq_ptr = reinterpret_cast<T*>(dq.data_ptr());
+    T* dk_ptr = reinterpret_cast<T*>(dk.data_ptr());
+    T* dv_ptr = reinterpret_cast<T*>(dv.data_ptr());
+    T* do_ptr = reinterpret_cast<T*>(do_.data_ptr());
+
+    constexpr int NUM_WARPS = NUM_THREADS / WARP_SIZE;
+    int padded_max_seq_len =
+        DIVIDE_ROUND_UP(max_seq_len, BLOCK_SIZE) * BLOCK_SIZE;
+    int shared_mem_size = 0; // No shared memory needed for this kernel
+
+    dim3 grid(num_heads, num_seqs, 1);
+    dim3 block(NUM_THREADS);
+    const at::cuda::OptionalCUDAGuard device_guard(device_of(query));
+    const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+    // Launch the kernel
+    switch (head_size) {
+        case 64:
+            APHRODITE_DevFuncAttribute_SET_MaxDynamicSharedMemorySize(
+                ((void*)burst_attention_kernel<
+                    T, CACHE_T, 64, BLOCK_SIZE, NUM_THREADS, KV_DTYPE,
+                    IS_BLOCK_SPARSE>),
+                shared_mem_size);
+            burst_attention_kernel<T, CACHE_T, 64, BLOCK_SIZE,
+                                    NUM_THREADS, KV_DTYPE, IS_BLOCK_SPARSE>
+                <<<grid, block, shared_mem_size, stream>>>(
+                    out_ptr, query_ptr, key_cache_ptr, value_cache_ptr, num_kv_heads,
+                    scale, block_tables_ptr, seq_lens_ptr, max_num_blocks_per_seq,
+                    alibi_slopes_ptr, q_stride, kv_block_stride, kv_head_stride,
+                    k_scale, v_scale, tp_rank, blocksparse_local_blocks,
+                    blocksparse_vert_stride, blocksparse_block_size,
+                    blocksparse_head_sliding_step,
+                    ipc_handles_ptr, ipc_offsets_ptr, shared_signals_ptr,
+                    world_size, rank, dq_ptr, dk_ptr, dv_ptr, do_ptr, tile_size);
+            break;
+        case 80:
+            APHRODITE_DevFuncAttribute_SET_MaxDynamicSharedMemorySize(
+                ((void*)burst_attention_kernel<
+                    T, CACHE_T, 80, BLOCK_SIZE, NUM_THREADS, KV_DTYPE,
+                    IS_BLOCK_SPARSE>),
+                shared_mem_size);
+            burst_attention_kernel<T, CACHE_T, 80, BLOCK_SIZE,
+                                    NUM_THREADS, KV_DTYPE, IS_BLOCK_SPARSE>
+                <<<grid, block, shared_mem_size, stream>>>(
+                    out_ptr, query_ptr, key_cache_ptr, value_cache_ptr, num_kv_heads,
+                    scale, block_tables_ptr, seq_lens_ptr, max_num_blocks_per_seq,
+                    alibi_slopes_ptr, q_stride, kv_block_stride, kv_head_stride,
+                    k_scale, v_scale, tp_rank, blocksparse_local_blocks,
+                    blocksparse_vert_stride, blocksparse_block_size,
+                    blocksparse_head_sliding_step,
+                    ipc_handles_ptr, ipc_offsets_ptr, shared_signals_ptr,
+                    world_size, rank, dq_ptr, dk_ptr, dv_ptr, do_ptr, tile_size);
+            break;
+        case 96:
+            APHRODITE_DevFuncAttribute_SET_MaxDynamicSharedMemorySize(
+                ((void*)burst_attention_kernel<
+                    T, CACHE_T, 96, BLOCK_SIZE, NUM_THREADS, KV_DTYPE,
+                    IS_BLOCK_SPARSE>),
+                shared_mem_size);
+            burst_attention_kernel<T, CACHE_T, 96, BLOCK_SIZE,
+                                    NUM_THREADS, KV_DTYPE, IS_BLOCK_SPARSE>
+                <<<grid, block, shared_mem_size, stream>>>(
+                    out_ptr, query_ptr, key_cache_ptr, value_cache_ptr, num_kv_heads,
+                    scale, block_tables_ptr, seq_lens_ptr, max_num_blocks_per_seq,
+                    alibi_slopes_ptr, q_stride, kv_block_stride, kv_head_stride,
+                    k_scale, v_scale, tp_rank, blocksparse_local_blocks,
+                    blocksparse_vert_stride, blocksparse_block_size,
+                    blocksparse_head_sliding_step,
+                    ipc_handles_ptr, ipc_offsets_ptr, shared_signals_ptr,
+                    world_size, rank, dq_ptr, dk_ptr, dv_ptr, do_ptr, tile_size);
+            break;
+        case 112:
+            APHRODITE_DevFuncAttribute_SET_MaxDynamicSharedMemorySize(
+                ((void*)burst_attention_kernel<
+                    T, CACHE_T, 112, BLOCK_SIZE, NUM_THREADS, KV_DTYPE,
+                    IS_BLOCK_SPARSE>),
+                shared_mem_size);
+            burst_attention_kernel<T, CACHE_T, 112, BLOCK_SIZE,
+                                    NUM_THREADS, KV_DTYPE, IS_BLOCK_SPARSE>
+                <<<grid, block, shared_mem_size, stream>>>(
+                    out_ptr, query_ptr, key_cache_ptr, value_cache_ptr, num_kv_heads,
+                    scale, block_tables_ptr, seq_lens_ptr, max_num_blocks_per_seq,
+                    alibi_slopes_ptr, q_stride, kv_block_stride, kv_head_stride,
+                    k_scale, v_scale, tp_rank, blocksparse_local_blocks,
+                    blocksparse_vert_stride, blocksparse_block_size,
+                    blocksparse_head_sliding_step,
+                    ipc_handles_ptr, ipc_offsets_ptr, shared_signals_ptr,
+                    world_size, rank, dq_ptr, dk_ptr, dv_ptr, do_ptr, tile_size);
+            break;
+        case 120:
+            APHRODITE_DevFuncAttribute_SET_MaxDynamicSharedMemorySize(
+                ((void*)burst_attention_kernel<
+                    T, CACHE_T, 120, BLOCK_SIZE, NUM_THREADS, KV_DTYPE,
+                    IS_BLOCK_SPARSE>),
+                shared_mem_size);
+            burst_attention_kernel<T, CACHE_T, 120, BLOCK_SIZE,
+                                    NUM_THREADS, KV_DTYPE, IS_BLOCK_SPARSE>
+                <<<grid, block, shared_mem_size, stream>>>(
+                    out_ptr, query_ptr, key_cache_ptr, value_cache_ptr, num_kv_heads,
+                    scale, block_tables_ptr, seq_lens_ptr, max_num_blocks_per_seq,
+                    alibi_slopes_ptr, q_stride, kv_block_stride, kv_head_stride,
+                    k_scale, v_scale, tp_rank, blocksparse_local_blocks,
+                    blocksparse_vert_stride, blocksparse_block_size,
+                    blocksparse_head_sliding_step,
+                    ipc_handles_ptr, ipc_offsets_ptr, shared_signals_ptr,
+                    world_size, rank, dq_ptr, dk_ptr, dv_ptr, do_ptr, tile_size);
+            break;
+        case 128:
+            APHRODITE_DevFuncAttribute_SET_MaxDynamicSharedMemorySize(
+                ((void*)burst_attention_kernel<
+                    T, CACHE_T, 128, BLOCK_SIZE, NUM_THREADS, KV_DTYPE,
+                    IS_BLOCK_SPARSE>),
+                shared_mem_size);
+            burst_attention_kernel<T, CACHE_T, 128, BLOCK_SIZE,
+                                    NUM_THREADS, KV_DTYPE, IS_BLOCK_SPARSE>
+                <<<grid, block, shared_mem_size, stream>>>(
+                    out_ptr, query_ptr, key_cache_ptr, value_cache_ptr, num_kv_heads,
+                    scale, block_tables_ptr, seq_lens_ptr, max_num_blocks_per_seq,
+                    alibi_slopes_ptr, q_stride, kv_block_stride, kv_head_stride,
+                    k_scale, v_scale, tp_rank, blocksparse_local_blocks,
+                    blocksparse_vert_stride, blocksparse_block_size,
+                    blocksparse_head_sliding_step,
+                    ipc_handles_ptr, ipc_offsets_ptr, shared_signals_ptr,
+                    world_size, rank, dq_ptr, dk_ptr, dv_ptr, do_ptr, tile_size);
+            break;
+        case 192:
+            APHRODITE_DevFuncAttribute_SET_MaxDynamicSharedMemorySize(
+                ((void*)burst_attention_kernel<
+                    T, CACHE_T, 192, BLOCK_SIZE, NUM_THREADS, KV_DTYPE,
+                    IS_BLOCK_SPARSE>),
+                shared_mem_size);
+            burst_attention_kernel<T, CACHE_T, 192, BLOCK_SIZE,
+                                    NUM_THREADS, KV_DTYPE, IS_BLOCK_SPARSE>
+                <<<grid, block, shared_mem_size, stream>>>(
+                    out_ptr, query_ptr, key_cache_ptr, value_cache_ptr, num_kv_heads,
+                    scale, block_tables_ptr, seq_lens_ptr, max_num_blocks_per_seq,
+                    alibi_slopes_ptr, q_stride, kv_block_stride, kv_head_stride,
+                    k_scale, v_scale, tp_rank, blocksparse_local_blocks,
+                    blocksparse_vert_stride, blocksparse_block_size,
+                    blocksparse_head_sliding_step,
+                    ipc_handles_ptr, ipc_offsets_ptr, shared_signals_ptr,
+                    world_size, rank, dq_ptr, dk_ptr, dv_ptr, do_ptr, tile_size);
+            break;
+        case 256:
+            APHRODITE_DevFuncAttribute_SET_MaxDynamicSharedMemorySize(
+                ((void*)burst_attention_kernel<
+                    T, CACHE_T, 256, BLOCK_SIZE, NUM_THREADS, KV_DTYPE,
+                    IS_BLOCK_SPARSE>),
+                shared_mem_size);
+            burst_attention_kernel<T, CACHE_T, 256, BLOCK_SIZE,
+                                    NUM_THREADS, KV_DTYPE, IS_BLOCK_SPARSE>
+                <<<grid, block, shared_mem_size, stream>>>(
+                    out_ptr, query_ptr, key_cache_ptr, value_cache_ptr, num_kv_heads,
+                    scale, block_tables_ptr, seq_lens_ptr, max_num_blocks_per_seq,
+                    alibi_slopes_ptr, q_stride, kv_block_stride, kv_head_stride,
+                    k_scale, v_scale, tp_rank, blocksparse_local_blocks,
+                    blocksparse_vert_stride, blocksparse_block_size,
+                    blocksparse_head_sliding_step,
+                    ipc_handles_ptr, ipc_offsets_ptr, shared_signals_ptr,
+                    world_size, rank, dq_ptr, dk_ptr, dv_ptr, do_ptr, tile_size);
+            break;
+        default:
+            TORCH_CHECK(false, "Unsupported head size: ", head_size);
+            break;
+    }
+}
+
+#define CALL_BURST_ATTENTION_LAUNCHER(T, CACHE_T, BLOCK_SIZE, KV_DTYPE, IS_BLOCK_SPARSE) \
+  burst_attention_launcher<T, CACHE_T, BLOCK_SIZE, KV_DTYPE, IS_BLOCK_SPARSE>(          \
+      out, query, key_cache, value_cache, num_kv_heads, scale, block_tables,         \
+      seq_lens, max_seq_len, alibi_slopes, k_scale, v_scale, tp_rank,               \
+      blocksparse_local_blocks, blocksparse_vert_stride, blocksparse_block_size,     \
+      blocksparse_head_sliding_step, ipc_handles, ipc_offsets, shared_signals, world_size, rank, dq, dk, dv, do_, tile_size);
+
+#define CALL_BURST_ATTENTION_LAUNCHER_SPARSITY(T, CACHE_T, BLOCK_SIZE, IS_FP8_KV_CACHE) \
+  switch (is_block_sparse) {                                               \
+    case true:                                                             \
+      CALL_BURST_ATTENTION_LAUNCHER(T, CACHE_T, BLOCK_SIZE, IS_FP8_KV_CACHE, true);     \
+      break;                                                               \
+    case false:                                                            \
+      CALL_BURST_ATTENTION_LAUNCHER(T, CACHE_T, BLOCK_SIZE, IS_FP8_KV_CACHE, false);    \
+      break;                                                               \
+  }
+// NOTE: To reduce the compilation time, we omitted block sizes
+// 1, 2, 4, 64, 128, 256.
+#define CALL_BURST_ATTENTION_LAUNCHER_BLOCK_SIZE(T, CACHE_T, KV_DTYPE)         \
+  switch (block_size) {                                           \
+    case 8:                                                       \
+      CALL_BURST_ATTENTION_LAUNCHER_SPARSITY(T, CACHE_T, 8, KV_DTYPE);         \
+      break;                                                      \
+    case 16:                                                      \
+      CALL_BURST_ATTENTION_LAUNCHER_SPARSITY(T, CACHE_T, 16, KV_DTYPE);        \
+      break;                                                      \
+    case 32:                                                      \
+      CALL_BURST_ATTENTION_LAUNCHER_SPARSITY(T, CACHE_T, 32, KV_DTYPE);        \
+      break;                                                      \
+    default:                                                      \
+      TORCH_CHECK(false, "Unsupported block size: ", block_size); \
+      break;                                                      \
+  }
+
+void burst_attention(
+    torch::Tensor& out,    // [num_seqs, num_heads, head_size]
+    torch::Tensor& query,  // [num_seqs, num_heads, head_size]
+    torch::Tensor&
+        key_cache,  // [num_blocks, num_heads, head_size/x, block_size, x]
+    torch::Tensor&
+        value_cache,       // [num_blocks, num_heads, head_size, block_size]
+    int64_t num_kv_heads,  // [num_heads]
+    double scale,
+    torch::Tensor& block_tables,  // [num_seqs, max_num_blocks_per_seq]
+    torch::Tensor& seq_lens,      // [num_seqs]
+    int64_t block_size, int64_t max_seq_len,
+    const c10::optional<torch::Tensor>& alibi_slopes,
+    const std::string& kv_cache_dtype, double k_scale, double v_scale,
+    const int64_t tp_rank, const int64_t blocksparse_local_blocks,
+    const int64_t blocksparse_vert_stride, const int64_t blocksparse_block_size,
+    const int64_t blocksparse_head_sliding_step,
+    // IPC related parameters
+    torch::Tensor& ipc_handles, // Tensor of IPC handles
+    torch::Tensor& ipc_offsets, // Tensor of offsets
+    torch::Tensor& shared_signals, // Tensor of shared memory
+    int world_size,
+    int rank,
+    torch::Tensor& dq,
+    torch::Tensor& dk,
+    torch::Tensor& dv,
+    torch::Tensor& do_,
+    int tile_size
+) {
+  const bool is_block_sparse = (blocksparse_vert_stride > 1);
+  DISPATCH_BY_KV_CACHE_DTYPE(query.dtype(), kv_cache_dtype,
+                             CALL_BURST_ATTENTION_LAUNCHER_BLOCK_SIZE)
+}
+
 #undef WARP_SIZE
 #undef MAX
 #undef MIN
