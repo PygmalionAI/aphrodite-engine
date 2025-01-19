@@ -66,7 +66,7 @@ class FluteConfig(QuantizationConfig):
 
     @classmethod
     def get_config_filenames(cls) -> List[str]:
-        return ["flute_config.json"]
+        return ["quantize_config.json"]
 
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "FluteConfig":
