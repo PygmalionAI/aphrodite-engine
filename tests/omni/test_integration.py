@@ -40,6 +40,19 @@ assert 'aphrodite.omni' not in sys.modules
 
 
 @isolated
+def test_diffusion_audio_serving_does_not_require_token_processor():
+    from aphrodite.omni.entrypoints.openai.serving_audio_generate import OmniOpenAIServingAudioGenerate
+
+    engine = SimpleNamespace(model_config=None)
+    models = SimpleNamespace()
+    serving = OmniOpenAIServingAudioGenerate.for_diffusion(engine, models, model_name="diffusion")
+    assert serving.engine_client is engine
+    assert serving.models is models
+    assert serving.diffusion_mode
+    assert serving.model_name == "diffusion"
+
+
+@isolated
 def test_video_task_registry_replacement_and_shutdown():
     import asyncio
 

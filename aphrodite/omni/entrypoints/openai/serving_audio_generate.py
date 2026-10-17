@@ -7,7 +7,7 @@ import torch
 from fastapi import Request
 from fastapi.responses import Response
 
-from aphrodite.entrypoints.generate.base.serving import GenerateBaseServing as OpenAIServing
+from aphrodite.entrypoints.serve.engine.serving import BaseServing
 from aphrodite.logger import init_logger
 from aphrodite.omni.entrypoints.async_omni import AsyncOmni
 from aphrodite.omni.entrypoints.openai.audio_utils_mixin import AudioMixin
@@ -23,14 +23,15 @@ from aphrodite.utils import random_uuid
 logger = init_logger(__name__)
 
 
-class OmniOpenAIServingAudioGenerate(OpenAIServing, AudioMixin):
+class OmniOpenAIServingAudioGenerate(BaseServing, AudioMixin):
     """Serving class for audio generation via diffusion models (e.g. Stable Audio)."""
 
     engine_client: AsyncOmni
 
-    def __init__(self, *args, **kwargs):
-        self.model_name = kwargs.pop("model_name", None)
-        super().__init__(*args, **kwargs)
+    def __init__(self, engine_client, models, *, request_logger=None, model_name=None):
+        self.engine_client = engine_client
+        self.model_name = model_name
+        super().__init__(models=models, model_config=engine_client.model_config, request_logger=request_logger)
         self.diffusion_mode = False
 
     @classmethod
