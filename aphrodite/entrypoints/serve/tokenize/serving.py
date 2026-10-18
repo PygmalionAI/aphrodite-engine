@@ -5,7 +5,6 @@ from typing import Any, Final
 
 from fastapi import Request
 
-from aphrodite.entrypoints.chat_utils import ChatTemplateContentFormatOption
 from aphrodite.entrypoints.openai.models.serving import (
     OpenAIModelRegistry,
     OpenAIServingModels,
@@ -23,6 +22,7 @@ from aphrodite.entrypoints.serve.tokenize.protocol import (
 from aphrodite.entrypoints.serve.utils.request_logger import RequestLogger
 from aphrodite.inputs import TokensPrompt, tokens_input
 from aphrodite.logger import init_logger
+from aphrodite.renderers.chat_utils import ChatTemplateContentFormatOption
 from aphrodite.renderers.online_renderer import OnlineRenderer
 from aphrodite.tokenizers import TokenizerLike
 

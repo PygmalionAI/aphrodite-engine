@@ -10,6 +10,7 @@ from aphrodite.config import AphroditeConfig, CompilationConfig, replace
 from aphrodite.config.kernel import MoEBackend
 from aphrodite.engine.arg_utils import EngineArgs
 from aphrodite.platforms import current_platform
+from aphrodite.v1.spec_decode.draft_model import DraftModelProposer
 from tests.utils import multi_gpu_only, single_gpu_only
 
 from ..utils import (
@@ -147,6 +148,21 @@ def test_draft_model_quantization(models: tuple[str, str], enforce_eager: bool, 
     assert_draft_model_correctness(sd_case, aphrodite_runner)
 
 
+@single_gpu_only
+def test_draft_model_transformers_backend(aphrodite_runner):
+    """Ensure that Attention prefixes don't collide between the target and
+    draft models when both models use the Transformers modelling backend."""
+    sd_case = ArgsTest(
+        target_model="allenai/OLMo-2-0425-1B-Instruct",
+        draft_model="allenai/OLMo-2-0425-1B-Instruct",
+        sampling_config=greedy_sampling(),
+        num_speculative_tokens=3,
+        expected_acceptance_len=0.98 * (3 + 1),  # epsilon discount of K + 1
+        expected_acceptance_rate=0.98,  # slight epsilon
+    )
+    assert_draft_model_correctness(sd_case, aphrodite_runner)
+
+
 @multi_gpu_only(num_gpus=2)
 def test_draft_model_tensor_parallelism(aphrodite_runner):
     """Ensure spec decode works when running with TP > 1."""
@@ -192,6 +208,36 @@ def test_draft_model_engine_args_tensor_parallelism():
     )
     assert draft_config.parallel_config.tensor_parallel_size == 1
     assert draft_config.quant_config is None
+
+
+@pytest.mark.cpu_test
+@pytest.mark.parametrize("dcp_size", [1, 2])
+def test_draft_model_inherits_target_dcp_config(monkeypatch, dcp_size):
+    monkeypatch.setattr(current_platform, "device_count", lambda: 16)
+    target_config = EngineArgs(
+        model="Qwen/Qwen3-1.7B",
+        tensor_parallel_size=16,
+        decode_context_parallel_size=dcp_size,
+        cp_kv_cache_interleave_size=16,
+        dcp_comm_backend="ag_rs",
+        distributed_executor_backend="mp",
+        speculative_config={
+            "model": "Qwen/Qwen3-0.6B",
+            "method": "draft_model",
+            "num_speculative_tokens": 3,
+        },
+    ).create_engine_config()
+    proposer = object.__new__(DraftModelProposer)
+    proposer.aphrodite_config = target_config
+    proposer.speculative_config = target_config.speculative_config
+    draft_config = proposer._create_draft_aphrodite_config()
+    draft_parallel = draft_config.parallel_config
+    assert draft_parallel.decode_context_parallel_size == dcp_size
+    assert draft_parallel.cp_kv_cache_interleave_size == 16
+    assert draft_parallel.dcp_comm_backend == "ag_rs"
+    assert draft_parallel.dcp_q_replicate == target_config.parallel_config.dcp_q_replicate
+    assert draft_parallel is not target_config.parallel_config
+    assert target_config.parallel_config.decode_context_parallel_size == dcp_size
 
 
 def _apply_draft_moe_backend(aphrodite_config: AphroditeConfig) -> AphroditeConfig:
@@ -317,7 +363,6 @@ def test_draft_model_kv_cache_dtype_override():
 def test_draft_model_engine_args_rejects_invalid_tp_argname():
     """The user should pass "draft_tensor_parallel_size" rather than
     "tensor_parallel_size". We enforce this with validation."""
-
     engine_args = EngineArgs(
         model="Qwen/Qwen3-1.7B",
         tensor_parallel_size=1,

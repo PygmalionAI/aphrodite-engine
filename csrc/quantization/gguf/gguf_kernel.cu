@@ -4,8 +4,8 @@
 #include <torch/all.h>
 #include <c10/cuda/CUDAGuard.h>
 
-#include "../../cuda_compat.h"
-#include "dispatch_utils.h"
+#include "../../core/cuda_compat.h"
+#include <ATen/Dispatch_v2.h>
 
 #include "ggml-common.h"
 #include "vecdotq.cuh"
@@ -80,10 +80,12 @@ torch::Tensor ggml_dequantize(torch::Tensor W,  // quant weight
   at::Tensor DW = torch::empty({m, n}, options);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
 
-  APHRODITE_DISPATCH_FLOATING_TYPES(DW.scalar_type(), "ggml_dequantize", [&] {
-    auto to_cuda = ggml_get_to_cuda<scalar_t>(type);
-    to_cuda((void*)W.data_ptr(), (scalar_t*)DW.data_ptr(), m * n, stream);
-  });
+  AT_DISPATCH_V2(
+      DW.scalar_type(), "ggml_dequantize", AT_WRAP([&] {
+        auto to_cuda = ggml_get_to_cuda<scalar_t>(type);
+        to_cuda((void*)W.data_ptr(), (scalar_t*)DW.data_ptr(), m * n, stream);
+      }),
+      at::ScalarType::Float, at::ScalarType::Half, at::ScalarType::BFloat16);
 
   return DW;
 }
@@ -100,109 +102,110 @@ torch::Tensor ggml_mul_mat_vec_a8(torch::Tensor W,  // quant weight
   cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
   options = torch::TensorOptions().dtype(torch::kInt32).device(W.device());
   at::Tensor quant_X = torch::empty({vecs, padded / 32 * 9}, options);
-  APHRODITE_DISPATCH_FLOATING_TYPES(
-      X.scalar_type(), "ggml_mul_mat_vec_a8", [&] {
-        quantize_row_q8_1_cuda<scalar_t>((scalar_t*)X.data_ptr(),
-                                         (void*)quant_X.data_ptr(), col, vecs,
-                                         stream);
-        switch (type) {
-          case 2:
-            mul_mat_vec_q4_0_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 3:
-            mul_mat_vec_q4_1_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 6:
-            mul_mat_vec_q5_0_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 7:
-            mul_mat_vec_q5_1_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 8:
-            mul_mat_vec_q8_0_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 10:
-            mul_mat_vec_q2_K_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 11:
-            mul_mat_vec_q3_K_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 12:
-            mul_mat_vec_q4_K_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 13:
-            mul_mat_vec_q5_K_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 14:
-            mul_mat_vec_q6_K_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 16:
-            mul_mat_vec_iq2_xxs_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 17:
-            mul_mat_vec_iq2_xs_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 18:
-            mul_mat_vec_iq3_xxs_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 19:
-            mul_mat_vec_iq1_s_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 20:
-            mul_mat_vec_iq4_nl_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 21:
-            mul_mat_vec_iq3_s_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 22:
-            mul_mat_vec_iq2_s_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 23:
-            mul_mat_vec_iq4_xs_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-          case 29:
-            mul_mat_vec_iq1_m_q8_1_cuda<scalar_t>(
-                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-                (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
-            break;
-        }
-      });
+  AT_DISPATCH_V2(X.scalar_type(), "ggml_mul_mat_vec_a8", AT_WRAP([&] {
+                   quantize_row_q8_1_cuda<scalar_t>((scalar_t*)X.data_ptr(),
+                                                    (void*)quant_X.data_ptr(),
+                                                    col, vecs, stream);
+                   switch (type) {
+                     case 2:
+                       mul_mat_vec_q4_0_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 3:
+                       mul_mat_vec_q4_1_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 6:
+                       mul_mat_vec_q5_0_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 7:
+                       mul_mat_vec_q5_1_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 8:
+                       mul_mat_vec_q8_0_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 10:
+                       mul_mat_vec_q2_K_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 11:
+                       mul_mat_vec_q3_K_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 12:
+                       mul_mat_vec_q4_K_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 13:
+                       mul_mat_vec_q5_K_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 14:
+                       mul_mat_vec_q6_K_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 16:
+                       mul_mat_vec_iq2_xxs_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 17:
+                       mul_mat_vec_iq2_xs_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 18:
+                       mul_mat_vec_iq3_xxs_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 19:
+                       mul_mat_vec_iq1_s_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 20:
+                       mul_mat_vec_iq4_nl_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 21:
+                       mul_mat_vec_iq3_s_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 22:
+                       mul_mat_vec_iq2_s_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 23:
+                       mul_mat_vec_iq4_xs_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                     case 29:
+                       mul_mat_vec_iq1_m_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), col, row, vecs, stream);
+                       break;
+                   }
+                 }),
+                 at::ScalarType::Float, at::ScalarType::Half,
+                 at::ScalarType::BFloat16);
   return Y;
 }
 
@@ -218,63 +221,65 @@ torch::Tensor ggml_mul_mat_a8(torch::Tensor W,  // quant weight
   cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
   options = torch::TensorOptions().dtype(torch::kInt32).device(W.device());
   at::Tensor quant_X = torch::empty({batch, padded / 32 * 9}, options);
-  APHRODITE_DISPATCH_FLOATING_TYPES(X.scalar_type(), "ggml_mul_mat_a8", [&] {
-    quantize_row_q8_1_cuda((scalar_t*)X.data_ptr(), (void*)quant_X.data_ptr(),
-                           col, batch, stream);
+  AT_DISPATCH_V2(
+      X.scalar_type(), "ggml_mul_mat_a8", AT_WRAP([&] {
+        quantize_row_q8_1_cuda((scalar_t*)X.data_ptr(),
+                               (void*)quant_X.data_ptr(), col, batch, stream);
 
-    switch (type) {
-      case 2:
-        ggml_mul_mat_q4_0_q8_1_cuda(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
-        break;
-      case 3:
-        ggml_mul_mat_q4_1_q8_1_cuda(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
-        break;
-      case 6:
-        ggml_mul_mat_q5_0_q8_1_cuda(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
-        break;
-      case 7:
-        ggml_mul_mat_q5_1_q8_1_cuda(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
-        break;
-      case 8:
-        ggml_mul_mat_q8_0_q8_1_cuda(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
-        break;
-      case 10:
-        ggml_mul_mat_q2_K_q8_1_cuda(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
-        break;
-      case 11:
-        ggml_mul_mat_q3_K_q8_1_cuda(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
-        break;
-      case 12:
-        ggml_mul_mat_q4_K_q8_1_cuda(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
-        break;
-      case 13:
-        ggml_mul_mat_q5_K_q8_1_cuda(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
-        break;
-      case 14:
-        ggml_mul_mat_q6_K_q8_1_cuda(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
-        break;
-    }
-  });
+        switch (type) {
+          case 2:
+            ggml_mul_mat_q4_0_q8_1_cuda(
+                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
+            break;
+          case 3:
+            ggml_mul_mat_q4_1_q8_1_cuda(
+                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
+            break;
+          case 6:
+            ggml_mul_mat_q5_0_q8_1_cuda(
+                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
+            break;
+          case 7:
+            ggml_mul_mat_q5_1_q8_1_cuda(
+                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
+            break;
+          case 8:
+            ggml_mul_mat_q8_0_q8_1_cuda(
+                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
+            break;
+          case 10:
+            ggml_mul_mat_q2_K_q8_1_cuda(
+                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
+            break;
+          case 11:
+            ggml_mul_mat_q3_K_q8_1_cuda(
+                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
+            break;
+          case 12:
+            ggml_mul_mat_q4_K_q8_1_cuda(
+                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
+            break;
+          case 13:
+            ggml_mul_mat_q5_K_q8_1_cuda(
+                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
+            break;
+          case 14:
+            ggml_mul_mat_q6_K_q8_1_cuda(
+                (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                (scalar_t*)Y.data_ptr(), col, row, batch, padded, row, stream);
+            break;
+        }
+      }),
+      at::ScalarType::Float, at::ScalarType::Half, at::ScalarType::BFloat16);
   return Y;
 }
 
@@ -292,92 +297,104 @@ torch::Tensor ggml_moe_a8(torch::Tensor X,  // input
   cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
   options = torch::TensorOptions().dtype(torch::kInt32).device(W.device());
   at::Tensor quant_X = torch::empty({tokens, padded / 32 * 9}, options);
-  APHRODITE_DISPATCH_FLOATING_TYPES(X.scalar_type(), "ggml_moe_a8", [&] {
-    quantize_row_q8_1_cuda((scalar_t*)X.data_ptr(), (void*)quant_X.data_ptr(),
-                           col, tokens, stream);
-    switch (type) {
-      case 2:
-        ggml_moe_q4_0_q8_1_cuda(
-            (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
-            (int*)expert_ids.data_ptr(),
-            (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
-            tokens, padded, row, top_k, sorted_token_ids.sizes()[0], stream);
-        break;
-      case 3:
-        ggml_moe_q4_1_q8_1_cuda(
-            (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
-            (int*)expert_ids.data_ptr(),
-            (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
-            tokens, padded, row, top_k, sorted_token_ids.sizes()[0], stream);
-        break;
-      case 6:
-        ggml_moe_q5_0_q8_1_cuda(
-            (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
-            (int*)expert_ids.data_ptr(),
-            (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
-            tokens, padded, row, top_k, sorted_token_ids.sizes()[0], stream);
-        break;
-      case 7:
-        ggml_moe_q5_1_q8_1_cuda(
-            (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
-            (int*)expert_ids.data_ptr(),
-            (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
-            tokens, padded, row, top_k, sorted_token_ids.sizes()[0], stream);
-        break;
-      case 8:
-        ggml_moe_q8_0_q8_1_cuda(
-            (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
-            (int*)expert_ids.data_ptr(),
-            (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
-            tokens, padded, row, top_k, sorted_token_ids.sizes()[0], stream);
-        break;
-      case 10:
-        ggml_moe_q2_K_q8_1_cuda(
-            (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
-            (int*)expert_ids.data_ptr(),
-            (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
-            tokens, padded, row, top_k, sorted_token_ids.sizes()[0], stream);
-        break;
-      case 11:
-        ggml_moe_q3_K_q8_1_cuda(
-            (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
-            (int*)expert_ids.data_ptr(),
-            (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
-            tokens, padded, row, top_k, sorted_token_ids.sizes()[0], stream);
-        break;
-      case 12:
-        ggml_moe_q4_K_q8_1_cuda(
-            (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
-            (int*)expert_ids.data_ptr(),
-            (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
-            tokens, padded, row, top_k, sorted_token_ids.sizes()[0], stream);
-        break;
-      case 13:
-        ggml_moe_q5_K_q8_1_cuda(
-            (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
-            (int*)expert_ids.data_ptr(),
-            (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
-            tokens, padded, row, top_k, sorted_token_ids.sizes()[0], stream);
-        break;
-      case 14:
-        ggml_moe_q6_K_q8_1_cuda(
-            (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
-            (int*)expert_ids.data_ptr(),
-            (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
-            tokens, padded, row, top_k, sorted_token_ids.sizes()[0], stream);
-        break;
-    }
-  });
+  AT_DISPATCH_V2(
+      X.scalar_type(), "ggml_moe_a8", AT_WRAP([&] {
+        quantize_row_q8_1_cuda((scalar_t*)X.data_ptr(),
+                               (void*)quant_X.data_ptr(), col, tokens, stream);
+        switch (type) {
+          case 2:
+            ggml_moe_q4_0_q8_1_cuda(
+                (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
+                (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
+                (int*)expert_ids.data_ptr(),
+                (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
+                tokens, padded, row, top_k, sorted_token_ids.sizes()[0],
+                stream);
+            break;
+          case 3:
+            ggml_moe_q4_1_q8_1_cuda(
+                (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
+                (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
+                (int*)expert_ids.data_ptr(),
+                (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
+                tokens, padded, row, top_k, sorted_token_ids.sizes()[0],
+                stream);
+            break;
+          case 6:
+            ggml_moe_q5_0_q8_1_cuda(
+                (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
+                (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
+                (int*)expert_ids.data_ptr(),
+                (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
+                tokens, padded, row, top_k, sorted_token_ids.sizes()[0],
+                stream);
+            break;
+          case 7:
+            ggml_moe_q5_1_q8_1_cuda(
+                (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
+                (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
+                (int*)expert_ids.data_ptr(),
+                (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
+                tokens, padded, row, top_k, sorted_token_ids.sizes()[0],
+                stream);
+            break;
+          case 8:
+            ggml_moe_q8_0_q8_1_cuda(
+                (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
+                (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
+                (int*)expert_ids.data_ptr(),
+                (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
+                tokens, padded, row, top_k, sorted_token_ids.sizes()[0],
+                stream);
+            break;
+          case 10:
+            ggml_moe_q2_K_q8_1_cuda(
+                (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
+                (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
+                (int*)expert_ids.data_ptr(),
+                (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
+                tokens, padded, row, top_k, sorted_token_ids.sizes()[0],
+                stream);
+            break;
+          case 11:
+            ggml_moe_q3_K_q8_1_cuda(
+                (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
+                (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
+                (int*)expert_ids.data_ptr(),
+                (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
+                tokens, padded, row, top_k, sorted_token_ids.sizes()[0],
+                stream);
+            break;
+          case 12:
+            ggml_moe_q4_K_q8_1_cuda(
+                (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
+                (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
+                (int*)expert_ids.data_ptr(),
+                (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
+                tokens, padded, row, top_k, sorted_token_ids.sizes()[0],
+                stream);
+            break;
+          case 13:
+            ggml_moe_q5_K_q8_1_cuda(
+                (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
+                (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
+                (int*)expert_ids.data_ptr(),
+                (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
+                tokens, padded, row, top_k, sorted_token_ids.sizes()[0],
+                stream);
+            break;
+          case 14:
+            ggml_moe_q6_K_q8_1_cuda(
+                (void*)quant_X.data_ptr(), (void*)W.data_ptr(),
+                (scalar_t*)Y.data_ptr(), (int*)sorted_token_ids.data_ptr(),
+                (int*)expert_ids.data_ptr(),
+                (int*)num_tokens_post_padded.data_ptr(), W.stride(0), col, row,
+                tokens, padded, row, top_k, sorted_token_ids.sizes()[0],
+                stream);
+            break;
+        }
+      }),
+      at::ScalarType::Float, at::ScalarType::Half, at::ScalarType::BFloat16);
   return Y;
 }
 
@@ -393,127 +410,129 @@ torch::Tensor ggml_moe_a8_vec(torch::Tensor X,  // input
   cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
   options = torch::TensorOptions().dtype(torch::kInt32).device(W.device());
   at::Tensor quant_X = torch::empty({tokens, padded / 32 * 9}, options);
-  APHRODITE_DISPATCH_FLOATING_TYPES(X.scalar_type(), "ggml_moe_vec_a8", [&] {
-    quantize_row_q8_1_cuda<scalar_t>((scalar_t*)X.data_ptr(),
-                                     (void*)quant_X.data_ptr(), col, tokens,
-                                     stream);
-    switch (type) {
-      case 2:
-        moe_vec_q4_0_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 3:
-        moe_vec_q4_1_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 6:
-        moe_vec_q5_0_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 7:
-        moe_vec_q5_1_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 8:
-        moe_vec_q8_0_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 10:
-        moe_vec_q2_K_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 11:
-        moe_vec_q3_K_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 12:
-        moe_vec_q4_K_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 13:
-        moe_vec_q5_K_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 14:
-        moe_vec_q6_K_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 16:
-        moe_vec_iq2_xxs_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 17:
-        moe_vec_iq2_xs_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 18:
-        moe_vec_iq3_xxs_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 19:
-        moe_vec_iq1_s_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 20:
-        moe_vec_iq4_nl_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 21:
-        moe_vec_iq3_s_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 22:
-        moe_vec_iq2_s_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 23:
-        moe_vec_iq4_xs_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-      case 29:
-        moe_vec_iq1_m_q8_1_cuda<scalar_t>(
-            (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
-            (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(), top_k, tokens,
-            col, row, quant_X.stride(0), stream);
-        break;
-    }
-  });
+  AT_DISPATCH_V2(X.scalar_type(), "ggml_moe_vec_a8", AT_WRAP([&] {
+                   quantize_row_q8_1_cuda<scalar_t>((scalar_t*)X.data_ptr(),
+                                                    (void*)quant_X.data_ptr(),
+                                                    col, tokens, stream);
+                   switch (type) {
+                     case 2:
+                       moe_vec_q4_0_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 3:
+                       moe_vec_q4_1_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 6:
+                       moe_vec_q5_0_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 7:
+                       moe_vec_q5_1_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 8:
+                       moe_vec_q8_0_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 10:
+                       moe_vec_q2_K_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 11:
+                       moe_vec_q3_K_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 12:
+                       moe_vec_q4_K_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 13:
+                       moe_vec_q5_K_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 14:
+                       moe_vec_q6_K_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 16:
+                       moe_vec_iq2_xxs_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 17:
+                       moe_vec_iq2_xs_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 18:
+                       moe_vec_iq3_xxs_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 19:
+                       moe_vec_iq1_s_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 20:
+                       moe_vec_iq4_nl_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 21:
+                       moe_vec_iq3_s_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 22:
+                       moe_vec_iq2_s_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 23:
+                       moe_vec_iq4_xs_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                     case 29:
+                       moe_vec_iq1_m_q8_1_cuda<scalar_t>(
+                           (void*)W.data_ptr(), (void*)quant_X.data_ptr(),
+                           (scalar_t*)Y.data_ptr(), (int*)topk_ids.data_ptr(),
+                           top_k, tokens, col, row, quant_X.stride(0), stream);
+                       break;
+                   }
+                 }),
+                 at::ScalarType::Float, at::ScalarType::Half,
+                 at::ScalarType::BFloat16);
   return Y;
 }
 

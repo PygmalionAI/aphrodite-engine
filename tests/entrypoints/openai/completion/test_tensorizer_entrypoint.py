@@ -13,13 +13,11 @@ from aphrodite.engine.arg_utils import EngineArgs
 from aphrodite.model_executor.model_loader.tensorizer import (
     TensorizerConfig,
     tensorize_aphrodite_model,
-    tensorize_lora_adapter,
 )
 from aphrodite.platforms import current_platform
 from tests.utils import RemoteOpenAIServer
 
 MODEL_NAME = "unsloth/llama-3.2-1b-Instruct"
-LORA_PATH = "davzoku/finqa_adapter_1b"
 
 
 def _cleanup():
@@ -44,11 +42,10 @@ def model_uri(tmp_dir):
 
 
 @pytest.fixture(scope="module")
-def tensorize_model_and_lora(tmp_dir, model_uri):
-    tensorizer_config = TensorizerConfig(tensorizer_uri=model_uri, lora_dir=tmp_dir)
+def tensorize_model(model_uri):
+    tensorizer_config = TensorizerConfig(tensorizer_uri=model_uri)
     args = EngineArgs(model=MODEL_NAME)
 
-    tensorize_lora_adapter(LORA_PATH, tensorizer_config)
     tensorize_aphrodite_model(args, tensorizer_config)
 
     # Manually invoke a _cleanup() here, as the cleanup()
@@ -59,7 +56,7 @@ def tensorize_model_and_lora(tmp_dir, model_uri):
 
 
 @pytest.fixture(scope="module")
-def server(model_uri, tensorize_model_and_lora):
+def server(model_uri, tensorize_model):
     # In this case, model_uri is a directory with a model.tensors
     # file and all necessary model artifacts, particularly a
     # HF `config.json` file. In this case, Tensorizer can infer the
@@ -72,7 +69,6 @@ def server(model_uri, tensorize_model_and_lora):
         "tensorizer",
         "--served-model-name",
         MODEL_NAME,
-        "--enable-lora",
     ]
     if current_platform.is_rocm():
         args += ["--attention-backend", "TRITON_ATTN"]

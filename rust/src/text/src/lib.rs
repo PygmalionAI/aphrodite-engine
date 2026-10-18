@@ -9,6 +9,10 @@
 
 use std::mem::take;
 
+use aphrodite_engine_core_client::EngineCoreClient;
+pub use aphrodite_llm::FinishReason;
+use aphrodite_llm::{GenerateOutputStream, Llm};
+use aphrodite_tokenizer::DynTokenizer;
 pub use backend::{
     DynTextBackend, GenerationConfigMode, SamplingHints, SamplingLimits, TextBackend,
 };
@@ -24,10 +28,6 @@ pub use output::{
 };
 pub use request::{Prompt, SamplingParams, TextRequest, normalize_top_k};
 use trait_set::trait_set;
-use aphrodite_engine_core_client::EngineCoreClient;
-pub use aphrodite_llm::FinishReason;
-use aphrodite_llm::{GenerateOutputStream, Llm};
-use aphrodite_tokenizer::DynTokenizer;
 
 pub mod backend;
 mod error;
@@ -35,8 +35,8 @@ mod lower;
 pub mod output;
 mod request;
 mod truncation;
-pub use truncation::{PromptTruncation, PromptTruncationLimit, TruncationSide};
 pub use aphrodite_tokenizer as tokenizer;
+pub use truncation::{PromptTruncation, PromptTruncationLimit, TruncationSide};
 
 trait_set! {
     /// Shared streamed text output type used by raw completions and other text-only northbound paths.
@@ -102,6 +102,27 @@ impl TextRequestProcessor {
             prompt_truncation.apply(&mut prompt_token_ids, input_budget)?;
         }
         Ok(prompt_token_ids)
+    }
+
+    /// Tokenize and truncate the prompt in place, so that later preparation
+    /// reuses the final token IDs instead of tokenizing again.
+    ///
+    /// Frontends that need the final prompt tokens before submission (for
+    /// example, to initialize a prompt-aware output parser) call this first
+    /// and then hand the same request to [`TextLlm::generate`].
+    pub fn tokenize_in_place<'r>(&self, request: &'r mut TextRequest) -> Result<&'r [u32]> {
+        request.validate()?;
+        let prompt_token_ids = self.prepare_prompt_tokens(
+            take(&mut request.prompt),
+            request.add_special_tokens,
+            request.prompt_truncation.take(),
+            request.sampling_params.max_tokens,
+        )?;
+        request.prompt = Prompt::TokenIds(prompt_token_ids);
+        match &request.prompt {
+            Prompt::TokenIds(prompt_token_ids) => Ok(prompt_token_ids),
+            Prompt::Text(_) => unreachable!("prompt was just replaced with token IDs"),
+        }
     }
 
     /// Prepare one request's prompt tokens without generation-specific lowering.

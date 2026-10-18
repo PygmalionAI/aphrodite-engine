@@ -14,12 +14,12 @@ import pytest
 import torch
 from PIL import Image
 
-from aphrodite.entrypoints.chat_utils import (
+from aphrodite.entrypoints.pooling.scoring.typing import ScoreMultiModalParam
+from aphrodite.platforms import current_platform
+from aphrodite.renderers.chat_utils import (
     ChatCompletionContentPartImageParam,
     ChatCompletionContentPartTextParam,
 )
-from aphrodite.entrypoints.pooling.scoring.typing import ScoreMultiModalParam
-from aphrodite.platforms import current_platform
 
 from ....conftest import AphroditeRunner
 

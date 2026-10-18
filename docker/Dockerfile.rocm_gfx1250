@@ -1,8 +1,8 @@
 # default base image
 ARG REMOTE_APHRODITE="0"
 ARG COMMON_WORKDIR=/app
-ARG BASE_IMAGE=rocm/aphrodite-dev:base
-ARG CI_BASE_IMAGE=rocm/aphrodite-dev:ci_base
+ARG BASE_IMAGE=rocm/vllm-dev:base
+ARG CI_BASE_IMAGE=rocm/vllm-dev:ci_base
 # NIC backend for MoRI RDMA support.
 # By default (all), drivers and userspace libraries for all supported NIC types
 # (ainic and bnxt) are installed; MoRI selects the appropriate one at runtime.
@@ -13,8 +13,10 @@ ARG CI_BASE_IMAGE=rocm/aphrodite-dev:ci_base
 ARG NIC_BACKEND=all
 # AMD AINIC apt repo settings
 # Users can specify a custom version compatible with their host drivers.
-# The default version has been tested with ioinic-dkms=25.11.1.001
-ARG AINIC_VERSION=1.117.3-hydra
+# The default version has been tested with ionic-dkms=26.03.3.001
+# (libionic1=54.0-187-1), required for MoRI-EP/NIXL on Pollara/AINIC.
+# TODO (jmathias) : Check if we can revert this Pinned AINIC version
+ARG AINIC_VERSION=1.117.5-a-77
 ARG UBUNTU_CODENAME=jammy
 
 # Sccache configuration. Release builds use this today; CI can opt in when a
@@ -114,16 +116,16 @@ WORKDIR ${COMMON_WORKDIR}
 FROM base AS fetch_aphrodite_0
 ONBUILD COPY ./ aphrodite/
 FROM base AS fetch_aphrodite_1
-ARG APHRODITE_REPO="https://github.com/ROCm/aphrodite.git"
-ARG APHRODITE_BRANCH="455_wip"
+ARG APHRODITE_REPO="https://github.com/aphrodite-engine/aphrodite-engine.git"
+ARG APHRODITE_BRANCH="main"
 ENV APHRODITE_REPO=${APHRODITE_REPO}
 ENV APHRODITE_BRANCH=${APHRODITE_BRANCH}
-ONBUILD RUN git clone ${APHRODITE_REPO} \
+ONBUILD RUN git clone ${APHRODITE_REPO} aphrodite \
 	    && cd aphrodite \
 	    && git fetch -v --prune -- origin ${APHRODITE_BRANCH} \
 	    && git checkout FETCH_HEAD \
-        && if [ ${APHRODITE_REPO} != "https://github.com/aphrodite-project/aphrodite.git" ] ; then \
-               git remote add upstream "https://github.com/aphrodite-project/aphrodite.git" \
+        && if [ "${APHRODITE_REPO}" != "https://github.com/vllm-project/vllm.git" ] ; then \
+               git remote add upstream "https://github.com/vllm-project/vllm.git" \
                && git fetch upstream ; fi
 FROM fetch_aphrodite_${REMOTE_APHRODITE} AS fetch_aphrodite
 
@@ -135,7 +137,7 @@ RUN --mount=type=cache,id=aphrodite-rocm-uv,target=/root/.cache/uv \
     cd ${COMMON_WORKDIR}/aphrodite \
     && uv pip install --system -r requirements/build/rust.txt \
     && python3 -c \
-        "from setuptools_scm import get_version; print(get_version())" \
+        "from setuptools_scm import get_version; print(get_version(git_describe_command=['git', 'describe', '--dirty', '--tags', '--long', '--abbrev=40', '--match', 'v[0-9]*']))" \
         > /aphrodite-version.txt
 
 # -----------------------
@@ -165,7 +167,7 @@ RUN --mount=type=cache,id=aphrodite-rocm-cargo-registry,target=/root/.cargo/regi
     --mount=type=cache,id=aphrodite-rocm-cargo-git,target=/root/.cargo/git,sharing=locked \
     cd ${COMMON_WORKDIR}/aphrodite \
     && export SETUPTOOLS_SCM_PRETEND_VERSION="$(cat /tmp/aphrodite-version.txt)" \
-    && bash build_rust.sh \
+    && bash tools/build_rust.sh \
     && test -x aphrodite/aphrodite-rs
 
 # -----------------------
@@ -194,6 +196,7 @@ COPY aphrodite/__init__.py aphrodite/__init__.py
 
 ENV APHRODITE_TARGET_DEVICE=rocm
 ENV SETUPTOOLS_SCM_PRETEND_VERSION="0.0.0+rocm.csrc.build"
+ENV APHRODITE_USE_PRECOMPILED_RUST=1
 
 RUN --mount=type=bind,source=pyproject.toml,target=${COMMON_WORKDIR}/aphrodite/pyproject.toml \
     --mount=type=cache,id=aphrodite-rocm-ccache,target=/root/.cache/ccache \
@@ -215,6 +218,7 @@ RUN --mount=type=bind,source=pyproject.toml,target=${COMMON_WORKDIR}/aphrodite/p
 FROM fetch_aphrodite AS build_aphrodite
 ARG COMMON_WORKDIR
 ENV APHRODITE_TARGET_DEVICE=rocm
+ENV APHRODITE_USE_PRECOMPILED_RUST=1
 
 COPY --from=csrc-build ${COMMON_WORKDIR}/aphrodite/dist /precompiled-wheels
 COPY --from=aphrodite-version /aphrodite-version.txt /tmp/aphrodite-version.txt
@@ -432,6 +436,7 @@ RUN /bin/bash -lc 'set -euo pipefail; \
 # Aphrodite wheel release build stage (for building distributable wheels)
 # This stage pins dependencies to custom ROCm wheel versions and handles version detection
 FROM fetch_aphrodite AS build_aphrodite_wheel_release
+ENV APHRODITE_USE_PRECOMPILED_RUST=1
 
 ARG COMMON_WORKDIR
 COPY --from=aphrodite-version /aphrodite-version.txt /tmp/aphrodite-version.txt
@@ -559,11 +564,19 @@ RUN --mount=type=bind,from=build_rixl,src=/app/install,target=/rixl_install \
 COPY --from=build_rocshmem /opt/rocshmem /opt/rocshmem
 
 # RDMA userspace libraries plus FFmpeg dev libs needed by torchcodec.
-RUN apt-get update -q -y && apt-get install -q -y --no-install-recommends \
+RUN timeout --kill-after=30s 5m apt-get update -q -y --error-on=any \
+    -o Acquire::Retries=3 \
+    -o Acquire::http::Timeout=30 \
+    -o Acquire::https::Timeout=30 \
+    && apt-get install -q -y --no-install-recommends \
+    -o Acquire::Retries=3 \
+    -o Acquire::http::Timeout=30 \
+    -o Acquire::https::Timeout=30 \
     librdmacm1 \
     libibverbs1 \
     ibverbs-providers \
     ibverbs-utils \
+    libsodium23 \
     pkg-config ffmpeg libavcodec-dev libavformat-dev libavutil-dev \
     libswscale-dev libavdevice-dev libavfilter-dev libswresample-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -646,6 +659,7 @@ RUN mkdir src && mv aphrodite src/aphrodite
 # -----------------------
 # Final Aphrodite image
 FROM mori_base AS final
+ENV UV_COMPILE_BYTECODE=1
 
 RUN python3 -m pip install --upgrade pip && rm -rf /var/lib/apt/lists/*
 
@@ -670,7 +684,7 @@ RUN case "$(which python3)" in \
         *) ;; esac
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --upgrade huggingface-hub[cli]
+    uv pip install --system --upgrade huggingface-hub
 
 # Install Aphrodite using uv (inherited from base stage)
 # Note: No -U flag to avoid upgrading PyTorch ROCm to CUDA version
@@ -678,7 +692,7 @@ RUN --mount=type=bind,from=export_aphrodite,src=/,target=/install \
     --mount=type=cache,target=/root/.cache/uv \
     cd /install \
     && uv pip install --system -r requirements/rocm.txt \
-    && pip uninstall -y aphrodite \
+    && pip uninstall -y aphrodite-engine \
     && uv pip install --system *.whl
 
 # Install RIXL wheel
@@ -715,18 +729,19 @@ RUN echo "APHRODITE_BASE_IMAGE=${BASE_IMAGE}" >> ${COMMON_WORKDIR}/versions.txt 
     && echo "AINIC_VERSION=${AINIC_VERSION}" >> ${COMMON_WORKDIR}/versions.txt
 
 # Download bench scripts for gfx1250
-RUN curl -k -O https://raw.githubusercontent.com/ROCm/aphrodite/refs/heads/gfx1250_bench/aphrodite_smoketest.sh
+RUN curl -k -O https://raw.githubusercontent.com/ROCm/vllm/refs/heads/gfx1250_bench/vllm_smoketest.sh
+RUN curl -k -O https://raw.githubusercontent.com/ROCm/vllm/refs/heads/gfx1250_bench/vllm_benchserve.sh
 
 
 ### Install triton from upstream for AITER Deps TODO: (JPVILLAM) If possible to get this on whls it would be better
 RUN pip3 uninstall -y triton && \
     git clone https://github.com/triton-lang/triton.git && \
     cd triton && \
-    git checkout c517f38c && \
+    git checkout aedd1f6 && \
     TRITON_APPEND_CMAKE_ARGS="-DCMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH=FALSE" pip3 install .
 
 CMD ["/bin/bash"]
 
 #Set entrypoint for aphrodite-openai official images
 FROM final AS aphrodite-openai
-ENTRYPOINT ["aphrodite", "serve"]
+ENTRYPOINT ["aphrodite", "run"]

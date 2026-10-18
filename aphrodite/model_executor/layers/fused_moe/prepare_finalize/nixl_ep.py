@@ -6,8 +6,6 @@ import nixl_ep
 import torch
 
 import aphrodite.model_executor.layers.fused_moe.modular_kernel as mk
-from aphrodite.distributed import get_ep_group
-from aphrodite.distributed.device_communicators.all2all import NixlEPAll2AllManager
 from aphrodite.logger import init_logger
 from aphrodite.model_executor.layers.fused_moe.config import FusedMoEQuantConfig
 from aphrodite.model_executor.layers.fused_moe.topk_weight_and_reduce import (
@@ -33,9 +31,7 @@ assert isinstance(NIXL_EP_TOPK_INDICES_DTYPE, torch.dtype)
 
 
 def dequant_fp8(expert_x_fp8: torch.Tensor, expert_x_scales: torch.Tensor) -> torch.Tensor:
-    """
-    Return dequantized tensor in fp32
-    """
+    """Return dequantized tensor in fp32."""
     assert expert_x_fp8.is_contiguous()
     expert_x_scales = expert_x_scales.contiguous()
     num_experts = expert_x_fp8.size(0)
@@ -46,9 +42,7 @@ def dequant_fp8(expert_x_fp8: torch.Tensor, expert_x_scales: torch.Tensor) -> to
 
 
 class NixlEPPrepareAndFinalize(mk.FusedMoEPrepareAndFinalizeModular):
-    """
-    Prepare/Finalize using NIXL EP kernels.
-    """
+    """Prepare/Finalize using NIXL EP kernels."""
 
     # NIXL EP kernels are compiled only for certain specific hidden sizes.
     # NOTE: Keep this list sorted, maybe_roundup_layer_hidden_size depends
@@ -74,6 +68,7 @@ class NixlEPPrepareAndFinalize(mk.FusedMoEPrepareAndFinalizeModular):
         buffer: nixl_ep.Buffer,
         max_tokens_per_rank: int,
         num_dispatchers: int,
+        expert_capacity: int,
         use_fp8_dispatch: bool = False,
         global_to_physical: torch.Tensor | None = None,
         physical_to_global: torch.Tensor | None = None,
@@ -89,6 +84,7 @@ class NixlEPPrepareAndFinalize(mk.FusedMoEPrepareAndFinalizeModular):
         # combine function.
         self.handles: list[tuple | None] = [None, None]
         self.num_dispatchers_ = num_dispatchers
+        self.expert_capacity = expert_capacity
 
         topk_indices_dtype = self.topk_indices_dtype()
 
@@ -133,17 +129,6 @@ class NixlEPPrepareAndFinalize(mk.FusedMoEPrepareAndFinalizeModular):
 
     def max_num_tokens_per_rank(self) -> int | None:
         return self.max_tokens_per_rank
-
-    def on_commit(self) -> None:
-        device_communicator = get_ep_group().device_communicator
-        assert device_communicator is not None
-        all2all_manager = device_communicator.all2all_manager
-        assert isinstance(all2all_manager, NixlEPAll2AllManager)
-        # maybe_make_prepare_finalize(..., eep_stage=True) initializes self.buffer
-        # with get_handle(..., stage=True), which stages global NIXL state for the
-        # new config but leaves it inactive while the old config remains active.
-        # When EEP commit switches to this P/F, this P/F needs to commit that state.
-        all2all_manager.commit_staged_state()
 
     def topk_indices_dtype(self) -> torch.dtype | None:
         return NIXL_EP_TOPK_INDICES_DTYPE
@@ -245,7 +230,7 @@ class NixlEPPrepareAndFinalize(mk.FusedMoEPrepareAndFinalizeModular):
             a1,
             dispatch_topk_ids,
             self.max_tokens_per_rank,
-            num_experts,
+            self.expert_capacity,
             use_fp8=self.use_fp8_dispatch,
             # round_scale needs to be set to dispatch in ue8m0
             round_scale=self.use_ue8m0_dispatch,

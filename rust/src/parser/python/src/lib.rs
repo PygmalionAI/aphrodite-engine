@@ -8,13 +8,13 @@
 //! Rust. Python callers should use this module as a typed bridge and keep any
 //! Aphrodite protocol adaptation outside the binding.
 
+use aphrodite_parser::tool::{Tool, ToolCallDelta, ToolParser, ToolParserOutput};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyModule};
 use pythonize::{depythonize, pythonize};
 use serde_json::Value;
 use thiserror_ext::AsReport as _;
-use aphrodite_parser::tool::{Tool, ToolCallDelta, ToolParser, ToolParserOutput};
 
 macro_rules! tool_parser_factory {
     ($($parser:ident),+ $(,)?) => {
@@ -48,19 +48,24 @@ tool_parser_factory! {
     KimiK2ToolParser,
 }
 
-#[pyclass(name = "Tool", module = "aphrodite._rust_tool_parser", skip_from_py_object)]
+#[pyclass(
+    name = "Tool",
+    module = "aphrodite._rust_tool_parser",
+    skip_from_py_object
+)]
 #[derive(Clone)]
 struct PyTool(Tool);
 
 #[pymethods]
 impl PyTool {
     #[new]
-    #[pyo3(signature = (name, description, parameters, strict=None))]
+    #[pyo3(signature = (name, description, parameters, strict=None, defer_loading=None))]
     fn new(
         name: String,
         description: Option<String>,
         parameters: &Bound<'_, PyAny>,
         strict: Option<bool>,
+        defer_loading: Option<bool>,
     ) -> PyResult<Self> {
         let parameters = depythonize::<Value>(parameters).map_err(|error| {
             PyValueError::new_err(format!(
@@ -72,6 +77,7 @@ impl PyTool {
             description,
             parameters,
             strict,
+            defer_loading,
         }))
     }
 
@@ -97,6 +103,11 @@ impl PyTool {
     #[getter]
     fn strict(&self) -> Option<bool> {
         self.0.strict
+    }
+
+    #[getter]
+    fn defer_loading(&self) -> Option<bool> {
+        self.0.defer_loading
     }
 }
 
@@ -176,7 +187,11 @@ impl PyToolParserOutput {
     }
 }
 
-#[pyclass(name = "ToolParser", module = "aphrodite._rust_tool_parser", unsendable)]
+#[pyclass(
+    name = "ToolParser",
+    module = "aphrodite._rust_tool_parser",
+    unsendable
+)]
 struct PyToolParser(Box<dyn ToolParser>);
 
 impl PyToolParser {
@@ -281,6 +296,7 @@ mod tests {
                 Some("Create an order".to_owned()),
                 &parameters,
                 None,
+                None,
             )?,
         )
     }
@@ -293,10 +309,34 @@ mod tests {
             assert_eq!(borrowed.name(), "create_order");
             assert_eq!(borrowed.description(), Some("Create an order"));
             assert_eq!(borrowed.strict(), None);
+            assert_eq!(borrowed.defer_loading(), None);
 
             let parameters = borrowed.parameters(py)?;
             let parameters = depythonize::<Value>(parameters.bind(py))?;
             assert_eq!(parameters, tool_schema());
+            PyResult::Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn tool_round_trips_deferred_loading() {
+        with_python(|py| {
+            let parameters = pythonize(py, &tool_schema()).map_err(|error| {
+                PyValueError::new_err(format!(
+                    "failed to convert test schema from JSON to Python: {error}"
+                ))
+            })?;
+            let tool = PyTool::new(
+                "create_order".to_owned(),
+                None,
+                &parameters,
+                Some(true),
+                Some(true),
+            )?;
+
+            assert_eq!(tool.strict(), Some(true));
+            assert_eq!(tool.defer_loading(), Some(true));
             PyResult::Ok(())
         })
         .unwrap();

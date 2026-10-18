@@ -24,6 +24,7 @@ from aphrodite.config import (
     ModelConfig,
     PassConfig,
 )
+from aphrodite.config.cache import CacheDType
 from aphrodite.config.utils import Range
 from aphrodite.forward_context import get_forward_context, set_forward_context
 from aphrodite.model_executor.layers.attention import Attention
@@ -314,7 +315,7 @@ def test_rope_kvcache_fusion(
     block_size: int,
     is_neox: bool,
     dtype: torch.dtype,
-    kv_cache_dtype: str,
+    kv_cache_dtype: CacheDType,
     monkeypatch: pytest.MonkeyPatch,
 ):
     torch.set_default_device("cuda")
@@ -450,7 +451,7 @@ def test_rope_static_qquant_kvcache_fusion(
     block_size: int,
     is_neox: bool,
     dtype: torch.dtype,
-    kv_cache_dtype: str,
+    kv_cache_dtype: CacheDType,
     monkeypatch: pytest.MonkeyPatch,
 ):
     torch.set_default_device("cuda")

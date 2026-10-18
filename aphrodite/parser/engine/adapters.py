@@ -27,7 +27,7 @@ if TYPE_CHECKING:
         ChatCompletionRequest,
     )
     from aphrodite.entrypoints.openai.responses.protocol import ResponsesRequest
-    from aphrodite.parser.engine.parser_engine import ParserEngine
+    from aphrodite.parser.engine.parser_engine import ParserEngine, ReasoningEnd
     from aphrodite.tokenizers import TokenizerLike
     from aphrodite.tool_parsers.utils import Tool
 
@@ -64,6 +64,14 @@ class ParserEngineReasoningAdapter(ReasoningParser):
 
     def is_reasoning_end(self, input_ids: Sequence[int]) -> bool:
         return self._parser_engine.is_reasoning_end(list(input_ids))
+
+    def find_reasoning_end(self, token_ids: Sequence[int]) -> ReasoningEnd | None:
+        return self._parser_engine.find_reasoning_end(token_ids)
+
+    def set_prompt_token_ids(self, prompt_token_ids: Sequence[int]) -> None:
+        self._parser_engine.set_prompt_token_ids(prompt_token_ids)
+        if self._counting_parser_engine is not None:
+            self._counting_parser_engine.set_prompt_token_ids(prompt_token_ids)
 
     def adjust_initial_state_from_prompt(self, prompt_token_ids: Sequence[int]) -> None:
         self._parser_engine.adjust_initial_state_from_prompt(prompt_token_ids)
@@ -108,6 +116,14 @@ class ParserEngineReasoningAdapter(ReasoningParser):
     def reasoning_end_str(self) -> str | None:
         return self._parser_engine.reasoning_end_str
 
+    @property
+    def reasoning_end_token_ids(self) -> frozenset[int]:
+        return self._parser_engine.reasoning_end_token_ids
+
+    @property
+    def implicit_reasoning_end_token_ids(self) -> frozenset[int]:
+        return self._parser_engine.implicit_reasoning_end_token_ids
+
     def adjust_request(
         self,
         request: ChatCompletionRequest | ResponsesRequest,
@@ -135,6 +151,7 @@ class ParserEngineReasoningAdapter(ReasoningParser):
             return 0
         if self._counting_parser_engine is None:
             self._counting_parser_engine = self._parser_engine_cls(self.model_tokenizer, **self._parser_engine_kwargs)  # type: ignore[call-arg]
+            self._counting_parser_engine._prompt_closes_reasoning = self._parser_engine._prompt_closes_reasoning
         self._counting_parser_engine._single_pass_parse(self.model_tokenizer.decode(token_ids), token_ids)
         return self._counting_parser_engine.count_reasoning_tokens(token_ids)
 

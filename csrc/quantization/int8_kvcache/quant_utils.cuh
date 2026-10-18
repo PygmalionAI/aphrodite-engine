@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <float.h>
 #include <type_traits>
-#include "../../attention/attention_dtypes.h"
+#include "../../core/vec_dtypes/vec_dtypes.h"
 
 namespace aphrodite {
 namespace int8 {

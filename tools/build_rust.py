@@ -16,13 +16,28 @@ from setuptools_scm import get_version
 ROOT_DIR = Path(__file__).resolve().parents[1]
 APHRODITE_RS_BUILD_VERSION = "APHRODITE_RS_BUILD_VERSION"
 
+# Select Aphrodite release tags, excluding crate tags such as "proto-v0.3.0".
+APHRODITE_GIT_DESCRIBE_COMMAND = [
+    "git",
+    "describe",
+    "--dirty",
+    "--tags",
+    "--long",
+    "--abbrev=40",
+    "--match",
+    "v[0-9]*",
+]
+
 
 def prepare_build_environment() -> str | None:
     """Set the device-independent Aphrodite source version for Rust artifacts."""
     version = os.getenv(APHRODITE_RS_BUILD_VERSION) or None
     if version is None:
         try:
-            version = get_version(root=ROOT_DIR)
+            version = get_version(
+                root=ROOT_DIR,
+                git_describe_command=APHRODITE_GIT_DESCRIBE_COMMAND,
+            )
         except LookupError:
             return None
 

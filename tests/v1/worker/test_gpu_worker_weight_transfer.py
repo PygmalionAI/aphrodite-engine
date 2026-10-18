@@ -11,9 +11,9 @@ import pytest
 import torch
 import torch.nn as nn
 
-from aphrodite.config import AphroditeConfig, get_current_aphrodite_config
+from aphrodite.config import AphroditeConfig, ParallelConfig, get_current_aphrodite_config
 from aphrodite.lora.layers import BaseLayerWithLoRA
-from aphrodite.v1.worker.gpu_model_runner import _get_parameter_for_reload
+from aphrodite.model_executor.model_loader.reload.inplace import get_parameter_for_reload
 from aphrodite.v1.worker.gpu_worker import Worker
 
 
@@ -24,6 +24,7 @@ class _RecordingEngine:
         self.raise_on_update = raise_on_update
         self.started = False
         self.finished = False
+        self.closed = False
         self.reset_count = 0
         self.supports_draft_weight_update = False
         self.update_calls: list[dict] = []
@@ -50,6 +51,9 @@ class _RecordingEngine:
     def reset_weight_update_target(self) -> None:
         self.reset_count += 1
 
+    def shutdown(self) -> None:
+        self.closed = True
+
 
 class _RecordingModelRunner:
     def __init__(self) -> None:
@@ -61,6 +65,9 @@ class _RecordingModelRunner:
 
     def reset_lora_state(self) -> None:
         self.reset_lora_calls += 1
+
+    def get_draft_model(self) -> nn.Module | None:
+        return None
 
 
 def _make_worker(engine: _RecordingEngine | None) -> Worker:
@@ -76,11 +83,28 @@ def _make_worker(engine: _RecordingEngine | None) -> Worker:
 def test_reload_weights_sets_current_config():
     worker = _make_worker(None)
     model_runner = _RecordingModelRunner()
-    worker.model_runner = model_runner  # type: ignore[assignment]
+    worker.model_runner = model_runner
 
     Worker.reload_weights(worker)
 
     assert model_runner.seen_config is worker.aphrodite_config
+
+
+@pytest.mark.parametrize("enabled,active", [(True, False), (True, True), (False, False)])
+def test_shutdown_weight_transfer_engine_preserves_inference(enabled, active):
+    engine = _RecordingEngine() if enabled else None
+    worker = _make_worker(engine)
+    worker._weight_update_active = active
+    model_runner = worker.model_runner
+    if active:
+        with pytest.raises(RuntimeError, match="during a weight update"):
+            worker.shutdown_weight_transfer_engine()
+    else:
+        worker.shutdown_weight_transfer_engine()
+    if engine is not None:
+        assert engine.closed is not active
+    assert worker.weight_transfer_engine is engine
+    assert worker.model_runner is model_runner
 
 
 def test_reload_parameter_lookup_preserves_lora_module_names():
@@ -96,7 +120,7 @@ def test_reload_parameter_lookup_preserves_lora_module_names():
     assert set(named_parameters) == {"proj.base_layer.qweight"}
     assert named_parameters["proj.base_layer.qweight"] is qweight
     assert model.get_parameter("proj.base_layer.qweight") is qweight
-    assert _get_parameter_for_reload(model, "proj.qweight") is qweight
+    assert get_parameter_for_reload(model, "proj.qweight") is qweight
 
 
 def test_start_update_finish_delegates_to_engine():
@@ -135,12 +159,22 @@ def test_rank_local_update_selects_worker_payload(rank, expected):
     assert worker._weight_update_active is True
 
 
-def test_rank_local_update_includes_data_parallel_rank():
+def test_rank_local_update_uses_data_parallel_index_after_reconfigure():
     engine = _RecordingEngine()
     worker = _make_worker(engine)
     worker.rank = 0
-    worker.aphrodite_config.parallel_config.data_parallel_size = 4
-    worker.aphrodite_config.parallel_config.data_parallel_rank = 2
+    parallel_config = ParallelConfig(
+        data_parallel_size=4,
+        data_parallel_rank=2,
+    )
+    assert parallel_config.data_parallel_rank == 2
+    assert parallel_config.data_parallel_index == 2
+
+    parallel_config.reconfigure_for_independent_dp_rank()
+    assert parallel_config.data_parallel_rank == 0
+    assert parallel_config.data_parallel_index == 2
+
+    worker.aphrodite_config.parallel_config = parallel_config
     Worker.start_weight_update(worker)
 
     Worker.update_weights(

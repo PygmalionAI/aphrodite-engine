@@ -62,7 +62,7 @@ def main() -> None:
           </div>
         </div>
         <a class="download" href="{html.escape(url, quote=True)}"
-           data-requires-python="&gt;=3.10,&lt;3.15"
+           data-requires-python="&gt;=3.11,&lt;3.15"
            aria-label="Download Sonar {html.escape(version, quote=True)}">
           <span class="filename">{html.escape(name)}</span><span class="icon" aria-hidden="true">↓</span>
         </a>
@@ -194,7 +194,7 @@ def main() -> None:
       </nav>
       <footer>Latest index build:
         <a href="https://github.com/dphnAI/sonar/commit/{escaped_commit}"><code>{escaped_commit[:12]}</code></a>
-        · Requires Python 3.10–3.14
+        · Requires Python 3.11–3.14
       </footer>
     </main>
     <!-- Latest build from {escaped_commit} -->

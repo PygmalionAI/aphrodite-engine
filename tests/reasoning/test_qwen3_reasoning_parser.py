@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import pytest
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 from aphrodite.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
 from aphrodite.reasoning import ReasoningParser, ReasoningParserManager
@@ -24,7 +24,7 @@ REASONING_MODEL_NAMES = [
 
 
 @pytest.fixture(scope="module", params=REASONING_MODEL_NAMES)
-def qwen3_tokenizer(request):
+def qwen3_tokenizer(request) -> PreTrainedTokenizerBase:
     return AutoTokenizer.from_pretrained(request.param)
 
 

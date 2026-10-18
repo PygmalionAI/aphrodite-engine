@@ -2,12 +2,14 @@
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 use std::collections::{BTreeSet, HashMap};
+use std::num::NonZeroU32;
 
 use serde::{Deserialize, Serialize};
 use serde_default::DefaultFromSerde;
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
 use crate::protocol::structured_outputs::StructuredOutputsParams;
+use crate::protocol::tensor::WireNdArray;
 
 fn default_top_p() -> f32 {
     1.0
@@ -19,6 +21,10 @@ fn default_repetition_penalty() -> f32 {
 
 fn default_temperature() -> f32 {
     1.0
+}
+
+fn default_watermarking() -> bool {
+    true
 }
 
 fn default_max_tokens() -> u32 {
@@ -65,6 +71,148 @@ pub enum RequestOutputKind {
     FinalOnly = 2,
 }
 
+/// Sonar sampler options shared by the HTTP, text, and engine-core boundaries.
+///
+/// Flattened into each sampling map so Python receives its native
+/// `SamplingParams` keys, not an extension object or `extra_args`.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AphroditeSamplingParams {
+    #[serde(deserialize_with = "default_on_null")]
+    pub no_repeat_ngram_size: u32,
+    #[serde(deserialize_with = "default_on_null")]
+    pub dynatemp_min: f32,
+    #[serde(deserialize_with = "default_on_null")]
+    pub dynatemp_max: f32,
+    #[serde(deserialize_with = "one_on_null")]
+    pub dynatemp_exponent: f32,
+    #[serde(deserialize_with = "default_on_null")]
+    pub temperature_last: bool,
+    #[serde(deserialize_with = "default_on_null")]
+    pub top_a: f32,
+    #[serde(deserialize_with = "one_on_null")]
+    pub tfs: f32,
+    #[serde(deserialize_with = "default_on_null")]
+    pub eta_cutoff: f32,
+    #[serde(deserialize_with = "default_on_null")]
+    pub epsilon_cutoff: f32,
+    #[serde(deserialize_with = "one_on_null")]
+    pub typical_p: f32,
+    #[serde(deserialize_with = "default_on_null")]
+    pub smoothing_factor: f32,
+    #[serde(deserialize_with = "one_on_null")]
+    pub smoothing_curve: f32,
+    #[serde(deserialize_with = "xtc_threshold_on_null")]
+    pub xtc_threshold: f32,
+    #[serde(deserialize_with = "default_on_null")]
+    pub xtc_probability: f32,
+    #[serde(deserialize_with = "default_on_null")]
+    pub nsigma: f32,
+    #[serde(deserialize_with = "default_on_null")]
+    pub mirostat_mode: u32,
+    #[serde(deserialize_with = "default_on_null")]
+    pub mirostat_tau: f32,
+    #[serde(deserialize_with = "default_on_null")]
+    pub mirostat_eta: f32,
+    #[serde(deserialize_with = "default_on_null")]
+    pub dry_multiplier: f32,
+    #[serde(deserialize_with = "dry_base_on_null")]
+    pub dry_base: f32,
+    #[serde(deserialize_with = "dry_allowed_length_on_null")]
+    pub dry_allowed_length: u32,
+    pub dry_sequence_breakers: Option<Vec<String>>,
+    #[serde(deserialize_with = "default_on_null")]
+    pub dry_sequence_breaker_ids: Vec<u32>,
+    #[serde(deserialize_with = "default_on_null")]
+    pub dry_range: u32,
+    #[serde(deserialize_with = "dry_max_ngram_on_null")]
+    pub dry_max_ngram: u32,
+    #[serde(deserialize_with = "dry_scan_limit_on_null")]
+    pub dry_max_occurrences: u32,
+    #[serde(deserialize_with = "dry_scan_limit_on_null")]
+    pub dry_early_exit_match_len: u32,
+    #[serde(deserialize_with = "default_on_null")]
+    pub skew: f32,
+}
+
+impl Default for AphroditeSamplingParams {
+    fn default() -> Self {
+        Self {
+            no_repeat_ngram_size: 0,
+            dynatemp_min: 0.0,
+            dynatemp_max: 0.0,
+            dynatemp_exponent: 1.0,
+            temperature_last: false,
+            top_a: 0.0,
+            tfs: 1.0,
+            eta_cutoff: 0.0,
+            epsilon_cutoff: 0.0,
+            typical_p: 1.0,
+            smoothing_factor: 0.0,
+            smoothing_curve: 1.0,
+            xtc_threshold: 0.1,
+            xtc_probability: 0.0,
+            nsigma: 0.0,
+            mirostat_mode: 0,
+            mirostat_tau: 0.0,
+            mirostat_eta: 0.0,
+            dry_multiplier: 0.0,
+            dry_base: 1.75,
+            dry_allowed_length: 2,
+            dry_sequence_breakers: None,
+            dry_sequence_breaker_ids: Vec::new(),
+            dry_range: 0,
+            dry_max_ngram: 12,
+            dry_max_occurrences: 8,
+            dry_early_exit_match_len: 8,
+            skew: 0.0,
+        }
+    }
+}
+
+// Python's from_optional treats explicit JSON null just like an omitted sampler
+// override. Keep non-zero defaults as well as zero/false defaults on this path.
+fn default_on_null<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+fn one_on_null<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error> {
+    Ok(Option::<f32>::deserialize(deserializer)?.unwrap_or(1.0))
+}
+
+fn xtc_threshold_on_null<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<f32, D::Error> {
+    Ok(Option::<f32>::deserialize(deserializer)?.unwrap_or(0.1))
+}
+
+fn dry_base_on_null<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error> {
+    Ok(Option::<f32>::deserialize(deserializer)?.unwrap_or(1.75))
+}
+
+fn dry_allowed_length_on_null<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<u32, D::Error> {
+    Ok(Option::<u32>::deserialize(deserializer)?.unwrap_or(2))
+}
+
+fn dry_max_ngram_on_null<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<u32, D::Error> {
+    Ok(Option::<u32>::deserialize(deserializer)?.unwrap_or(12))
+}
+
+fn dry_scan_limit_on_null<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<u32, D::Error> {
+    Ok(Option::<u32>::deserialize(deserializer)?.unwrap_or(8))
+}
+
 /// Engine-core-facing sampling parameters for text generation.
 ///
 /// This is the normalized southbound subset used by the Rust frontend when it
@@ -85,6 +233,9 @@ pub struct EngineCoreSamplingParams {
     /// greedy sampling.
     #[serde(default = "default_temperature")]
     pub temperature: f32,
+    /// Whether to apply the engine's configured watermark to this request.
+    #[serde(default = "default_watermarking")]
+    pub watermarking: bool,
     /// Cumulative probability threshold for nucleus sampling.
     #[serde(default = "default_top_p")]
     pub top_p: f32,
@@ -111,6 +262,11 @@ pub struct EngineCoreSamplingParams {
     ///
     /// `None` disables prompt logprobs. `-1` requests the full vocabulary.
     pub prompt_logprobs: Option<i32>,
+    /// `[num_rows, num_ids]` candidate token IDs per scored causal prompt row,
+    /// `-1` padding shorter rows.
+    pub prompt_logprob_token_ids: Option<WireNdArray>,
+    /// First causal prompt row to score; `None` scores from the first row.
+    pub prompt_logprob_start: Option<u32>,
     /// Minimum probability threshold for token sampling.
     pub min_p: f32,
     /// Frequency penalty applied by the sampler.
@@ -165,6 +321,13 @@ pub struct EngineCoreSamplingParams {
     /// Number of prompt tokens to skip from returned routed-expert data.
     /// A value of zero returns routing data for the entire prompt.
     pub routed_experts_prompt_start: u32,
+    /// Number of newly generated tokens to batch into each streamed output.
+    /// The first and final outputs are always emitted immediately. Engine-core
+    /// ignores it; [`EngineCoreClient::call`](crate::EngineCoreClient::call)
+    /// batches output deliveries by it.
+    pub stream_interval: Option<NonZeroU32>,
+    #[serde(flatten)]
+    pub aphrodite_sampling: AphroditeSamplingParams,
 }
 
 impl EngineCoreSamplingParams {
@@ -172,6 +335,7 @@ impl EngineCoreSamplingParams {
     pub fn for_test() -> Self {
         Self {
             temperature: 1.0,
+            watermarking: true,
             top_p: 1.0,
             top_k: 0,
             seed: None,
@@ -180,6 +344,8 @@ impl EngineCoreSamplingParams {
             thinking_token_budget: None,
             logprobs: None,
             prompt_logprobs: None,
+            prompt_logprob_token_ids: None,
+            prompt_logprob_start: None,
             min_p: 0.0,
             frequency_penalty: 0.0,
             presence_penalty: 0.0,
@@ -196,17 +362,68 @@ impl EngineCoreSamplingParams {
             skip_reading_prefix_cache: None,
             extra_args: None,
             routed_experts_prompt_start: 0,
+            stream_interval: None,
+            aphrodite_sampling: AphroditeSamplingParams::default(),
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
     use rmpv::Value;
 
+    use super::{AphroditeSamplingParams, EngineCoreSamplingParams};
     use crate::protocol::decode_msgpack;
     use crate::protocol::request::EngineCoreRequest;
+
+    #[test]
+    fn sonar_sampler_fields_and_phrase_retry_survive_the_engine_wire() {
+        let params: EngineCoreSamplingParams = serde_json::from_value(serde_json::json!({
+            "dry_multiplier": 0.8,
+            "dry_sequence_breaker_ids": [13, 42],
+            "xtc_probability": 0.25,
+            "dynatemp_exponent": 1.5,
+            "extra_args": {"_sonar_phrase_retry": {"rollback_tokens": 3}}
+        }))
+        .unwrap();
+        let bytes = crate::protocol::encode_msgpack(&params).unwrap();
+        let value: serde_json::Value = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(
+            value["dry_sequence_breaker_ids"],
+            serde_json::json!([13, 42])
+        );
+        assert_eq!(value["xtc_probability"], 0.25);
+        assert_eq!(
+            value["extra_args"]["_sonar_phrase_retry"]["rollback_tokens"],
+            3
+        );
+        assert!(value.get("aphrodite_sampling").is_none());
+        let decoded: EngineCoreSamplingParams = decode_msgpack(&bytes).unwrap();
+        assert_eq!(decoded, params);
+    }
+
+    #[test]
+    fn sonar_sampler_nulls_preserve_python_defaults() {
+        let params: EngineCoreSamplingParams = serde_json::from_value(serde_json::json!({
+            "dynatemp_exponent": null,
+            "tfs": null,
+            "typical_p": null,
+            "smoothing_curve": null,
+            "xtc_threshold": null,
+            "dry_base": null,
+            "dry_allowed_length": null,
+            "dry_max_ngram": null,
+            "dry_max_occurrences": null,
+            "dry_early_exit_match_len": null,
+            "temperature_last": null,
+            "dry_sequence_breaker_ids": null
+        }))
+        .unwrap();
+        assert_eq!(
+            params.aphrodite_sampling,
+            AphroditeSamplingParams::default()
+        );
+    }
 
     #[test]
     fn decodes_sampling_params_with_omitted_defaults() {
@@ -244,6 +461,7 @@ mod tests {
 
         // Omitted fields -> Python defaults.
         assert_eq!(sampling.temperature, 1.0);
+        assert!(sampling.watermarking);
         assert_eq!(sampling.top_p, 1.0);
         assert_eq!(sampling.top_k, 0);
         assert_eq!(sampling.seed, None);
@@ -258,5 +476,9 @@ mod tests {
         assert_eq!(sampling.prompt_logprobs, None);
         assert_eq!(sampling.eos_token_id, None);
         assert!(sampling.all_stop_token_ids.is_empty());
+        assert_eq!(
+            sampling.aphrodite_sampling,
+            AphroditeSamplingParams::default()
+        );
     }
 }

@@ -7,7 +7,6 @@ from collections.abc import Sequence
 import partial_json_parser
 from partial_json_parser.core.options import Allow
 
-from aphrodite.entrypoints.chat_utils import make_tool_call_id
 from aphrodite.entrypoints.generate.base.protocol import (
     DeltaFunctionCall,
     DeltaMessage,
@@ -21,12 +20,13 @@ from aphrodite.entrypoints.openai.chat_completion.protocol import (
 )
 from aphrodite.entrypoints.openai.responses.protocol import ResponsesRequest
 from aphrodite.logger import init_logger
+from aphrodite.renderers.chat_utils import make_tool_call_id
 from aphrodite.tokenizers import TokenizerLike
 from aphrodite.tool_parsers.abstract_tool_parser import (
     Tool,
     ToolParser,
 )
-from aphrodite.tool_parsers.utils import extract_intermediate_diff, is_complete_json
+from aphrodite.tool_parsers.utils import find_common_prefix, is_complete_json
 
 logger = init_logger(__name__)
 
@@ -162,8 +162,17 @@ class Internlm2ToolParser(ToolParser):
                 elif cur_arguments and prev_arguments:
                     cur_args_json = json.dumps(cur_arguments, ensure_ascii=False)
                     prev_args_json = json.dumps(prev_arguments, ensure_ascii=False)
+                    sent = len(self.streamed_args_for_tool[self.current_tool_id])
 
-                    argument_diff = extract_intermediate_diff(cur_args_json, prev_args_json)
+                    # Partial JSON is serialized with synthetic closers, so
+                    # only the part shared with the previous parse is final.
+                    if is_complete_json(parsable_arr):
+                        argument_diff = cur_args_json[sent:]
+                    elif cur_args_json != prev_args_json:
+                        prefix = find_common_prefix(prev_args_json, cur_args_json)
+                        argument_diff = prefix[sent:]
+                    else:
+                        argument_diff = ""
 
                     delta = DeltaMessage(
                         tool_calls=[

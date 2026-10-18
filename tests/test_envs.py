@@ -15,6 +15,12 @@ from aphrodite.envs import (
     env_with_choices,
     environment_variables,
 )
+from aphrodite.exceptions import AphroditeValidationError
+
+
+def test_object_storage_shm_default_name():
+    """The generated name must fit macOS's shared-memory name limit."""
+    assert len(envs._generate_shm_name()) <= 30
 
 
 def test_getattr_without_cache(monkeypatch: pytest.MonkeyPatch):
@@ -42,37 +48,12 @@ def test_api_key_is_not_compile_factor(monkeypatch: pytest.MonkeyPatch):
     assert "APHRODITE_API_KEY" not in envs.compile_factors()
 
 
-def test_scale_out_endpoints_flag_is_runtime_only(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("APHRODITE_ENABLE_SCALE_OUT_ENDPOINTS", "1")
+def test_ray_bundle_indices_is_not_compile_factor(monkeypatch: pytest.MonkeyPatch):
+    # Engines sharing a placement group get different bundle indices but
+    # compile the same graphs, so they must share a cache key.
+    monkeypatch.setenv("APHRODITE_RAY_BUNDLE_INDICES", "4,5,6,7")
 
-    assert envs.APHRODITE_ENABLE_SCALE_OUT_ENDPOINTS is True
-    assert "APHRODITE_ENABLE_SCALE_OUT_ENDPOINTS" not in envs.compile_factors()
-
-
-def test_scale_out_endpoints_flag_distinguishes_unset_from_disabled(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.delenv("APHRODITE_ENABLE_SCALE_OUT_ENDPOINTS", raising=False)
-    assert envs.APHRODITE_ENABLE_SCALE_OUT_ENDPOINTS is None
-
-    monkeypatch.setenv("APHRODITE_ENABLE_SCALE_OUT_ENDPOINTS", "0")
-    assert envs.APHRODITE_ENABLE_SCALE_OUT_ENDPOINTS is False
-
-
-def test_scale_out_endpoints_flag_treats_empty_as_unset(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setenv("APHRODITE_ENABLE_SCALE_OUT_ENDPOINTS", "")
-
-    assert envs.APHRODITE_ENABLE_SCALE_OUT_ENDPOINTS is None
-
-
-@pytest.mark.parametrize("value", ["-1", "2", "01", "+1", "invalid", " "])
-def test_scale_out_endpoints_flag_rejects_values_other_than_zero_or_one(monkeypatch: pytest.MonkeyPatch, value: str):
-    monkeypatch.setenv("APHRODITE_ENABLE_SCALE_OUT_ENDPOINTS", value)
-
-    with pytest.raises(ValueError, match="must be 0 or 1"):
-        _ = envs.APHRODITE_ENABLE_SCALE_OUT_ENDPOINTS
+    assert "APHRODITE_RAY_BUNDLE_INDICES" not in envs.compile_factors()
 
 
 def test_p2p_side_channel_defaults_and_override(monkeypatch: pytest.MonkeyPatch):
@@ -95,6 +76,24 @@ def test_p2p_side_channel_envs_are_not_compile_factors(
 
     assert "APHRODITE_P2P_SIDE_CHANNEL_HOST" not in envs.compile_factors()
     assert "APHRODITE_P2P_SIDE_CHANNEL_PORT" not in envs.compile_factors()
+
+
+def test_p2p_resource_limit_defaults_and_override(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.delenv("APHRODITE_P2P_MAX_PEERS", raising=False)
+    monkeypatch.delenv("APHRODITE_P2P_HANDSHAKE_TIMEOUT_S", raising=False)
+    monkeypatch.delenv("APHRODITE_P2P_IDLE_TIMEOUT_S", raising=False)
+    assert envs.APHRODITE_P2P_MAX_PEERS == 128
+    assert envs.APHRODITE_P2P_HANDSHAKE_TIMEOUT_S == 30
+    assert envs.APHRODITE_P2P_IDLE_TIMEOUT_S == 300
+
+    monkeypatch.setenv("APHRODITE_P2P_MAX_PEERS", "64")
+    monkeypatch.setenv("APHRODITE_P2P_HANDSHAKE_TIMEOUT_S", "15")
+    monkeypatch.setenv("APHRODITE_P2P_IDLE_TIMEOUT_S", "60")
+    assert envs.APHRODITE_P2P_MAX_PEERS == 64
+    assert envs.APHRODITE_P2P_HANDSHAKE_TIMEOUT_S == 15
+    assert envs.APHRODITE_P2P_IDLE_TIMEOUT_S == 60
 
 
 def test_getattr_with_cache(monkeypatch: pytest.MonkeyPatch):
@@ -537,7 +536,7 @@ class TestAphroditeMaxNSequences:
         max_n = envs.APHRODITE_MAX_N_SEQUENCES
         SamplingParams(n=max_n)
 
-        with pytest.raises(ValueError, match="n must be at most"):
+        with pytest.raises(AphroditeValidationError):
             SamplingParams(n=max_n + 1)
 
     def test_sampling_params_respects_custom_limit(
@@ -553,5 +552,5 @@ class TestAphroditeMaxNSequences:
 
         SamplingParams(n=128)
 
-        with pytest.raises(ValueError, match="n must be at most 128"):
+        with pytest.raises(AphroditeValidationError):
             SamplingParams(n=129)

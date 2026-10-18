@@ -9,6 +9,7 @@ from aphrodite.logger import init_logger
 from aphrodite.model_executor.layers.activation import get_act_fn
 from aphrodite.model_executor.layers.linear import ColumnParallelLinear
 
+from .interfaces import supports_pp
 from .step3_vl import Step3VLForConditionalGeneration
 from .step_vl import PerceptionEncoder
 from .utils import WeightsMapper, init_aphrodite_registered_model, maybe_prefix
@@ -41,7 +42,7 @@ class Step3p7ForConditionalGeneration(Step3VLForConditionalGeneration):
         super(Step3VLForConditionalGeneration, self).__init__()
 
         config = aphrodite_config.model_config.hf_config
-        multimodal_config = aphrodite_config.model_config.multimodal_config
+        multimodal_config = aphrodite_config.model_config.get_multimodal_config()
         quant_config = aphrodite_config.quant_config
 
         self.config = config
@@ -66,13 +67,15 @@ class Step3p7ForConditionalGeneration(Step3VLForConditionalGeneration):
             )
 
         with self._mark_language_model(aphrodite_config):
-            self.language_model = init_aphrodite_registered_model(
+            language_model = init_aphrodite_registered_model(
                 aphrodite_config=aphrodite_config,
                 hf_config=config.text_config,
                 prefix=maybe_prefix(prefix, "language_model"),
             )
+            self.language_model = language_model
+            assert supports_pp(language_model)
 
-        self.make_empty_intermediate_tensors = self.language_model.make_empty_intermediate_tensors
+        self.make_empty_intermediate_tensors = language_model.make_empty_intermediate_tensors
 
     def _get_vision_model_output(self, input_tensor: torch.Tensor | None) -> torch.Tensor | None:
         if input_tensor is None:

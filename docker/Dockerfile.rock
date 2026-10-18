@@ -1,11 +1,11 @@
 # default base image
 ARG REMOTE_APHRODITE="0"
-ARG APHRODITE_REPO="https://github.com/vllm-project/vllm.git"
+ARG APHRODITE_REPO="https://github.com/aphrodite-engine/aphrodite-engine.git"
 ARG APHRODITE_BRANCH="main"
 ARG COMMON_WORKDIR=/app
-ARG BASE_IMAGE=rocm/aphrodite-dev:base
-ARG CI_BASE_IMAGE=rocm/aphrodite-dev:ci_base
-ARG ROCM_TRITON_KERNELS_COMMIT=0f380657dbf3ee86eb57558ff71df24f03b5d4e7
+ARG BASE_IMAGE=rocm/vllm-dev:base
+ARG CI_BASE_IMAGE=rocm/vllm-dev:ci_base
+ARG ROCM_TRITON_KERNELS_COMMIT=669b31acc1dd1b3fd93286afd5db67f65d9f7557
 ARG INSTALL_LMCACHE=false
 # NIC backend for MoRI RDMA support.
 # By default (all), drivers and userspace libraries for all supported NIC types
@@ -17,8 +17,9 @@ ARG INSTALL_LMCACHE=false
 ARG NIC_BACKEND=all
 # AMD AINIC apt repo settings
 # Users can specify a custom version compatible with their host drivers.
-# The default version has been tested with ioinic-dkms=25.11.1.001
-ARG AINIC_VERSION=1.117.3-hydra
+# The default version has been tested with ionic-dkms=26.03.3.001
+# (libionic1=54.0-187-1), required for MoRI-EP/NIXL on Pollara/AINIC.
+ARG AINIC_VERSION=1.117.5-a-77
 ARG UBUNTU_CODENAME=jammy
 
 # Sccache configuration. Release builds use this today; CI can opt in when a
@@ -116,11 +117,11 @@ ONBUILD COPY ./ aphrodite/
 FROM base AS fetch_aphrodite_1
 ARG APHRODITE_REPO
 ARG APHRODITE_BRANCH
-ONBUILD RUN git clone ${APHRODITE_REPO} \
+ONBUILD RUN git clone ${APHRODITE_REPO} aphrodite \
 	    && cd aphrodite \
 	    && git fetch -v --prune -- origin ${APHRODITE_BRANCH} \
 	    && git checkout FETCH_HEAD \
-        && if [ ${APHRODITE_REPO} != "https://github.com/vllm-project/vllm.git" ] ; then \
+        && if [ "${APHRODITE_REPO}" != "https://github.com/vllm-project/vllm.git" ] ; then \
                git remote add upstream "https://github.com/vllm-project/vllm.git" \
                && git fetch upstream ; fi
 FROM fetch_aphrodite_${REMOTE_APHRODITE} AS fetch_aphrodite
@@ -134,7 +135,7 @@ RUN --mount=type=cache,id=aphrodite-rocm-uv,target=/root/.cache/uv \
     cd ${COMMON_WORKDIR}/aphrodite \
     && uv pip install --system -r requirements/build/rust.txt \
     && python3 -c \
-        "from setuptools_scm import get_version; print(get_version())" \
+        "from setuptools_scm import get_version; print(get_version(git_describe_command=['git', 'describe', '--dirty', '--tags', '--long', '--abbrev=40', '--match', 'v[0-9]*']))" \
         > /aphrodite-version.txt
 
 # -----------------------
@@ -170,7 +171,7 @@ COPY rust/proto /rust-input/aphrodite/rust/proto
 COPY rust/src /rust-input/aphrodite/rust/src
 COPY rust-toolchain.toml /rust-input/aphrodite/rust-toolchain.toml
 COPY tools/build_rust.py /rust-input/aphrodite/tools/build_rust.py
-COPY build_rust.sh /rust-input/aphrodite/build_rust.sh
+COPY tools/build_rust.sh /rust-input/aphrodite/tools/build_rust.sh
 
 FROM base AS rust_input_1
 ARG APHRODITE_REPO
@@ -187,7 +188,7 @@ RUN git clone --no-checkout --filter=blob:none ${APHRODITE_REPO} /rust-input/aph
         rust/src/** \
         rust-toolchain.toml \
         tools/build_rust.py \
-        build_rust.sh \
+        tools/build_rust.sh \
     && git checkout FETCH_HEAD
 
 FROM rust_input_${REMOTE_APHRODITE} AS rust-input
@@ -243,7 +244,7 @@ RUN --mount=type=cache,id=aphrodite-rocm-uv,target=/root/.cache/uv \
 COPY --from=rust-input /rust-input/aphrodite/rust rust
 COPY --from=rust-input /rust-input/aphrodite/rust-toolchain.toml rust-toolchain.toml
 COPY --from=rust-input /rust-input/aphrodite/tools/build_rust.py tools/build_rust.py
-COPY --from=rust-input /rust-input/aphrodite/build_rust.sh build_rust.sh
+COPY --from=rust-input /rust-input/aphrodite/tools/build_rust.sh tools/build_rust.sh
 COPY --from=aphrodite-version /aphrodite-version.txt /tmp/aphrodite-version.txt
 
 # Build the release binary. Cargo's registry/git caches can be written by
@@ -257,7 +258,7 @@ RUN --mount=type=cache,id=aphrodite-rocm-cargo-registry,target=/root/.cargo/regi
         && sccache --show-stats; \
     fi \
     && export SETUPTOOLS_SCM_PRETEND_VERSION="$(cat /tmp/aphrodite-version.txt)" \
-    && bash build_rust.sh \
+    && bash tools/build_rust.sh \
     && test -x aphrodite/aphrodite-rs \
     && if [ "$USE_SCCACHE" = "1" ]; then \
         sccache --show-stats; \
@@ -305,6 +306,7 @@ RUN mkdir -p /opt/rocm-triton-kernels \
 # expensive HIP/C++ build layer.
 FROM build_aphrodite_dependencies AS csrc-build
 ARG ROCM_TRITON_KERNELS_COMMIT
+ENV APHRODITE_USE_PRECOMPILED_RUST=1
 COPY --from=rocm-triton-kernels \
     /opt/rocm-triton-kernels /opt/rocm-triton-kernels
 ENV TRITON_KERNELS_SRC_DIR=/opt/rocm-triton-kernels
@@ -322,8 +324,9 @@ ENV SETUPTOOLS_SCM_PRETEND_VERSION="0.0.0+rocm.csrc.build"
 
 RUN --mount=type=bind,source=pyproject.toml,target=${COMMON_WORKDIR}/aphrodite/pyproject.toml \
     --mount=type=cache,id=aphrodite-rocm-ccache,target=/root/.cache/ccache \
-    grep -Fq "set(TRITON_KERNELS_TAG \"${ROCM_TRITON_KERNELS_COMMIT}\")" \
+    { grep -Fq "set(TRITON_KERNELS_TAG \"${ROCM_TRITON_KERNELS_COMMIT}\")" \
         cmake/external_projects/triton_kernels.cmake \
+        || echo "WARNING: Dockerfile.rock ROCM_TRITON_KERNELS_COMMIT (${ROCM_TRITON_KERNELS_COMMIT}) does not match cmake TRITON_KERNELS_TAG; the Docker build uses the Dockerfile pin, cmake governs only non-Docker builds"; } \
     && export CCACHE_BASEDIR="$PWD" \
     && echo "=== ccache stats before ROCm native build ===" \
     && (ccache --show-stats || true) \
@@ -341,6 +344,7 @@ RUN --mount=type=bind,source=pyproject.toml,target=${COMMON_WORKDIR}/aphrodite/p
 # the expensive dependency installation and HIP/C++ compilation when their
 # respective inputs are unchanged.
 FROM build_aphrodite_dependencies AS build_aphrodite
+ENV APHRODITE_USE_PRECOMPILED_RUST=1
 COPY --from=fetch_aphrodite ${COMMON_WORKDIR}/aphrodite ${COMMON_WORKDIR}/aphrodite
 COPY --from=csrc-build ${COMMON_WORKDIR}/aphrodite/dist /precompiled-wheels
 COPY --from=aphrodite-version /aphrodite-version.txt /tmp/aphrodite-version.txt
@@ -366,15 +370,12 @@ COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/requirements /requiremen
 COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/benchmarks /benchmarks
 COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/tests /tests
 COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/examples /examples
-COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/scripts/benchmark_helion_kernels.py /scripts/benchmark_helion_kernels.py
+COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/tools/benchmark_helion_kernels.py /tools/benchmark_helion_kernels.py
 COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/tools/install_torchcodec_rocm.sh /tools/install_torchcodec_rocm.sh
 COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/docker/Dockerfile /docker/Dockerfile
 COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/docker/Dockerfile.cpu /docker/Dockerfile.cpu
 COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/docker/Dockerfile.rocm /docker/
-COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/docker/Dockerfile.rocm_base /docker/Dockerfile.rocm_base
-COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/docker/ci-rocm.hcl /docker/ci-rocm.hcl
 COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/docker/docker-bake.hcl /docker/docker-bake.hcl
-COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/docker/docker-bake-rocm.hcl /docker/docker-bake-rocm.hcl
 COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/.buildkite /.buildkite
 COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/pyproject.toml /pyproject.toml
 COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/rust /rust
@@ -383,7 +384,7 @@ COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/aphrodite/v1 /aphrodite_
 
 # NIXL/UCX build stages
 FROM base AS build_nixl
-ARG NIXL_BRANCH="231d56753047c989062a5cb2ac703a1ad761c7d2"
+ARG NIXL_BRANCH="1683cf3b7f3d11674c03c5e861cea22339876c96"
 ARG NIXL_REPO="https://github.com/ai-dynamo/nixl.git"
 ARG UCX_BRANCH="96e58a16039f6d7d213bc967b8069238742c5194"
 ARG UCX_REPO="https://github.com/openucx/ucx.git"
@@ -459,6 +460,8 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
 # so configure the ROCm wheel variant directly through Meson.
 # Exclude libcore and libpull from auditwheel: transitive dependencies
 # that are not shipped in the wheel and vary across base images.
+# Tag manylinux_2_35 to match the Ubuntu 22.04 base: NIXL >= 1.5 links
+# GLIBCXX_3.4.30 symbols, which manylinux_2_34 does not allow.
 RUN cd /opt/nixl && \
     ./contrib/tomlutil.py --wheel-name nixl-rocm pyproject.toml && \
     CC="ccache gcc" CXX="ccache g++" \
@@ -474,7 +477,7 @@ RUN cd /opt/nixl && \
         --exclude 'libcore*' \
         --exclude 'libpull*' \
         /tmp/nixl_wheels/nixl_rocm*.whl \
-        --plat manylinux_2_34_$(uname -m) \
+        --plat manylinux_2_35_$(uname -m) \
         --wheel-dir /tmp/nixl_wheels/repaired && \
     ./contrib/wheel_add_ucx_plugins.py \
         --ucx-plugins-dir ${UCX_HOME}/lib/ucx \
@@ -625,6 +628,7 @@ RUN /bin/bash -lc 'set -euo pipefail; \
 # Aphrodite wheel release build stage (for building distributable wheels)
 # This stage pins dependencies to custom ROCm wheel versions and handles version detection
 FROM fetch_aphrodite AS build_aphrodite_wheel_release
+ENV APHRODITE_USE_PRECOMPILED_RUST=1
 
 ARG COMMON_WORKDIR
 ARG ROCM_TRITON_KERNELS_COMMIT
@@ -669,8 +673,9 @@ RUN if [ "$GIT_REPO_CHECK" != "0" ]; then \
 
 # Install the packaging helpers before modifying requirements/rocm.txt.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    grep -Fq "set(TRITON_KERNELS_TAG \"${ROCM_TRITON_KERNELS_COMMIT}\")" \
+    { grep -Fq "set(TRITON_KERNELS_TAG \"${ROCM_TRITON_KERNELS_COMMIT}\")" \
         aphrodite/cmake/external_projects/triton_kernels.cmake \
+        || echo "WARNING: Dockerfile.rock ROCM_TRITON_KERNELS_COMMIT (${ROCM_TRITON_KERNELS_COMMIT}) does not match cmake TRITON_KERNELS_TAG; the Docker build uses the Dockerfile pin, cmake governs only non-Docker builds"; } \
     && cd aphrodite \
     && uv pip install --system setuptools_scm regex
 
@@ -726,15 +731,12 @@ COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/requiremen
 COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/benchmarks /benchmarks
 COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/tests /tests
 COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/examples /examples
-COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/scripts/benchmark_helion_kernels.py /scripts/benchmark_helion_kernels.py
+COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/tools/benchmark_helion_kernels.py /tools/benchmark_helion_kernels.py
 COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/tools/install_torchcodec_rocm.sh /tools/install_torchcodec_rocm.sh
 COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/docker/Dockerfile /docker/Dockerfile
 COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/docker/Dockerfile.cpu /docker/Dockerfile.cpu
 COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/docker/Dockerfile.rocm /docker/
-COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/docker/Dockerfile.rocm_base /docker/Dockerfile.rocm_base
-COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/docker/ci-rocm.hcl /docker/ci-rocm.hcl
 COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/docker/docker-bake.hcl /docker/docker-bake.hcl
-COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/docker/docker-bake-rocm.hcl /docker/docker-bake-rocm.hcl
 COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/.buildkite /.buildkite
 COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/pyproject.toml /pyproject.toml
 COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/rust /rust
@@ -773,13 +775,21 @@ RUN --mount=type=bind,from=build_nixl,src=/app/install,target=/nixl_install \
     uv pip install --system /nixl_install/*.whl /deep_install/*.whl
 
 # RDMA userspace libraries plus FFmpeg dev libs needed by torchcodec.
-RUN apt-get update -q -y && apt-get install -q -y --no-install-recommends \
+RUN timeout --kill-after=30s 5m apt-get update -q -y --error-on=any \
+    -o Acquire::Retries=3 \
+    -o Acquire::http::Timeout=30 \
+    -o Acquire::https::Timeout=30 \
+    && apt-get install -q -y --no-install-recommends \
+    -o Acquire::Retries=3 \
+    -o Acquire::http::Timeout=30 \
+    -o Acquire::https::Timeout=30 \
     librdmacm1 \
     libibverbs1 \
     ibverbs-providers \
     ibverbs-utils \
     util-linux \
     unzip \
+    libsodium23 \
     pkg-config ffmpeg libavcodec-dev libavformat-dev libavutil-dev \
     libswscale-dev libavdevice-dev libavfilter-dev libswresample-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -875,9 +885,11 @@ RUN mkdir src && mv aphrodite src/aphrodite
 # Catch GPU<->CPU syncs in execute_model/sample_tokens during tests.
 ENV APHRODITE_GPU_SYNC_CHECK=error
 
+
 # -----------------------
 # Final Aphrodite image
 FROM mori_base AS final_common
+ENV UV_COMPILE_BYTECODE=1
 
 RUN python3 -m pip install --upgrade pip && rm -rf /var/lib/apt/lists/*
 
@@ -902,16 +914,19 @@ RUN case "$(which python3)" in \
         *) ;; esac
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --upgrade huggingface-hub[cli]
+    uv pip install --system --upgrade huggingface-hub
 
 # Install Aphrodite using uv (inherited from base stage)
 # Note: No -U flag to avoid upgrading PyTorch ROCm to CUDA version
+# Keep OpenTelemetry within LMCache's cap.
 RUN --mount=type=bind,from=export_aphrodite,src=/,target=/install \
     --mount=type=cache,target=/root/.cache/uv \
     cd /install \
-    && uv pip install --system -c /etc/rocm-constraints.txt -r requirements/rocm.txt \
-    && pip uninstall -y aphrodite \
-    && uv pip install --system -c /etc/rocm-constraints.txt *.whl
+    && echo "opentelemetry-api<=1.40.0" > /tmp/otel-constraints.txt \
+    && uv pip install --system -c /etc/rocm-constraints.txt -c /tmp/otel-constraints.txt -r requirements/rocm.txt \
+    && pip uninstall -y aphrodite-engine \
+    && uv pip install --system -c /etc/rocm-constraints.txt -c /tmp/otel-constraints.txt *.whl \
+    && rm /tmp/otel-constraints.txt
 
 # Install NIXL ROCm wheel
 RUN --mount=type=bind,from=build_nixl,src=/app/install,target=/nixl_install \
@@ -989,4 +1004,4 @@ FROM final_lmcache_${INSTALL_LMCACHE} AS final
 
 #Set entrypoint for aphrodite-openai official images
 FROM final AS aphrodite-openai
-ENTRYPOINT ["aphrodite", "serve"]
+ENTRYPOINT ["aphrodite", "run"]

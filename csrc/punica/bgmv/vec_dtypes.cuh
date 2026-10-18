@@ -9,7 +9,7 @@
 #include <type_traits>
 
 #include "../type_convert.h"
-#include "../../cuda_compat.h"
+#include "../../core/cuda_compat.h"
 
 #define FLASHINFER_INLINE \
   inline __attribute__((always_inline)) __device__ __host__

@@ -7,11 +7,10 @@ mod control;
 mod convert;
 mod health;
 mod inference;
+mod media;
 
 /// Generated protobuf/gRPC types for the `aphrodite` package.
-pub mod pb {
-    tonic::include_proto!("aphrodite");
-}
+pub use aphrodite_proto as pb;
 
 pub(crate) use control::ControlGrpcService;
 pub use control::ControlServiceImpl;

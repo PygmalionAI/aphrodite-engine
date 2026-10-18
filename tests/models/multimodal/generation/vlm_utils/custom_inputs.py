@@ -22,6 +22,7 @@ def multi_image_multi_aspect_ratio_inputs(formatter: Callable[[str], str]):
 
     Args:
         formatter: model-specific prompt formatter.
+
     """
     stop_sign = IMAGE_ASSETS[0].pil_image
     cherry_blossom = IMAGE_ASSETS[1].pil_image
@@ -63,6 +64,7 @@ def multi_video_multi_aspect_ratio_inputs(formatter: Callable[[str], str], num_f
 
     Args:
         formatter: model-specific prompt formatter.
+
     """
     video = sample_frames_from_video(VIDEO_ASSETS[0].np_ndarrays, num_frames)
     # Apply the selected formatter to the base prompts

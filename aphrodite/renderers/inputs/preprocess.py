@@ -1,6 +1,4 @@
-"""
-Schemas and utilities for preprocessing inputs.
-"""
+"""Schemas and utilities for preprocessing inputs."""
 
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
@@ -23,7 +21,7 @@ if TYPE_CHECKING:
     import torch
 
     from aphrodite.config import ModelConfig
-    from aphrodite.entrypoints.chat_utils import ChatCompletionMessageParam
+    from aphrodite.renderers.chat_utils import ChatCompletionMessageParam
 
 
 @overload
@@ -86,8 +84,7 @@ that has been standardized into a dictionary.
 
 
 class EncoderDecoderDictPrompt(TypedDict):
-    """
-    A [`EncoderDecoderPrompt`][aphrodite.inputs.llm.EncoderDecoderPrompt]
+    """A [`EncoderDecoderPrompt`][aphrodite.inputs.llm.EncoderDecoderPrompt]
     that has been standardized into a dictionary.
     """
 
@@ -120,9 +117,7 @@ def _validate_prompt_dict(prompt: Mapping[str, object]) -> None:
 
 
 def parse_dec_only_prompt(prompt: PromptType | object) -> DecoderOnlyDictPrompt:
-    """
-    Parse a prompt for a decoder-only model and normalize it to a dictionary.
-    """
+    """Parse a prompt for a decoder-only model and normalize it to a dictionary."""
     if isinstance(prompt, str):
         return TextPrompt(prompt=prompt)
 
@@ -198,9 +193,7 @@ def _parse_dec_prompt(prompt: PromptType | object) -> DecoderDictPrompt:
 
 
 def parse_enc_dec_prompt(prompt: PromptType | object) -> EncoderDecoderDictPrompt:
-    """
-    Parse a prompt for an encoder-decoder model and normalize it to a dictionary.
-    """
+    """Parse a prompt for an encoder-decoder model and normalize it to a dictionary."""
     if isinstance(prompt, dict) and "encoder_prompt" in prompt:
         enc_prompt = prompt["encoder_prompt"]  # type: ignore[typeddict-item]
         dec_prompt = prompt["decoder_prompt"]  # type: ignore[typeddict-item]

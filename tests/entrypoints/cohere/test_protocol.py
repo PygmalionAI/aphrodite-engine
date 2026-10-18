@@ -35,7 +35,7 @@ from aphrodite.entrypoints.cohere.protocol import (
     ToolCallStartEvent,
     ToolPlanDeltaEvent,
 )
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 
 # ======================================================================
 # CohereError
@@ -55,13 +55,13 @@ class TestCohereError:
 
 class TestCohereChatV2Request:
     def test_empty_model_rejected(self):
-        with pytest.raises(APHRODITEValidationError, match="model is required") as exc_info:
+        with pytest.raises(AphroditeValidationError, match="model is required") as exc_info:
             CohereChatV2Request(model="", messages=[{"role": "user", "content": "hi"}])
         assert exc_info.value.parameter == "model"
         assert exc_info.value.value is None
 
     def test_negative_max_tokens_rejected(self):
-        with pytest.raises(APHRODITEValidationError, match="non-negative") as exc_info:
+        with pytest.raises(AphroditeValidationError, match="non-negative") as exc_info:
             CohereChatV2Request(
                 model="m",
                 messages=[{"role": "user", "content": "hi"}],
@@ -71,7 +71,7 @@ class TestCohereChatV2Request:
         assert exc_info.value.value == -1
 
     def test_empty_messages_rejected(self):
-        with pytest.raises(APHRODITEValidationError, match="messages must contain at least one message") as exc_info:
+        with pytest.raises(AphroditeValidationError, match="messages must contain at least one message") as exc_info:
             CohereChatV2Request(model="m", messages=[])
         assert exc_info.value.parameter == "messages"
         assert exc_info.value.value is None
@@ -92,6 +92,27 @@ class TestCohereChatV2Request:
                 messages=[{"role": "user", "content": "hi"}],
                 tool_choice="ANY",  # not REQUIRED/NONE
             )
+
+    @pytest.mark.parametrize("tool_fields", [{}, {"tools": None}, {"tools": []}])
+    def test_required_tool_choice_requires_tools(self, tool_fields):
+        with pytest.raises(AphroditeValidationError, match="REQUIRED.*tools") as exc_info:
+            CohereChatV2Request(
+                model="m",
+                messages=[{"role": "user", "content": "hi"}],
+                tool_choice="REQUIRED",
+                **tool_fields,
+            )
+        assert exc_info.value.parameter == "tool_choice"
+
+    @pytest.mark.parametrize("tool_choice", [None, "NONE"])
+    def test_nonrequired_tool_choice_allows_empty_tools(self, tool_choice):
+        request = CohereChatV2Request(
+            model="m",
+            messages=[{"role": "user", "content": "hi"}],
+            tool_choice=tool_choice,
+            tools=[],
+        )
+        assert request.tool_choice == tool_choice
 
     def test_stop_sequences_bounded_by_env_limit(self):
         messages = [{"role": "user", "content": "hi"}]
@@ -134,7 +155,7 @@ class TestCohereChatV2Response:
         with pytest.raises(ValidationError):
             CohereChatV2Response(
                 id="r1",
-                finish_reason="NOT_A_REASON",  # type: ignore[arg-type]
+                finish_reason="NOT_A_REASON",
                 message=msg,
             )
 
@@ -238,5 +259,5 @@ class TestStreamingEventTypeField:
             MessageStartEvent(
                 id="a",
                 delta={"message": {"role": "assistant"}},
-                type="other",  # type: ignore[arg-type]
+                type="other",
             )

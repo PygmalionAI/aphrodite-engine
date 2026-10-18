@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the Aphrodite project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 from typing import Any
 
@@ -69,24 +70,26 @@ AUDIO_MODEL_SETTINGS: dict[str, dict[str, Any]] = {
 }
 
 
-@pytest.mark.parametrize("model_id", list(AUDIO_MODEL_SETTINGS))
-def test_transformers_audio_generation(
-    hf_runner: type[HfRunner],
-    aphrodite_runner: type[AphroditeRunner],
-    monkeypatch,
-    model_id: str,
-):
+@pytest.fixture(autouse=True)
+def use_spawn_for_audio_models(monkeypatch):
     """Single-process workaround for V1 fork safety deadlock issue
-    (aphrodite-project/aphrodite/issues/17676). Running multiple audio models together
+    (https://github.com/vllm-project/vllm/issues/17676). Running multiple audio models together
     under pytest can cause (possibly flaky) hangs, so they are grouped under
     the same config. Using APHRODITE_WORKER_MULTIPROC_METHOD=spawn avoids the
     deadlock and allows worker processes to terminate cleanly, and release
     GPU memory between test runs until the issue is fixed."""
     # TODO: Remove monkeypatch once
-    # https://github.com/aphrodite-project/aphrodite/issues/17676 is fixed.
+    # https://github.com/vllm-project/vllm/issues/17676 is fixed.
     disable_envs_cache()
     monkeypatch.setenv("APHRODITE_WORKER_MULTIPROC_METHOD", "spawn")
 
+
+@pytest.mark.parametrize("model_id", list(AUDIO_MODEL_SETTINGS))
+def test_transformers_audio_generation(
+    hf_runner: type[HfRunner],
+    aphrodite_runner: type[AphroditeRunner],
+    model_id: str,
+):
     settings = AUDIO_MODEL_SETTINGS[model_id]
     audio_lora_path = settings.get("audio_lora_path")
 

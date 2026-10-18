@@ -9,7 +9,6 @@ from typing import Any
 
 import numpy as np
 import torch
-from aphrodite.quantization.schema import QuantParamSchema
 from safetensors.torch import safe_open
 
 
@@ -259,18 +258,16 @@ def main(args):
     rank_keyword = "rank"
     hf_tensor_files, use_safetensors = _prepare_hf_weights(args.quantized_model, args.load_format)
     rank_scales_map = _kv_scales_extractor(hf_tensor_files, use_safetensors, rank_keyword, expected_tp_size)
-    # Postprocess: formatting to the current schema. Consider pulling it
-    # out into a dedicated function should it ever become more complicated.
+    # Preserve the legacy scale-export format without depending on a removed
+    # engine configuration schema.
     rank_scales_map = {rank: {k: scale[k] for k in sorted(scale.keys())} for rank, scale in rank_scales_map.items()}
-    # TODO: Expand this with activation and weights scaling factors when
-    # they are used in the future
-    schema = QuantParamSchema(
-        model_type=recovered_metadata["model_type"],
-        kv_cache={
+    schema = {
+        "model_type": recovered_metadata["model_type"],
+        "kv_cache": {
             "dtype": ("float8_e4m3fn" if len(rank_scales_map) > 0 else recovered_metadata["model_dtype"]),
             "scaling_factor": rank_scales_map,
         },
-    )
+    }
 
     if args.output_dir is None:
         output_file = os.path.join(args.quantized_model, args.output_name)
@@ -280,19 +277,16 @@ def main(args):
         output_file = os.path.join(args.output_dir, args.output_name)
 
     with open(output_file, "w") as f:
-        f.write(schema.model_dump_json(indent=4))
+        json.dump(schema, f, indent=4)
         print(f"Completed! KV cache scaling factors saved to {output_file}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="This simple utility extracts the "
-        "KV cache scaling factors from a quantized HF model "
-        "and saves them to a JSON file compatible with later "
-        "use by Aphrodite (pass this file to the appropriate "
-        "runtime typically using the argument "
-        "--quantization-param-path <filename>). This is only used "
-        "if the KV cache dtype is FP8 and on ROCm (AMD GPU)."
+        description="Extract legacy KV cache scaling factors from a quantized HF model "
+        "and save the standalone JSON scale-export format. Current Sonar loaders "
+        "read KV scales from checkpoint tensors; this utility is for inspecting "
+        "and exporting older FP8 models, not a --quantization-param-path option."
     )
     parser.add_argument(
         "--quantized-model",

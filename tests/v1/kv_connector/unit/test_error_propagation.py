@@ -2,7 +2,6 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 from collections.abc import Callable
-from unittest.mock import Mock
 
 import pytest
 
@@ -11,6 +10,7 @@ from aphrodite.v1.request import FinishReason, Request, RequestStatus
 
 from .utils import (
     create_aphrodite_config,
+    create_mock_connector,
     create_model_runner_output,
     create_request,
     create_scheduler,
@@ -32,14 +32,14 @@ def _make_get_num_new_matched_tokens(
 
 @pytest.fixture
 def fail_scheduler():
-    """scheduler with kv_load_failure_policy='fail'"""
+    """Scheduler with kv_load_failure_policy='fail'."""
     aphrodite_config = create_aphrodite_config()
     aphrodite_config.kv_transfer_config.kv_load_failure_policy = "fail"
     return create_scheduler(aphrodite_config)
 
 
 def test_error_propagation_sync_load(fail_scheduler: Scheduler):
-    """test invalid_block_ids with fail policy -> FINISHED_ERROR (sync load)"""
+    """Test invalid_block_ids with fail policy -> FINISHED_ERROR (sync load)."""
     num_prompt_blocks = 100
     num_external_computed_blocks = 99
     invalid_block_idx = 50
@@ -54,7 +54,7 @@ def test_error_propagation_sync_load(fail_scheduler: Scheduler):
         request.request_id: num_external_computed_tokens,
     }
 
-    fail_scheduler.connector = Mock()
+    fail_scheduler.connector = create_mock_connector()
     fail_scheduler.connector.get_num_new_matched_tokens.side_effect = _make_get_num_new_matched_tokens(
         req_num_new_matched_tokens, False
     )
@@ -91,7 +91,7 @@ def test_error_propagation_sync_load(fail_scheduler: Scheduler):
 
 
 def test_error_propagation_async_load(fail_scheduler: Scheduler):
-    """test invalid_block_ids with fail policy -> FINISHED_ERROR (async load)"""
+    """Test invalid_block_ids with fail policy -> FINISHED_ERROR (async load)."""
     num_prompt_blocks = 100
     num_external_computed_blocks = 99
     invalid_block_idx = 50
@@ -106,7 +106,8 @@ def test_error_propagation_async_load(fail_scheduler: Scheduler):
         request.request_id: num_external_computed_tokens,
     }
 
-    fail_scheduler.connector = Mock()
+    fail_scheduler.connector = create_mock_connector()
+    fail_scheduler.connector.get_loaded_kv_cache_group_ids.return_value = (0,)
     fail_scheduler.connector.get_num_new_matched_tokens.side_effect = _make_get_num_new_matched_tokens(
         req_num_new_matched_tokens, True
     )
@@ -115,7 +116,7 @@ def test_error_propagation_async_load(fail_scheduler: Scheduler):
 
     scheduler_output = fail_scheduler.schedule()
 
-    assert len(fail_scheduler.skipped_waiting) == 1
+    assert len(fail_scheduler.kv_holding_waiting) == 1
     assert request.status == RequestStatus.WAITING_FOR_REMOTE_KVS
     assert request.num_computed_tokens == num_external_computed_tokens
 
@@ -141,4 +142,5 @@ def test_error_propagation_async_load(fail_scheduler: Scheduler):
     assert output.finish_reason == FinishReason.ERROR
 
     assert len(fail_scheduler.waiting) == 0
-    assert len(fail_scheduler.skipped_waiting) == 0
+    assert len(fail_scheduler.kv_holding_waiting) == 0
+    assert not fail_scheduler.deferred_waiting

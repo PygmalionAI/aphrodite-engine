@@ -11,6 +11,9 @@ from aphrodite.config import ParallelConfig
 from aphrodite.distributed import (
     stateless_destroy_torch_distributed_process_group,
 )
+from aphrodite.distributed.elastic_ep.external_elastic_ep import (
+    ExternalElasticEPScaleCoordinator,
+)
 from aphrodite.distributed.utils import get_cached_tcp_store_client
 from aphrodite.logger import init_logger
 from aphrodite.v1.engine import (
@@ -187,7 +190,7 @@ class ElasticEPScalingState:
             return True
 
         elif state == ScaleUpNewEngineState.PREPARE:
-            self._collective_rpc("elastic_ep_execute", args=("warmup_local_kernels",))
+            self._collective_rpc("elastic_ep_execute", args=("warmup_new_worker",))
             self._mark_ready_for_switch()
             tensor = torch.tensor([0, 0, 0], dtype=torch.int32, device="cpu")
             torch.distributed.all_reduce(
@@ -239,8 +242,21 @@ class ElasticEPScalingState:
         if state == ScaleDownRemovingEngineState.PREPARE:
             assert self.old_dp_group.rank() > 0
             self._commit_scale_down(removing=True)
-            self.state = ScaleDownRemovingEngineState.COMPLETE
+            external_lb = self.aphrodite_config.parallel_config.data_parallel_external_lb
+            if external_lb:
+                # Preserve completion delivery: client cleanup on exit must not
+                # cancel the receiver before it records the notification.
+                parallel_config = self.new_parallel_config
+                store = get_cached_tcp_store_client(
+                    parallel_config.data_parallel_master_ip,
+                    parallel_config._coord_store_port,
+                )
+                key = ExternalElasticEPScaleCoordinator.key
+                epoch = store.get(key("current_epoch")).decode()
             self.engine_core._eep_send_engine_core_notification(EEPNotificationType.SHUTDOWN_COMPLETE)
+            if external_lb:
+                store.wait([key(epoch, "shutdown_complete", self.engine_core.dp_rank)])
+            self.state = ScaleDownRemovingEngineState.COMPLETE
             return True
 
         else:
@@ -361,7 +377,7 @@ class ElasticEPScalingState:
 
     def _send_reconfigure_finished(self):
         assert self.new_dp_group is not None
-        if self.new_dp_group.rank() == 0:
+        if self.new_dp_group.rank() == 0 or self.aphrodite_config.parallel_config.data_parallel_external_lb:
             self.engine_core._eep_send_engine_core_notification(EEPNotificationType.RECONFIGURE_FINISHED)
 
     def _commit_scale_down(self, removing: bool):

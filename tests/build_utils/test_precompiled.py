@@ -93,23 +93,45 @@ def test_extracts_allowlisted_files_and_preserves_tracked_interfaces(tmp_path: P
     flash_attn.mkdir(parents=True)
     interface = flash_attn / "flash_attn_interface.py"
     interface.write_text("tracked\n")
+    deep_gemm = package / "third_party/deep_gemm"
+    deep_gemm.mkdir(parents=True)
+    legacy_bindings = [deep_gemm / "_C.cpython-311-x86_64-linux-gnu.so", deep_gemm / "_C.abi3.so"]
+    for binding in legacy_bindings:
+        binding.write_bytes(b"old pybind binding")
+    (deep_gemm / "user_notes.txt").write_text("keep this file\n")
 
     first = _make_wheel(
         tmp_path / WHEEL_NAME,
         {
             "aphrodite/_C_stable_libtorch.abi3.so": b"first",
+            "aphrodite/_deepselect_C.abi3.so": b"deepselect",
+            "aphrodite/libs/libtcmalloc.so.4": b"cpu allocator",
+            "aphrodite/unrelated/libskip.so.1": b"ignore",
             "aphrodite/vllm_flash_attn/flash_attn_interface.py": b"wheel copy",
             "aphrodite/third_party/deep_gemm/old.py": b"old",
+            "aphrodite/third_party/deep_gemm/_C.py": b"first wrapper",
+            "aphrodite/third_party/deep_gemm/_C_extension.abi3.so": b"first stable extension",
             "aphrodite/unrelated.py": b"ignore",
         },
     )
     patch = precompiled.extract_precompiled_wheel(tmp_path, first)
 
     assert (package / "_C_stable_libtorch.abi3.so").read_bytes() == b"first"
+    assert (package / "_deepselect_C.abi3.so").read_bytes() == b"deepselect"
+    assert (package / "libs/libtcmalloc.so.4").read_bytes() == b"cpu allocator"
+    assert not (package / "unrelated/libskip.so.1").exists()
     assert interface.read_text() == "tracked\n"
     assert (package / "third_party/deep_gemm/old.py").is_file()
     assert not (package / "unrelated.py").exists()
     assert "aphrodite" in patch
+    assert all(not binding.exists() for binding in legacy_bindings)
+    assert (deep_gemm / "user_notes.txt").read_text() == "keep this file\n"
+
+    # A cached extraction must also remove bindings left by another local build.
+    legacy_bindings[0].write_bytes(b"recreated pybind binding")
+    precompiled.extract_precompiled_wheel(tmp_path, first)
+    assert not legacy_bindings[0].exists()
+    assert (deep_gemm / "_C_extension.abi3.so").read_bytes() == b"first stable extension"
 
     second_path = tmp_path / f"second-{WHEEL_NAME}"
     second = _make_wheel(
@@ -117,15 +139,49 @@ def test_extracts_allowlisted_files_and_preserves_tracked_interfaces(tmp_path: P
         {
             "aphrodite/_C_stable_libtorch.abi3.so": b"second",
             "aphrodite/third_party/deep_gemm/new.py": b"new",
+            "aphrodite/third_party/deep_gemm/_C.py": b"second wrapper",
+            "aphrodite/third_party/deep_gemm/_C_extension.abi3.so": b"second stable extension",
         },
     )
     precompiled.extract_precompiled_wheel(tmp_path, second)
 
     assert (package / "_C_stable_libtorch.abi3.so").read_bytes() == b"second"
     assert not (package / "third_party/deep_gemm/old.py").exists()
+    assert not (package / "_deepselect_C.abi3.so").exists()
+    assert not (package / "libs/libtcmalloc.so.4").exists()
     assert (package / "third_party/deep_gemm/new.py").is_file()
+    assert (package / "third_party/deep_gemm/_C.py").read_bytes() == b"second wrapper"
+    assert (package / "third_party/deep_gemm/_C_extension.abi3.so").read_bytes() == b"second stable extension"
     manifest = json.loads((tmp_path / precompiled.MANIFEST_PATH).read_text())
     assert "aphrodite/third_party/deep_gemm/new.py" in manifest["paths"]
+    assert "aphrodite/third_party/deep_gemm/_C.py" in manifest["paths"]
+    assert "aphrodite/third_party/deep_gemm/_C_extension.abi3.so" in manifest["paths"]
+
+
+def test_rust_only_extraction_preserves_executable_and_parser(tmp_path: Path) -> None:
+    wheel_path = tmp_path / WHEEL_NAME
+    with zipfile.ZipFile(wheel_path, "w") as wheel:
+        executable = zipfile.ZipInfo("aphrodite/aphrodite-rs")
+        executable.create_system = 3
+        executable.external_attr = 0o100755 << 16
+        wheel.writestr(executable, b"rust frontend")
+        wheel.writestr("aphrodite/_rust_parser.abi3.so", b"parser")
+        wheel.writestr("aphrodite/_deepselect_C.abi3.so", b"native extension")
+        wheel.writestr("aphrodite/libs/libtcmalloc.so.4", b"cpu allocator")
+    candidate = precompiled.WheelCandidate(
+        str(wheel_path), wheel_path.name, hashlib.sha256(wheel_path.read_bytes()).hexdigest()
+    )
+
+    patch = precompiled.extract_precompiled_wheel(tmp_path, candidate, extract_extensions=False, extract_rust=True)
+
+    package = tmp_path / "aphrodite"
+    frontend = package / "aphrodite-rs"
+    assert frontend.read_bytes() == b"rust frontend"
+    assert frontend.stat().st_mode & 0o777 == 0o755
+    assert (package / "_rust_parser.abi3.so").read_bytes() == b"parser"
+    assert not (package / "_deepselect_C.abi3.so").exists()
+    assert not (package / "libs/libtcmalloc.so.4").exists()
+    assert set(patch["aphrodite"]) == {"aphrodite-rs", "_rust_parser.abi3.so"}
 
 
 def test_checksum_mismatch_fails_before_replacing_existing_files(tmp_path: Path) -> None:

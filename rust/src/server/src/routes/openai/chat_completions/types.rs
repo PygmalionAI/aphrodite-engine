@@ -3,21 +3,25 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 
+use aphrodite_engine_core_client::protocol::sampling::{
+    AphroditeSamplingParams, RepetitionDetectionParams,
+};
+use aphrodite_text::TruncationSide;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::SerializeDisplay;
 use validator::Validate;
-use aphrodite_chat::ReasoningEffort;
-use aphrodite_engine_core_client::protocol::sampling::RepetitionDetectionParams;
-use aphrodite_text::TruncationSide;
 
+use crate::routes::openai::utils::metrics::{PerRequestMetrics, StreamPerRequestMetrics};
 use crate::routes::openai::utils::structured_outputs::ResponseFormat;
 use crate::routes::openai::utils::types::{
-    ChatLogProbs, ChatMessage, Normalizable, PromptLogprobs, StreamOptions, StreamResponseEnvelope,
-    StringOrArray, Tool, ToolCall, ToolCallDelta, ToolChoice, Usage, default_true,
-    deserialize_request_top_k, validate_messages, validate_stop, validate_top_p_value,
+    ChatLogProbs, ChatMessage, Normalizable, PromptLogprobs, ReasoningEffort, StreamOptions,
+    StreamResponseEnvelope, StringOrArray, Tool, ToolCall, ToolCallDelta, ToolChoice, Usage,
+    default_true, deserialize_request_top_k, validate_messages, validate_stop,
+    validate_top_p_value,
 };
 
 /// Aphrodite-compatible request type for the Chat Completions API.
@@ -116,6 +120,14 @@ pub struct ChatCompletionRequest {
     pub user: Option<String>,
 
     // -------- Aphrodite Sampling Parameters --------
+    /// Sonar's extended sampler settings, with the Python API defaults.
+    #[serde(default, flatten)]
+    pub aphrodite_sampling: AphroditeSamplingParams,
+
+    /// Whether to apply the engine's configured watermark to this request.
+    #[serde(default = "default_true")]
+    pub watermarking: bool,
+
     /// Use beam search instead of sampling
     #[serde(default)]
     pub use_beam_search: bool,
@@ -165,6 +177,11 @@ pub struct ChatCompletionRequest {
 
     /// Number of prompt logprobs to return
     pub prompt_logprobs: Option<i32>,
+
+    /// Specific vocab token IDs to return logprobs for at each generated
+    /// position, in addition to the sampled token. Takes precedence over
+    /// `top_logprobs`. Requires `logprobs=true`.
+    pub logprob_token_ids: Option<Vec<u32>>,
 
     /// Restrict output to these token IDs only
     pub allowed_token_ids: Option<Vec<u32>>,
@@ -252,6 +269,12 @@ pub struct ChatCompletionRequest {
 
     /// Parameters for detecting repetitive N-gram patterns in output tokens
     pub repetition_detection: Option<RepetitionDetectionParams>,
+
+    /// Number of tokens to batch into each streamed chunk. Raises the server's
+    /// `--stream-interval` for this request. Values below the server setting
+    /// are clamped up to it. The first and last chunks are always sent
+    /// immediately. Ignored for non-streaming requests.
+    pub stream_interval: Option<NonZeroU32>,
 }
 
 impl Default for ChatCompletionRequest {
@@ -282,6 +305,8 @@ impl Default for ChatCompletionRequest {
             include_reasoning: true,
             parallel_tool_calls: None,
             user: None,
+            aphrodite_sampling: AphroditeSamplingParams::default(),
+            watermarking: true,
             use_beam_search: false,
             top_k: None,
             min_p: None,
@@ -296,6 +321,7 @@ impl Default for ChatCompletionRequest {
             truncate_prompt_tokens: None,
             truncation_side: None,
             prompt_logprobs: None,
+            logprob_token_ids: None,
             allowed_token_ids: None,
             bad_words: None,
             echo: false,
@@ -318,6 +344,7 @@ impl Default for ChatCompletionRequest {
             ec_transfer_params: None,
             aphrodite_xargs: None,
             repetition_detection: None,
+            stream_interval: None,
         }
     }
 }
@@ -346,6 +373,7 @@ pub(super) struct ChatCompletionResponse {
     pub model: String,
     pub choices: Vec<ChatCompletionChoice>,
     pub usage: Option<Usage>,
+    pub metrics: Option<PerRequestMetrics>,
     pub system_fingerprint: Option<String>,
     pub prompt_logprobs: Option<PromptLogprobs>,
     pub prompt_token_ids: Option<Vec<u32>>,
@@ -393,6 +421,7 @@ pub(super) struct ChatCompletionStreamResponse {
     pub envelope: Arc<StreamResponseEnvelope>,
     pub choices: Vec<ChatCompletionStreamChoice>,
     pub usage: Option<Usage>,
+    pub metrics: Option<StreamPerRequestMetrics>,
     pub prompt_token_ids: Option<Vec<u32>>,
 }
 
@@ -403,6 +432,7 @@ impl ChatCompletionStreamResponse {
             envelope: Arc::clone(envelope),
             choices: Vec::new(),
             usage: None,
+            metrics: None,
             prompt_token_ids: None,
         }
     }

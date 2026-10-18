@@ -38,10 +38,9 @@ import json
 from collections.abc import Iterator, Sequence
 
 import regex as re
-from openai.types.responses import ToolChoiceFunction
+from openai.types.responses import ToolChoiceCustom, ToolChoiceFunction
 from transformers import PreTrainedTokenizerBase
 
-from aphrodite.entrypoints.chat_utils import make_tool_call_id
 from aphrodite.entrypoints.generate.base.protocol import (
     DeltaFunctionCall,
     DeltaMessage,
@@ -56,6 +55,7 @@ from aphrodite.entrypoints.openai.chat_completion.protocol import (
 )
 from aphrodite.entrypoints.openai.responses.protocol import ResponsesRequest
 from aphrodite.logger import init_logger
+from aphrodite.renderers.chat_utils import make_tool_call_id
 from aphrodite.tool_parsers.abstract_tool_parser import (
     Tool,
     ToolParser,
@@ -225,7 +225,14 @@ class MuseGlimmerToolParser(ToolParser):
         tool_choice = getattr(request, "tool_choice", None)
         if request.tools and (
             tool_choice == "required"
-            or isinstance(tool_choice, (ChatCompletionNamedToolChoiceParam, ToolChoiceFunction))
+            or isinstance(
+                tool_choice,
+                (
+                    ChatCompletionNamedToolChoiceParam,
+                    ToolChoiceFunction,
+                    ToolChoiceCustom,
+                ),
+            )
         ):
             return request
         return super().adjust_request(request)

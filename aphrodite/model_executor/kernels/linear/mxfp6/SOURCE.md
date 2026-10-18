@@ -16,3 +16,18 @@ in the vendored file to make future CUTLASS updates easier.
 at the same CUTLASS commit. It ports mixed-width operand and FP6 TMA-unpack
 support from the dense implementation. NVIDIA's grouped example only accepted
 same-width operands at that revision.
+
+The native online path uses `Mxfp6LinearKernel` and
+`Mxfp6LinearLayerConfig` with `CutedslMxfp6LinearKernel`; it is gated to
+SM110 and retains separate dense and grouped packed-weight layouts.
+Checkpoint MXFP6 selection uses `MxFp6LinearKernel` and
+`MxFp6LinearLayerConfig` with Humming or software emulation. These kernel
+interfaces are distinct: the checkpoint selector must not substitute
+emulation for the native online conversion path. Both use the canonical
+`kMxfp6E2M3*` and `kMxfp6E3M2*` quantization keys.
+
+The CuTe DSL 4.8 integration uses separate A/B dtypes in Blackwell MMA
+helpers and supplies scale tensors as auxiliary `cute.gemm` operands for
+both dense and grouped kernels. Scale-factor SMEM/TMEM layouts remain
+provided by `cutlass.utils.blockscaled_layout`; no direct NVVM
+`tcgen05_mma_block_scale` enum binding is used in these kernels.

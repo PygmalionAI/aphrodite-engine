@@ -140,8 +140,7 @@ def json_reduce_leaves(
     initial: _U = ...,  # type: ignore[assignment]
     /,
 ) -> _T | _U:
-    """
-    Apply a function of two arguments cumulatively to each leaf in a
+    """Apply a function of two arguments cumulatively to each leaf in a
     nested JSON structure, from left to right, so as to reduce the
     sequence to a single value.
     """

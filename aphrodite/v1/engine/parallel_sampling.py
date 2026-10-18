@@ -36,6 +36,7 @@ class ParentRequest:
     def __init__(self, request: EngineCoreRequest) -> None:
         assert request.external_req_id is not None
         sampling_params = request.params
+        assert isinstance(sampling_params, SamplingParams)
         self.request_id = request.request_id
         self.external_req_id = request.external_req_id
         self.sampling_params = sampling_params
@@ -53,7 +54,7 @@ class ParentRequest:
         self,
         index: int,
     ) -> SamplingParams:
-        """Efficiently obtain child `sampling_params`
+        """Efficiently obtain child `sampling_params`.
 
         If `sampling_params.seed` is not `None` then
         each child request requires a unique clone of
@@ -64,6 +65,7 @@ class ParentRequest:
 
         Returns:
           Child `sampling_params` instance.
+
         """
         seed = self.sampling_params.seed
         if self.cached_child_sampling_params:
@@ -88,6 +90,7 @@ class ParentRequest:
 
         Returns:
           (request ID, sampling_params) tuple
+
         """
         child_req_id = f"{index}_{self.request_id}"
         self.child_requests.add(child_req_id)

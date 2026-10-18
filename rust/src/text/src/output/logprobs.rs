@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-use itertools::Itertools as _;
-use serde::{Deserialize, Serialize};
 use aphrodite_llm::{Logprobs, PositionLogprobs};
 use aphrodite_tokenizer::Tokenizer;
+use itertools::Itertools as _;
+use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
 

@@ -34,11 +34,33 @@ encode_path() {
 }
 
 build_with_current_rust_helper() (
-  local commit="$1"
   local version="$2"
-  # Packaging fixes must also apply to commits awaiting their first wheel.
-  trap 'git restore --source="$commit" -- tools/build_rust.py' EXIT
-  git show "${target_commit}:tools/build_rust.py" > tools/build_rust.py
+  local helper backup_dir
+  local -a helpers=(tools/build_rust.py tools/use_existing_torch.py)
+  backup_dir="$(mktemp -d)"
+  restore_build_helpers() {
+    local status=$?
+    for helper in "${helpers[@]}"; do
+      if [[ -f "${backup_dir}/$(basename "$helper")" ]]; then
+        cp -p -- "${backup_dir}/$(basename "$helper")" "$helper"
+      else
+        rm -f -- "$helper"
+      fi
+    done
+    rm -rf -- "$backup_dir"
+    return "$status"
+  }
+  # The pinned Dockerfile also needs helpers relocated after historical commits.
+  # Preserve existing files (including untracked overrides) on success or failure.
+  for helper in "${helpers[@]}"; do
+    if [[ -f "$helper" ]]; then
+      cp -p -- "$helper" "$backup_dir/"
+    fi
+  done
+  trap restore_build_helpers EXIT
+  for helper in "${helpers[@]}"; do
+    git show "${target_commit}:${helper}" > "$helper"
+  done
   APHRODITE_VERSION_OVERRIDE="$version" "$PLATFORM_BUILD_SCRIPT" "$output_dir"
 )
 

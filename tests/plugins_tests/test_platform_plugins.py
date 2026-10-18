@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import subprocess
+import sys
+
 import pytest
 import torch
 
@@ -29,6 +32,20 @@ def test_platform_plugins():
         "possibly because current_platform is imported before the plugin"
         f" is loaded. The first import:\n{_init_trace}"
     )
+
+
+def test_import_aphrodite_does_not_resolve_platform():
+    # Platform plugins must be loaded after `import aphrodite` completes; resolving
+    # current_platform during it runs plugins against a half-imported Aphrodite.
+    # Needs a fresh interpreter, since aphrodite is already imported here.
+    code = (
+        "import sys, aphrodite\n"
+        "p = sys.modules.get('aphrodite.platforms')\n"
+        "assert p is None or p._current_platform is None, p._init_trace\n"
+        "from aphrodite.platforms import current_platform\n"
+        "assert current_platform.device_name == 'DummyDevice'\n"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
 
 
 def test_oot_custom_op(default_aphrodite_config, monkeypatch: pytest.MonkeyPatch):

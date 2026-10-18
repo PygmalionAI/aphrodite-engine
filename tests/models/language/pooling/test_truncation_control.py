@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import pytest
 
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 
 MODEL_NAME = "sentence-transformers/all-MiniLM-L12-v2"
 max_model_len = 128
@@ -53,13 +53,15 @@ def test_max_truncation_size(aphrodite_model):
 
     prompt_tokens = aphrodite_output[0].prompt_token_ids
 
+    # Pooling requests emit an embedding rather than generated tokens, so -1
+    # truncates to the full context length.
     assert len(prompt_tokens) == max_model_len
 
 
 def test_bigger_truncation_size(aphrodite_model):
     truncate_prompt_tokens = max_model_len + 1
 
-    with pytest.raises(APHRODITEValidationError):
+    with pytest.raises(AphroditeValidationError):
         aphrodite_model.llm.embed(
             input_str,
             tokenization_kwargs=dict(truncate_prompt_tokens=truncate_prompt_tokens),

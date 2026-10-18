@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+use aphrodite_tokenizer::{TiktokenTokenizer, Tokenizer};
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use hf_hub::api::tokio::ApiBuilder;
 use tokio::runtime::Runtime;
-use aphrodite_tokenizer::{TiktokenTokenizer, Tokenizer};
 
 const MODEL_ID: &str = "moonshotai/Kimi-K2.5";
 const SAMPLE_TEXT: &str = "\

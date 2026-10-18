@@ -12,7 +12,13 @@ from typing import Any, ParamSpec, TypeVar
 import torch
 
 import aphrodite.envs as envs
-from aphrodite.config import CompilationMode, CUDAGraphMode, get_current_aphrodite_config
+from aphrodite.compilation.counter import compilation_counter
+from aphrodite.config import (
+    AphroditeConfig,
+    CompilationMode,
+    CUDAGraphMode,
+    get_current_aphrodite_config,
+)
 from aphrodite.config.compilation import DynamicShapesType
 from aphrodite.logger import init_logger
 from aphrodite.utils.nvtx_pytorch_hooks import layerwise_nvtx_marker_context
@@ -44,9 +50,17 @@ def _compilation_context() -> Generator[None, None, None]:
         torch._dynamo.config.accumulated_cache_size_limit = original_accumulated_cache
 
 
+def compile_model_with_stock_torch(model: torch.nn.Module, aphrodite_config: AphroditeConfig) -> None:
+    from aphrodite.env_override import _apply_constrain_to_fx_strides_patch
+
+    _apply_constrain_to_fx_strides_patch()
+    backend = aphrodite_config.compilation_config.init_backend(aphrodite_config)
+    compilation_counter.stock_torch_compile_count += 1
+    model.compile(fullgraph=True, backend=backend)
+
+
 class TorchCompileWithNoGuardsWrapper:
-    """
-    A wrapper class for torch.compile, it ensures that all guards are dropped
+    """A wrapper class for torch.compile, it ensures that all guards are dropped
     when CompilationMode is not CompilationMode.STOCK_TORCH_COMPILE.
     When guards are dropped, the first time __call__ is invoked, a single
     compilation is triggered. Dynamo should never be traced again after that
@@ -67,6 +81,8 @@ class TorchCompileWithNoGuardsWrapper:
             return ctx.result
         return callable_fn(*args, **kwargs)
 
+    _allow_aot_compile: bool = True
+
     def __init__(
         self,
         compile_prefix: str = "",
@@ -84,7 +100,10 @@ class TorchCompileWithNoGuardsWrapper:
             raise RuntimeError("Compilation mode cannot be NO_COMPILATION")
 
         backend = aphrodite_config.compilation_config.init_backend(
-            aphrodite_config, prefix=compile_prefix, is_encoder=is_encoder
+            aphrodite_config,
+            prefix=compile_prefix,
+            is_encoder=is_encoder,
+            use_aot_compile=self._allow_aot_compile,
         )
         options = {}
 
@@ -124,7 +143,7 @@ class TorchCompileWithNoGuardsWrapper:
         _apply_constrain_to_fx_strides_patch()
 
         aot_context = nullcontext()
-        if envs.APHRODITE_USE_AOT_COMPILE:
+        if self._allow_aot_compile and envs.APHRODITE_USE_AOT_COMPILE:
             if hasattr(torch._dynamo.config, "enable_aot_compile"):
                 aot_context = torch._dynamo.config.patch(enable_aot_compile=True)
             else:
@@ -250,8 +269,7 @@ class TorchCompileWithNoGuardsWrapper:
     @contextmanager
     def _dispatch_to_compiled_code(self) -> Generator[None, None, None]:
         # noqa: E501
-        """
-        Context manager to dispatch to internally compiled code for torch<2.8.
+        """Context manager to dispatch to internally compiled code for torch<2.8.
         Why does this work? Because Dynamo guarantees that the compiled
         bytecode has exactly the same arguments, cell variables, and free
         variables as the original code. Therefore we can directly switch
@@ -269,9 +287,7 @@ class TorchCompileWithNoGuardsWrapper:
 
 
 def reset_compile_wrapper(model: torch.nn.Module) -> None:
-    """
-    Clean up compiled model and captured CUDA graphs for elastic EP.
-    """
+    """Clean up compiled model and captured CUDA graphs for elastic EP."""
     if not isinstance(model, TorchCompileWithNoGuardsWrapper) and hasattr(model, "model"):
         model = model.model
     if not isinstance(model, TorchCompileWithNoGuardsWrapper):

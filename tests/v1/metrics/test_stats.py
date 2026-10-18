@@ -1,10 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 from aphrodite.v1.core.sched.output import ScheduledEncoderInputStats, SchedulerOutput
-from aphrodite.v1.engine import EngineCoreOutputs, FinishReason
+from aphrodite.v1.engine import EngineCoreEvent, EngineCoreEventType, EngineCoreOutput, EngineCoreOutputs, FinishReason
+from aphrodite.v1.metrics.cache_hit_source import CacheHitSource
 from aphrodite.v1.metrics.stats import (
     IterationStats,
+    LoRARequestStates,
     PrefillStats,
+    PrefixCacheStats,
     PromptTokenStats,
     RequestStateStats,
     SchedulerIterationDetails,
@@ -17,6 +21,46 @@ from aphrodite.v1.utils import compute_iteration_details
 def test_iteration_stats_repr():
     iteration_stats = IterationStats()
     assert repr(iteration_stats).startswith("IterationStats(")
+
+
+def test_request_latencies_use_frontend_and_engine_clocks():
+    req_stats = RequestStateStats(arrival_time=1000.0)
+    lora_states = LoRARequestStates()
+    first = IterationStats()
+    first.iteration_timestamp = 1005.0
+    first.update_from_output(
+        EngineCoreOutput(
+            request_id="timing",
+            new_token_ids=[1],
+            events=[
+                EngineCoreEvent(EngineCoreEventType.QUEUED, 10.0),
+                EngineCoreEvent(EngineCoreEventType.SCHEDULED, 12.0),
+            ],
+        ),
+        engine_core_timestamp=15.0,
+        is_prefilling=True,
+        req_stats=req_stats,
+        lora_states=lora_states,
+        lora_name=None,
+    )
+    last = IterationStats()
+    last.iteration_timestamp = 1010.0
+    last.update_from_output(
+        EngineCoreOutput(request_id="timing", new_token_ids=[2, 3]),
+        engine_core_timestamp=19.0,
+        is_prefilling=False,
+        req_stats=req_stats,
+        lora_states=lora_states,
+        lora_name=None,
+    )
+    last.update_from_finished_request(FinishReason.LENGTH, "timing", 64, 3, req_stats)
+
+    finished = last.finished_requests[0]
+    assert finished.first_token_latency == 5.0
+    assert finished.queued_time == 2.0
+    assert finished.prefill_time == 3.0
+    assert finished.decode_time == 4.0
+    assert finished.e2e_latency == 10.0
 
 
 def test_scheduler_iteration_details_serialization():
@@ -43,6 +87,96 @@ def test_scheduler_iteration_details_serialization():
     assert decoded.scheduler_stats is not None
     assert decoded.scheduler_stats.kv_cache_usage == 0.5
     assert decoded.scheduler_stats.iteration_details == iteration_details
+
+
+def test_prefix_cache_stats_hits_by_source_accumulate():
+    stats = PrefixCacheStats()
+    stats.record(
+        num_tokens=8,
+        num_hits=5,
+        preempted=False,
+        hits_by_source={CacheHitSource.HOST: 3, CacheHitSource.DISK: 2},
+    )
+    stats.record(
+        num_tokens=8,
+        num_hits=6,
+        preempted=False,
+        hits_by_source={CacheHitSource.P2P: 5, CacheHitSource.HOST: 1},
+    )
+    # Zero counts never create an entry.
+    stats.record(
+        num_tokens=8,
+        num_hits=4,
+        preempted=False,
+        hits_by_source={CacheHitSource.DISK: 4, CacheHitSource.P2P: 0},
+    )
+
+    assert stats.hits_by_source == {
+        CacheHitSource.HOST: 4,
+        CacheHitSource.DISK: 6,
+        CacheHitSource.P2P: 5,
+    }
+    assert sum(stats.hits_by_source.values()) == stats.hits == 15
+
+
+def test_prefix_cache_stats_record_hits_by_source():
+    stats = PrefixCacheStats()
+    stats.record(num_tokens=32, num_hits=16, preempted=False)
+    stats.record(
+        num_tokens=32,
+        num_hits=24,
+        preempted=False,
+        hits_by_source={CacheHitSource.HOST: 16, CacheHitSource.DISK: 8},
+    )
+    # Preempted re-admissions never contribute to hits or the split.
+    stats.record(
+        num_tokens=32,
+        num_hits=32,
+        preempted=True,
+        hits_by_source={CacheHitSource.P2P: 32},
+    )
+    # A connector miscount is reported as unspecified, not dropped or raised.
+    stats.record(
+        num_tokens=8,
+        num_hits=8,
+        preempted=False,
+        hits_by_source={CacheHitSource.HOST: 4},
+    )
+
+    assert stats.requests == 3
+    assert stats.hits == 48
+    assert stats.preempted_hits == 32
+    assert stats.hits_by_source == {
+        CacheHitSource.HOST: 16,
+        CacheHitSource.DISK: 8,
+        CacheHitSource.EXTERNAL_UNSPECIFIED: 8,
+    }
+    assert sum(stats.hits_by_source.values()) == 48 - 16
+
+
+def test_prefix_cache_stats_hits_by_source_serialization():
+    connector_stats = PrefixCacheStats()
+    connector_stats.record(
+        num_tokens=16,
+        num_hits=8,
+        preempted=False,
+        hits_by_source={CacheHitSource.P2P: 4, CacheHitSource.HOST: 4},
+    )
+    outputs = EngineCoreOutputs(
+        scheduler_stats=SchedulerStats(
+            connector_prefix_cache_stats=connector_stats,
+        )
+    )
+
+    encoded = MsgpackEncoder().encode(outputs)
+    decoded = MsgpackDecoder(EngineCoreOutputs).decode(encoded)
+
+    assert decoded.scheduler_stats is not None
+    assert decoded.scheduler_stats.connector_prefix_cache_stats is not None
+    assert decoded.scheduler_stats.connector_prefix_cache_stats.hits_by_source == {
+        CacheHitSource.P2P: 4,
+        CacheHitSource.HOST: 4,
+    }
 
 
 def test_compute_iteration_details_includes_encoder_stats():

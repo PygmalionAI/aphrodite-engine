@@ -6,7 +6,9 @@ import os
 import sys
 from pathlib import Path
 
-from aphrodite import envs
+import aphrodite.envs as envs
+
+JSON_FORMAT = "%(asctime)s %(levelname)s %(name)s %(processName)s %(process)d %(message)s"
 
 
 class Colors:
@@ -39,10 +41,10 @@ def _supports_color() -> bool:
 class NewLineFormatter(logging.Formatter):
     """Adds logging prefix to newlines to align multiline log messages."""
 
-    def __init__(self, fmt, datefmt=None, style="%"):
+    def __init__(self, fmt, datefmt=None, style="%", *, log_level: str | None = None):
         super().__init__(fmt, datefmt, style)
 
-        self.use_relpath = envs.APHRODITE_LOGGING_LEVEL == "DEBUG"
+        self.use_relpath = log_level == "DEBUG"
         if self.use_relpath:
             self.root_dir = Path(__file__).resolve().parent.parent.parent
 

@@ -81,13 +81,18 @@ class DraftModelProposer(SpecDecodeBaseProposer):
     def _create_draft_aphrodite_config(self) -> AphroditeConfig:
         base = super()._create_draft_aphrodite_config()
         spec = self.speculative_config
+        target_parallel = base.parallel_config
 
         return replace(
             base,
             quant_config=None,
             parallel_config=replace(
                 spec.draft_parallel_config,
-                rank=self.aphrodite_config.parallel_config.rank,
+                rank=target_parallel.rank,
+                decode_context_parallel_size=(target_parallel.decode_context_parallel_size),
+                cp_kv_cache_interleave_size=target_parallel.cp_kv_cache_interleave_size,
+                dcp_comm_backend=target_parallel.dcp_comm_backend,
+                dcp_q_replicate=target_parallel.dcp_q_replicate,
             ),
             model_config=spec.draft_model_config,
         )

@@ -14,13 +14,13 @@ input-processing library (mistral-common style) later.
 """
 
 from aphrodite.config import AphroditeConfig
-from aphrodite.entrypoints.chat_utils import (
+from aphrodite.logger import init_logger
+from aphrodite.renderers.chat_utils import (
     ChatCompletionMessageParam,
     ConversationMessage,
     parse_chat_messages,
     parse_chat_messages_async,
 )
-from aphrodite.logger import init_logger
 from aphrodite.tokenizers.hf import HfTokenizer
 from aphrodite.utils.async_utils import make_async
 

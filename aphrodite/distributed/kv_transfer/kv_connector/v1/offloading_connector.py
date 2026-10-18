@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from collections.abc import Iterable
+from functools import cached_property
 from typing import Any
 
 import torch
 
 from aphrodite.config import AphroditeConfig
-from aphrodite.distributed.kv_events import KVCacheEvent
+from aphrodite.distributed.kv_events import KVCacheEventType
 from aphrodite.distributed.kv_transfer.kv_connector.v1 import (
     KVConnectorBase_V1,
     KVConnectorRole,
@@ -25,6 +26,7 @@ from aphrodite.distributed.kv_transfer.kv_connector.v1.offloading.common import 
 )
 from aphrodite.distributed.kv_transfer.kv_connector.v1.offloading.config import (
     build_offloading_config,
+    get_offloading_group_ids,
 )
 from aphrodite.distributed.kv_transfer.kv_connector.v1.offloading.metrics import (
     OffloadingConnectorStats,
@@ -38,15 +40,36 @@ from aphrodite.distributed.kv_transfer.kv_connector.v1.offloading.worker import 
 )
 from aphrodite.forward_context import ForwardContext
 from aphrodite.v1.attention.backend import AttentionMetadata
+from aphrodite.v1.core.kv_cache_coordinator import HybridKVCacheCoordinator
 from aphrodite.v1.core.kv_cache_manager import KVCacheBlocks
 from aphrodite.v1.core.sched.output import SchedulerOutput
 from aphrodite.v1.kv_cache_interface import KVCacheConfig
 from aphrodite.v1.kv_offload.factory import OffloadingSpecFactory
+from aphrodite.v1.metrics.cache_hit_source import CacheHitSource
 from aphrodite.v1.outputs import KVConnectorOutput
 from aphrodite.v1.request import Request
 
 
 class OffloadingConnector(KVConnectorBase_V1, SupportsHMA):
+    @cached_property
+    def _bounding_group_ids(self) -> tuple[int, ...]:
+        """Prefix-cacheable groups this connector does not offload.
+
+        Never offer tokens for a range some group cannot cover: past such a
+        group's own cached prefix its KV would be left unwritten.
+        """
+        offloaded = set(get_offloading_group_ids(self._kv_cache_config))
+        return tuple(
+            group_id
+            for group_id, group in enumerate(self._kv_cache_config.kv_cache_groups)
+            if group.kv_cache_spec.prefix_cacheable and group_id not in offloaded
+        )
+
+    @property
+    def scheduler(self) -> OffloadingConnectorScheduler:
+        assert self.connector_scheduler is not None
+        return self.connector_scheduler
+
     @property
     def requires_kv_delivery(self) -> bool:
         # Runs as kv_both, but is a best-effort cache: a dropped save is just a
@@ -105,19 +128,14 @@ class OffloadingConnector(KVConnectorBase_V1, SupportsHMA):
         pass
 
     def wait_for_save(self):
-        # Store deferral is handled in get_finished(), which always runs even
-        # when wait_for_save() is skipped (e.g. kv_connector_no_forward).
-        pass
+        assert self.connector_worker is not None
+        assert isinstance(self._connector_metadata, OffloadingConnectorMetadata)
+        # Defer store jobs to the next step's start_kv_transfers.
+        self.connector_worker.prepare_store_kv(self._connector_metadata)
 
     def get_finished(self, finished_req_ids: set[str]) -> tuple[set[str], set[str]]:
         assert self.connector_worker is not None
         assert isinstance(self._connector_metadata, OffloadingConnectorMetadata)
-
-        # Defer store jobs to the next step's start_kv_transfers. Done here
-        # (rather than wait_for_save) so stores are queued even on steps where
-        # wait_for_save is skipped.
-        self.connector_worker.prepare_store_kv(self._connector_metadata)
-
         return self.connector_worker.get_finished(finished_req_ids)
 
     def build_connector_worker_meta(self) -> OffloadingWorkerMetadata | None:
@@ -131,7 +149,34 @@ class OffloadingConnector(KVConnectorBase_V1, SupportsHMA):
 
     def get_num_new_matched_tokens(self, request: "Request", num_computed_tokens: int) -> tuple[int | None, bool]:
         assert self.connector_scheduler is not None
-        return self.connector_scheduler.get_num_new_matched_tokens(request, num_computed_tokens)
+        return self.connector_scheduler.get_num_new_matched_tokens(
+            request,
+            num_computed_tokens,
+            max_num_new_tokens=self._max_loadable_tokens(request, num_computed_tokens),
+        )
+
+    def _max_loadable_tokens(self, request: "Request", num_computed_tokens: int) -> int | None:
+        """How far past ``num_computed_tokens`` a load may reach, if bounded.
+
+        Bounded by the deepest prefix the groups this connector does not
+        offload already hold, since nothing refills them beyond it.
+        """
+        if not self._bounding_group_ids:
+            return None
+        assert self._kv_cache_manager is not None
+        coordinator = self._kv_cache_manager.coordinator
+        assert isinstance(coordinator, HybridKVCacheCoordinator)
+        _, per_group_hits = coordinator.find_longest_cache_hit_per_group(request.block_hashes, request.num_tokens - 1)
+        bound = min(per_group_hits[group_id] for group_id in self._bounding_group_ids)
+        return max(0, bound - num_computed_tokens)
+
+    def get_external_cache_hit_sources(
+        self,
+        request: "Request",
+        num_external_tokens: int,
+    ) -> dict[CacheHitSource, int]:
+        assert self.connector_scheduler is not None
+        return self.connector_scheduler.get_external_cache_hit_sources(request, num_external_tokens)
 
     def update_state_after_alloc(self, request: "Request", blocks: "KVCacheBlocks", num_external_tokens: int):
         assert self.connector_scheduler is not None
@@ -165,12 +210,14 @@ class OffloadingConnector(KVConnectorBase_V1, SupportsHMA):
         assert self.connector_scheduler is not None
         return self.connector_scheduler.request_finished(request)
 
-    def take_events(self) -> Iterable[KVCacheEvent]:
+    def take_events(self) -> Iterable[KVCacheEventType]:
         assert self.connector_scheduler is not None
         return self.connector_scheduler.take_events()
 
     @classmethod
     def get_required_kvcache_layout(cls, aphrodite_config: AphroditeConfig) -> str | None:
+        if aphrodite_config.attention_config.hisparse_config is not None:
+            return "BLHNC"
         return "LBHNC"
 
     def reset_cache(self) -> bool | None:

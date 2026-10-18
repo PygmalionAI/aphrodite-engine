@@ -175,12 +175,12 @@ class SpecDecodingProm:
 
       1 + (
       rate(aphrodite:spec_decode_num_accepted_tokens_total[$interval]) /
-      rate(aphrodite:spec_decode_num_drafts[$interval]))
+      rate(aphrodite:spec_decode_num_drafts_total[$interval]))
 
     A per-position acceptance rate vector can be computed using
 
-      aphrodite:spec_decode_num_accepted_tokens_per_pos[$interval] /
-      aphrodite:spec_decode_num_drafts[$interval]
+      aphrodite:spec_decode_num_accepted_tokens_per_pos_total[$interval] /
+      aphrodite:spec_decode_num_drafts_total[$interval]
     """
 
     _counter_cls = prometheus_client.Counter

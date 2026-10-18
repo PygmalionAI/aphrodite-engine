@@ -84,7 +84,7 @@ def _run_test(
     *,
     dtype: str,
 ) -> None:
-    """SET PYTHONPATH"""
+    """SET PYTHONPATH."""
     # NOTE: take care of the order. run Aphrodite first, and then run HF.
     # Aphrodite needs a fresh new process without cuda initialization.
     # if we run HF first, the cuda initialization will be done and it

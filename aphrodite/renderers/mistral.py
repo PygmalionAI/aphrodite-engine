@@ -2,13 +2,13 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 from aphrodite.config import AphroditeConfig
-from aphrodite.entrypoints.chat_utils import (
+from aphrodite.logger import init_logger
+from aphrodite.renderers.chat_utils import (
     ChatCompletionMessageParam,
     ConversationMessage,
     parse_chat_messages,
     parse_chat_messages_async,
 )
-from aphrodite.logger import init_logger
 from aphrodite.tokenizers.mistral import MistralTokenizer
 from aphrodite.utils.async_utils import make_async
 

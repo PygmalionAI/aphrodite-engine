@@ -7,7 +7,7 @@ import pytest
 import regex as re
 
 from aphrodite import LLM
-from aphrodite.entrypoints.chat_utils import ChatCompletionMessageParam
+from aphrodite.renderers.chat_utils import ChatCompletionMessageParam
 from aphrodite.v1.metrics import loggers as stat_loggers
 from aphrodite.v1.metrics.reader import Counter, Metric
 from tests.entrypoints.multimodal.conftest import TEST_IMAGE_ASSETS

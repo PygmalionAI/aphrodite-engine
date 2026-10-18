@@ -94,7 +94,7 @@ def main():
             except aiohttp.ClientError as e:
                 logger.error("Connection error to %s: %s", url, str(e))
                 yield b'{"error": "Service unavailable"}'
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.error("Timeout connecting to %s", url)
                 yield b'{"error": "Service timeout"}'
 

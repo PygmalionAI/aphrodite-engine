@@ -7,7 +7,6 @@ from typing import Any
 
 import regex as re
 
-from aphrodite.entrypoints.chat_utils import make_tool_call_id
 from aphrodite.entrypoints.generate.base.protocol import (
     DeltaFunctionCall,
     DeltaMessage,
@@ -21,6 +20,7 @@ from aphrodite.entrypoints.openai.chat_completion.protocol import (
     ChatCompletionToolsParam,
 )
 from aphrodite.logger import init_logger
+from aphrodite.renderers.chat_utils import make_tool_call_id
 from aphrodite.tokenizers import TokenizerLike
 from aphrodite.tool_parsers.abstract_tool_parser import (
     Tool,
@@ -179,6 +179,7 @@ class HYV3ToolParser(ToolParser):
             "-3"   → int(-3)
 
         Return None on failure.
+
         """
         try:
             if "." in value or "e" in value or "E" in value:

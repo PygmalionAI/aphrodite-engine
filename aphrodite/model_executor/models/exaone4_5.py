@@ -36,6 +36,7 @@ from aphrodite.distributed import parallel_state
 from aphrodite.distributed import utils as dist_utils
 from aphrodite.logger import init_logger
 from aphrodite.model_executor.layers.attention.mm_encoder_attention import MMEncoderAttention
+from aphrodite.model_executor.layers.fusion.mm_input_norm import build_mm_input_norm
 from aphrodite.model_executor.layers.layernorm import RMSNorm
 from aphrodite.model_executor.layers.linear import QKVParallelLinear, RowParallelLinear
 from aphrodite.model_executor.layers.quantization import QuantizationConfig
@@ -261,6 +262,7 @@ class EXAONE4_5_VisionTransformer(Qwen2_5_VisionTransformer):
         vision_config: Exaone4_5_VisionConfig,
         norm_eps: float = 1e-6,
         quant_config: QuantizationConfig | None = None,
+        input_norm: nn.Module | None = None,
         prefix: str = "",
         use_data_parallel: bool = False,
     ) -> None:
@@ -268,6 +270,7 @@ class EXAONE4_5_VisionTransformer(Qwen2_5_VisionTransformer):
             vision_config=vision_config,
             norm_eps=norm_eps,
             quant_config=quant_config,
+            input_norm=input_norm,
             prefix=prefix,
         )
         depth = vision_config.depth
@@ -300,7 +303,6 @@ class Exaone4_5_ProcessingInfo(Qwen2VLProcessingInfo):
     def get_hf_processor(self, **kwargs: object) -> Exaone4_5_Processor:
         return self.ctx.get_hf_processor(
             Exaone4_5_Processor,
-            use_fast=kwargs.pop("use_fast", True),
             **kwargs,
         )
 
@@ -325,7 +327,9 @@ class Exaone4_5_ForConditionalGeneration(Qwen2_5_VLForConditionalGeneration):
 
         self.use_data_parallel = multimodal_config.mm_encoder_tp_mode == "data"
         self.config = config
+        self.model_config = aphrodite_config.model_config
         self.multimodal_config = multimodal_config
+        self.video_pruning_rate = multimodal_config.video_pruning_rate
         self.is_multimodal_pruning_enabled = multimodal_config.is_multimodal_pruning_enabled()
 
         with self._mark_tower_model(aphrodite_config, {"image", "video"}):
@@ -333,6 +337,7 @@ class Exaone4_5_ForConditionalGeneration(Qwen2_5_VLForConditionalGeneration):
                 config.vision_config,
                 norm_eps=getattr(config, "rms_norm_eps", 1e-6),
                 quant_config=self.quant_config,
+                input_norm=build_mm_input_norm(self.model_config),
                 prefix=maybe_prefix(prefix, "visual"),
                 use_data_parallel=self.use_data_parallel,
             )

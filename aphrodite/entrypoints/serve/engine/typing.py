@@ -4,7 +4,6 @@
 from typing import Protocol, TypeAlias
 
 from aphrodite.config import ModelConfig
-from aphrodite.entrypoints.chat_utils import ChatTemplateContentFormatOption
 from aphrodite.entrypoints.openai.chat_completion.protocol import (
     BatchChatCompletionRequest,
     ChatCompletionRequest,
@@ -35,6 +34,7 @@ from aphrodite.entrypoints.speech_to_text.transcription.protocol import (
 )
 from aphrodite.entrypoints.speech_to_text.translation.protocol import TranslationRequest
 from aphrodite.renderers import ChatParams, TokenizeParams
+from aphrodite.renderers.chat_utils import ChatTemplateContentFormatOption
 
 
 class RendererRequest(Protocol):

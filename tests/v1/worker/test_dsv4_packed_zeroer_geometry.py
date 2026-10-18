@@ -96,7 +96,7 @@ def test_overlaid_zeroer_dedups_segments_with_max_span():
     zeroed no matter which group owns it."""
     from unittest.mock import MagicMock
 
-    from aphrodite.v1.core.kv_cache_utils import get_kv_cache_config_from_groups
+    from aphrodite.v1.core.kv_cache_planning import get_kv_cache_config_from_groups
     from aphrodite.v1.kv_cache_interface import (
         KVCacheGroupSpec,
         KVCacheLayout,
@@ -124,6 +124,7 @@ def test_overlaid_zeroer_dedups_segments_with_max_span():
     aphrodite_config.cache_config = CacheConfig()
     aphrodite_config.cache_config.num_gpu_blocks_override = None
     aphrodite_config.cache_config.kv_cache_layout = "BLHNC"
+    aphrodite_config.attention_config.hisparse_config = None
     config = get_kv_cache_config_from_groups(aphrodite_config, groups, 8 * 1024 * 1024)
     views = allocate_kv_cache(config, torch.device("cpu"), KVCacheLayout.BLHNC, None)
     buf_ptr = views["g1.big"].data_ptr()

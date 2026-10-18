@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.logger import init_logger
 from aphrodite.logits_process import LogitsProcessor as RequestLogitsProcessor
 from aphrodite.sampling_params import SamplingParams
@@ -51,8 +51,7 @@ BUILTIN_LOGITS_PROCESSORS: list[type[LogitsProcessor]] = [
 
 
 def _load_logitsprocs_plugins() -> list[type[LogitsProcessor]]:
-    """Load all installed logit processor plugins"""
-
+    """Load all installed logit processor plugins."""
     from importlib.metadata import entry_points
 
     installed_logitsprocs_plugins = entry_points(group=LOGITSPROCS_GROUP)
@@ -117,7 +116,10 @@ def _load_logitsprocs_by_fqcns(
             continue
 
         logger.debug("- Loading logits processor %s", logitproc)
-        module_path, qualname = logitproc.split(":")
+        parts = logitproc.split(":")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid logits processor FQCN {logitproc!r}. Expected format: '<module>:<type>'")
+        module_path, qualname = parts
 
         try:
             # Load module
@@ -160,6 +162,7 @@ def _load_custom_logitsprocs(
 
     Returns:
       A list of all loaded logitproc types
+
     """
     from aphrodite.platforms import current_platform
 
@@ -223,11 +226,11 @@ def validate_logits_processors_parameters(
         try:
             logits_procs.validate_params(sampling_params)
         except ValueError as e:
-            raise APHRODITEValidationError(str(e)) from e
+            raise AphroditeValidationError(str(e)) from e
 
 
 class AdapterLogitsProcessor(LogitsProcessor):
-    """Wrapper for per-request logits processors
+    """Wrapper for per-request logits processors.
 
     To wrap a specific per-request logits processor,
     * Subclass `AdapterLogitsProcessor`
@@ -251,7 +254,6 @@ class AdapterLogitsProcessor(LogitsProcessor):
         these arguments are used, the Aphrodite logits processor interface requires
         all three arguments to be present.
         """
-
         # Map req index -> logits processor state
         #
         # State representation is a partial[Tensor] comprising a request-level
@@ -288,7 +290,7 @@ class AdapterLogitsProcessor(LogitsProcessor):
         prompt_ids: list[int] | None,
         output_ids: list[int],
     ) -> partial[torch.Tensor] | None:
-        """Return state representation for new request
+        """Return state representation for new request.
 
         Returns None if logits processor is not applicable to request
 

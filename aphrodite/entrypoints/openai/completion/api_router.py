@@ -10,16 +10,18 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from aphrodite.entrypoints.openai.completion.protocol import (
     CompletionRequest,
     CompletionResponse,
+    CompletionStreamResponse,
 )
 from aphrodite.entrypoints.openai.completion.serving import OpenAIServingCompletion
-from aphrodite.entrypoints.openai.sse_keep_alive import with_sse_keep_alive
 from aphrodite.entrypoints.serve.engine.protocol import ErrorResponse
 from aphrodite.entrypoints.serve.utils.api_utils import (
+    json_or_sse_responses,
     load_aware_call,
     validate_json_request,
     with_cancellation,
 )
 from aphrodite.entrypoints.serve.utils.orca_metrics import metrics_header
+from aphrodite.entrypoints.serve.utils.sse_keep_alive import with_sse_keep_alive
 from aphrodite.logger import init_logger
 
 logger = init_logger(__name__)
@@ -35,12 +37,15 @@ def completion(request: Request) -> OpenAIServingCompletion | None:
 @router.post(
     "/v1/completions",
     dependencies=[Depends(validate_json_request)],
-    responses={
-        HTTPStatus.OK.value: {"content": {"text/event-stream": {}}},
-        HTTPStatus.BAD_REQUEST.value: {"model": ErrorResponse},
-        HTTPStatus.NOT_FOUND.value: {"model": ErrorResponse},
-        HTTPStatus.INTERNAL_SERVER_ERROR.value: {"model": ErrorResponse},
-    },
+    **json_or_sse_responses(
+        CompletionResponse,
+        CompletionStreamResponse,
+        {
+            HTTPStatus.BAD_REQUEST.value: {"model": ErrorResponse},
+            HTTPStatus.NOT_FOUND.value: {"model": ErrorResponse},
+            HTTPStatus.INTERNAL_SERVER_ERROR.value: {"model": ErrorResponse},
+        },
+    ),
 )
 @with_cancellation
 @load_aware_call

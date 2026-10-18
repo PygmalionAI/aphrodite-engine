@@ -6,15 +6,14 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
-mod adapter;
+mod unified;
 
+use aphrodite_parser::tool::test_utils::collect_stream;
+use aphrodite_parser::tool::{Tool, ToolParser};
 use futures::FutureExt as _;
 use openai_protocol::common::{Function as OpenAiFunction, Tool as OpenAiTool};
 use tool_parser::traits::ToolParser as ExternalToolParser;
-use aphrodite_parser::tool::test_utils::collect_stream;
-use aphrodite_parser::tool::{Tool, ToolParser};
-
-pub(super) use adapter::UnifiedToolParserAdapter;
+pub(super) use unified::{attributed_chunks, feed_unified_parser};
 
 pub(super) fn openai_tools(tools: &[Tool]) -> Vec<OpenAiTool> {
     tools

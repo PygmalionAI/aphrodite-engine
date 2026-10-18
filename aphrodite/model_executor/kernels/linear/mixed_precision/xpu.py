@@ -53,10 +53,8 @@ class XPUwNa16LinearKernel(MPLinearKernel):
         return True, None
 
     def process_weights_after_loading(self, layer: torch.nn.Module):
-        # Default names since marlin requires empty parameters for these,
+        # Default name since marlin requires empty parameter for zp,
         # TODO: remove this requirement from marlin (allow optional tensors)
-        if self.w_gidx_name is None:
-            self.w_gidx_name = "g_idx"
         if self.w_zp_name is None:
             self.w_zp_name = "w_zp"
 
@@ -81,17 +79,6 @@ class XPUwNa16LinearKernel(MPLinearKernel):
         else:
             weight_zero_point = torch.Tensor([8]).to(torch.int8).to("xpu")
             setattr(layer, self.w_zp_name, Parameter(weight_zero_point, requires_grad=False))
-        if self.config.has_g_idx:
-            setattr(
-                layer,
-                self.w_gidx_name,
-                Parameter(
-                    getattr(layer, self.w_gidx_name).data.t().contiguous(),
-                    requires_grad=False,
-                ),
-            )
-        else:
-            setattr(layer, self.w_gidx_name, None)
 
     def apply_weights(
         self,
@@ -100,7 +87,7 @@ class XPUwNa16LinearKernel(MPLinearKernel):
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
         reshaped_x = x.reshape(-1, x.shape[-1])
-        w_q, w_s, w_zp, w_gidx = self._get_weight_params(layer)
+        w_q, w_s, w_zp = self._get_weight_params(layer)
         out = torch.ops._xpu_C.int4_gemm_w4a16(
             reshaped_x,
             w_q.t(),
@@ -108,7 +95,7 @@ class XPUwNa16LinearKernel(MPLinearKernel):
             w_s,
             w_zp,
             self.config.group_size,
-            w_gidx,
+            None,  # Retained by the external XPU op ABI.
         )
         return out
 
@@ -189,7 +176,7 @@ class XPUW4A8IntLinearKernel(MPLinearKernel):
 
         # Free the original unpacked int8 weight (still registered as "weight")
         # to avoid double-storing both int8 [N, K] and int32 [N, K/8] in memory.
-        layer.register_parameter("weight", None)
+        delattr(layer, "weight")
 
     def apply_weights(
         self,
@@ -212,7 +199,7 @@ class XPUW4A8IntLinearKernel(MPLinearKernel):
             layer.weight_scale,
             layer.weight_zero_point,
             self.config.group_size,
-            None,  # g_idx not currently supported
+            None,  # Retained by the external XPU op ABI.
             bias,
         )
 

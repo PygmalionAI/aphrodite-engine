@@ -590,7 +590,10 @@ class MetalModelRunner:
         """
         model = self._forward_model
         if logit_indices is None or not hasattr(model, "model"):
-            return self._extract_logits(model(input_ids, cache=cache))
+            logits = self._extract_logits(model(input_ids, cache=cache))
+            if logit_indices:
+                logits = logits[:, mx.array(logit_indices, dtype=mx.int32), :]
+            return logits
 
         hidden = model.model(input_ids, cache=cache)
         if logit_indices:

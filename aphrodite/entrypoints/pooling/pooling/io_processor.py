@@ -4,7 +4,6 @@ from collections.abc import Sequence
 from typing import Any
 
 from aphrodite import PoolingParams, PoolingRequestOutput
-from aphrodite.logger import init_logger
 from aphrodite.plugins.io_processors import get_io_processor
 from aphrodite.renderers.inputs.preprocess import parse_model_prompt, prompt_to_seq
 
@@ -20,8 +19,6 @@ from ..typing import (
     RequestFactory,
 )
 from .protocol import IOProcessorRequest, IOProcessorResponse
-
-logger = init_logger(__name__)
 
 
 class UnsupportedCombinedTaskIOProcessor(PoolingIOProcessor):
@@ -109,21 +106,7 @@ class PluginWithIOProcessorPlugins(PoolingIOProcessor):
             ctx.final_res_batch,
             request_id=ctx.request_id,
         )
-
-        if callable(output_to_response := getattr(self.io_processor, "output_to_response", None)):
-            logger.warning_once(
-                "`IOProcessor.output_to_response` is deprecated. To ensure "
-                "consistency between offline and online APIs, "
-                "`IOProcessorResponse` will become a transparent wrapper "
-                "around output data from v0.19 onwards.",
-            )
-
-            if hasattr(output, "request_id") and output.request_id is None:
-                output.request_id = ctx.request_id  # type: ignore
-
-            ctx.response = output_to_response(output)  # type: ignore
-        else:
-            ctx.response = IOProcessorResponse(request_id=ctx.request_id, data=output)
+        ctx.response = IOProcessorResponse(request_id=ctx.request_id, data=output)
 
     #######################################
     # offline APIs
@@ -156,7 +139,7 @@ class PluginWithIOProcessorPlugins(PoolingIOProcessor):
             pooling_params = ctx.pooling_params
 
         params_seq: list[PoolingParams] = [
-            self.io_processor.merge_pooling_params(param)
+            self.io_processor.merge_pooling_params(param.clone())
             for param in self._params_to_seq(
                 pooling_params,
                 num_requests,

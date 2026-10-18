@@ -6,7 +6,7 @@ import weakref
 import pytest
 
 from aphrodite import LLM, PoolingParams
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 
 MODEL_NAME = "intfloat/multilingual-e5-small"
 
@@ -58,7 +58,7 @@ def test_multiple_pooling_params(llm: LLM):
     assert len(PROMPTS) == len(outputs)
 
     # Exception raised, if the size of params does not match the size of prompts
-    with pytest.raises(APHRODITEValidationError):
+    with pytest.raises(AphroditeValidationError):
         outputs = llm.encode(PROMPTS, pooling_params=pooling_params[:3], pooling_task="embed")
 
     # Single PoolingParams should be applied to every prompt

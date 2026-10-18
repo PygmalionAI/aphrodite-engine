@@ -10,12 +10,12 @@ from aphrodite import (
     PoolingRequestOutput,
 )
 from aphrodite.config import AphroditeConfig
-from aphrodite.entrypoints.chat_utils import (
-    ChatTemplateConfig,
-)
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.lora.request import LoRARequest
 from aphrodite.renderers import BaseRenderer, merge_kwargs
+from aphrodite.renderers.chat_utils import (
+    ChatTemplateConfig,
+)
 from aphrodite.renderers.inputs.preprocess import parse_model_prompt, prompt_to_seq
 from aphrodite.utils.async_utils import make_async
 from aphrodite.utils.mistral import is_mistral_tokenizer
@@ -183,7 +183,8 @@ class PoolingIOProcessor:
         else:
             pooling_params = ctx.pooling_params
 
-        params_seq = self._params_to_seq(pooling_params, num_requests)
+        # Clone to avoid modifying the caller's pooling parameters.
+        params_seq = [param.clone() for param in self._params_to_seq(pooling_params, num_requests)]
 
         for param in params_seq:
             if param.task is None:
@@ -194,7 +195,7 @@ class PoolingIOProcessor:
                 pass
             elif param.task != pooling_task:
                 msg = f"You cannot overwrite {param.task=!r} with {pooling_task=!r}!"
-                raise APHRODITEValidationError(msg)
+                raise AphroditeValidationError(msg)
 
         seq_lora_requests = self._lora_request_to_seq(ctx.lora_request, num_requests)
         seq_priority = self._priority_to_seq(ctx.priorities, num_requests)
@@ -263,7 +264,7 @@ class PoolingIOProcessor:
             request_chat_template is not None
             or (chat_template_kwargs and chat_template_kwargs.get("chat_template") is not None)
         ):
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 "Chat template is passed with request, but "
                 "--trust-request-chat-template is not set. "
                 "Refused request with untrusted chat template."
@@ -277,7 +278,7 @@ class PoolingIOProcessor:
     ) -> Sequence[PoolingParams]:
         if isinstance(params, Sequence):
             if len(params) != num_requests:
-                raise APHRODITEValidationError(
+                raise AphroditeValidationError(
                     f"The lengths of prompts ({num_requests}) and params ({len(params)}) must be the same."
                 )
 
@@ -292,7 +293,7 @@ class PoolingIOProcessor:
     ) -> Sequence[LoRARequest | None]:
         if isinstance(lora_request, Sequence):
             if len(lora_request) != num_requests:
-                raise APHRODITEValidationError(
+                raise AphroditeValidationError(
                     f"The lengths of prompts ({num_requests}) and lora_request ({len(lora_request)}) must be the same."
                 )
 

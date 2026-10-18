@@ -23,6 +23,7 @@ from aphrodite.model_executor.layers.quantization.modelopt import (
     ModelOptNvFp4Config,
     ModelOptNvFp4FusedMoE,
 )
+from aphrodite.platforms import current_platform
 from tests.kernels.moe.utils import make_test_quant_config
 
 from .eplb_utils import distributed_run, set_env_vars_and_device
@@ -248,6 +249,8 @@ def test_eplb_fml(
 ):
     if torch.accelerator.device_count() < world_size:
         pytest.skip(f"Need at least {world_size} GPUs to run the test")
+    if current_platform.is_xpu():
+        pytest.skip("NVFP4 quantization and flashinfer backends are CUDA-only")
 
     num_local_experts = num_experts // world_size
     num_topk = 4

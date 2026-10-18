@@ -8,7 +8,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/Atomic.cuh>
 
-#include "../cuda_compat.h"
+#include "../core/cuda_compat.h"
 #include "../dispatch_utils.h"
 #include "core/math.hpp"
 

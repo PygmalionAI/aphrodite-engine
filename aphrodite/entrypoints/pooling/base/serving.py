@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import asyncio
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import AsyncGenerator
 from concurrent.futures import Executor
 from http import HTTPStatus
 from typing import ClassVar
@@ -10,23 +10,19 @@ from typing import ClassVar
 import torch
 from fastapi import Request
 from fastapi.responses import Response
-from starlette.datastructures import Headers
 
 from aphrodite import PoolingRequestOutput, envs
 from aphrodite.config import AphroditeConfig
 from aphrodite.engine.protocol import EngineClient
-from aphrodite.entrypoints.chat_utils import ChatTemplateConfig
+from aphrodite.entrypoints.generate.base.protocol import validate_request_mm_kwargs
 from aphrodite.entrypoints.openai.models.serving import OpenAIServingModels
 from aphrodite.entrypoints.serve.engine.serving import BaseServing
 from aphrodite.entrypoints.serve.engine.typing import AnyRequest
 from aphrodite.entrypoints.serve.utils.request_logger import RequestLogger
+from aphrodite.exceptions import GenerationError, RetryableRequestError
 from aphrodite.lora.request import LoRARequest
 from aphrodite.renderers.base import BaseRenderer
-from aphrodite.tracing import (
-    contains_trace_headers,
-    extract_trace_headers,
-    log_tracing_disabled_warning,
-)
+from aphrodite.renderers.chat_utils import ChatTemplateConfig
 from aphrodite.utils.async_utils import make_async, merge_async_iterators
 
 from ...serve.engine.protocol import ErrorResponse
@@ -60,6 +56,7 @@ class PoolingBaseServing(ABC, BaseServing):
         self.return_tokens_as_token_ids = return_tokens_as_token_ids
         self.log_error_stack = log_error_stack
         self.chat_template_config = chat_template_config
+        self.trust_request_mm_kwargs = chat_template_config.trust_request_mm_kwargs
 
         # Shared thread pool executor for preprocessing and postprocessing.
         self._executor: Executor = self.renderer._executor
@@ -100,12 +97,18 @@ class PoolingBaseServing(ABC, BaseServing):
         request: AnyPoolingRequest,
         raw_request: Request | None = None,
     ):
-        model_name = self.models.model_name()
-        request_id = f"{self.request_id_prefix}-{self._base_request_id(raw_request)}"
+        validate_request_mm_kwargs(
+            mm_processor_kwargs=getattr(request, "mm_processor_kwargs", None),
+            media_io_kwargs=getattr(request, "media_io_kwargs", None),
+            trust_request_mm_kwargs=self.trust_request_mm_kwargs,
+        )
+        base_request_id = self._base_request_id(raw_request, getattr(request, "request_id", None))
+        request_id = f"{self.request_id_prefix}-{base_request_id}"
         await self._check_model(request)
 
         pooling_params = io_processor.create_pooling_params(request)
         lora_request = self._maybe_get_adapters(request)
+        model_name = self.models.model_name(lora_request)
         priorities = getattr(request, "priority", 0)
         prompt_extras = {
             k: v
@@ -180,6 +183,10 @@ class PoolingBaseServing(ABC, BaseServing):
         final_res_batch = [None] * num_inputs
 
         async for i, res in ctx.result_generator:
+            if res.error is not None:
+                if res.error.retryable:
+                    raise RetryableRequestError(res.error.message)
+                raise GenerationError(res.error.message)
             final_res_batch[i] = res
 
         if None in final_res_batch:
@@ -220,20 +227,6 @@ class PoolingBaseServing(ABC, BaseServing):
             raise ValueError(
                 "truncate_prompt_tokens value is greater than max_model_len. Please request a smaller truncation size."
             )
-
-        return None
-
-    async def _get_trace_headers(
-        self,
-        headers: Headers,
-    ) -> Mapping[str, str] | None:
-        is_tracing_enabled = await self.engine_client.is_tracing_enabled()
-
-        if is_tracing_enabled:
-            return extract_trace_headers(headers)
-
-        if contains_trace_headers(headers):
-            log_tracing_disabled_warning()
 
         return None
 

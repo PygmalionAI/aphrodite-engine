@@ -17,9 +17,9 @@ from lmcache.v1.cache_engine import LMCacheEngine, LMCacheEngineBuilder
 from lmcache.v1.compute.blend import LMCBlenderBuilder
 from lmcache.v1.config import LMCacheEngineConfig, _validate_and_set_config_value
 from lmcache.v1.gpu_connector import (
-    APHRODITEBufferLayerwiseGPUConnector,
-    APHRODITEPagedMemGPUConnectorV2,
-    APHRODITEPagedMemLayerwiseGPUConnector,
+    VLLMBufferLayerwiseGPUConnector,
+    VLLMPagedMemGPUConnectorV2,
+    VLLMPagedMemLayerwiseGPUConnector,
 )
 from lmcache.v1.internal_api_server.api_server import InternalAPIServer
 from lmcache.v1.lookup_client import LookupClientFactory
@@ -168,6 +168,7 @@ class RequestTracker:
             lmcache_cached_tokens (int): the number of tokens that are
                 cached in LMCache.
             skip_save (bool): whether the request cache should be saved
+
         """
         # Aphrodite 0.9.0 update: request.block_ids changed from list[int] to
         # list[list[int]]
@@ -216,7 +217,6 @@ class RequestTracker:
         """Update the request tracker when a running request is
         scheduled again
         """
-
         self.token_ids.extend(new_token_ids)
 
         if new_block_ids is None:
@@ -285,6 +285,7 @@ class ReqMeta:
         Returns:
             the request metadata if we need to perform load/save
             operations, None otherwise.
+
         """
         input_token_ids = tracker.token_ids
         input_token_len = len(input_token_ids)
@@ -423,6 +424,7 @@ def _init_lmcache_engine(
 
     Returns:
         The initialized LMCache engine
+
     """
     if curr_engine := LMCacheEngineBuilder.get(ENGINE_NAME):
         return curr_engine
@@ -464,7 +466,7 @@ def _init_lmcache_engine(
         model_config.model,
         parallel_config.world_size,
         parallel_config.rank,
-        "aphrodite",
+        "vllm",
         kv_dtype,
         kv_shape,
         use_mla,
@@ -472,7 +474,7 @@ def _init_lmcache_engine(
 
     use_gpu = need_gpu_interim_buffer(lmcache_config)
     aphrodite_gpu_connector: (
-        APHRODITEBufferLayerwiseGPUConnector | APHRODITEPagedMemGPUConnectorV2 | APHRODITEPagedMemLayerwiseGPUConnector
+        VLLMBufferLayerwiseGPUConnector | VLLMPagedMemGPUConnectorV2 | VLLMPagedMemLayerwiseGPUConnector
     )
 
     if use_mla and lmcache_config.use_layerwise:
@@ -483,7 +485,7 @@ def _init_lmcache_engine(
     if lmcache_config.use_layerwise:
         if lmcache_config.enable_blending:
             # Use layerwise connector for blending
-            aphrodite_gpu_connector = APHRODITEBufferLayerwiseGPUConnector(
+            aphrodite_gpu_connector = VLLMBufferLayerwiseGPUConnector(
                 hidden_dim_size,
                 num_layer,
                 use_gpu=use_gpu,
@@ -492,7 +494,7 @@ def _init_lmcache_engine(
                 device=device,
             )
         else:
-            aphrodite_gpu_connector = APHRODITEPagedMemLayerwiseGPUConnector(
+            aphrodite_gpu_connector = VLLMPagedMemLayerwiseGPUConnector(
                 hidden_dim_size,
                 num_layer,
                 use_gpu=use_gpu,
@@ -501,7 +503,7 @@ def _init_lmcache_engine(
                 device=device,
             )
     else:
-        aphrodite_gpu_connector = APHRODITEPagedMemGPUConnectorV2(
+        aphrodite_gpu_connector = VLLMPagedMemGPUConnectorV2(
             hidden_dim_size,
             num_layer,
             use_gpu=use_gpu,
@@ -534,6 +536,7 @@ class LMCacheConnectorMetadata(KVConnectorMetadata):
 
         Args:
             req_meta (ReqMeta): the request metadata.
+
         """
         self.requests.append(req_meta)
 
@@ -570,6 +573,7 @@ class LMCacheConnectorV1Impl:
 
         self.async_loading = config.enable_async_loading
         self.layerwise_retrievers: list[Generator[torch.Tensor | None, None, None]] = []
+        self.layerwise_storers: list[Generator[Any, None, None]] = []
         self._stats_monitor = LMCStatsMonitor.GetOrCreate()
         if role == KVConnectorRole.SCHEDULER:
             # Create lookup client using factory
@@ -675,6 +679,7 @@ class LMCacheConnectorV1Impl:
 
         Returns:
             dict: Dictionary containing inference information
+
         """
         # Get Aphrodite config information
         aphrodite_config = self._aphrodite_config
@@ -714,6 +719,7 @@ class LMCacheConnectorV1Impl:
 
         Returns:
             str: Aphrodite version string
+
         """
         return APHRODITE_VERSION
 
@@ -741,6 +747,7 @@ class LMCacheConnectorV1Impl:
         """
         self.current_layer = 0
         self.layerwise_retrievers = []
+        self.layerwise_storers = []
 
     @_lmcache_nvtx_annotate
     def register_kv_caches(self, kv_caches: dict[str, torch.Tensor]):
@@ -764,6 +771,7 @@ class LMCacheConnectorV1Impl:
         Note:
             The number of elements in kv_caches and layer_names should be
             the same.
+
         """
         if len(self.kv_caches) == 0:
             self._init_kv_caches_from_forward_context(forward_context)
@@ -862,6 +870,7 @@ class LMCacheConnectorV1Impl:
 
         Args:
             layer_name: the name of that layer
+
         """
         if self.layerwise_retrievers:
             logger.debug("Waiting for layer %s to be loaded", self.current_layer)
@@ -893,6 +902,7 @@ class LMCacheConnectorV1Impl:
             kv_layer (torch.Tensor): the paged KV buffer of the current
                 layer in Aphrodite.
             attn_metadata (AttentionMetadata): the attention metadata.
+
         """
         assert self.lmcache_engine is not None
 
@@ -974,7 +984,6 @@ class LMCacheConnectorV1Impl:
     @_lmcache_nvtx_annotate
     def wait_for_save(self):
         """Blocking until the KV cache is saved to the connector buffer."""
-
         connector_metadata = self._parent._get_connector_metadata()
         assert isinstance(connector_metadata, LMCacheConnectorMetadata)
 
@@ -1072,8 +1081,7 @@ class LMCacheConnectorV1Impl:
         request: "Request",
         num_computed_tokens: int,
     ) -> int | None:
-        """
-        Check for external KV cache hit.
+        """Check for external KV cache hit.
 
         Args:
             request (Request): the request object.
@@ -1083,6 +1091,7 @@ class LMCacheConnectorV1Impl:
         Returns:
             the number of tokens that can be loaded from the
             external KV cache beyond what is already computed.
+
         """
         if self.kv_role == "kv_producer" and not hasattr(self.lookup_client, "supports_producer_reuse"):
             return 0
@@ -1156,13 +1165,11 @@ class LMCacheConnectorV1Impl:
 
     @_lmcache_nvtx_annotate
     def update_state_after_alloc(self, request: "Request", num_external_tokens: int):
-        """
-        Update KVConnector state after temporary buffer alloc.
+        """Update KVConnector state after temporary buffer alloc.
 
         For SharedStorageConnector, update _request_needs_load
         if the CacheManager this allocated blocks for us.
         """
-
         # Clear local status in lookup client when a new request is
         # successfully scheduled.
         self.lookup_client.clear_lookup_status(request.request_id)
@@ -1220,8 +1227,8 @@ class LMCacheConnectorV1Impl:
 
         Args:
             scheduler_output (SchedulerOutput): the scheduler output object.
-        """
 
+        """
         force_skip_save = self.kv_role == "kv_consumer" or self.force_skip_save
 
         meta = LMCacheConnectorMetadata()

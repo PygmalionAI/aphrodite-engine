@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+from collections.abc import Mapping
 from http import HTTPStatus
 
 from fastapi import Request
@@ -15,14 +16,16 @@ from aphrodite.entrypoints.serve import create_error_response
 from aphrodite.entrypoints.serve.engine.protocol import ErrorResponse
 from aphrodite.entrypoints.serve.engine.typing import AnyRequest
 from aphrodite.entrypoints.serve.utils.request_logger import RequestLogger
-from aphrodite.exceptions import APHRODITENotFoundError
+from aphrodite.exceptions import AphroditeNotFoundError
 from aphrodite.inputs import EngineInput
 from aphrodite.lora.request import LoRARequest
+from aphrodite.pooling_params import PoolingParams
 from aphrodite.renderers.inputs.preprocess import (
     extract_prompt_components,
     extract_prompt_len,
 )
 from aphrodite.sampling_params import BeamSearchParams
+from aphrodite.tracing import contains_trace_headers, extract_trace_headers
 from aphrodite.utils import random_uuid
 
 
@@ -37,10 +40,18 @@ class BaseServing:
         self.model_config = model_config
         self.request_logger = request_logger
 
+    async def _get_trace_headers(self, headers: Mapping[str, str]) -> Mapping[str, str] | None:
+        if not contains_trace_headers(headers):
+            return None
+        return extract_trace_headers(headers)
+
     async def _check_model(
         self,
         request: AnyRequest | AnyPoolingRequest,
     ) -> ErrorResponse | None:
+        if self.request_logger is not None:
+            self.request_logger.log_request_body(request)
+
         error_response = None
 
         if self._is_model_supported(request.model):
@@ -57,8 +68,9 @@ class BaseServing:
             if isinstance(load_result, ErrorResponse) and load_result.error.code == HTTPStatus.BAD_REQUEST.value:
                 error_response = load_result
 
+        served_names = ", ".join(model.name for model in self.models.base_model_paths)
         return error_response or self.create_error_response(
-            message=f"The model `{request.model}` does not exist.",
+            message=(f"The model `{request.model}` does not exist. Valid aliases: {served_names}."),
             err_type="NotFoundError",
             status_code=HTTPStatus.NOT_FOUND,
             param="model",
@@ -93,7 +105,7 @@ class BaseServing:
         self,
         request_id: str,
         inputs: PromptType | EngineInput,
-        params: SamplingParams | BeamSearchParams | None,
+        params: SamplingParams | PoolingParams | BeamSearchParams | None,
         lora_request: LoRARequest | None,
     ) -> None:
         if self.request_logger is None:
@@ -112,7 +124,7 @@ class BaseServing:
 
     @staticmethod
     def _base_request_id(raw_request: Request | None, default: str | None = None) -> str | None:
-        """Pulls the request id to use from a header, if provided"""
+        """Pulls the request id to use from a header, if provided."""
         if raw_request is not None and ((req_id := raw_request.headers.get("X-Request-Id")) is not None):
             return req_id
 
@@ -181,4 +193,4 @@ class BaseServing:
             return None
 
         # if _check_model has been called earlier, this will be unreachable
-        raise APHRODITENotFoundError(f"The model `{request.model}` does not exist.")
+        raise AphroditeNotFoundError(f"The model `{request.model}` does not exist.")

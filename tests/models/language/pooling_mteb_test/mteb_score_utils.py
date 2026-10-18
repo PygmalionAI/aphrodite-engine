@@ -225,8 +225,10 @@ def mteb_test_rerank_models(
     hf_runner=HFMtebCrossEncoder,
     aphrodite_extra_kwargs=None,
     aphrodite_mteb_encoder=AphroditeMtebCrossEncoder,
-    atol=MTEB_RERANK_TOL,
+    atol: float | None = None,
 ):
+    if atol is None:
+        atol = model_info.mteb_tol if model_info.mteb_tol is not None else MTEB_RERANK_TOL
     aphrodite_extra_kwargs = get_aphrodite_extra_kwargs(model_info, aphrodite_extra_kwargs)
 
     # Maybe load chat_template.
@@ -295,4 +297,7 @@ def mteb_test_rerank_models(
 
     # We are not concerned that the aphrodite mteb results are better
     # than SentenceTransformers, so we only perform one-sided testing.
-    assert st_main_score - aphrodite_main_score < atol
+    diff = st_main_score - aphrodite_main_score
+    assert diff < atol, (
+        f"diff={diff:.6g} tol={atol} model={model_info.name} (st={st_main_score}, aphrodite={aphrodite_main_score})"
+    )

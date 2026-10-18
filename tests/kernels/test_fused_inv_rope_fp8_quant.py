@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""
-Unit tests for the fused inverse RoPE + block-scaled FP8 quantization kernel.
+"""Unit tests for the fused inverse RoPE + block-scaled FP8 quantization kernel.
 
 Tests compare the fused kernel against a reference implementation built from
 the existing separate operations (inverse RoPE via rotate_neox + FP8 quant
@@ -22,7 +21,12 @@ Usage:
 import pytest
 import torch
 
+from aphrodite.model_executor.layers.quantization.utils.fp8_utils import (
+    deepgemm_post_process_fp8_weight_block,
+)
 from aphrodite.models.deepseek_v4.common.ops import fused_inv_rope_fp8_quant
+from aphrodite.platforms import current_platform
+from aphrodite.utils.deep_gemm import fp8_einsum
 
 # -- Default dimensions matching DeepSeek V3/V4 --------------------------
 HEAD_DIM = 512
@@ -32,6 +36,41 @@ QUANT_GROUP_SIZE = 128
 FP8_MAX = 448.0  # torch.finfo(torch.float8_e4m3fn).max
 FP8_DTYPE = torch.float8_e4m3fn
 EPS = 1e-10
+
+
+@pytest.mark.skipif(not current_platform.is_device_capability_family(100), reason="Requires SM100/SM103")
+@pytest.mark.parametrize("groups", [2, 4])
+@pytest.mark.parametrize("tokens", [1, 6, 18, 32])
+def test_dsv41_fused_wo_a_matches_deepgemm(groups, tokens):
+    """Fused WO-A matches inverse RoPE + fp8_einsum + MXFP8 quantize."""
+    from flashinfer import mxfp8_quantize
+
+    from aphrodite.models.deepseek_v41.nvidia.ops.fused_wo_a import _FUSED_WO_A_KERNEL
+
+    torch.manual_seed(0)
+    n = groups * 1024
+    x = torch.randn(tokens, 64, 512, device="cuda", dtype=torch.bfloat16)[:, : n // 128]
+    positions = torch.randint(0, 128, (tokens,), device="cuda")
+    rope = make_cos_sin_cache(128, device="cuda")
+    wq = torch.randn(n, 4096, device="cuda").to(FP8_DTYPE)
+    scale = torch.exp2(torch.randint(-8, 0, (n, 128), device="cuda").float())
+    wq, ws = deepgemm_post_process_fp8_weight_block(wq, scale, (1, 32), False, True, groups)
+    q, sf = _FUSED_WO_A_KERNEL(x=x, positions=positions, rope=rope, weight=wq, weight_scale=ws)
+
+    a, sa = fused_inv_rope_fp8_quant(x, positions, rope, groups, 8, quant_group_size=32, tma_aligned_scales=True)
+    y = torch.empty(tokens, groups, 1024, device="cuda", dtype=torch.bfloat16)
+    fp8_einsum("bhr,hdr->bhd", (a, sa), (wq, ws), y, recipe=(1, 1, 32))
+    ref, ref_sf = mxfp8_quantize(y.flatten(1), backend="cute-dsl")
+
+    def rows(scales):  # F8_128x4 bytes -> [128 rows, n / 32 blocks]
+        return scales.view(n // 128, 32, 4, 4).permute(2, 1, 0, 3).reshape(128, -1)
+
+    actual, expected = (
+        d.float().view(tokens, -1, 32) * torch.exp2(rows(s)[:tokens, :, None] - 127.0)
+        for d, s in ((q, sf), (ref, ref_sf))
+    )
+    assert (actual - expected).norm() / expected.norm() < 3e-3
+    assert not rows(sf)[tokens:].any(), "padded scale rows must be zero"
 
 
 # =========================================================================
@@ -124,6 +163,7 @@ def reference_inv_rope(
 
     Returns:
         o with inverse RoPE applied on the rope portion (bf16).
+
     """
     assert cos_sin_cache.dtype == torch.float32
     cos_sin = cos_sin_cache[positions]  # [T, rope_dim] fp32
@@ -151,13 +191,13 @@ def _ref_ue8m0_quant_block(x_f32: torch.Tensor) -> tuple[torch.Tensor, torch.Ten
       absmax -> 2^ceil(log2(absmax / fp8_max)) -> clamp(x / scale) -> fp8
 
     Args:
-        x_f32: [..., quant_group_size] float32 — one or more 128-element blocks.
+        x_f32: [..., quant_group_size] float32 quantization blocks.
 
     Returns:
         x_fp8: same shape, float8_e4m3fn
         scales: [...] float32, one scale per block
+
     """
-    assert x_f32.shape[-1] == QUANT_GROUP_SIZE
     absmax = x_f32.abs().amax(dim=-1, keepdim=True).clamp(min=EPS)
     scale_raw = absmax * (1.0 / FP8_MAX)
     scale = torch.exp2(torch.ceil(torch.log2(scale_raw)))
@@ -185,6 +225,7 @@ def reference_inv_rope_fp8_quant(
     Returns:
         o_fp8: [T, G, D] FP8 with strides (D, T*D, 1)
         o_scale: [T, G, S] FP32 with strides (S, T*S, 1)
+
     """
     assert cos_sin_cache.dtype == torch.float32
     T, _H, head_dim = o.shape
@@ -245,6 +286,52 @@ def reference_inv_rope_fp8_quant(
 # =========================================================================
 
 
+@pytest.mark.parametrize("num_tokens", [1, 7, 128, 4096])
+@pytest.mark.parametrize("quant_group_size", [32, 128])
+@torch.inference_mode()
+def test_packed_quantization_preserves_rotary_dimensions(num_tokens, quant_group_size):
+    """RoPE may span multiple scale blocks; pack every scale and padding row."""
+    from aphrodite.models.deepseek_v4.common.ops.fused_inv_rope_fp8_quant import (
+        fused_inv_rope_fp8_quant as quantize,
+    )
+
+    torch.manual_seed(42)
+    groups, heads_per_group = 2, 2
+    x = torch.randn(
+        num_tokens,
+        groups * heads_per_group,
+        HEAD_DIM,
+        device="cuda",
+        dtype=torch.bfloat16,
+    )
+    cache = make_cos_sin_cache(4096)
+    positions = torch.randint(4096, (num_tokens,), device="cuda")
+    q, packed_scales = quantize(
+        x,
+        positions,
+        cache,
+        groups,
+        heads_per_group,
+        quant_group_size=quant_group_size,
+        tma_aligned_scales=True,
+    )
+    scale_bytes = torch.stack([(packed_scales >> (8 * i)) & 0xFF for i in range(4)], dim=-1).flatten(-2)
+    scales = torch.exp2(scale_bytes.float() - 127)
+    rotated = reference_inv_rope(x.float(), positions, cache)
+    ref_q, ref_scales = _ref_ue8m0_quant_block(rotated.reshape(num_tokens, groups, -1, quant_group_size))
+    torch.testing.assert_close(scales, ref_scales, rtol=0, atol=0)
+    actual = q.float().unflatten(-1, (-1, quant_group_size)) * scales.unsqueeze(-1)
+    expected = ref_q.float() * ref_scales.unsqueeze(-1)
+    assert (actual - expected).norm() / expected.norm() < 1e-3
+
+    aligned_tokens = (num_tokens + 3) // 4 * 4
+    full_scales = packed_scales.transpose(0, 1).as_strided(
+        (groups, aligned_tokens, packed_scales.shape[-1]),
+        (packed_scales.stride(1), 1, packed_scales.stride(2)),
+    )
+    assert torch.count_nonzero(full_scales[:, num_tokens:]) == 0
+
+
 @pytest.mark.parametrize("num_tokens", [1, 7, 32, 128])
 @pytest.mark.parametrize(
     "num_heads,n_groups",
@@ -252,8 +339,9 @@ def reference_inv_rope_fp8_quant(
     ids=["H64_G8", "H32_G4", "H128_G8"],
 )
 @pytest.mark.parametrize("seed", [0, 42])
+@pytest.mark.parametrize("quantize", [True, False], ids=["fp8", "bf16"])
 @torch.inference_mode()
-def test_correctness(num_tokens, num_heads, n_groups, seed):
+def test_correctness(num_tokens, num_heads, n_groups, seed, quantize):
     """Compare fused kernel against reference for FP8 values and scales."""
     torch.manual_seed(seed)
 
@@ -265,6 +353,24 @@ def test_correctness(num_tokens, num_heads, n_groups, seed):
     o = torch.randn(num_tokens, num_heads, HEAD_DIM, device=device, dtype=torch.bfloat16)
     positions = torch.randint(0, max_pos, (num_tokens,), device=device, dtype=torch.long)
     cos_sin_cache = make_cos_sin_cache(max_pos, ROPE_DIM, dtype=torch.float32, device=device)
+
+    if not quantize:
+        ref_output = reference_inv_rope(o, positions, cos_sin_cache).view(num_tokens, n_groups, -1)
+        fused_output, fused_scale = fused_inv_rope_fp8_quant(
+            o.clone(),
+            positions,
+            cos_sin_cache,
+            n_groups,
+            heads_per_group,
+            quantize=False,
+        )
+        d = heads_per_group * HEAD_DIM
+        assert fused_output.shape == (num_tokens, n_groups, d)
+        assert fused_scale.numel() == 0
+        assert fused_output.dtype == torch.bfloat16
+        assert fused_output.stride() == (d, num_tokens * d, 1)
+        torch.testing.assert_close(fused_output, ref_output, rtol=1e-2, atol=1e-2)
+        return
 
     # Reference
     ref_fp8, ref_scale = reference_inv_rope_fp8_quant(
@@ -317,7 +423,6 @@ def test_output_strides(num_tokens, num_heads, n_groups):
     - FP8: logical [T, G, D] backed by contiguous [G, T, D].
     - Scale: MN-major TMA-aligned (column-major: T-stride=1).
     """
-
     heads_per_group = num_heads // n_groups
     max_pos = 4096
     device = "cuda"
@@ -673,6 +778,7 @@ def test_einsum_end_to_end(num_tokens, num_heads, n_groups):
     This catches stride/layout bugs that only manifest when the einsum
     kernel actually consumes the quantized activations.
     """
+    from aphrodite.models.deepseek_v4.nvidia.ops.o_proj import deep_gemm_fp8_o_proj
     from aphrodite.utils.deep_gemm import (
         fp8_einsum,
         is_deep_gemm_supported,
@@ -732,21 +838,23 @@ def test_einsum_end_to_end(num_tokens, num_heads, n_groups):
     fp8_einsum("bhr,hdr->bhd", (ref_fp8, ref_scale), (w_fp8, w_scale_t), z_ref, recipe=recipe)
 
     # -- FUSED path --
-    fused_fp8, fused_scale = fused_inv_rope_fp8_quant(
+    wo_a = torch.nn.Module()
+    wo_a.register_buffer("weight", w_fp8)
+    wo_a.register_buffer("weight_scale", w_scale_t)
+    z_fused = deep_gemm_fp8_o_proj(
         o.clone(),
         positions,
         cos_sin_cache,
-        n_groups,
-        heads_per_group,
-    )
-    z_fused = torch.empty(num_tokens, n_groups, o_lora_rank, device=device, dtype=torch.bfloat16)
-    fp8_einsum(
-        "bhr,hdr->bhd",
-        (fused_fp8, fused_scale),
-        (w_fp8, w_scale_t),
-        z_fused,
-        recipe=recipe,
-    )
+        wo_a,
+        torch.nn.Identity(),
+        n_groups=n_groups,
+        heads_per_group=heads_per_group,
+        nope_dim=NOPE_DIM,
+        rope_dim=ROPE_DIM,
+        o_lora_rank=o_lora_rank,
+        einsum_recipe=recipe,
+        tma_aligned_scales=True,
+    ).view_as(z_ref)
 
     # -- Checks --
     # Einsum output: Triton and CUDA both rotate in fp32 now, so diffs
@@ -767,7 +875,6 @@ def test_einsum_end_to_end(num_tokens, num_heads, n_groups):
 def test_with_real_deepseek_v4_rope(num_tokens, default_aphrodite_config):
     """Test with real DeepseekV4ScalingRotaryEmbedding (GPT-J style,
     mscale=0, YaRN scaling) matching the production config."""
-
     num_heads = 64
     n_groups = 8
     heads_per_group = num_heads // n_groups

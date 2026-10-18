@@ -99,6 +99,18 @@ def test_dflash_fc_uses_aux_layer_count():
     assert _get_dflash_fc_input_size(aphrodite_config) == 3 * 4096
 
 
+def test_dflash_target_layers_map_to_post_layer_boundaries():
+    aphrodite_config = _aphrodite_config(
+        dflash_config={"target_layer_ids": [0, 16, 31]},
+    )
+
+    assert get_eagle3_aux_layers_from_config(aphrodite_config.speculative_config) == (
+        1,
+        17,
+        32,
+    )
+
+
 @pytest.mark.parametrize("config_name", ["dflash_config", "eagle_config"])
 def test_eagle_aux_layers_preserves_legacy_layer_ids(config_name):
     layer_ids = [1, 17, 32]

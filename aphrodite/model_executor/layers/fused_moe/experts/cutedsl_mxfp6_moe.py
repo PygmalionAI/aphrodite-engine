@@ -14,6 +14,7 @@ from aphrodite.model_executor.layers.fused_moe.config import (
 )
 from aphrodite.model_executor.layers.fused_moe.moe_permute_unpermute import (
     MoEPermuteScratch,
+    get_moe_permute_scratch,
     moe_permute,
     moe_permute_unpermute_supported,
     moe_unpermute,
@@ -24,10 +25,10 @@ from aphrodite.model_executor.layers.fused_moe.topk_weight_and_reduce import (
 from aphrodite.model_executor.layers.fused_moe.utils import _resize_cache
 from aphrodite.model_executor.layers.quantization.utils.quant_utils import (
     QuantKey,
-    kMxfp6E2m3Dynamic,
-    kMxfp6E2m3Static,
-    kMxfp6E3m2Dynamic,
-    kMxfp6E3m2Static,
+    kMxfp6E2M3Dynamic,
+    kMxfp6E2M3Static,
+    kMxfp6E3M2Dynamic,
+    kMxfp6E3M2Static,
     kMxfp8Dynamic,
 )
 from aphrodite.platforms import current_platform
@@ -40,7 +41,6 @@ class CutedslMxfp6Experts(mk.FusedMoEExpertsModular):
         super().__init__(*args, **kwargs)
         self.weight_format = weight_format
         self.activation_quant_format = activation_format
-        self._permute_scratch: MoEPermuteScratch | None = None
 
     @property
     def expects_unquantized_inputs(self) -> bool:
@@ -64,12 +64,12 @@ class CutedslMxfp6Experts(mk.FusedMoEExpertsModular):
         activation_key: QuantKey | None,
     ) -> bool:
         return weight_key in {
-            kMxfp6E2m3Static,
-            kMxfp6E3m2Static,
+            kMxfp6E2M3Static,
+            kMxfp6E3M2Static,
         } and activation_key in {
             kMxfp8Dynamic,
-            kMxfp6E2m3Dynamic,
-            kMxfp6E3m2Dynamic,
+            kMxfp6E2M3Dynamic,
+            kMxfp6E3M2Dynamic,
         }
 
     @staticmethod
@@ -109,15 +109,13 @@ class CutedslMxfp6Experts(mk.FusedMoEExpertsModular):
         )
 
     def _get_permute_scratch(self) -> MoEPermuteScratch | None:
-        if self._permute_scratch is None and moe_permute_unpermute_supported():
-            self._permute_scratch = MoEPermuteScratch(
-                max_num_tokens=self.moe_config.max_num_tokens,
-                topk=self.moe_config.experts_per_token,
-                num_experts=self.moe_config.num_experts,
-                num_local_experts=self.moe_config.num_local_experts,
-                device=torch.device(self.moe_config.device),
-            )
-        return self._permute_scratch
+        if not moe_permute_unpermute_supported():
+            return None
+        return get_moe_permute_scratch(
+            num_experts=self.moe_config.num_experts,
+            num_local_experts=self.moe_config.num_local_experts,
+            device=torch.device(self.moe_config.device),
+        )
 
     def apply(
         self,
@@ -147,7 +145,9 @@ class CutedslMxfp6Experts(mk.FusedMoEExpertsModular):
         topk = topk_ids.shape[1]
         n = self.moe_config.intermediate_size_per_partition
         local_experts = w1.shape[0]
-        num_experts = global_num_experts if expert_map is None else expert_map.numel()
+        num_experts = local_experts if global_num_experts < 0 else global_num_experts
+        if expert_map is not None:
+            num_experts = expert_map.numel()
         permuted = _resize_cache(workspace2, (m * topk, k))
         permuted, _, offsets, inv_perm, _ = moe_permute(
             hidden_states,
@@ -190,7 +190,7 @@ class CutedslMxfp6Experts(mk.FusedMoEExpertsModular):
         moe_unpermute(
             out=output,
             permuted_hidden_states=down,
-            topk_weights=None if apply_router_weight_on_input else topk_weights,
+            topk_weights=torch.ones_like(topk_weights) if apply_router_weight_on_input else topk_weights,
             inv_permuted_idx=inv_perm,
             expert_first_token_offset=offsets,
         )

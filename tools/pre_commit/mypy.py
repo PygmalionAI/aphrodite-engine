@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""
-Run mypy on changed files.
+"""Run mypy on changed files.
 
 This script is designed to be used as a pre-commit hook. It runs mypy
 on files that have been changed. It groups files into different mypy calls
@@ -15,6 +14,7 @@ Args:
     python_version: Python version to use (e.g., "3.10") or "local" to use
         the local Python version.
     changed_files: List of changed files to check.
+
 """
 
 import subprocess
@@ -59,14 +59,14 @@ EXCLUDE = [
 
 
 def group_files(changed_files: list[str]) -> dict[str, list[str]]:
-    """
-    Group changed files into different mypy calls.
+    """Group changed files into different mypy calls.
 
     Args:
         changed_files: List of changed files.
 
     Returns:
         A dictionary mapping file group names to lists of changed files.
+
     """
     exclude_pattern = re.compile(f"^{'|'.join(EXCLUDE)}.*")
     file_groups: dict[str, list[str]] = {"": []}
@@ -92,12 +92,11 @@ def mypy(
     follow_imports: str | None,
     file_group: str,
 ) -> int:
-    """
-    Run mypy on the given targets.
+    """Run mypy on the given targets.
 
     Args:
         targets: List of files or directories to check.
-        python_version: Python version to use (e.g., "3.10") or None to use
+        python_version: Python version to use (e.g., "3.11") or None to use
             the default mypy version.
         follow_imports: Value for the --follow-imports option or None to use
             the default mypy behavior.
@@ -105,6 +104,7 @@ def mypy(
 
     Returns:
         The return code from mypy.
+
     """
     args = ["mypy"]
     if python_version is not None:

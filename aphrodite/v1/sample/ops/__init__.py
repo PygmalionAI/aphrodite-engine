@@ -67,8 +67,14 @@ class SamplingOps:
         for processor in sampling_metadata.logitsprocs.non_argmax_invariant:
             logits = processor.apply(logits)
 
-        # Apply penalties (e.g., freq_penalties).
-        logits = self.apply_penalties(logits, sampling_metadata, output_token_ids)
+        holder = sampling_metadata.thinking_budget_state_holder
+        if holder is not None and holder.has_tracked_requests():
+            holder.update_state(
+                sampling_metadata.output_token_ids,
+                sampling_metadata.spec_token_ids,
+                repeat_indices=None,
+            )
+            logits = holder.apply_to_logits(logits, predict_bonus_token, sampling_metadata.spec_token_ids)
         return logits
 
     @staticmethod

@@ -4,10 +4,12 @@ import argparse
 import itertools
 
 import torch
-from aphrodite.modeling.layers.fused_moe.moe_align_block_size import (
+
+import aphrodite._custom_ops as ops
+from aphrodite.model_executor.layers.fused_moe.moe_align_block_size import (
     moe_align_block_size,
 )
-
+from aphrodite.platforms import current_platform
 from aphrodite.triton_utils import triton
 
 
@@ -51,8 +53,79 @@ def benchmark(num_tokens, num_experts, topk, provider):
     return 1000 * ms, 1000 * max_ms, 1000 * min_ms
 
 
+batched_configs = list(
+    itertools.product(
+        [8, 32, 64, 256],
+        [16, 256, 512, 2048],
+        [8, 32, 48, 64],
+        ["uniform", "skewed", "mostly_empty"],
+    )
+)
+
+
+@triton.testing.perf_report(
+    triton.testing.Benchmark(
+        x_names=[
+            "num_batches",
+            "max_tokens_per_batch",
+            "block_size",
+            "distribution",
+        ],
+        x_vals=batched_configs,
+        line_arg="provider",
+        line_vals=["aphrodite"],
+        line_names=["Aphrodite"],
+        plot_name="batched-moe-align-block-size-performance",
+        args={},
+    )
+)
+def benchmark_batched(
+    num_batches,
+    max_tokens_per_batch,
+    block_size,
+    distribution,
+    provider,
+):
+    current_platform.seed_everything(0)
+    if distribution == "uniform":
+        expert_num_tokens = torch.full(
+            (num_batches,),
+            max_tokens_per_batch,
+            dtype=torch.int32,
+            device="cuda",
+        )
+    elif distribution == "skewed":
+        expert_num_tokens = torch.ones((num_batches,), dtype=torch.int32, device="cuda")
+        expert_num_tokens[0] = max_tokens_per_batch
+    else:
+        expert_num_tokens = torch.zeros((num_batches,), dtype=torch.int32, device="cuda")
+        expert_num_tokens[::8] = max_tokens_per_batch
+
+    max_num_tokens_padded = num_batches * ((max_tokens_per_batch + block_size - 1) // block_size) * block_size
+    sorted_ids = torch.empty((max_num_tokens_padded,), dtype=torch.int32, device="cuda")
+    expert_ids = torch.empty((max_num_tokens_padded // block_size,), dtype=torch.int32, device="cuda")
+    num_tokens_post_pad = torch.empty((1,), dtype=torch.int32, device="cuda")
+
+    quantiles = [0.5, 0.2, 0.8]
+    if provider == "aphrodite":
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: ops.batched_moe_align_block_size(
+                max_tokens_per_batch,
+                block_size,
+                expert_num_tokens,
+                sorted_ids,
+                expert_ids,
+                num_tokens_post_pad,
+            ),
+            quantiles=quantiles,
+        )
+
+    return 1000 * ms, 1000 * max_ms, 1000 * min_ms
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--batched", action="store_true")
     parser.add_argument(
         "--num_experts",
         type=int,
@@ -68,4 +141,5 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    benchmark.run(print_data=True, show_plots=True)
+    selected_benchmark = benchmark_batched if args.batched else benchmark
+    selected_benchmark.run(print_data=True, show_plots=True)

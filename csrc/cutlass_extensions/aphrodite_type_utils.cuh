@@ -2,7 +2,7 @@
 #include "cutlass/half.h"
 #include "cuda_bf16.h"
 
-#include "cutlass_extensions/aphrodite_custom_types.cuh"
+#include "aphrodite_custom_types.cuh"
 
 namespace cutlass {
 

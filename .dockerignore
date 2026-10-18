@@ -1,6 +1,8 @@
 conda/
 build/
 dist/
+# Model recipes are rendered separately, not copied into the runtime image.
+/recipes
 rust/target/
 .venv/
 venv/

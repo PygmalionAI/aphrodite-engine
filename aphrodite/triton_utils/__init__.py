@@ -34,8 +34,17 @@ from aphrodite.triton_utils.tensor_descriptor import use_tensor_descriptor  # no
 LOG2E = 1.4426950408889634
 LOGE2 = 0.6931471805599453
 
+
+def get_cache_invalidating_env_vars() -> dict[str, str]:
+    """Read Triton's cache environment without eagerly importing its compiler."""
+    get_env_vars = import_module("triton._C.libtriton").get_cache_invalidating_env_vars
+
+    return get_env_vars()
+
+
 __all__ = [
     "HAS_TRITON",
+    "get_cache_invalidating_env_vars",
     "triton",
     "tl",
     "tldevice",

@@ -155,10 +155,12 @@ def mteb_test_embed_models(
     model_info: EmbedModelInfo,
     aphrodite_extra_kwargs=None,
     hf_model_callback=None,
-    atol=MTEB_EMBED_TOL,
+    atol: float | None = None,
     prompt_prefix: str | None = None,
     aphrodite_model_callback=None,
 ):
+    if atol is None:
+        atol = model_info.mteb_tol if model_info.mteb_tol is not None else MTEB_EMBED_TOL
     aphrodite_extra_kwargs = get_aphrodite_extra_kwargs(model_info, aphrodite_extra_kwargs)
 
     # Test embed_dims, isnan and whether to use normalize
@@ -250,4 +252,7 @@ def mteb_test_embed_models(
 
     # We are not concerned that the aphrodite mteb results are better
     # than SentenceTransformers, so we only perform one-sided testing.
-    assert st_main_score - aphrodite_main_score < atol
+    diff = st_main_score - aphrodite_main_score
+    assert diff < atol, (
+        f"diff={diff:.6g} tol={atol} model={model_info.name} (st={st_main_score}, aphrodite={aphrodite_main_score})"
+    )

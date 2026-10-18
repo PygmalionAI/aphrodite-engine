@@ -74,6 +74,83 @@ def _torch_topk_softplus_sqrt(
     return topk_weights.to(torch.float32), topk_ids.to(torch.int32)
 
 
+def _dsv4_moe_config(monkeypatch, default_aphrodite_config, has_hash_routing, backend):
+    from dataclasses import replace
+
+    from aphrodite._aiter_ops import rocm_aiter_ops
+    from aphrodite.model_executor.layers.fused_moe.layer import FusedMoEFactory
+    from aphrodite.platforms import rocm
+
+    # Exercise both native MX and monolithic AITER selection on any ROCm device.
+    monkeypatch.setattr(rocm, "on_gfx950", lambda: True)
+    monkeypatch.setattr(rocm, "on_gfx1250", lambda: False)
+    monkeypatch.setattr(rocm_aiter_ops, "is_enabled", lambda: True)
+    monkeypatch.setattr(rocm_aiter_ops, "is_fused_moe_enabled", lambda: True)
+    default_aphrodite_config.kernel_config.moe_backend = "triton"
+    layer = FusedMoEFactory(
+        num_experts=8,
+        top_k=2,
+        hidden_size=256,
+        intermediate_size=256,
+        params_dtype=torch.bfloat16,
+        scoring_func="sqrtsoftplus",
+        e_score_correction_bias=torch.zeros(8),
+        hash_indices_table=(torch.tensor([[0, 1], [2, 3]], dtype=torch.int32) if has_hash_routing else None),
+        prefix="hash_routing_selection",
+    )
+    return layer, replace(layer.routed_experts.moe_config, moe_backend=backend)
+
+
+@pytest.mark.skipif(not current_platform.is_rocm(), reason="ROCm backend selection")
+@pytest.mark.parametrize("has_hash_routing", [False, True])
+@pytest.mark.parametrize(
+    "backend,expected_experts",
+    [
+        ("aiter_triton_mxfp4_bf16", "AiterW4A16ExpertsMonolithic"),
+        ("aiter", "AiterMxfp4Experts"),
+        ("triton_unfused", "UnfusedOAITritonExperts"),
+    ],
+)
+def test_hash_routing_backend_selection(
+    dist_init,
+    default_aphrodite_config,
+    monkeypatch,
+    has_hash_routing,
+    backend,
+    expected_experts,
+):
+    """Hash tables reach backend selection and hash-capable kernels."""
+    from aphrodite.model_executor.layers.fused_moe.oracle.mxfp4 import (
+        select_deepseek_v4_mxfp4_moe_backend,
+    )
+
+    layer, config = _dsv4_moe_config(monkeypatch, default_aphrodite_config, has_hash_routing, backend)
+    _, experts_cls = select_deepseek_v4_mxfp4_moe_backend(config)
+    assert experts_cls.__name__ == expected_experts
+    # Monolithic kernels route internally, so they read the table from the layer.
+    assert (layer.routed_experts.hash_indices_table is not None) == has_hash_routing
+
+
+@pytest.mark.skipif(not current_platform.is_rocm(), reason="ROCm backend selection")
+def test_hash_routing_rejects_monolithic_without_support(dist_init, default_aphrodite_config, monkeypatch):
+    """A monolithic kernel that does not implement hash routing is rejected."""
+    from aphrodite.model_executor.layers.fused_moe.experts.aiter_mxfp4_w4a16_moe import (
+        AiterW4A16ExpertsMonolithic,
+    )
+    from aphrodite.model_executor.layers.fused_moe.oracle.mxfp4 import (
+        select_deepseek_v4_mxfp4_moe_backend,
+    )
+
+    monkeypatch.setattr(
+        AiterW4A16ExpertsMonolithic,
+        "_supports_hash_routing",
+        staticmethod(lambda: False),
+    )
+    _, config = _dsv4_moe_config(monkeypatch, default_aphrodite_config, True, "aiter_triton_mxfp4_bf16")
+    with pytest.raises(ValueError, match="hash routing"):
+        select_deepseek_v4_mxfp4_moe_backend(config)
+
+
 def test_torch_topk_softplus_sqrt_breaks_ties_by_expert_id():
     gating_output = torch.tensor([[2.0, 1.0, 1.0, 0.0]])
 
@@ -162,6 +239,137 @@ def test_fused_topk_softplus_sqrt(
     sorted_w_ref = topk_weights_ref.gather(1, idx_ref)
     sorted_w = topk_weights.gather(1, idx_ops)
     torch.testing.assert_close(sorted_w_ref, sorted_w, atol=2e-2, rtol=1e-2)
+
+
+@pytest.mark.skipif(
+    not current_platform.is_cuda_alike(),
+    reason="This test is skipped on non-CUDA platform.",
+)
+@pytest.mark.parametrize("num_tokens", [1, 33, 128])
+@pytest.mark.parametrize("hidden_size", [1024, 2048])
+@pytest.mark.parametrize("num_experts", [256, 384, 512])
+@pytest.mark.parametrize("topk", [6, 8, 16])
+@pytest.mark.parametrize("renormalize", [True, False])
+@pytest.mark.parametrize("routed_scaling_factor", [1.0, 2.5])
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.half, torch.float32])
+def test_fused_topk_softplus_sqrt_hash(
+    num_tokens: int,
+    hidden_size: int,
+    num_experts: int,
+    topk: int,
+    renormalize: bool,
+    routed_scaling_factor: float,
+    dtype: torch.dtype,
+):
+    torch.manual_seed(0)
+    vocab_size = 1024
+    hidden_states = torch.randn((num_tokens, hidden_size), dtype=dtype, device="cuda")
+    gating_output = torch.randn((num_tokens, num_experts), dtype=dtype, device="cuda")
+    # Per-token fixed expert selection: for each vocab id pick `topk` distinct
+    # experts.
+    hash_indices_table = torch.stack([torch.randperm(num_experts)[:topk] for _ in range(vocab_size)]).to(
+        device="cuda", dtype=torch.long
+    )
+    input_ids = torch.randint(0, vocab_size, (num_tokens,), dtype=torch.long, device="cuda")
+
+    topk_weights_ref, topk_ids_ref = _torch_topk_softplus_sqrt(
+        gating_output=gating_output,
+        topk=topk,
+        renormalize=renormalize,
+        routed_scaling_factor=routed_scaling_factor,
+        input_ids=input_ids,
+        hash_indices_table=hash_indices_table,
+    )
+
+    topk_weights, topk_ids = fused_topk_bias(
+        hidden_states=hidden_states,
+        gating_output=gating_output,
+        scoring_func="sqrtsoftplus",
+        e_score_correction_bias=None,
+        topk=topk,
+        renormalize=renormalize,
+        input_tokens=input_ids,
+        hash_indices_table=hash_indices_table,
+        routed_scaling_factor=routed_scaling_factor,
+    )
+
+    sorted_ref_ids, idx_ref = topk_ids_ref.sort(dim=-1)
+    sorted_ids, idx_ops = topk_ids.sort(dim=-1)
+    torch.testing.assert_close(sorted_ref_ids, sorted_ids, atol=0, rtol=0)
+
+    sorted_w_ref = topk_weights_ref.gather(1, idx_ref)
+    sorted_w = topk_weights.gather(1, idx_ops)
+    torch.testing.assert_close(sorted_w_ref, sorted_w, atol=2e-2, rtol=1e-2)
+
+
+@pytest.mark.skipif(
+    not current_platform.is_cuda(),
+    reason="The DeepSeek V4 fast path is CUDA-only.",
+)
+@pytest.mark.parametrize(
+    ("num_tokens", "num_experts", "indices_type"),
+    [
+        (0, 256, torch.int32),
+        (17, 256, torch.int32),
+        (17, 384, torch.int64),
+    ],
+)
+@pytest.mark.parametrize("use_padding", [False, True])
+def test_dsv4_fast_topk(
+    num_tokens: int,
+    num_experts: int,
+    indices_type: torch.dtype,
+    use_padding: bool,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    torch.manual_seed(0)
+    gating_output = torch.randn((num_tokens, num_experts), dtype=torch.float32, device="cuda")
+    correction_bias = torch.randn(num_experts, dtype=torch.float32, device="cuda")
+
+    topk_weights_ref, topk_ids_ref = _torch_topk_softplus_sqrt(
+        gating_output=gating_output,
+        topk=6,
+        renormalize=True,
+        routed_scaling_factor=1.5,
+        e_score_correction_bias=correction_bias,
+    )
+    is_padding = torch.arange(num_tokens, device="cuda") % 2 == 1
+    if use_padding:
+        monkeypatch.setattr(
+            "aphrodite.model_executor.layers.fused_moe.router.fused_topk_bias_router._get_padding_mask",
+            lambda _: is_padding,
+        )
+        gating_output[is_padding] = float("nan")
+        topk_weights_ref[is_padding] = 0
+        topk_ids_ref[is_padding] = -1
+    topk_weights, topk_ids = fused_topk_bias(
+        gating_output,
+        gating_output,
+        "sqrtsoftplus",
+        correction_bias,
+        6,
+        True,
+        indices_type=indices_type,
+        routed_scaling_factor=1.5,
+    )
+
+    assert topk_ids.dtype == indices_type
+    torch.testing.assert_close(topk_ids_ref.to(indices_type), topk_ids, atol=0, rtol=0)
+    torch.testing.assert_close(
+        topk_weights_ref,
+        topk_weights,
+        atol=2e-5,
+        rtol=2e-5,
+    )
+
+    if use_padding and num_tokens:
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            weights, ids = dsv4_topk(gating_output, correction_bias, indices_type, 1.5, is_padding=is_padding)
+        is_padding.fill_(True)
+        graph.replay()
+        assert (ids == -1).all()
+        assert (weights == 0).all()
 
 
 @pytest.mark.skipif(
@@ -267,107 +475,6 @@ def test_fused_topk_softplus_sqrt_padding(
 
     sorted_w_ref = topk_weights_ref[rows_to_compare].gather(1, idx_ref)
     sorted_w = topk_weights[rows_to_compare].gather(1, idx_ops)
-    torch.testing.assert_close(sorted_w_ref, sorted_w, atol=2e-2, rtol=1e-2)
-
-
-@pytest.mark.skipif(
-    not current_platform.is_cuda(),
-    reason="The DeepSeek V4 fast path is CUDA-only.",
-)
-@pytest.mark.parametrize(
-    ("num_tokens", "num_experts", "indices_type"),
-    [
-        (0, 256, torch.uint32),
-        (17, 256, torch.uint32),
-        (17, 384, torch.int64),
-    ],
-)
-def test_dsv4_fast_topk(
-    num_tokens: int,
-    num_experts: int,
-    indices_type: torch.dtype,
-):
-    torch.manual_seed(0)
-    gating_output = torch.randn((num_tokens, num_experts), dtype=torch.float32, device="cuda")
-    correction_bias = torch.randn(num_experts, dtype=torch.float32, device="cuda")
-
-    topk_weights_ref, topk_ids_ref = _torch_topk_softplus_sqrt(
-        gating_output=gating_output,
-        topk=6,
-        renormalize=True,
-        routed_scaling_factor=1.5,
-        e_score_correction_bias=correction_bias,
-    )
-    topk_weights, topk_ids = dsv4_topk(gating_output, correction_bias, indices_type, 1.5)
-
-    assert topk_ids.dtype == indices_type
-    torch.testing.assert_close(topk_ids_ref.to(indices_type), topk_ids, atol=0, rtol=0)
-    torch.testing.assert_close(
-        topk_weights_ref,
-        topk_weights,
-        atol=2e-5,
-        rtol=2e-5,
-    )
-
-
-@pytest.mark.skipif(
-    not current_platform.is_cuda_alike(),
-    reason="This test is skipped on non-CUDA platform.",
-)
-@pytest.mark.parametrize("num_tokens", [1, 33, 128])
-@pytest.mark.parametrize("hidden_size", [1024, 2048])
-@pytest.mark.parametrize("num_experts", [256, 384, 512])
-@pytest.mark.parametrize("topk", [6, 8, 16])
-@pytest.mark.parametrize("renormalize", [True, False])
-@pytest.mark.parametrize("routed_scaling_factor", [1.0, 2.5])
-@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.half, torch.float32])
-def test_fused_topk_softplus_sqrt_hash(
-    num_tokens: int,
-    hidden_size: int,
-    num_experts: int,
-    topk: int,
-    renormalize: bool,
-    routed_scaling_factor: float,
-    dtype: torch.dtype,
-):
-    torch.manual_seed(0)
-    vocab_size = 1024
-    hidden_states = torch.randn((num_tokens, hidden_size), dtype=dtype, device="cuda")
-    gating_output = torch.randn((num_tokens, num_experts), dtype=dtype, device="cuda")
-    # Per-token fixed expert selection: for each vocab id pick `topk` distinct
-    # experts.
-    hash_indices_table = torch.stack([torch.randperm(num_experts)[:topk] for _ in range(vocab_size)]).to(
-        device="cuda", dtype=torch.long
-    )
-    input_ids = torch.randint(0, vocab_size, (num_tokens,), dtype=torch.long, device="cuda")
-
-    topk_weights_ref, topk_ids_ref = _torch_topk_softplus_sqrt(
-        gating_output=gating_output,
-        topk=topk,
-        renormalize=renormalize,
-        routed_scaling_factor=routed_scaling_factor,
-        input_ids=input_ids,
-        hash_indices_table=hash_indices_table,
-    )
-
-    topk_weights, topk_ids = fused_topk_bias(
-        hidden_states=hidden_states,
-        gating_output=gating_output,
-        scoring_func="sqrtsoftplus",
-        e_score_correction_bias=None,
-        topk=topk,
-        renormalize=renormalize,
-        input_tokens=input_ids,
-        hash_indices_table=hash_indices_table,
-        routed_scaling_factor=routed_scaling_factor,
-    )
-
-    sorted_ref_ids, idx_ref = topk_ids_ref.sort(dim=-1)
-    sorted_ids, idx_ops = topk_ids.sort(dim=-1)
-    torch.testing.assert_close(sorted_ref_ids, sorted_ids, atol=0, rtol=0)
-
-    sorted_w_ref = topk_weights_ref.gather(1, idx_ref)
-    sorted_w = topk_weights.gather(1, idx_ops)
     torch.testing.assert_close(sorted_w_ref, sorted_w, atol=2e-2, rtol=1e-2)
 
 

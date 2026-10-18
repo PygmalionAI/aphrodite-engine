@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 import transformers.configuration_utils as hf_configuration_utils
-from transformers import PretrainedConfig
+from transformers import PreTrainedConfig
 
 import aphrodite.transformers_utils.config as config_module
 from aphrodite.transformers_utils.config import (
@@ -24,7 +24,7 @@ class CustomConfigParser(ConfigParserBase):
         revision: str | None = None,
         code_revision: str | None = None,
         **kwargs,
-    ) -> tuple[dict, PretrainedConfig]:
+    ) -> tuple[dict, PreTrainedConfig]:
         raise NotImplementedError
 
 

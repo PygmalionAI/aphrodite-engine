@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""
-Benchmark the performance of the cutlass_moe_fp4 kernel vs the triton_moe
+"""Benchmark the performance of the cutlass_moe_fp4 kernel vs the triton_moe
 kernel. The cutlass_moe_fp4 kernel takes in fp4 quantized weights and 16-bit
 activations. The triton_moe kernel takes in fp8 weights(tensor scaled to fp8)
 and 16-bit activations.
@@ -10,17 +9,26 @@ and 16-bit activations.
 import nvtx
 import torch
 import torch.utils.benchmark as benchmark
-from aphrodite.modeling.layers.fused_moe.config import (
+
+import aphrodite.model_executor.layers.fused_moe.modular_kernel as mk
+from aphrodite import _custom_ops as ops
+from aphrodite.config import AphroditeConfig, ParallelConfig, set_current_aphrodite_config
+from aphrodite.model_executor.layers.fused_moe.all2all_utils import (
+    maybe_make_prepare_finalize,
+)
+from aphrodite.model_executor.layers.fused_moe.config import (
     fp8_w8a8_moe_quant_config,
     nvfp4_moe_quant_config,
 )
-from aphrodite.modeling.layers.fused_moe.cutlass_moe import cutlass_moe_fp4
-from aphrodite.modeling.layers.fused_moe.fused_moe import fused_experts, fused_topk
-
-from aphrodite import _custom_ops as ops
-from aphrodite.config import AphroditeConfig, ParallelConfig, set_current_aphrodite_config
+from aphrodite.model_executor.layers.fused_moe.experts.cutlass_moe import (
+    CutlassExpertsFp4,
+)
+from aphrodite.model_executor.layers.fused_moe.fused_moe import fused_experts
+from aphrodite.model_executor.layers.fused_moe.router.fused_topk_router import fused_topk
 from aphrodite.scalar_type import scalar_types
 from aphrodite.utils.argparse_utils import FlexibleArgumentParser
+from aphrodite.v1.worker.workspace import init_workspace_manager
+from tests.kernels.moe.utils import make_dummy_moe_config
 
 WEIGHT_SHAPES_MOE = {
     "nvidia/DeepSeek-R1-FP4": [
@@ -175,19 +183,34 @@ def bench_run(
             g1_alphas=w1_gs,
             g2_alphas=w2_gs,
         )
+
+        moe_config = make_dummy_moe_config(
+            num_experts=num_experts,
+            hidden_dim=k,
+            intermediate_size_per_partition=n,
+            in_dtype=a.dtype,
+        )
+        kernel = mk.FusedMoEKernel(
+            maybe_make_prepare_finalize(
+                moe=moe_config,
+                quant_config=quant_config,
+                allow_new_interface=True,
+                use_monolithic=False,
+            ),
+            CutlassExpertsFp4(
+                moe_config=moe_config,
+                quant_config=quant_config,
+            ),
+        )
+
         for _ in range(num_repeats):
             with nvtx.annotate("cutlass_moe_fp4", color="green"):
-                cutlass_moe_fp4(
-                    a=a,
-                    w1_fp4=w1_fp4,
-                    w2_fp4=w2_fp4,
+                kernel(
+                    hidden_states=a,
+                    w1=w1_fp4,
+                    w2=w2_fp4,
                     topk_weights=topk_weights,
                     topk_ids=topk_ids,
-                    m=m,
-                    n=n,
-                    k=k,
-                    e=num_experts,
-                    quant_config=quant_config,
                 )
 
     def run_cutlass_from_graph(
@@ -216,19 +239,30 @@ def bench_run(
             g1_alphas=w1_gs,
             g2_alphas=w2_gs,
         )
+        moe_config = make_dummy_moe_config(
+            num_experts=num_experts, hidden_dim=k, intermediate_size_per_partition=n, in_dtype=a.dtype
+        )
+
+        kernel = mk.FusedMoEKernel(
+            maybe_make_prepare_finalize(
+                moe=moe_config,
+                quant_config=quant_config,
+                allow_new_interface=True,
+                use_monolithic=False,
+            ),
+            CutlassExpertsFp4(
+                moe_config=moe_config,
+                quant_config=quant_config,
+            ),
+        )
 
         with set_current_aphrodite_config(AphroditeConfig(parallel_config=ParallelConfig(pipeline_parallel_size=1))):
-            return cutlass_moe_fp4(
-                a=a,
-                w1_fp4=w1_fp4,
-                w2_fp4=w2_fp4,
+            return kernel(
+                hidden_states=a,
+                w1=w1_fp4,
+                w2=w2_fp4,
                 topk_weights=topk_weights,
                 topk_ids=topk_ids,
-                m=m,
-                n=n,
-                k=k,
-                e=num_experts,
-                quant_config=quant_config,
             )
 
     def run_triton_from_graph(
@@ -425,6 +459,10 @@ def bench_run(
 
 
 def main(args):
+    # Initialize workspace manager (required for CUTLASS MoE kernels)
+    device = torch.device("cuda:0")
+    init_workspace_manager(device)
+
     print("Benchmarking models:")
     for i, model in enumerate(args.models):
         print(f"[{i}]  {model}")

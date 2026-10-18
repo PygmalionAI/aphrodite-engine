@@ -95,6 +95,7 @@ WORKDIR ${COMMON_WORKDIR}
 FROM base AS fetch_aphrodite_0
 ONBUILD COPY ./ aphrodite/
 
+
 FROM base AS fetch_aphrodite_1
 ARG APHRODITE_REPO
 ARG APHRODITE_BRANCH
@@ -122,6 +123,7 @@ COPY rust/proto /rust-input/aphrodite/rust/proto
 COPY rust/src /rust-input/aphrodite/rust/src
 COPY tools/build_rust.py /rust-input/aphrodite/tools/build_rust.py
 
+
 FROM base AS rust_input_1
 ARG APHRODITE_REPO
 ARG APHRODITE_BRANCH
@@ -136,6 +138,7 @@ RUN git clone --no-checkout --filter=blob:none ${APHRODITE_REPO} /rust-input/aph
         rust/proto/** \
         rust/src/** \
         tools/build_rust.py \
+
     && git checkout FETCH_HEAD
 
 FROM rust_input_${REMOTE_APHRODITE} AS rust-input
@@ -178,6 +181,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY --from=rust-input /rust-input/aphrodite/rust rust
 COPY --from=rust-input /rust-input/aphrodite/tools/build_rust.py tools/build_rust.py
+
 
 # BuildKit can run this stage in parallel with ROCm native builds. Keep Rust on
 # a separate local sccache daemon while sharing the same remote cache backend.
@@ -247,6 +251,7 @@ COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/requirements /requiremen
 COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/benchmarks /benchmarks
 COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/tests /tests
 COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/examples /examples
+COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/tools /tools
 COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/docker/Dockerfile /docker/Dockerfile
 COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/docker/Dockerfile.cpu /docker/Dockerfile.cpu
 COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/docker/Dockerfile.rocm /docker/
@@ -257,7 +262,7 @@ COPY --from=build_aphrodite ${COMMON_WORKDIR}/aphrodite/rust /rust
 # -----------------------
 # NIXL/UCX build stages
 FROM base AS build_nixl
-ARG NIXL_BRANCH="231d56753047c989062a5cb2ac703a1ad761c7d2"
+ARG NIXL_BRANCH="1683cf3b7f3d11674c03c5e861cea22339876c96"
 ARG NIXL_REPO="https://github.com/ai-dynamo/nixl.git"
 ARG UCX_BRANCH="96e58a16039f6d7d213bc967b8069238742c5194"
 ARG UCX_REPO="https://github.com/openucx/ucx.git"
@@ -320,9 +325,12 @@ RUN git clone ${NIXL_REPO} /opt/nixl \
 # so configure the ROCm wheel variant directly through Meson.
 # Exclude libcore and libpull from auditwheel: transitive dependencies
 # that are not shipped in the wheel and vary across base images.
-RUN cd /opt/nixl \
-    && ./contrib/tomlutil.py --wheel-name nixl-rocm pyproject.toml \
-    && uv build --wheel --no-build-isolation --out-dir /tmp/nixl_wheels \
+# Tag manylinux_2_35 to match the Ubuntu 22.04 base: NIXL >= 1.5 links
+# GLIBCXX_3.4.30 symbols, which manylinux_2_34 does not allow.
+RUN cd /opt/nixl && \
+    ./contrib/tomlutil.py --wheel-name nixl-rocm pyproject.toml && \
+    CC="ccache gcc" CXX="ccache g++" \
+    uv build --wheel --no-build-isolation --out-dir /tmp/nixl_wheels \
         --python ${PYTHON_VERSION} \
         -Csetup-args=-Ducx_path=${UCX_HOME} \
         -Csetup-args=-Dwheel_variant=rocm \
@@ -334,9 +342,9 @@ RUN cd /opt/nixl \
         --exclude 'libcore*' \
         --exclude 'libpull*' \
         /tmp/nixl_wheels/nixl_rocm*.whl \
-        --plat manylinux_2_34_$(uname -m) \
-        --wheel-dir /tmp/nixl_wheels/repaired \
-    && ./contrib/wheel_add_ucx_plugins.py \
+        --plat manylinux_2_35_$(uname -m) \
+        --wheel-dir /tmp/nixl_wheels/repaired && \
+    ./contrib/wheel_add_ucx_plugins.py \
         --ucx-plugins-dir ${UCX_HOME}/lib/ucx \
         --nixl-plugins-dir ${NIXL_HOME}/lib/$(uname -m)-linux-gnu/plugins \
         /tmp/nixl_wheels/repaired/*.whl \
@@ -384,6 +392,9 @@ FROM fetch_aphrodite AS build_aphrodite_wheel_release
 ARG COMMON_WORKDIR
 ARG USE_SCCACHE
 ARG SCCACHE_ENDPOINT
+ENV APHRODITE_USE_PRECOMPILED_RUST=1
+COPY --from=rust-build ${COMMON_WORKDIR}/aphrodite/aphrodite/aphrodite-rs aphrodite/aphrodite/aphrodite-rs
+COPY --from=rust-build ${COMMON_WORKDIR}/aphrodite/aphrodite/_rust_*.so aphrodite/aphrodite/
 RUN mkdir -p /install
 
 COPY docker/context/base-wheels/ /tmp/base-wheels/
@@ -461,6 +472,7 @@ COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/requiremen
 COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/benchmarks /benchmarks
 COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/tests /tests
 COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/examples /examples
+COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/tools /tools
 COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/docker/Dockerfile /docker/Dockerfile
 COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/docker/Dockerfile.cpu /docker/Dockerfile.cpu
 COPY --from=build_aphrodite_wheel_release ${COMMON_WORKDIR}/aphrodite/docker/Dockerfile.rocm /docker/
@@ -496,8 +508,24 @@ RUN --mount=type=bind,from=build_deep,src=/app/deep_install,target=/deep_install
     uv pip install --system /deep_install/*.whl
 COPY --from=build_deep /opt/rocshmem /opt/rocshmem
 
-RUN apt-get update -q -y && apt-get install -q -y --no-install-recommends \
-    librdmacm1 libibverbs1 ibverbs-providers ibverbs-utils \
+# RDMA userspace libraries plus FFmpeg dev libs needed by torchcodec.
+RUN timeout --kill-after=30s 5m apt-get update -q -y --error-on=any \
+    -o Acquire::Retries=3 \
+    -o Acquire::http::Timeout=30 \
+    -o Acquire::https::Timeout=30 \
+    && apt-get install -q -y --no-install-recommends \
+    -o Acquire::Retries=3 \
+    -o Acquire::http::Timeout=30 \
+    -o Acquire::https::Timeout=30 \
+    librdmacm1 \
+    libibverbs1 \
+    ibverbs-providers \
+    ibverbs-utils \
+    util-linux \
+    unzip \
+    libsodium23 \
+    pkg-config ffmpeg libavcodec-dev libavformat-dev libavutil-dev \
+    libswscale-dev libavdevice-dev libavfilter-dev libswresample-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /aphrodite-workspace
@@ -560,7 +588,7 @@ RUN case "$(which python3)" in \
         *) ;; esac
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --upgrade huggingface-hub[cli]
+    uv pip install --system --upgrade huggingface-hub
 
 # Install Aphrodite using uv. No upgrade flag: avoid replacing ROCm PyTorch
 # with CUDA wheels.

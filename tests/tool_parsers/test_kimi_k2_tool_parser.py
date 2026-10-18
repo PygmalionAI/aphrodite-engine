@@ -196,6 +196,7 @@ def _split_tool_output_to_deltas(content: str, tool_strs: list[tuple[str, str]])
     Args:
         content: text before tool section
         tool_strs: list of (tool_id, args_json)
+
     """
     deltas = [content, SECTION_BEGIN]
     for tool_id, args_json in tool_strs:

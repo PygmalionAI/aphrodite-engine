@@ -25,9 +25,16 @@
 """Inference-only Qwen3.5 Series compatible with HuggingFace weights."""
 
 from collections.abc import Iterable
+from typing import ClassVar
 
 import torch
 from torch import nn
+from transformers import (
+    Qwen3_5Config,
+    Qwen3_5MoeConfig,
+    Qwen3_5MoeTextConfig,
+    Qwen3_5TextConfig,
+)
 
 from aphrodite.compilation.decorators import support_torch_compile
 from aphrodite.config import AphroditeConfig
@@ -38,6 +45,7 @@ from aphrodite.logger import init_logger
 from aphrodite.model_executor.layers.fused_moe.utils import (
     is_model_fused_shared_expert_compatible,
 )
+from aphrodite.model_executor.layers.fusion.mm_input_norm import build_mm_input_norm
 from aphrodite.model_executor.layers.layernorm import GemmaRMSNorm as Qwen3_5RMSNorm
 from aphrodite.model_executor.layers.logits_processor import LogitsProcessor
 from aphrodite.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn import (
@@ -54,13 +62,9 @@ from aphrodite.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding,
 )
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
+from aphrodite.multimodal.inputs import MultiModalFeatureSpec
 from aphrodite.sequence import IntermediateTensors
 from aphrodite.tokenizers.registry import cached_tokenizer_from_config
-from aphrodite.transformers_utils.configs.qwen3_5 import Qwen3_5Config, Qwen3_5TextConfig
-from aphrodite.transformers_utils.configs.qwen3_5_moe import (
-    Qwen3_5MoeConfig,
-    Qwen3_5MoeTextConfig,
-)
 
 from .interfaces import (
     HasInnerState,
@@ -87,6 +91,7 @@ from .qwen3_vl import (
     Qwen3VLForConditionalGeneration,
     Qwen3VLMultiModalProcessor,
     Qwen3VLProcessingInfo,
+    mrope_positions_factor,
 )
 from .utils import (
     AutoWeightsLoader,
@@ -156,6 +161,7 @@ class Qwen3_5DecoderLayer(Qwen3NextDecoderLayer):
                 quant_config=quant_config,
                 reduce_results=not self.use_attn_reduce_scatter_for_moe,
                 prefix=f"{prefix}.self_attn",
+                mrope_positions_factor=mrope_positions_factor(aphrodite_config),
             )
         else:
             raise ValueError(f"Invalid layer_type {self.layer_type}")
@@ -319,13 +325,8 @@ class Qwen3_5ForCausalLMBase(
         config = aphrodite_config.model_config.hf_text_config
         self.aphrodite_config = aphrodite_config
         self.model_config = aphrodite_config.model_config
-        cache_config = aphrodite_config.cache_config
 
         scheduler_config = aphrodite_config.scheduler_config
-        if cache_config.mamba_cache_mode == "all":
-            raise NotImplementedError(
-                "Qwen3.5 currently does not support 'all' prefix caching, please use '--mamba-cache-mode=align' instead"
-            )
         self.quant_config = aphrodite_config.quant_config
 
         super().__init__()
@@ -427,7 +428,7 @@ class Qwen3_5ForCausalLMBase(
     def get_mrope_input_positions(
         self,
         input_tokens: list[int],
-        mm_features: list[object],
+        mm_features: list[MultiModalFeatureSpec],
     ) -> tuple[torch.Tensor, int]:
         positions = torch.arange(len(input_tokens), dtype=torch.long)
         return positions.unsqueeze(0).expand(3, -1), 0
@@ -472,7 +473,7 @@ class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration, IsHybrid)
         nn.Module.__init__(self)
         config: Qwen3_5Config = aphrodite_config.model_config.hf_config
         quant_config = aphrodite_config.quant_config
-        multimodal_config = aphrodite_config.model_config.multimodal_config
+        multimodal_config = aphrodite_config.model_config.get_multimodal_config()
 
         self.config = config
         self.model_config = aphrodite_config.model_config
@@ -493,6 +494,7 @@ class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration, IsHybrid)
                 config.vision_config,
                 norm_eps=getattr(config, "rms_norm_eps", 1e-6),
                 quant_config=quant_config,
+                input_norm=build_mm_input_norm(self.model_config),
                 prefix=maybe_prefix(prefix, "visual"),
             )
 
@@ -559,8 +561,8 @@ class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration, IsHybrid)
                     model. `None` if no videos are passed.
                 - video_grid_thw: Tensor `(n_videos, 3)` of video 3D grid in
                     LLM. `None` if no videos are passed.
-        """
 
+        """
         if intermediate_tensors is not None:
             inputs_embeds = None
 
@@ -622,6 +624,9 @@ class Qwen3_5ForConditionalGeneration(Qwen3VLForConditionalGeneration, IsHybrid)
 
 
 class Qwen3_5_MoeMixtureOfExperts(MixtureOfExperts):
+    language_model: Qwen3_5ForCausalLM
+    num_local_physical_experts: int
+
     def update_physical_experts_metadata(
         self,
         num_physical_experts: int,
@@ -668,14 +673,14 @@ class Qwen3_5_MoeMixtureOfExperts(MixtureOfExperts):
 )
 class Qwen3_5MoeForConditionalGeneration(Qwen3_5ForConditionalGeneration, Qwen3_5_MoeMixtureOfExperts):
     # For MoE LoRA weights loading
-    is_3d_moe_weight: bool = True
+    is_3d_moe_weight: ClassVar[bool] = True
 
     def __init__(self, *, aphrodite_config: AphroditeConfig, prefix: str = "model"):
         # protocols have not __init__ method, so we need to use nn.Module.__init__
         nn.Module.__init__(self)
         config: Qwen3_5MoeConfig = aphrodite_config.model_config.hf_config
         quant_config = aphrodite_config.quant_config
-        multimodal_config = aphrodite_config.model_config.multimodal_config
+        multimodal_config = aphrodite_config.model_config.get_multimodal_config()
 
         self.config = config
         self.model_config = aphrodite_config.model_config
@@ -696,6 +701,7 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3_5ForConditionalGeneration, Qwen3_
                 config.vision_config,
                 norm_eps=getattr(config, "rms_norm_eps", 1e-6),
                 quant_config=quant_config,
+                input_norm=build_mm_input_norm(self.model_config),
                 prefix=maybe_prefix(prefix, "visual"),
             )
 

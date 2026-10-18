@@ -7,8 +7,10 @@ import pytest
 
 from aphrodite import PoolingParams
 from aphrodite.entrypoints.pooling.base.io_processor import PoolingIOProcessor
+from aphrodite.entrypoints.pooling.offline import PoolingOfflineMixin
+from aphrodite.entrypoints.pooling.scoring.io_processor import CrossEncoderIOProcessor
 from aphrodite.entrypoints.pooling.typing import OfflineEncodeInputsContext
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.renderers import TokenizeParams
 
 
@@ -18,7 +20,7 @@ def processor() -> PoolingIOProcessor:
 
 
 def test_rejects_untrusted_request_chat_template(processor: PoolingIOProcessor):
-    with pytest.raises(APHRODITEValidationError) as exc_info:
+    with pytest.raises(AphroditeValidationError) as exc_info:
         processor._validate_chat_template("template", None, False)
 
     assert str(exc_info.value) == (
@@ -31,7 +33,7 @@ def test_rejects_untrusted_request_chat_template(processor: PoolingIOProcessor):
 
 
 def test_rejects_mismatched_pooling_params(processor: PoolingIOProcessor):
-    with pytest.raises(APHRODITEValidationError) as exc_info:
+    with pytest.raises(AphroditeValidationError) as exc_info:
         processor._params_to_seq([PoolingParams()], num_requests=2)
 
     assert str(exc_info.value) == ("The lengths of prompts (2) and params (1) must be the same.")
@@ -40,7 +42,7 @@ def test_rejects_mismatched_pooling_params(processor: PoolingIOProcessor):
 
 
 def test_rejects_mismatched_lora_requests(processor: PoolingIOProcessor):
-    with pytest.raises(APHRODITEValidationError) as exc_info:
+    with pytest.raises(AphroditeValidationError) as exc_info:
         processor._lora_request_to_seq([None], num_requests=2)
 
     assert str(exc_info.value) == ("The lengths of prompts (2) and lora_request (1) must be the same.")
@@ -60,9 +62,185 @@ def test_rejects_conflicting_pooling_task(processor: PoolingIOProcessor):
         pooling_params=PoolingParams(task="classify"),
     )
 
-    with pytest.raises(APHRODITEValidationError) as exc_info:
+    with pytest.raises(AphroditeValidationError) as exc_info:
         processor.get_request_factory_offline(ctx)
 
     assert str(exc_info.value) == ("You cannot overwrite param.task='classify' with pooling_task='embed'!")
     assert exc_info.value.parameter is None
     assert exc_info.value.value is None
+
+
+def test_qwen3_reranker_warns_without_chat_template(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from aphrodite.entrypoints.pooling.scoring.io_processor import CrossEncoderIOProcessor
+
+    monkeypatch.setattr("aphrodite.model_executor.model_loader.get_model_cls", lambda *_: MagicMock())
+    monkeypatch.setattr(
+        "aphrodite.model_executor.models.interfaces.supports_score_template",
+        lambda *_: False,
+    )
+    monkeypatch.setattr(
+        "aphrodite.entrypoints.pooling.scoring.io_processor.is_mistral_tokenizer",
+        lambda *_: False,
+    )
+
+    mock_logger = MagicMock()
+    monkeypatch.setattr(
+        "aphrodite.entrypoints.pooling.scoring.io_processor.logger",
+        mock_logger,
+    )
+
+    model_config = MagicMock()
+    model_config.architecture = "Qwen3ForSequenceClassification"
+    model_config.model = "Qwen/Qwen3-Reranker-0.6B"
+    model_config.hf_config.is_original_qwen3_reranker = True
+    model_config.use_sep_token = False
+    model_config.is_multimodal_model = False
+    model_config.max_model_len = 8192
+
+    aphrodite_config = MagicMock(model_config=model_config)
+    tokenizer = MagicMock()
+    tokenizer.pad_token_id = 0
+    renderer = MagicMock()
+    renderer.get_tokenizer.return_value = tokenizer
+    chat_template_config = MagicMock(chat_template=None)
+
+    CrossEncoderIOProcessor(
+        aphrodite_config=aphrodite_config,
+        renderer=renderer,
+        chat_template_config=chat_template_config,
+    )
+
+    mock_logger.warning.assert_called_once()
+    warning_call = mock_logger.warning.call_args
+    assert "Qwen/Qwen3-Reranker-0.6B" in warning_call[0][1]
+    assert "qwen3_reranker.jinja" in warning_call[0][2]
+
+
+def test_qwen3_vl_reranker_warns_with_vl_template(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from aphrodite.entrypoints.pooling.scoring.io_processor import CrossEncoderIOProcessor
+
+    monkeypatch.setattr("aphrodite.model_executor.model_loader.get_model_cls", lambda *_: MagicMock())
+    monkeypatch.setattr(
+        "aphrodite.model_executor.models.interfaces.supports_score_template",
+        lambda *_: False,
+    )
+    monkeypatch.setattr(
+        "aphrodite.entrypoints.pooling.scoring.io_processor.is_mistral_tokenizer",
+        lambda *_: False,
+    )
+
+    mock_logger = MagicMock()
+    monkeypatch.setattr(
+        "aphrodite.entrypoints.pooling.scoring.io_processor.logger",
+        mock_logger,
+    )
+
+    model_config = MagicMock()
+    model_config.architecture = "Qwen3VLForSequenceClassification"
+    model_config.model = "Qwen/Qwen3-VL-Reranker-2B"
+    model_config.hf_config.is_original_qwen3_reranker = True
+    model_config.use_sep_token = False
+    model_config.is_multimodal_model = True
+    model_config.max_model_len = 8192
+
+    aphrodite_config = MagicMock(model_config=model_config)
+    tokenizer = MagicMock()
+    tokenizer.pad_token_id = 0
+    renderer = MagicMock()
+    renderer.get_tokenizer.return_value = tokenizer
+    chat_template_config = MagicMock(chat_template=None)
+
+    CrossEncoderIOProcessor(
+        aphrodite_config=aphrodite_config,
+        renderer=renderer,
+        chat_template_config=chat_template_config,
+    )
+
+    mock_logger.warning.assert_called_once()
+    warning_call = mock_logger.warning.call_args
+    assert "Qwen/Qwen3-VL-Reranker-2B" in warning_call[0][1]
+    assert "qwen3_vl_reranker.jinja" in warning_call[0][2]
+
+
+def test_qwen3_reranker_no_warning_when_template_provided(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from aphrodite.entrypoints.pooling.scoring.io_processor import CrossEncoderIOProcessor
+
+    monkeypatch.setattr("aphrodite.model_executor.model_loader.get_model_cls", lambda *_: MagicMock())
+    monkeypatch.setattr(
+        "aphrodite.model_executor.models.interfaces.supports_score_template",
+        lambda *_: False,
+    )
+    monkeypatch.setattr(
+        "aphrodite.entrypoints.pooling.scoring.io_processor.is_mistral_tokenizer",
+        lambda *_: False,
+    )
+
+    mock_logger = MagicMock()
+    monkeypatch.setattr(
+        "aphrodite.entrypoints.pooling.scoring.io_processor.logger",
+        mock_logger,
+    )
+
+    model_config = MagicMock()
+    model_config.architecture = "Qwen3ForSequenceClassification"
+    model_config.model = "Qwen/Qwen3-Reranker-0.6B"
+    model_config.hf_config.is_original_qwen3_reranker = True
+    model_config.use_sep_token = False
+    model_config.is_multimodal_model = False
+    model_config.max_model_len = 8192
+
+    aphrodite_config = MagicMock(model_config=model_config)
+    tokenizer = MagicMock()
+    tokenizer.pad_token_id = 0
+    renderer = MagicMock()
+    renderer.get_tokenizer.return_value = tokenizer
+    chat_template_config = MagicMock(chat_template="custom template")
+
+    CrossEncoderIOProcessor(
+        aphrodite_config=aphrodite_config,
+        renderer=renderer,
+        chat_template_config=chat_template_config,
+    )
+
+    mock_logger.warning.assert_not_called()
+
+
+def _make_score_llm(monkeypatch) -> PoolingOfflineMixin:
+    """A scoring LLM with no model behind it.
+
+    Input validation runs for real; only the rendering, engine and
+    post-processing boundaries are stubbed out. The pooling task is filled in
+    before any of them, so the mutation is observable without inference.
+    """
+    proc = CrossEncoderIOProcessor.__new__(CrossEncoderIOProcessor)
+    proc.is_multimodal_model = False
+    proc.architecture = "CrossEncoder"
+    monkeypatch.setattr(proc, "get_request_factory_offline", lambda ctx: (None, 0))
+    monkeypatch.setattr(proc, "post_process_offline", lambda ctx: [])
+
+    llm = PoolingOfflineMixin.__new__(PoolingOfflineMixin)
+    llm.runner_type = "pooling"
+    llm.pooling_task = "classify"  # SCORE_TYPE_MAP -> "cross-encoder"
+    llm.model_config = SimpleNamespace(hf_config=SimpleNamespace(num_labels=1))
+    llm.pooling_io_processors = {"cross-encoder": proc}
+    monkeypatch.setattr(llm, "_run_tiling_engine", lambda *args, **kwargs: [])
+    return llm
+
+
+def test_score_leaves_caller_pooling_params_untouched(monkeypatch):
+    llm = _make_score_llm(monkeypatch)
+
+    params = PoolingParams()
+    llm.score("query", "doc", pooling_params=params)
+
+    assert params.task is None, (
+        "LLM.score() wrote the model's own pooling task into the caller's "
+        "PoolingParams; reusing that object with another pooling model now "
+        "fails with 'You cannot overwrite ...' before any inference runs."
+    )

@@ -52,6 +52,7 @@ from aphrodite.v1.kv_offload.base import (
     make_offload_key,
 )
 from aphrodite.v1.kv_offload.config import OffloadingConfig
+from aphrodite.v1.metrics.cache_hit_source import CacheHitSource
 from aphrodite.v1.request import Request
 from aphrodite.v1.structured_output import StructuredOutputManager
 from tests.v1.kv_connector.unit.utils import (
@@ -125,7 +126,9 @@ class MockOffloadingSpec(OffloadingSpec):
         self.manager = MagicMock(spec=OffloadingManager)
         self.manager.prepare_load = lambda keys, req_context: MockLoadStoreSpec(keys)
         self.manager.lookup.return_value = LookupResult.MISS
+        self.manager.get_load_source.return_value = CacheHitSource.EXTERNAL_UNSPECIFIED
         self.manager.get_stats.return_value = None
+        self.manager.config_info.return_value = [{}]
         self.manager.on_new_request.return_value = RequestOffloadingContext()
         self.handler = MockOffloadingWorker()
 
@@ -172,6 +175,7 @@ class RequestRunner:
         extra_config_overrides: dict[str, Any] | None = None,
         worker_count: int = 1,
         retention_interval: int | None = None,
+        speculative_config: Any | None = None,
     ):
         assert blocks_per_chunk == 1 or kv_cache_groups is None, (
             "blocks_per_chunk > 1 requires all groups to have the same "
@@ -193,6 +197,8 @@ class RequestRunner:
         aphrodite_config.scheduler_config.async_scheduling = async_scheduling
         aphrodite_config.parallel_config.world_size = worker_count
         aphrodite_config.cache_config.prefix_cache_retention_interval = retention_interval
+        if speculative_config is not None:
+            aphrodite_config.speculative_config = speculative_config
 
         extra_config: dict[str, Any] = {
             "spec_name": "MockOffloadingSpec",
@@ -448,8 +454,7 @@ class RequestRunner:
         complete_transfers: bool,
         post_step_fn: Callable[[], None] | None = None,
     ):
-        """
-        Runs multiple engine (scheduler + worker) steps.
+        """Runs multiple engine (scheduler + worker) steps.
         Assumes a single request is running.
 
         Args:
@@ -457,8 +462,8 @@ class RequestRunner:
             complete_transfers: complete transfers immediately
             post_step_fn: optional callback invoked after each step's
                 update_from_output(), before the next schedule().
-        """
 
+        """
         tokens_iter = iter(decoded_tokens)
         token_id = next(tokens_iter, None)
         prev_scheduler_output = None
@@ -491,6 +496,7 @@ class RequestRunner:
             if complete_transfers:
                 self.offloading_spec.complete_transfers()
 
+            self.worker_connector.wait_for_save()
             finished_sending, finished_recving = self.worker_connector.get_finished(scheduler_output.finished_req_ids)
             worker_meta = self.worker_connector.build_connector_worker_meta() or OffloadingWorkerMetadata()
 
@@ -567,8 +573,7 @@ class RequestRunner:
         expected_flushed: tuple[int | tuple[int, int], ...] = (),
         post_step_fn: Callable[[], None] | None = None,
     ):
-        """
-        Runs multiple engine (scheduler + worker) steps.
+        """Runs multiple engine (scheduler + worker) steps.
         Assumes a single request is running.
 
         Args:
@@ -584,8 +589,8 @@ class RequestRunner:
             A GPU block is either a (group_idx: int, request_block_offset: int)
             or just request_block_offset: int.
             The latter case is a convenience for representing all groups.
-        """
 
+        """
         expected_stored_gpu_blocks = self._to_gpu_blocks(expected_stored)
         expected_loaded_gpu_blocks = self._to_gpu_blocks(expected_loaded)
         expected_flushed_gpu_blocks = self._to_gpu_blocks(expected_flushed)
@@ -628,6 +633,7 @@ def request_runner():
         extra_config_overrides=None,
         worker_count=1,
         retention_interval=None,
+        speculative_config=None,
     ):
         runner = RequestRunner(
             block_size=block_size,
@@ -638,6 +644,7 @@ def request_runner():
             extra_config_overrides=extra_config_overrides,
             worker_count=worker_count,
             retention_interval=retention_interval,
+            speculative_config=speculative_config,
         )
         runners.append(runner)
         return runner

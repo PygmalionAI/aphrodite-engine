@@ -10,7 +10,6 @@ from partial_json_parser.core.options import Allow
 from transformers import PreTrainedTokenizerBase
 
 import aphrodite.envs as envs
-from aphrodite.entrypoints.chat_utils import make_tool_call_id
 from aphrodite.entrypoints.generate.base.protocol import (
     DeltaFunctionCall,
     DeltaMessage,
@@ -23,6 +22,7 @@ from aphrodite.entrypoints.openai.chat_completion.protocol import (
     ChatCompletionRequest,
 )
 from aphrodite.logger import init_logger
+from aphrodite.renderers.chat_utils import make_tool_call_id
 from aphrodite.tool_parsers.abstract_tool_parser import (
     Tool,
     ToolParser,
@@ -37,8 +37,7 @@ logger = init_logger(__name__)
 
 
 class Llama3JsonToolParser(ToolParser):
-    """
-    Tool call parser for Llama 3.x and 4 models intended for use with the
+    """Tool call parser for Llama 3.x and 4 models intended for use with the
     examples/tool_chat_template_llama.jinja template.
 
     Used when --enable-auto-tool-choice --tool-call-parser llama3_json or
@@ -72,8 +71,7 @@ class Llama3JsonToolParser(ToolParser):
             )
 
     def extract_tool_calls(self, model_output: str, request: ChatCompletionRequest) -> ExtractedToolCallInformation:
-        """
-        Extract the tool calls from a complete model response.
+        """Extract the tool calls from a complete model response.
         Only extracts JSON content and ignores any surrounding plain text.
         Supports both single JSON and multiple JSONs separated by semicolons.
         """

@@ -2,12 +2,13 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from functools import partial
 from typing import Any, Literal
 
 import aphrodite.envs as envs
 from aphrodite.config import AphroditeConfig
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.inputs import (
     EngineInput,
     PromptType,
@@ -24,13 +25,15 @@ from aphrodite.platforms import current_platform
 from aphrodite.pooling_params import PoolingParams
 from aphrodite.renderers import BaseRenderer, renderer_from_config
 from aphrodite.renderers.inputs.preprocess import parse_model_prompt
-from aphrodite.sampling_params import SamplingParams
+from aphrodite.sampling_params import BeamSearchParams, SamplingParams
 from aphrodite.tasks import GENERATION_TASKS, POOLING_TASKS, SupportedTask
 from aphrodite.tokenizers import TokenizerLike
 from aphrodite.utils import length_from_prompt_token_ids_or_embeds, random_uuid
 from aphrodite.utils.async_utils import make_async
+from aphrodite.utils.diffusion import validate_diffusion_sampling_params
 from aphrodite.utils.jsontree import json_iter_leaves
 from aphrodite.v1.engine import EngineCoreRequest
+from aphrodite.v1.kv_hints import KvHintsEnvelope
 
 logger = init_logger(__name__)
 
@@ -51,12 +54,16 @@ class InputProcessor:
         self.speculative_config = aphrodite_config.speculative_config
         self.structured_outputs_config = aphrodite_config.structured_outputs_config
         self.observability_config = aphrodite_config.observability_config
+        self.diffusion_config = aphrodite_config.diffusion_config
+        # Load the custom logits processor classes once; the returned callable
+        # runs their validate_params hooks per request at admission.
+        self.validate_logits_processors_params = self._build_logits_processors_params_validator()
 
         self.generation_config_fields = model_config.try_get_generation_config()
 
         self.renderer = renderer or renderer_from_config(aphrodite_config)
 
-        self.supports_mm_inputs = mm_registry.supports_multimodal_inputs(model_config)
+        self.supports_mm_inputs = model_config.supports_multimodal_inputs
         self.mm_encoder_cache_size = 0
         self.skip_prompt_length_check = False
         if self.supports_mm_inputs:
@@ -77,12 +84,61 @@ class InputProcessor:
     def get_tokenizer(self) -> TokenizerLike:
         return self.renderer.get_tokenizer()
 
+    def _build_logits_processors_params_validator(
+        self,
+    ) -> Callable[[SamplingParams], None]:
+        """Load the custom logits processor classes and return the per-request
+        params validator for the active model runner."""
+        custom_logitsprocs = self.model_config.logits_processors
+        if self.aphrodite_config.use_v2_model_runner:
+            if self.model_config.runner_type == "pooling" and not custom_logitsprocs:
+                return lambda _: None
+
+            from aphrodite.v1.worker.gpu.sample.logits_processor import (
+                build_custom_logits_processors_params_validator,
+            )
+
+            return build_custom_logits_processors_params_validator(custom_logitsprocs)
+
+        from aphrodite.v1.sample.logits_processor import (
+            validate_logits_processors_parameters,
+        )
+
+        return partial(validate_logits_processors_parameters, custom_logitsprocs)
+
+    def resolve_watermarking(self, params: SamplingParams | BeamSearchParams) -> bool:
+        """Return whether watermarking will be applied to this request.
+
+        ``None`` and ``True`` request watermarking, while ``False`` opts out.
+        If watermarking is unavailable or incompatible with the request, emit
+        a warning and return ``False``.
+        """
+        return self.aphrodite_config._check_supports_watermarking(params)
+
+    def apply_watermarking(self, params: SamplingParams, watermarking: bool) -> None:
+        """Store the resolved `watermarking` on request-local params.
+
+        Also records whether watermarking was requested on a watermarking
+        engine but could not be applied, as opposed to an explicit opt-out.
+        """
+        # Sticky, so resolving an already resolved request keeps the flag.
+        params._watermarking_skipped = params._watermarking_skipped or (
+            self.aphrodite_config.watermark_config is not None and params.watermarking is not False and not watermarking
+        )
+        params.watermarking = watermarking
+
     def _validate_params(
         self,
         params: SamplingParams | PoolingParams,
         supported_tasks: tuple[SupportedTask, ...],
-    ) -> None:
-        """Raise `ValueError` if SamplingParams or PoolingParams is not valid."""
+    ) -> bool | None:
+        """Raise `ValueError` if SamplingParams or PoolingParams is not valid.
+
+        Returns the resolved `watermarking` value for `SamplingParams` (`None`
+        for `PoolingParams`). The caller applies it to its private copy of the
+        params so that a caller-owned params object is never mutated.
+        """
+        watermarking: bool | None = None
         if isinstance(params, SamplingParams):
             if "banned_strings" in (params.extra_args or {}) or "_sonar_phrase_retry" in (params.extra_args or {}):
                 from aphrodite.v1.phrase_guard.processor import PhraseRetryProcessor
@@ -94,7 +150,7 @@ class InputProcessor:
                 PhraseRetryProcessor.validate_runtime(self.aphrodite_config, self.tokenizer)
             supported_generation_tasks = [task for task in supported_tasks if task in GENERATION_TASKS]
             if not supported_generation_tasks:
-                raise APHRODITEValidationError("This model does not support generation")
+                raise AphroditeValidationError("This model does not support generation")
 
             params.verify(
                 self.model_config,
@@ -102,6 +158,28 @@ class InputProcessor:
                 self.structured_outputs_config,
                 self.tokenizer,
             )
+            if params.prompt_logprob_token_ids is not None:
+                if not self.aphrodite_config.use_v2_model_runner:
+                    raise AphroditeValidationError(
+                        "prompt_logprob_token_ids requires the V2 model runner (APHRODITE_USE_V2_MODEL_RUNNER=1).",
+                        parameter="prompt_logprob_token_ids",
+                    )
+                if self.aphrodite_config.cache_config.kv_sharing_fast_prefill:
+                    raise AphroditeValidationError(
+                        "prompt_logprob_token_ids is incorrect with --kv-sharing-fast-prefill; disable it for scoring.",
+                        parameter="prompt_logprob_token_ids",
+                    )
+
+            self.validate_logits_processors_params(params)
+
+            if self.model_config.is_diffusion:
+                # Without --diffusion-config the served canvas is unknown here;
+                # the ids and the read-only normalisation are still checked.
+                validate_diffusion_sampling_params(
+                    params,
+                    canvas_length=(self.diffusion_config.canvas_length if self.diffusion_config is not None else None),
+                    vocab_size=self.model_config.get_vocab_size(),
+                )
 
             if self.model_config.return_sampling_mask:
                 if params.temperature <= 0:
@@ -115,21 +193,24 @@ class InputProcessor:
             if params.thinking_token_budget is not None and (
                 self.aphrodite_config.reasoning_config is None or not self.aphrodite_config.reasoning_config.enabled
             ):
-                raise APHRODITEValidationError(
+                raise AphroditeValidationError(
                     "thinking_token_budget is set but reasoning_config is "
                     "not configured. Please set --reasoning-parser "
                     "and/or --reasoning-config to use thinking_token_budget."
                 )
             if params.trace_decode_token_ids and not self.model_config.enable_trace_replay:
-                raise APHRODITEValidationError(
+                raise AphroditeValidationError(
                     "trace_decode_token_ids is set but trace replay is not "
                     "enabled. Start the engine with --enable-trace-replay "
                     "to use it."
                 )
+            # Resolved last so that feature gates above report the missing
+            # feature rather than its incompatibility with watermarking.
+            watermarking = self.resolve_watermarking(params)
         elif isinstance(params, PoolingParams):
             supported_pooling_tasks = [task for task in supported_tasks if task in POOLING_TASKS]
             if not supported_pooling_tasks:
-                raise APHRODITEValidationError("This model does not support pooling")
+                raise AphroditeValidationError("This model does not support pooling")
 
             if params.task is None:
                 if "token_embed" in supported_pooling_tasks:
@@ -140,13 +221,15 @@ class InputProcessor:
                     params.task = "plugin"
 
             if params.task not in supported_pooling_tasks:
-                raise APHRODITEValidationError(
+                raise AphroditeValidationError(
                     f"Unsupported task: {params.task!r} Supported tasks: {supported_pooling_tasks}"
                 )
 
             params.verify(self.model_config)
         else:
             raise TypeError(f"params must be either SamplingParams or PoolingParams, but got {type(params).__name__}")
+
+        return watermarking
 
     def _normalize_trace_replay_params(self, sampling_params: SamplingParams, prompt_len: int) -> None:
         """Apply trace replay's generation semantics to request-local params."""
@@ -174,7 +257,7 @@ class InputProcessor:
 
         # LoRA request passed in while LoRA is not enabled
         if not self.lora_config:
-            raise APHRODITEValidationError(f"Got lora_request {lora_request} but LoRA is not enabled!")
+            raise AphroditeValidationError(f"Got lora_request {lora_request} but LoRA is not enabled!")
 
         if self.tokenizer is not None:
             logger.warning_once(
@@ -190,8 +273,7 @@ class InputProcessor:
         mm_hash: str,
         lora_request: LoRARequest | None,
     ) -> str:
-        """
-        When enable_tower_connector_lora is True, multi-modal embeddings
+        """When enable_tower_connector_lora is True, multi-modal embeddings
         vary depending on the LoRA request. Therefore, the mm_hash must be
         generated based on the LoRA request to prevent incorrect cache hits.
         """
@@ -272,8 +354,9 @@ class InputProcessor:
         data_parallel_rank: int | None = None,
         resumable: bool = False,
         session_id: str | None = None,
+        kv_hints: KvHintsEnvelope | None = None,
     ) -> EngineCoreRequest:
-        self._validate_params(params, supported_tasks)
+        watermarking = self._validate_params(params, supported_tasks)
         self._validate_lora(lora_request)
 
         parallel_config = self.aphrodite_config.parallel_config
@@ -281,7 +364,7 @@ class InputProcessor:
         dp_local_size = parallel_config.data_parallel_size_local
         num_ranks = dp_local_size if parallel_config.local_engines_only else dp_size
         if data_parallel_rank is not None and not (0 <= data_parallel_rank < num_ranks):
-            raise APHRODITEValidationError(f"data_parallel_rank {data_parallel_rank} is out of range [0, {num_ranks}).")
+            raise AphroditeValidationError(f"data_parallel_rank {data_parallel_rank} is out of range [0, {num_ranks}).")
 
         if isinstance(prompt, dict) and "type" in prompt:
             if arrival_time is None:
@@ -329,10 +412,39 @@ class InputProcessor:
         if isinstance(params, SamplingParams):
             # TODO: can we avoid cloning here in multiproc case?
             sampling_params = params.clone()
+            # Resolve on the request-local copy: `params` may be shared across
+            # prompts, requests and even engines by the caller.
+            assert watermarking is not None
+            self.apply_watermarking(sampling_params, watermarking)
+            prompt_len = length_from_prompt_token_ids_or_embeds(prompt_token_ids, prompt_embeds)
+            if not 0 <= sampling_params.routed_experts_prompt_start <= prompt_len:
+                raise AphroditeValidationError(
+                    f"routed_experts_prompt_start must be between 0 and the prompt length ({prompt_len}), inclusive.",
+                    parameter="routed_experts_prompt_start",
+                    value=sampling_params.routed_experts_prompt_start,
+                )
+            rows = sampling_params.prompt_logprob_token_ids
+            if rows is not None:
+                start = sampling_params.prompt_logprob_start or 0
+                num_rows = max(prompt_len - 1 - start, 0)
+                if len(rows) != num_rows:
+                    raise AphroditeValidationError(
+                        f"prompt_logprob_token_ids has {len(rows)} rows, but the "
+                        f"prompt has {num_rows} scored rows "
+                        f"(prompt_len - 1 - prompt_logprob_start).",
+                        parameter="prompt_logprob_token_ids",
+                        value=len(rows),
+                    )
             # If unset max tokens, then generate up to the max_model_len.
             if sampling_params.max_tokens is None:
-                seq_len = length_from_prompt_token_ids_or_embeds(prompt_token_ids, prompt_embeds)
-                sampling_params.max_tokens = self.model_config.max_model_len - seq_len
+                sampling_params.max_tokens = self.model_config.max_model_len - prompt_len
+                # min_tokens is not checked while max_tokens is unset.
+                if sampling_params.min_tokens > sampling_params.max_tokens:
+                    raise AphroditeValidationError(
+                        f"min_tokens must be less than or equal to "
+                        f"max_tokens={sampling_params.max_tokens}, got "
+                        f"{sampling_params.min_tokens}."
+                    )
 
             sampling_params.update_from_generation_config(
                 self.generation_config_fields,
@@ -341,10 +453,7 @@ class InputProcessor:
             if self.tokenizer is not None:
                 sampling_params.update_from_tokenizer(self.tokenizer)
             if sampling_params.trace_decode_token_ids:
-                self._normalize_trace_replay_params(
-                    sampling_params,
-                    length_from_prompt_token_ids_or_embeds(prompt_token_ids, prompt_embeds),
-                )
+                self._normalize_trace_replay_params(sampling_params, prompt_len)
         else:
             pooling_params = params.clone()
 
@@ -407,6 +516,7 @@ class InputProcessor:
             trace_headers=trace_headers,
             resumable=resumable,
             session_id=session_id,
+            kv_hints=kv_hints,
         )
 
     def _validate_prompt_len(
@@ -418,7 +528,7 @@ class InputProcessor:
             return
 
         if prompt_len == 0 and prompt_type == "decoder":
-            raise APHRODITEValidationError(f"The {prompt_type} prompt cannot be empty")
+            raise AphroditeValidationError(f"The {prompt_type} prompt cannot be empty")
 
         model_config = self.model_config
         max_prompt_len = model_config.max_model_len if prompt_type == "decoder" else self.mm_encoder_cache_size
@@ -433,7 +543,7 @@ class InputProcessor:
             else:
                 suggestion = "Make sure that `max_model_len` is no smaller than the number of text tokens."
 
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 f"The {prompt_type} prompt (length {prompt_len}) is "
                 f"longer than the maximum model length of {max_prompt_len}. "
                 f"{suggestion}"
@@ -443,7 +553,7 @@ class InputProcessor:
                 "Make sure that `max_model_len` is no smaller than the "
                 "number of text tokens (prompt + requested output tokens)."
             )
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 f"The {prompt_type} prompt (length {prompt_len}) plus the number of "
                 f"requested output tokens (at least 1) is longer than the maximum "
                 f"model length of {max_prompt_len}. {suggestion}"
@@ -454,14 +564,20 @@ class InputProcessor:
         prompt_input: SingletonInput,
         prompt_type: Literal["encoder", "decoder"],
     ) -> None:
-        model_config = self.model_config
-        tokenizer = self.tokenizer
-
         prompt_ids = None if prompt_input["type"] == "embeds" else prompt_input["prompt_token_ids"]
         prompt_embeds = prompt_input["prompt_embeds"] if prompt_input["type"] == "embeds" else None
 
         prompt_len = length_from_prompt_token_ids_or_embeds(prompt_ids, prompt_embeds)
         self._validate_prompt_len(prompt_len, prompt_type)
+
+        if prompt_input["type"] == "embeds":
+            is_token_ids = prompt_input.get("is_token_ids")
+            if is_token_ids is not None and len(is_token_ids) != prompt_len:
+                raise AphroditeValidationError(
+                    "prompt_is_token_ids must have the same length as prompt_embeds "
+                    f"(expected {prompt_len}, got {len(is_token_ids)}).",
+                    parameter="prompt_is_token_ids",
+                )
 
         if prompt_input["type"] == "multimodal":
             decoder_mm_positions = prompt_input["mm_placeholders"]
@@ -469,7 +585,7 @@ class InputProcessor:
                 for mm_position in mm_positions:
                     num_embeds = mm_position.get_num_embeds()
                     if num_embeds > self.mm_encoder_cache_size:
-                        raise APHRODITEValidationError(
+                        raise AphroditeValidationError(
                             f"The {prompt_type} prompt contains a(n) {modality} item "
                             f"with {num_embeds} embedding tokens, which exceeds the "
                             f"pre-allocated encoder cache size "
@@ -478,30 +594,9 @@ class InputProcessor:
                             f"by setting --limit-mm-per-prompt at startup."
                         )
 
-        if prompt_ids and tokenizer is not None:
-            max_input_id = max(prompt_ids, default=0)
-            min_input_id = min(prompt_ids, default=0)
-
-            # NOTE: tokenizer.max_token_id is the tokenizer’s vocab size while
-            # self.model_config.get_vocab_size() is the model’s vocab size.
-            # For Qwen3 models, the language model has extra tokens that do
-            # not exist in the tokenizer, and vice versa for multimodal
-            # placeholder tokens in some multimodal models.
-            # See https://github.com/QwenLM/Qwen3/issues/29#issuecomment-1933720399 # noqa: E501
-            # and https://github.com/vllm-project/vllm/pull/22471#discussion_r2312251421 # noqa: E501
-
-            # Here we take the max of the two to determine if a token id is
-            # truly out-of-vocabulary.
-            model_vocab_size = model_config.get_vocab_size()
-            # A negative id is out of vocabulary just like an over-large one,
-            # but is not caught by the upper-bound check below. Reject it here
-            # so it is not used as an embedding index downstream. This
-            # validation path is shared by generate, embedding and pooling
-            # requests, so the check covers all three.
-            if min_input_id < 0:
-                raise APHRODITEValidationError(f"Token id {min_input_id} is out of vocabulary")
-            if max_input_id > max(tokenizer.max_token_id, model_vocab_size - 1):
-                raise APHRODITEValidationError(f"Token id {max_input_id} is out of vocabulary")
+        # Shared by generate, embedding and pooling requests.
+        if prompt_ids:
+            self.renderer.validate_token_ids(prompt_ids)
 
     def _validate_model_inputs(
         self,

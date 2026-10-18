@@ -26,6 +26,7 @@ class AphroditeValidationError(AphroditeClientError):
         message: The error message describing the validation failure.
         parameter: Optional parameter name that failed validation.
         value: Optional value that was rejected during validation.
+
     """
 
     def __init__(
@@ -50,7 +51,13 @@ class AphroditeValidationError(AphroditeClientError):
 
 
 class AphroditeNotFoundError(AphroditeClientError):
-    """Aphrodite-specific NotFoundError"""
+    """Aphrodite-specific NotFoundError."""
+
+    pass
+
+
+class ChatTemplateResolutionError(AphroditeClientError):
+    """Raised when chat template resolution fails."""
 
     pass
 
@@ -63,6 +70,7 @@ class LoRAAdapterNotFoundError(AphroditeNotFoundError):
 
     Attributes:
         message: The error message string describing the exception
+
     """
 
     message: str
@@ -86,6 +94,7 @@ class AphroditeUnprocessableEntityError(AphroditeClientError):
         message: The error message describing the unprocessable entity.
         parameter: Optional parameter name that failed validation.
         value: Optional value that was rejected during validation.
+
     """
 
     def __init__(
@@ -109,16 +118,7 @@ class AphroditeUnprocessableEntityError(AphroditeClientError):
         return f"{base} ({', '.join(extras)})" if extras else base
 
 
-# Backward compatibility with older upstream-derived imports.
-APHRODITEError = AphroditeError
-APHRODITEClientError = AphroditeClientError
-APHRODITEServerError = AphroditeServerError
-APHRODITEValidationError = AphroditeValidationError
-APHRODITENotFoundError = AphroditeNotFoundError
-APHRODITEUnprocessableEntityError = AphroditeUnprocessableEntityError
-
-
-class GenerationError(APHRODITEServerError):
+class GenerationError(AphroditeServerError):
     """raised when finish_reason indicates internal server error (500)"""
 
     def __init__(self, message: str = "Internal server error"):
@@ -126,7 +126,15 @@ class GenerationError(APHRODITEServerError):
         self.status_code = HTTPStatus.INTERNAL_SERVER_ERROR
 
 
-class GracefulHTTPError(APHRODITEError):
+class RetryableRequestError(GenerationError):
+    """A transient request-level failure that is safe for clients to retry."""
+
+    def __init__(self, message: str = "Request failed; please retry"):
+        super().__init__(message)
+        self.status_code = HTTPStatus.SERVICE_UNAVAILABLE
+
+
+class GracefulHTTPError(AphroditeError):
     """Exception that should be translated into an HTTP error response.
 
     These are expected to occur during normal operation (e.g. admission
@@ -168,4 +176,14 @@ class MaxQueuedTokensError(GracefulHTTPError):
             "The engine has reached its prefill token backlog limit. "
             "Please try again later or on a different instance.",
             HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+
+
+class ProfilerAlreadyActiveError(GracefulHTTPError):
+    """Raised when a profiling session is already active."""
+
+    def __init__(self):
+        super().__init__(
+            "A profiling session is already active. Call /stop_profile before starting another session.",
+            HTTPStatus.CONFLICT,
         )

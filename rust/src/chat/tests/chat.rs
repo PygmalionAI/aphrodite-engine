@@ -6,8 +6,6 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::StreamExt as _;
-use tokio::time::timeout;
 use aphrodite_chat::{
     AssistantBlockKind, AssistantContentBlock, AssistantMessageExt as _, ChatBackend, ChatEvent,
     ChatLlm, ChatMessage, ChatRenderer, ChatRequest, ChatRole, ChatTextBackend, ChatTool,
@@ -18,7 +16,9 @@ use aphrodite_chat::{
 use aphrodite_engine_core_client::protocol::logprobs::{
     Logprobs, MaybeWireLogprobs, PositionLogprobs, TokenLogprob,
 };
-use aphrodite_engine_core_client::protocol::output::{EngineCoreFinishReason, EngineCoreOutput, EngineCoreOutputs, RequestBatchOutputs, StopReason};
+use aphrodite_engine_core_client::protocol::output::{
+    EngineCoreFinishReason, EngineCoreOutput, EngineCoreOutputs, RequestBatchOutputs, StopReason,
+};
 use aphrodite_engine_core_client::protocol::request::EngineCoreRequest;
 use aphrodite_engine_core_client::test_utils::{IpcNamespace, spawn_mock_engine_task};
 use aphrodite_engine_core_client::{EngineCoreClient, EngineCoreClientConfig};
@@ -29,6 +29,8 @@ use aphrodite_text::{
     TextBackend,
 };
 use aphrodite_tokenizer::test_utils::TestTokenizer;
+use futures::StreamExt as _;
+use tokio::time::timeout;
 use zeromq::prelude::{SocketRecv, SocketSend};
 use zeromq::{DealerSocket, PushSocket, ZmqMessage};
 
@@ -225,6 +227,7 @@ impl ChatBackend for FakeChatBackend {
             self.tokenizer(),
             options.tool_call_parser,
             options.reasoning_parser,
+            options.tool_strict_level,
         )?))
     }
 }
@@ -248,6 +251,7 @@ impl ChatRenderer for FakeChatBackend {
 
         Ok(RenderedPrompt {
             prompt: Prompt::Text(prompt),
+            media_order: None,
             effective_template_kwargs: request.chat_options.template_kwargs.clone(),
         })
     }
@@ -293,6 +297,7 @@ fn sample_tool_request(request_id: &str) -> ChatRequest {
             "required": ["city"],
         }),
         strict: None,
+        defer_loading: None,
     }];
     request.tool_context = aphrodite_chat::ResolvedToolContext::new(
         &request.messages,
@@ -1321,7 +1326,7 @@ async fn chat_stream_and_collect_preserve_prompt_and_sample_logprobs() {
                             finished_requests: Some(BTreeSet::from([request.request_id])),
                             ..Default::default()
                         }
-                    .into(),
+                        .into(),
                     )
                     .await;
                 }

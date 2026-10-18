@@ -2,15 +2,18 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import asyncio
+import threading
 import time
 from contextlib import ExitStack
-from unittest.mock import MagicMock
+from http import HTTPStatus
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
+import aphrodite.v1.engine.async_llm as async_llm_module
 from aphrodite import SamplingParams
 from aphrodite.assets.image import ImageAsset
-from aphrodite.config import AphroditeConfig
+from aphrodite.config import AphroditeConfig, LoggingConfig, ProfilerConfig
 from aphrodite.engine.arg_utils import AsyncEngineArgs
 from aphrodite.entrypoints.openai.chat_completion.protocol import (
     ChatCompletionRequest,
@@ -19,9 +22,11 @@ from aphrodite.entrypoints.openai.chat_completion.protocol import (
 from aphrodite.entrypoints.openai.chat_completion.serving import OpenAIServingChat
 from aphrodite.entrypoints.openai.models.protocol import BaseModelPath
 from aphrodite.entrypoints.openai.models.serving import OpenAIServingModels
+from aphrodite.exceptions import ProfilerAlreadyActiveError
 from aphrodite.inputs import PromptType
 from aphrodite.outputs import RequestOutput
 from aphrodite.platforms import current_platform
+from aphrodite.profiler.wrapper import WorkerProfiler
 from aphrodite.sampling_params import RequestOutputKind
 from aphrodite.utils.torch_utils import set_default_torch_num_threads
 from aphrodite.v1.engine.async_llm import AsyncLLM
@@ -54,6 +59,333 @@ VISION_PROMPT = {
     "prompt": VISION_PROMPT_TEMPLATE,
     "multi_modal_data": {"image": ImageAsset("stop_sign").pil_image},
 }
+
+
+def _mock_async_llm_dependencies(monkeypatch: pytest.MonkeyPatch):
+    renderer = MagicMock()
+    engine_core = MagicMock()
+    engine_core.profile_async = AsyncMock()
+    monkeypatch.setattr(async_llm_module, "maybe_register_config_serialize_by_value", MagicMock())
+    monkeypatch.setattr(
+        async_llm_module,
+        "load_stat_logger_plugin_factories",
+        MagicMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        async_llm_module,
+        "renderer_from_config",
+        MagicMock(return_value=renderer),
+    )
+    monkeypatch.setattr(async_llm_module, "InputProcessor", MagicMock())
+    monkeypatch.setattr(async_llm_module, "OutputProcessor", MagicMock())
+    monkeypatch.setattr(
+        async_llm_module.EngineCoreClient,
+        "make_async_mp_client",
+        MagicMock(return_value=engine_core),
+    )
+    return engine_core
+
+
+def _mock_aphrodite_config() -> MagicMock:
+    aphrodite_config = MagicMock()
+    aphrodite_config.logging_config = LoggingConfig()
+    aphrodite_config.observability_config.otlp_traces_endpoint = None
+    aphrodite_config.scheduler_config.stream_interval = 1
+    return aphrodite_config
+
+
+def test_cuda_profiler_requests_reach_engine_core(monkeypatch: pytest.MonkeyPatch):
+    aphrodite_config = _mock_aphrodite_config()
+    aphrodite_config.profiler_config.profiler = "cuda"
+    aphrodite_config.profiler_config.ignore_frontend = False
+    aphrodite_config.profiler_config.should_profile_frontend = False
+    engine_core = _mock_async_llm_dependencies(monkeypatch)
+
+    engine = AsyncLLM(aphrodite_config, MagicMock(), log_stats=False)
+
+    async def profile():
+        await engine.start_profile()
+        await engine.stop_profile()
+
+    asyncio.run(profile())
+
+    assert engine.profiler is None
+    engine_core.profile_async.assert_has_awaits([call(True, None, None, None), call(False)])
+
+
+def test_cuda_only_torch_profiler_skips_frontend_cpu_trace(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    aphrodite_config = _mock_aphrodite_config()
+    aphrodite_config.profiler_config.profiler = "torch"
+    aphrodite_config.profiler_config.ignore_frontend = False
+    aphrodite_config.profiler_config.torch_profiler_activities = ["CUDA"]
+    aphrodite_config.profiler_config.should_profile_frontend = False
+    _mock_async_llm_dependencies(monkeypatch)
+    profiler = MagicMock()
+    monkeypatch.setattr(async_llm_module, "create_frontend_profiler", profiler)
+
+    engine = AsyncLLM(aphrodite_config, MagicMock(), log_stats=False)
+
+    assert engine.profiler is None
+    profiler.assert_not_called()
+
+
+def test_profile_forwards_overrides_rejects_duplicate_and_allows_restart(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    aphrodite_config = _mock_aphrodite_config()
+    aphrodite_config.profiler_config.should_profile_frontend = False
+    engine_core = _mock_async_llm_dependencies(monkeypatch)
+
+    engine = AsyncLLM(aphrodite_config, MagicMock(), log_stats=False)
+
+    async def profile():
+        for kwargs in (
+            {"profile_prefix": "../trace"},
+            {"delay_iterations": -1},
+            {"max_iterations": -1},
+        ):
+            with pytest.raises(ValueError):
+                await engine.start_profile(**kwargs)
+        await engine.start_profile(
+            "session",
+            delay_iterations=5,
+            max_iterations=2,
+        )
+        with pytest.raises(ProfilerAlreadyActiveError) as exc_info:
+            await engine.start_profile("duplicate")
+        assert exc_info.value.http_status == HTTPStatus.CONFLICT
+        await engine.stop_profile()
+        await engine.start_profile("next-session")
+        await engine.stop_profile()
+
+    asyncio.run(profile())
+
+    engine_core.profile_async.assert_has_awaits(
+        [
+            call(True, "session", 5, 2),
+            call(False),
+            call(True, "next-session", None, None),
+            call(False),
+        ]
+    )
+
+
+def test_stop_profile_waits_for_inflight_start(monkeypatch: pytest.MonkeyPatch):
+    aphrodite_config = _mock_aphrodite_config()
+    engine_core = _mock_async_llm_dependencies(monkeypatch)
+    events: list[str] = []
+    frontend_profiler = MagicMock()
+    frontend_profiler.start.side_effect = lambda: events.append("frontend_start")
+    frontend_profiler.stop.side_effect = lambda: events.append("frontend_stop")
+
+    engine = AsyncLLM(
+        aphrodite_config,
+        MagicMock(),
+        log_stats=False,
+        profiler=frontend_profiler,
+    )
+
+    async def profile():
+        start_rpc_entered = asyncio.Event()
+        release_start_rpc = asyncio.Event()
+
+        async def profile_async(is_start, *args):
+            if is_start:
+                start_rpc_entered.set()
+                await release_start_rpc.wait()
+                events.append("engine_start_done")
+            else:
+                events.append("engine_stop")
+
+        engine_core.profile_async.side_effect = profile_async
+
+        start_task = asyncio.create_task(engine.start_profile())
+        await start_rpc_entered.wait()
+
+        stop_task = asyncio.create_task(engine.stop_profile())
+        await asyncio.sleep(0)
+        release_start_rpc.set()
+        await asyncio.wait_for(asyncio.gather(start_task, stop_task), timeout=5)
+
+    asyncio.run(profile())
+
+    assert events[:2] == ["engine_start_done", "frontend_start"]
+    assert sorted(events[2:]) == ["engine_stop", "frontend_stop"]
+    assert engine._profile_session_active is False
+
+
+@pytest.mark.parametrize("failure", ["error", "cancel"])
+def test_interrupted_engine_profile_start_skips_frontend_profiler(monkeypatch: pytest.MonkeyPatch, failure: str):
+    """The frontend trace starts only after the engine start succeeds. A
+    cancelled start may still reach the engine, so it keeps the session active
+    until /stop_profile."""
+    aphrodite_config = _mock_aphrodite_config()
+    engine_core = _mock_async_llm_dependencies(monkeypatch)
+    frontend_profiler = MagicMock()
+    engine = AsyncLLM(
+        aphrodite_config,
+        MagicMock(),
+        log_stats=False,
+        profiler=frontend_profiler,
+    )
+
+    async def profile():
+        start_rpc_entered = asyncio.Event()
+
+        async def profile_async(is_start, *args):
+            if not is_start:
+                return
+            start_rpc_entered.set()
+            if failure == "error":
+                raise RuntimeError("engine profiler failed to start")
+            await asyncio.Event().wait()
+
+        engine_core.profile_async.side_effect = profile_async
+
+        start_task = asyncio.create_task(engine.start_profile())
+        await start_rpc_entered.wait()
+        if failure == "cancel":
+            start_task.cancel()
+        expected = RuntimeError if failure == "error" else asyncio.CancelledError
+        with pytest.raises(expected):
+            await start_task
+
+        assert engine._profile_session_active is (failure == "cancel")
+        await engine.stop_profile()
+        assert engine._profile_session_active is False
+
+    asyncio.run(profile())
+
+    frontend_profiler.start.assert_not_called()
+
+
+class _BlockingStartProfiler(WorkerProfiler):
+    def __init__(self) -> None:
+        self.in_start = threading.Event()
+        self.release_start = threading.Event()
+        self.stop_call_count = 0
+        super().__init__(ProfilerConfig(profiler="torch", torch_profiler_dir="/tmp/mock"))
+
+    def _start(self) -> None:
+        self.in_start.set()
+        if not self.release_start.wait(timeout=5):
+            raise TimeoutError("start was never released")
+
+    def _stop(self) -> None:
+        self.stop_call_count += 1
+
+
+def test_stop_after_cancelled_frontend_start_stops_frontend_profiler(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Cancelling start_profile while the frontend profiler is starting keeps
+    the session active, and the next stop_profile still stops the backend."""
+    aphrodite_config = _mock_aphrodite_config()
+    engine_core = _mock_async_llm_dependencies(monkeypatch)
+    frontend_profiler = _BlockingStartProfiler()
+    engine = AsyncLLM(
+        aphrodite_config,
+        MagicMock(),
+        log_stats=False,
+        profiler=frontend_profiler,
+    )
+
+    async def profile():
+        try:
+            start_task = asyncio.create_task(engine.start_profile())
+            assert await asyncio.to_thread(frontend_profiler.in_start.wait, 5)
+            start_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await start_task
+            assert engine._profile_session_active is True
+
+            stop_task = asyncio.create_task(engine.stop_profile())
+            done, _ = await asyncio.wait({stop_task}, timeout=0.1)
+            assert not done, "stop_profile did not wait for the in-flight start"
+            frontend_profiler.release_start.set()
+            await asyncio.wait_for(stop_task, timeout=5)
+        finally:
+            frontend_profiler.release_start.set()
+
+    asyncio.run(profile())
+
+    assert frontend_profiler.stop_call_count == 1
+    assert frontend_profiler._active is False
+    assert frontend_profiler._running is False
+    assert engine._profile_session_active is False
+    assert engine_core.profile_async.await_args_list == [
+        call(True, None, None, None),
+        call(False),
+    ]
+
+
+def test_multi_client_profile_uses_idempotent_engine_requests(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    aphrodite_config = _mock_aphrodite_config()
+    aphrodite_config.profiler_config = ProfilerConfig(
+        profiler="torch",
+        torch_profiler_dir=str(tmp_path),
+        torch_profiler_activities=["CPU"],
+    )
+    engine_core = _mock_async_llm_dependencies(monkeypatch)
+    profiler = MagicMock()
+    monkeypatch.setattr(async_llm_module, "create_frontend_profiler", profiler)
+    engines = [
+        AsyncLLM(
+            aphrodite_config,
+            MagicMock(),
+            log_stats=False,
+            client_count=2,
+            client_index=client_index,
+        )
+        for client_index in range(2)
+    ]
+
+    assert all(engine.profiler is None for engine in engines)
+    profiler.assert_not_called()
+
+    async def profile():
+        await engines[0].start_profile()
+        await engines[1].start_profile()
+        await engines[1].stop_profile()
+        await engines[0].start_profile()
+
+    asyncio.run(profile())
+
+    engine_core.profile_async.assert_has_awaits(
+        [
+            call(True, None, None, None),
+            call(True, None, None, None),
+            call(False),
+            call(True, None, None, None),
+        ]
+    )
+
+
+def test_frontend_profiler_ignores_worker_iteration_bounds(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    aphrodite_config = _mock_aphrodite_config()
+    aphrodite_config.profiler_config = ProfilerConfig(
+        profiler="torch",
+        torch_profiler_dir=str(tmp_path),
+        torch_profiler_activities=["CPU", "CUDA"],
+        delay_iterations=5,
+        max_iterations=2,
+        wait_iterations=3,
+        warmup_iterations=1,
+    )
+    _mock_async_llm_dependencies(monkeypatch)
+    profiler = MagicMock()
+    monkeypatch.setattr("aphrodite.profiler.wrapper.TorchProfilerWrapper", profiler)
+
+    engine = AsyncLLM(aphrodite_config, MagicMock(), log_stats=False)
+
+    frontend_config = profiler.call_args.args[0]
+    assert frontend_config.delay_iterations == 0
+    assert frontend_config.max_iterations == 0
+    assert frontend_config.wait_iterations == 0
+    assert frontend_config.warmup_iterations == 0
+    assert engine.profiler is profiler.return_value
 
 
 async def generate(
@@ -359,7 +691,6 @@ async def test_customize_loggers(monkeypatch):
     If a customized logger is provided at the init, it should
     be added to the default loggers.
     """
-
     with ExitStack() as after:
         with set_default_torch_num_threads(1):
             engine = AsyncLLM.from_engine_args(
@@ -538,7 +869,6 @@ async def test_check_health():
 @pytest.mark.asyncio
 async def test_abort_final_output(output_kind: RequestOutputKind):
     """Test that abort() returns a final output with correct information."""
-
     with ExitStack() as after:
         with set_default_torch_num_threads(1):
             engine = AsyncLLM.from_engine_args(TEXT_ENGINE_ARGS)

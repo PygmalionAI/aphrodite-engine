@@ -17,6 +17,7 @@ from aphrodite.distributed.parallel_state import (
     get_tp_group,
 )
 from aphrodite.model_executor.layers.fused_moe import FusedMoEFactory, MoERunner
+from aphrodite.platforms import current_platform
 
 from .eplb_utils import distributed_run, set_env_vars_and_device
 
@@ -81,7 +82,7 @@ def make_fused_moe_layer(
     )
     re = fml.routed_experts
 
-    device = torch.device(f"cuda:{rank}")
+    device = torch.device(f"{torch.accelerator.current_accelerator().type}:{rank}")
 
     from functools import partial
 
@@ -184,11 +185,12 @@ def _test_eplb_fml(env, world_size: int, test_config: TestConfig):
     aphrodite_config = AphroditeConfig()
     aphrodite_config.parallel_config.tensor_parallel_size = world_size
     aphrodite_config.parallel_config.enable_expert_parallel = True
+    aphrodite_config.parallel_config.enable_eplb = True
 
     with set_current_aphrodite_config(aphrodite_config):
         ensure_model_parallel_initialized(tensor_model_parallel_size=world_size, pipeline_model_parallel_size=1)
 
-        ep_group = get_tp_group().cpu_group
+        ep_group = get_tp_group().device_group
         ep_rank = torch.distributed.get_rank()
 
         fml_layers = [
@@ -205,9 +207,10 @@ def _test_eplb_fml(env, world_size: int, test_config: TestConfig):
             shuffled_indices[lidx] = torch.randperm(test_config.num_experts)
 
         expert_buffer = [torch.empty_like(w) for w in rank_expert_weights[0]]
+        default_backend = "torch_xccl" if current_platform.is_xpu() else "torch_nccl"
         communicator = create_eplb_communicator(
             group_coordinator=get_eplb_group(),
-            backend="torch_nccl",
+            backend=default_backend,
             expert_weights=rank_expert_weights,
             expert_buffer=expert_buffer,
         )

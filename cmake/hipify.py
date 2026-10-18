@@ -58,8 +58,8 @@ if __name__ == "__main__":
     hipify_result = hipify(
         project_directory=args.project_dir,
         output_directory=args.output_dir,
-        # Hipify resolves quoted includes next to the including file first. Sonar
-        # uses paths relative to csrc/ (e.g. "libtorch_stable/torch_utils.h"
+        # Hipify resolves quoted includes next to the including file first; Sonar
+        # uses paths relative to csrc/ (e.g. "torch_utils.h"
         # from quantization/w8a8/fp8/*.cu). Without an include root here, those
         # headers are never found and are not hipified or rewritten in dependents.
         header_include_dirs=["."],

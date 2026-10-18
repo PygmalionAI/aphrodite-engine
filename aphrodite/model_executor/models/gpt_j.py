@@ -31,6 +31,7 @@ from aphrodite.config import AphroditeConfig, CacheConfig
 from aphrodite.distributed import get_pp_group, get_tensor_model_parallel_world_size
 from aphrodite.model_executor.layers.activation import get_act_fn
 from aphrodite.model_executor.layers.attention import Attention
+from aphrodite.model_executor.layers.layernorm import LayerNorm
 from aphrodite.model_executor.layers.linear import (
     ColumnParallelLinear,
     QKVParallelLinear,
@@ -163,7 +164,7 @@ class GPTJBlock(nn.Module):
     ):
         super().__init__()
         inner_dim = 4 * config.n_embd if config.n_inner is None else config.n_inner
-        self.ln_1 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+        self.ln_1 = LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
         self.attn = GPTJAttention(config, cache_config, quant_config, prefix=f"{prefix}.attn")
         self.mlp = GPTJMLP(inner_dim, config, quant_config, prefix=f"{prefix}.mlp")
 
@@ -204,7 +205,7 @@ class GPTJModel(nn.Module):
             lambda prefix: GPTJBlock(config, cache_config, quant_config, prefix=prefix),
             prefix=f"{prefix}.h",
         )
-        self.ln_f = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
+        self.ln_f = LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
         self.make_empty_intermediate_tensors = make_empty_intermediate_tensors_factory(["hidden_states"], config.n_embd)
 
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:

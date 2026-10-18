@@ -4,7 +4,7 @@
 
 import torch
 import torch.nn as nn
-from transformers import PretrainedConfig
+from transformers import PreTrainedConfig
 
 from aphrodite.config.lora import LoRAConfig
 from aphrodite.model_executor.custom_op import maybe_get_oot_by_class
@@ -23,7 +23,7 @@ class ReplicatedLinearWithLoRA(BaseLinearLayerWithLoRA):
         self.n_slices = 1
 
     def forward(self, input_: torch.Tensor) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor | None]:
-        """Forward of ReplicatedLinearWithLoRA
+        """Forward of ReplicatedLinearWithLoRA.
 
         Args:
             input_: Tensor whose last dimension is `input_size`.
@@ -31,6 +31,7 @@ class ReplicatedLinearWithLoRA(BaseLinearLayerWithLoRA):
         Returns:
             - output
             - bias
+
         """
         bias = self.base_layer.bias if not self.base_layer.skip_bias_add else None
 
@@ -58,7 +59,7 @@ class ReplicatedLinearWithLoRA(BaseLinearLayerWithLoRA):
         source_layer: nn.Module,
         lora_config: LoRAConfig,
         packed_modules_list: list,
-        model_config: PretrainedConfig | None = None,
+        model_config: PreTrainedConfig | None = None,
     ) -> bool:
         return isinstance(source_layer, maybe_get_oot_by_class(ReplicatedLinear))
 

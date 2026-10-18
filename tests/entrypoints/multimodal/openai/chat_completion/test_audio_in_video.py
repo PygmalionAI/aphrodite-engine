@@ -26,13 +26,11 @@ def server():
         "--enforce-eager",
         "--limit-mm-per-prompt",
         json.dumps({"audio": 3, "video": 3}),
+        "--trust-request-mm-kwargs",
         *ROCM_EXTRA_ARGS,
     ]
 
-    with RemoteOpenAIServer(
-        MODEL_NAME,
-        args,
-    ) as remote_server:
+    with RemoteOpenAIServer(MODEL_NAME, args) as remote_server:
         yield remote_server
 
 
@@ -45,8 +43,7 @@ async def client(server):
 @pytest.mark.core_model
 @pytest.mark.asyncio
 async def test_online_audio_in_video(client: openai.AsyncOpenAI, video_assets: VideoTestAssets):
-    """Test video input with `audio_in_video=True`"""
-
+    """Test video input with `audio_in_video=True`."""
     # we don't use video_urls above because they missed audio stream.
     video_path = video_assets[0].video_path
     with open(video_path, "rb") as f:
@@ -93,8 +90,7 @@ async def test_online_audio_in_video(client: openai.AsyncOpenAI, video_assets: V
 @pytest.mark.core_model
 @pytest.mark.asyncio
 async def test_online_audio_in_video_multi_videos(client: openai.AsyncOpenAI, video_assets: VideoTestAssets):
-    """Test multi-video input with `audio_in_video=True`"""
-
+    """Test multi-video input with `audio_in_video=True`."""
     # we don't use video_urls above because they missed audio stream.
     video_path = video_assets[0].video_path
     with open(video_path, "rb") as f:
@@ -145,8 +141,7 @@ async def test_online_audio_in_video_multi_videos(client: openai.AsyncOpenAI, vi
 @pytest.mark.core_model
 @pytest.mark.asyncio
 async def test_online_audio_in_video_interleaved(client: openai.AsyncOpenAI, video_assets: VideoTestAssets):
-    """Test interleaved video/audio input with `audio_in_video=True`"""
-
+    """Test interleaved video/audio input with `audio_in_video=True`."""
     # we don't use video_urls above because they missed audio stream.
     video_path = video_assets[0].video_path
     with open(video_path, "rb") as f:

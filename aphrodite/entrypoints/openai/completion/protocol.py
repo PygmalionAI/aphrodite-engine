@@ -13,18 +13,21 @@ import aphrodite.envs as envs
 from aphrodite.config import ModelConfig
 from aphrodite.entrypoints.generate.base.protocol import (
     AnyResponseFormat,
+    MMPayload,
     PerRequestMetrics,
     StopParam,
     StreamOptions,
+    resolve_return_mm_kwargs_alias,
     structured_outputs_from_response_format,
     validate_cache_salt,
     validate_structural_tag_response_format,
     validate_structured_outputs_structural_tag,
 )
 from aphrodite.entrypoints.serve.engine.protocol import OpenAIBaseModel, UsageInfo
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.logger import init_logger
 from aphrodite.logprobs import Logprob
+from aphrodite.outputs import WeightVersionSpan
 from aphrodite.renderers import TokenizeParams
 from aphrodite.sampling_params import (
     BeamSearchParams,
@@ -72,12 +75,12 @@ class CompletionRequest(OpenAIBaseModel):
     model: str | None = None
     prompt: list[Annotated[int, Field(ge=0)]] | list[list[Annotated[int, Field(ge=0)]]] | str | list[str] | None = None
     echo: bool | None = False
-    frequency_penalty: float | None = 0.0
+    frequency_penalty: float | None = None
     logit_bias: dict[str, float] | None = None
     logprobs: int | None = None
     max_tokens: int | None = 16
     n: int = 1
-    presence_penalty: float | None = 0.0
+    presence_penalty: float | None = None
     seed: int | None = Field(None, ge=_INT64_MIN, le=_INT64_MAX)
     stop: StopParam = []
     stream: bool | None = False
@@ -92,6 +95,7 @@ class CompletionRequest(OpenAIBaseModel):
     top_k: int | None = None
     min_p: float | None = None
     repetition_penalty: float | None = None
+    watermarking: bool | None = None
     length_penalty: float = 1.0
     stop_token_ids: list[int] | None = []
     include_stop_str_in_output: bool = False
@@ -216,6 +220,15 @@ class CompletionRequest(OpenAIBaseModel):
             "need to map generated text back to input tokens."
         ),
     )
+    return_weight_versions: bool = Field(
+        default=False,
+        description=(
+            "If true, each choice includes weight_versions: the weight-version "
+            "label that sampled each half-open range of its output tokens. "
+            "When streaming, only the last chunk of each choice includes it. "
+            "Beam search does not return it."
+        ),
+    )
     routed_experts_prompt_start: int = Field(
         default=0,
         ge=0,
@@ -235,6 +248,25 @@ class CompletionRequest(OpenAIBaseModel):
             "string (after applying the chat template). Multimodal "
             "inputs and pre-tokenized inputs always yield null."
         ),
+    )
+
+    mm_payload: MMPayload = Field(
+        default="tensors",
+        description=(
+            "What the render response's `features` carry for multimodal "
+            "items. 'tensors' serializes the processed tensors into "
+            "`kwargs_data` and `mm_metadata`. 'none' sets both to null for "
+            "callers that need only the token layout and item hashes, such as "
+            "cache-aware routers. Do not send a 'none' response to "
+            "`/inference/v1/generate` which reads a null `kwargs_data` as "
+            "every item being cached. Only supported on the render endpoints. "
+            "Ignored on regular generation endpoints."
+        ),
+    )
+    return_mm_kwargs: bool | None = Field(
+        default=None,
+        deprecated="return_mm_kwargs is deprecated in favor of the mm_payload field",
+        description=("Deprecated alias: false is the same as `mm_payload='none'`. Ignored when `mm_payload` is set."),
     )
 
     cache_salt: str | None = Field(
@@ -316,6 +348,8 @@ class CompletionRequest(OpenAIBaseModel):
     # Default sampling parameters for completion requests
     _DEFAULT_SAMPLING_PARAMS: dict = {
         "repetition_penalty": 1.0,
+        "presence_penalty": 0.0,
+        "frequency_penalty": 0.0,
         "temperature": 1.0,
         "top_p": 1.0,
         "top_k": 0,
@@ -336,11 +370,14 @@ class CompletionRequest(OpenAIBaseModel):
 
         return BeamSearchParams(
             beam_width=n,
+            allowed_token_ids=self.allowed_token_ids,
             max_tokens=max_tokens,
             ignore_eos=self.ignore_eos,
             temperature=temperature,
+            watermarking=self.watermarking,
             length_penalty=self.length_penalty,
             include_stop_str_in_output=self.include_stop_str_in_output,
+            skip_special_tokens=self.skip_special_tokens,
         )
 
     def extract_structured_outputs(self) -> StructuredOutputsParams | None:
@@ -358,20 +395,11 @@ class CompletionRequest(OpenAIBaseModel):
         if default_sampling_params is None:
             default_sampling_params = {}
 
-        # Default parameters
-        if (repetition_penalty := self.repetition_penalty) is None:
-            repetition_penalty = default_sampling_params.get(
-                "repetition_penalty",
-                self._DEFAULT_SAMPLING_PARAMS["repetition_penalty"],
-            )
-        if (temperature := self.temperature) is None:
-            temperature = default_sampling_params.get("temperature", self._DEFAULT_SAMPLING_PARAMS["temperature"])
-        if (top_p := self.top_p) is None:
-            top_p = default_sampling_params.get("top_p", self._DEFAULT_SAMPLING_PARAMS["top_p"])
-        if (top_k := self.top_k) is None:
-            top_k = default_sampling_params.get("top_k", self._DEFAULT_SAMPLING_PARAMS["top_k"])
-        if (min_p := self.min_p) is None:
-            min_p = default_sampling_params.get("min_p", self._DEFAULT_SAMPLING_PARAMS["min_p"])
+        # Priority: user -> server default -> OpenAI default
+        sampling_params = {
+            name: (value if (value := getattr(self, name)) is not None else default_sampling_params.get(name, default))
+            for name, default in self._DEFAULT_SAMPLING_PARAMS.items()
+        }
 
         # Merge server-default stop_token_ids (e.g., model-specific tokens
         # like </call> for gpt-oss) with any request-specified ones
@@ -398,13 +426,8 @@ class CompletionRequest(OpenAIBaseModel):
             extra_args["ec_transfer_params"] = self.ec_transfer_params
         return SamplingParams.from_optional(
             n=self.n,
-            presence_penalty=self.presence_penalty,
-            frequency_penalty=self.frequency_penalty,
-            repetition_penalty=repetition_penalty,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k,
-            min_p=min_p,
+            **sampling_params,
+            watermarking=self.watermarking,
             seed=self.seed,
             stop=self.stop,
             stop_token_ids=stop_token_ids,
@@ -465,6 +488,11 @@ class CompletionRequest(OpenAIBaseModel):
 
     @model_validator(mode="before")
     @classmethod
+    def apply_return_mm_kwargs_alias(cls, data: Any) -> Any:
+        return resolve_return_mm_kwargs_alias(data)
+
+    @model_validator(mode="before")
+    @classmethod
     def check_cache_salt_support(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
@@ -499,7 +527,7 @@ class CompletionRequest(OpenAIBaseModel):
                 else getattr(response_format, "json_schema", None)
             )
             if json_schema is None:
-                raise APHRODITEValidationError(
+                raise AphroditeValidationError(
                     "When response_format type is 'json_schema', the 'json_schema' field must be provided.",
                     parameter="response_format",
                 )
@@ -527,7 +555,7 @@ class CompletionRequest(OpenAIBaseModel):
             for k in ("json", "regex", "choice")
         )
         if count > 1:
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 "You can only use one kind of constraints for structured outputs ('json', 'regex' or 'choice').",
                 parameter="structured_outputs",
             )
@@ -540,20 +568,27 @@ class CompletionRequest(OpenAIBaseModel):
         if not isinstance(data, dict):
             return data
         if data.get("logprob_token_ids") and data.get("use_beam_search"):
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 "`logprob_token_ids` is not supported with beam search.",
                 parameter="logprob_token_ids",
             )
 
+        if data.get("use_beam_search") and data.get("echo") and data.get("logprobs") is not None:
+            raise AphroditeValidationError(
+                "`echo` with `logprobs` is not supported with beam search "
+                "because beam search does not compute prompt logprobs.",
+                parameter="echo",
+            )
+
         if data.get("logprob_token_ids") and data.get("echo") and data.get("max_tokens") == 0:
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 "`logprob_token_ids` is not supported when `echo=True` and "
                 "`max_tokens=0` because no output tokens are generated.",
                 parameter="logprob_token_ids",
             )
 
         if data.get("logprob_token_ids") and data.get("logprobs") is None:
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 "when using `logprob_token_ids`, `logprobs` must be set.",
                 parameter="logprob_token_ids",
             )
@@ -565,7 +600,7 @@ class CompletionRequest(OpenAIBaseModel):
         for field_name in ("prompt_logprobs", "logprobs"):
             field_value = data.get(field_name)
             if field_value is not None and not isinstance(field_value, (int, float)):
-                raise APHRODITEValidationError(
+                raise AphroditeValidationError(
                     f"`{field_name}` must be an integer.",
                     parameter=field_name,
                     value=field_value,
@@ -573,19 +608,19 @@ class CompletionRequest(OpenAIBaseModel):
 
         if (prompt_logprobs := data.get("prompt_logprobs")) is not None:
             if data.get("stream") and (prompt_logprobs > 0 or prompt_logprobs == -1):
-                raise APHRODITEValidationError(
+                raise AphroditeValidationError(
                     "`prompt_logprobs` are not available when `stream=True`.",
                     parameter="prompt_logprobs",
                 )
 
             if prompt_logprobs < 0 and prompt_logprobs != -1:
-                raise APHRODITEValidationError(
+                raise AphroditeValidationError(
                     "`prompt_logprobs` must be a positive value or -1.",
                     parameter="prompt_logprobs",
                     value=prompt_logprobs,
                 )
         if (logprobs := data.get("logprobs")) is not None and logprobs < 0 and logprobs != -1:
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 "`logprobs` must be a positive value or -1.",
                 parameter="logprobs",
                 value=logprobs,
@@ -599,7 +634,7 @@ class CompletionRequest(OpenAIBaseModel):
         if not isinstance(data, dict):
             return data
         if data.get("stream_options") and not data.get("stream"):
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 "Stream options can only be defined when `stream=True`.",
                 parameter="stream_options",
             )
@@ -618,7 +653,7 @@ class CompletionRequest(OpenAIBaseModel):
         embeds_is_empty = prompt_embeds is None or (isinstance(prompt_embeds, list) and len(prompt_embeds) == 0)
 
         if prompt_is_empty and embeds_is_empty:
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 "Either prompt or prompt_embeds must be provided and non-empty.",
                 parameter="prompt",
             )
@@ -634,7 +669,7 @@ class CompletionRequest(OpenAIBaseModel):
 
         prompt = data.get("prompt")
         if isinstance(prompt, list) and len(prompt) > 0 and not is_list_of(prompt, int) and len(prompt) > max_prompts:
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 f"prompt list length {len(prompt)} exceeds the maximum "
                 f"allowed count of {max_prompts}. To increase this "
                 "limit, set the APHRODITE_MAX_COMPLETION_PROMPTS "
@@ -644,7 +679,7 @@ class CompletionRequest(OpenAIBaseModel):
 
         prompt_embeds = data.get("prompt_embeds")
         if isinstance(prompt_embeds, list) and len(prompt_embeds) > max_prompts:
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 f"prompt_embeds list length {len(prompt_embeds)} exceeds "
                 f"the maximum allowed count of {max_prompts}. To increase "
                 "this limit, set the APHRODITE_MAX_COMPLETION_PROMPTS "
@@ -688,6 +723,8 @@ class CompletionResponseChoice(OpenAIBaseModel):
     # ``None`` if (a) the request was aborted before any forward pass,
     # or (b) ``enable_return_routed_experts`` is off server-side.
     routed_experts: str | None = None
+    # Contiguous weight version spans over output-token indexes.
+    weight_versions: list[WeightVersionSpan] | None = None
 
 
 class CompletionResponse(OpenAIBaseModel):
@@ -723,6 +760,8 @@ class CompletionResponseStreamChoice(OpenAIBaseModel):
     # prompt tokens is put into choice to align with CompletionResponseChoice
     prompt_token_ids: list[int] | None = None
     token_ids: list[int] | None = None
+    # Set on the final chunk only; covers the whole output.
+    weight_versions: list[WeightVersionSpan] | None = None
 
 
 class CompletionStreamResponse(OpenAIBaseModel):

@@ -5,11 +5,10 @@ import dataclasses
 import json
 import uuid
 
-import aphrodite.common.envs as envs
-from aphrodite.engine.args_tools import EngineArgs
-from aphrodite.modeling.model_loader.tensorizer import TensorizerArgs, TensorizerConfig, tensorize_aphrodite_model
-
+import aphrodite.envs as envs
 from aphrodite import LLM
+from aphrodite.engine.arg_utils import EngineArgs
+from aphrodite.model_executor.model_loader.tensorizer import TensorizerArgs, TensorizerConfig, tensorize_aphrodite_model
 
 # yapf conflicts with isort for this docstring
 # yapf: disable

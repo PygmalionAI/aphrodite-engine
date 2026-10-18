@@ -8,10 +8,10 @@ use std::ffi::OsStr;
 use std::process::{ExitCode, ExitStatus};
 
 use anyhow::{Context, Result, anyhow, bail};
+use aphrodite_managed_engine::ManagedEngineHandle;
 use thiserror_ext::AsReport as _;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
-use aphrodite_managed_engine::ManagedEngineHandle;
 
 use crate::cli::{BenchCommand, Cli, Command};
 
@@ -119,7 +119,9 @@ async fn async_main(cli: Cli) -> Result<()> {
             aphrodite_bench::prepare_process();
             aphrodite_bench::run(bench_args).await
         }
-        Command::Frontend(args) => aphrodite_server::serve(args.into_config(), shutdown_signal()).await,
+        Command::Frontend(args) => {
+            aphrodite_server::serve(args.into_config(), shutdown_signal()).await
+        }
         Command::Serve(args) => {
             let handshake_port = args.managed_engine.resolve_handshake_port()?;
 

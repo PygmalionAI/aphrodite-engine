@@ -38,6 +38,7 @@ def maybe_exec_rust_bench() -> None:
 def _import_bench_subcommand_modules() -> None:
     # Imported lazily so `BenchmarkSubcommandBase` subclasses register only
     # when `aphrodite bench` is actually invoked.
+    import aphrodite.entrypoints.cli.benchmark.forward  # noqa: F401
     import aphrodite.entrypoints.cli.benchmark.latency  # noqa: F401
     import aphrodite.entrypoints.cli.benchmark.mm_processor  # noqa: F401
     import aphrodite.entrypoints.cli.benchmark.perf  # noqa: F401

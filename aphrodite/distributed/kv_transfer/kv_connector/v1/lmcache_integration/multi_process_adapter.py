@@ -42,8 +42,7 @@ def send_lmcache_request(
     request_type: RequestType,
     payloads: list[Any],
 ) -> MessagingFuture[Any]:
-    """
-    Helper function to send the request to the LMCache multiprocess server
+    """Helper function to send the request to the LMCache multiprocess server.
 
     Args:
         mq_client: The LMCache multiprocess mode message queue client
@@ -52,8 +51,8 @@ def send_lmcache_request(
 
     Returns:
         A messaging future for the request
-    """
 
+    """
     future = mq_client.submit_request(request_type, payloads, get_response_class(request_type))
     return future
 
@@ -61,14 +60,14 @@ def send_lmcache_request(
 def get_lmcache_chunk_size(
     mq_client: MessageQueueClient,
 ) -> int:
-    """
-    Helper function to get the LMCache chunk size from the server
+    """Helper function to get the LMCache chunk size from the server.
 
     Args:
         mq_client: The LMCache multiprocess mode message queue client
 
     Returns:
         An integer representing the LMCache chunk size
+
     """
     future = send_lmcache_request(mq_client, RequestType.GET_CHUNK_SIZE, [])
     chunk_size = future.result()
@@ -143,16 +142,16 @@ class LMCacheMPSchedulerAdapter:
         aphrodite_block_size: int,
         parallel_strategy: ParallelStrategy,
     ):
-        """
-        Args:
-            server_url: The server URL for the LMCache message queue
-            context: The ZMQ context
+        """Args:
+        server_url: The server URL for the LMCache message queue
+        context: The ZMQ context
 
-            model_name: The model name used for LMCache keys
-            aphrodite_block_size: The block size used in Aphrodite
-            parallel_strategy:
-                The parallel strategy, which includes `use_mla`,
-                `world_size`, `worker_id` and so on
+        model_name: The model name used for LMCache keys
+        aphrodite_block_size: The block size used in Aphrodite
+        parallel_strategy:
+            The parallel strategy, which includes `use_mla`,
+            `world_size`, `worker_id` and so on
+
         """
         self.mq_client = MessageQueueClient(server_url, context)
 
@@ -191,8 +190,7 @@ class LMCacheMPSchedulerAdapter:
         block_hashes: list[bytes] | None = None,
         token_ids: list[int] | None = None,
     ) -> None:
-        """
-        Submit a new lookup request to LMCache if there is no ongoing request.
+        """Submit a new lookup request to LMCache if there is no ongoing request.
 
         Supports both token-based and hash-based Aphrodite:
         - token_ids: token IDs (token-based Aphrodite) -> single token-mode key
@@ -215,6 +213,7 @@ class LMCacheMPSchedulerAdapter:
             for later retrieve operations.
             In the meantime, this function will record the lookup request, and the
             status of the look up request can be checked by `check_lookup_result`.
+
         """
         if request_id in self.lookup_futures:
             # Skip if there is already a lookup request
@@ -252,8 +251,7 @@ class LMCacheMPSchedulerAdapter:
 
     @_lmcache_nvtx_annotate
     def check_lookup_result(self, request_id: str) -> int | None:
-        """
-        Check the result of a previously submitted lookup request.
+        """Check the result of a previously submitted lookup request.
 
         Args:
             request_id: The ID of the lookup request submitted in
@@ -263,6 +261,7 @@ class LMCacheMPSchedulerAdapter:
             An integer representing the total number of tokens matched
             in LMCache (prefix matching), or
             None if the lookup request is not finished yet.
+
         """
         assert request_id in self.lookup_futures, f"Lookup request for request_id={request_id} has not been submitted"
 
@@ -275,25 +274,27 @@ class LMCacheMPSchedulerAdapter:
         return num_chunks * self.chunk_size
 
     def num_blocks_per_chunk(self) -> int:
-        """
-        Returns:
-            The number of aphrodite blocks in a LMCache data chunk
+        """Returns:
+        The number of aphrodite blocks in a LMCache data chunk
+
         """
         return self.blocks_in_chunk
 
     def cleanup_lookup_result(self, request_id: str) -> None:
-        """
-        Clean up lookup future for a finished request to prevent memory leak.
+        """Clean up lookup future for a finished request to prevent memory leak.
+
         Args:
             request_id: The ID of the finished request.
+
         """
         self.lookup_futures.pop(request_id, None)
 
     def end_session(self, request_id: str) -> None:
-        """
-        Notify LMCache server to remove the session for a finished request.
+        """Notify LMCache server to remove the session for a finished request.
+
         Args:
             request_id: The ID of the finished request.
+
         """
         send_lmcache_request(
             self.mq_client,
@@ -309,7 +310,7 @@ class LMCacheMPSchedulerAdapter:
         end: int = 0,
         request_id: str | None = None,
     ) -> IPCCacheEngineKey:
-        """Convert token IDs to an IPC cache engine key"""
+        """Convert token IDs to an IPC cache engine key."""
         return IPCCacheEngineKey(
             model_name=self.model_name,
             world_size=self.world_size,
@@ -322,7 +323,7 @@ class LMCacheMPSchedulerAdapter:
         )
 
     def _create_hash_key(self, chunk_hash: bytes, request_id: str | None = None) -> IPCCacheEngineKey:
-        """Create a hash-mode IPC cache engine key"""
+        """Create a hash-mode IPC cache engine key."""
         return IPCCacheEngineKey(
             model_name=self.model_name,
             world_size=self.world_size,
@@ -390,12 +391,12 @@ class LMCacheMPWorkerAdapter:
         return self.parallel_strategy.actual_worker_id % self.parallel_strategy.tp_size == 0
 
     def register_kv_caches(self, kv_caches: dict[str, torch.Tensor]):
-        """
-        Register the kv caches with LMCache server
+        """Register the kv caches with LMCache server.
 
         Args:
             kv_caches: A dict of kv caches to register. The keys are the
                 layer names and the values are the corresponding tensors.
+
         """
         # Register kv cache and send the request
         self.kv_caches = kv_caches
@@ -409,14 +410,14 @@ class LMCacheMPWorkerAdapter:
 
     @_lmcache_nvtx_annotate
     def submit_store_request(self, request_id: str, op: LoadStoreOp, event: torch.cuda.Event):
-        """
-        Submit a KV cache store request to LMCache
+        """Submit a KV cache store request to LMCache.
 
         Args:
             request_id: The ID of the request
             op: The LoadStoreOp describing the store operation.
             event: The CUDA event that is recorded after the current
                 model inference step
+
         """
         if op.block_hashes is not None:
             # Hash mode
@@ -435,14 +436,14 @@ class LMCacheMPWorkerAdapter:
 
     @_lmcache_nvtx_annotate
     def submit_retrieve_request(self, request_id: str, op: LoadStoreOp, event: torch.cuda.Event):
-        """
-        Submit a KV cache retrieve request to LMCache
+        """Submit a KV cache retrieve request to LMCache.
 
         Args:
             request_id: The ID of the request
             op: The LoadStoreOp describing the retrieve operation.
             event: The CUDA event that is recorded after the current
                 model inference step
+
         """
         if op.block_hashes is not None:
             # Hash mode
@@ -466,8 +467,7 @@ class LMCacheMPWorkerAdapter:
         ops: list[LoadStoreOp],
         event: torch.cuda.Event,
     ):
-        """
-        Submit a batched store request to LMCache
+        """Submit a batched store request to LMCache.
 
         Args:
             request_ids: The IDs of the requests
@@ -475,6 +475,7 @@ class LMCacheMPWorkerAdapter:
                 the same length as request_ids
             event: The CUDA event that is recorded after the current
                 model inference step
+
         """
         all_keys: list[IPCCacheEngineKey] = []
         block_ids: list[int] = []
@@ -506,8 +507,7 @@ class LMCacheMPWorkerAdapter:
         ops: list[LoadStoreOp],
         event: torch.cuda.Event,
     ):
-        """
-        Submit a batched retrieve request to LMCache
+        """Submit a batched retrieve request to LMCache.
 
         Args:
             request_ids: The IDs of the requests
@@ -515,6 +515,7 @@ class LMCacheMPWorkerAdapter:
                 the same length as request_ids
             event: The CUDA event that is recorded after the current
                 model inference step
+
         """
         all_keys: list[IPCCacheEngineKey] = []
         block_ids: list[int] = []
@@ -541,8 +542,7 @@ class LMCacheMPWorkerAdapter:
 
     @_lmcache_nvtx_annotate
     def get_finished(self, finished_req_ids_from_engine: set[str]) -> tuple[set[str] | None, set[str] | None]:
-        """
-        Check and get the finished store and retrieve requests.
+        """Check and get the finished store and retrieve requests.
 
         Args:
             finished_req_ids_from_engine: the set of request ids that are
@@ -560,6 +560,7 @@ class LMCacheMPWorkerAdapter:
             multiple times in `finished_req_ids_from_engine`. The adapter should
             take care of deduplicating the request IDs and only return the request
             IDs that have not been returned before.
+
         """
         finished_stores = set()
         finished_retrieves = set()
@@ -616,16 +617,14 @@ class LMCacheMPWorkerAdapter:
         return ret_stores, finished_retrieves
 
     def num_blocks_per_chunk(self) -> int:
-        """
-        Returns:
-            The number of aphrodite blocks in a LMCache data chunk
+        """Returns:
+        The number of aphrodite blocks in a LMCache data chunk
+
         """
         return self.blocks_in_chunk
 
     def shutdown(self):
-        """
-        Shutdown the LMCache MP worker adapter
-        """
+        """Shutdown the LMCache MP worker adapter."""
         logger.info("Unregistering kv caches")
         send_lmcache_request(self.mq_client, RequestType.UNREGISTER_KV_CACHE, [self.instance_id]).result()
 
@@ -651,7 +650,7 @@ class LMCacheMPWorkerAdapter:
         end: int = 0,
         request_id: str | None = None,
     ) -> IPCCacheEngineKey:
-        """Convert token IDs to an IPC cache engine key"""
+        """Convert token IDs to an IPC cache engine key."""
         return IPCCacheEngineKey(
             model_name=self.model_name,
             world_size=self.world_size,
@@ -663,7 +662,7 @@ class LMCacheMPWorkerAdapter:
         )
 
     def _create_hash_key(self, chunk_hash: bytes, request_id: str | None = None) -> IPCCacheEngineKey:
-        """Create a hash-mode IPC cache engine key"""
+        """Create a hash-mode IPC cache engine key."""
         return IPCCacheEngineKey(
             model_name=self.model_name,
             world_size=self.world_size,

@@ -5,19 +5,37 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use aphrodite_metrics::{
-    EngineLabels, EnginePositionLabels, F64Gauge, Family, HistogramMetric, LoraAdapterNames,
-    LoraInfoLabels, MooncakeOperationCounterFamily, MooncakeOperationHistogramFamily,
-    MooncakeOperationLabels, SchedulerLogStatsAccumulator, SchedulerMetrics, U64Counter, U64Gauge,
-    WaitingReasonLabels,
+    CacheHitSourceLabels, EngineLabels, EnginePositionLabels, F64Gauge, Family, HistogramMetric,
+    LoraAdapterNames, LoraInfoLabels, MooncakeOperationCounterFamily,
+    MooncakeOperationHistogramFamily, MooncakeOperationLabels, RequestMetrics,
+    SchedulerLogStatsAccumulator, SchedulerMetrics, U64Counter, U64Gauge, WaitingReasonLabels,
 };
 
 use crate::protocol::stats::{
-    KvConnectorStats, MooncakeStats, MultiConnectorStats, NixlStats, SchedulerStats,
+    CachedTokensBySource, KvConnectorStats, MooncakeStats, MultiConnectorStats, NixlStats,
+    SchedulerStats,
 };
 use crate::transport::ConnectedEngine;
 
 const WAITING_REASON_CAPACITY: &str = "capacity";
 const WAITING_REASON_DEFERRED: &str = "deferred";
+
+/// Cached output-batch metric handles for one model and engine index.
+pub(crate) struct IterationMetricHandles {
+    pub iteration_tokens_total: HistogramMetric,
+}
+
+impl IterationMetricHandles {
+    pub(crate) fn new(metrics: &RequestMetrics, model_name: &str, engine: u32) -> Self {
+        let labels = EngineLabels {
+            model_name: model_name.to_string(),
+            engine,
+        };
+        Self {
+            iteration_tokens_total: metrics.iteration_tokens_total.get_or_create_owned(&labels),
+        }
+    }
+}
 
 /// Cached scheduler-stats metric handles for all engines connected to one
 /// frontend client.
@@ -42,6 +60,8 @@ struct SchedulerStatsHandles {
     prefix_cache_hits: U64Counter,
     external_prefix_cache_queries: U64Counter,
     external_prefix_cache_hits: U64Counter,
+    /// One handle per `CachedTokensBySource::SOURCES` entry.
+    prompt_tokens_cached_by_source: [U64Counter; 5],
 
     // Speculative decoding counters.
     spec_decode_num_drafts: U64Counter,
@@ -147,6 +167,15 @@ fn resolve_scheduler_stats_handles(
             .external_prefix_cache_queries
             .get_or_create_owned(&labels),
         external_prefix_cache_hits: metrics.external_prefix_cache_hits.get_or_create_owned(&labels),
+        prompt_tokens_cached_by_source: CachedTokensBySource::SOURCES.map(|source| {
+            metrics
+                .prompt_tokens_cached_by_source
+                .get_or_create_owned(&CacheHitSourceLabels {
+                    model_name: model_name.to_string(),
+                    engine,
+                    source,
+                })
+        }),
         spec_decode_num_drafts: metrics.spec_decode_num_drafts.get_or_create_owned(&labels),
         spec_decode_num_draft_tokens: metrics
             .spec_decode_num_draft_tokens
@@ -202,6 +231,8 @@ fn record_scheduler_stats_with_handles(handles: &SchedulerStatsHandles, stats: &
     // Prefix-cache counters, including the connector-backed external cache path.
     handles.prefix_cache_queries.inc_by(stats.prefix_cache_stats.base.queries);
     handles.prefix_cache_hits.inc_by(stats.prefix_cache_stats.base.hits);
+    // Local prefix-cache hits are the `device` tier.
+    handles.prompt_tokens_cached_by_source[0].inc_by(stats.prefix_cache_stats.base.hits);
 
     if let Some(connector_prefix_cache_stats) = &stats.connector_prefix_cache_stats {
         handles
@@ -210,6 +241,10 @@ fn record_scheduler_stats_with_handles(handles: &SchedulerStatsHandles, stats: &
         handles
             .external_prefix_cache_hits
             .inc_by(connector_prefix_cache_stats.base.hits);
+        let counts = connector_prefix_cache_stats.hits_by_source.counts();
+        for (handle, count) in handles.prompt_tokens_cached_by_source.iter().zip(counts) {
+            handle.inc_by(count);
+        }
     }
 
     // Speculative decoding counters.
@@ -395,8 +430,8 @@ fn now_unix_secs() -> f64 {
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
-    use expect_test::expect;
     use aphrodite_metrics::Metrics;
+    use expect_test::expect;
 
     use crate::metrics::LoraInfoExporter;
     use crate::protocol::stats::{
@@ -512,14 +547,11 @@ mod tests {
             "aphrodite:mooncake_store_operation_bytes_total{model_name=\"model\",engine=\"0\",\
              operation=\"load_get\",status=\"ok\"} 1024"
         ));
-        assert!(
-            rendered.contains(
-                "aphrodite:nixl_num_kv_expired_reqs_total{model_name=\"model\",engine=\"0\"} 1"
-            )
-        );
-        assert!(
-            rendered
-                .contains("aphrodite:nixl_xfer_time_seconds_count{model_name=\"model\",engine=\"0\"} 2")
-        );
+        assert!(rendered.contains(
+            "aphrodite:nixl_num_kv_expired_reqs_total{model_name=\"model\",engine=\"0\"} 1"
+        ));
+        assert!(rendered.contains(
+            "aphrodite:nixl_xfer_time_seconds_count{model_name=\"model\",engine=\"0\"} 2"
+        ));
     }
 }

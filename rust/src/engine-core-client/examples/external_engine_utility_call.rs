@@ -4,13 +4,15 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use clap::Parser;
-use tracing_subscriber::EnvFilter;
 use aphrodite_engine_core_client::protocol::utility::PauseMode;
 use aphrodite_engine_core_client::{EngineCoreClient, EngineCoreClientConfig, TransportMode};
+use clap::Parser;
+use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
-#[command(about = "Smoke-test EngineCoreClient utility calls against an external Aphrodite engine.")]
+#[command(
+    about = "Smoke-test EngineCoreClient utility calls against an external Aphrodite engine."
+)]
 struct Args {
     #[arg(long)]
     handshake_address: String,
@@ -68,6 +70,7 @@ async fn main() -> Result<()> {
         coordinator_mode: None,
         model_name: args.model.clone(),
         client_index: args.client_index,
+        engine_stats_enabled: true,
     })
     .await
     .context("failed to connect to external Aphrodite engine")?;

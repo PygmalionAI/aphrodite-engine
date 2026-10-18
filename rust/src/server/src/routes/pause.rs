@@ -3,11 +3,11 @@
 
 use std::sync::Arc;
 
+use aphrodite_engine_core_client::protocol::utility::PauseMode;
 use axum::Json;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Query, State};
 use serde::{Deserialize, Serialize};
-use aphrodite_engine_core_client::protocol::utility::PauseMode;
 
 use crate::error::ApiError;
 use crate::state::AppState;
@@ -38,10 +38,6 @@ const fn default_clear_cache() -> bool {
 fn invalid_query(error: QueryRejection) -> ApiError {
     ApiError::invalid_request(error.body_text(), Some("mode"))
 }
-
-// TODO: the Python frontend also accepts the deprecated
-// `wait_for_inflight_requests` flag (equivalent to `mode="wait"`); it is
-// intentionally omitted here in favor of the `mode` parameter.
 
 /// Pause the scheduler so generation can be halted (e.g. for weight updates).
 pub async fn pause(

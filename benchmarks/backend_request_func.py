@@ -100,7 +100,7 @@ async def async_request_tgi(
                         timestamp = time.perf_counter()
                         # First token
                         if ttft == 0.0:
-                            ttft = time.perf_counter() - st
+                            ttft = timestamp - st
                             output.ttft = ttft
 
                         # Decoding phase
@@ -308,8 +308,7 @@ async def async_request_openai_completions(
                                 # First token
                                 if not first_chunk_received:
                                     first_chunk_received = True
-                                    ttft = time.perf_counter() - st
-                                    output.ttft = ttft
+                                    output.ttft = timestamp - st
 
                                 # Decoding phase
                                 else:
@@ -387,7 +386,7 @@ async def async_request_openai_chat_completions(
         output.prompt_len = request_func_input.prompt_len
 
         generated_text = ""
-        ttft = 0.0
+        first_chunk_received = False
         st = time.perf_counter()
         most_recent_timestamp = st
         try:
@@ -412,22 +411,29 @@ async def async_request_openai_chat_completions(
                             if choices := data.get("choices"):
                                 content = choices[0]["delta"].get("content")
                                 # First token
-                                if ttft == 0.0:
-                                    ttft = timestamp - st
-                                    output.ttft = ttft
+                                if not first_chunk_received:
+                                    first_chunk_received = True
+                                    output.ttft = timestamp - st
 
                                 # Decoding phase
                                 else:
                                     output.itl.append(timestamp - most_recent_timestamp)
 
                                 generated_text += content or ""
+                                # Only token chunks advance the request end;
+                                # the trailing usage chunk carries no token.
+                                most_recent_timestamp = timestamp
                             elif usage := data.get("usage"):
                                 output.output_tokens = usage.get("completion_tokens")
 
-                            most_recent_timestamp = timestamp
-
                     output.generated_text = generated_text
-                    output.success = True
+                    if first_chunk_received:
+                        output.success = True
+                    else:
+                        output.success = False
+                        output.error = (
+                            "Never received a valid chunk to calculate TTFT.This response will be marked as failed!"
+                        )
                     output.latency = most_recent_timestamp - st
                 else:
                     output.error = response.reason or ""
@@ -495,7 +501,7 @@ async def async_request_openai_audio(
             output.prompt_len = request_func_input.prompt_len
 
             generated_text = ""
-            ttft = 0.0
+            first_chunk_received = False
             st = time.perf_counter()
             most_recent_timestamp = st
             try:
@@ -514,22 +520,30 @@ async def async_request_openai_audio(
                                 if choices := data.get("choices"):
                                     content = choices[0]["delta"].get("content")
                                     # First token
-                                    if ttft == 0.0:
-                                        ttft = timestamp - st
-                                        output.ttft = ttft
+                                    if not first_chunk_received:
+                                        first_chunk_received = True
+                                        output.ttft = timestamp - st
 
                                     # Decoding phase
                                     else:
                                         output.itl.append(timestamp - most_recent_timestamp)
 
                                     generated_text += content or ""
+                                    # Only token chunks advance the request
+                                    # end; the trailing usage chunk carries no
+                                    # token.
+                                    most_recent_timestamp = timestamp
                                 elif usage := data.get("usage"):
                                     output.output_tokens = usage.get("completion_tokens")
 
-                                most_recent_timestamp = timestamp
-
                         output.generated_text = generated_text
-                        output.success = True
+                        if first_chunk_received:
+                            output.success = True
+                        else:
+                            output.success = False
+                            output.error = (
+                                "Never received a valid chunk to calculate TTFT.This response will be marked as failed!"
+                            )
                         output.latency = most_recent_timestamp - st
                     else:
                         output.error = response.reason or ""
@@ -546,8 +560,9 @@ async def async_request_openai_audio(
 
 def get_model(pretrained_model_name_or_path: str) -> str:
     if os.getenv("APHRODITE_USE_MODELSCOPE", "False").lower() == "true":
-        from aphrodite.modeling.model_loader.weight_utils import get_lock
         from modelscope import snapshot_download
+
+        from aphrodite.model_executor.model_loader.weight_utils import get_lock
 
         # Use file lock to prevent multiple processes from
         # downloading the same model weights at the same time.
@@ -570,13 +585,9 @@ def get_tokenizer(
 ) -> PythonBackend | TokenizersBackend:
     if pretrained_model_name_or_path is not None and not os.path.exists(pretrained_model_name_or_path):
         pretrained_model_name_or_path = get_model(pretrained_model_name_or_path)
-    if tokenizer_mode == "slow":
-        if kwargs.get("use_fast", False):
-            raise ValueError("Cannot use the fast tokenizer in slow tokenizer mode.")
-        kwargs["use_fast"] = False
     if tokenizer_mode == "mistral":
         try:
-            from aphrodite.transformers_utils.tokenizer import MistralTokenizer
+            from aphrodite.tokenizers import MistralTokenizer
         except ImportError as e:
             raise ImportError(
                 "MistralTokenizer requires aphrodite package.\n"

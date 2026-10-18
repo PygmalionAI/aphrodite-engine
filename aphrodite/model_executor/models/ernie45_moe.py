@@ -29,7 +29,7 @@ from typing import Any
 
 import torch
 from torch import nn
-from transformers import PretrainedConfig
+from transformers import PreTrainedConfig
 
 from aphrodite.compilation.decorators import support_torch_compile
 from aphrodite.config import AphroditeConfig, CacheConfig, get_current_aphrodite_config
@@ -41,12 +41,15 @@ from aphrodite.distributed import (
 from aphrodite.logger import init_logger
 from aphrodite.model_executor.layers.activation import SiluAndMul
 from aphrodite.model_executor.layers.attention import Attention
-from aphrodite.model_executor.layers.fused_moe import FusedMoEFactory, MoERunner
+from aphrodite.model_executor.layers.fused_moe import (
+    FusedMoEFactory,
+    GateLinear,
+    MoERunner,
+)
 from aphrodite.model_executor.layers.layernorm import RMSNorm
 from aphrodite.model_executor.layers.linear import (
     MergedColumnParallelLinear,
     QKVParallelLinear,
-    ReplicatedLinear,
     RowParallelLinear,
 )
 from aphrodite.model_executor.layers.logits_processor import LogitsProcessor
@@ -114,7 +117,7 @@ class Ernie4_5_MoeMLP(nn.Module):
 class Ernie4_5_MoeMoE(nn.Module):
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
         enable_eplb: bool = False,
@@ -147,12 +150,11 @@ class Ernie4_5_MoeMoE(nn.Module):
                 f"Tensor parallel size {self.tp_size} is greater than the number of experts {config.moe_num_experts}."
             )
 
-        self.gate = ReplicatedLinear(
+        self.gate = GateLinear(
             config.hidden_size,
             config.moe_num_experts,
-            bias=False,
+            out_dtype=torch.float32,
             params_dtype=torch.float32,
-            quant_config=None,
             prefix=f"{prefix}.gate",
         )
 
@@ -192,7 +194,7 @@ class Ernie4_5_MoeMoE(nn.Module):
         hidden_dim = hidden_states.shape[-1]
         hidden_states = hidden_states.view(-1, hidden_dim)
 
-        router_logits, _ = self.gate(hidden_states.to(dtype=torch.float32))
+        router_logits, _ = self.gate(hidden_states)
 
         final_hidden_states = self.experts(hidden_states=hidden_states, router_logits=router_logits)
 
@@ -294,7 +296,7 @@ class Ernie4_5_MoeAttention(nn.Module):
 class Ernie4_5_MoeDecoderLayer(nn.Module):
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         cache_config: CacheConfig | None = None,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",

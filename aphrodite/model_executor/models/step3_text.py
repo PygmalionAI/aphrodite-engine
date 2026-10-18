@@ -10,7 +10,7 @@ import torch
 from torch import nn
 
 from aphrodite.compilation.decorators import support_torch_compile
-from aphrodite.config import AphroditeConfig, CacheConfig, ModelConfig
+from aphrodite.config import AphroditeConfig, CacheConfig
 from aphrodite.distributed import (
     get_pp_group,
     get_tensor_model_parallel_world_size,
@@ -20,6 +20,7 @@ from aphrodite.model_executor.layers.activation import SiluAndMul
 from aphrodite.model_executor.layers.attention import Attention
 from aphrodite.model_executor.layers.fused_moe import (
     FusedMoEFactory,
+    GateLinear,
 )
 from aphrodite.model_executor.layers.layernorm import RMSNorm
 from aphrodite.model_executor.layers.linear import (
@@ -55,7 +56,7 @@ logger = init_logger(__name__)
 class FusedMoEBlock(nn.Module):
     def __init__(
         self,
-        config: ModelConfig,
+        config: Step3TextConfig,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ):
@@ -76,11 +77,9 @@ class FusedMoEBlock(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.experts",
         )
-        self.gate = ReplicatedLinear(
+        self.gate = GateLinear(
             config.hidden_size,
             config.moe_num_experts,
-            bias=False,
-            quant_config=None,
             prefix=f"{prefix}.gate",
         )
 
@@ -369,7 +368,7 @@ class Step3TextModel(nn.Module):
         return hidden_states
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        qkv_params_mapping = [
+        qkv_params_mapping: list[tuple[str, str, float, float]] = [
             # (param_name, shard_name, relative_start_idx, relative_end_idx)
             (
                 ".qkv_proj",
@@ -391,7 +390,7 @@ class Step3TextModel(nn.Module):
                 / (self.config.share_q_dim + self.config.head_dim * 2),
             ),
         ]
-        stacked_params_mapping = [
+        stacked_params_mapping: list[tuple[str, str, int]] = [
             # (param_name, shard_name, shard_id)
             (".gate_up_proj", ".gate_proj", 0),
             (".gate_up_proj", ".up_proj", 1),
@@ -400,7 +399,7 @@ class Step3TextModel(nn.Module):
         loaded_params: set[str] = set()
         base_layer = "base_layer." if any(".base_layer." in name for name in params_dict) else ""
 
-        expert_params_mapping = [
+        expert_params_mapping: list[tuple[str, str, str]] = [
             (
                 f".moe.experts.routed_experts.{base_layer}w13_weight",
                 ".moe.gate_proj.weight",
@@ -436,7 +435,7 @@ class Step3TextModel(nn.Module):
                 break
             else:
                 for mapping in expert_params_mapping:
-                    param_name, weight_name, shard_id = mapping
+                    param_name, weight_name, expert_shard_id = mapping
                     if weight_name not in name:
                         continue
                     name = name.replace(weight_name, param_name)
@@ -454,7 +453,7 @@ class Step3TextModel(nn.Module):
                             param,
                             loaded_weight_expert,
                             name,
-                            shard_id=shard_id,
+                            shard_id=expert_shard_id,
                             expert_id=expert_id,
                         )
                     loaded_params.add(name)

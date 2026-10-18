@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-use thiserror::Error;
 use aphrodite_engine_core_client::protocol::sampling::EngineCoreSamplingParams;
+use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq)]
 pub enum SamplingParamsError {
@@ -64,7 +64,58 @@ pub(crate) fn validate_resolved_sampling_params(
     validate_min_p(params.min_p)?;
     validate_frequency_penalty(params.frequency_penalty)?;
     validate_presence_penalty(params.presence_penalty)?;
-    validate_repetition_penalty(params.repetition_penalty)
+    validate_repetition_penalty(params.repetition_penalty)?;
+
+    let extra = &params.aphrodite_sampling;
+    for (parameter, value) in [
+        ("dynatemp_min", extra.dynatemp_min),
+        ("dynatemp_max", extra.dynatemp_max),
+        ("top_a", extra.top_a),
+        ("eta_cutoff", extra.eta_cutoff),
+        ("epsilon_cutoff", extra.epsilon_cutoff),
+        ("xtc_threshold", extra.xtc_threshold),
+        ("nsigma", extra.nsigma),
+        ("mirostat_tau", extra.mirostat_tau),
+        ("mirostat_eta", extra.mirostat_eta),
+        ("dry_multiplier", extra.dry_multiplier),
+    ] {
+        validate_finite(parameter, value)?;
+        validate_closed_range(parameter, value, 0.0, f32::MAX, "[0, inf)")?;
+    }
+    for (parameter, value, min) in [
+        ("dynatemp_exponent", extra.dynatemp_exponent, 0.0),
+        ("dry_base", extra.dry_base, 1.0),
+    ] {
+        validate_finite(parameter, value)?;
+        if value <= min {
+            return Err(SamplingParamsError::OutOfRange {
+                parameter,
+                value,
+                expected: if min == 0.0 { "(0, inf)" } else { "(1, inf)" },
+            });
+        }
+    }
+    for (parameter, value) in [
+        ("typical_p", extra.typical_p),
+        ("xtc_probability", extra.xtc_probability),
+    ] {
+        validate_closed_range(parameter, value, 0.0, 1.0, "[0, 1]")?;
+    }
+    if !(extra.tfs > 0.0 && extra.tfs <= 1.0) {
+        return Err(SamplingParamsError::OutOfRange {
+            parameter: "tfs",
+            value: extra.tfs,
+            expected: "(0, 1]",
+        });
+    }
+    if !matches!(extra.mirostat_mode, 0 | 2) {
+        return Err(SamplingParamsError::OutOfRange {
+            parameter: "mirostat_mode",
+            value: extra.mirostat_mode as f32,
+            expected: "{0, 2}",
+        });
+    }
+    Ok(())
 }
 
 fn validate_finite(parameter: &'static str, value: f32) -> Result<(), SamplingParamsError> {

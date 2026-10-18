@@ -40,6 +40,7 @@ def get_prometheus_registry() -> CollectorRegistry:
 
     Returns:
         Registry: A prometheus registry
+
     """
     if os.getenv("PROMETHEUS_MULTIPROC_DIR") is not None:
         logger.debug("Using multiprocess registry for prometheus metrics")
@@ -68,7 +69,6 @@ def unregister_aphrodite_metrics():
 
 def shutdown_prometheus():
     """Shutdown prometheus metrics."""
-
     path = _prometheus_multiproc_dir
     if path is None:
         return

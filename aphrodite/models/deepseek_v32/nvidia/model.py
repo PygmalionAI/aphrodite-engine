@@ -29,6 +29,7 @@ from aphrodite.model_executor.models.deepseek_v2 import (
     DeepseekV2MoE,
     _try_load_fp8_indexer_wk,
     get_spec_layer_idx_from_weight_name,
+    is_skip_topk_layer,
 )
 from aphrodite.model_executor.models.utils import (
     PPMissingLayer,
@@ -46,6 +47,10 @@ from aphrodite.models.common.ops.sequence_parallel import (
 )
 from aphrodite.models.deepseek_v32.attention import DeepseekV32Attention
 from aphrodite.sequence import IntermediateTensors
+from aphrodite.v1.attention.backends.mla.index_group import (
+    SparseMLAIndexGroupBuilder,
+    get_sparse_mla_index_group_max_rows,
+)
 
 from .glm52_low_latency_gemm import enable_glm52_low_latency_gemm
 
@@ -57,6 +62,7 @@ class DeepseekV32DecoderLayer(torch.nn.Module):
         prefix: str,
         config=None,
         topk_indices_buffer: torch.Tensor | None = None,
+        index_group_builder: SparseMLAIndexGroupBuilder | None = None,
     ) -> None:
         super().__init__()
 
@@ -79,6 +85,7 @@ class DeepseekV32DecoderLayer(torch.nn.Module):
             config=config,
             prefix=f"{prefix}.self_attn",
             topk_indices_buffer=topk_indices_buffer,
+            index_group_builder=index_group_builder,
         )
 
         if (
@@ -180,11 +187,16 @@ class DeepseekV32Model(torch.nn.Module):
         # DSA is always sparse (has index_topk); allocate the shared top-k
         # buffer the indexer writes and the sparse MLA backend reads.
         self.is_v32 = True
-        topk_indices_buffer = torch.empty(
+        # On the model, not a local: the MTP proposer shares it with the draft.
+        self.topk_indices_buffer = torch.empty(
             aphrodite_config.scheduler_config.max_num_batched_tokens,
             config.index_topk,
             dtype=torch.int32,
             device=self.device,
+        )
+        index_group_builder = SparseMLAIndexGroupBuilder(
+            self.topk_indices_buffer,
+            get_sparse_mla_index_group_max_rows(aphrodite_config),
         )
 
         if get_pp_group().is_first_rank:
@@ -205,10 +217,22 @@ class DeepseekV32Model(torch.nn.Module):
             lambda prefix: DeepseekV32DecoderLayer(
                 aphrodite_config=aphrodite_config,
                 prefix=prefix,
-                topk_indices_buffer=topk_indices_buffer,
+                topk_indices_buffer=self.topk_indices_buffer,
+                index_group_builder=index_group_builder,
             ),
             prefix=f"{prefix}.layers",
         )
+        # Each PP rank owns its top-k buffer; a skip layer cannot consume
+        # indices produced only on the preceding stage.
+        if is_skip_topk_layer(config, self.start_layer):
+            raise ValueError(
+                f"Pipeline stage starting at layer {self.start_layer} begins "
+                "with a skip-topk sparse layer, which would read top-k indices "
+                "no layer on this rank has produced. Adjust the pipeline "
+                "partition so every stage starts with a full-indexer layer "
+                "(align stage boundaries with index_topk_freq / "
+                "index_topk_pattern)."
+            )
 
         if get_pp_group().is_last_rank:
             self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)

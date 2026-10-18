@@ -29,7 +29,7 @@ from collections.abc import Callable, Iterable
 
 import torch
 import torch.nn as nn
-from transformers import PretrainedConfig
+from transformers import PreTrainedConfig
 
 from aphrodite.config import AphroditeConfig, CacheConfig, ParallelConfig
 from aphrodite.model_executor.layers.fused_moe import (
@@ -60,7 +60,7 @@ from .utils import get_spec_layer_idx_from_weight_name, maybe_prefix
 class SharedHead(nn.Module):
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         prefix: str,
         quant_config: QuantizationConfig | None = None,
     ) -> None:
@@ -80,7 +80,7 @@ class SharedHead(nn.Module):
 class Glm4MoeMultiTokenPredictorLayer(nn.Module):
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         prefix: str,
         cache_config: CacheConfig | None = None,
         quant_config: QuantizationConfig | None = None,
@@ -387,8 +387,7 @@ class Glm4MoeMTP(nn.Module, Glm4MixtureOfExperts):
         return loaded_params
 
     def _rewrite_spec_layer_name(self, spec_layer: int, name: str) -> str:
-        """
-        Rewrite the weight name to match the format of the original model.
+        """Rewrite the weight name to match the format of the original model.
         Add .mtp_block for modules in transformer layer block for spec layer
         and rename shared layer weights to be top level.
         """

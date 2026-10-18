@@ -7,7 +7,7 @@ import pytest
 from aphrodite.v1.kv_offload.base import OffloadKey, ReqContext
 from aphrodite.v1.kv_offload.cpu.manager import CPUOffloadingManager
 from aphrodite.v1.kv_offload.cpu.policies.arc import ARCCachePolicy
-from aphrodite.v1.kv_offload.cpu.policies.base import BlockStatus, CachePolicy
+from aphrodite.v1.kv_offload.cpu.policies.base import CachePolicy, ChunkStatus
 from aphrodite.v1.kv_offload.cpu.policies.factory import CachePolicyFactory
 from aphrodite.v1.kv_offload.cpu.policies.lru import LRUCachePolicy
 
@@ -16,10 +16,10 @@ class _DummyCachePolicy(CachePolicy):
     def __init__(self, cache_capacity: int) -> None:
         super().__init__(cache_capacity)
 
-    def get(self, key: OffloadKey) -> BlockStatus | None:
+    def get(self, key: OffloadKey) -> ChunkStatus | None:
         return None
 
-    def insert(self, key: OffloadKey, block: BlockStatus) -> None:
+    def insert(self, key: OffloadKey, chunk: ChunkStatus) -> None:
         pass
 
     def remove(self, key: OffloadKey) -> None:
@@ -28,7 +28,7 @@ class _DummyCachePolicy(CachePolicy):
     def touch(self, keys: Iterable[OffloadKey], req_context: ReqContext) -> None:
         pass
 
-    def evict(self, n: int, protected: set[OffloadKey]) -> list[tuple[OffloadKey, BlockStatus]] | None:
+    def evict(self, n: int, protected: set[OffloadKey]) -> list[tuple[OffloadKey, ChunkStatus]] | None:
         return None
 
     def clear(self) -> None:
@@ -61,7 +61,7 @@ class TestCachePolicyFactory:
         policy_cls = CachePolicyFactory.get_cache_policy_cls("dummy")
         assert policy_cls is _DummyCachePolicy
 
-        manager = CPUOffloadingManager(num_blocks=4, cache_policy="dummy")
+        manager = CPUOffloadingManager(num_chunks=4, cache_policy="dummy")
         assert isinstance(manager._policy, _DummyCachePolicy)
 
     def test_unregistered_policy_raises(self):
@@ -81,7 +81,7 @@ class TestCachePolicyFactory:
 
     def test_manager_resolves_policy_via_module_path(self):
         manager = CPUOffloadingManager(
-            num_blocks=4,
+            num_chunks=4,
             cache_policy="_DummyCachePolicy",
             cache_policy_module_path="tests.v1.kv_offload.cpu.policies.test_factory",
         )

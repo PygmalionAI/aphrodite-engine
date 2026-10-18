@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -8,7 +9,6 @@ from typing import Any
 
 import torch
 
-import aphrodite.envs as envs
 from aphrodite.compilation.cuda_graph import CUDAGraphWrapper
 from aphrodite.config import AphroditeConfig, CUDAGraphMode
 from aphrodite.distributed.device_communicators.pynccl_allocator import set_graph_pool_id
@@ -85,7 +85,7 @@ class UBatchWrapper:
 
         self.sm_control = create_sm_control_context(aphrodite_config.parallel_config)
         self.device = device
-        self.is_debugging_mode = envs.APHRODITE_LOGGING_LEVEL == "DEBUG"
+        self.is_debugging_mode = logger.isEnabledFor(logging.DEBUG)
         self._runnable_str = str(runnable) if self.is_debugging_mode else None
 
     @property
@@ -114,8 +114,7 @@ class UBatchWrapper:
         return self.runnable
 
     def _capture_ubatches(self, ubatch_metadata, model) -> torch.Tensor:
-        """
-        Capture a cudagraph for a microbatched run.
+        """Capture a cudagraph for a microbatched run.
 
         The logic here is somewhat complicated because we need to make sure that
         each of the ubatch threads initialize the cuda context before we start
@@ -209,6 +208,7 @@ class UBatchWrapper:
     def _run_ubatches(self, ubatch_metadata, model) -> torch.Tensor:
         @torch.inference_mode()
         def _ubatch_thread(results, model, ubatch_metadata):
+            torch.accelerator.set_device_index(self.device)
             with ubatch_metadata.context:
                 model_output = model(
                     input_ids=ubatch_metadata.input_ids,
@@ -257,6 +257,7 @@ class UBatchWrapper:
         dp_metadata,
         batch_descriptor,
         cudagraph_runtime_mode,
+        is_padding,
     ) -> list[UbatchMetadata]:
         # Create one forward context per ubatch
         forward_contexts = []
@@ -272,6 +273,7 @@ class UBatchWrapper:
                     batch_descriptor=batch_descriptor,
                     cudagraph_runtime_mode=cudagraph_runtime_mode,
                     slot_mapping=slot_mapping[i] if has_slot_mapping else None,
+                    is_padding=(is_padding[ubatch_slice.token_slice] if is_padding is not None else None),
                 )
             )
 
@@ -281,6 +283,7 @@ class UBatchWrapper:
             compute_stream=compute_stream,
             forward_contexts=forward_contexts,
             ready_barrier=self.ready_barrier,
+            token_offsets=[s.token_slice.start for s in ubatch_slices],
         )
 
         ubatch_metadata: list[UbatchMetadata] = []
@@ -362,6 +365,7 @@ class UBatchWrapper:
 
         attn_metadata = forward_context.attn_metadata
         slot_mapping = forward_context.slot_mapping
+        is_padding = forward_context.is_padding
         num_tokens = sum(ubatch_slice.num_tokens for ubatch_slice in ubatch_slices)
         input_ids = kwargs["input_ids"]
         positions = kwargs["positions"]
@@ -400,6 +404,7 @@ class UBatchWrapper:
                 dp_metadata=ubatch_dp_metadata,
                 batch_descriptor=batch_descriptor,
                 cudagraph_runtime_mode=CUDAGraphMode.NONE,
+                is_padding=is_padding,
             )
             with self.sm_control:
                 return self._capture_ubatches(ubatch_metadata, self.runnable)
@@ -423,6 +428,7 @@ class UBatchWrapper:
                 dp_metadata=ubatch_dp_metadata,
                 batch_descriptor=batch_descriptor,
                 cudagraph_runtime_mode=CUDAGraphMode.NONE,
+                is_padding=is_padding,
             )
             with self.sm_control:
                 return self._run_ubatches(ubatch_metadata, self.runnable)

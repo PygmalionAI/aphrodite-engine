@@ -154,14 +154,15 @@ if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER_EQUAL 12.8 AND QUTLASS_ARCHS)
     USE_SABI 3
     WITH_SOABI)
 
-  # QuTLASS uses legacy ATen headers and cannot be built with
-  # TORCH_TARGET_VERSION. QUTLASS_DISABLE_PYBIND drops its pybind module so it
-  # registers only via TORCH_LIBRARY (torch.ops._qutlass_C).
+  # The pinned QuTLASS sources use torch::stable tensors and boxed operator
+  # registrations. Build the inference-only subset: training/backward sources
+  # are deliberately not part of this extension.
   target_compile_definitions(_qutlass_C PRIVATE
-    QUTLASS_DISABLE_PYBIND=1
-    USE_CUDA
+    QUTLASS_MINIMAL_BUILD=1
+    TORCH_TARGET_VERSION=0x020B000000000000ULL
     TARGET_CUDA_ARCH=${QUTLASS_TARGET_CC}
-    CUTLASS_ENABLE_DIRECT_CUDA_DRIVER_CALL=1)
+    CUTLASS_ENABLE_DIRECT_CUDA_DRIVER_CALL=1
+    USE_CUDA)
 
   set_property(SOURCE ${QUTLASS_SOURCES} APPEND PROPERTY COMPILE_OPTIONS
     $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr --use_fast_math -O3>

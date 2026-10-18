@@ -4,14 +4,14 @@
 from typing import Any, cast
 
 from aphrodite.config import AphroditeConfig
-from aphrodite.entrypoints.chat_utils import (
+from aphrodite.exceptions import AphroditeValidationError
+from aphrodite.multimodal.media.connector import merge_media_io_kwargs
+from aphrodite.renderers.chat_utils import (
     ChatCompletionMessageParam,
     ConversationMessage,
     parse_chat_messages,
     parse_chat_messages_async,
 )
-from aphrodite.exceptions import AphroditeValidationError
-from aphrodite.multimodal.media.connector import merge_media_io_kwargs
 from aphrodite.tokenizers.hf import HfTokenizer
 from aphrodite.utils.async_utils import make_async
 

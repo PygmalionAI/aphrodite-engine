@@ -126,7 +126,7 @@ def create_sampling_metadata(
 
 ########################### Tests for Greedy Sampling ###################
 def test_perfect_match(rejection_sampler):
-    """Test when output tokens perfectly match speculated tokens"""
+    """Test when output tokens perfectly match speculated tokens."""
     spec_tokens = [[1, 2, 3]]
     output_tokens = [[1, 2, 3, 4]]  # 4 is the bonus token
 
@@ -147,7 +147,7 @@ def test_perfect_match(rejection_sampler):
 
 
 def test_early_mismatch(rejection_sampler):
-    """Test when there's an early mismatch in tokens"""
+    """Test when there's an early mismatch in tokens."""
     spec_tokens = [[1, 2, 3]]
     output_tokens = [[1, 5, 3, 4]]  # Mismatch at position 1
 
@@ -172,7 +172,7 @@ def test_early_mismatch(rejection_sampler):
 
 
 def test_multiple_sequences(rejection_sampler):
-    """Test handling multiple sequences of speculated tokens"""
+    """Test handling multiple sequences of speculated tokens."""
     spec_tokens = [[1, 2], [3]]
     output_tokens = [[1, 2, 5], [3, 4]]  # Two sequences with bonus tokens 5 and 4
 
@@ -193,7 +193,7 @@ def test_multiple_sequences(rejection_sampler):
 
 
 def test_single_token_sequence(rejection_sampler):
-    """Test handling sequences with single token"""
+    """Test handling sequences with single token."""
     spec_tokens = [[1]]
     output_tokens = [[1, 2]]  # Single token with bonus token 2
 
@@ -214,7 +214,7 @@ def test_single_token_sequence(rejection_sampler):
 
 
 def test_empty_sequence(rejection_sampler):
-    """Test handling empty sequence of speculated tokens"""
+    """Test handling empty sequence of speculated tokens."""
     spec_tokens: list[list[int]] = [[]]
     output_tokens = [[5]]  # Just the bonus token
 
@@ -235,7 +235,7 @@ def test_empty_sequence(rejection_sampler):
 
 
 def test_multiple_mismatches(rejection_sampler):
-    """Test handling multiple sequences with mismatches"""
+    """Test handling multiple sequences with mismatches."""
     spec_tokens = [[1, 2, 3], [4, 5, 6]]
     output_tokens = [[1, 2, 7, 6], [4, 8, 6, 9]]  # Mismatches in both sequences
 
@@ -275,7 +275,7 @@ def test_multiple_mismatches(rejection_sampler):
     ],
 )
 def test_parametrized_cases(rejection_sampler, spec_tokens, output_tokens, expected):
-    """Parametrized test for various matching scenarios"""
+    """Parametrized test for various matching scenarios."""
     metadata = create_sampling_metadata(all_greedy=True)
     logits = create_logits_tensor(output_tokens)
     bonus_token_tensor = torch.tensor([tokens[-1] for tokens in output_tokens], device=logits.device)
@@ -451,6 +451,7 @@ def estimate_rejection_sampling_pdf(
 
     Returns:
         Estimated probability distribution of the output tokens.
+
     """
     mock_sampler = Mock(spec=Sampler)
     mock_sampler.logprobs_mode = "raw_logprobs"
@@ -606,7 +607,7 @@ def _test_masked_logits(
 
 @pytest.mark.parametrize("top_k", [1, 5, 99])
 def test_top_k(rejection_sampler, top_k):
-    """Test rejection sampling with top-k sampling"""
+    """Test rejection sampling with top-k sampling."""
     vocab_size = 100
     batch_size = 100
     num_draft_tokens = 3
@@ -646,7 +647,7 @@ def test_top_k(rejection_sampler, top_k):
 
 @pytest.mark.parametrize("top_p", [0.5, 0.9, 0.99])
 def test_top_p(rejection_sampler, top_p):
-    """Test rejection sampling with top-p sampling"""
+    """Test rejection sampling with top-p sampling."""
     vocab_size = 100
     batch_size = 100
     num_draft_tokens = 3
@@ -742,7 +743,7 @@ def test_min_p(rejection_sampler, min_p):
 
 ########################### Tests for Logit Processors ###################
 def test_frequency_penalties(rejection_sampler):
-    """Test rejection sampling with frequency penalties"""
+    """Test rejection sampling with frequency penalties."""
     spec_tokens = [[1, 1, 1], [], [1, 1, 1]]
     output_tokens = [[1, 1, 1, 1], [7], [1, 1, 1, 1]]  # 1, 7 and 1 are the bonus tokens
 
@@ -819,7 +820,7 @@ def test_bad_words(rejection_sampler):
 
 
 def test_allowed_token_ids(rejection_sampler):
-    """Test rejection sampling with allowed token ids"""
+    """Test rejection sampling with allowed token ids."""
     spec_tokens = [[1, 2, 10], [10, 5, 3], [7, 10, 12]]
     output_tokens = [[1, 2, 10, 5], [10, 5, 10, 5], [7, 10, 12, 5]]
     # Not allowed tokens:
@@ -1144,3 +1145,41 @@ def test_placeholder_draft_token_rejected_random(rejection_sampler):
     assert sampled[0, 1].item() == vocab_size - 1
     recovered = sampled[0, 2].item()
     assert 0 <= recovered < vocab_size
+
+
+@pytest.mark.parametrize(
+    "emitted_tokens",
+    [
+        [0, 1, 2],  # All drafts and the bonus were accepted.
+        [0, 2, PLACEHOLDER_TOKEN_ID],  # One accepted draft, then recovery.
+        [1, PLACEHOLDER_TOKEN_ID, PLACEHOLDER_TOKEN_ID],  # Immediate recovery.
+        [PLACEHOLDER_TOKEN_ID, PLACEHOLDER_TOKEN_ID, PLACEHOLDER_TOKEN_ID],
+    ],
+)
+def test_speculative_mirostat_commits_only_emitted_tokens(emitted_tokens: list[int]):
+    metadata = create_sampling_metadata(all_greedy=False, temperature=torch.ones(2))
+    metadata.mirostat_mode = torch.tensor([2, 0])
+    metadata.mirostat_tau = torch.tensor([1.5, 1.5])
+    metadata.mirostat_eta = torch.tensor([0.25, 0.25])
+    metadata.persistent_data = {0: {"miro_mu": 4.0, "unrelated": 123}, 1: {"miro_mu": 17.0}}
+    spec_metadata = SpecDecodeMetadata.make_dummy([[0, 1], [2]], device=torch.device("cpu"))
+    spec_metadata.target_logits_indices = torch.tensor([0, 1, 3])
+    spec_metadata.bonus_logits_indices = torch.tensor([2, 4])
+    probabilities = torch.tensor(
+        [[0.5, 0.25, 0.25], [0.125, 0.75, 0.125], [0.25, 0.25, 0.5], [0.2, 0.4, 0.4], [0.6, 0.2, 0.2]]
+    )
+    logits = probabilities.log()
+    outputs = torch.tensor([emitted_tokens, [1, PLACEHOLDER_TOKEN_ID, PLACEHOLDER_TOKEN_ID]])
+    emitted = [token for token in emitted_tokens if token != PLACEHOLDER_TOKEN_ID]
+    delta = sum(0.25 * (float(-probabilities[offset, token].log2()) - 1.5) for offset, token in enumerate(emitted))
+
+    RejectionSampler._commit_mirostat_state(logits, outputs, metadata, spec_metadata)
+    assert metadata.persistent_data[0]["miro_mu"] == pytest.approx(4.0 - delta)
+    assert metadata.persistent_data[0]["unrelated"] == 123
+    assert metadata.persistent_data[1] == {"miro_mu": 17.0}
+
+    # Unconsumed target/bonus rows must not affect learning on the next step;
+    # accepted updates accumulate rather than resetting to the initial mu.
+    logits[len(emitted) : 3] = torch.tensor([10.0, -10.0, -10.0])
+    RejectionSampler._commit_mirostat_state(logits, outputs, metadata, spec_metadata)
+    assert metadata.persistent_data[0]["miro_mu"] == pytest.approx(4.0 - 2 * delta)

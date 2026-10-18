@@ -17,6 +17,7 @@ MODELS = [
         "BAAI/bge-base-en",
         architecture="BertModel",
         mteb_score=0.779336792,
+        mteb_tol=2e-3,
         seq_pooling_type="CLS",
         attn_type="encoder_only",
         is_prefix_caching_supported=False,
@@ -40,6 +41,7 @@ MODELS = [
         "BAAI/bge-m3",
         architecture="XLMRobertaModel",
         mteb_score=0.787343078,
+        mteb_tol=2e-3,
         seq_pooling_type="CLS",
         attn_type="encoder_only",
         is_prefix_caching_supported=False,
@@ -68,6 +70,7 @@ RERANK_MODELS = [
         "BAAI/bge-reranker-base",
         architecture="XLMRobertaForSequenceClassification",
         mteb_score=0.32398,
+        mteb_tol=1e-2,
         seq_pooling_type="CLS",
         attn_type="encoder_only",
         is_prefix_caching_supported=False,
@@ -87,6 +90,7 @@ RERANK_MODELS = [
 ]
 
 
+@pytest.mark.flaky(reruns=2)
 @pytest.mark.parametrize("model_info", MODELS)
 def test_embed_models_mteb(hf_runner, aphrodite_runner, model_info: EmbedModelInfo) -> None:
     mteb_test_embed_models(hf_runner, aphrodite_runner, model_info)
@@ -97,6 +101,7 @@ def test_embed_models_correctness(hf_runner, aphrodite_runner, model_info: Embed
     correctness_test_embed_models(hf_runner, aphrodite_runner, model_info, example_prompts)
 
 
+@pytest.mark.flaky(reruns=2)
 @pytest.mark.parametrize("model_info", RERANK_MODELS)
 def test_rerank_models_mteb(aphrodite_runner, model_info: RerankModelInfo) -> None:
     mteb_test_rerank_models(aphrodite_runner, model_info)

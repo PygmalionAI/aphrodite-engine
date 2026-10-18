@@ -20,7 +20,6 @@ pytestmark = pytest.mark.cpu_test
 
 def test_basic_lifecycle():
     """Test lifecycle of a Remote Decode request."""
-
     aphrodite_config = create_aphrodite_config()
     scheduler = create_scheduler(aphrodite_config)
 
@@ -111,7 +110,6 @@ def test_basic_lifecycle():
 
 def test_short_prompt_lifecycle():
     """Test lifecycle of a Remote Decode request with short prompt."""
-
     aphrodite_config = create_aphrodite_config()
     scheduler = create_scheduler(aphrodite_config)
 
@@ -156,7 +154,6 @@ def test_short_prompt_lifecycle():
 
 def test_prefix_cache_lifecycle():
     """Test that remote decode params still work with a prefix cache hit."""
-
     aphrodite_config = create_aphrodite_config()
     scheduler = create_scheduler(aphrodite_config)
 
@@ -210,7 +207,6 @@ def test_prefix_cache_lifecycle():
 
 def test_abort_during_kv_transfer():
     """Test aborting request does not release blocks for remote decode."""
-
     aphrodite_config = create_aphrodite_config()
     scheduler = create_scheduler(aphrodite_config)
 

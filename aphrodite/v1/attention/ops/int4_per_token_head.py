@@ -18,6 +18,7 @@ import torch
 
 from aphrodite.platforms import current_platform
 from aphrodite.triton_utils import tl, triton
+from aphrodite.utils.math_utils import largest_power_of_2_divisor
 from aphrodite.v1.attention.ops.triton_attention_helpers import (
     apply_alibi_to_score,
     apply_softcap,
@@ -847,14 +848,15 @@ def unified_attention_int4(
 ) -> None:
     """Paged attention over the INT4 packed cache, writing into *out*.
 
-    The forward RHT has norm ``sqrt(head_size)``, so ``softmax_scale`` is
-    divided by ``head_size`` and the inverse RHT divides the output by
-    ``head_size`` as well.
+    The forward RHT has norm ``sqrt(b)`` for ``b`` the largest power-of-two
+    divisor of ``head_size`` (``b == head_size`` for power-of-two sizes), so
+    ``softmax_scale`` is divided by ``b`` and the inverse RHT divides the output
+    by ``b`` as well.
     """
     q_orig_dtype = q.dtype
     q = single_rht(q.float()).to(q_orig_dtype)
-    head_size = q.shape[2]
-    softmax_scale = softmax_scale / head_size
+    rht_norm = largest_power_of_2_divisor(q.shape[2])
+    softmax_scale = softmax_scale / rht_norm
 
     _launch_packed_attn(
         q=q,
@@ -884,7 +886,7 @@ def unified_attention_int4(
         packing_factor=_INT4_PACKING_FACTOR,
     )
 
-    out_f = single_rht(out.float(), inverse=True) / head_size
+    out_f = single_rht(out.float(), inverse=True) / rht_norm
     out.copy_(out_f.to(q_orig_dtype))
 
 
@@ -1082,6 +1084,14 @@ def single_rht(x: torch.Tensor, inverse: bool = False) -> torch.Tensor:
     before asymmetric quantization.
     """
     d = x.shape[-1]
+    block = largest_power_of_2_divisor(d)
+    if block < d:
+        # H is only defined for power-of-two rows, so apply it
+        # block-diagonally: H_b inside each of the d / b blocks, for b the
+        # largest power-of-two divisor of d.  That keeps H @ H.T = b * I
+        # without padding the row, hence the norm is sqrt(b), not sqrt(d).
+        lead = x.shape[:-1]
+        return single_rht(x.reshape(*lead, d // block, block), inverse).reshape(*lead, d)
     d1 = _get_rht_signs(d, 0, x.device)
     if inverse:
         return fast_hadamard_transform(x) * d1

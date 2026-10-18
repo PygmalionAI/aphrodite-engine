@@ -102,6 +102,13 @@ def load_endpoint_plugins(
         `APHRODITE_PLUGINS=""` parses to `[""]`, not `None`, so it is treated
         as a non-strict allowlist matching no plugin name, not as "unset".
       - its `required_tasks` is `None` or intersects `supported_tasks`.
+
+    Args:
+        supported_tasks: Tasks the server supports. `None` means no plugin
+            with a non `None` `required_tasks` will be loaded.
+
+    Returns:
+        Instantiated plugins that passed gating in discovery order.
     """
     from importlib.metadata import entry_points
 

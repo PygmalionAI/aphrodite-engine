@@ -5,7 +5,7 @@ from fastapi import Request
 from starlette.responses import JSONResponse
 
 from aphrodite.entrypoints.launchers.launcher import terminate_if_errored
-from aphrodite.exceptions import APHRODITEError, GenerationError
+from aphrodite.exceptions import AphroditeError, GenerationError
 from aphrodite.logger import init_logger
 from aphrodite.v1.engine.exceptions import EngineDeadError, EngineGenerateError
 
@@ -15,7 +15,7 @@ from .exception import exception_handler
 logger = init_logger(__name__)
 
 
-async def aphrodite_error_handler(req: Request, exc: APHRODITEError):
+async def aphrodite_error_handler(req: Request, exc: AphroditeError):
     """Dispatch a Aphrodite-specific error to the appropriate handler."""
     if isinstance(exc, (EngineGenerateError, EngineDeadError)):
         return await engine_error_handler(req, exc)
@@ -26,8 +26,7 @@ async def aphrodite_error_handler(req: Request, exc: APHRODITEError):
 
 
 async def engine_error_handler(req: Request, exc: EngineDeadError | EngineGenerateError):
-    """
-    APHRODITE V1 AsyncLLM catches exceptions and returns
+    """APHRODITE V1 AsyncLLM catches exceptions and returns
     only two types: EngineGenerateError and EngineDeadError.
 
     EngineGenerateError is raised by the per request generate()
@@ -49,7 +48,6 @@ async def engine_error_handler(req: Request, exc: EngineDeadError | EngineGenera
     will not automatically shut down. Instead, we use the watchdog
     background task for check for errored state.
     """
-
     if req.app.state.args.log_error_stack:
         logger.exception(
             "Engine Exception caught. Request id: %s",
@@ -68,8 +66,8 @@ async def generation_error_handler(req: Request, exc: GenerationError):
     """Handle GenerationError without logging stack traces.
 
     GenerationError is a known, expected error (e.g. KV cache load failure)
-    that should be returned to the client as a 500 response without polluting
-    server logs with stack traces.
+    that should be returned to the client without polluting server logs with
+    stack traces.
     """
     err = create_error_response(exc)
     return JSONResponse(err.model_dump(), status_code=err.error.code)

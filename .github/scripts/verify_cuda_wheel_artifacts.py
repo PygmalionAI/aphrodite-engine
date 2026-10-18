@@ -12,20 +12,8 @@ import sys
 import zipfile
 from pathlib import Path
 
-import tomllib
 
-
-def supported_python_minors(pyproject: Path) -> list[int]:
-    with pyproject.open("rb") as file:
-        spec = tomllib.load(file)["project"]["requires-python"]
-    bounds = spec.removeprefix(">=3.").split(",<3.")
-    if len(bounds) != 2 or not all(bound.isdigit() for bound in bounds):
-        raise ValueError(f"Cannot parse requires-python from {pyproject}")
-    lower, upper = map(int, bounds)
-    return list(range(lower, upper))
-
-
-def verify(wheel: Path, pyproject: Path) -> None:
+def verify(wheel: Path) -> None:
     with zipfile.ZipFile(wheel) as archive:
         entries = {entry.filename: entry for entry in archive.infolist()}
 
@@ -46,10 +34,14 @@ def verify(wheel: Path, pyproject: Path) -> None:
     ):
         missing.append("aphrodite/_rust_tool_parser*.so")
 
-    for minor in supported_python_minors(pyproject):
-        prefix = f"aphrodite/third_party/deep_gemm/_C.cpython-3{minor}-"
-        if not any(name.startswith(prefix) and name.endswith(".so") for name in entries):
-            missing.append(f"{prefix}*.so")
+    deepgemm_dir = "aphrodite/third_party/deep_gemm/"
+    shim = f"{deepgemm_dir}_C.py"
+    extension = f"{deepgemm_dir}_C_extension.abi3.so"
+    if shim not in entries:
+        missing.append(shim)
+    bindings = [name for name in entries if name.startswith(f"{deepgemm_dir}_C") and name.endswith(".so")]
+    if bindings != [extension]:
+        missing.append(f"{extension} (exactly one stable-ABI binding; no legacy bindings)")
 
     if missing:
         formatted = "\n".join(f"  - {item}" for item in missing)
@@ -59,9 +51,8 @@ def verify(wheel: Path, pyproject: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("wheel", type=Path)
-    parser.add_argument("--pyproject", type=Path, default=Path("pyproject.toml"))
     args = parser.parse_args()
-    verify(args.wheel, args.pyproject)
+    verify(args.wheel)
     print(f"Verified CUDA wheel native artifacts: {args.wheel}")
     return 0
 

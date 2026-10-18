@@ -32,8 +32,7 @@ def test_speculators_model_integration(
     expected_accuracy_threshold: float,
     aphrodite_runner,
 ):
-    """
-    Test that speculators models work with the simplified integration.
+    """Test that speculators models work with the simplified integration.
 
     This verifies the `aphrodite serve <speculator-model>` use case where
     speculative config is automatically detected from the model config

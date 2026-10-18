@@ -20,10 +20,15 @@ Multi-lora shrink/expand Triton kernel tuning follows a similar methodology from
    split_k_range = [4, 8, 16, 32, 64]
    ```
 
+   Batch-invariant shrink uses a fixed `block_k=256` and `split_k=8` with
+   ordered FP32 partial reduction; those two tuning values are overridden.
+   On SM90, expand uses one pipeline stage when casting FP32 input to the
+   adapter dtype to avoid the pipelined WGMMA compiler issue.
+
 2. Get all hidden_state sizes and num_slices that the target model uses for a specific TP size.
 
    For example, you can acquire the info by simply checking
-   [add_lora_linear](https://github.com/vllm-project/vllm/blob/main/aphrodite/lora/punica_wrapper/punica_gpu.py#L181):
+   [add_lora_linear](https://github.com/vllm-project/vllm/blob/main/vllm/lora/punica_wrapper/punica_gpu.py#L181):
 
    ```python
    print(f"x_shape: {x.view(-1, x.shape[-1]).shape}")

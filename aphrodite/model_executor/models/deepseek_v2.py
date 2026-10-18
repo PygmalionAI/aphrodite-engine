@@ -103,10 +103,14 @@ from aphrodite.platforms import current_platform
 from aphrodite.sequence import IntermediateTensors
 from aphrodite.utils.torch_utils import direct_register_custom_op
 from aphrodite.v1.attention.backend import AttentionBackend, AttentionType
+from aphrodite.v1.attention.backends.mla.index_group import (
+    SparseMLAIndexGroupBuilder,
+    get_sparse_mla_index_group_max_rows,
+)
 from aphrodite.v1.attention.backends.mla.indexer import (
     DeepseekV32IndexerBackend,
 )
-from aphrodite.v1.kv_cache_interface import KVCacheSpec, MLAAttentionSpec
+from aphrodite.v1.kv_cache_interface import KVCacheSpec, MLAAttentionSpec, SparseCacheRole
 
 from .interfaces import (
     MixtureOfExperts,
@@ -381,6 +385,7 @@ class DeepseekV2MoE(nn.Module):
             reduce_results=reduce_results,
             n_shared_experts=config.n_shared_experts if self.is_fused_shared_expert_enabled else None,
             fuse_shared_experts=self.is_fused_shared_expert_enabled,
+            shared_expert_prefix=f"{prefix}.shared_experts",
             router_logits_dtype=self.gate.out_dtype,
         )
 
@@ -514,7 +519,7 @@ class DeepseekV2Attention(nn.Module):
         )
         if config.rope_parameters["rope_type"] != "default":
             config.rope_parameters["rope_type"] = (
-                "deepseek_yarn" if config.rope_parameters.get("apply_yarn_scaling", True) else "deepseek_llama_scaling"
+                "deepseek_llama_scaling" if config.rope_parameters.get("attention_factor") == 1.0 else "deepseek_yarn"
             )
 
         self.rotary_emb = get_rope(
@@ -619,11 +624,18 @@ class DeepseekV32IndexerCache(torch.nn.Module, AttentionLayerBase):
         return MLAAttentionSpec(
             block_size=self.cache_config.block_size,
             num_kv_heads=1,
+            max_tp_shards=1,
             head_size=self.head_dim,
             dtype=self.dtype,
+            cache_role=SparseCacheRole.INDEXER,
         )  # Only has one vector instead of K + V
 
     def forward(self): ...
+
+    @property
+    def uses_shuffled_layout(self) -> bool:
+        """Whether this cache's reader expects the shuffled value layout."""
+        return False
 
     def get_attn_backend(self) -> type[AttentionBackend]:
         return DeepseekV32IndexerBackend
@@ -670,7 +682,7 @@ class Indexer(nn.Module):
             disable_tp=True,
             prefix=f"{prefix}.wk_weights_proj",
         )
-        self.k_norm = LayerNorm(self.head_dim, eps=1e-6)
+        self.k_norm = LayerNorm(self.head_dim, eps=1e-6, dtype=torch.float32)
         self.softmax_scale = self.head_dim**-0.5
 
         self.scale_fmt = "ue8m0"
@@ -798,8 +810,7 @@ class Indexer(nn.Module):
 
 
 def _try_load_fp8_indexer_wk(name, tensor, buf, params_dict, loaded_params, pp_missing_layer_names):
-    """
-    We fuse the WK and weights_proj projections, but in some checkpoints WK is stored
+    """We fuse the WK and weights_proj projections, but in some checkpoints WK is stored
     in FP8 with a separate weight_scale_inv, while weights_proj is stored in BF16.
     Upcasting to BF16 during loading enables the fusion. This function loads the FP8 WK
     weights and scale, and when both are available, dequantizes to BF16 and stores into
@@ -856,8 +867,7 @@ def _min_latency_fused_qkv_a_proj_impl(
     input_: torch.Tensor,
     weight: torch.Tensor,
 ) -> torch.Tensor:
-    """
-    Dynamically run min-latency gemm if num_tokens <= 16.
+    """Dynamically run min-latency gemm if num_tokens <= 16.
     This must be wrapped in a custom op because our torch.compile integration
     does not support runtime dispatching on num_tokens.
     """
@@ -952,8 +962,7 @@ def is_skip_topk_layer(config, layer_id: int) -> bool:
 
 
 class DeepseekV2MLAAttention(nn.Module):
-    """
-    Main reference: DeepseekV2 paper, and FlashInfer Implementation
+    """Main reference: DeepseekV2 paper, and FlashInfer Implementation
     (https://arxiv.org/abs/2405.04434 and https://github.com/flashinfer-ai/flashinfer/pull/551).
 
         For more info see MLACommonImpl in:
@@ -976,6 +985,7 @@ class DeepseekV2MLAAttention(nn.Module):
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
         topk_indices_buffer: torch.Tensor | None = None,
+        index_group_builder: SparseMLAIndexGroupBuilder | None = None,
         input_size: int | None = None,
         reduce_results: bool = True,
         non_causal_multi_token_decode: bool = False,
@@ -1001,13 +1011,6 @@ class DeepseekV2MLAAttention(nn.Module):
         # Use input_size for projection input dimensions if provided,
         # otherwise default to hidden_size (used in Eagle3 Deepseek with MLA)
         proj_input_size = input_size if input_size is not None else self.hidden_size
-        qrep_enabled = (
-            envs.APHRODITE_DCP_Q_REPLICATE
-            and aphrodite_config.parallel_config.decode_context_parallel_size > 1
-            and aphrodite_config.parallel_config.prefill_context_parallel_size <= 1
-        )
-        q_proj_cls = DCPGroupColumnParallelLinear if qrep_enabled else ColumnParallelLinear
-
         if self.q_lora_rank is not None:
             self.fused_qkv_a_proj = DeepSeekV2FusedQkvAProjLinear(
                 proj_input_size,
@@ -1072,7 +1075,7 @@ class DeepseekV2MLAAttention(nn.Module):
 
         if config.rope_parameters["rope_type"] != "default":
             config.rope_parameters["rope_type"] = (
-                "deepseek_yarn" if config.rope_parameters.get("apply_yarn_scaling", True) else "deepseek_llama_scaling"
+                "deepseek_llama_scaling" if config.rope_parameters.get("attention_factor") == 1.0 else "deepseek_yarn"
             )
 
         self.rotary_emb = get_rope(
@@ -1146,6 +1149,7 @@ class DeepseekV2MLAAttention(nn.Module):
             indexer_rotary_emb=self.indexer_rope_emb,
             is_sparse=self.is_v32,
             topk_indices_buffer=topk_indices_buffer,
+            index_group_builder=index_group_builder,
         )
 
         self.mla_attn = MultiHeadLatentAttentionWrapper(
@@ -1189,6 +1193,7 @@ class DeepseekV2DecoderLayer(nn.Module):
         prefix: str,
         config: DeepseekV2Config | None = None,
         topk_indices_buffer: torch.Tensor | None = None,
+        index_group_builder: SparseMLAIndexGroupBuilder | None = None,
     ) -> None:
         super().__init__()
 
@@ -1233,6 +1238,7 @@ class DeepseekV2DecoderLayer(nn.Module):
         self.use_sequence_parallel_moe = (
             parallel_config.use_sequence_parallel_moe and parallel_config.pipeline_parallel_size == 1 and is_moe_layer
         )
+        attn_kwargs = {"index_group_builder": index_group_builder} if attn_cls is DeepseekV2MLAAttention else {}
         self.self_attn = attn_cls(
             aphrodite_config=aphrodite_config,
             config=config,
@@ -1249,6 +1255,7 @@ class DeepseekV2DecoderLayer(nn.Module):
             prefix=f"{prefix}.self_attn",
             topk_indices_buffer=topk_indices_buffer,
             reduce_results=not self.use_sequence_parallel_moe,
+            **attn_kwargs,
         )
 
         if is_moe_layer:
@@ -1365,6 +1372,14 @@ class DeepseekV2Model(nn.Module):
             )
         else:
             topk_indices_buffer = None
+        index_group_builder = (
+            SparseMLAIndexGroupBuilder(
+                topk_indices_buffer,
+                get_sparse_mla_index_group_max_rows(aphrodite_config),
+            )
+            if topk_indices_buffer is not None
+            else None
+        )
 
         if get_pp_group().is_first_rank:
             self.embed_tokens = VocabParallelEmbedding(
@@ -1381,6 +1396,7 @@ class DeepseekV2Model(nn.Module):
                 aphrodite_config=aphrodite_config,
                 prefix=prefix,
                 topk_indices_buffer=topk_indices_buffer,
+                index_group_builder=index_group_builder,
             ),
             prefix=f"{prefix}.layers",
         )

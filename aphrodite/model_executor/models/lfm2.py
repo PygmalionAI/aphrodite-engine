@@ -432,6 +432,7 @@ class Lfm2ForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP, IsHybr
         Returns:
             Tuple containing:
             - conv_state_shape: Shape for convolutional state cache
+
         """
         parallel_config = aphrodite_config.parallel_config
         hf_config = aphrodite_config.model_config.hf_config
@@ -449,12 +450,6 @@ class Lfm2ForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP, IsHybr
     def __init__(self, *, aphrodite_config: AphroditeConfig, prefix: str = "") -> None:
         config = aphrodite_config.model_config.hf_config
         quant_config = aphrodite_config.quant_config
-        cache_config = aphrodite_config.cache_config
-        if cache_config.mamba_cache_mode == "all":
-            raise NotImplementedError(
-                "Lfm2 currently does not support 'all' prefix caching, please use '--mamba-cache-mode=align' instead"
-            )
-
         super().__init__()
         self.config = config
         self.model = Lfm2Model(aphrodite_config=aphrodite_config, prefix=maybe_prefix(prefix, "model"))

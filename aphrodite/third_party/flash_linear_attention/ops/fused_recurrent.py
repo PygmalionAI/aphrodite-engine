@@ -10,6 +10,7 @@
 
 import torch
 
+from aphrodite.platforms import current_platform
 from aphrodite.triton_utils import tl, triton
 
 from .op import exp, log
@@ -418,6 +419,17 @@ def fused_recurrent_gated_delta_rule_packed_decode(
     if triton.cdiv(K, BK) != 1:
         raise ValueError(f"Packed decode kernel only supports NK=1 (got K={K}, BK={BK}).")
     BV = min(triton.next_power_of_2(V), 32)
+    if (
+        K == V == 128
+        and current_platform.is_cuda()
+        and current_platform.is_device_capability_family(100, device_id=dev.index)
+    ):
+        # Tuned on GB300; validated on GB200 and with 148 SMs.
+        # MRv2 decode warmup/graph capture compiles the reachable BV variants.
+        if B * HV <= 64:
+            BV = 4
+        elif initial_state.dtype == torch.float32:
+            BV = 8
     num_stages = 3
     num_warps = 1
 

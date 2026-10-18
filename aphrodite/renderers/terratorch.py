@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from aphrodite.entrypoints.chat_utils import (
+from aphrodite.logger import init_logger
+from aphrodite.renderers.chat_utils import (
     ChatCompletionMessageParam,
     ConversationMessage,
     parse_chat_messages,
     parse_chat_messages_async,
 )
-from aphrodite.logger import init_logger
 
 from .base import BaseRenderer
 from .inputs import DictPrompt

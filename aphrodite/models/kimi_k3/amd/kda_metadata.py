@@ -7,16 +7,26 @@ The request classification and cudagraph staging intentionally mirror
 differently on device rather than on the host.
 """
 
+from dataclasses import replace
+
 import torch
 
+from aphrodite.config import AphroditeConfig
 from aphrodite.logger import init_logger
+from aphrodite.model_executor.layers.mamba.checkpoint import (
+    MambaPrefillCheckpointMetadata,
+)
 from aphrodite.third_party.flash_linear_attention.ops.utils import FLA_CHUNK_SIZE
 from aphrodite.triton_utils import tl, triton
 from aphrodite.utils.math_utils import next_power_of_2
+from aphrodite.v1.attention.backend import max_decode_query_len
 from aphrodite.v1.attention.backends.gdn_attn import (
     GDNAttentionBackend,
+    GDNAttentionMetadata,
     GDNAttentionMetadataBuilder,
 )
+from aphrodite.v1.attention.backends.utils import CommonAttentionMetadata
+from aphrodite.v1.kv_cache_interface import KVCacheSpec
 
 logger = init_logger(__name__)
 
@@ -81,7 +91,71 @@ def prepare_chunk_metadata_device(
     return chunk_indices, chunk_offsets
 
 
+def _adaptive_verification_enabled(aphrodite_config: AphroditeConfig) -> bool:
+    speculative_config = aphrodite_config.speculative_config
+    return speculative_config is not None and bool(getattr(speculative_config, "enable_adaptive_verification", False))
+
+
 class KimiK3ROCmKDAMetadataBuilder(GDNAttentionMetadataBuilder):
+    @classmethod
+    def get_varlen_cudagraph_max_query_len(
+        cls: type["KimiK3ROCmKDAMetadataBuilder"],
+        aphrodite_config: AphroditeConfig,
+        kv_cache_spec: KVCacheSpec,
+    ) -> int | None:
+        if not _adaptive_verification_enabled(aphrodite_config):
+            return None
+        return max_decode_query_len(aphrodite_config)
+
+    def build(  # type: ignore[override]
+        self,
+        common_prefix_len: int,
+        common_attn_metadata: CommonAttentionMetadata,
+        num_accepted_tokens: torch.Tensor | None = None,
+        num_decode_draft_tokens_cpu: torch.Tensor | None = None,
+        fast_build: bool = False,
+    ) -> GDNAttentionMetadata:
+        attn_metadata = super().build(
+            common_prefix_len,
+            common_attn_metadata,
+            num_accepted_tokens,
+            num_decode_draft_tokens_cpu,
+            fast_build,
+        )
+        if attn_metadata.uniform_spec_sequence_length is not None and _adaptive_verification_enabled(
+            self.aphrodite_config
+        ):
+            attn_metadata = replace(attn_metadata, uniform_spec_sequence_length=None)
+        if attn_metadata.checkpoint is None:
+            return attn_metadata
+        # The shared builder keys checkpoint rows on every request; the ROCm
+        # prefill path indexes them by prefill_query_start_loc, so rebuild with
+        # those rows.
+        return replace(
+            attn_metadata,
+            checkpoint=self._build_checkpoint_metadata(
+                common_attn_metadata, attn_metadata, num_decode_draft_tokens_cpu
+            ),
+        )
+
+    def _build_checkpoint_metadata(
+        self,
+        m: CommonAttentionMetadata,
+        attn_metadata: GDNAttentionMetadata,
+        num_decode_draft_tokens_cpu: torch.Tensor | None,
+    ) -> MambaPrefillCheckpointMetadata | None:
+        if attn_metadata.num_prefills == 0:
+            return None
+        # request_rows must line up with prefill_query_start_loc, either the
+        # prefill tail of a decode-first batch, or every non-spec row
+        # including padding
+        num_decodes = attn_metadata.num_decodes
+        request_rows = list(range(num_decodes, num_decodes + attn_metadata.num_prefills))
+        if attn_metadata.spec_sequence_masks is not None:
+            assert num_decode_draft_tokens_cpu is not None
+            request_rows = (num_decode_draft_tokens_cpu < 0).nonzero().flatten().tolist()
+        return self.checkpoint_builder.build(m, request_rows)
+
     def _build_chunk_metadata(
         self,
         prefill_query_start_loc: torch.Tensor,
@@ -103,3 +177,7 @@ class KimiK3ROCmKDABackend(GDNAttentionBackend):
     @staticmethod
     def get_builder_cls() -> type[KimiK3ROCmKDAMetadataBuilder]:
         return KimiK3ROCmKDAMetadataBuilder
+
+    @classmethod
+    def supports_device_cpu_query_lens_mismatch(cls) -> bool:
+        return True

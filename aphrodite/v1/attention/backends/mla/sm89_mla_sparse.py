@@ -37,6 +37,8 @@ from aphrodite.v1.attention.backend import (
     SparseMLAAttentionImpl,
 )
 from aphrodite.v1.attention.backends.mla.sparse_utils import (
+    align_blocks_to_rows,
+    flat_kv_row_view,
     triton_convert_req_index_to_global_index,
     triton_filter_and_convert_dcp_index,
 )
@@ -80,8 +82,12 @@ class Sm89MLASparseBackend(AttentionBackend):
     ]
 
     @staticmethod
-    def get_supported_kernel_block_sizes() -> list[int | MultipleOf]:
+    def get_supported_kernel_block_sizes(kv_cache_spec=None) -> list[int | MultipleOf]:
         return [64]
+
+    @classmethod
+    def customize_spec(cls, spec: AttentionSpec) -> AttentionSpec:
+        return align_blocks_to_rows(spec, 64)
 
     @staticmethod
     def get_name() -> str:
@@ -139,20 +145,6 @@ class Sm89MLASparseBackend(AttentionBackend):
             if not hasattr(hf_config, "index_topk"):
                 return "SM89 MLA Sparse requires model with index_topk"
         return None
-
-    @staticmethod
-    def get_kv_cache_shape(
-        num_blocks: int,
-        block_size: int,
-        num_kv_heads: int,  # assumed to be 1 for MLA
-        head_size: int,
-        cache_dtype_str: str = "auto",
-    ) -> tuple[int, ...]:
-        if cache_dtype_str == "fp8_ds_mla":
-            # 656-byte custom storage format; see flashmla_sparse docstring.
-            return (num_blocks, block_size, 656)
-        else:
-            return (num_blocks, block_size, head_size)
 
 
 @dataclass
@@ -412,6 +404,7 @@ class Sm89MLASparseImpl(SparseMLAAttentionImpl[Sm89MLASparseMetadata]):
     # The kernel emits a natural-log LSE (lse_base_on_e default), which the
     # DCP cross-rank softmax combine consumes.
     can_return_lse_for_decode: bool = True
+    supports_dcp: bool = True
 
     def __init__(
         self,
@@ -490,6 +483,7 @@ class Sm89MLASparseImpl(SparseMLAAttentionImpl[Sm89MLASparseMetadata]):
             ops.concat_mla_q(ql_nope, q_pe, q)
 
         num_actual_toks = q.shape[0]
+        kv_pool, block_stride_rows = flat_kv_row_view(kv_c_and_k_pe_cache.view(torch.uint8), attn_metadata.block_size)
 
         assert self.topk_indices_buffer is not None
         topk_indices = self.topk_indices_buffer[:num_actual_toks]
@@ -518,6 +512,7 @@ class Sm89MLASparseImpl(SparseMLAAttentionImpl[Sm89MLASparseMetadata]):
                 dcp_rank=self.dcp_rank,
                 cp_kv_cache_interleave_size=attn_metadata.cp_kv_cache_interleave_size,
                 BLOCK_SIZE=attn_metadata.block_size,
+                BLOCK_STRIDE_ROWS=block_stride_rows,
                 NUM_TOPK_TOKENS=num_topk,
                 BLOCK_N=block_n,
                 compact_valid_to_front=True,
@@ -528,16 +523,13 @@ class Sm89MLASparseImpl(SparseMLAAttentionImpl[Sm89MLASparseMetadata]):
             # stays -1; the kernel zero-outputs fully masked rows, so no
             # valid-count side channel is needed.
             topk_indices = triton_convert_req_index_to_global_index(
-                attn_metadata.req_id_per_token,
+                attn_metadata.req_id_per_token[:num_actual_toks],
                 attn_metadata.block_table,
                 topk_indices,
                 BLOCK_SIZE=attn_metadata.block_size,
+                BLOCK_STRIDE_ROWS=block_stride_rows,
                 NUM_TOPK_TOKENS=topk_indices.shape[1],
             )
-
-        # The kernel addresses the cache as raw per-token rows ([slots, 656]).
-        kv_pool = kv_c_and_k_pe_cache.view(torch.uint8)
-        kv_pool = kv_pool.view(-1, kv_pool.shape[-1])
 
         # Under DCP the caller all-gathers q across the group in the head dim,
         # so q carries num_heads * dcp_world_size heads; size outputs from q.

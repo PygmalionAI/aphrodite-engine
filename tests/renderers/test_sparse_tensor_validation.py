@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""
-Tests verify that malicious sparse tensors are rejected before they can trigger
+"""Tests verify that malicious sparse tensors are rejected before they can trigger
 out-of-bounds memory writes, or an unbounded allocation, during to_dense()
 operations.
 
@@ -19,7 +18,7 @@ import pytest
 import torch
 
 import aphrodite.envs as envs
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.multimodal.media import AudioEmbeddingMediaIO, ImageEmbeddingMediaIO
 from aphrodite.multimodal.media.video import VideoEmbeddingMediaIO
 from aphrodite.renderers.embed_utils import safe_load_prompt_embeds
@@ -51,8 +50,7 @@ def _encode_tensor(tensor: torch.Tensor) -> bytes:
 
 
 def _create_malicious_sparse_tensor() -> torch.Tensor:
-    """
-    Create a malicious sparse COO tensor with out-of-bounds indices.
+    """Create a malicious sparse COO tensor with out-of-bounds indices.
 
     This tensor has indices that point beyond the declared shape, which would
     cause an out-of-bounds write when converted to dense format without
@@ -115,8 +113,10 @@ class TestPromptEmbedsValidation:
         malicious_tensor = _create_malicious_sparse_tensor()
         encoded = _encode_tensor(malicious_tensor)
 
-        # Should raise RuntimeError due to invalid sparse tensor
-        with pytest.raises((RuntimeError, ValueError)) as exc_info:
+        # The invariant check raises RuntimeError from inside torch.load;
+        # safe_load_prompt_embeds now reports that as a client error so the
+        # caller gets a 400 rather than the 500 a bare RuntimeError produced.
+        with pytest.raises(AphroditeValidationError) as exc_info:
             safe_load_prompt_embeds(model_config, encoded)
 
         # Error should indicate sparse tensor validation failure
@@ -133,7 +133,7 @@ class TestPromptEmbedsValidation:
         malicious_tensor = torch.sparse_coo_tensor(indices, values, shape, dtype=torch.float32, check_invariants=False)
         encoded = _encode_tensor(malicious_tensor)
 
-        with pytest.raises((RuntimeError, ValueError)):
+        with pytest.raises(AphroditeValidationError):
             safe_load_prompt_embeds(model_config, encoded)
 
     def test_negative_indices_rejected(self, model_config):
@@ -146,7 +146,7 @@ class TestPromptEmbedsValidation:
         malicious_tensor = torch.sparse_coo_tensor(indices, values, shape, dtype=torch.float32, check_invariants=False)
         encoded = _encode_tensor(malicious_tensor)
 
-        with pytest.raises((RuntimeError, ValueError)):
+        with pytest.raises(AphroditeValidationError):
             safe_load_prompt_embeds(model_config, encoded)
 
     def test_hidden_size_mismatch_rejected(self, model_config):
@@ -156,7 +156,7 @@ class TestPromptEmbedsValidation:
         wrong_hidden = torch.randn(10, 512, dtype=torch.float32)
         encoded = _encode_tensor(wrong_hidden)
 
-        with pytest.raises(APHRODITEValidationError, match="hidden_size"):
+        with pytest.raises(AphroditeValidationError, match="hidden_size"):
             safe_load_prompt_embeds(model_config, encoded)
 
     def test_float_dtype_mismatch_cast_to_model_dtype(self, model_config):
@@ -179,7 +179,7 @@ class TestPromptEmbedsValidation:
         non_float = torch.randint(0, 100, (10, 768), dtype=torch.int32)
         encoded = _encode_tensor(non_float)
 
-        with pytest.raises(APHRODITEValidationError, match="floating-point"):
+        with pytest.raises(AphroditeValidationError, match="floating-point"):
             safe_load_prompt_embeds(model_config, encoded)
 
     def test_non_2d_tensor_rejected(self, model_config):
@@ -189,7 +189,7 @@ class TestPromptEmbedsValidation:
         bad = torch.randn(768, dtype=torch.float32)
         encoded = _encode_tensor(bad)
 
-        with pytest.raises(APHRODITEValidationError, match="2D tensor"):
+        with pytest.raises(AphroditeValidationError, match="2D tensor"):
             safe_load_prompt_embeds(model_config, encoded)
 
     def test_non_tensor_payload_rejected(self, model_config):
@@ -202,7 +202,7 @@ class TestPromptEmbedsValidation:
         buffer.seek(0)
         encoded = base64.b64encode(buffer.read())
 
-        with pytest.raises(APHRODITEValidationError, match="torch.Tensor"):
+        with pytest.raises(AphroditeValidationError, match="torch.Tensor"):
             safe_load_prompt_embeds(model_config, encoded)
 
 
@@ -258,7 +258,7 @@ class TestImageEmbedsValidation:
             io_handler.load_bytes(buffer.read())
 
     def test_valid_numpy_tensor_accepted(self):
-        """numpy .npy format should load and return correct tensor."""
+        """Numpy .npy format should load and return correct tensor."""
         io_handler = ImageEmbeddingMediaIO()
 
         arr = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
@@ -273,8 +273,7 @@ class TestImageEmbedsValidation:
         assert torch.allclose(result, torch.from_numpy(arr))
 
     def test_numpy_int32_tensor_accepted(self):
-        """numpy int32 arrays should round-trip correctly."""
-
+        """Numpy int32 arrays should round-trip correctly."""
         io_handler = ImageEmbeddingMediaIO()
 
         arr = np.arange(280, dtype=np.int32)
@@ -288,8 +287,7 @@ class TestImageEmbedsValidation:
         assert (result == torch.from_numpy(arr)).all()
 
     def test_load_file_numpy_tensor_accepted(self, tmp_path):
-        """numpy .npy files should load correctly via load_file."""
-
+        """Numpy .npy files should load correctly via load_file."""
         io_handler = ImageEmbeddingMediaIO()
 
         arr = np.array([[1.5, 2.5], [3.5, 4.5]], dtype=np.float32)
@@ -356,13 +354,10 @@ class TestAudioEmbedsValidation:
 
 
 class TestSparseTensorValidationIntegration:
-    """
-    These tests verify the complete attack chain is blocked at all entry points.
-    """
+    """These tests verify the complete attack chain is blocked at all entry points."""
 
     def test_attack_scenario_completions_api(self, model_config):
-        """
-        Simulate a complete attack through the Completions API.
+        """Simulate a complete attack through the Completions API.
 
         Attack scenario:
         1. Attacker crafts malicious sparse tensor
@@ -373,13 +368,12 @@ class TestSparseTensorValidationIntegration:
         # Step 1-2: Attacker creates malicious payload
         attack_payload = _encode_tensor(_create_malicious_sparse_tensor())
 
-        # Step 3-4: Server processes and should reject
-        with pytest.raises((RuntimeError, ValueError)):
+        # Step 3-4: Server processes and should reject, as a client error
+        with pytest.raises(AphroditeValidationError):
             safe_load_prompt_embeds(model_config, attack_payload)
 
     def test_attack_scenario_chat_api_image(self):
-        """
-        Simulate attack through Chat API with image_embeds.
+        """Simulate attack through Chat API with image_embeds.
 
         Verifies the image embeddings path is protected.
         """
@@ -390,8 +384,7 @@ class TestSparseTensorValidationIntegration:
             io_handler.load_base64("", attack_payload.decode("utf-8"))
 
     def test_attack_scenario_chat_api_audio(self):
-        """
-        Simulate attack through Chat API with audio_embeds.
+        """Simulate attack through Chat API with audio_embeds.
 
         Verifies the audio embeddings path is protected.
         """
@@ -447,7 +440,7 @@ class TestEmbeddingDecodeSizeLimit:
     """
 
     def test_oversized_sparse_tensor_rejected(self, small_decode_limit):
-        with pytest.raises(APHRODITEValidationError) as exc_info:
+        with pytest.raises(AphroditeValidationError) as exc_info:
             safe_to_dense(
                 _create_oversized_sparse_tensor(OVERSIZED_SHAPE),
                 parameter="prompt_embeds",
@@ -482,7 +475,7 @@ class TestEmbeddingDecodeSizeLimit:
         assert safe_to_dense(at_limit, parameter="image_embeds").shape == (32, 32)
 
         over_limit = _create_oversized_sparse_tensor((33, 32))
-        with pytest.raises(APHRODITEValidationError):
+        with pytest.raises(AphroditeValidationError):
             safe_to_dense(over_limit, parameter="image_embeds")
 
     def test_limit_can_be_disabled(self, monkeypatch: pytest.MonkeyPatch):
@@ -495,7 +488,7 @@ class TestEmbeddingDecodeSizeLimit:
     def test_media_io_rejects_oversized_base64(self, io_cls, parameter, small_decode_limit):
         encoded = _encode_tensor(_create_oversized_sparse_tensor(OVERSIZED_SHAPE))
 
-        with pytest.raises(APHRODITEValidationError) as exc_info:
+        with pytest.raises(AphroditeValidationError) as exc_info:
             io_cls().load_base64("", encoded.decode("utf-8"))
 
         assert parameter in str(exc_info.value)
@@ -505,7 +498,7 @@ class TestEmbeddingDecodeSizeLimit:
         path = tmp_path / "embeds.pt"
         torch.save(_create_oversized_sparse_tensor(OVERSIZED_SHAPE), path)
 
-        with pytest.raises(APHRODITEValidationError):
+        with pytest.raises(AphroditeValidationError):
             io_cls().load_file(path)
 
     @pytest.mark.parametrize("io_cls,parameter", EMBEDDING_MEDIA_IO)
@@ -516,7 +509,7 @@ class TestEmbeddingDecodeSizeLimit:
         torch.save({"not": "a tensor"}, buffer)
         encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
-        with pytest.raises(APHRODITEValidationError) as exc_info:
+        with pytest.raises(AphroditeValidationError) as exc_info:
             io_cls().load_base64("", encoded)
 
         assert "torch.Tensor" in str(exc_info.value)

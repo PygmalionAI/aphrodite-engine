@@ -9,7 +9,6 @@ import partial_json_parser
 import regex as re
 from partial_json_parser.core.options import Allow
 
-from aphrodite.entrypoints.chat_utils import make_tool_call_id
 from aphrodite.entrypoints.generate.base.protocol import (
     DeltaFunctionCall,
     DeltaMessage,
@@ -22,6 +21,7 @@ from aphrodite.entrypoints.openai.chat_completion.protocol import (
     ChatCompletionRequest,
 )
 from aphrodite.logger import init_logger
+from aphrodite.renderers.chat_utils import make_tool_call_id
 from aphrodite.tokenizers import TokenizerLike
 from aphrodite.tool_parsers.abstract_tool_parser import (
     Tool,
@@ -38,8 +38,7 @@ logger = init_logger(__name__)
 
 
 class Granite20bFCToolParser(ToolParser):
-    """
-    Tool call parser for the granite-20b-functioncalling model intended
+    """Tool call parser for the granite-20b-functioncalling model intended
     for use with the examples/tool_chat_template_granite20b_fc.jinja
     template.
 

@@ -4,8 +4,8 @@ from itertools import accumulate
 
 import nvtx
 import torch
-from aphrodite.modeling.layers.rotary_embedding import RotaryEmbedding, get_rope
 
+from aphrodite.model_executor.layers.rotary_embedding import RotaryEmbedding, get_rope
 from aphrodite.platforms import current_platform
 from aphrodite.utils.argparse_utils import FlexibleArgumentParser
 

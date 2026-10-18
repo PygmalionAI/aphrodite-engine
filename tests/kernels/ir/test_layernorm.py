@@ -16,6 +16,8 @@ from tests.ir.ir_test_utils import (
 )
 from tests.utils import set_random_seed
 
+pytestmark = pytest.mark.skip_global_cleanup
+
 rms_norm_native = ir.ops.rms_norm.impls["native"].impl_fn
 
 IS_GPGPU_DEVICE = current_platform.is_cuda_alike() or current_platform.is_xpu()

@@ -8,7 +8,10 @@ import torch.nn as nn
 
 import aphrodite.envs as envs
 from aphrodite.compilation.breakable_cudagraph import eager_break_during_capture
-from aphrodite.config import CacheConfig, get_current_aphrodite_config
+from aphrodite.config import (
+    CacheConfig,
+    get_current_aphrodite_config,
+)
 from aphrodite.config.aphrodite import AphroditeConfig
 from aphrodite.forward_context import ForwardContext, get_forward_context
 from aphrodite.logger import init_logger
@@ -92,21 +95,27 @@ def should_load_quant_weights(quant_method: QuantizeMethodBase | None) -> bool:
 def _largest_kernel_block_within(
     attn_backend: "type[AttentionBackend]",
     per_token_bytes: int,
-    page_budget: int | None,
+    page_budget: int,
     fallback: int,
+    kv_cache_spec: KVCacheSpec | None = None,
 ) -> int:
-    """Largest supported kernel block size whose page fits in ``page_budget``."""
+    """Largest supported kernel block size whose page fits in ``page_budget``.
+
+    A padded spec (e.g. skip-quant layer) that pads its page up to a large shared page
+    wastes ``page_budget - block*per_token`` bytes per block. Picking the largest kernel
+    block whose natural page still fits under ``page_budget`` minimizes that waste.
+    ``MultipleOf`` declarations are expanded to the largest aligned block that fits.
+    Falls back to the smallest supported block when nothing fits.
+    """
     from aphrodite.v1.attention.backend import MultipleOf
 
-    sizes = attn_backend.get_supported_kernel_block_sizes()
+    sizes = attn_backend.get_supported_kernel_block_sizes(kv_cache_spec)
+    max_block_size = page_budget // per_token_bytes
     candidates = [s for s in sizes if isinstance(s, int)]
-    if not candidates:
-        candidates = [s.base for s in sizes if isinstance(s, MultipleOf)]
+    candidates.extend(max(s.base, max_block_size // s.base * s.base) for s in sizes if isinstance(s, MultipleOf))
     if not candidates:
         return fallback
     smallest = min(candidates)
-    if not page_budget or per_token_bytes <= 0:
-        return smallest
     fitting = [b for b in candidates if b * per_token_bytes <= page_budget]
     return max(fitting) if fitting else smallest
 
@@ -151,8 +160,8 @@ def _init_kv_cache_quant(
         layer: The attention layer instance to initialize.
         quant_config: Optional quantization configuration.
         prefix: Layer name prefix for quantization method lookup.
-    """
 
+    """
     # Note [Register q/k/v/prob scales in state dict]
     # When calling model.to(device), only parameters/buffers in state dict are
     # moved. If not registering q/k/v/prob scales in state dict, there would
@@ -233,8 +242,7 @@ class Attention(nn.Module, AttentionLayerBase):
         cache_num_kv_heads: int | None = None,
         **extra_impl_args,
     ) -> None:
-        """
-        The KV cache is stored inside this class and is accessed via
+        """The KV cache is stored inside this class and is accessed via
         `self.kv_cache`.
 
         ``cache_num_kv_heads`` can increase the number of KV heads stored in
@@ -458,8 +466,7 @@ class Attention(nn.Module, AttentionLayerBase):
         output_shape: torch.Size | None = None,
         output_dtype: torch.dtype | None = None,
     ) -> torch.Tensor:
-        """
-        The KV cache is stored inside this class and is accessed via
+        """The KV cache is stored inside this class and is accessed via
         `self.kv_cache`.
 
         Attention metadata (`attn_metadata`) is set using a context manager in
@@ -573,9 +580,11 @@ class Attention(nn.Module, AttentionLayerBase):
         quant_mode = get_kv_quant_mode(self.kv_cache_dtype)
         if self.sliding_window is not None:
             assert not self.attn_backend.is_mla(), "MLA is not supported for sliding window"
+            # Choose the largest supported SW block within the shared page (or
+            # primary block budget), avoiding coprime scheduler block-size LCMs.
             shared_page = aphrodite_config.cache_config.skip_page_size_padded
             # The backend owns its packing
-            sw_per_token = self.attn_backend.customize_spec(
+            kv_cache_spec = self.attn_backend.customize_spec(
                 SlidingWindowSpec(
                     block_size=1,
                     num_kv_heads=self.cache_num_kv_heads,
@@ -585,8 +594,16 @@ class Attention(nn.Module, AttentionLayerBase):
                     kv_quant_mode=quant_mode,
                     sliding_window=self.sliding_window,
                 )
-            ).real_page_size_bytes
-            sw_block_size = _largest_kernel_block_within(self.attn_backend, sw_per_token, shared_page, block_size)
+            )
+            sw_per_token = kv_cache_spec.real_page_size_bytes
+            page_budget = shared_page or sw_per_token * block_size
+            sw_block_size = _largest_kernel_block_within(
+                self.attn_backend,
+                sw_per_token,
+                page_budget,
+                block_size,
+                kv_cache_spec,
+            )
             return SlidingWindowSpec(
                 block_size=sw_block_size,
                 num_kv_heads=self.cache_num_kv_heads,
@@ -629,6 +646,7 @@ def get_attention_context(
 
         Note: attn_metadata may be None, but attn_layer and kv_cache are always
         extracted from the forward context.
+
     """
     forward_context: ForwardContext = get_forward_context()
     attn_metadata_raw = forward_context.attn_metadata
@@ -654,8 +672,7 @@ def unified_kv_cache_update(
     value: torch.Tensor,
     layer_name: LayerNameType,
 ) -> torch.Tensor:
-    """
-    Returns a dummy that is passed to unified_attention to signal a side effect and
+    """Returns a dummy that is passed to unified_attention to signal a side effect and
     the data dependency between them to ensure torch.compile preserves ordering.
     """
     layer_name = _resolve_layer_name(layer_name)
@@ -723,22 +740,8 @@ def unified_attention_with_output(
     )
 
 
-def unified_attention_with_output_fake(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    output: torch.Tensor,
-    layer_name: LayerNameType,
-    output_scale: torch.Tensor | None = None,
-    output_block_scale: torch.Tensor | None = None,
-    kv_cache_dummy_dep: torch.Tensor | None = None,
-) -> None:
-    return
-
-
 direct_register_custom_op(
     op_name="unified_attention_with_output",
     op_func=unified_attention_with_output,
     mutates_args=["output", "output_block_scale"],
-    fake_impl=unified_attention_with_output_fake,
 )

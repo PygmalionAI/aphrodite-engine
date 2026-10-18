@@ -3,24 +3,12 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-from aphrodite.quantization.utils.bitblas_utils import (
-    MINIMUM_BITBLAS_VERSION,
-)
-from packaging import version
+from importlib.util import find_spec
 
-try:
-    import bitblas
-
-    if version.parse(bitblas.__version__) < version.parse(MINIMUM_BITBLAS_VERSION):
-        raise ImportError(f"bitblas version is wrong. Please install bitblas>={MINIMUM_BITBLAS_VERSION}")
-except ImportError as e:
-    bitblas_import_exception = e
+if find_spec("bitblas") is None:
     raise ValueError(
-        "Trying to use the bitblas backend, but could not import"
-        f"with the following error: {bitblas_import_exception}. "
-        "Please install bitblas through the following command: "
-        f"`pip install bitblas>={MINIMUM_BITBLAS_VERSION}`"
-    ) from bitblas_import_exception
+        "This standalone benchmark requires the external BitBLAS package. Install it with `pip install bitblas`."
+    )
 
 from bitblas import Matmul, MatmulConfig, auto_detect_nvidia_target
 

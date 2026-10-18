@@ -3,13 +3,14 @@
 
 //! Shared tracing subscriber and log formatting for Aphrodite Rust binaries.
 
+pub mod timing;
+
 use std::{env, fmt, process};
 
 use time::UtcOffset;
 use time::macros::format_description;
 use tracing::level_filters::LevelFilter;
 use tracing::{Event, Level, Subscriber};
-use tracing_subscriber::Layer as _;
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::fmt::format::{FormatEvent, FormatFields, Writer};
 use tracing_subscriber::fmt::time::FormatTime;
@@ -17,6 +18,7 @@ use tracing_subscriber::fmt::{FmtContext, FormattedFields};
 use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt as _;
+use tracing_subscriber::{Layer, Registry};
 
 const CYAN: &str = "\x1b[0;36m";
 const GREY: &str = "\x1b[90m";
@@ -30,20 +32,38 @@ const APHRODITE_TIME_FORMAT: &[time::format_description::FormatItem<'static>] =
 
 /// Install the process-wide Aphrodite-style tracing subscriber.
 pub fn init_tracing(process_label: &str) {
+    let _ = tracing_subscriber::registry()
+        .with(aphrodite_fmt_layer(process_label))
+        .try_init();
+}
+
+/// Install the process-wide Aphrodite-style tracing subscriber, with an
+/// additional layer (e.g. the multimodal preprocessing timing collector).
+pub fn init_tracing_with<L>(process_label: &str, layer: L)
+where
+    L: Layer<Registry> + Send + Sync + 'static,
+{
+    let _ = tracing_subscriber::registry()
+        .with(layer)
+        .with(aphrodite_fmt_layer(process_label))
+        .try_init();
+}
+
+/// The Aphrodite-style fmt layer filtered by `APHRODITE_LOGGING_LEVEL` / `RUST_LOG`.
+fn aphrodite_fmt_layer<S>(process_label: &str) -> impl Layer<S> + Send + Sync + 'static + use<S>
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+{
     let filter = build_targets_filter(
         env::var("APHRODITE_LOGGING_LEVEL").ok().as_deref(),
         env::var("RUST_LOG").ok().as_deref(),
     );
     let formatter = AphroditeEventFormatter::new(process_label);
 
-    let _ = tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .event_format(formatter)
-                .with_writer(std::io::stderr)
-                .with_filter(filter),
-        )
-        .try_init();
+    tracing_subscriber::fmt::layer()
+        .event_format(formatter)
+        .with_writer(std::io::stderr)
+        .with_filter(filter)
 }
 
 /// Build the CLI log filter by merging the Aphrodite-style default level with
@@ -56,8 +76,9 @@ pub fn init_tracing(process_label: &str) {
 /// - Any explicit target directives in `RUST_LOG`, such as `hyper=info`, override whichever default
 ///   level is active for those targets only.
 fn build_targets_filter(aphrodite_logging_level: Option<&str>, rust_log: Option<&str>) -> Targets {
-    let mut filter =
-        Targets::new().with_default(map_python_log_level(aphrodite_logging_level.unwrap_or("INFO")));
+    let mut filter = Targets::new().with_default(map_python_log_level(
+        aphrodite_logging_level.unwrap_or("INFO"),
+    ));
 
     if let Some(rust_log) = rust_log
         && !rust_log.is_empty()

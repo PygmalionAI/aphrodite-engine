@@ -1,6 +1,6 @@
 #pragma once
 
-#include "libtorch_stable/torch_utils.h"
+#include "torch_utils.h"
 
 #include <torch/csrc/stable/tensor.h>
 #include <torch/headeronly/core/ScalarType.h>

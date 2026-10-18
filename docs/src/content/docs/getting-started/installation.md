@@ -38,8 +38,8 @@ not available, it prints the required package-manager command and exits.
 
 ## NVIDIA CUDA
 
-The published wheel supports Linux x86-64, Python 3.10-3.13, and NVIDIA GPUs
-with compute capability 8.0 or newer.
+Current source builds and nightly wheels require Python 3.11-3.14. CUDA wheels
+support Linux x86-64 and NVIDIA GPUs with compute capability 8.0 or newer.
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/). Then
 create an environment and install Sonar.
@@ -80,6 +80,11 @@ The commit must have a compatible wheel at
 change `csrc/`, CMake, Rust, or a bundled native dependency.
 
 ### Build native extensions incrementally
+
+CUDA source builds require GCC 13 or newer, its matching C++ standard library,
+and the development packages for `libelf` and `libdw`. DeepGEMM and DeepSelect
+require C++20 `<format>` support. The CUDA Docker image installs these
+dependencies for builds and runtime JIT compilation.
 
 Install the development environment first. Then generate a CMake preset from
 the active virtual environment.
@@ -183,6 +188,10 @@ source .venv/bin/activate
 uv pip install -r requirements/metal.txt
 APHRODITE_TARGET_DEVICE=metal uv pip install . --no-build-isolation
 ```
+
+Metal supports hybrid attention models, but it cannot reuse their recurrent
+state across requests. Sonar disables prefix caching for these models and logs
+a warning. Prefix caching remains available for pure-attention models.
 
 ## Google TPU
 

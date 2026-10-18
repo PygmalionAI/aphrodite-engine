@@ -183,6 +183,7 @@ def reserve_mm_ipc_gpu_memory(
 
     Raises:
         ValueError: If the reservation leaves no memory for the KV cache.
+
     """
     if mm_config is None:
         return available_kv_cache_memory_bytes
@@ -195,6 +196,7 @@ def reserve_mm_ipc_gpu_memory(
     from aphrodite.multimodal.video_decoders.pynvvideocodec import (
         PYNVVIDEOCODEC_CUDA_CONTEXT_BYTES,
         PYNVVIDEOCODEC_DECODER_GPU_MEMORY_BYTES,
+        get_pynvvideocodec_decoder_gpu_memory_bytes,
         validate_pynvvideocodec_hw_decoders,
     )
 
@@ -214,7 +216,12 @@ def reserve_mm_ipc_gpu_memory(
         if uses_pynvvideocodec
         else 1
     )
-    per_server_decoder_bytes = PYNVVIDEOCODEC_DECODER_GPU_MEMORY_BYTES * hw_decoders + PYNVVIDEOCODEC_CUDA_CONTEXT_BYTES
+    decoder_bytes = (
+        get_pynvvideocodec_decoder_gpu_memory_bytes(video_kwargs.get("max_width"), video_kwargs.get("max_height"))
+        if uses_pynvvideocodec
+        else PYNVVIDEOCODEC_DECODER_GPU_MEMORY_BYTES
+    )
+    per_server_decoder_bytes = decoder_bytes * hw_decoders + PYNVVIDEOCODEC_CUDA_CONTEXT_BYTES
     decoder_reserved_bytes = num_api_servers * per_server_decoder_bytes if mm_config.use_gpu_video_backend() else 0
     reserved_bytes = raw_frame_reserved_bytes + decoder_reserved_bytes
     if reserved_bytes <= 0:

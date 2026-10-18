@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable
 
 import torch
 import torch.nn as nn
-from transformers.configuration_utils import PretrainedConfig
+from transformers.configuration_utils import PreTrainedConfig
 
 from aphrodite.compilation.decorators import support_torch_compile
 from aphrodite.config import AphroditeConfig
@@ -33,16 +33,21 @@ from aphrodite.model_executor.models.bailing_moe_v3 import (
     _maybe_pad_block_fp8_shared_expert_checkpoint_tensor,
     _maybe_remap_ling_mxfp4_weight_names,
 )
-from aphrodite.model_executor.models.interfaces import SupportsPP
+from aphrodite.model_executor.models.interfaces import (
+    MultiModalEmbeddings,
+    SupportsMultiModalEmbeddings,
+    SupportsPP,
+)
 from aphrodite.model_executor.models.utils import (
     PPMissingLayer,
+    _merge_multimodal_embeddings,
     is_pp_missing_parameter,
     maybe_prefix,
 )
 from aphrodite.sequence import IntermediateTensors
 
 
-def _get_draft_hf_config(aphrodite_config: AphroditeConfig) -> PretrainedConfig:
+def _get_draft_hf_config(aphrodite_config: AphroditeConfig) -> PreTrainedConfig:
     speculative_config = aphrodite_config.speculative_config
     if speculative_config is not None:
         draft_model_config = speculative_config.draft_model_config
@@ -54,7 +59,7 @@ def _get_draft_hf_config(aphrodite_config: AphroditeConfig) -> PretrainedConfig:
 class BailingMoeV3MTPSharedHead(nn.Module):
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         prefix: str,
         aphrodite_config: AphroditeConfig,
     ) -> None:
@@ -210,8 +215,16 @@ class BailingMoeV3MultiTokenPredictor(nn.Module):
         return self.logits_processor(head, mtp_layer.shared_head(hidden_states))
 
 
-@support_torch_compile
-class BailingMoeV3MTPModel(nn.Module, SupportsPP):
+@support_torch_compile(
+    dynamic_arg_dims={
+        "input_ids": 0,
+        "positions": -1,
+        "hidden_states": 0,
+        "intermediate_tensors": 0,
+        "inputs_embeds": 0,
+    }
+)
+class BailingMoeV3MTPModel(nn.Module, SupportsPP, SupportsMultiModalEmbeddings):
     hf_to_aphrodite_mapper = BailingMoeV3ForCausalLM.hf_to_aphrodite_mapper
 
     packed_modules_mapping = {
@@ -238,8 +251,22 @@ class BailingMoeV3MTPModel(nn.Module, SupportsPP):
     def share_lm_head(self, lm_head: nn.Module) -> None:
         self.lm_head = lm_head
 
-    def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
-        return self.model.embed_input_ids(input_ids)
+    def embed_input_ids(
+        self,
+        input_ids: torch.Tensor,
+        multimodal_embeddings: MultiModalEmbeddings | None = None,
+        *,
+        is_multimodal: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        inputs_embeds = self.model.embed_input_ids(input_ids)
+        if multimodal_embeddings is None or len(multimodal_embeddings) == 0:
+            return inputs_embeds
+        assert is_multimodal is not None
+        return _merge_multimodal_embeddings(
+            inputs_embeds=inputs_embeds,
+            multimodal_embeddings=multimodal_embeddings,
+            is_multimodal=is_multimodal,
+        )
 
     def forward(
         self,

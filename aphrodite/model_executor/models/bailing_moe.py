@@ -30,7 +30,7 @@ from itertools import islice
 import torch
 import torch.nn.functional as F
 from torch import nn
-from transformers.configuration_utils import PretrainedConfig
+from transformers.configuration_utils import PreTrainedConfig
 
 from aphrodite.compilation.decorators import support_torch_compile
 from aphrodite.config import AphroditeConfig, CacheConfig
@@ -41,7 +41,10 @@ from aphrodite.distributed import (
 )
 from aphrodite.model_executor.layers.activation import SiluAndMul
 from aphrodite.model_executor.layers.attention import Attention
-from aphrodite.model_executor.layers.fused_moe import FusedMoEFactory
+from aphrodite.model_executor.layers.fused_moe import (
+    FusedMoEFactory,
+    GateLinear,
+)
 from aphrodite.model_executor.layers.layernorm import RMSNorm
 from aphrodite.model_executor.layers.linear import (
     MergedColumnParallelLinear,
@@ -71,7 +74,7 @@ from .utils import (
 class BailingAttention(nn.Module):
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         cache_config: CacheConfig | None = None,
         quant_config: QuantizationConfig | None = None,
         reduce_results: bool = True,
@@ -178,7 +181,7 @@ class BailingMLP(nn.Module):
     def __init__(
         self,
         intermediate_size: int,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         quant_config: QuantizationConfig | None = None,
         reduce_results: bool = True,
         prefix: str = "",
@@ -212,7 +215,7 @@ class BailingMoE(nn.Module):
     def __init__(
         self,
         intermediate_size: int,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         quant_config: QuantizationConfig | None = None,
         reduce_results: bool | None = True,
         prefix: str = "",
@@ -241,11 +244,12 @@ class BailingMoE(nn.Module):
         else:
             self.router_dtype = torch.bfloat16
 
-        self.gate = nn.Linear(
+        self.gate = GateLinear(
             self.hidden_size,
             self.num_experts,
-            bias=False,
-            dtype=self.router_dtype,
+            out_dtype=self.router_dtype,
+            params_dtype=self.router_dtype,
+            prefix=f"{prefix}.gate",
         )
 
         if getattr(config, "moe_router_enable_expert_bias", False):
@@ -304,7 +308,7 @@ class BailingMoE(nn.Module):
         hidden_states = hidden_states.view(-1, hidden_size)
 
         # router_logits: (num_tokens, n_experts)
-        router_logits = self.gate(hidden_states.to(self.router_dtype))
+        router_logits, _ = self.gate(hidden_states)
         router_logits = router_logits.to(hidden_states.dtype)
 
         final_hidden_states = self.experts(hidden_states=hidden_states, router_logits=router_logits)
@@ -314,7 +318,7 @@ class BailingMoE(nn.Module):
 class BailingMoeBlock(nn.Module):
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         cache_config: CacheConfig | None = None,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",

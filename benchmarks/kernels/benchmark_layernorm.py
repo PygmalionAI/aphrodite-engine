@@ -3,8 +3,8 @@
 import time
 
 import torch
-from aphrodite.modeling.layers.layernorm import RMSNorm
 
+from aphrodite.model_executor.layers.layernorm import RMSNorm
 from aphrodite.platforms import current_platform
 from aphrodite.utils.argparse_utils import FlexibleArgumentParser
 from aphrodite.utils.torch_utils import STR_DTYPE_TO_TORCH_DTYPE

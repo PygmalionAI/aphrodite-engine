@@ -5,13 +5,17 @@
 import ast
 import inspect
 import textwrap
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache
 from typing import TYPE_CHECKING, ClassVar
 
+import torch
 from torch import fx, nn
 
+from aphrodite.model_executor.model_loader.weight_utils import sharded_weight_loader
 from aphrodite.model_executor.models.transformers.fusers.base import BaseFuser
+from aphrodite.model_executor.utils import set_weight_attrs
 
 if TYPE_CHECKING:
     from aphrodite.config import AphroditeConfig
@@ -31,16 +35,16 @@ def _is_interface_lookup(node: ast.expr | None) -> bool:
 
 
 @cache
-def interface_call(cls: type[nn.Module]) -> ast.Call | None:
-    """The attention interface call in `cls.forward`, if it makes exactly one."""
+def interface_call(forward: Callable) -> ast.Call | None:
+    """The attention interface call in `forward`, if it makes exactly one."""
     try:
-        source = inspect.getsource(inspect.unwrap(cls.forward))
+        source = inspect.getsource(inspect.unwrap(forward))
         tree = ast.parse(textwrap.dedent(source))
     except (AttributeError, OSError, SyntaxError, TypeError):
         return None
 
     # Find the names of the local variables that read from the interface lookup
-    names = set()
+    names: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
@@ -74,19 +78,27 @@ class AttentionFuser(BaseFuser):
 
     source_cls: str
     """Class of the HF module that dispatches (for logging)."""
-    scale_expr: ast.expr | None
+    scale_expr: ast.expr | None = None
     """Source of the `scaling=` the module hands the interface, if it hands one."""
+    s_aux_expr: ast.expr | None = None
+    """Source of the `s_aux=` the module hands the interface, if it hands one."""
 
     def info(self, name: str) -> str:
         return f"Found: {name} ({self.source_cls}) -> attention interface"
 
     @classmethod
     def match(cls, graph: fx.Graph | None, module: nn.Module) -> "AttentionFuser | None":
-        if (call := interface_call(type(module))) is None:
+        if (call := interface_call(type(module).forward)) is None:
             return None
         scaling = [kw.value for kw in call.keywords if kw.arg == "scaling"]
         scale_expr = scaling[0] if len(scaling) == 1 else None
-        return cls(source_cls=type(module).__name__, scale_expr=scale_expr)
+        s_aux = [kw.value for kw in call.keywords if kw.arg == "s_aux"]
+        s_aux_expr = s_aux[0] if len(s_aux) == 1 else None
+        return cls(
+            source_cls=type(module).__name__,
+            scale_expr=scale_expr,
+            s_aux_expr=s_aux_expr,
+        )
 
     def validate(self, module: nn.Module, aphrodite_config: "AphroditeConfig") -> bool:
         """Whether `module` will actually dispatch to Aphrodite."""
@@ -96,6 +108,14 @@ class AttentionFuser(BaseFuser):
         return getattr(config, "_attn_implementation", None) in aphrodite_attn_impls
 
     def fuse(self, module: nn.Module, prefix: str, aphrodite_config: "AphroditeConfig") -> nn.Module:
+        if (sinks := self.sinks(module)) is not None:
+            assert isinstance(self.s_aux_expr, ast.Attribute)
+            size = sinks.numel() // aphrodite_config.parallel_config.tensor_parallel_size
+            device = aphrodite_config.device_config.device
+            data = torch.empty(size, dtype=sinks.dtype, device=device)
+            sinks_param = nn.Parameter(data, requires_grad=False)
+            set_weight_attrs(sinks_param, {"weight_loader": sharded_weight_loader(0)})
+            setattr(module, self.s_aux_expr.attr, sinks_param)
         return module
 
     def layer_index(self, module: nn.Module) -> int | None:
@@ -112,3 +132,13 @@ class AttentionFuser(BaseFuser):
             expression = ast.unparse(self.scale_expr)
             raise ValueError(f"Cannot resolve attention scaling expression {expression!r} in {type(module).__name__}.")
         return float(scale)
+
+    def sinks(self, module: nn.Module) -> nn.Parameter | None:
+        """The per-head sink tensor `module` passes to the interface, or `None`."""
+        if self.s_aux_expr is None:
+            return None
+        s_aux = _resolve(self.s_aux_expr, module)
+        if not isinstance(s_aux, (nn.Parameter, type(None))):
+            expression = ast.unparse(self.s_aux_expr)
+            raise ValueError(f"Cannot resolve attention s_aux expression {expression!r} in {type(module).__name__}.")
+        return s_aux

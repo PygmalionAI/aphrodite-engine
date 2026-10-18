@@ -29,16 +29,18 @@ import regex as re
 import torch
 import torch.nn as nn
 from transformers.feature_extraction_utils import BatchFeature
+from transformers.models.qwen3_asr import Qwen3ASRFeatureExtractor, Qwen3ASRProcessor
 from transformers.models.whisper import WhisperFeatureExtractor
 
 from aphrodite.config import AphroditeConfig, ModelConfig, SpeechToTextConfig
-from aphrodite.config.multimodal import BaseDummyOptions
+from aphrodite.config.multimodal import MultiModalDummyOptions
 from aphrodite.config.speech_to_text import SpeechToTextParams
 from aphrodite.inputs import ModalityData, MultiModalDataDict, PromptType, TokensPrompt
 from aphrodite.logger import init_logger
 from aphrodite.model_executor.models.interfaces import (
     MultiModalEmbeddings,
     StreamingTranscriptionPostProcessor,
+    SupportsEagle3,
     SupportsLoRA,
     SupportsMRoPE,
     SupportsMultiModal,
@@ -46,11 +48,11 @@ from aphrodite.model_executor.models.interfaces import (
     SupportsTranscription,
 )
 from aphrodite.model_executor.models.module_mapping import MultiModelKeys
+from aphrodite.model_executor.models.qwen2_5_omni_thinker import unpad_and_flat_audio_features
 from aphrodite.model_executor.models.qwen3 import Qwen3ForCausalLM
 from aphrodite.model_executor.models.qwen3_omni_moe_thinker import (
     Qwen2_5OmniAudioFeatureInputs,
     Qwen3OmniMoeAudioEncoder,
-    Qwen3OmniMoeThinkerMultiModalProcessor,
 )
 from aphrodite.model_executor.models.utils import (
     AutoWeightsLoader,
@@ -64,6 +66,7 @@ from aphrodite.multimodal.inputs import (
     AudioItem,
     MultiModalFeatureSpec,
     MultiModalFieldConfig,
+    MultiModalKwargsItem,
     MultiModalKwargsItems,
 )
 from aphrodite.multimodal.parse import (
@@ -75,6 +78,7 @@ from aphrodite.multimodal.parse import (
 )
 from aphrodite.multimodal.processing import (
     BaseDummyInputsBuilder,
+    BaseMultiModalProcessor,
     BaseProcessingInfo,
     PromptReplacement,
     PromptUpdate,
@@ -87,9 +91,6 @@ from aphrodite.transformers_utils.configs.qwen3_asr import (
     Qwen3ASRThinkerConfig,
 )
 from aphrodite.transformers_utils.processor import cached_processor_from_config
-from aphrodite.transformers_utils.processors.qwen3_asr import (
-    Qwen3ASRProcessor,
-)
 from aphrodite.utils.gpu_sync_debug import gpu_sync_allowed
 from aphrodite.utils.torch_utils import async_tensor_h2d
 
@@ -177,19 +178,15 @@ class Qwen3ASRProcessingInfo(BaseProcessingInfo):
         return self.ctx.get_hf_config(Qwen3ASRConfig).thinker_config
 
     def get_hf_processor(self, **kwargs: object) -> Qwen3ASRProcessor:
-        processor = self.ctx.get_hf_processor(
+        return self.ctx.get_hf_processor(
             Qwen3ASRProcessor,
-            use_fast=kwargs.pop("use_fast", True),
             **kwargs,
         )
-        if not hasattr(processor, "audio_token"):
-            processor.audio_token = "<|audio_pad|>"
-        return processor
 
-    def get_feature_extractor(self, **kwargs: object) -> WhisperFeatureExtractor:
+    def get_feature_extractor(self, **kwargs: object) -> WhisperFeatureExtractor | Qwen3ASRFeatureExtractor:
         hf_processor = self.get_hf_processor(**kwargs)
         feature_extractor = hf_processor.feature_extractor
-        assert isinstance(feature_extractor, WhisperFeatureExtractor)
+        assert isinstance(feature_extractor, (WhisperFeatureExtractor, Qwen3ASRFeatureExtractor))
         return feature_extractor
 
     def get_supported_mm_limits(self) -> Mapping[str, int | None]:
@@ -216,10 +213,8 @@ class Qwen3ASRDummyInputsBuilder(BaseDummyInputsBuilder[Qwen3ASRProcessingInfo])
         self,
         seq_len: int,
         mm_counts: Mapping[str, int],
-        mm_options: Mapping[str, BaseDummyOptions],
+        mm_options: MultiModalDummyOptions,
     ) -> MultiModalDataDict:
-        num_audios = mm_counts.get("audio", 0)
-
         feature_extractor = self.info.get_feature_extractor()
 
         target_audio_length = (
@@ -230,13 +225,11 @@ class Qwen3ASRDummyInputsBuilder(BaseDummyInputsBuilder[Qwen3ASRProcessingInfo])
             * feature_extractor.sampling_rate
         )
 
-        audio_overrides = mm_options.get("audio")
-
         return {
             "audio": self._get_dummy_audios(
                 length=target_audio_length,
-                num_audios=num_audios,
-                overrides=audio_overrides,
+                num_audios=mm_counts.get("audio", 0),
+                overrides=mm_options.get("audio"),
             ),
         }
 
@@ -267,8 +260,56 @@ class Qwen3ASRMultiModalDataParser(MultiModalDataParser):
 
 
 class Qwen3ASRMultiModalProcessor(
-    Qwen3OmniMoeThinkerMultiModalProcessor,
+    BaseMultiModalProcessor[Qwen3ASRProcessingInfo],
 ):
+    def _get_hf_mm_text(self, mm_counts: Mapping[str, int]) -> str:
+        return self.dummy_inputs.get_dummy_text(mm_counts)
+
+    def _call_hf_processor(
+        self,
+        hf_data: Mapping[str, object],
+        hf_kwargs: Mapping[str, object],
+    ) -> BatchFeature:
+        audios = hf_data.get("audio")
+        if not audios:
+            return BatchFeature()
+        assert isinstance(audios, list)
+
+        if len(audios) == 1:
+            return super()._call_hf_processor(hf_data, hf_kwargs)
+
+        # HF requires one text per audio, and batch padding changes clip features.
+        # Keep clips independent so partial cache hits cannot change their inputs.
+        text = self._get_hf_mm_text({"audio": 1})
+        outputs: dict[str, list[torch.Tensor]] = {
+            "input_features": [],
+            "input_features_mask": [],
+        }
+        for audio in audios:
+            processed = super()._call_hf_processor(dict(hf_data, text=text, audio=audio), hf_kwargs)
+            for key, values in outputs.items():
+                values.append(processed[key][0])
+
+        return BatchFeature(outputs)
+
+    def _postprocess_hf_mm_data(
+        self,
+        hf_data: Mapping[str, object],
+        hf_kwargs: Mapping[str, object],
+        processed_data: BatchFeature,
+    ) -> BatchFeature:
+        if "input_features" not in processed_data:
+            return processed_data
+
+        features = processed_data.pop("input_features")
+        masks = processed_data.pop("input_features_mask")
+        processed_data["input_audio_features"] = torch.cat(
+            [feature[:, mask.bool()] for feature, mask in zip(features, masks)], dim=1
+        )
+        processed_data["feature_attention_mask"] = masks
+        processed_data["audio_feature_lengths"] = torch.stack([mask.sum() for mask in masks])
+        return processed_data
+
     def _get_mm_fields_config(
         self,
         hf_inputs: BatchFeature,
@@ -307,6 +348,7 @@ class Qwen3ASRMultiModalProcessor(
             if num_features == 0:
                 audios = mm_items.get_items("audio", AudioProcessorItems)
                 audio = audios.get(item_idx)
+                assert audio is not None
                 raise ValueError(
                     f"The audio {audio} (len={len(audio)}) is too short to be represented inside the model"
                 )
@@ -334,6 +376,7 @@ class Qwen3ASRForConditionalGeneration(
     SupportsMRoPE,
     SupportsTranscription,
     SupportsLoRA,
+    SupportsEagle3,
 ):
     # LoRA support
     packed_modules_mapping = {
@@ -406,6 +449,15 @@ class Qwen3ASRForConditionalGeneration(
         if input_audio_features is None:
             return None
 
+        # inputs features from rust frontend is batched and padded
+        # with shape [batch_size, n_mels, padded_seq_len], different
+        # from python's shape [n_mels, batch_size * seq_len].
+        # Requests with different padded lengths are batched as a
+        # list of [n_mels, padded_seq_len] tensors.
+        if isinstance(input_audio_features, (list, tuple)) or (
+            isinstance(input_audio_features, torch.Tensor) and input_audio_features.dim() == 3
+        ):
+            input_audio_features = unpad_and_flat_audio_features(input_audio_features, audio_feature_lengths)
         return Qwen2_5OmniAudioFeatureInputs(
             type="audio_features",
             input_features=input_audio_features,
@@ -568,24 +620,25 @@ class Qwen3ASRForConditionalGeneration(
         return llm_positions, mrope_position_delta
 
     def get_mm_mapping(self) -> MultiModelKeys:
-        """
-        Get the module prefix in multimodal models
-        """
+        """Get the module prefix in multimodal models."""
         return MultiModelKeys.from_string_field(
             language_model="language_model",
             tower_model=["audio_tower."],
         )
 
-    def get_num_mm_encoder_tokens(self, num_audio_tokens: int) -> int:
-        """Return the number of tokens processed by the audio tower encoder.
-
-        Required for LoRA support on the tower module.
-        """
+    def get_mm_lora_token_counts(
+        self,
+        *,
+        modality: str,
+        mm_kwargs: MultiModalKwargsItem | None,
+        num_mm_embeds: int,
+    ) -> tuple[int, int | None]:
+        del modality, mm_kwargs
         # For Qwen3-ASR, the audio tower produces one embedding per audio
         # placeholder token inserted into the prompt (no additional
         # merge/downsample step like vision towers). Therefore, the encoder
         # token budget is identity.
-        return num_audio_tokens
+        return num_mm_embeds, None
 
     @classmethod
     def get_speech_to_text_config(cls, model_config: ModelConfig, task_type: str) -> SpeechToTextConfig:
@@ -643,8 +696,7 @@ class Qwen3ASRForConditionalGeneration(
 
     @classmethod
     def post_process_output(cls, text: str) -> str:
-        """
-        Post-process Qwen3-ASR raw output to extract clean transcription.
+        """Post-process Qwen3-ASR raw output to extract clean transcription.
 
         The model outputs in format: "language {lang}<asr_text>{transcription}"
         This method strips the language prefix and asr_text tags.

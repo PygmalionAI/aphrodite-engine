@@ -33,8 +33,10 @@ from aphrodite.model_executor.models.deepseek_v2 import (
     _try_load_fp8_indexer_wk,
     get_spec_layer_idx_from_weight_name,
 )
+from aphrodite.model_executor.models.interfaces import SupportsPP
 from aphrodite.model_executor.models.utils import (
     get_pp_missing_layer_names,
+    make_empty_intermediate_tensors_factory,
     maybe_prefix,
 )
 from aphrodite.models.common.ops.fused_allreduce_rms_norm import fused_allreduce_rms_norm
@@ -46,6 +48,10 @@ from aphrodite.models.common.ops.sequence_parallel import (
 from aphrodite.models.deepseek_v32.common.kernels import fused_eh_norm
 from aphrodite.platforms import current_platform
 from aphrodite.sequence import IntermediateTensors
+from aphrodite.v1.attention.backends.mla.index_group import (
+    SparseMLAIndexGroupBuilder,
+    get_sparse_mla_index_group_max_rows,
+)
 
 from .glm52_low_latency_gemm import (
     build_glm52_plan,
@@ -78,6 +84,10 @@ class DeepseekV32MultiTokenPredictorLayer(nn.Module):
             dtype=torch.int32,
             device=current_platform.device_type,
         )
+        index_group_builder = SparseMLAIndexGroupBuilder(
+            topk_indices_buffer,
+            get_sparse_mla_index_group_max_rows(aphrodite_config),
+        )
         self.shared_head = SharedHead(config=config, prefix=prefix, quant_config=quant_config)
 
         self.mtp_block = DeepseekV32DecoderLayer(
@@ -85,6 +95,7 @@ class DeepseekV32MultiTokenPredictorLayer(nn.Module):
             prefix,
             config=config,
             topk_indices_buffer=topk_indices_buffer,
+            index_group_builder=index_group_builder,
         )
 
     def forward(
@@ -249,7 +260,7 @@ class DeepseekV32MultiTokenPredictor(nn.Module):
         return self.logits_processor.get_top_tokens(mtp_layer.shared_head.head, hidden_states)
 
 
-class DeepseekV32MTP(nn.Module, DeepseekV2MixtureOfExperts):
+class DeepseekV32MTP(nn.Module, DeepseekV2MixtureOfExperts, SupportsPP):
     def __init__(self, *, aphrodite_config: AphroditeConfig, prefix: str = ""):
         super().__init__()
         self.config = aphrodite_config.model_config.hf_config
@@ -260,6 +271,9 @@ class DeepseekV32MTP(nn.Module, DeepseekV2MixtureOfExperts):
         if self.config.model_type == "glm_moe_dsa":
             enable_glm52_low_latency_gemm(self, aphrodite_config.model_config.dtype)
         self.set_moe_parameters()
+        self.make_empty_intermediate_tensors = make_empty_intermediate_tensors_factory(
+            ["hidden_states", "residual"], self.config.hidden_size
+        )
 
     def set_moe_parameters(self):
         self.num_moe_layers = self.config.num_nextn_predict_layers
@@ -278,7 +292,7 @@ class DeepseekV32MTP(nn.Module, DeepseekV2MixtureOfExperts):
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.model.embed_input_ids(input_ids)
 
-    def forward(
+    def forward(  # type: ignore[override]
         self,
         input_ids: torch.Tensor | None,
         positions: torch.Tensor,
@@ -327,6 +341,9 @@ class DeepseekV32MTP(nn.Module, DeepseekV2MixtureOfExperts):
             name = name.replace(f"model.layers.{spec_layer}.", "model.")
         return name
 
+    def is_unused_checkpoint_weight(self, name: str) -> bool:
+        return get_spec_layer_idx_from_weight_name(self.config, name) is None and "embed_tokens" not in name
+
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         stacked_params_mapping = [
             ("gate_up_proj", "gate_proj", 0),
@@ -349,10 +366,17 @@ class DeepseekV32MTP(nn.Module, DeepseekV2MixtureOfExperts):
         loaded_params: set[str] = set()
         _pending_wk_fp8: dict = {}
         for name, loaded_weight in weights:
-            if "rotary_emb.inv_freq" in name:
+            if "rotary_emb.inv_freq" in name or self.is_unused_checkpoint_weight(name):
                 continue
             spec_layer = get_spec_layer_idx_from_weight_name(self.config, name)
             if spec_layer is None:
+                # A tied top-level embed_tokens has no spec layer to rewrite
+                # from; the draft needs its own copy under PP.
+                param = params_dict.get(name) if "embed_tokens" in name else None
+                if param is not None:
+                    weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                    weight_loader(param, loaded_weight)
+                    loaded_params.add(name)
                 continue
             name = self._rewrite_spec_layer_name(spec_layer, name)
 

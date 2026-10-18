@@ -10,13 +10,14 @@ import torch.nn as nn
 from transformers import BatchFeature, LlavaNextVideoConfig, LlavaNextVideoProcessor
 
 from aphrodite.config import AphroditeConfig
-from aphrodite.config.multimodal import BaseDummyOptions, VideoDummyOptions
+from aphrodite.config.multimodal import MultiModalDummyOptions
 from aphrodite.inputs import MultiModalDataDict
 from aphrodite.model_executor.layers.activation import get_act_fn
 from aphrodite.model_executor.models.clip import CLIPVisionModel
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
 from aphrodite.multimodal.inputs import (
     MultiModalFieldConfig,
+    MultiModalKwargsItem,
     MultiModalKwargsItems,
 )
 from aphrodite.multimodal.parse import (
@@ -55,8 +56,7 @@ from .vision import get_vision_encoder_info
 
 
 class LlavaNextVideoPixelInputs(TensorSchema):
-    """
-    Dimensions:
+    """Dimensions:
         - bn: Batch size * number of videos
         - f: Number of frames
         - c: Number of channels (3)
@@ -169,23 +169,18 @@ class LlavaNextVideoDummyInputsBuilder(BaseDummyInputsBuilder[LlavaNextVideoProc
         self,
         seq_len: int,
         mm_counts: Mapping[str, int],
-        mm_options: Mapping[str, BaseDummyOptions],
+        mm_options: MultiModalDummyOptions,
     ) -> MultiModalDataDict:
-        num_videos = mm_counts.get("video", 0)
-
         target_width, target_height = self.info.get_image_size_with_most_features()
         target_num_frames = self.info.get_num_frames_with_most_features(seq_len, mm_counts)
-
-        video_overrides = mm_options.get("video")
-        assert video_overrides is None or isinstance(video_overrides, VideoDummyOptions)
 
         return {
             "video": self._get_dummy_videos(
                 width=target_width,
                 height=target_height,
                 num_frames=target_num_frames,
-                num_videos=num_videos,
-                overrides=video_overrides,
+                num_videos=mm_counts.get("video", 0),
+                overrides=mm_options.get("video"),
             )
         }
 
@@ -359,8 +354,7 @@ class LlavaNextVideoForConditionalGeneration(
         self.make_empty_intermediate_tensors = self.language_model.model.make_empty_intermediate_tensors
 
     def _parse_and_validate_video_input(self, **kwargs: object) -> LlavaNextVideoPixelInputs | None:
-        """
-        A legal video input should have the following dimensions:
+        """A legal video input should have the following dimensions:
         {
             "pixel_values_videos" :
                 list[b, Tensor(nb_frames, nb_channels, height, width)]
@@ -431,10 +425,17 @@ class LlavaNextVideoForConditionalGeneration(
         **kwargs: object,
     ) -> torch.Tensor | IntermediateTensors:
         """Run forward pass for LlaVA-NeXT-Video.
+
         Args:
             input_ids: Flattened (concatenated) input_ids corresponding to a
                 batch.
-            pixel_values_videos: Pixels in each frames for each input videos.
+            positions: Flattened (concatenated) position ids corresponding to a
+                batch.
+            intermediate_tensors: Intermediate tensors from prior forward pass.
+            inputs_embeds: Optional tensor of input embeddings.
+            **kwargs: Multimodal inputs for this batch, forwarded to the
+                multimodal embedding path.
+
         """
         if intermediate_tensors is not None:
             inputs_embeds = None
@@ -460,40 +461,33 @@ class LlavaNextVideoForConditionalGeneration(
         return loader.load_weights(weights, mapper=self.hf_to_aphrodite_mapper)
 
     def get_mm_mapping(self) -> MultiModelKeys:
-        """
-        Get the module prefix in multimodal models
-        """
+        """Get the module prefix in multimodal models."""
         return MultiModelKeys.from_string_field(
             language_model="language_model",
             connector="multi_modal_projector",
             tower_model="vision_tower",
         )
 
-    def get_num_mm_encoder_tokens(
+    def get_mm_lora_token_counts(
         self,
-        num_video_tokens: int,
-    ) -> int:
+        *,
+        modality: str,
+        mm_kwargs: MultiModalKwargsItem | None,
+        num_mm_embeds: int,
+    ) -> tuple[int, int | None]:
+        del modality, mm_kwargs
+
         # Invert the spatial pooling done by `vision_resampler`: each frame
         # contributes `pooled_grid_length ** 2` tokens after the language
         # model's placeholder count, but `patch_grid_length ** 2` tokens
         # when it leaves the vision encoder.
         pooled_tokens_per_frame = self.pooled_grid_length**2
-        if num_video_tokens <= 0 or pooled_tokens_per_frame <= 0:
-            return 0
-
-        num_frames = num_video_tokens // pooled_tokens_per_frame
-        return num_frames * (self.patch_grid_length**2)
-
-    def get_num_mm_connector_tokens(
-        self,
-        num_vision_tokens: int,
-    ) -> int:
-        # The projector is length-preserving; it runs after
-        # `vision_resampler` has already pooled each frame down to
-        # `pooled_grid_length ** 2` tokens.
         patch_tokens_per_frame = self.patch_grid_length**2
-        if num_vision_tokens <= 0 or patch_tokens_per_frame <= 0:
-            return 0
+        if num_mm_embeds <= 0 or pooled_tokens_per_frame <= 0 or patch_tokens_per_frame <= 0:
+            return 0, 0
 
-        num_frames = num_vision_tokens // patch_tokens_per_frame
-        return num_frames * (self.pooled_grid_length**2)
+        num_frames = num_mm_embeds // pooled_tokens_per_frame
+        return (
+            num_frames * patch_tokens_per_frame,
+            num_frames * pooled_tokens_per_frame,
+        )

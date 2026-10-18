@@ -12,17 +12,17 @@ from typing import Annotated, Literal, TypeAlias, TypedDict
 import regex as re
 import torch
 import torch.nn as nn
-from transformers import BatchFeature, InternVLProcessor, PretrainedConfig
+from transformers import BatchFeature, InternVLProcessor, PreTrainedConfig
 from transformers.activations import ACT2FN
-from transformers.models.got_ocr2.image_processing_got_ocr2_fast import (
-    GotOcr2ImageProcessorFast,
+from transformers.models.got_ocr2.image_processing_got_ocr2 import (
+    GotOcr2ImageProcessor,
 )
 from transformers.models.internvl.video_processing_internvl import (
     InternVLVideoProcessor,
 )
 
 from aphrodite.config import AphroditeConfig
-from aphrodite.config.multimodal import BaseDummyOptions, VideoDummyOptions
+from aphrodite.config.multimodal import MultiModalDummyOptions
 from aphrodite.inputs import MultiModalDataDict
 from aphrodite.model_executor.layers.quantization import QuantizationConfig
 from aphrodite.model_executor.models.interns1_vit import InternS1VisionModel
@@ -85,13 +85,12 @@ class InternS1MultiModalProjector(nn.Module):
 
 
 class InternS1ImagePixelInputs(TensorSchema):
-    """
-    Dimensions:
-        - bnp: Batch size * number of images * (1 + num_patches)
-        - c: Number of channels (3)
-        - h: Height
-        - w: Width
-        - bn: Batch size * number of images
+    """Dimensions:
+    - bnp: Batch size * number of images * (1 + num_patches)
+    - c: Number of channels (3)
+    - h: Height
+    - w: Width
+    - bn: Batch size * number of images
     """
 
     type: Literal["pixel_values"] = "pixel_values"
@@ -100,11 +99,10 @@ class InternS1ImagePixelInputs(TensorSchema):
 
 
 class InternS1ImageEmbeddingInputs(TensorSchema):
-    """
-    Dimensions:
-        - ni: Number of images
-        - tifs: Total image feature size
-        - hs: Hidden size (must match language model backbone)
+    """Dimensions:
+    - ni: Number of images
+    - tifs: Total image feature size
+    - hs: Hidden size (must match language model backbone)
     """
 
     type: Literal["image_embeds"] = "image_embeds"
@@ -115,13 +113,12 @@ InternS1ImageInputs: TypeAlias = InternS1ImagePixelInputs | InternS1ImageEmbeddi
 
 
 class InternS1VideoPixelInputs(TensorSchema):
-    """
-    Dimensions:
-        - bnv: Batch size * number of videos * number of frames
-        - bn: Batch size * number of images
-        - c: Number of channels (3)
-        - h: Height
-        - w: Width
+    """Dimensions:
+    - bnv: Batch size * number of videos * number of frames
+    - bn: Batch size * number of images
+    - c: Number of channels (3)
+    - h: Height
+    - w: Width
     """
 
     type: Literal["pixel_values_videos"] = "pixel_values_videos"
@@ -130,11 +127,10 @@ class InternS1VideoPixelInputs(TensorSchema):
 
 
 class InternS1VideoEmbeddingInputs(TensorSchema):
-    """
-    Dimensions:
-        - nv: Number of videos
-        - tvfs: Total video feature size
-        - hs: Hidden size (must match language model backbone)
+    """Dimensions:
+    - nv: Number of videos
+    - tvfs: Total video feature size
+    - hs: Hidden size (must match language model backbone)
     """
 
     type: Literal["video_embeds"] = "video_embeds"
@@ -202,7 +198,7 @@ class InternS1ProcessingInfo(BaseProcessingInfo):
         processor: InternVLProcessor,
         mm_kwargs: Mapping[str, object],
     ) -> int:
-        image_processor: GotOcr2ImageProcessorFast = processor.image_processor
+        image_processor: GotOcr2ImageProcessor = processor.image_processor
 
         num_image_patches = image_processor.get_number_of_image_patches(
             image_height,
@@ -299,33 +295,27 @@ class InternS1DummyInputsBuilder(BaseDummyInputsBuilder[InternS1ProcessingInfo])
         self,
         seq_len: int,
         mm_counts: Mapping[str, int],
-        mm_options: Mapping[str, BaseDummyOptions],
+        mm_options: MultiModalDummyOptions,
     ) -> MultiModalDataDict:
         target_width, target_height = self.info.get_image_size_with_most_features()
         target_num_frames = self.info.get_num_frames_with_most_features(seq_len, mm_counts)
-        num_images = mm_counts.get("image", 0)
-        num_videos = mm_counts.get("video", 0)
 
         config = self.info.get_hf_config()
         image_size_h, image_size_w = config.vision_config.image_size
-
-        image_overrides = mm_options.get("image")
-        video_overrides = mm_options.get("video")
-        assert video_overrides is None or isinstance(video_overrides, VideoDummyOptions)
 
         return {
             "image": self._get_dummy_images(
                 width=target_width,
                 height=target_height,
-                num_images=num_images,
-                overrides=image_overrides,
+                num_images=mm_counts.get("image", 0),
+                overrides=mm_options.get("image"),
             ),
             "video": self._get_dummy_videos(
                 width=image_size_w,
                 height=image_size_h,
                 num_frames=target_num_frames,
-                num_videos=num_videos,
-                overrides=video_overrides,
+                num_videos=mm_counts.get("video", 0),
+                overrides=mm_options.get("video"),
             ),
         }
 
@@ -333,26 +323,28 @@ class InternS1DummyInputsBuilder(BaseDummyInputsBuilder[InternS1ProcessingInfo])
 class InternS1MultiModalProcessor(BaseMultiModalProcessor[InternS1ProcessingInfo]):
     """Basic image-only MultiModalProcessor for InternS1-style models."""
 
+    def _get_hf_mm_text(self, mm_counts: Mapping[str, int]) -> str:
+        return self.dummy_inputs.get_dummy_text(mm_counts)
+
     def _apply_hf_processor_main(
         self,
         mm_items: MultiModalDataItems,
-        hf_processor_mm_kwargs: Mapping[str, object],
+        hf_kwargs: Mapping[str, object],
     ) -> BatchFeature:
-        valid_mm_items = mm_items.select({k for k, c in mm_items.get_all_counts().items() if c > 0})
-        mm_data, passthrough_data = self._get_hf_mm_data(valid_mm_items)
+        hf_data, hf_kwargs, passthrough_data = self._get_hf_mm_inputs(mm_items, hf_kwargs)
 
-        if not mm_data:
-            return BatchFeature(dict(passthrough_data))
+        if not hf_data:
+            return self._finalize_hf_mm_data(hf_data, hf_kwargs, passthrough_data)
 
-        prompt_text = self.dummy_inputs.get_dummy_text(mm_items.get_all_counts())
+        prompt_text = hf_data.pop("text")
+        assert isinstance(prompt_text, str)
 
-        mm_data = dict(mm_data)
-        videos = mm_data.pop("videos", [])
-        images = mm_data.pop("images", [])
+        videos = hf_data.pop("videos", [])
+        images = hf_data.pop("images", [])
         assert isinstance(videos, list)
         assert isinstance(images, list)
 
-        hf_processor = self.info.get_hf_processor(**hf_processor_mm_kwargs)
+        hf_processor = self.info.get_hf_processor(**hf_kwargs)
         tokenizer = hf_processor.tokenizer
         vocab = tokenizer.get_vocab()
 
@@ -366,9 +358,9 @@ class InternS1MultiModalProcessor(BaseMultiModalProcessor[InternS1ProcessingInfo
             image_pixel_values = []
             for image in images:
                 processed_data = self.info.ctx.call_hf_processor(
-                    self.info.get_hf_processor(**hf_processor_mm_kwargs),
+                    self.info.get_hf_processor(**hf_kwargs),
                     dict(text=hf_processor.image_token, **{"images": image}),
-                    hf_processor_mm_kwargs,
+                    hf_kwargs,
                 )
                 image_pixel_values.append(processed_data.pop("pixel_values"))
 
@@ -388,9 +380,9 @@ class InternS1MultiModalProcessor(BaseMultiModalProcessor[InternS1ProcessingInfo
             video_pixel_values = []
             for video in videos:
                 processed_data = self.info.ctx.call_hf_processor(
-                    self.info.get_hf_processor(**hf_processor_mm_kwargs),
+                    self.info.get_hf_processor(**hf_kwargs),
                     dict(text=hf_processor.video_token, **{"videos": video}),
-                    hf_processor_mm_kwargs,
+                    hf_kwargs,
                 )
                 video_pixel_values.append(processed_data.pop("pixel_values"))
 
@@ -414,9 +406,7 @@ class InternS1MultiModalProcessor(BaseMultiModalProcessor[InternS1ProcessingInfo
         processed_data.update(text_outputs)
         processed_data.update(image_outputs)
         processed_data.update(video_outputs)
-        processed_data.update(passthrough_data)
-
-        return processed_data
+        return self._finalize_hf_mm_data(hf_data, hf_kwargs, passthrough_data, processed_data)
 
     def _get_mm_fields_config(
         self,
@@ -574,7 +564,7 @@ class InternS1ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP
 
     def _init_vision_model(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         quant_config: QuantizationConfig | None,
         *,
         prefix: str,
@@ -587,7 +577,7 @@ class InternS1ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP
             prefix=prefix,
         )
 
-    def _init_mlp1(self, config: PretrainedConfig) -> nn.Module:
+    def _init_mlp1(self, config: PreTrainedConfig) -> nn.Module:
         return InternS1MultiModalProjector(config)
 
     def pixel_shuffle(self, x, scale_factor=0.5):
@@ -802,9 +792,7 @@ class InternS1ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP
         return loader.load_weights(weights, mapper=self.hf_to_aphrodite_mapper)
 
     def get_mm_mapping(self) -> MultiModelKeys:
-        """
-        Get the module prefix in multimodal models
-        """
+        """Get the module prefix in multimodal models."""
         return MultiModelKeys.from_string_field(
             language_model="language_model",
             connector="multi_modal_projector",

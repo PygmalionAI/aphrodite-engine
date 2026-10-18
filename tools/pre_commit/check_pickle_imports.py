@@ -29,6 +29,9 @@ ALLOWED_FILES = {
     "aphrodite/distributed/parallel_state.py",
     "aphrodite/distributed/device_communicators/all_reduce_utils.py",
     "aphrodite/distributed/device_communicators/shm_broadcast.py",
+    # Encoder-only Pickler subclass for the existing trusted local queue.
+    # shm_broadcast disables its shared-memory arena when remote readers exist.
+    "aphrodite/distributed/device_communicators/shm_tensor_arena.py",
     "aphrodite/distributed/device_communicators/shm_object_storage.py",
     "aphrodite/distributed/weight_transfer/ipc_engine.py",
     "aphrodite/env_override.py",

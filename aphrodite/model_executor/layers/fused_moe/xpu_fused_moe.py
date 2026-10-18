@@ -21,7 +21,7 @@ from aphrodite.model_executor.layers.quantization.utils.quant_utils import (
 from aphrodite.platforms import current_platform
 
 if current_platform.is_xpu():
-    from aphrodite_xpu_kernels.fused_moe_interface import xpu_fused_moe
+    from vllm_xpu_kernels.fused_moe_interface import xpu_fused_moe
 
 
 def prepare_fp8_moe_layer_for_xpu(

@@ -3,14 +3,15 @@
 
 import torch
 import torch.nn as nn
-from transformers import PretrainedConfig
+from transformers import PreTrainedConfig
 
 from aphrodite.config.lora import LoRAConfig
 from aphrodite.distributed import (
     get_tensor_model_parallel_rank,
     get_tensor_model_parallel_world_size,
+    get_tp_group,
 )
-from aphrodite.model_executor.layers.logits_processor import LogitsProcessor
+from aphrodite.model_executor.layers.logits_processor import LogitsProcessor, _topk
 from aphrodite.model_executor.layers.vocab_parallel_embedding import VocabParallelEmbedding
 from aphrodite.platforms import current_platform
 
@@ -18,8 +19,7 @@ from .base import BaseLayerWithLoRA
 
 
 class LogitsProcessorWithLoRA(BaseLayerWithLoRA):
-    """
-    LoRA wrapper for LogitsProcessor, with extra logic to handle the
+    """LoRA wrapper for LogitsProcessor, with extra logic to handle the
     application of the LoRA adapter.
 
     Args:
@@ -30,6 +30,7 @@ class LogitsProcessorWithLoRA(BaseLayerWithLoRA):
         sharded_to_full_mapping: index mapping from sharded vocab to full vocab
             received from base_layer.get_sharded_to_full_mapping(). If None,
             no reindexing will be done.
+
     """
 
     def __init__(
@@ -85,7 +86,7 @@ class LogitsProcessorWithLoRA(BaseLayerWithLoRA):
         self,
         max_loras: int,
         lora_config: LoRAConfig,
-        model_config: PretrainedConfig | None = None,
+        model_config: PreTrainedConfig | None = None,
     ) -> None:
         # TODO: Verify if this condition can be further relaxed
         if self.base_layer.vocab_size > 258048:
@@ -207,13 +208,60 @@ class LogitsProcessorWithLoRA(BaseLayerWithLoRA):
     def forward(self, *args, **kwargs):
         return type(self.base_layer).forward(self, *args, **kwargs)
 
+    def get_top_tokens(
+        self,
+        lm_head: VocabParallelEmbedding,
+        hidden_states: torch.Tensor,
+        embedding_bias: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Reduce full adapter-adjusted logits, preserving custom forward scaling.
+
+        The LoRA delta is applied after the TP gather, so the base processor's
+        shard-local reduction cannot be used. Broadcast rank-zero results when
+        the processor gathers rather than all-gathers.
+        """
+        logits = self(lm_head, hidden_states, embedding_bias)
+        if logits is None:
+            top_tokens = torch.empty(hidden_states.shape[:-1], dtype=torch.int64, device=hidden_states.device)
+        else:
+            top_tokens = logits[..., : self.org_vocab_size].argmax(dim=-1)
+        if self.tp_size > 1 and not self.use_all_gather:
+            get_tp_group().broadcast(top_tokens, src=0)
+        return top_tokens
+
+    def get_top_k_tokens(
+        self,
+        lm_head: VocabParallelEmbedding,
+        hidden_states: torch.Tensor,
+        k: int,
+        embedding_bias: torch.Tensor | None = None,
+        *,
+        return_log_probs: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Select candidates from full LoRA logits on every TP rank."""
+        logits = self(lm_head, hidden_states, embedding_bias)
+        if logits is None:
+            shape = (*hidden_states.shape[:-1], k)
+            ids = torch.empty(shape, dtype=torch.int64, device=hidden_states.device)
+            values = torch.empty(shape, dtype=torch.float32, device=hidden_states.device)
+        else:
+            scores = logits[..., : self.org_vocab_size].float()
+            values, ids = _topk(scores, k)
+            if return_log_probs:
+                values = values - torch.logsumexp(scores, dim=-1, keepdim=True)
+        if self.tp_size > 1 and not self.use_all_gather:
+            group = get_tp_group()
+            group.broadcast(ids, src=0)
+            group.broadcast(values, src=0)
+        return ids, values
+
     @classmethod
     def can_replace_layer(
         cls,
         source_layer: nn.Module,
         lora_config: LoRAConfig,
         packed_modules_list: list,
-        model_config: PretrainedConfig | None = None,
+        model_config: PreTrainedConfig | None = None,
     ) -> bool:
         # Special handling for the LogitsProcessor.
         return False

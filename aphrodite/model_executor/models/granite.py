@@ -36,7 +36,7 @@ from itertools import islice
 import torch
 from torch import nn
 from transformers import GraniteConfig
-from transformers.configuration_utils import PretrainedConfig
+from transformers.configuration_utils import PreTrainedConfig
 
 from aphrodite.compilation.decorators import support_torch_compile
 from aphrodite.config import AphroditeConfig, CacheConfig
@@ -60,7 +60,13 @@ from aphrodite.model_executor.model_loader.weight_utils import sharded_weight_lo
 from aphrodite.model_executor.utils import set_weight_attrs
 from aphrodite.sequence import IntermediateTensors
 
-from .interfaces import SupportsLoRA, SupportsPP, SupportsQuant
+from .interfaces import (
+    EagleModelMixin,
+    SupportsEagle3,
+    SupportsLoRA,
+    SupportsPP,
+    SupportsQuant,
+)
 from .utils import (
     AutoWeightsLoader,
     PPMissingLayer,
@@ -71,7 +77,7 @@ from .utils import (
 )
 
 
-def granite_layer_attn_params(config: PretrainedConfig, layer_idx: int) -> tuple[int | None, float, bool]:
+def granite_layer_attn_params(config: PreTrainedConfig, layer_idx: int) -> tuple[int | None, float, bool]:
     """Resolve one layer's sliding window, RoPE base and sink usage.
 
     Plain Granite configs carry no SWA fields and fall back to full
@@ -82,6 +88,7 @@ def granite_layer_attn_params(config: PretrainedConfig, layer_idx: int) -> tuple
     Returns:
         Sliding window size (`None` for full attention), RoPE base theta (`0`
         for NoPE), and attention sink presence/absence.
+
     """
     layer_types = getattr(config, "layer_types", None)
     sliding_window = (
@@ -288,7 +295,7 @@ class GraniteDecoderLayer(nn.Module):
 
 
 @support_torch_compile
-class GraniteModel(nn.Module):
+class GraniteModel(nn.Module, EagleModelMixin):
     hf_to_aphrodite_mapper = WeightsMapper(
         orig_to_new_stacked={
             # weight_name: (param_name, shard_id)
@@ -342,7 +349,7 @@ class GraniteModel(nn.Module):
         positions: torch.Tensor,
         intermediate_tensors: IntermediateTensors | None,
         inputs_embeds: torch.Tensor | None = None,
-    ) -> torch.Tensor | IntermediateTensors:
+    ) -> torch.Tensor | IntermediateTensors | tuple[torch.Tensor, list[torch.Tensor]]:
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
                 hidden_states = inputs_embeds
@@ -354,8 +361,10 @@ class GraniteModel(nn.Module):
             assert intermediate_tensors is not None
             hidden_states = intermediate_tensors["hidden_states"]
 
-        for layer in islice(self.layers, self.start_layer, self.end_layer):
+        aux_hidden_states = self._maybe_add_hidden_state([], 0, hidden_states, None)
+        for idx, layer in enumerate(islice(self.layers, self.start_layer, self.end_layer)):
             hidden_states = layer(positions, hidden_states)
+            self._maybe_add_hidden_state(aux_hidden_states, idx + 1, hidden_states, None)
 
         if not get_pp_group().is_last_rank:
             return IntermediateTensors(
@@ -365,6 +374,9 @@ class GraniteModel(nn.Module):
             )
 
         hidden_states = self.norm(hidden_states)
+
+        if len(aux_hidden_states) > 0:
+            return hidden_states, aux_hidden_states
         return hidden_states
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
@@ -372,7 +384,7 @@ class GraniteModel(nn.Module):
         return loader.load_weights(weights, mapper=self.hf_to_aphrodite_mapper)
 
 
-class GraniteForCausalLM(nn.Module, SupportsLoRA, SupportsPP, SupportsQuant):
+class GraniteForCausalLM(nn.Module, SupportsLoRA, SupportsPP, SupportsQuant, SupportsEagle3):
     hf_to_aphrodite_mapper = GraniteModel.hf_to_aphrodite_mapper
     # LoRA specific attributes
     packed_modules_mapping: dict[str, list[str]] = {

@@ -11,10 +11,10 @@ import importlib.metadata
 import importlib.util
 from dataclasses import dataclass
 
-import lm_eval
 import pytest
 from packaging import version
 
+from tests.quantization.lm_eval_utils import evaluate_sonar
 from tests.utils import (
     multi_gpu_only,
 )
@@ -34,11 +34,14 @@ class ModelCase:
 class EvaluationConfig:
     model_name: str
 
-    def get_model_args(self) -> str:
-        return (
-            f"pretrained={self.model_name},"
-            "tensor_parallel_size=4,dtype=auto,gpu_memory_utilization=0.8,trust_remote_code=False"
-        )
+    def get_model_args(self) -> dict:
+        return {
+            "pretrained": self.model_name,
+            "tensor_parallel_size": 4,
+            "dtype": "auto",
+            "gpu_memory_utilization": 0.8,
+            "trust_remote_code": False,
+        }
 
 
 TEST_CONFIGS = {
@@ -58,9 +61,8 @@ TEST_CONFIGS = {
 @pytest.mark.skipif(not QUARK_MXFP4_AVAILABLE, reason="amd-quark>=0.9 is not available")
 @multi_gpu_only(num_gpus=4)
 def test_mixed_precision_model_accuracies(model_name: str, accuracy_numbers: dict):
-    results = lm_eval.simple_evaluate(
-        model="aphrodite",
-        model_args=EvaluationConfig(model_name).get_model_args(),
+    results = evaluate_sonar(
+        EvaluationConfig(model_name).get_model_args(),
         tasks=list(accuracy_numbers.keys()),
         batch_size=8,
     )

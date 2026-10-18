@@ -106,7 +106,11 @@ if HAS_TRITON:
         BatchedTritonExperts,
     )
     from aphrodite.model_executor.layers.fused_moe.experts.rocm_aiter_moe import (
-        AiterExperts,
+        AiterFp8BlockExperts,
+        AiterFp8ChannelExperts,
+        AiterFp8TensorExperts,
+        AiterMxfp4Experts,
+        AiterUnquantizedExperts,
     )
     from aphrodite.model_executor.layers.fused_moe.experts.triton_deep_gemm_moe import (
         TritonOrDeepGemmExperts,
@@ -117,8 +121,10 @@ if HAS_TRITON:
     )
     from aphrodite.model_executor.layers.fused_moe.experts.xpu_moe import (
         XPUExperts,
+        XPUExpertsBlockFp8,
         XPUExpertsFp8,
         XPUExpertsMxFp4,
+        XPUExpertsMxFp8,
     )
     from aphrodite.model_executor.layers.fused_moe.fused_moe import (
         fused_experts,
@@ -132,7 +138,11 @@ if HAS_TRITON:
     )
 
     __all__ += [
-        "AiterExperts",
+        "AiterUnquantizedExperts",
+        "AiterFp8BlockExperts",
+        "AiterFp8TensorExperts",
+        "AiterFp8ChannelExperts",
+        "AiterMxfp4Experts",
         "fused_topk",
         "fused_experts",
         "get_config_file_name",

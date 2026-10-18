@@ -18,6 +18,7 @@ from aphrodite.config.multimodal import (
     AudioDummyOptions,
     BaseDummyOptions,
     ImageDummyOptions,
+    MultiModalDummyOptions,
     VideoDummyOptions,
 )
 from aphrodite.distributed import (
@@ -85,13 +86,12 @@ def create_batched_mm_kwargs(
     size_factors: tuple[float, ...] = (1.0, 0.5, 0.25),
 ) -> Iterable[tuple[str, int, BatchedTensorInputs]]:
     processing_info = processor.info
-    dummy_inputs = processor.dummy_inputs
     supported_mm_limits = processing_info.get_supported_mm_limits()
     mm_counts = {modality: 3 if limit is None else limit for modality, limit in supported_mm_limits.items()}
-    processor_inputs = dummy_inputs.get_dummy_processor_inputs(
+    processor_inputs = processor.get_dummy_inputs(
         seq_len=model_config.max_model_len,
         mm_counts=mm_counts,
-        mm_options={},
+        mm_options=MultiModalDummyOptions(),
     )
     mm_items = processor_inputs.mm_data_items
     resized_mm_data = {modality: resize_mm_data(items.data, size_factors) for modality, items in mm_items.items()}
@@ -146,8 +146,8 @@ def test_model_tensor_schema(model_id: str):
         # FIXME(Isotr0py): Fix Kimi-K2.5's offline inference about vision chunks.
         pytest.skip("Kimi-K2.5's offline inference has issues about vision chunks. Fix later.")
 
-    if model_id == "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp" and not (current_platform.is_cuda()):
-        pytest.skip("Deepseek V4 is only supported on CUDA")
+    if model_id == "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp" and not current_platform.is_cuda_alike():
+        pytest.skip("Deepseek V4 vision is only supported on CUDA and ROCm")
 
     if model_id == "zai-org/GLM-5.3-Flash" and (current_platform.is_xpu()):
         pytest.skip("GLM-5.3-Flash is not supported on XPU")
@@ -194,8 +194,14 @@ def test_model_tensor_schema(model_id: str):
 
     factories = model_cls._processor_factory
 
+    # Capture helpers return capture-buffer containers (e.g.
+    # EncoderCudaGraphCaptureInputs), not TensorSchema mm inputs.
+    capture_helpers = {"prepare_encoder_cudagraph_capture_inputs"}
+
     inputs_parse_methods = []
     for attr_name in dir(model_cls):
+        if attr_name in capture_helpers:
+            continue
         attr = getattr(model_cls, attr_name)
         if hasattr(attr, "__annotations__"):
             return_type = attr.__annotations__.get("return", None)
@@ -222,10 +228,10 @@ def test_model_tensor_schema(model_id: str):
             return AudioDummyOptions(count=count)
         return BaseDummyOptions(count=count)
 
-    model_config.get_multimodal_config().limit_per_prompt = {
-        modality: _to_dummy_options(modality, count) for modality, count in limit_mm_per_prompt.items()
-    }
-    processor = factories.build_processor(ctx, cache=None)
+    model_config.get_multimodal_config().limit_per_prompt = MultiModalDummyOptions(
+        {modality: _to_dummy_options(modality, count) for modality, count in limit_mm_per_prompt.items()}
+    )
+    processor = factories.build_processor(ctx)
 
     with initialize_dummy_model(model_cls, model_config) as model:
         for modality, _, mm_kwargs in create_batched_mm_kwargs(model_config, processor):

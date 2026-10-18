@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""
-Define KV connector functionality mixin for model runners.
-"""
+"""Define KV connector functionality mixin for model runners."""
 
 from collections.abc import Generator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
@@ -30,9 +28,7 @@ class KVConnectorModelRunnerMixin:
         # KV send/recv even if no work to do.
         with (
             set_forward_context(None, aphrodite_config),
-            KVConnectorModelRunnerMixin._get_kv_connector_output(
-                scheduler_output, wait_for_save=False
-            ) as kv_connector_output,
+            KVConnectorModelRunnerMixin._get_kv_connector_output(scheduler_output) as kv_connector_output,
         ):
             pass
 
@@ -66,7 +62,6 @@ class KVConnectorModelRunnerMixin:
     @contextmanager
     def _get_kv_connector_output(
         scheduler_output: "SchedulerOutput",
-        wait_for_save: bool = True,
         defer_finalize: bool = False,
     ) -> Generator[KVConnectorOutput, None, None]:
         output = KVConnectorOutput()
@@ -89,12 +84,13 @@ class KVConnectorModelRunnerMixin:
         finally:
             if start_after_forward:
                 kv_connector.start_load_kv(get_forward_context())
-            if wait_for_save and not defer_finalize:
+            if not defer_finalize:
                 kv_connector.wait_for_save()
 
-            output.finished_sending, output.finished_recving = kv_connector.get_finished(
-                scheduler_output.finished_req_ids
-            )
+            transfer_results = kv_connector.get_transfer_results(scheduler_output.finished_req_ids)
+            output.finished_sending = transfer_results.finished_sending
+            output.finished_recving = transfer_results.finished_recving
+            output.failed_recving = transfer_results.failed_recving
             output.invalid_block_ids = kv_connector.get_block_ids_with_load_errors()
 
             output.kv_connector_stats = kv_connector.get_kv_connector_stats()

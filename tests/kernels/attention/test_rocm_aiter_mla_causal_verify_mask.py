@@ -75,6 +75,7 @@ def _run_verify_block():
     """
     from aphrodite.config import SpeculativeConfig
     from aphrodite.config.aphrodite import set_current_aphrodite_config
+    from aphrodite.v1.attention.backends.mla.rocm_aiter_mla import AiterMLAImpl
     from aphrodite.v1.attention.backends.registry import AttentionBackendEnum
     from aphrodite.v1.kv_cache_interface import MLAAttentionSpec
     from aphrodite.v1.worker.workspace import init_workspace_manager
@@ -102,7 +103,7 @@ def _run_verify_block():
     # What raises reorder_batch_threshold to QLEN, so a QLEN-token block is
     # classified as a decode instead of a prefill. ngram needs no draft model.
     aphrodite_config.speculative_config = SpeculativeConfig(method="ngram", num_speculative_tokens=QLEN - 1)
-    aphrodite_config.model_config.get_num_attention_heads = types.MethodType(
+    aphrodite_config.model_config.get_num_attention_heads = types.MethodType(  # type: ignore[method-assign]
         lambda self, parallel_config, arch_config=None: NUM_QUERY_HEADS,
         aphrodite_config.model_config,
     )
@@ -186,6 +187,7 @@ def _run_verify_block():
             lambda: spy,
         ),
     ):
+        assert isinstance(impl, AiterMLAImpl)
         impl.forward_mqa((q_nope, q_pe), kv_cache, metadata, layer=None)
 
     return metadata, captured

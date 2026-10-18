@@ -68,8 +68,7 @@ class KaldifeatFbank:
 
 
 class FireRedASR2FeatureExtractor(SequenceFeatureExtractor):
-    r"""
-    Constructs a FireRedASR2 feature extractor.
+    r"""Constructs a FireRedASR2 feature extractor.
 
     This feature extractor inherits from [`~feature_extraction_sequence_
         utils.SequenceFeatureExtractor`] which contains most of the main
@@ -99,6 +98,7 @@ class FireRedASR2FeatureExtractor(SequenceFeatureExtractor):
             Dithering has similar effect as `spectrogram(mel_floor=...)`. It reduces
             the high log_mel_fbank values for signals with hard-zero sections,
             when VAD cutoff is present in the signal.
+
     """
 
     model_input_names = ["input_features"]
@@ -226,9 +226,8 @@ class FireRedASR2FeatureExtractor(SequenceFeatureExtractor):
 
 
 class FireRedASR2Processor(ProcessorMixin):
-    r"""
-    Constructs a FireRedASR2 processor which wraps a FireRedASR2 feature extractor and
-    a FireRedASR2 tokenizer into a single processor.
+    r"""Constructs a FireRedASR2 processor which wraps a FireRedASR2 feature extractor
+    and a FireRedASR2 tokenizer into a single processor.
 
     [`FireRedASR2Processor`] offers all the functionalities of
     [`FireRedASR2FeatureExtractor`] and [`Qwen2Tokenizer`]. See the
@@ -242,6 +241,7 @@ class FireRedASR2Processor(ProcessorMixin):
         tokenizer (`Qwen2Tokenizer`):
             An instance of [`Qwen2Tokenizer`]. The tokenizer is a required
             input.
+
     """
 
     feature_extractor_class = "FireRedASR2FeatureExtractor"
@@ -263,8 +263,7 @@ class FireRedASR2Processor(ProcessorMixin):
         return self.tokenizer.get_decoder_prompt_ids(task=task, language=language, no_timestamps=no_timestamps)
 
     def __call__(self, *args, **kwargs):
-        """
-        Forwards the `audio` argument to FireRedASR2FeatureExtractor's
+        """Forwards the `audio` argument to FireRedASR2FeatureExtractor's
         [`~FireRedASR2FeatureExtractor.__call__`] and the `text` argument to
         [`~Qwen2Tokenizer.__call__`]. Please refer to the docstring of the
         above two methods for more information.

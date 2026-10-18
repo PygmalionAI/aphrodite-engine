@@ -15,7 +15,7 @@ from torch import nn
 from transformers import BatchFeature
 
 from aphrodite.config import AphroditeConfig
-from aphrodite.config.multimodal import BaseDummyOptions
+from aphrodite.config.multimodal import MultiModalDummyOptions
 from aphrodite.inputs import MultiModalDataDict
 from aphrodite.model_executor.layers.pooler.tokwise import pooler_for_token_embed
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
@@ -131,18 +131,16 @@ class ColModernVBertDummyInputsBuilder(
         self,
         seq_len: int,
         mm_counts: Mapping[str, int],
-        mm_options: Mapping[str, BaseDummyOptions],
+        mm_options: MultiModalDummyOptions,
     ) -> MultiModalDataDict:
-        num_images = mm_counts.get("image", 0)
         target_width, target_height = self.info.get_image_size_with_most_features()
-        image_overrides = mm_options.get("image")
 
         return {
             "image": self._get_dummy_images(
                 width=target_width,
                 height=target_height,
-                num_images=num_images,
-                overrides=image_overrides,
+                num_images=mm_counts.get("image", 0),
+                overrides=mm_options.get("image"),
             )
         }
 
@@ -153,13 +151,12 @@ class ColModernVBertMultiModalProcessor(
     def _apply_hf_processor_main(
         self,
         mm_items: MultiModalDataItems,
-        hf_processor_mm_kwargs: Mapping[str, object],
+        hf_kwargs: Mapping[str, object],
     ) -> BatchFeature:
-        valid_mm_items = mm_items.select({k for k, c in mm_items.get_all_counts().items() if c > 0})
-        mm_data, passthrough_data = self._get_hf_mm_data(valid_mm_items)
+        mm_data, hf_kwargs, passthrough_data = self._get_hf_mm_inputs(mm_items, hf_kwargs)
 
         if not mm_data:
-            return BatchFeature(dict(passthrough_data))
+            return self._finalize_hf_mm_data(mm_data, hf_kwargs, passthrough_data)
 
         prompt_text = self.dummy_inputs.get_dummy_text(mm_items.get_all_counts())
 
@@ -187,8 +184,7 @@ class ColModernVBertMultiModalProcessor(
             result.update(image_outputs)
 
         processed_data = result
-        processed_data.update(passthrough_data)
-        return processed_data
+        return self._finalize_hf_mm_data(mm_data, hf_kwargs, passthrough_data, processed_data)
 
     def _get_mm_fields_config(
         self,

@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
 
+import aphrodite.envs as envs
 from aphrodite.logger import init_logger
 from aphrodite.model_executor.layers.quantization.utils.mxfp4_utils import (
     dequant_mxfp4,
@@ -89,7 +90,16 @@ class EmulationMxfp4LinearKernel(MxFp4LinearKernel):
         return True, None
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
-        layer.weight_scale = Parameter(layer.weight_scale.data, requires_grad=False)
+        weight_scale = Parameter(layer.weight_scale.data, requires_grad=False)
+
+        # Match the MXFP8 emulation path when explicitly enabled: dequantize
+        # once at load time so inference uses a plain high-precision linear.
+        # Otherwise retain packed weights and dequantize per invocation.
+        if envs.APHRODITE_MXFP4_EMULATION_DEQUANT_AT_LOAD:
+            weight = dequant_mxfp4(layer.weight, weight_scale, torch.bfloat16)
+            layer.weight = Parameter(weight.contiguous(), requires_grad=False)
+
+        layer.weight_scale = weight_scale
 
     def apply_weights(
         self,
@@ -97,6 +107,12 @@ class EmulationMxfp4LinearKernel(MxFp4LinearKernel):
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        dq_w = dequant_mxfp4(layer.weight, layer.weight_scale, x.dtype)
         qdq_x = self.quant_dequant_func(x)
+
+        # Packed MXFP4 weights use one byte for two values. A weight with
+        # elements wider than one byte was already dequantized at load time.
+        if layer.weight.element_size() >= 2:
+            return F.linear(qdq_x, layer.weight.to(x.dtype), bias)
+
+        dq_w = dequant_mxfp4(layer.weight, layer.weight_scale, x.dtype)
         return F.linear(qdq_x, dq_w, bias)

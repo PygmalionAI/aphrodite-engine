@@ -3,6 +3,10 @@
 
 import torch
 
+from aphrodite.model_executor.layers.quantization.utils.mxfp8_utils import (
+    MXFP8_BLOCK_SIZE,
+)
+
 from .Mxfp8LinearKernel import Mxfp8LinearKernel, Mxfp8LinearLayerConfig
 
 
@@ -21,6 +25,15 @@ class MarlinMxfp8LinearKernel(Mxfp8LinearKernel):
 
     @classmethod
     def can_implement(cls, c: Mxfp8LinearLayerConfig) -> tuple[bool, str | None]:
+        N, K = c.weight_shape
+        if N <= 0 or K <= 0:
+            return False, f"Marlin MXFP8 requires positive N and K, got N={N}, K={K}."
+        if K % MXFP8_BLOCK_SIZE != 0:
+            return (
+                False,
+                f"Marlin MXFP8 requires K to be divisible by {MXFP8_BLOCK_SIZE}, got K={K}.",
+            )
+        # Tile misalignment is fixed by zero-padding at weight prep.
         return True, None
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
@@ -44,7 +57,7 @@ class MarlinMxfp8LinearKernel(Mxfp8LinearKernel):
             input=x,
             weight=layer.weight,
             weight_scale=layer.weight_scale,
-            workspace=layer.workspace,
+            workspace=None,
             size_n=layer.output_size_per_partition,
             size_k=layer.input_size_per_partition,
             bias=bias,

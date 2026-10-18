@@ -4,7 +4,7 @@
 import itertools
 import math
 import typing
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Hashable, Iterable, Mapping, Sequence
 from typing import Annotated, Any, Literal
 
 import torch
@@ -13,15 +13,15 @@ from transformers import BatchFeature
 from transformers.activations import ACT2FN
 from transformers.models.lfm2_vl import Lfm2VlProcessor
 from transformers.models.lfm2_vl.configuration_lfm2_vl import Lfm2VlConfig
-from transformers.models.lfm2_vl.image_processing_lfm2_vl_fast import (
-    Lfm2VlImageProcessorFast,
+from transformers.models.lfm2_vl.image_processing_lfm2_vl import (
+    Lfm2VlImageProcessor,
     find_closest_aspect_ratio,
     round_by_factor,
 )
 from typing_extensions import Buffer
 
 from aphrodite.config import AphroditeConfig
-from aphrodite.config.multimodal import BaseDummyOptions
+from aphrodite.config.multimodal import MultiModalDummyOptions
 from aphrodite.forward_context import set_forward_context
 from aphrodite.inputs import MultiModalDataDict
 from aphrodite.model_executor.layers.linear import ReplicatedLinear
@@ -35,6 +35,7 @@ from aphrodite.model_executor.models.module_mapping import MultiModelKeys
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
 from aphrodite.multimodal.inputs import (
     MultiModalFieldConfig,
+    MultiModalKwargsItem,
     MultiModalKwargsItems,
 )
 from aphrodite.multimodal.parse import ImageProcessorItems, ImageSize, MultiModalDataItems
@@ -80,12 +81,11 @@ def _pad_cumulative_seqlens_buffer(
 
 
 class Lfm2VLImagePixelInputs(TensorSchema):
-    """
-    Dimensions:
-        - b: Number of images in the prompt
-        - bn: Batch size * number of images
-        - d: Number of dimensions
-        - fd: Number of features per dimension
+    """Dimensions:
+    - b: Number of images in the prompt
+    - bn: Batch size * number of images
+    - d: Number of dimensions
+    - fd: Number of features per dimension
     """
 
     type: Literal["pixel_values"] = "pixel_values"
@@ -104,7 +104,7 @@ class Lfm2VLProcessingInfo(BaseProcessingInfo):
     def get_hf_processor(self, **kwargs):
         return self.ctx.get_hf_processor(Lfm2VlProcessor, **kwargs)
 
-    def get_image_processor(self, **kwargs: object) -> Lfm2VlImageProcessorFast:
+    def get_image_processor(self, **kwargs: object) -> Lfm2VlImageProcessor:
         return self.get_hf_processor(**kwargs).image_processor
 
     def get_default_tok_params(self) -> TokenizeParams:
@@ -197,7 +197,7 @@ class Lfm2VLProcessingInfo(BaseProcessingInfo):
         processor: Lfm2VlProcessor,
         mm_kwargs: Mapping[str, object],
     ) -> tuple[int, int, int]:
-        image_processor: Lfm2VlImageProcessorFast = processor.image_processor
+        image_processor: Lfm2VlImageProcessor = processor.image_processor
 
         mm_kwargs = self.ctx.get_merged_mm_kwargs(mm_kwargs)
         downsample_factor = mm_kwargs.get("downsample_factor", image_processor.downsample_factor)
@@ -306,7 +306,7 @@ class Lfm2VLProcessingInfo(BaseProcessingInfo):
         processor: Lfm2VlProcessor,
         mm_kwargs: Mapping[str, object],
     ) -> tuple[int, int]:
-        image_processor: Lfm2VlImageProcessorFast = processor.image_processor
+        image_processor: Lfm2VlImageProcessor = processor.image_processor
 
         mm_kwargs = self.ctx.get_merged_mm_kwargs(mm_kwargs)
         downsample_factor = mm_kwargs.get("downsample_factor", image_processor.downsample_factor)
@@ -353,26 +353,22 @@ class Lfm2VLDummyInputsBuilder(BaseDummyInputsBuilder[Lfm2VLProcessingInfo]):
         self,
         seq_len: int,
         mm_counts: Mapping[str, int],
-        mm_options: Mapping[str, BaseDummyOptions],
+        mm_options: MultiModalDummyOptions,
     ) -> MultiModalDataDict:
-        num_images = mm_counts.get("image", 0)
-
         target_width, target_height = self.info.get_image_size_with_most_features()
-
-        image_overrides = mm_options.get("image")
 
         return {
             "image": self._get_dummy_images(
                 width=target_width,
                 height=target_height,
-                num_images=num_images,
-                overrides=image_overrides,
+                num_images=mm_counts.get("image", 0),
+                overrides=mm_options.get("image"),
             ),
         }
 
 
 class Lfm2VLMultiModalProcessor(BaseMultiModalProcessor[Lfm2VLProcessingInfo]):
-    def _get_hf_processor_text(self, mm_counts: Mapping[str, int]) -> str:
+    def _get_hf_mm_text(self, mm_counts: Mapping[str, int]) -> str:
         return self.dummy_inputs.get_dummy_text(mm_counts)
 
     def _postprocess_hf_mm_data(
@@ -497,6 +493,7 @@ class Lfm2VLMultiModalProjector(nn.Module):
 
         Returns:
             projected_packed: (total_projected_tokens, text_hidden_size)
+
         """
         assert spatial_shapes.device.type == "cpu", (
             "Expected `spatial_shapes` on CPU to avoid device-to-host sync in variable-length packing."
@@ -621,6 +618,7 @@ class Lfm2VLForConditionalGeneration(
         Returns:
             Tuple containing:
             - conv_state_shape: Shape for convolutional state cache
+
         """
         parallel_config = aphrodite_config.parallel_config
         hf_language_config = aphrodite_config.model_config.hf_config.text_config
@@ -1074,6 +1072,7 @@ class Lfm2VLForConditionalGeneration(
         device: torch.device,
         dtype: torch.dtype,
         path: str = "default",
+        axis_keys: tuple[Hashable, ...] | None = None,
     ):
         from aphrodite.v1.worker.encoder_cudagraph_defs import (
             EncoderCudaGraphCaptureInputs,
@@ -1198,21 +1197,20 @@ class Lfm2VLForConditionalGeneration(
         return loader.load_weights(weights, mapper=self.hf_to_aphrodite_mapper)
 
     def get_mm_mapping(self) -> MultiModelKeys:
-        """
-        Get the module prefix in multimodal models
-        """
+        """Get the module prefix in multimodal models."""
         return MultiModelKeys.from_string_field(
             language_model="language_model",
             connector="multi_modal_projector",
             tower_model="vision_tower",
         )
 
-    def get_num_mm_encoder_tokens(self, num_image_tokens: int) -> int:
+    def get_mm_lora_token_counts(
+        self,
+        *,
+        modality: str,
+        mm_kwargs: MultiModalKwargsItem | None,
+        num_mm_embeds: int,
+    ) -> tuple[int, int | None]:
+        del modality, mm_kwargs
         downsample_factor = self.config.downsample_factor
-
-        return num_image_tokens * downsample_factor**2
-
-    def get_num_mm_connector_tokens(self, num_vision_tokens: int) -> int:
-        downsample_factor = self.config.downsample_factor
-
-        return num_vision_tokens // downsample_factor**2
+        return num_mm_embeds * downsample_factor**2, num_mm_embeds

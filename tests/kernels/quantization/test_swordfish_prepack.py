@@ -3,8 +3,7 @@
 """Swordfish ABI v1 prepack: bit-exact contract tests.
 
 The CUDA op `swordfish_prepack_B` must reproduce the pure-torch reference
-(`swordfish_pack_weights_ref`) bit-exactly — the ABI is frozen against these
-tests (csrc/libtorch_stable/quantization/swordfish/docs/abi-design.md).
+(`swordfish_pack_weights_ref`) bit-exactly, including activation-order inputs.
 """
 
 import pytest
@@ -127,4 +126,16 @@ def test_prepack_bit_exact_8bit(shape):
     gptq = pack_rows(q_w, 8, size_k, size_n).to(DEVICE)
     got = ops.swordfish_prepack_B(gptq, size_k, size_n, num_bits=8)
     assert got.shape == (size_n // 64, size_k // 64, 1024)
+    assert torch.equal(got.cpu(), ref)
+
+
+@pytest.mark.parametrize("num_bits", [4, 8])
+def test_prepack_activation_order(num_bits):
+    size_k, size_n = 192, 320
+    generator = torch.Generator().manual_seed(73)
+    q_w = torch.randint(0, 1 << num_bits, (size_k, size_n), generator=generator, dtype=torch.int32)
+    permutation = torch.randperm(size_k, generator=generator, dtype=torch.int32)
+    ref = swordfish_pack_weights_ref(q_w[permutation.long()], size_k, size_n, num_bits)
+    packed = pack_rows(q_w, num_bits, size_k, size_n).to(DEVICE)
+    got = ops.swordfish_prepack_B(packed, size_k, size_n, num_bits, perm=permutation.to(DEVICE))
     assert torch.equal(got.cpu(), ref)

@@ -8,11 +8,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import torch
-from transformers import MistralCommonBackend
+from transformers import TokenizersBackend
 
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.logger import init_logger
 from aphrodite.sampling_params import SamplingParams
+from aphrodite.tokenizers import TokenizerLike
 from aphrodite.utils.import_utils import LazyLoader
 from aphrodite.utils.mistral import is_mistral_tokenizer
 from aphrodite.v1.structured_output.backend_types import (
@@ -21,6 +22,7 @@ from aphrodite.v1.structured_output.backend_types import (
     StructuredOutputOptions,
 )
 from aphrodite.v1.structured_output.request import get_structured_output_key
+from aphrodite.v1.structured_output.utils import strip_speculative_padding
 
 if TYPE_CHECKING:
     import llguidance
@@ -34,15 +36,57 @@ else:
 logger = init_logger(__name__)
 
 
+_SCHEMA_MAP_KEYWORDS = (
+    "properties",
+    "patternProperties",
+    "$defs",
+    "definitions",
+    "dependentSchemas",
+    "dependencies",
+)
+
+_SUBSCHEMA_KEYWORDS = (
+    "additionalProperties",
+    "unevaluatedProperties",
+    "propertyNames",
+    "contains",
+    "additionalItems",
+    "unevaluatedItems",
+    "not",
+    "if",
+    "then",
+    "else",
+    "contentSchema",
+    "items",
+    "prefixItems",
+    "allOf",
+    "anyOf",
+    "oneOf",
+)
+
+
 def _walk_json_for_additional_properties(data: object):
     if isinstance(data, dict):
-        for value in data.values():
-            _walk_json_for_additional_properties(value)
-        if "additionalProperties" not in data and ("properties" in data or "patternProperties" in data):
+        for key in _SCHEMA_MAP_KEYWORDS:
+            value = data.get(key)
+            if isinstance(value, dict):
+                for subschema in value.values():
+                    if isinstance(subschema, dict):
+                        _walk_json_for_additional_properties(subschema)
+
+        for key in _SUBSCHEMA_KEYWORDS:
+            value = data.get(key)
+            if isinstance(value, (dict, list)):
+                _walk_json_for_additional_properties(value)
+
+        if "additionalProperties" not in data and (
+            isinstance(data.get("properties"), dict) or isinstance(data.get("patternProperties"), dict)
+        ):
             data["additionalProperties"] = False
     elif isinstance(data, list):
         for item in data:
-            _walk_json_for_additional_properties(item)
+            if isinstance(item, dict):
+                _walk_json_for_additional_properties(item)
 
 
 def has_guidance_unsupported_json_features(schema: dict[str, Any]) -> bool:
@@ -85,20 +129,50 @@ def process_for_additional_properties(
 
 @dataclass
 class GuidanceBackend(StructuredOutputBackend):
+    @staticmethod
+    def is_tokenizer_supported(tokenizer: TokenizerLike) -> bool:
+        """Check if tokenizer is supported by guidance backend.
+
+        TODO(arpera):
+        guidance backend does NOT support some types of tokenizers
+        so, we MUST verify tokenizer before using guidance
+        The problem is that guidance API does not provide
+        a way to validate tokenizer before building LLTokenizer
+        So, we have to do it manually here in Aphrodite.
+        This is ofcourse very bad, we duplicate complex logic
+        that can change arbitrary in future.
+        Our check here is based on guidance source code
+        on function `from_tokenizer` implementation:
+        https://github.com/guidance-ai/llguidance/blob/main/python/llguidance/hf.py#L29-L47
+        If you want to contribute to Aphrodite, please, add to llguidance
+        API function to implement this check there.
+        In that case we will remove this check from Aphrodite.
+        That kind of work is really appreciated!
+        """
+        if is_mistral_tokenizer(tokenizer):
+            return tokenizer.is_tekken
+        # PreTrainedTokenizerFast is the same as TokenizersBackend
+        return isinstance(tokenizer, TokenizersBackend)
+
+    @staticmethod
+    def _build_ll_tokenizer(tokenizer: TokenizerLike, vocab_size: int) -> Any:
+        if is_mistral_tokenizer(tokenizer):
+            return tokenizer.llg_tokenizer
+        return llguidance_hf.from_tokenizer(tokenizer, max(vocab_size, len(tokenizer)))
+
     def __post_init__(self):
         self.disable_any_whitespace = self.aphrodite_config.structured_outputs_config.disable_any_whitespace
         self.disable_additional_properties = (
             self.aphrodite_config.structured_outputs_config.disable_additional_properties
         )
 
-        if is_mistral_tokenizer(self.tokenizer):
-            self.ll_tokenizer = self.tokenizer.llg_tokenizer
-        elif isinstance(self.tokenizer, MistralCommonBackend):
-            from mistral_common.guidance.tokenizer import from_mistral_tokenizer
-
-            self.ll_tokenizer = from_mistral_tokenizer(self.tokenizer.tokenizer)
-        else:
-            self.ll_tokenizer = llguidance_hf.from_tokenizer(self.tokenizer, max(self.vocab_size, len(self.tokenizer)))
+        if not self.is_tokenizer_supported(self.tokenizer):
+            raise ValueError(
+                "Only fast tokenizers are supported."
+                "This error should NOT happen,"
+                "if you see this, please report an issue."
+            )
+        self.ll_tokenizer = self._build_ll_tokenizer(self.tokenizer, self.vocab_size)
 
     def compile_grammar(
         self,
@@ -157,7 +231,6 @@ class GuidanceGrammar(StructuredOutputGrammar):
         Returns True if the parser was advanced successfully.
         Returns False if the parser failed to advance.
         """
-
         if self.ll_tokenizer.eos_token in tokens:
             if self.ll_matcher.is_stopped() and not self.terminated:
                 self.rollback_lag = 1
@@ -188,6 +261,10 @@ class GuidanceGrammar(StructuredOutputGrammar):
         if len(tokens) == 0:
             return []
         if self.ll_matcher.is_stopped():
+            return []
+
+        tokens = strip_speculative_padding(tokens)
+        if len(tokens) == 0:
             return []
 
         num_tokens = self.ll_matcher.validate_tokens(tokens)
@@ -262,7 +339,7 @@ def serialize_guidance_grammar(
                 begin: str = s["begin"]
                 trig = next((t for t in triggers if begin.startswith(t)), None)
                 if trig is None:
-                    raise APHRODITEValidationError(f"Trigger {begin} not found in triggers {triggers}")
+                    raise AphroditeValidationError(f"Trigger {begin} not found in triggers {triggers}")
                 tags.append(
                     llguidance.StructTag(
                         trigger=trig,
@@ -272,7 +349,7 @@ def serialize_guidance_grammar(
                     )
                 )
             if not tags:
-                raise APHRODITEValidationError("No structural tags found in the grammar spec.")
+                raise AphroditeValidationError("No structural tags found in the grammar spec.")
             return llguidance.StructTag.to_grammar(tags)
         else:
             logger.error("Validation should have already occurred. Please file an issue.")
@@ -288,7 +365,7 @@ def validate_guidance_grammar(sampling_params: SamplingParams, tokenizer: llguid
     try:
         guidance_grm = serialize_guidance_grammar(tp, grm)
     except (ValueError, KeyError, TypeError) as e:
-        raise APHRODITEValidationError(f"Invalid grammar specification: {e}") from e
+        raise AphroditeValidationError(f"Invalid grammar specification: {e}") from e
     err = llguidance.LLMatcher.validate_grammar(guidance_grm, tokenizer)
     if err:
-        raise APHRODITEValidationError(f"Grammar error: {err}")
+        raise AphroditeValidationError(f"Grammar error: {err}")

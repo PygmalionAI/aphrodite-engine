@@ -12,7 +12,7 @@ import regex as re
 from pydantic import BaseModel
 
 from aphrodite.config import StructuredOutputsConfig
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.outputs import RequestOutput
 from aphrodite.platforms import current_platform
 from aphrodite.reasoning.abs_reasoning_parsers import ReasoningParserManager
@@ -324,7 +324,7 @@ def test_structured_output(
         )
         if backend.startswith("xgrammar"):
             with pytest.raises(
-                APHRODITEValidationError,
+                AphroditeValidationError,
                 match="The provided JSON schema contains features not supported by xgrammar.",
             ):
                 prompt = (
@@ -446,7 +446,7 @@ def test_structured_output(
                 max_tokens=1000,
                 structured_outputs=StructuredOutputsParams(grammar="not a grammar"),
             )
-            with pytest.raises(APHRODITEValidationError, match="Failed to convert the grammar "):
+            with pytest.raises(AphroditeValidationError, match="Invalid grammar specification"):
                 runner.llm.generate(
                     (
                         "Generate a sql statement that selects col_1 from "
@@ -913,7 +913,7 @@ def test_structured_output_batched_with_non_structured_outputs_requests(
         prompts = [structured_outputs_prompt, non_structured_outputs_prompt]
         sampling_params = [
             SamplingParams(
-                temperature=1.0,
+                temperature=0,
                 max_tokens=400,
                 structured_outputs=StructuredOutputsParams(json=sample_json_schema),
             ),

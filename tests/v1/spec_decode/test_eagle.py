@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+from typing import Literal
 from unittest import mock
 
 import numpy as np
@@ -24,6 +25,7 @@ from aphrodite.v1.attention.backends.registry import AttentionBackendEnum
 from aphrodite.v1.spec_decode.dflash import DFlashProposer
 from aphrodite.v1.spec_decode.draft_model import DraftModelProposer
 from aphrodite.v1.spec_decode.eagle import EagleProposer
+from aphrodite.v1.spec_decode.llm_base_proposer import SpecDecodeBaseProposer
 from aphrodite.v1.spec_decode.metadata import SpecDecodeMetadata
 from aphrodite.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from tests.utils import get_attn_backend_list_based_on_platform
@@ -46,13 +48,13 @@ DEVICE_TYPE = current_platform.device_type
 
 
 def _create_proposer(
-    method: str,
+    method: Literal["eagle", "eagle3", "draft_model", "dflash"],
     num_speculative_tokens: int,
     attention_backend: str | None = None,
     parallel_drafting: bool = False,
-    rejection_sample_method: str = "standard",
-    draft_sample_method: str = "greedy",
-) -> EagleProposer:
+    rejection_sample_method: Literal["standard", "synthetic", "block"] = "standard",
+    draft_sample_method: Literal["greedy", "probabilistic"] = "greedy",
+) -> SpecDecodeBaseProposer:
     # Method-dependent setup
     if method == "eagle":
         target_model_dir = model_dir
@@ -102,9 +104,12 @@ def _create_proposer(
             max_model_len=model_config.max_model_len,
             is_encoder_decoder=model_config.is_encoder_decoder,
         ),
-        attention_config=AttentionConfig(backend=attention_backend),
+        attention_config=AttentionConfig(
+            backend=AttentionBackendEnum[attention_backend] if attention_backend else None
+        ),
     )
 
+    proposer: SpecDecodeBaseProposer
     if method == "dflash":
         proposer = DFlashProposer(aphrodite_config=aphrodite_config, device=device)
     elif "eagle" in method:
@@ -116,8 +121,7 @@ def _create_proposer(
 
 
 def test_prepare_next_token_ids():
-    """
-    Test for prepare_next_token_ids_cpu and prepare_next_token_ids_padded.
+    """Test for prepare_next_token_ids_cpu and prepare_next_token_ids_padded.
     Each will produce a device tensor of next_token_ids, taking as input
     either the GPU tensor of sampled_token_ids with -1 for rejected tokens,
     or the CPU python list[list[int]] with the rejected tokens removed.
@@ -134,7 +138,7 @@ def test_prepare_next_token_ids():
     mock_input_batch.num_tokens_no_spec = np.array([num_speculative_tokens + 1] * num_requests)
 
     mock_num_scheduled_tokens = {req_id: 0 for req_id in req_ids}
-    mock_requests = {}
+    mock_requests: dict[str, CachedRequestState] = {}
     for req_id in req_ids:
         mock_request = mock.MagicMock(spec=CachedRequestState)
         # Each request will have a backup next token id of 10, 20, 30, 40
@@ -184,8 +188,7 @@ def test_prepare_next_token_ids():
 
 
 def test_prepare_inputs():
-    """
-    cu_target_query_lens: [0, a, a + b, a + b + c]
+    """cu_target_query_lens: [0, a, a + b, a + b + c]
     num_rejected_tokens: [n1, n2, n3]
     num_tokens_per_req: [a - n1, b - n2, c - n3]
     cu_num_tokens: [0, a - n1, a + b - n1 - n2, a + b + c - n1 - n2 - n3]
@@ -268,8 +271,7 @@ def test_prepare_inputs():
 
 
 def test_prepare_inputs_padded():
-    """
-    Input scenario is 3 requests with num_speculative_tokens == 2 and:
+    """Input scenario is 3 requests with num_speculative_tokens == 2 and:
     - Request 1: query_len = 3, rejected = 1
     - Request 2: query_len = 3, rejected = 0
     - Request 3: query_len = 3, rejected = 2
@@ -279,7 +281,6 @@ def test_prepare_inputs_padded():
     Reason: After accounting for rejections, these are the valid token positions
             from the original indices to sample from.
     """
-
     device = torch.device(DEVICE_TYPE)
 
     expected_token_indices_to_sample = torch.tensor([1, 5, 6], dtype=torch.int32, device=device)
@@ -324,8 +325,7 @@ def test_prepare_inputs_padded():
 
 
 def test_set_inputs_first_pass_default_eagle():
-    """
-    Test for set_inputs_first_pass without extra input slots (default EAGLE).
+    """Test for set_inputs_first_pass without extra input slots (default EAGLE).
 
     This tests the path where needs_extra_input_slots=False, which is the
     default EAGLE pathway. In this case:
@@ -400,8 +400,7 @@ def test_set_inputs_first_pass_default_eagle():
 
 
 def test_set_inputs_first_pass_draft_model():
-    """
-    Test for set_inputs_first_pass with a draft model (extra input slots,
+    """Test for set_inputs_first_pass with a draft model (extra input slots,
     no shift).
 
     This tests the path where needs_extra_input_slots=True and
@@ -526,8 +525,7 @@ def test_set_inputs_first_pass_draft_model():
 
 
 def test_set_inputs_first_pass_parallel_drafting():
-    """
-    Test for set_inputs_first_pass with parallel drafting (extra input slots,
+    """Test for set_inputs_first_pass with parallel drafting (extra input slots,
     with shift).
 
     This tests the path where needs_extra_input_slots=True and
@@ -870,15 +868,15 @@ def test_propose(method, attn_backend, num_speculative_tokens, monkeypatch):
 
     attn_metadata_builder = attn_metadata_builder_cls(
         kv_cache_spec=create_standard_kv_cache_spec(proposer.aphrodite_config),
-        layer_names=proposer._draft_attn_layer_names,
+        layer_names=sorted(proposer._draft_attn_layer_names),
         aphrodite_config=proposer.aphrodite_config,
         device=device,
     )
 
-    # Mock runner and draft_attn_groups for attention metadata building
-    proposer.runner = mock.MagicMock()
+    # Mock draft_attn_groups for attention metadata building.
     mock_attn_group = mock.MagicMock()
     mock_attn_group.get_metadata_builder.return_value = attn_metadata_builder
+    mock_attn_group.build_metadata_for_drafting = attn_metadata_builder.build_for_drafting
     mock_attn_group.layer_names = list(proposer._draft_attn_layer_names)
     mock_attn_group.kv_cache_spec = attn_metadata_builder.kv_cache_spec
     proposer.draft_attn_groups = [mock_attn_group]
@@ -970,13 +968,13 @@ def test_propose_stores_probabilistic_draft_probs(attn_backend, monkeypatch):
     attn_metadata_builder_cls, _ = try_get_attention_backend(AttentionBackendEnum[attn_backend])
     attn_metadata_builder = attn_metadata_builder_cls(
         kv_cache_spec=create_standard_kv_cache_spec(proposer.aphrodite_config),
-        layer_names=proposer._draft_attn_layer_names,
+        layer_names=sorted(proposer._draft_attn_layer_names),
         aphrodite_config=proposer.aphrodite_config,
         device=device,
     )
-    proposer.runner = mock.MagicMock()
     mock_attn_group = mock.MagicMock()
     mock_attn_group.get_metadata_builder.return_value = attn_metadata_builder
+    mock_attn_group.build_metadata_for_drafting = attn_metadata_builder.build_for_drafting
     mock_attn_group.layer_names = list(proposer._draft_attn_layer_names)
     mock_attn_group.kv_cache_spec = attn_metadata_builder.kv_cache_spec
     proposer.draft_attn_groups = [mock_attn_group]
@@ -1014,8 +1012,7 @@ def test_propose_stores_probabilistic_draft_probs(attn_backend, monkeypatch):
 
 
 def test_set_inputs_first_pass_dflash():
-    """
-    Test for DFlash set_inputs_first_pass.
+    """Test for DFlash set_inputs_first_pass.
 
     DFlash uses cross-attention: context tokens become K/V and only
     query tokens (bonus + mask) are Q. This tests the DFlash-specific
@@ -1048,6 +1045,7 @@ def test_set_inputs_first_pass_dflash():
 
     num_speculative_tokens = 3
     proposer = _create_proposer("dflash", num_speculative_tokens)
+    assert isinstance(proposer, DFlashProposer)
     mask_token_id = proposer.parallel_drafting_token_id
 
     # Setup batch with 3 requests

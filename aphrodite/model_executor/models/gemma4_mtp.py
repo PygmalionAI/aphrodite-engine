@@ -45,7 +45,6 @@ from aphrodite.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding,
 )
 from aphrodite.sequence import IntermediateTensors
-from aphrodite.transformers_utils.configs.gemma4 import gemma4_layer_config
 
 from .gemma4 import Gemma4MLP, _get_text_config
 from .utils import (
@@ -101,6 +100,7 @@ class Gemma4MTPMaskedEmbedder(nn.Module):
         Returns:
             logits: (num_tokens, num_selected) sparse logits.
             indices: (num_tokens, num_selected) corresponding vocab indices.
+
         """
         num_tokens = hidden_states.shape[0]
         _, top_k_indices = torch.topk(
@@ -244,16 +244,8 @@ class Gemma4MTPAttention(nn.Module):
 
         q, _ = self.rotary_emb(positions, q, None)
 
-        # Attention reads K/V from the target's cache via KV sharing;
-        # these dummy tensors are never consumed but required by the API.
-        num_tokens = q.shape[0]
-        kv_dummy = torch.empty(
-            num_tokens,
-            self.num_kv_heads * self.head_dim,
-            dtype=q.dtype,
-            device=q.device,
-        )
-        attn_output = self.attn(q, kv_dummy, kv_dummy)
+        # Attention reads K/V from the target's cache via KV sharing.
+        attn_output = self.attn(q, None, None)
         output, _ = self.o_proj(attn_output)
         return output
 
@@ -270,7 +262,7 @@ class Gemma4MTPDecoderLayer(nn.Module):
         self.hidden_size = config.hidden_size
 
         layer_idx = extract_layer_index(prefix)
-        layer_config = gemma4_layer_config(config, layer_idx)
+        layer_config = config.per_layer_config[layer_idx]
         head_dim = layer_config.head_dim
         num_kv_heads = layer_config.num_key_value_heads
 

@@ -10,6 +10,7 @@ from aphrodite.platforms import current_platform
 from aphrodite.utils.torch_utils import get_dtype_size
 from aphrodite.v1.attention.backends.registry import AttentionBackendEnum
 from aphrodite.v1.kv_cache_interface import (
+    CircularBufferSpec,
     FullAttentionSpec,
     KVCacheConfig,
     KVCacheGroupSpec,
@@ -77,10 +78,9 @@ def _make_worker(
     kv_cache_config: KVCacheConfig,
     replicated_layout: bool = False,
     rank: int = 0,
+    canonical_layout: bool = False,
 ):
-    """
-    Create an OffloadingConnectorWorker with mocked dependencies.
-    """
+    """Create an OffloadingConnectorWorker with mocked dependencies."""
     from aphrodite.distributed.kv_transfer.kv_connector.v1.offloading.worker import (
         OffloadingConnectorWorker,
     )
@@ -88,6 +88,7 @@ def _make_worker(
     spec = MagicMock(spec=OffloadingSpec)
     spec.replicated_layout = replicated_layout
     spec.config = MagicMock()
+    spec.config.canonical_layout = canonical_layout
     spec.config.parallel.rank = rank
     spec.get_worker.return_value = MagicMock()
 
@@ -166,6 +167,109 @@ class BareExternalOffloadingSpec(OffloadingSpec):
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
+
+def test_prepare_store_kv_non_writer_marks_completed_without_submit():
+    worker, _ = _make_worker(
+        KVCacheConfig(num_blocks=0, kv_cache_tensors=[], kv_cache_groups=[]),
+        replicated_layout=True,
+        rank=1,
+    )
+
+    worker.prepare_store_kv(_store_metadata(7))
+    worker.start_kv_transfers(_empty_metadata())
+
+    assert worker._unsubmitted_store_jobs == []
+    assert worker.worker is not None
+    worker.worker.submit_store.assert_not_called()
+    meta = worker.build_connector_worker_meta()
+    assert meta is not None
+    assert meta.completed_jobs == {7: 1}
+
+
+@pytest.mark.parametrize("rank,canonical_layout", [(0, False), (0, True), (1, True)])
+def test_prepare_store_kv_writer_submits_store(rank, canonical_layout):
+    worker, _ = _make_worker(
+        KVCacheConfig(num_blocks=0, kv_cache_tensors=[], kv_cache_groups=[]),
+        replicated_layout=True,
+        rank=rank,
+        canonical_layout=canonical_layout,
+    )
+
+    worker.prepare_store_kv(_store_metadata(8))
+    assert worker.build_connector_worker_meta() is None
+    worker.start_kv_transfers(_empty_metadata())
+
+    assert worker.worker is not None
+    worker.worker.submit_store.assert_called_once()
+
+
+def test_prepare_store_kv_non_replicated_rank_gt_zero_queues_store():
+    worker, _ = _make_worker(
+        KVCacheConfig(num_blocks=0, kv_cache_tensors=[], kv_cache_groups=[]),
+        replicated_layout=False,
+        rank=1,
+    )
+
+    worker.prepare_store_kv(_store_metadata(9))
+    assert worker.build_connector_worker_meta() is None
+    assert len(worker._unsubmitted_store_jobs) == 1
+
+    worker.start_kv_transfers(_empty_metadata())
+
+    assert worker.worker is not None
+    worker.worker.submit_store.assert_called_once()
+    assert worker._unsubmitted_store_jobs == []
+
+
+def test_handle_preemptions_non_writer_acks_flushed_store():
+    worker, _ = _make_worker(
+        KVCacheConfig(num_blocks=0, kv_cache_tensors=[], kv_cache_groups=[]),
+        replicated_layout=True,
+        rank=1,
+    )
+    metadata = _store_metadata(10)
+    metadata.jobs_to_flush = {10}
+
+    worker.handle_preemptions(metadata)
+
+    assert worker.worker is not None
+    worker.worker.submit_store.assert_not_called()
+    worker.worker.wait.assert_called_once_with({10})
+    assert metadata.store_jobs == {}
+    meta = worker.build_connector_worker_meta()
+    assert meta is not None
+    assert meta.completed_jobs == {10: 1}
+
+
+def test_start_kv_transfers_non_writer_still_submits_load():
+    worker, _ = _make_worker(
+        KVCacheConfig(num_blocks=0, kv_cache_tensors=[], kv_cache_groups=[]),
+        replicated_layout=True,
+        rank=1,
+    )
+
+    worker.start_kv_transfers(_load_metadata(10))
+
+    assert worker.worker is not None
+    worker.worker.submit_load.assert_called_once()
+    assert worker.build_connector_worker_meta() is None
+
+
+def test_offloading_connector_worker_accepts_plugin_spec_default_layout():
+    from aphrodite.distributed.kv_transfer.kv_connector.v1.offloading.worker import (
+        OffloadingConnectorWorker,
+    )
+
+    spec = BareExternalOffloadingSpec(_offloading_config(rank=1))
+
+    OffloadingConnectorWorker(
+        spec=spec,
+        aphrodite_config=_single_rank_aphrodite_config(NUM_KV_HEADS),
+        kv_cache_config=KVCacheConfig(num_blocks=0, kv_cache_tensors=[], kv_cache_groups=[]),
+    )
+
+    assert spec.replicated_layout is False
 
 
 @pytest.mark.parametrize("backend", ATTN_BACKENDS)
@@ -386,6 +490,43 @@ def test_register_kv_caches(backend):
             assert actual.tensor_idx == expected.tensor_idx
             assert actual.page_size_bytes == expected.page_size_bytes
             assert actual.mapping is not None
+
+
+def test_register_packed_kv_caches_skips_scratch_group():
+    attn_spec = FullAttentionSpec(
+        block_size=BLOCK_SIZE,
+        num_kv_heads=NUM_KV_HEADS,
+        head_size=HEAD_SIZE,
+        dtype=DTYPE,
+    )
+    page = attn_spec.page_size_bytes
+    layers = ["layer0", "layer1"]
+    kv_cache_config = KVCacheConfig(
+        num_blocks=NUM_BLOCKS,
+        kv_cache_tensors=[
+            KVCacheTensor(
+                size=2 * page * NUM_BLOCKS,
+                layers=layers,
+                layer_stride=page,
+                block_stride=2 * page,
+            )
+        ],
+        kv_cache_groups=[
+            KVCacheGroupSpec(layers, attn_spec),
+            KVCacheGroupSpec(
+                ["scratch"],
+                CircularBufferSpec(block_size=4, num_kv_heads=1, head_size=1, dtype=DTYPE),
+            ),
+        ],
+    )
+    kv_caches = _allocate_kv_caches(kv_cache_config, [], device=torch.device(f"{DEVICE_TYPE}:0"))
+    worker, spec = _make_worker(kv_cache_config)
+    worker.register_kv_caches(kv_caches)
+
+    canonical = spec.get_worker.call_args[0][0]
+    assert len(canonical.tensors) == 1
+    assert canonical.tensors[0].tensor.shape == (NUM_BLOCKS, 2 * page)
+    assert canonical.group_data_refs == [[CanonicalKVCacheRef(0, 2 * page)]]
 
 
 @pytest.mark.parametrize("backend", ATTN_BACKENDS)

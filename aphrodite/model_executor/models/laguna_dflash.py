@@ -17,7 +17,7 @@ from aphrodite.compilation.decorators import support_torch_compile
 from aphrodite.config import AphroditeConfig
 from aphrodite.logger import init_logger
 from aphrodite.model_executor.layers.layernorm import RMSNorm
-from aphrodite.model_executor.layers.linear import ReplicatedLinear
+from aphrodite.model_executor.layers.linear import ReplicatedLinear, UnquantizedLinearMethod
 from aphrodite.model_executor.layers.logits_processor import LogitsProcessor
 from aphrodite.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead,
@@ -150,12 +150,20 @@ class DFlashLagunaModel(DFlashQwen3Model, EagleModelMixin):
         layers_attn: list[nn.Module],
         has_bias: bool,
     ) -> None:
-        self._kv_weights = torch.stack([a.qkv_proj.weight[a.q_size :] for a in layers_attn], dim=0).contiguous()
-        if has_bias:
-            self._kv_biases: torch.Tensor | None = torch.stack(
-                [a.qkv_proj.bias[a.q_size :] for a in layers_attn], dim=0
+        self._context_qkv_projs = [a.qkv_proj for a in layers_attn]
+        self._context_q_sizes = [a.q_size for a in layers_attn]
+        if all(isinstance(proj.quant_method, UnquantizedLinearMethod) for proj in self._context_qkv_projs):
+            self._kv_weights: torch.Tensor | None = torch.stack(
+                [a.qkv_proj.weight[a.q_size :] for a in layers_attn], dim=0
             ).contiguous()
+            if has_bias:
+                self._kv_biases: torch.Tensor | None = torch.stack(
+                    [a.qkv_proj.bias[a.q_size :] for a in layers_attn], dim=0
+                ).contiguous()
+            else:
+                self._kv_biases = None
         else:
+            self._kv_weights = None
             self._kv_biases = None
         self._input_layernorm_weights = torch.stack(
             [layer.input_layernorm.weight.data for layer in self.layers], dim=0
@@ -181,13 +189,23 @@ class DFlashLagunaModel(DFlashQwen3Model, EagleModelMixin):
             self._input_layernorm_weights,
             self._rms_norm_eps,
         )
-        all_kv_flat = torch.bmm(
-            normed_context_states,
-            self._kv_weights.transpose(1, 2),
-        )
-        if self._kv_biases is not None:
-            all_kv_flat += self._kv_biases[:, None, :]
-        all_kv = all_kv_flat.view(num_layers, num_ctx, 2, num_kv_heads, head_dim).permute(2, 0, 1, 3, 4).contiguous()
+        if self._kv_weights is not None:
+            all_kv_flat = torch.bmm(
+                normed_context_states,
+                self._kv_weights.transpose(1, 2),
+            )
+            if self._kv_biases is not None:
+                all_kv_flat += self._kv_biases[:, None, :]
+            all_kv = all_kv_flat.view(num_layers, num_ctx, 2, num_kv_heads, head_dim)
+        else:
+            all_kv = torch.stack(
+                [
+                    proj(normed_context_states[i])[0][:, q_size:].view(num_ctx, 2, num_kv_heads, head_dim)
+                    for i, (proj, q_size) in enumerate(zip(self._context_qkv_projs, self._context_q_sizes, strict=True))
+                ],
+                dim=0,
+            )
+        all_kv = all_kv.permute(2, 0, 1, 3, 4).contiguous()
         all_k = all_kv[0]
         all_v = all_kv[1]
         return all_k, all_v

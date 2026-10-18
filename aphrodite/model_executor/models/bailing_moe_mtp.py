@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable
 
 import torch
 import torch.nn as nn
-from transformers.configuration_utils import PretrainedConfig
+from transformers.configuration_utils import PreTrainedConfig
 
 from aphrodite.compilation.decorators import support_torch_compile
 from aphrodite.config import AphroditeConfig
@@ -36,7 +36,7 @@ from aphrodite.sequence import IntermediateTensors
 from .utils import PPMissingLayer, is_pp_missing_parameter, maybe_prefix
 
 
-def _get_draft_hf_config(aphrodite_config: AphroditeConfig) -> PretrainedConfig:
+def _get_draft_hf_config(aphrodite_config: AphroditeConfig) -> PreTrainedConfig:
     speculative_config = aphrodite_config.speculative_config
     if speculative_config is not None:
         draft_model_config = speculative_config.draft_model_config
@@ -48,7 +48,7 @@ def _get_draft_hf_config(aphrodite_config: AphroditeConfig) -> PretrainedConfig:
 class BailingMTPSharedHead(nn.Module):
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         prefix: str,
         aphrodite_config: AphroditeConfig,
     ) -> None:

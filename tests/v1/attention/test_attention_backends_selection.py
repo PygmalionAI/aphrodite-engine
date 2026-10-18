@@ -5,18 +5,85 @@
 from types import SimpleNamespace
 
 import pytest
+import torch
 
+from aphrodite.model_executor.layers.mamba.abstract import MambaBase
 from aphrodite.model_executor.layers.mamba.linear.minimax_linear_attn import (
     MiniMaxText01LinearAttention,
 )
 from aphrodite.model_executor.layers.mamba.mamba_mixer import MambaMixer
 from aphrodite.model_executor.layers.mamba.mamba_mixer2 import MambaMixer2
+from aphrodite.model_executor.layers.mamba.mamba_utils import MambaStateShapeCalculator
 from aphrodite.model_executor.layers.mamba.short_conv import ShortConv
+from aphrodite.model_executor.models.falcon_h1 import FalconH1ForCausalLM
+from aphrodite.model_executor.models.granitemoehybrid import GraniteMoeHybridForCausalLM
+from aphrodite.model_executor.models.zamba2 import Zamba2ForCausalLM
 from aphrodite.v1.attention.backends.linear_attn import LinearAttentionBackend
 from aphrodite.v1.attention.backends.mamba1_attn import Mamba1AttentionBackend
 from aphrodite.v1.attention.backends.mamba2_attn import Mamba2AttentionBackend
 from aphrodite.v1.attention.backends.registry import MambaAttentionBackendEnum
 from aphrodite.v1.attention.backends.short_conv_attn import ShortConvAttentionBackend
+
+
+@pytest.mark.parametrize(("use_replayssm", "expected_blocks"), [(False, 3), (True, 0)])
+def test_replayssm_does_not_reserve_speculative_state_blocks(use_replayssm, expected_blocks):
+    layer = SimpleNamespace(
+        get_state_shape=lambda: ((2,),),
+        get_state_dtype=lambda: (torch.float32,),
+        mamba_type=MambaAttentionBackendEnum.MAMBA2,
+        is_kv_cache_tp_replicated=False,
+    )
+    aphrodite_config = SimpleNamespace(
+        cache_config=SimpleNamespace(
+            mamba_block_size=1,
+            mamba_page_size_padded=None,
+            mamba_cache_mode="none",
+            use_replayssm=use_replayssm,
+        ),
+        num_speculative_tokens=3,
+    )
+
+    spec = MambaBase.get_kv_cache_spec(layer, aphrodite_config)
+
+    assert spec is not None
+    assert spec.num_speculative_blocks == expected_blocks
+
+
+@pytest.mark.parametrize("model_cls", [FalconH1ForCausalLM, GraniteMoeHybridForCausalLM, Zamba2ForCausalLM])
+def test_mamba2_config_state_shape_includes_speculative_tokens(model_cls):
+    """The config-time shape sizes the padded Mamba page, so it must match
+    MambaMixer2.get_state_shape, whose conv state grows with spec tokens."""
+    hf_config = SimpleNamespace(
+        hidden_size=128,
+        mamba_expand=2,
+        mamba_d_ssm=None,
+        mamba_n_groups=1,
+        mamba_ngroups=1,
+        mamba_n_heads=8,
+        n_mamba_heads=8,
+        mamba_d_head=32,
+        mamba_headdim=32,
+        mamba_d_state=16,
+        mamba_d_conv=4,
+    )
+    aphrodite_config = SimpleNamespace(
+        model_config=SimpleNamespace(hf_config=hf_config),
+        parallel_config=SimpleNamespace(tensor_parallel_size=1),
+        num_speculative_tokens=2,
+    )
+
+    assert model_cls.get_mamba_state_shape_from_config(
+        aphrodite_config
+    ) == MambaStateShapeCalculator.mamba2_state_shape(
+        tp_world_size=1,
+        intermediate_size=256,
+        n_groups=1,
+        num_heads=8,
+        head_dim=32,
+        state_size=16,
+        conv_kernel=4,
+        num_spec=2,
+    )
 
 
 @pytest.mark.parametrize(

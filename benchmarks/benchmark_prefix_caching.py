@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""
-Benchmark the efficiency of prefix caching.
+"""Benchmark the efficiency of prefix caching.
 
 This script allows you to benchmark the performance of
 a model with and without prefix caching using either fixed prompts
@@ -44,14 +43,14 @@ import json
 import random
 import time
 
-from aphrodite.engine.args_tools import EngineArgs
 from transformers import PreTrainedTokenizerBase
 
 from aphrodite import LLM, SamplingParams
+from aphrodite.engine.arg_utils import EngineArgs
 from aphrodite.utils.argparse_utils import FlexibleArgumentParser
 
 try:
-    from aphrodite.transformers_utils.tokenizer import get_tokenizer
+    from aphrodite.tokenizers import get_tokenizer
 except ImportError:
     from backend_request_func import get_tokenizer
 

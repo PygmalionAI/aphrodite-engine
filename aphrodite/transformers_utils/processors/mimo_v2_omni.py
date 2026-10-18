@@ -982,6 +982,8 @@ class MiMoOmniProcessor(ProcessorMixin):
                     tuples (pre-decoded).
             audio: list of ``(waveform_1D, sample_rate)`` tuples or
                    ``np.ndarray``.
+            video_audio: audio track extracted from ``videos``, in the same
+                   formats accepted by ``audio``.
             return_tensors: Passed to :class:`BatchFeature`.
 
         Returns:
@@ -990,6 +992,7 @@ class MiMoOmniProcessor(ProcessorMixin):
             - ``pixel_values`` + ``image_grid_thw``
             - ``pixel_values_videos`` + ``video_grid_thw`` + ``second_per_grid_ts``
             - ``audio_features``
+
         """
         if isinstance(text, list):
             text = text[0] if len(text) == 1 else "\n".join(text)

@@ -3,7 +3,7 @@
 
 import random
 from collections.abc import Callable
-from typing import NamedTuple, TypeAlias
+from typing import NamedTuple, NoReturn, TypeAlias
 
 import numpy as np
 import pytest
@@ -36,6 +36,7 @@ from tests.utils import create_new_process_for_each_test
 from tests.v1.sample.utils import (
     LogitsprocsTestFakes,
     create_fake_logits,
+    create_mock_reasoning_config,
     create_penalty_tensor,
     create_prompt_tokens_tensor,
     fake_apply_logitsprocs,
@@ -95,17 +96,9 @@ class LogitsProcsRequestParams:
         self.params = _sampling_params_from_logitproc(logitproc_type)
 
     def __str__(self):
-        """For debugging"""
+        """For debugging."""
         summ = ", ".join(f"{k}={v}" for k, v in vars(self).items())
         return f"MyClass({summ})"
-
-
-class MockReasoningConfig:
-    """Minimal reasoning config for ``ThinkingBudgetStateHolder`` tests."""
-
-    reasoning_start_token_ids = [THINK_START_TOKEN_ID]
-    reasoning_end_token_ids = [THINK_END_TOKEN_ID]
-    enabled = True
 
 
 def _generate_fake_sampling_metadata(
@@ -114,7 +107,7 @@ def _generate_fake_sampling_metadata(
     vocab_size: int,
     device: torch.device,
 ) -> SamplingMetadata:
-    """Generate fake sampling metadata with fake logitsprocs"""
+    """Generate fake sampling metadata with fake logitsprocs."""
     output_token_ids: list[list[int]] = []
     prompt_token_ids: list[list[int]] = []
     for _ in range(batch_size):
@@ -124,7 +117,7 @@ def _generate_fake_sampling_metadata(
         )
 
     aphrodite_config = AphroditeConfig()
-    aphrodite_config.reasoning_config = MockReasoningConfig()
+    aphrodite_config.reasoning_config = create_mock_reasoning_config([THINK_START_TOKEN_ID], [THINK_END_TOKEN_ID])
 
     logitsprocs = build_logitsprocs(
         aphrodite_config=aphrodite_config,
@@ -163,7 +156,7 @@ def _generate_fake_sampling_metadata(
 
 
 def _generate_test_fakes(batch_size: int, device: str) -> LogitsprocsTestFakes:
-    """Generate fake logits and sampling metadata"""
+    """Generate fake logits and sampling metadata."""
     fake_logits = create_fake_logits(batch_size, VOCAB_SIZE)
     # Create one dominant token per batch, to support min-p test
     for i in range(batch_size):
@@ -179,7 +172,7 @@ def _generate_test_fakes(batch_size: int, device: str) -> LogitsprocsTestFakes:
 
 
 def _sampling_params_from_logitproc(logitproc_type: LogitprocType) -> SamplingParams:
-    """Customize request SamplingParams for a specified logitproc"""
+    """Customize request SamplingParams for a specified logitproc."""
     # SamplingParams for req with no logitproc
     kwargs = {"min_p": 0.0, "logit_bias": None, "min_tokens": 0}
     if fxn := logitsprocs_test_mapping[logitproc_type].gen_request_fxn:
@@ -207,6 +200,7 @@ def _generate_mixed_logitsprocs_batch_params(
     Returns:
       List of per-request params which configure the engine for that request's
       enabled logitproc
+
     """
     batch_size = len(logitsprocs_types) * reqs_per_logitproc
     # Generate multiple repeats of key params for each logitproc;
@@ -228,7 +222,7 @@ def _raise_error_invalid(
     request_params: LogitsProcsRequestParams,
     step_idx: int,
     err_cls: type[Exception] = ValueError,
-) -> None:
+) -> NoReturn:
     raise err_cls(
         f"Validation failed for step={step_idx}, "
         f"batch_index={batch_index}, "
@@ -238,7 +232,7 @@ def _raise_error_invalid(
 
 
 def _logit_bias_params(kwargs: dict) -> None:
-    """Logit bias config"""
+    """Logit bias config."""
     kwargs["logit_bias"] = {random.randint(0, VOCAB_SIZE - 1): random.choice([-0.1, 0.2])}
 
 
@@ -250,8 +244,9 @@ def _logit_bias_validate(
     request_params: LogitsProcsRequestParams,
     step_idx: int,
 ) -> None:
-    """Validate logit bias logitproc applied correctly"""
+    """Validate logit bias logitproc applied correctly."""
     logit_bias = request_params.params.logit_bias
+    assert logit_bias is not None
     logits_old = test_fakes.logits[persistent_batch[batch_index].workload_index].cpu()
     logits_new = logits_new[batch_index].cpu()
     for token_id in range(VOCAB_SIZE):
@@ -286,7 +281,7 @@ def _logit_bias_validate(
 
 
 def _min_p_params(kwargs: dict) -> None:
-    """Min-p logitproc config"""
+    """Min-p logitproc config."""
     kwargs["min_p"] = 0.1
 
 
@@ -298,7 +293,7 @@ def _min_p_validate(
     request_params: LogitsProcsRequestParams,
     step_idx: int,
 ) -> None:
-    """Validate min-p logitproc applied correctly"""
+    """Validate min-p logitproc applied correctly."""
     for token_id in range(VOCAB_SIZE):
         logits_for_token = logits_new[batch_index][token_id]
         if token_id == 0:
@@ -332,7 +327,7 @@ def _min_p_validate(
 
 
 def _min_tokens_params(kwargs: dict) -> None:
-    """Min-tokens logitproc config"""
+    """Min-tokens logitproc config."""
     kwargs["min_tokens"] = MIN_TOKENS_LEN_THRESHOLD
     kwargs["stop_token_ids"] = [np.random.randint(0, VOCAB_SIZE - 1) for _ in range(np.random.randint(0, VOCAB_SIZE))]
 
@@ -345,11 +340,11 @@ def _min_tokens_validate(
     request_params: LogitsProcsRequestParams,
     step_idx: int,
 ) -> None:
-    """Validate min-tokens logitsproc applied correctly"""
+    """Validate min-tokens logitsproc applied correctly."""
     ref_num_out_tokens = len(request_params.out_tokens)
     min_reached = ref_num_out_tokens >= MIN_TOKENS_LEN_THRESHOLD
     ref_all_stop_token_ids = request_params.params.all_stop_token_ids
-    mt_lp: MinTokensLogitsProcessor = next(test_fakes.get_logitsprocs_by_cls(MinTokensLogitsProcessor))
+    mt_lp = next(test_fakes.get_logitsprocs_by_cls(MinTokensLogitsProcessor))
     assert isinstance(mt_lp, MinTokensLogitsProcessor)
     min_tok = mt_lp.min_toks.get(batch_index, None)
 
@@ -533,7 +528,7 @@ def test_min_tokens_restores_all_masked_structured_output_stop_token_spec_decode
 
 
 def _thinking_budget_params(kwargs: dict) -> None:
-    """Set SamplingParams kwargs for thinking token budget tests"""
+    """Set SamplingParams kwargs for thinking token budget tests."""
     kwargs["thinking_token_budget"] = THINKING_TOKEN_BUDGET
 
 
@@ -621,7 +616,7 @@ def _none_validate(
     request_params: LogitsProcsRequestParams,
     step_idx: int,
 ) -> None:
-    """Validate that no logits processors are applied"""
+    """Validate that no logits processors are applied."""
     logits = test_fakes.logits[persistent_batch[batch_index].workload_index].cpu()
     ref_logits = logits_new[batch_index]
     if not torch.all(ref_logits == logits):
@@ -646,7 +641,7 @@ class LogitsprocTestHelpers(NamedTuple):
     gen_request_fxn: Callable | None = None
 
 
-logitsprocs_test_mapping = {
+logitsprocs_test_mapping: dict[LogitprocType, LogitsprocTestHelpers] = {
     STR_NO_LOGITPROC: LogitsprocTestHelpers(eval_fxn=_none_validate),
     LogitBiasLogitsProcessor: LogitsprocTestHelpers(gen_request_fxn=_logit_bias_params, eval_fxn=_logit_bias_validate),
     MinPLogitsProcessor: LogitsprocTestHelpers(gen_request_fxn=_min_p_params, eval_fxn=_min_p_validate),
@@ -657,20 +652,18 @@ logitsprocs_test_mapping = {
 }
 
 
-def _get_test_cases() -> list[list[str]]:
-    """Each test case is a set of logitsprocs"""
-    logitsprocs_types = list(logitsprocs_test_mapping.keys())
+def _get_test_cases() -> list[list[LogitprocType]]:
+    """Each test case is a set of logitsprocs."""
+    logitsprocs_types: list[LogitprocType] = list(logitsprocs_test_mapping.keys())
 
     # Isolate thinking-budget handling from other processors to avoid cross-talk.
     thinking_id: LogitprocType = STR_THINKING_BUDGET
-    other_processors = [p for p in logitsprocs_types if p != STR_NO_LOGITPROC and p != thinking_id]
+    other_processors: list[LogitprocType] = [p for p in logitsprocs_types if p != STR_NO_LOGITPROC and p != thinking_id]
 
-    return (
-        [[STR_NO_LOGITPROC]]
-        + [[logitproc_type, STR_NO_LOGITPROC] for logitproc_type in other_processors]
-        + [other_processors]
-        + [[thinking_id]]
-    )
+    test_cases: list[list[LogitprocType]] = [[STR_NO_LOGITPROC]]
+    test_cases.extend([logitproc_type, STR_NO_LOGITPROC] for logitproc_type in other_processors)
+    test_cases.extend([other_processors, [thinking_id]])
+    return test_cases
 
 
 def _generate_fake_step_update(
@@ -719,6 +712,7 @@ def _generate_fake_step_update(
     for add_req_params in workload_params[wdx : (wdx + num_step_add_replace)]:
         # Replace as many removed requests as possible with added requests
         add_remove_idx = batch_update_builder.pop_removed()
+        assert add_remove_idx is not None
         batch_update_builder.added.append(
             (
                 add_remove_idx,
@@ -905,13 +899,6 @@ def test_logitsprocs(device: str, reqs_per_logitproc: int, logitsprocs_under_tes
         step_idx += 1
 
 
-class MockReasoningNoEndTokens:
-    """Reasoning config with no end token ids (disables enforcement in holder)."""
-
-    reasoning_start_token_ids = [THINK_START_TOKEN_ID]
-    reasoning_end_token_ids: list[int] = []
-
-
 def test_maybe_create_thinking_budget_holder_without_reasoning():
     cfg = AphroditeConfig()
     assert cfg.reasoning_config is None
@@ -929,7 +916,7 @@ def test_maybe_create_thinking_budget_holder_without_reasoning():
 
 def test_thinking_budget_holder_has_tracked_after_sync_add():
     vc = AphroditeConfig()
-    vc.reasoning_config = MockReasoningConfig()
+    vc.reasoning_config = create_mock_reasoning_config([THINK_START_TOKEN_ID], [THINK_END_TOKEN_ID])
     h = ThinkingBudgetStateHolder(
         vc.reasoning_config,
         vc.scheduler_config.max_num_seqs,
@@ -959,7 +946,7 @@ def test_thinking_budget_holder_has_tracked_after_sync_add():
 
 def test_thinking_budget_holder_sync_remove_clears_state():
     vc = AphroditeConfig()
-    vc.reasoning_config = MockReasoningConfig()
+    vc.reasoning_config = create_mock_reasoning_config([THINK_START_TOKEN_ID], [THINK_END_TOKEN_ID])
     h = ThinkingBudgetStateHolder(
         vc.reasoning_config,
         vc.scheduler_config.max_num_seqs,
@@ -989,7 +976,7 @@ def test_thinking_budget_holder_sync_remove_clears_state():
 
 def test_thinking_budget_holder_sync_add_without_budget_drops_row():
     vc = AphroditeConfig()
-    vc.reasoning_config = MockReasoningConfig()
+    vc.reasoning_config = create_mock_reasoning_config([THINK_START_TOKEN_ID], [THINK_END_TOKEN_ID])
     h = ThinkingBudgetStateHolder(
         vc.reasoning_config,
         vc.scheduler_config.max_num_seqs,
@@ -1010,7 +997,7 @@ def test_thinking_budget_holder_sync_add_without_budget_drops_row():
 
 def test_thinking_budget_holder_swap_exchanges_state():
     vc = AphroditeConfig()
-    vc.reasoning_config = MockReasoningConfig()
+    vc.reasoning_config = create_mock_reasoning_config([THINK_START_TOKEN_ID], [THINK_END_TOKEN_ID])
     h = ThinkingBudgetStateHolder(
         vc.reasoning_config,
         vc.scheduler_config.max_num_seqs,
@@ -1054,7 +1041,7 @@ def test_thinking_budget_holder_swap_exchanges_state():
 
 def test_thinking_budget_holder_unidirectional_move():
     vc = AphroditeConfig()
-    vc.reasoning_config = MockReasoningConfig()
+    vc.reasoning_config = create_mock_reasoning_config([THINK_START_TOKEN_ID], [THINK_END_TOKEN_ID])
     h = ThinkingBudgetStateHolder(
         vc.reasoning_config,
         vc.scheduler_config.max_num_seqs,
@@ -1092,7 +1079,7 @@ def test_thinking_budget_holder_unidirectional_move():
 
 def test_thinking_budget_holder_update_state_repeat_indices_last_row_wins():
     vc = AphroditeConfig()
-    vc.reasoning_config = MockReasoningConfig()
+    vc.reasoning_config = create_mock_reasoning_config([THINK_START_TOKEN_ID], [THINK_END_TOKEN_ID])
     h = ThinkingBudgetStateHolder(
         vc.reasoning_config,
         vc.scheduler_config.max_num_seqs,
@@ -1126,7 +1113,7 @@ def test_thinking_budget_holder_update_state_repeat_indices_last_row_wins():
 
 def test_thinking_budget_holder_spec_mode_tensor_layout():
     h = ThinkingBudgetStateHolder(
-        MockReasoningConfig(),
+        create_mock_reasoning_config([THINK_START_TOKEN_ID], [THINK_END_TOKEN_ID]),
         8,
         2,
         torch.device("cpu"),
@@ -1138,7 +1125,7 @@ def test_thinking_budget_holder_spec_mode_tensor_layout():
 
 def test_thinking_budget_holder_empty_end_tokens_disables_row():
     vc = AphroditeConfig()
-    vc.reasoning_config = MockReasoningNoEndTokens()
+    vc.reasoning_config = create_mock_reasoning_config([THINK_START_TOKEN_ID], [])
     h = ThinkingBudgetStateHolder(
         vc.reasoning_config,
         vc.scheduler_config.max_num_seqs,
@@ -1182,7 +1169,7 @@ def test_thinking_budget_enforced_without_penalties():
     passing an empty list (the pre-fix behavior) prevents budget enforcement.
     """
     vc = AphroditeConfig()
-    vc.reasoning_config = MockReasoningConfig()
+    vc.reasoning_config = create_mock_reasoning_config([THINK_START_TOKEN_ID], [THINK_END_TOKEN_ID])
     budget = 3  # allow 3 thinking tokens
 
     h = ThinkingBudgetStateHolder(
@@ -1254,24 +1241,30 @@ def test_sampling_params_minus_one_normalizes_to_none():
 
 @pytest.mark.parametrize("invalid_budget", [-2, 0.6, 10.5, True])
 def test_validate_thinking_token_budget_rejects_invalid(invalid_budget):
-    from aphrodite.exceptions import APHRODITEValidationError
+    from aphrodite.exceptions import AphroditeValidationError
 
-    with pytest.raises(APHRODITEValidationError, match="thinking_token_budget"):
+    with pytest.raises(AphroditeValidationError, match="thinking_token_budget"):
         validate_thinking_token_budget(invalid_budget)
 
 
 @pytest.mark.parametrize("invalid_budget", [-2, 0.6, 10.5])
 def test_thinking_budget_invalid_budget_rejected(invalid_budget):
-    from aphrodite.exceptions import APHRODITEValidationError
+    from aphrodite.exceptions import AphroditeValidationError
 
-    with pytest.raises(APHRODITEValidationError, match="thinking_token_budget"):
+    with pytest.raises(AphroditeValidationError, match="thinking_token_budget"):
         SamplingParams(thinking_token_budget=invalid_budget)
 
 
 def test_thinking_budget_long_thinking_section_end_marker_found_at_correct_index():
     """Test thinking budget enforced for a long thinking run,
     then a natural end marker."""
-    h = ThinkingBudgetStateHolder(MockReasoningConfig(), 8, 0, torch.device("cpu"), False)
+    h = ThinkingBudgetStateHolder(
+        create_mock_reasoning_config([THINK_START_TOKEN_ID], [THINK_END_TOKEN_ID]),
+        8,
+        0,
+        torch.device("cpu"),
+        False,
+    )
     h.sync_batch(
         BatchUpdate(
             batch_size=1,
@@ -1280,8 +1273,8 @@ def test_thinking_budget_long_thinking_section_end_marker_found_at_correct_index
             moved=(),
         )
     )
-    start = MockReasoningConfig.reasoning_start_token_ids
-    end = MockReasoningConfig.reasoning_end_token_ids
+    start = [THINK_START_TOKEN_ID]
+    end = [THINK_END_TOKEN_ID]
 
     out: list[int] = list(start)
     h.update_state([out], None, None)
@@ -1317,13 +1310,7 @@ class TestThinkingBudgetReentry:
 
     @staticmethod
     def _make_holder(end_token_ids: list[int]) -> ThinkingBudgetStateHolder:
-        class FakeReasoningConfig:
-            reasoning_start_token_ids = [TestThinkingBudgetReentry.THINK_START]
-            reasoning_end_token_ids: list[int] = []
-            enabled = True
-
-        cfg = FakeReasoningConfig()
-        cfg.reasoning_end_token_ids = end_token_ids
+        cfg = create_mock_reasoning_config([TestThinkingBudgetReentry.THINK_START], end_token_ids)
         return ThinkingBudgetStateHolder(
             reasoning_config=cfg,
             max_num_seqs=8,
@@ -1438,14 +1425,12 @@ class TestThinkingBudgetNaturalEndReentry:
     THINK_TOKEN = 60
 
     @staticmethod
-    def _make_holder(end_token_ids: list[int]) -> ThinkingBudgetStateHolder:
-        class FakeReasoningConfig:
-            reasoning_start_token_ids = [TestThinkingBudgetNaturalEndReentry.THINK_START]
-            reasoning_end_token_ids: list[int] = []
-            enabled = True
+    def _make_holder(end_token_ids):
+        from aphrodite.v1.sample.thinking_budget_state import (
+            ThinkingBudgetStateHolder,
+        )
 
-        cfg = FakeReasoningConfig()
-        cfg.reasoning_end_token_ids = end_token_ids
+        cfg = create_mock_reasoning_config([TestThinkingBudgetNaturalEndReentry.THINK_START], end_token_ids)
         return ThinkingBudgetStateHolder(
             reasoning_config=cfg,
             max_num_seqs=8,

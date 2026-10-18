@@ -4,7 +4,7 @@ import copy
 
 import torch
 import torch.nn.functional as F
-from transformers.configuration_utils import PretrainedConfig
+from transformers.configuration_utils import PreTrainedConfig
 
 from aphrodite.config import (
     AphroditeConfig,
@@ -37,7 +37,7 @@ from aphrodite.triton_utils import tl, triton
 from aphrodite.v1.attention.backends.linear_attn import LinearAttentionMetadata
 
 
-def _build_rope_parameters(config: PretrainedConfig) -> dict | None:
+def _build_rope_parameters(config: PreTrainedConfig) -> dict | None:
     rope_parameters = copy.deepcopy(getattr(config, "rope_parameters", None)) or {}
     if "rope_theta" not in rope_parameters and hasattr(config, "rope_theta"):
         rope_parameters["rope_theta"] = config.rope_theta
@@ -358,7 +358,7 @@ class BailingMoELinearAttention(LinearAttention):
     # --8<-- [end:bailing_moe_linear_attention]
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         aphrodite_config: AphroditeConfig,
         prefix: str = "linear_attn",
     ):
@@ -486,7 +486,7 @@ class BailingMoELinearAttention(LinearAttention):
         output: torch.Tensor,
         positions: torch.Tensor,
     ) -> None:
-        """Forward method called by torch.ops.aphrodite.linear_attention"""
+        """Forward method called by torch.ops.aphrodite.linear_attention."""
         torch.ops.aphrodite.linear_attention(
             hidden_states,
             output,

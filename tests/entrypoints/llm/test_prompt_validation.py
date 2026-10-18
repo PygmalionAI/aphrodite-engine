@@ -4,13 +4,13 @@
 import pytest
 import torch
 
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 
 
 def test_empty_prompt(aphrodite_runner):
     with (
         aphrodite_runner("openai-community/gpt2", enforce_eager=True) as runner,
-        pytest.raises(APHRODITEValidationError, match="decoder prompt cannot be empty"),
+        pytest.raises(AphroditeValidationError, match="decoder prompt cannot be empty"),
     ):
         runner.llm.generate([""])
 
@@ -18,7 +18,7 @@ def test_empty_prompt(aphrodite_runner):
 def test_out_of_vocab_token(aphrodite_runner):
     with (
         aphrodite_runner("openai-community/gpt2", enforce_eager=True) as runner,
-        pytest.raises(APHRODITEValidationError, match="out of vocabulary"),
+        pytest.raises(AphroditeValidationError, match="out of vocabulary"),
     ):
         runner.llm.generate({"prompt_token_ids": [999999]})
 

@@ -4,10 +4,10 @@
 import pytest
 
 from aphrodite.assets.image import ImageAsset
-from aphrodite.multimodal.video import sample_frames_from_video
 from aphrodite.platforms import current_platform
 
 from ....conftest import VIDEO_ASSETS
+from .vlm_utils.builders import sample_frames_with_video_metadata
 
 models = ["Qwen/Qwen2.5-VL-3B-Instruct"]
 target_dtype = "bfloat16"
@@ -76,7 +76,9 @@ def test_qwen2_5_vl_evs_functionality(
     monkeypatch.setenv("APHRODITE_USE_BYTECODE_HOOK", "1" if use_bytecode_hook else "0")
 
     # Sample frames from video assets
-    sampled_vids = [sample_frames_from_video(asset.np_ndarrays, num_frames) for asset in video_assets]
+    sampled_vids = [
+        sample_frames_with_video_metadata((asset.np_ndarrays, asset.metadata), num_frames) for asset in video_assets
+    ]
 
     prompts = [VIDEO_PROMPTS[0]]
     videos = [sampled_vids[0]]
@@ -133,7 +135,9 @@ def test_qwen2_5_vl_evs_batched_videos(
     # Set the environment variable for this test
     monkeypatch.setenv("APHRODITE_USE_BYTECODE_HOOK", "1" if use_bytecode_hook else "0")
     # Sample frames from video assets
-    sampled_vids = [sample_frames_from_video(asset.np_ndarrays, num_frames) for asset in video_assets]
+    sampled_vids = [
+        sample_frames_with_video_metadata((asset.np_ndarrays, asset.metadata), num_frames) for asset in video_assets
+    ]
 
     # Test batched videos
     prompts = [VIDEO_PROMPTS[0], VIDEO_PROMPTS[0]]

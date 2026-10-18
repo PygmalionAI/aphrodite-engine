@@ -6,15 +6,20 @@ import math
 from collections.abc import Generator
 from types import SimpleNamespace
 from typing import get_args
+from unittest.mock import patch
 
+import numpy as np
 import pytest
 import torch
+from pydantic import TypeAdapter, ValidationError
 
-from aphrodite import SamplingParams
+from aphrodite import SamplingParams, TokensPrompt
 from aphrodite.config.model import LogprobsMode
 from aphrodite.distributed import cleanup_dist_env_and_memory
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
+from aphrodite.logprobs import Logprob
 from aphrodite.platforms import current_platform
+from aphrodite.v1.engine.input_processor import InputProcessor
 from tests.utils import large_gpu_mark
 from tests.v1.sample.utils import (
     BatchLogprobsComposition,
@@ -81,9 +86,10 @@ def hf_model(hf_runner) -> Generator[HfRunner, None, None]:
         yield hf_model
 
 
-def _model_config(vocab_size: int = 10):
+def _model_config(vocab_size: int = 10, max_logprobs: int = 20):
     return SimpleNamespace(
-        max_logprobs=20,
+        max_logprobs=max_logprobs,
+        max_model_len=16,
         logits_processors=None,
         is_diffusion=False,
         get_vocab_size=lambda: vocab_size,
@@ -127,6 +133,7 @@ def _repeat_logprob_config(
       `logprob_prompt_logprob_list` enough times to match the
       number of `test_prompts`, or else is truncated to match
       the number of `test_prompts`
+
     """
     num_test_prompts = len(test_prompts)
     # Make sure there is a logprobs configuration for each test prompt
@@ -139,7 +146,7 @@ def _repeat_logprob_config(
 def _run_and_validate(
     aphrodite_model: AphroditeRunner,
     test_prompts: list[str],
-    aphrodite_sampling_params: SamplingParams,
+    aphrodite_sampling_params: SamplingParams | list[SamplingParams],
     hf_logprobs: list[list[torch.Tensor]],
     hf_outputs: list[tuple[list[int], str]],
     logprob_prompt_logprob_list: BatchLogprobsSpecType,
@@ -155,10 +162,11 @@ def _run_and_validate(
         # Extract request-level (prompt)logprobs config
         num_top_logprobs, num_top_prompt_logprobs = logprob_prompt_logprob
 
+        assert aphrodite_result.prompt_token_ids is not None
         # Test whether sampled token output is consistent between Aphrodite and HF
         # Aphrodite prompt+completion should match HF output
         if temperature == 0.0:
-            assert aphrodite_result.prompt_token_ids + aphrodite_result.outputs[0].token_ids == hf_output[0]
+            assert aphrodite_result.prompt_token_ids + list(aphrodite_result.outputs[0].token_ids) == hf_output[0]
         else:
             # Sampled tokens won't match if not greedy
             assert aphrodite_result.prompt_token_ids == hf_output[0][: len(aphrodite_result.prompt_token_ids)]
@@ -175,7 +183,9 @@ def _run_and_validate(
 
                 # Confirm that the output token appears among the logprobs
                 assert token_id in logprobs
-                token_in_topk = logprobs[token_id].rank <= num_top_logprobs
+                rank = logprobs[token_id].rank
+                assert rank is not None
+                token_in_topk = rank <= num_top_logprobs
 
                 # If the output token is not included in the top K
                 # logprob, it can return 1 more data
@@ -191,8 +201,10 @@ def _run_and_validate(
 
             output_text = aphrodite_result.outputs[0].text
             output_string_from_most_likely_tokens_lst: list[str] = []
-            for top_logprobs in aphrodite_result.outputs[0].logprobs:
-                top_logprob = next(iter(top_logprobs.values()))
+            for output_logprobs in aphrodite_result.outputs[0].logprobs:
+                assert output_logprobs is not None
+                top_logprob = next(iter(output_logprobs.values()))
+                assert top_logprob.decoded_token is not None
                 output_string_from_most_likely_tokens_lst.append(top_logprob.decoded_token)
 
             output_string_from_most_likely_tokens = "".join(output_string_from_most_likely_tokens_lst)
@@ -206,8 +218,9 @@ def _run_and_validate(
 
             # Compare Aphrodite sample logprobs to HF
             aphrodite_sample_logprobs = aphrodite_result.outputs[0].logprobs
-            for i, top_logprobs in enumerate(aphrodite_sample_logprobs):
-                for token_id, sample_logprob in top_logprobs.items():
+            for i, sample_logprobs in enumerate(aphrodite_sample_logprobs):
+                assert sample_logprobs is not None
+                for token_id, sample_logprob in sample_logprobs.items():
                     if temperature == 0.0 or i == 0:
                         logprob = sample_logprob.logprob
                         torch.testing.assert_close(
@@ -250,7 +263,9 @@ def _run_and_validate(
 
                 # Confirm that the prompt token appears among the logprobs
                 assert prompt_token_id in prompt_logprobs
-                token_in_topk = prompt_logprobs[prompt_token_id].rank <= num_top_prompt_logprobs
+                prompt_rank = prompt_logprobs[prompt_token_id].rank
+                assert prompt_rank is not None
+                token_in_topk = prompt_rank <= num_top_prompt_logprobs
 
                 # If the prompt token is not included in the top K
                 # logprob, it can return 1 more data
@@ -269,9 +284,10 @@ def _run_and_validate(
             # 1:.
             aphrodite_prompt_logprobs = aphrodite_result.prompt_logprobs[1:]
             for i, aphrodite_prompt_logprob_dict in enumerate(aphrodite_prompt_logprobs):
-                for token_id, logprob in aphrodite_prompt_logprob_dict.items():
+                assert aphrodite_prompt_logprob_dict is not None
+                for token_id, prompt_lp in aphrodite_prompt_logprob_dict.items():
                     torch.testing.assert_close(
-                        logprob.logprob,
+                        prompt_lp.logprob,
                         hf_logprob[0][i][token_id].item(),
                         atol=2e-2,
                         rtol=2e-2,
@@ -289,7 +305,7 @@ def test_get_logprobs_and_prompt_logprobs(
     temperature: float,
     example_prompts: list[str],
 ) -> None:
-    """Test V1 Engine logprobs & prompt logprobs
+    """Test V1 Engine logprobs & prompt logprobs.
 
     Exercise a variety of combinations of `logprobs` and `prompt_logprobs`
     settings and validate that
@@ -314,6 +330,7 @@ def test_get_logprobs_and_prompt_logprobs(
       batch_logprobs_composition: logprobs configuration for test batch
       temperature: "temperature" sampling parameter
       example_prompts: example prompt fixture
+
     """
     aphrodite_config = aphrodite_model.llm.llm_engine.aphrodite_config
     do_apc = aphrodite_config.cache_config.enable_prefix_caching
@@ -364,7 +381,7 @@ def test_get_logprobs_and_prompt_logprobs(
 
 
 def test_max_logprobs():
-    """Aphrodite v1 engine should fail a request with `logprobs > max_logprobs`
+    """APHRODITE v1 engine should fail a request with `logprobs > max_logprobs`
     Should also fail for `prompt_logprobs > max_logprobs`
     APC should not matter as this test checks basic request validation.
     """
@@ -396,7 +413,7 @@ def test_logprob_token_ids_validate_vocab_bounds_valid(token_ids: list[int]):
 
 @pytest.mark.parametrize("token_ids", [[-1], [10], [-35, 1873042417]])
 def test_logprob_token_ids_validate_vocab_bounds_invalid(token_ids: list[int]):
-    with pytest.raises(APHRODITEValidationError, match="logprob_token_ids"):
+    with pytest.raises(AphroditeValidationError, match="logprob_token_ids"):
         SamplingParams(logprob_token_ids=token_ids).verify(
             _model_config(),
             speculative_config=None,
@@ -405,12 +422,97 @@ def test_logprob_token_ids_validate_vocab_bounds_invalid(token_ids: list[int]):
         )
 
 
+def test_prompt_logprob_token_ids_validation():
+    """Rows may be ragged (-1 padded); the width is bounded by max_logprobs."""
+    model_config = _model_config(vocab_size=100, max_logprobs=4)
+
+    def verify(**kwargs):
+        params = SamplingParams(**kwargs)
+        params.verify(
+            model_config,
+            speculative_config=None,
+            structured_outputs_config=None,
+            tokenizer=None,
+        )
+        return params.prompt_logprob_token_ids
+
+    assert verify(prompt_logprob_token_ids=[[], [1], [4, 3, 2, 1]]).tolist() == [
+        [-1] * 4,
+        [1, -1, -1, -1],
+        [4, 3, 2, 1],
+    ]
+    # Any integer layout is normalized to what the worker uploads:
+    # C-contiguous native int32.
+    odd = np.asfortranarray(np.array([[1, 2], [3, -1]], dtype=">i8"))
+    ids = verify(prompt_logprob_token_ids=odd)
+    assert ids.dtype == np.int32 and ids.flags.c_contiguous
+    assert ids.tolist() == [[1, 2], [3, -1]]
+    # The pydantic path (token-in/token-out API, /docs) takes strict integer lists.
+    adapter = TypeAdapter(SamplingParams)
+    for bad in ("[[1.5]]", '[["3"]]', "[[true]]", "[1, 2]"):
+        with pytest.raises(ValidationError):
+            adapter.validate_json(f'{{"prompt_logprob_token_ids": {bad}}}')
+
+    with pytest.raises(AphroditeValidationError, match=r"shape \[num_rows, num_ids\]"):
+        verify(prompt_logprob_token_ids=np.array([1, 2]))
+    with pytest.raises(AphroditeValidationError, match=r"shape \[num_rows, num_ids\]"):
+        verify(prompt_logprob_token_ids=[1, 2])
+    for bad_ids in ([[None]], [[2**63]], [[[1]]], [[[1], 2]]):
+        with pytest.raises(AphroditeValidationError, match="integer token ids"):
+            verify(prompt_logprob_token_ids=bad_ids)
+    with pytest.raises(AphroditeValidationError, match="out-of-vocab"):
+        verify(prompt_logprob_token_ids=np.array([[2**64 - 1]], dtype=np.uint64))
+    # The error names the value to raise max_logprobs to.
+    with pytest.raises(AphroditeValidationError, match=r"max_logprobs.*at least 5"):
+        verify(prompt_logprob_token_ids=[[1], [1, 2, 3, 4, 5]])
+    with pytest.raises(AphroditeValidationError, match="out-of-vocab"):
+        verify(prompt_logprob_token_ids=[[1], [100]])
+    with pytest.raises(AphroditeValidationError, match="out-of-vocab"):
+        verify(prompt_logprob_token_ids=[[1], [-2]])
+    with pytest.raises(AphroditeValidationError, match="non-empty"):
+        verify(prompt_logprob_token_ids=[[], []])
+    # Rows are bounded by max_model_len before the table is padded.
+    with pytest.raises(AphroditeValidationError, match="at most 15 scored rows"):
+        verify(prompt_logprob_token_ids=[[]] * 15 + [[1]])
+    # prompt_logprob_start alone is a caller mistake, not a silent no-op.
+    with pytest.raises(AphroditeValidationError, match="requires prompt_logprob_token_ids"):
+        verify(prompt_logprob_start=3)
+
+
+def test_prompt_logprob_token_ids_require_v2_model_runner():
+    """Only the V2 runner scores them; the V1 runner would return None, and
+    kv-sharing fast prefill would score rows the cross-decoder never ran."""
+    processor = SimpleNamespace(
+        model_config=SimpleNamespace(return_sampling_mask=False, enable_trace_replay=False, is_diffusion=False),
+        aphrodite_config=SimpleNamespace(
+            reasoning_config=None,
+            use_v2_model_runner=False,
+            cache_config=SimpleNamespace(kv_sharing_fast_prefill=False),
+        ),
+        speculative_config=None,
+        structured_outputs_config=None,
+        tokenizer=None,
+        validate_logits_processors_params=lambda params: None,
+        resolve_watermarking=lambda params: False,
+    )
+    params = SamplingParams(prompt_logprob_token_ids=[[1, 2]])
+    with patch.object(SamplingParams, "verify"):
+        with pytest.raises(AphroditeValidationError, match="V2 model runner"):
+            InputProcessor._validate_params(processor, params, ("generate",))
+        processor.aphrodite_config.use_v2_model_runner = True
+        InputProcessor._validate_params(processor, params, ("generate",))
+        processor.aphrodite_config.cache_config.kv_sharing_fast_prefill = True
+        with pytest.raises(AphroditeValidationError, match="fast-prefill"):
+            InputProcessor._validate_params(processor, params, ("generate",))
+
+
 def test_none_logprobs(aphrodite_model, example_prompts):
-    """Engine should return `logprobs` and `prompt_logprobs` as `None`
+    """Engine should return `logprobs` and `prompt_logprobs` as `None`.
 
     Args:
       aphrodite_model: Aphrodite model fixture
       example_prompts: list of example prompts (test fixture)
+
     """
     max_tokens = 5
 
@@ -434,11 +536,12 @@ def test_none_logprobs(aphrodite_model, example_prompts):
 
 
 def test_zero_logprobs(aphrodite_model, example_prompts):
-    """Engine should return sampled token and prompt token logprobs
+    """Engine should return sampled token and prompt token logprobs.
 
     Args:
       aphrodite_model: Aphrodite model fixture
       example_prompts: list of example prompts (test fixture)
+
     """
     max_tokens = 5
 
@@ -464,10 +567,11 @@ def test_zero_logprobs(aphrodite_model, example_prompts):
 
 
 def test_all_logprobs(example_prompts):
-    """Engine should return all vocabulary logprobs and prompt logprobs
+    """Engine should return all vocabulary logprobs and prompt logprobs.
 
     Args:
       example_prompts: list of example prompts (test fixture)
+
     """
     with AphroditeRunner(
         "facebook/opt-125m",
@@ -517,7 +621,9 @@ def test_logprobs_mode(logprobs_mode: LogprobsMode):
         total_token_with_logprobs = 0
         positive_values = 0
         for output in results[0].outputs:
+            assert output.logprobs is not None
             for logprobs in output.logprobs:
+                assert logprobs is not None
                 for token_id in logprobs:
                     logprob = logprobs[token_id]
                     if logprobs_mode in ("raw_logprobs", "processed_logprobs"):
@@ -556,6 +662,7 @@ def test_prompt_logprobs_mode():
             )
             assert results[0].prompt_logprobs is not None
             assert results[0].prompt_logprobs[1] is not None
+            assert results[0].prompt_token_ids is not None
             tok_id = results[0].prompt_token_ids[1]
             values[mode] = results[0].prompt_logprobs[1][tok_id].logprob
         finally:
@@ -1091,6 +1198,7 @@ def test_spec_decode_logprobs(
         logprobs_mode: logprobs mode.
         model_setup: Tuple of (method, base model name,
             speculative_config dict, top_logprobs).
+
     """
     from aphrodite import LLM
 
@@ -1128,10 +1236,12 @@ def test_spec_decode_logprobs(
     )
     ref_results = ref_llm.generate([prompt, prompt], [sampling_params, penalty_sampling_params])
     # Collect logprobs outputs from reference LLM.
-    ref_logprobs = []
+    ref_logprobs: list[Logprob] = []
     for results in ref_results:
         for output in results.outputs:
+            assert output.logprobs is not None
             for logprobs in output.logprobs:
+                assert logprobs is not None
                 ref_logprobs.extend(logprobs.values())
     del ref_llm
     torch.accelerator.empty_cache()
@@ -1147,10 +1257,12 @@ def test_spec_decode_logprobs(
     )
     spec_results = spec_llm.generate([prompt, prompt], [sampling_params, penalty_sampling_params])
     # Collect logprobs outputs from spec decode LLM.
-    spec_logprobs = []
+    spec_logprobs: list[Logprob] = []
     for results in spec_results:
         for output in results.outputs:
+            assert output.logprobs is not None
             for logprobs in output.logprobs:
+                assert logprobs is not None
                 spec_logprobs.extend(logprobs.values())
     del spec_llm
     torch.accelerator.empty_cache()
@@ -1178,7 +1290,6 @@ def test_prompt_logprobs_with_chunking_and_preemption():
     This test ensures that the num_prompt_logprobs tracking persists
     across preemptions and prefill chunks.
     """
-
     # Create prompts that will trigger chunking and preemption
     prompts = [
         "The following numbers of the sequence " + ", ".join(str(i) for i in range(10)) + " are:",
@@ -1215,6 +1326,7 @@ def test_prompt_logprobs_with_chunking_and_preemption():
             assert prompt_logprobs is not None and len(prompt_logprobs) > 0, f"Output {i} missing prompt logprobs"
             assert len(prompt_logprobs) == len(prompt_token_ids), "Unexpected number of prompt logprob positions"
 
+            assert sampling_params.prompt_logprobs is not None
             # Each position should have the requested number of logprobs
             for pos, logprobs_dict in enumerate(prompt_logprobs):
                 if logprobs_dict is not None:  # First token may be None
@@ -1233,6 +1345,150 @@ def test_prompt_logprobs_with_chunking_and_preemption():
         assert preemptions > 0, "Test did not trigger any preemptions"
 
         print(f"Test passed with {preemptions} preemptions")
+
+
+def test_prompt_logprob_token_ids_with_chunking_and_preemption(monkeypatch):
+    """Per-row scores stay row-aligned across chunked prefill and preemption."""
+    monkeypatch.setenv("APHRODITE_USE_V2_MODEL_RUNNER", "1")
+
+    prompts = [
+        "The following numbers of the sequence " + ", ".join(str(i) for i in range(10)) + " are:",
+        "In one word, the capital of France is ",
+    ] + [f"Tell me about the number {i}: " for i in range(32)]
+
+    start = 2
+
+    def candidate_ids(j):
+        return [10 + j, 100 + j, 1000 + j, 10000 + j]
+
+    with AphroditeRunner(
+        "Qwen/Qwen3-0.6B",
+        max_model_len=512,
+        enable_chunked_prefill=True,
+        max_num_batched_tokens=48,  # Force prefill chunking
+        num_gpu_blocks_override=33,  # Force preemptions (32 usable + null block)
+        disable_log_stats=False,
+        gpu_memory_utilization=0.25,
+    ) as aphrodite_model:
+        tokenizer = aphrodite_model.llm.get_tokenizer()
+        token_prompts = [TokensPrompt(prompt_token_ids=tokenizer(p).input_ids) for p in prompts]
+
+        def make_params(row_ids):
+            return [
+                SamplingParams(
+                    temperature=0.0,
+                    max_tokens=40,
+                    min_tokens=20,
+                    prompt_logprob_token_ids=[row_ids(j) for j in range(len(p["prompt_token_ids"]) - 1 - start)],
+                    prompt_logprob_start=start,
+                )
+                for p in token_prompts
+            ]
+
+        metrics_before = aphrodite_model.llm.get_metrics()
+        full_params = make_params(candidate_ids)
+        for params in full_params:  # the array form, as a top-k tensor would be
+            params.prompt_logprob_token_ids = np.array(params.prompt_logprob_token_ids)
+        outputs = aphrodite_model.llm.generate(token_prompts, full_params)
+
+        for i, output in enumerate(outputs):
+            scores = output.prompt_token_id_logprobs
+            assert scores is not None, f"Output {i} missing per-row scores"
+            expected_shape = (
+                len(output.prompt_token_ids) - 1 - start,
+                4,
+            )
+            assert scores.shape == expected_shape, f"Output {i} scored {scores.shape}, expected {expected_shape}"
+            assert math.isfinite(float(scores.min()))
+            assert float(scores.max()) <= 1e-3, "logprobs must be <= 0"
+
+        # Ragged rows: each row keeps a prefix of the candidates and must
+        # reproduce that prefix of the full scores, with -inf padding. On ROCm
+        # the second generate call picks its own kernels, which moves bf16
+        # tails by up to 0.19; a misaligned row is off by nats either way.
+        ragged_atol = 0.2 if current_platform.is_rocm() else 1e-2
+        ragged_params = make_params(lambda j: candidate_ids(j)[: 1 + j % 4])
+        ragged_outputs = aphrodite_model.llm.generate(token_prompts, ragged_params)
+        for output, ragged_output in zip(outputs, ragged_outputs):
+            expected = np.full_like(output.prompt_token_id_logprobs, -np.inf)
+            for j in range(len(expected)):
+                n = 1 + j % 4
+                expected[j, :n] = output.prompt_token_id_logprobs[j, :n]
+            np.testing.assert_allclose(ragged_output.prompt_token_id_logprobs, expected, atol=ragged_atol)
+
+        # The row count is checked against the prompt at admission.
+        with pytest.raises(AphroditeValidationError, match="scored rows"):
+            aphrodite_model.llm.generate(token_prompts[0], ragged_params[1])
+
+        metrics_after = aphrodite_model.llm.get_metrics()
+        preemptions_before = next((m.value for m in metrics_before if m.name == "aphrodite:num_preemptions"), 0)
+        preemptions_after = next((m.value for m in metrics_after if m.name == "aphrodite:num_preemptions"), 0)
+        assert preemptions_after - preemptions_before > 0, "Test did not trigger any preemptions"
+
+    # Row alignment is numerical: chunked and preempted scores must match an
+    # unchunked, unpreempted run of the same requests. Batch composition moves
+    # bf16 tail logprobs by a few percent; a misaligned row differs by nats.
+    with AphroditeRunner("Qwen/Qwen3-0.6B", max_model_len=512, gpu_memory_utilization=0.25) as reference:
+        reference_outputs = reference.llm.generate(token_prompts, full_params)
+        self_scored = reference.llm.generate(
+            token_prompts,
+            [
+                SamplingParams(
+                    max_tokens=1,
+                    prompt_logprobs=0,
+                    prompt_logprob_token_ids=[[t] for t in p["prompt_token_ids"][1:]],
+                )
+                for p in token_prompts
+            ],
+        )
+    for output, ref in zip(outputs, reference_outputs):
+        np.testing.assert_allclose(
+            output.prompt_token_id_logprobs,
+            ref.prompt_token_id_logprobs,
+            rtol=0.1,
+            atol=0.2,
+        )
+    for output in self_scored:
+        scores = output.prompt_token_id_logprobs[:, 0]
+        for row, target in enumerate(output.prompt_token_ids[1:]):
+            expected = output.prompt_logprobs[row + 1][target].logprob
+            assert scores[row] == pytest.approx(expected, abs=1e-3)
+
+
+def test_prompt_logprob_token_ids_drop_partially_scored_prefills(monkeypatch):
+    """A prefill that starts past the first scored row returns no scores.
+
+    Such a prefill (here a prefix-cache hit the caller opted back into) never
+    computes the leading rows, so emitting the buffer would return values the
+    model never produced for them.
+    """
+    monkeypatch.setenv("APHRODITE_USE_V2_MODEL_RUNNER", "1")
+
+    text = "The capital of France is Paris. " * 20
+
+    with AphroditeRunner(
+        "Qwen/Qwen3-0.6B",
+        max_model_len=512,
+        enable_prefix_caching=True,
+        gpu_memory_utilization=0.25,
+    ) as aphrodite_model:
+        token_ids = aphrodite_model.llm.get_tokenizer()(text).input_ids
+        prompt = TokensPrompt(prompt_token_ids=token_ids)
+        sampling_params = SamplingParams(
+            temperature=0.0,
+            max_tokens=1,
+            prompt_logprob_token_ids=np.tile([10, 100, 1000], (len(token_ids) - 1, 1)),
+            skip_reading_prefix_cache=False,
+        )
+
+        first = aphrodite_model.llm.generate([prompt], sampling_params)[0]
+        assert first.prompt_token_id_logprobs is not None
+        assert math.isfinite(float(first.prompt_token_id_logprobs.min()))
+
+        # The re-send is served from the prefix cache, so its prefill starts
+        # past row 0 and the leading rows are never computed.
+        second = aphrodite_model.llm.generate([prompt], sampling_params)[0]
+        assert second.prompt_token_id_logprobs is None
 
 
 @large_gpu_mark(min_gb=24)

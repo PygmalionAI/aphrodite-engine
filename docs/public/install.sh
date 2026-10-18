@@ -402,9 +402,9 @@ import sys
 expected_arch = sys.argv[1]
 if sys.implementation.name != "cpython":
     raise SystemExit("Sonar wheels require CPython.")
-if not ((3, 10) <= sys.version_info[:2] < (3, 15)):
+if not ((3, 11) <= sys.version_info[:2] < (3, 15)):
     raise SystemExit(
-        f"Sonar requires Python 3.10-3.14; this environment uses "
+        f"Sonar requires Python 3.11-3.14; this environment uses "
         f"{platform.python_version()}."
     )
 machine = platform.machine().lower()

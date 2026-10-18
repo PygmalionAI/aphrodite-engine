@@ -2,9 +2,11 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import builtins
 import logging
+from types import SimpleNamespace
 from unittest.mock import mock_open, patch
 
 import pytest
+import torch
 
 from aphrodite.platforms import (
     _is_amd_zen_cpu,
@@ -63,7 +65,7 @@ def test_cpu_target_selects_cpu_platform_from_non_cpu_wheel(
     rocm_plugin.assert_not_called()
 
 
-def test_platform_detection_logs_zentorch_import_failure(caplog):
+def test_broken_zentorch_falls_back_to_cpu_platform(caplog_aphrodite):
     original_import = builtins.__import__
 
     def import_with_broken_zentorch(name, *args, **kwargs):
@@ -82,10 +84,73 @@ def test_platform_detection_logs_zentorch_import_failure(caplog):
         patch("aphrodite.platforms.aphrodite_version_matches_substr", return_value=True),
         patch("aphrodite.platforms._is_amd_zen_cpu", return_value=True),
         patch.object(builtins, "__import__", side_effect=import_with_broken_zentorch),
-        caplog.at_level(logging.DEBUG, logger="aphrodite.platforms"),
+        caplog_aphrodite.at_level(logging.DEBUG, logger="aphrodite.platforms"),
+    ):
+        platform = resolve_current_platform_cls_qualname()
+
+    assert platform == "aphrodite.platforms.cpu.CpuPlatform"
+    assert "zentorch failed to import" in caplog_aphrodite.text
+    assert "OSError: incompatible shared library" in caplog_aphrodite.text
+
+
+def test_zentorch_failure_other_than_oserror_is_not_recovered(caplog_aphrodite):
+    original_import = builtins.__import__
+
+    def import_with_broken_zentorch(name, *args, **kwargs):
+        if name == "zentorch":
+            raise RuntimeError("unknown zentorch failure")
+        return original_import(name, *args, **kwargs)
+
+    with (
+        patch("aphrodite.platforms.envs.APHRODITE_TARGET_DEVICE", "cuda"),
+        patch.dict(
+            "aphrodite.platforms.builtin_platform_plugins",
+            {"cpu": cpu_platform_plugin},
+            clear=True,
+        ),
+        patch("aphrodite.platforms.load_plugins_by_group", return_value={}),
+        patch("aphrodite.platforms.aphrodite_version_matches_substr", return_value=True),
+        patch("aphrodite.platforms._is_amd_zen_cpu", return_value=True),
+        patch.object(builtins, "__import__", side_effect=import_with_broken_zentorch),
+        caplog_aphrodite.at_level(logging.DEBUG, logger="aphrodite.platforms"),
     ):
         platform = resolve_current_platform_cls_qualname()
 
     assert platform == "aphrodite.platforms.interface.UnspecifiedPlatform"
-    assert "Platform plugin cpu failed during detection" in caplog.text
-    assert "OSError: incompatible shared library" in caplog.text
+    assert "RuntimeError: unknown zentorch failure" in caplog_aphrodite.text
+
+
+def test_platform_plugin_failure_is_logged(caplog_aphrodite):
+    def failing_plugin():
+        raise RuntimeError("plugin exploded")
+
+    with (
+        patch("aphrodite.platforms.envs.APHRODITE_TARGET_DEVICE", "cuda"),
+        patch.dict(
+            "aphrodite.platforms.builtin_platform_plugins",
+            {"cpu": failing_plugin},
+            clear=True,
+        ),
+        patch("aphrodite.platforms.load_plugins_by_group", return_value={}),
+        caplog_aphrodite.at_level(logging.DEBUG, logger="aphrodite.platforms"),
+    ):
+        platform = resolve_current_platform_cls_qualname()
+
+    assert platform == "aphrodite.platforms.interface.UnspecifiedPlatform"
+    assert "Platform plugin cpu failed during detection" in caplog_aphrodite.text
+    assert "RuntimeError: plugin exploded" in caplog_aphrodite.text
+
+
+@pytest.mark.parametrize("fp16_supported", [True, False])
+def test_zen_cpu_supported_dtypes_track_fp16_capability(fp16_supported):
+    from aphrodite.platforms.zen_cpu import ZenCpuPlatform
+
+    # zentorch is absent on most CI hosts, so torch.ops.zentorch has to be
+    # stood up rather than patched in place.
+    zentorch_ops = SimpleNamespace(zentorch_is_fp16_supported=lambda: fp16_supported)
+    with patch.object(torch.ops, "zentorch", zentorch_ops, create=True):
+        dtypes = ZenCpuPlatform().supported_dtypes
+
+    # bf16 stays first so `--dtype auto` resolves to it on every Zen part.
+    assert dtypes[0] is torch.bfloat16
+    assert (torch.float16 in dtypes) is fp16_supported

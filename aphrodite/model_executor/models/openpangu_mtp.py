@@ -52,7 +52,9 @@ class OpenPanguMultiTokenPredictorLayer(DeepSeekMultiTokenPredictorLayer):
     def __init__(self, aphrodite_config: AphroditeConfig, prefix: str) -> None:
         nn.Module.__init__(self)
 
-        config = aphrodite_config.speculative_config.draft_model_config.hf_config
+        speculative_config = aphrodite_config.speculative_config
+        assert speculative_config is not None
+        config = speculative_config.draft_model_config.hf_config
         self.config = config
         quant_config = aphrodite_config.quant_config
 
@@ -196,10 +198,15 @@ class OpenPanguMTP(nn.Module):
                 break
             else:
                 for mapping in expert_params_mapping:
-                    param_name, weight_name, expert_id, shard_id = mapping
-                    if weight_name not in name:
+                    (
+                        expert_param_name,
+                        expert_weight_name,
+                        expert_id,
+                        expert_shard_id,
+                    ) = mapping
+                    if expert_weight_name not in name:
                         continue
-                    name = name.replace(weight_name, param_name)
+                    name = name.replace(expert_weight_name, expert_param_name)
 
                     param = params_dict[name]
                     weight_loader = param.weight_loader
@@ -207,7 +214,7 @@ class OpenPanguMTP(nn.Module):
                         param,
                         loaded_weight,
                         name,
-                        shard_id=shard_id,
+                        shard_id=expert_shard_id,
                         expert_id=expert_id,
                     )
                     break
@@ -226,8 +233,7 @@ class OpenPanguMTP(nn.Module):
         return loaded_params
 
     def _rewrite_spec_layer_name(self, spec_layer: int, name: str) -> str:
-        """
-        Rewrite the weight name to match the format of the original model.
+        """Rewrite the weight name to match the format of the original model.
         Add .mtp_block for modules in transformer layer block for spec layer
         and rename shared layer weights to be top level.
         """

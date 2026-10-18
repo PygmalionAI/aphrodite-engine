@@ -3,19 +3,20 @@
 
 //! Output processing helpers shared by text and chat layers.
 
+pub use aphrodite_tokenizer::{DecodedText, TokenAnchor, TokenAttribution};
 pub use decoded::{
     DecodedTextEvent, Finished, SampledDelta, TextDecodeOptions, decoded_text_event_stream,
 };
 pub use logprobs::{
     DecodedLogprobs, DecodedPositionLogprobs, DecodedPromptLogprobs, DecodedTokenLogprob,
 };
-pub use aphrodite_tokenizer::{DecodedText, TokenAnchor, TokenAttribution};
 
 mod decoded;
 mod logprobs;
 
 use std::sync::Arc;
 
+use aphrodite_engine_core_client::protocol::sampling_mask::SamplingMask;
 use futures::{StreamExt as _, pin_mut};
 
 use crate::{Error, FinishReason, Result, TextOutputStream};
@@ -30,11 +31,14 @@ pub struct CollectedTextOutput {
     pub token_ids: Vec<u32>,
     pub finish_reason: FinishReason,
     pub usage: aphrodite_llm::TokenUsage,
+    pub timestamps: aphrodite_llm::RequestTimestamps,
     /// Connector-specific KV transfer parameters for disaggregated serving.
     pub kv_transfer_params: Option<serde_json::Value>,
     /// Connector-specific encoder cache transfer parameters for disaggregated
     /// serving.
     pub ec_transfer_params: Option<serde_json::Value>,
+    /// Sampling support sets aligned with generated token positions.
+    pub sampling_mask: Option<SamplingMask>,
 }
 
 #[allow(clippy::manual_async_fn, reason = "specify `Send` bound")]
@@ -88,8 +92,10 @@ impl<T: TextOutputStream> T {
                                 token_ids: delta_token_ids,
                                 finish_reason: FinishReason::Error,
                                 usage: aphrodite_llm::TokenUsage::default(),
+                                timestamps: aphrodite_llm::RequestTimestamps::default(),
                                 kv_transfer_params: None,
                                 ec_transfer_params: None,
+                                sampling_mask: None,
                             })
                         };
 
@@ -97,8 +103,12 @@ impl<T: TextOutputStream> T {
                             let mut collected = collected.unwrap();
                             collected.finish_reason = finished.finish_reason;
                             collected.usage = finished.usage;
-                            collected.kv_transfer_params = finished.kv_transfer_params;
-                            collected.ec_transfer_params = finished.ec_transfer_params;
+                            collected.timestamps = finished.timestamps;
+                            collected.kv_transfer_params =
+                                finished.kv_transfer_params.map(|value| *value);
+                            collected.ec_transfer_params =
+                                finished.ec_transfer_params.map(|value| *value);
+                            collected.sampling_mask = finished.sampling_mask;
                             return Ok(collected);
                         }
                     }
@@ -116,8 +126,8 @@ impl<T: TextOutputStream> T {
 
 #[cfg(test)]
 mod tests {
-    use futures::stream;
     use aphrodite_llm::FinishReason;
+    use futures::stream;
 
     use super::*;
 
@@ -173,6 +183,8 @@ mod tests {
                     finish_reason: FinishReason::stop_eos(),
                     kv_transfer_params: None,
                     ec_transfer_params: None,
+                    sampling_mask: None,
+                    timestamps: Default::default(),
                 })),
             }),
         ]);
@@ -295,6 +307,8 @@ mod tests {
                     finish_reason: FinishReason::stop_eos(),
                     kv_transfer_params: None,
                     ec_transfer_params: None,
+                    sampling_mask: None,
+                    timestamps: Default::default(),
                 })),
             }),
         ]);

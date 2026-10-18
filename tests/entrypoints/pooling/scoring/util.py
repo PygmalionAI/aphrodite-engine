@@ -10,12 +10,12 @@ from PIL import Image
 from safetensors.torch import load_file
 from transformers import AutoModel, AutoTokenizer
 
-from aphrodite.entrypoints.chat_utils import (
+from aphrodite.entrypoints.pooling.scoring.typing import ScoreMultiModalParam
+from aphrodite.entrypoints.pooling.scoring.utils import compute_maxsim_score
+from aphrodite.renderers.chat_utils import (
     ChatCompletionContentPartImageParam,
     ChatCompletionContentPartTextParam,
 )
-from aphrodite.entrypoints.pooling.scoring.typing import ScoreMultiModalParam
-from aphrodite.entrypoints.pooling.scoring.utils import compute_maxsim_score
 from aphrodite.transformers_utils.repo_utils import hf_api
 from tests.conftest import HfRunner
 

@@ -22,6 +22,7 @@ from aphrodite.compilation.counter import compilation_counter
 from aphrodite.config.compilation import CUDAGraphMode
 from aphrodite.v1.worker.gpu import cudagraph_utils as cgu
 from aphrodite.v1.worker.gpu import model_runner as mrv2
+from aphrodite.v1.worker.gpu.eplb_utils import EPLBController
 from tests.utils import create_new_process_for_each_test
 
 GLOBAL_POOL = "global-pool"
@@ -211,6 +212,7 @@ def test_profile_cudagraph_memory_restores_compilation_counters(monkeypatch):
 
 def test_model_runner_delegates_to_cudagraph_utils(monkeypatch):
     runner = mrv2.GPUModelRunner.__new__(mrv2.GPUModelRunner)
+    runner.eplb = EPLBController(SimpleNamespace(enable_eplb=False), torch.device("cpu"))
     monkeypatch.setattr(mrv2, "_profile_cudagraph_memory", lambda r: 42)
     assert runner.profile_cudagraph_memory() == 42
 

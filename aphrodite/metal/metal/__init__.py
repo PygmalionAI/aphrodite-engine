@@ -206,6 +206,8 @@ def get_ops() -> ModuleType:
     if _ops_module is not None:
         return _ops_module
 
+    importlib.import_module("mlx.core")
+
     try:
         from aphrodite.metal.metal import (  # type: ignore[attr-defined]
             _paged_ops as packaged_ops,

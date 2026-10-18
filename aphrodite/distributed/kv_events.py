@@ -6,7 +6,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections import Counter, deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict
 from itertools import count
 from queue import Queue
@@ -17,6 +17,12 @@ import zmq
 
 from aphrodite.config.kv_events import KVEventsConfig
 from aphrodite.logger import init_logger
+from aphrodite.utils.network_utils import (
+    get_ip,
+    get_tcp_uri,
+    is_valid_ipv6_address,
+    split_zmq_path,
+)
 from aphrodite.v1.core.kv_cache_utils import ExternalBlockHash
 
 logger = init_logger(__name__)
@@ -39,7 +45,7 @@ class KVCacheEvent(
     gc=False,  # type: ignore[call-arg]
     tag=True,
 ):
-    """Base class for all KV cache-related events"""
+    """Base class for all KV cache-related events."""
 
 
 MEDIUM_GPU = "GPU"
@@ -62,9 +68,11 @@ class BlockStored(KVCacheEvent):
     lora_name: str | None
 
     """Extra keys used in block hash computation, one entry per block in
-    block_hashes. Each entry contains MM identifiers, LoRA name, cache_salt,
-    prompt embedding hashes, etc. for that specific block. Exposed for external
-    KV cache consumers to reconstruct block hashes.
+    block_hashes. Each entry contains, in order, the LoRA name (if
+    `lora_name` is set), `(mm_identifier, offset)` pairs, the cache_salt
+    string and prompt embedding digests for that specific block. These are
+    published untagged; the block hash itself uses each value tagged with
+    its source, e.g. `("lora", name)` or `("mm", mm_identifier, offset)`.
     """
     extra_keys: list[tuple[Any, ...] | None] | None = None
 
@@ -130,13 +138,16 @@ class AllBlocksCleared(KVCacheEvent):
     pass
 
 
+# Keep the concrete tagged variants for both publishers and wire decoders.
+KVCacheEventType = BlockStored | BlockRemoved | AllBlocksCleared
+
+
 class KVEventBatch(EventBatch):
-    events: list[BlockStored | BlockRemoved | AllBlocksCleared]
+    events: list[KVCacheEventType]
 
 
 class KVEventAggregator:
-    """
-    Aggregates KV events across multiple workers.
+    """Aggregates KV events across multiple workers.
     Tracks how many times each event appears and returns only those
     that were emitted by all workers.
     """
@@ -146,67 +157,61 @@ class KVEventAggregator:
     def __init__(self, num_workers: int) -> None:
         if num_workers <= 0:
             raise ValueError("num_workers must be greater than zero.")
-        self._event_counter: Counter[KVCacheEvent] = Counter()
+        self._event_counter: Counter[KVCacheEventType] = Counter()
         self._num_workers: int = num_workers
 
-    def add_events(self, events: list[KVCacheEvent]) -> None:
-        """
-        Add events from a worker batch.
+    def add_events(self, events: Sequence[KVCacheEventType]) -> None:
+        """Add events from a worker batch.
 
         Args:
-            events: List of KVCacheEvent objects.
+            events: Sequence of supported KV cache events.
+
         """
-        if not isinstance(events, list):
-            raise TypeError("events must be a list of KVCacheEvent.")
         self._event_counter.update(events)
 
-    def get_common_events(self) -> list[KVCacheEvent]:
-        """
-        Return events that appeared in all workers.
+    def get_common_events(self) -> list[KVCacheEventType]:
+        """Return events that appeared in all workers.
 
         Returns:
             List of events present in all workers.
+
         """
         return [event for event, count in self._event_counter.items() if count == self._num_workers]
 
-    def get_all_events(self) -> list[KVCacheEvent]:
-        """
-        Return all events for all workers.
+    def get_all_events(self) -> list[KVCacheEventType]:
+        """Return all events for all workers.
 
         Returns:
             List of events for all workers.
+
         """
         return list(self._event_counter.elements())
 
     def clear_events(self) -> None:
-        """
-        Clear all tracked events.
-        """
+        """Clear all tracked events."""
         self._event_counter.clear()
 
     def increment_workers(self, count: int = 1) -> None:
-        """
-        Increment the number of workers contributing events.
+        """Increment the number of workers contributing events.
 
         Args:
             count: Number to increment the workers by.
+
         """
         if count <= 0:
             raise ValueError("count must be positive.")
         self._num_workers += count
 
     def reset_workers(self) -> None:
-        """
-        Reset the number of workers to 1.
-        """
+        """Reset the number of workers to 1."""
         self._num_workers = 1
 
     def get_number_of_workers(self) -> int:
-        """
-        Return the number of workers.
+        """Return the number of workers.
 
         Returns:
             int number of workers.
+
         """
         return self._num_workers
 
@@ -215,13 +220,13 @@ class KVEventAggregator:
 
 
 class KVConnectorKVEvents(ABC):
-    """
-    Abstract base class for KV events.
-    Acts as a container for KV events from the connector.
+    """Container for supported, wire-publishable KV cache event variants.
+
+    Event inputs are read-only sequences; aggregation owns its own counters.
     """
 
     @abstractmethod
-    def add_events(self, events: list[KVCacheEvent]) -> None:
+    def add_events(self, events: Sequence[KVCacheEventType]) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -233,7 +238,7 @@ class KVConnectorKVEvents(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_all_events(self) -> list[KVCacheEvent]:
+    def get_all_events(self) -> list[KVCacheEventType]:
         raise NotImplementedError
 
     @abstractmethod
@@ -316,6 +321,7 @@ class ZmqEventPublisher(EventPublisher):
         Maximum number of events to buffer in memory.
     topic:
         Topic to publish events to.
+
     """
 
     SHUTDOWN_TIMEOUT: float = 1.0
@@ -345,6 +351,8 @@ class ZmqEventPublisher(EventPublisher):
         self._endpoint = self.offset_endpoint_port(endpoint, self._dp_rank)
         self._replay_endpoint = self.offset_endpoint_port(replay_endpoint, self._dp_rank)
         assert self._endpoint is not None
+        self._hwm = hwm
+        self._socket_setup()
         self._publisher_config = KVEventsConfig(
             enable_kv_cache_events=True,
             publisher="zmq",
@@ -355,8 +363,6 @@ class ZmqEventPublisher(EventPublisher):
             max_queue_size=max_queue_size,
             topic=topic,
         )
-        self._hwm = hwm
-        self._socket_setup()
 
         # Payload
         self._seq_gen = count()
@@ -417,16 +423,10 @@ class ZmqEventPublisher(EventPublisher):
         if self._pub is None:
             self._pub = self._ctx.socket(zmq.PUB)
             self._pub.set_hwm(self._hwm)
-            # Heuristic: bind if wildcard / * present, else connect.
-            # bind stable, connect volatile convention
-            if self._endpoint is not None and (
-                "*" in self._endpoint
-                or "::" in self._endpoint
-                or self._endpoint.startswith("ipc://")
-                or self._endpoint.startswith("inproc://")
-            ):
-                self._pub.bind(self._endpoint)
-            elif self._endpoint is not None:
+            assert self._endpoint is not None
+            if self._is_bind_endpoint(self._endpoint):
+                self._endpoint = self._bind(self._pub, self._endpoint)
+            else:
                 self._pub.connect(self._endpoint)
 
         # Set up replay socket: use ROUTER
@@ -435,7 +435,27 @@ class ZmqEventPublisher(EventPublisher):
         # 3) works in our non‑blocking poll loop alongside PUB
         if self._replay_endpoint is not None:
             self._replay = self._ctx.socket(zmq.ROUTER)
-            self._replay.bind(self._replay_endpoint)
+            self._replay_endpoint = self._bind(self._replay, self._replay_endpoint)
+
+    @staticmethod
+    def _is_bind_endpoint(endpoint: str) -> bool:
+        """Bind wildcard and ipc/inproc endpoints; connect to the rest."""
+        return "*" in endpoint or "::" in endpoint or endpoint.startswith(("ipc://", "inproc://"))
+
+    @staticmethod
+    def _bind(sock: zmq.Socket, endpoint: str) -> str:
+        """Bind; tcp://*:0 binds this node's IP and returns the bound endpoint."""
+        if endpoint != "tcp://*:0":
+            sock.bind(endpoint)
+            return endpoint
+        ip = get_ip()
+        if ip in ("0.0.0.0", "::"):
+            raise ValueError("tcp://*:0 needs a node IP; set APHRODITE_HOST_IP")
+        if is_valid_ipv6_address(ip):
+            sock.setsockopt(zmq.IPV6, 1)
+        sock.bind(get_tcp_uri(ip, 0))
+        _, _, port = split_zmq_path(sock.getsockopt_string(zmq.LAST_ENDPOINT))
+        return get_tcp_uri(ip, int(port))
 
     def _publisher_thread(self) -> None:
         """Background thread that processes the event queue."""
@@ -504,7 +524,8 @@ class ZmqEventPublisher(EventPublisher):
 
         Returns:
             The endpoint with the port offset by data_parallel_rank
-                or suffix appended
+                or suffix appended; a tcp port of 0 is left for the OS.
+
         """
         # Do nothing if input is None or data_parallel_rank is 0
         if not endpoint or data_parallel_rank == 0:
@@ -518,6 +539,8 @@ class ZmqEventPublisher(EventPublisher):
                 last_colon_idx = endpoint.rfind(":")
                 base_addr = endpoint[:last_colon_idx]
                 base_port = int(endpoint[last_colon_idx + 1 :])
+                if base_port == 0:
+                    return endpoint
                 new_port = base_port + data_parallel_rank
                 return f"{base_addr}:{new_port}"
             return endpoint

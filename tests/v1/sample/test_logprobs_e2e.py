@@ -3,6 +3,8 @@
 
 import lm_eval
 
+from tests.quantization.lm_eval_utils import evaluate_sonar
+
 from ...utils import RemoteOpenAIServer
 
 # arc-easy uses prompt_logprobs=1, logprobs=1
@@ -13,7 +15,12 @@ EXPECTED_VALUE = 0.62
 
 # FIXME(rob): enable prefix caching once supported.
 MODEL = "meta-llama/Llama-3.2-1B-Instruct"
-MODEL_ARGS = f"pretrained={MODEL},enforce_eager=True,enable_prefix_caching=False,gpu_memory_utilization=0.8"  # noqa: E501
+MODEL_ARGS = {
+    "pretrained": MODEL,
+    "enforce_eager": True,
+    "enable_prefix_caching": False,
+    "gpu_memory_utilization": 0.8,
+}
 SERVER_ARGS = [
     "--enforce_eager",
     "--no_enable_prefix_caching",
@@ -23,7 +30,7 @@ NUM_CONCURRENT = 100
 
 
 def test_prompt_logprobs_e2e():
-    results = lm_eval.simple_evaluate(model="aphrodite", model_args=MODEL_ARGS, tasks=TASK, batch_size="auto")
+    results = evaluate_sonar(MODEL_ARGS, tasks=TASK, batch_size="auto")
 
     measured_value = results["results"][TASK][FILTER]
     assert measured_value - RTOL < EXPECTED_VALUE and measured_value + RTOL > EXPECTED_VALUE, (

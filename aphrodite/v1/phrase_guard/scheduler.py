@@ -46,6 +46,7 @@ class RequestGuard:
         self.step_logprobs = None
         self.output_logprobs = None
         self.prompt_logprobs = None
+        self.prompt_token_id_logprobs = None
         self.reset_decoder()
 
     def reset_decoder(self):
@@ -102,7 +103,7 @@ class PhraseScheduler(AsyncScheduler):
                 raise ValueError("banned_strings requires the PhraseRetryProcessor logits processor")
             if (
                 self.return_sampling_mask
-                or self.enable_return_routed_experts
+                or self.aux_output_connector is not None
                 or request.resumable
                 or request.has_encoder_inputs
                 or request.prompt_embeds is not None
@@ -111,7 +112,11 @@ class PhraseScheduler(AsyncScheduler):
             if self.tokenizer is None:
                 self.tokenizer = cached_tokenizer_from_config(self.aphrodite_config.model_config)
             self.guards[request.request_id] = RequestGuard(request, self.tokenizer)
-            if params.num_logprobs is not None or params.prompt_logprobs is not None:
+            if (
+                params.num_logprobs is not None
+                or params.prompt_logprobs is not None
+                or params.prompt_logprob_token_ids is not None
+            ):
                 self.logprob_guards.add(request.request_id)
         super().add_request(request)
 
@@ -238,6 +243,7 @@ class PhraseScheduler(AsyncScheduler):
         if self.use_v2_model_runner:
             # Original prompt probabilities are already buffered or published.
             params.prompt_logprobs = None
+            params.prompt_logprob_token_ids = None
         params.extra_args = dict(params.extra_args or {})
         params.extra_args[RETRY_KEY] = (position, guard.blocked.copy())
         if self.use_v2_model_runner:
@@ -252,6 +258,7 @@ class PhraseScheduler(AsyncScheduler):
             return super().update_from_output(scheduler_output, model_runner_output)
         guards = {rid: self.guards[rid] for rid in model_runner_output.req_ids if rid in self.logprob_guards}
         prompt_logprobs = dict(model_runner_output.prompt_logprobs_dict)
+        prompt_token_id_logprobs = dict(model_runner_output.prompt_token_id_logprobs_dict)
         for rid, guard in guards.items():
             guard.step_logprobs = None
             guard.output_logprobs = None
@@ -262,8 +269,15 @@ class PhraseScheduler(AsyncScheduler):
                 )
             if rid in prompt_logprobs:
                 guard.prompt_logprobs = prompt_logprobs.pop(rid)
+            if rid in prompt_token_id_logprobs:
+                guard.prompt_token_id_logprobs = prompt_token_id_logprobs.pop(rid)
         outputs = super().update_from_output(
-            scheduler_output, replace(model_runner_output, prompt_logprobs_dict=prompt_logprobs)
+            scheduler_output,
+            replace(
+                model_runner_output,
+                prompt_logprobs_dict=prompt_logprobs,
+                prompt_token_id_logprobs_dict=prompt_token_id_logprobs,
+            ),
         )
         for batch in outputs.values():
             for output in batch.outputs:
@@ -271,6 +285,8 @@ class PhraseScheduler(AsyncScheduler):
                     output.new_logprobs = guard.output_logprobs
                     output.new_prompt_logprobs_tensors = guard.prompt_logprobs
                     guard.prompt_logprobs = None
+                    output.prompt_token_id_logprobs = guard.prompt_token_id_logprobs
+                    guard.prompt_token_id_logprobs = None
         for guard in guards.values():
             guard.step_logprobs = None
         return outputs

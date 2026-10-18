@@ -32,19 +32,13 @@ else:
 
 logger = init_logger(__name__)
 
-# The type of hidden states
-# Currently, T = torch.Tensor for all models except for Medusa
-# which has T = list[torch.Tensor]
-T = TypeVar("T", default=torch.Tensor)
-T_co = TypeVar("T_co", default=torch.Tensor, covariant=True)
-
 # NOTE: Unlike those in `interfaces.py`, we don't define `ClassVar` tags
 # for the base interfaces to avoid breaking OOT registration for existing models
 # that don't inherit from the base interface classes
 
 
 @runtime_checkable
-class AphroditeModel(Protocol[T_co]):
+class AphroditeModel(Protocol):
     """The interface required for all models in Aphrodite."""
 
     def __init__(self, aphrodite_config: AphroditeConfig, prefix: str = "") -> None: ...
@@ -53,7 +47,16 @@ class AphroditeModel(Protocol[T_co]):
         """Apply token embeddings to `input_ids`."""
         ...
 
-    def forward(self, input_ids: torch.Tensor, positions: torch.Tensor) -> T_co: ...
+    def forward(self, input_ids: torch.Tensor, positions: torch.Tensor) -> torch.Tensor: ...
+
+    def is_unused_checkpoint_weight(self, name: str) -> bool:
+        """Return True for checkpoint weights this model does not load.
+
+        Defining this method is optional for satisfying this interface.
+        Override with the same rule used in ``load_weights``. Models without
+        a selection rule keep every checkpoint weight by default.
+        """
+        return False
 
 
 def _check_aphrodite_model_init(model: type[object] | object) -> bool:
@@ -110,13 +113,13 @@ def is_aphrodite_model(
 
 
 @runtime_checkable
-class AphroditeModelForTextGeneration(AphroditeModel[T], Protocol[T]):
+class AphroditeModelForTextGeneration(AphroditeModel, Protocol):
     """The interface required for all generative models in Aphrodite."""
 
     def compute_logits(
         self,
-        hidden_states: T,
-    ) -> T | None:
+        hidden_states: torch.Tensor,
+    ) -> torch.Tensor | None:
         """Return `None` if TP rank > 0."""
         ...
 
@@ -137,14 +140,12 @@ def is_text_generation_model(
     if not is_aphrodite_model(model):
         return False
 
-    if isinstance(model, type):
-        return isinstance(model, AphroditeModelForTextGeneration)
-
-    return isinstance(model, AphroditeModelForTextGeneration)
+    # Optional protocol defaults are not inherited by structural models.
+    return callable(getattr(model, "compute_logits", None))
 
 
 @runtime_checkable
-class AphroditeModelForPooling(AphroditeModel[T_co], Protocol[T_co]):
+class AphroditeModelForPooling(AphroditeModel, Protocol):
     """The interface required for all pooling models in Aphrodite."""
 
     is_pooling_model: ClassVar[Literal[True]] = True

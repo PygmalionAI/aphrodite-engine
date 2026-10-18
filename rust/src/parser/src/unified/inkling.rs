@@ -45,6 +45,7 @@ const BLOCK_END_MARKERS: &[&str] = &[END_MESSAGE, CONTENT_MODEL_END_SAMPLING];
 const INKLING_TOOL_CONFIG: JsonToolCallConfig = JsonToolCallConfig {
     parser_name: "Inkling",
     start_marker: CONTENT_INVOKE_TOOL_JSON,
+    framed_start_marker: None,
     end_marker: END_MESSAGE,
     marker_whitespace: JsonToolCallWhitespace::Optional,
     delimiter: None,
@@ -425,8 +426,8 @@ mod tests {
     use super::{CONTENT_TEXT, CONTENT_THINKING, END_MESSAGE, InklingUnifiedParser, MESSAGE_MODEL};
     use crate::tool::Tool;
     use crate::unified::{UnifiedParser, UnifiedParserEvent, UnifiedParserOutput};
-    use thiserror_ext::AsReport;
     use aphrodite_tokenizer::{DecodedText, TokenAnchor, TokenAttribution, Tokenizer};
+    use thiserror_ext::AsReport;
 
     struct FakeTokenizer;
 
@@ -556,6 +557,7 @@ mod tests {
                 },
             }),
             strict: None,
+            defer_loading: None,
         }]
     }
 

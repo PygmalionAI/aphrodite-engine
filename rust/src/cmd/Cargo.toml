@@ -33,6 +33,7 @@ aphrodite-chat.workspace = true
 aphrodite-engine-core-client.workspace = true
 aphrodite-managed-engine.workspace = true
 aphrodite-server.workspace = true
+aphrodite-text.workspace = true
 aphrodite-tracing.workspace = true
 
 [dev-dependencies]

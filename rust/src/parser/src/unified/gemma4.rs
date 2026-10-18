@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-use serde_json::{Map, Number, Value};
 use aphrodite_tokenizer::{DecodedText, DynTokenizer};
+use serde_json::{Map, Number, Value};
 use winnow::ascii::multispace0 as ws0;
 use winnow::combinator::{alt, delimited, eof, opt, separated, seq, terminated};
 use winnow::error::{ContextError, ErrMode, ModalResult};
 use winnow::prelude::*;
 use winnow::stream::{Partial, Stream};
 use winnow::token::{literal, take_till, take_until};
-
 
 use super::{Result, UnifiedParser, UnifiedParserOutput, token_id};
 use crate::reasoning::last_reasoning_boundary;
@@ -21,6 +20,7 @@ use crate::utils::{incomplete, parse_buffered_event, partial_prefix_len, safe_te
 const REASONING_START: &str = "<|channel>thought\n";
 const CHANNEL_START: &str = "<|channel>";
 const CHANNEL_END: &str = "<channel|>";
+const FRAMED_CHANNEL_END: &str = "\n<channel|>";
 const TOOL_CALL_START: &str = "<|tool_call>";
 const TOOL_CALL_END: &str = "<tool_call|>";
 const STRING_DELIM: &str = "<|\"|>";
@@ -260,7 +260,9 @@ fn reasoning_start_event(input: &mut Gemma4Input<'_>) -> ModalResult<Gemma4Event
 
 /// Parse a Gemma4 reasoning end marker.
 fn reasoning_end_event(input: &mut Gemma4Input<'_>) -> ModalResult<Gemma4Event> {
-    literal(CHANNEL_END).value(Gemma4Event::ReasoningEnd).parse_next(input)
+    alt((literal(FRAMED_CHANNEL_END), literal(CHANNEL_END)))
+        .value(Gemma4Event::ReasoningEnd)
+        .parse_next(input)
 }
 
 /// Parse a Gemma4 tool-call start marker.
@@ -309,7 +311,8 @@ fn safe_text_event(input: &mut Gemma4Input<'_>) -> ModalResult<Gemma4Event> {
 
 /// Parse a safe reasoning run before the next Gemma4 marker.
 fn safe_reasoning_event(input: &mut Gemma4Input<'_>) -> ModalResult<Gemma4Event> {
-    safe_text_len_mul(input, &[CHANNEL_END, TOOL_CALL_START]).map(|_| Gemma4Event::Reasoning)
+    safe_text_len_mul(input, &[FRAMED_CHANNEL_END, CHANNEL_END, TOOL_CALL_START])
+        .map(|_| Gemma4Event::Reasoning)
 }
 
 /// Parse raw Gemma4 arguments through the first end marker outside a Gemma string.
@@ -507,10 +510,10 @@ fn parse_gemma4_scalar(value: &str) -> Value {
 mod tests {
     use std::sync::Arc;
 
-    use serde_json::{Value, json};
-    use thiserror_ext::AsReport;
     use aphrodite_tokenizer::test_utils::TestTokenizer;
     use aphrodite_tokenizer::{DecodedText, TokenAnchor, TokenAttribution};
+    use serde_json::{Value, json};
+    use thiserror_ext::AsReport;
     use winnow::combinator::{eof, terminated};
     use winnow::error::ErrMode;
     use winnow::prelude::*;
@@ -614,48 +617,56 @@ mod tests {
                 description: None,
                 parameters: json!({ "type": "object" }),
                 strict: None,
+                defer_loading: None,
             },
             Tool {
                 name: "get_time".to_string(),
                 description: None,
                 parameters: json!({ "type": "object" }),
                 strict: None,
+                defer_loading: None,
             },
             Tool {
                 name: "write_file".to_string(),
                 description: None,
                 parameters: json!({ "type": "object" }),
                 strict: None,
+                defer_loading: None,
             },
             Tool {
                 name: "Edit".to_string(),
                 description: None,
                 parameters: json!({ "type": "object" }),
                 strict: None,
+                defer_loading: None,
             },
             Tool {
                 name: "search".to_string(),
                 description: None,
                 parameters: json!({ "type": "object" }),
                 strict: None,
+                defer_loading: None,
             },
             Tool {
                 name: "set".to_string(),
                 description: None,
                 parameters: json!({ "type": "object" }),
                 strict: None,
+                defer_loading: None,
             },
             Tool {
                 name: "get_status".to_string(),
                 description: None,
                 parameters: json!({ "type": "object" }),
                 strict: None,
+                defer_loading: None,
             },
             Tool {
                 name: "todowrite".to_string(),
                 description: None,
                 parameters: json!({ "type": "object" }),
                 strict: None,
+                defer_loading: None,
             },
         ]
     }
@@ -685,6 +696,18 @@ mod tests {
         }
         output.append(parser.finish().unwrap());
         output.coalesce()
+    }
+
+    #[test]
+    fn gemma4_reasoning_framing_preserves_extra_newlines_at_every_split() {
+        let wire = "<|channel>thought\n\n  reason\n\n<channel|>    answer\n";
+        for split in 0..=wire.len() {
+            let output = collect_stream(&[&wire[..split], &wire[split..]]);
+            assert_eq!(output.reasoning_text(), "\n  reason\n", "split {split}");
+            assert_eq!(output.normal_text(), "    answer\n", "split {split}");
+        }
+        let output = collect_stream(&["<|channel>thought\nreason\n<channel"]);
+        assert_eq!(output.reasoning_text(), "reason\n<channel");
     }
 
     fn first_call(output: &UnifiedParserOutput) -> ToolCallDelta {

@@ -5,64 +5,21 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import torch
-
-from aphrodite.v1.kv_cache_interface import (
-    FullAttentionSpec,
-    KVCacheGroupSpec,
-    MLAAttentionSpec,
-    SlidingWindowSpec,
-)
 from aphrodite.v1.kv_offload.base import (
     OffloadingSpec,
     make_offload_key,
 )
 from aphrodite.v1.kv_offload.file_mapper import FileMapper
 
-# ---------------------------------------------------------------------------
-# Shared mocks (mirrors test_fs_tier.py pattern)
-# ---------------------------------------------------------------------------
-
-_MOCK_APHRODITE_CONFIG = MagicMock()
-_MOCK_APHRODITE_CONFIG.model_config.model = "test-model"
-_MOCK_APHRODITE_CONFIG.cache_config.block_size = 16
-_MOCK_APHRODITE_CONFIG.cache_config.cache_dtype = "torch.float32"
-_MOCK_APHRODITE_CONFIG.parallel_config.tensor_parallel_size = 1
-_MOCK_APHRODITE_CONFIG.parallel_config.pipeline_parallel_size = 1
-_MOCK_APHRODITE_CONFIG.parallel_config.prefill_context_parallel_size = 1
-_MOCK_APHRODITE_CONFIG.parallel_config.decode_context_parallel_size = 1
-_MOCK_APHRODITE_CONFIG.parallel_config.rank = 0
-
-_MOCK_KV_CACHE_CONFIG = MagicMock()
-_MOCK_KV_CACHE_CONFIG.kv_cache_groups = []
-
-_MOCK_OFFLOADING_SPEC = MagicMock(spec=OffloadingSpec)
-_MOCK_OFFLOADING_SPEC.config = SimpleNamespace(
-    model=SimpleNamespace(name="test-model", dtype="float32"),
-    cache=SimpleNamespace(tokens_per_hash=16),
-    parallel=SimpleNamespace(
-        tp_size=1,
-        pp_size=1,
-        pcp_size=1,
-        dcp_size=1,
-        rank=0,
-        is_parallelism_agnostic=True,
-    ),
-    groups=(),
-    replicated_layout=False,
-)
-_MOCK_OFFLOADING_SPEC.blocks_per_chunk = 1
-
-
-# ---------------------------------------------------------------------------
-# Helper
-# ---------------------------------------------------------------------------
-
 
 def make_mapper_from_offloading_spec(**kwargs) -> FileMapper:
     """Helper to create FileMapper with customizable mock config."""
     mock_offloading_spec = MagicMock(spec=OffloadingSpec)
     mock_offloading_spec.config = SimpleNamespace(
+        groups=tuple(
+            SimpleNamespace(tokens_per_block=tokens_per_block, layer_names=(layer_name,), group_id=group_id)
+            for group_id, (tokens_per_block, layer_name) in enumerate(kwargs.get("groups", ()))
+        ),
         model=SimpleNamespace(
             name=kwargs.get("model_name", "test-model"),
             dtype=kwargs.get("dtype", "float16"),
@@ -73,17 +30,13 @@ def make_mapper_from_offloading_spec(**kwargs) -> FileMapper:
             pp_size=kwargs.get("pp_size", 1),
             pcp_size=kwargs.get("pcp_size", 1),
             dcp_size=kwargs.get("dcp_size", 1),
-            data_parallel_index=0,
-            data_parallel_size=1,
-            data_parallel_rank_local=None,
+            rank=kwargs.get("rank", 0),
             is_parallelism_agnostic=kwargs.get("is_parallelism_agnostic", False),
         ),
         replicated_layout=kwargs.get("replicated_layout", False),
         canonical_layout=kwargs.get("canonical_layout", False),
         kv_cache_layout=kwargs.get("kv_cache_layout", "LBNHC"),
     )
-    if kwargs.get("omit_replicated_layout", False):
-        del mock_offloading_spec.config.replicated_layout
     mock_offloading_spec.blocks_per_chunk = kwargs.get("blocks_per_chunk", 1)
 
     return FileMapper.from_offloading_spec(
@@ -100,8 +53,7 @@ def make_mapper_from_offloading_spec(**kwargs) -> FileMapper:
 
 
 def test_get_file_name_full_structure():
-    """
-    Path must match: <base_path>_r<rank>/<hhh>/<hh>_g<group_idx>/<hash_hex>.bin
+    """Path must match: <base_path>_r<rank>/<hhh>/<hh>_g<group_idx>/<hash_hex>.bin.
 
     Concretely:
       - The segment immediately after base_path must end with `_r0`
@@ -148,38 +100,11 @@ def test_get_config_file_path():
     assert config_path == f"{fm.base_path}/config.json"
 
 
-# ---------------------------------------------------------------------------
-# parallel_agnostic: honored only for a single non-MLA full-attention group
-# ---------------------------------------------------------------------------
-
-
-def _full_attention_group() -> KVCacheGroupSpec:
-    return KVCacheGroupSpec(
-        layer_names=["layer0"],
-        kv_cache_spec=FullAttentionSpec(block_size=16, num_kv_heads=4, head_size=128, dtype=torch.float32),
-    )
-
-
-def _sliding_window_group() -> KVCacheGroupSpec:
-    return KVCacheGroupSpec(
-        layer_names=["layer0"],
-        kv_cache_spec=SlidingWindowSpec(
-            block_size=16,
-            num_kv_heads=4,
-            head_size=128,
-            dtype=torch.float32,
-            sliding_window=128,
-        ),
-    )
-
-
-def test_parallel_agnostic_enabled_for_single_full_attention():
-    # tp/rank are collapsed out of the namespace so the cache is shared
-    # across tensor-parallel sizes.
+def test_parallel_agnostic_enabled_by_resolved_config():
     fm = make_mapper_from_offloading_spec(
         tp_size=2,
         rank=1,
-        kv_cache_groups=[_full_attention_group()],
+        is_parallelism_agnostic=True,
         parallel_agnostic=True,
     )
     assert fm.fields["tp_size"] == 1
@@ -187,48 +112,11 @@ def test_parallel_agnostic_enabled_for_single_full_attention():
     assert "parallel_agnostic" not in fm.fields
 
 
-def test_parallel_agnostic_disabled_for_multiple_groups():
-    # More than one KV-cache group (hybrid model) => keep per-layout namespacing.
-    fm = make_mapper_from_offloading_spec(
-        tp_size=2,
-        kv_cache_groups=[_full_attention_group(), _full_attention_group()],
-        parallel_agnostic=True,
-    )
-    assert fm.fields["tp_size"] == 2
-    assert fm.fields["parallel_agnostic"] is False
-
-
-def test_parallel_agnostic_disabled_for_non_full_attention():
-    # Single group but not full attention (sliding window) => keep namespacing.
-    fm = make_mapper_from_offloading_spec(
-        tp_size=2,
-        kv_cache_groups=[_sliding_window_group()],
-        parallel_agnostic=True,
-    )
-    assert fm.fields["tp_size"] == 2
-    assert fm.fields["parallel_agnostic"] is False
-
-
-def test_parallel_agnostic_excludes_mla():
-    # MLA latent KV is replicated per rank, so its offloaded blocks are not
-    # parallelism-invariant: the opt-in must not collapse tp/rank.
-    group = KVCacheGroupSpec(
-        layer_names=["layer0"],
-        kv_cache_spec=MLAAttentionSpec(block_size=16, num_kv_heads=1, head_size=576, dtype=torch.float32),
-    )
-    fm = make_mapper_from_offloading_spec(tp_size=2, rank=1, kv_cache_groups=[group], parallel_agnostic=True)
-    assert fm.fields["tp_size"] == 2
-    assert fm.rank == 1
-    assert fm.fields["parallel_agnostic"] is False
-
-
-def test_parallel_agnostic_disabled_on_v2_model_runner():
-    # V2's KV layout is not known to be parallelism-invariant: don't collapse.
+def test_parallel_agnostic_disabled_by_resolved_config():
     fm = make_mapper_from_offloading_spec(
         tp_size=2,
         rank=1,
-        kv_cache_groups=[_full_attention_group()],
-        use_v2_model_runner=True,
+        is_parallelism_agnostic=False,
         parallel_agnostic=True,
     )
     assert fm.fields["tp_size"] == 2
@@ -238,11 +126,10 @@ def test_parallel_agnostic_disabled_on_v2_model_runner():
 
 def test_parallel_agnostic_separates_persistent_layouts():
     agnostic = make_mapper_from_offloading_spec(
-        kv_cache_groups=[_full_attention_group()],
+        is_parallelism_agnostic=True,
         parallel_agnostic=True,
     )
     specific = make_mapper_from_offloading_spec(
-        kv_cache_groups=[_full_attention_group()],
         is_parallelism_agnostic=False,
         parallel_agnostic=True,
     )
@@ -307,7 +194,6 @@ def test_replicated_layout_requires_caller_opt_in():
 
 def test_replicated_and_parallelism_agnostic_separate_layouts():
     via_agnostic = make_mapper_from_offloading_spec(
-        kv_cache_groups=[_full_attention_group()],
         is_parallelism_agnostic=True,
         replicated_layout=False,
         parallel_agnostic=True,

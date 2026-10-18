@@ -3,6 +3,7 @@
 
 import string
 from collections.abc import Sequence
+from typing import cast
 
 import pytest
 
@@ -10,6 +11,7 @@ from aphrodite.entrypoints.openai.chat_completion.protocol import ChatCompletion
 from aphrodite.parser.parser_manager import ParserManager
 from aphrodite.reasoning import ReasoningParserManager
 from aphrodite.reasoning.k2_horizon_reasoning_parser import K2HorizonReasoningParser
+from aphrodite.tokenizers import TokenizerLike
 
 pytestmark = pytest.mark.skip_global_cleanup
 
@@ -57,6 +59,10 @@ class K2Tokenizer:
         return "".join(inverse_vocab[token_id] for token_id in ids)
 
 
+def _k2_tokenizer() -> TokenizerLike:
+    return cast(TokenizerLike, K2Tokenizer())
+
+
 def _request(**kwargs) -> ChatCompletionRequest:
     return ChatCompletionRequest(
         model="k2-horizon",
@@ -68,7 +74,7 @@ def _request(**kwargs) -> ChatCompletionRequest:
 @pytest.mark.parametrize("effort", ["high", "medium", "low"])
 def test_reasoning_effort_selects_tokens(effort: str):
     parser = K2HorizonReasoningParser(
-        K2Tokenizer(),
+        _k2_tokenizer(),
         chat_template_kwargs={"reasoning_effort": effort},
     )
 
@@ -76,7 +82,7 @@ def test_reasoning_effort_selects_tokens(effort: str):
 
 
 def test_reasoning_effort_precedence_and_default():
-    tokenizer = K2Tokenizer()
+    tokenizer = _k2_tokenizer()
     request = _request(
         reasoning_effort="medium",
         chat_template_kwargs={"reasoning_effort": "low"},
@@ -99,13 +105,13 @@ def test_reasoning_effort_precedence_and_default():
 def test_invalid_reasoning_effort_raises(effort: str | None):
     with pytest.raises(ValueError, match="Unsupported reasoning_effort"):
         K2HorizonReasoningParser(
-            K2Tokenizer(),
+            _k2_tokenizer(),
             chat_template_kwargs={"reasoning_effort": effort},
         )
 
 
 def test_non_streaming_explicit_and_implicit_boundaries():
-    parser = K2HorizonReasoningParser(K2Tokenizer())
+    parser = K2HorizonReasoningParser(_k2_tokenizer())
     request = _request()
 
     assert parser.extract_reasoning("<ifm|think>plan</ifm|think>answer", request) == (
@@ -120,7 +126,7 @@ def test_non_streaming_explicit_and_implicit_boundaries():
 
 @pytest.mark.parametrize("reasoning", ["plan", " ", "\n", " \n"])
 def test_character_split_reasoning_stream(reasoning: str):
-    parser = K2HorizonReasoningParser(K2Tokenizer())
+    parser = K2HorizonReasoningParser(_k2_tokenizer())
     reasoning_parts: list[str] = []
     content_parts: list[str] = []
 
@@ -144,7 +150,7 @@ def test_character_split_reasoning_stream(reasoning: str):
 
 
 def test_latest_boundary_controls_reasoning_state():
-    tokenizer = K2Tokenizer()
+    tokenizer = _k2_tokenizer()
     parser = K2HorizonReasoningParser(tokenizer)
     vocab = tokenizer.get_vocab()
 
@@ -153,7 +159,7 @@ def test_latest_boundary_controls_reasoning_state():
 
 
 def test_composed_streaming_reasoning_to_tool_handoff():
-    tokenizer = K2Tokenizer()
+    tokenizer = _k2_tokenizer()
     tools = [
         {
             "type": "function",

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import torch
-from transformers import PretrainedConfig
+from transformers import PreTrainedConfig
 
 from aphrodite.config import (
     AphroditeConfig,
@@ -24,7 +24,7 @@ class GatedDeltaNetAttention(PluggableLayer, MambaBase):
 
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         aphrodite_config: AphroditeConfig,
         prefix: str = "",
     ) -> None:

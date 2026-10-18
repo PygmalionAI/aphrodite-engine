@@ -5,6 +5,8 @@ import itertools
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+import numpy as np
+
 from aphrodite.logger import init_logger
 from aphrodite.logprobs import (
     FlatLogprobs,
@@ -38,6 +40,8 @@ class LogprobsProcessor:
     cumulative_logprob: float | None
     num_logprobs: int | None
     num_prompt_logprobs: int | None
+    # [num_scored_rows, num_token_ids], set once on the final prefill chunk.
+    prompt_token_id_logprobs: np.ndarray | None = None
 
     @classmethod
     def from_new_request(
@@ -70,7 +74,6 @@ class LogprobsProcessor:
           logprobs_lists: the lists of logprob tokens, logprobs, and ranks.
 
         """
-
         assert self.num_logprobs is not None
         assert self.logprobs is not None
         assert self.cumulative_logprob is not None
@@ -119,7 +122,6 @@ class LogprobsProcessor:
                                    tensors.
 
         """
-
         # Prompt logprobs are enabled.
         assert self.num_prompt_logprobs is not None
         assert self.prompt_logprobs is not None
@@ -173,7 +175,7 @@ class LogprobsProcessor:
             )
 
     def pop_prompt_logprobs(self) -> PromptLogprobs | None:
-        """Pop and return all request prompt logprobs
+        """Pop and return all request prompt logprobs.
 
         The logprobs processor aggregates prompt chunk logprobs
         over one or more prefill chunks. This method returns
@@ -185,11 +187,18 @@ class LogprobsProcessor:
         Returns:
           None if prompt logprobs are disabled for this request.
           List of all prompt logprobs, otherwise.
+
         """
         plp = self.prompt_logprobs
         if plp:
             self.prompt_logprobs = []
         return plp
+
+    def pop_prompt_token_id_logprobs(self) -> np.ndarray | None:
+        """Pop and return the fixed-ID prompt scores."""
+        scores = self.prompt_token_id_logprobs
+        self.prompt_token_id_logprobs = None
+        return scores
 
     @staticmethod
     def _get_sampled_context_ids(
@@ -209,6 +218,7 @@ class LogprobsProcessor:
 
         Returns:
             List of sampled token IDs, oldest first, most recent last.
+
         """
         if not logprobs_source:
             return []
@@ -249,6 +259,7 @@ class LogprobsProcessor:
         Returns:
             The corrected decoded string, or empty string if the byte
             sequence is genuinely incomplete at this point.
+
         """
         assert self.tokenizer is not None
 
@@ -309,6 +320,7 @@ class LogprobsProcessor:
             context_token_ids: Preceding sampled token IDs providing
                 sequential context. If None, extracted from
                 self.logprobs.
+
         """
         if context_token_ids is None:
             context_token_ids = self._get_sampled_context_ids(self.logprobs)
@@ -332,3 +344,5 @@ class LogprobsProcessor:
             self._update_sample_logprobs(output.new_logprobs)
         if output.new_prompt_logprobs_tensors is not None:
             self._update_prompt_logprobs(output.new_prompt_logprobs_tensors)
+        if output.prompt_token_id_logprobs is not None:
+            self.prompt_token_id_logprobs = output.prompt_token_id_logprobs.numpy()

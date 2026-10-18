@@ -3,10 +3,10 @@
 
 use std::time::Duration;
 
-use criterion::{BatchSize, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use tool_parser::parsers::DeepSeek31Parser as ExternalDeepSeek31Parser;
 use aphrodite_parser::tool::test_utils::{split_by_chars, test_tools};
 use aphrodite_parser::tool::{DeepSeekV31ToolParser, Tool, ToolParser};
+use criterion::{BatchSize, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use tool_parser::parsers::DeepSeek31Parser as ExternalDeepSeek31Parser;
 
 mod utils;
 use utils::{feed_external_parser, feed_parser, openai_tools};

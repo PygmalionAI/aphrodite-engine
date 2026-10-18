@@ -81,6 +81,7 @@ class MambaConvSplitInfo:
                 < 0:   P_TP > D_TP — P pages are smaller, D reads entire
                        P page.  Local dims are scaled down by |tp_ratio|
                        to get P-sized offsets.
+
         """
         offsets: list[tuple[int, int]] = []
         if tp_ratio >= 1:
@@ -119,6 +120,7 @@ def derive_mamba_conv_split(
     Returns:
         MambaConvSplitInfo with per-rank sub-projection dims, conv_rows,
         conv_dtype_size, and ssm_sizes (conv_state_bytes, ssm_state_bytes).
+
     """
     _supported = (
         MambaAttentionBackendEnum.MAMBA1,
@@ -221,5 +223,6 @@ def compute_physical_blocks_per_logical(ssm_sizes: tuple[int, ...], block_len: i
     Args:
         ssm_sizes: (conv_state_bytes, ssm_state_bytes) from NixlAgentMetadata.
         block_len: the engine's block_len in bytes (from block_lens[0]).
+
     """
     return math.ceil((ssm_sizes[0] + ssm_sizes[1]) / block_len)

@@ -8,7 +8,7 @@ from typing import Annotated, Literal, TypeAlias
 
 import torch
 import torch.nn as nn
-from transformers import PretrainedConfig
+from transformers import PreTrainedConfig
 
 from aphrodite.config import AphroditeConfig
 from aphrodite.model_executor.layers.quantization import QuantizationConfig
@@ -37,13 +37,12 @@ from .utils import AutoWeightsLoader, init_aphrodite_registered_model, maybe_pre
 
 
 class Eagle2_5_VLImagePixelInputs(TensorSchema):
-    """
-    Dimensions:
-        - bn: Batch size * number of images
-        - bnp: Batch size * number of images * (1 + num_patches)
-        - c: Number of channels (3)
-        - h: Height of each image patch
-        - w: Width of each image patch
+    """Dimensions:
+    - bn: Batch size * number of images
+    - bnp: Batch size * number of images * (1 + num_patches)
+    - c: Number of channels (3)
+    - h: Height of each image patch
+    - w: Width of each image patch
     """
 
     type: Literal["pixel_values"]
@@ -52,11 +51,10 @@ class Eagle2_5_VLImagePixelInputs(TensorSchema):
 
 
 class Eagle2_5_VLImageEmbeddingInputs(TensorSchema):
-    """
-    Dimensions:
-        - n: Number of images
-        - f: Total image feature size
-        - h: Hidden size (must match the hidden size of language model backbone)
+    """Dimensions:
+    - n: Number of images
+    - f: Total image feature size
+    - h: Hidden size (must match the hidden size of language model backbone)
     """
 
     type: Literal["image_embeds"]
@@ -117,8 +115,7 @@ class Eagle2_5_VLMultiModalProcessor(BaseInternVLMultiModalProcessor[Eagle2_5_VL
     dummy_inputs=Eagle2_5_VLDummyInputsBuilder,
 )
 class Eagle2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP, SupportsLoRA):
-    """
-    Eagle2.5-VL model for conditional generation.
+    """Eagle2.5-VL model for conditional generation.
 
     Architecture:
         - Vision Encoder: SigLIP
@@ -180,7 +177,7 @@ class Eagle2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal, Support
 
     def _init_vision_model(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         quant_config: QuantizationConfig | None,
         prefix: str,
     ):
@@ -205,7 +202,7 @@ class Eagle2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal, Support
             prefix=prefix,
         )
 
-    def _init_mlp1(self, config: PretrainedConfig) -> nn.Module:
+    def _init_mlp1(self, config: PreTrainedConfig) -> nn.Module:
         """Initialize MLP projection layer."""
         vit_hidden_size = config.vision_config.hidden_size
         llm_hidden_size = config.text_config.hidden_size
@@ -218,8 +215,7 @@ class Eagle2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal, Support
         )
 
     def pixel_shuffle(self, x: torch.Tensor, scale_factor: float = 0.5) -> torch.Tensor:
-        """
-        Pixel shuffle operation for downsampling vision features.
+        """Pixel shuffle operation for downsampling vision features.
 
         Args:
             x: Input tensor of shape (n, w, h, c)
@@ -227,6 +223,7 @@ class Eagle2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal, Support
 
         Returns:
             Downsampled tensor
+
         """
         n, w, h, c = x.size()
         # N, W, H, C --> N, W, H * scale, C // scale
@@ -244,14 +241,14 @@ class Eagle2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal, Support
         return x
 
     def extract_feature(self, pixel_values: torch.Tensor) -> torch.Tensor:
-        """
-        Extract visual features from pixel values.
+        """Extract visual features from pixel values.
 
         Args:
             pixel_values: Input pixel values of shape (batch, channels, height, width)
 
         Returns:
             Visual embeddings
+
         """
         vit_embeds = self.vision_model(pixel_values=pixel_values)
 

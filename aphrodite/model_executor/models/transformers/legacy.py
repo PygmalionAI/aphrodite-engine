@@ -20,34 +20,37 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from aphrodite.model_executor.models.utils import WeightsMapper
 from aphrodite.sequence import IntermediateTensors
+
+from .base import Base
 
 if TYPE_CHECKING:
     from aphrodite.config import AphroditeConfig
 
 
-class LegacyMixin:
+class LegacyMixin(Base):
     def __init__(self, *, aphrodite_config: "AphroditeConfig", prefix: str = ""):
         super().__init__(aphrodite_config=aphrodite_config, prefix=prefix)
 
-        # Drop unsupported/unwanted output embeddings layers.
-        self.hf_to_aphrodite_mapper.orig_to_new_prefix.update(
-            {
+        self.hf_to_aphrodite_mapper |= WeightsMapper(
+            # Drop unsupported/unwanted output embeddings layers.
+            orig_to_new_prefix={
                 "model.lm_head.": None,
                 "model.predictions.": None,
                 "model.qa_outputs.": None,
                 "model.embeddings_project.": None,
                 "model.discriminator_predictions.": None,
-            }
+            },
+            orig_to_new_substr={
+                # Some encoder models have the position_ids buffer in the checkpoint.
+                # Aphrodite always passes position_ids as an argument, so drop the buffer.
+                "position_ids": None,
+                # Some encoder models have the bias of the final classifier layer in
+                # the checkpoint. Aphrodite does not use this bias, so drop it.
+                "score.bias": None,
+            },
         )
-
-        # Some encoder models have the position_ids buffer in the checkpoint. Aphrodite will
-        # always pass position_ids as an argument, so we drop the  buffer if it exists.
-        self.hf_to_aphrodite_mapper.orig_to_new_substr["position_ids"] = None
-
-        # Some encoder models have the bias of the final classifier layer in the
-        # checkpoint. Aphrodite does not use this bias, so we drop it if it exists.
-        self.hf_to_aphrodite_mapper.orig_to_new_substr["score.bias"] = None
 
         # roberta-like models an extra padding in positions.
         # FIXME(Isotr0py): This is quite hacky for roberta edge case,
@@ -61,6 +64,7 @@ class LegacyMixin:
         positions: torch.Tensor,
         intermediate_tensors: IntermediateTensors | None = None,
         inputs_embeds: torch.Tensor | None = None,
+        **kwargs,
     ) -> torch.Tensor | IntermediateTensors:
         if self.is_roberta:
             # RoBERTa positions start at padding_idx + 1.
@@ -72,4 +76,5 @@ class LegacyMixin:
             positions=positions,
             intermediate_tensors=intermediate_tensors,
             inputs_embeds=inputs_embeds,
+            **kwargs,
         )

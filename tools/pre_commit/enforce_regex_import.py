@@ -11,6 +11,9 @@ ALLOWED_PATTERNS = [
     re.compile(r"^\s*import\s+regex\s*$"),
 ]
 
+# Grammar validation consumes CPython's parsed regex tree, which regex does not expose.
+CPYTHON_PARSER_IMPORT = re.compile(r"from\s+re\s+import\s+(?:_constants|_parser)(?:\s*,\s*(?:_constants|_parser))*")
+
 
 def get_staged_python_files() -> list[str]:
     try:
@@ -28,6 +31,8 @@ def get_staged_python_files() -> list[str]:
 
 def is_forbidden_import(line: str) -> bool:
     line = line.strip()
+    if CPYTHON_PARSER_IMPORT.fullmatch(line.partition("#")[0].strip()):
+        return False
     return bool(FORBIDDEN_PATTERNS.match(line) and not any(pattern.match(line) for pattern in ALLOWED_PATTERNS))
 
 

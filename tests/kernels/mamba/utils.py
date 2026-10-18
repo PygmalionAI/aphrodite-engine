@@ -7,8 +7,7 @@ from einops import rearrange, repeat
 
 
 def selective_state_update_ref(state, x, dt, A, B, C, D=None, z=None, dt_bias=None, dt_softplus=False):
-    """
-    Argument:
+    """Argument:
         state: (batch, dim, dstate) or (batch, nheads, dim, dstate)
         x: (batch, dim) or (batch, nheads, dim)
         dt: (batch, dim) or (batch, nheads, dim)
@@ -18,8 +17,10 @@ def selective_state_update_ref(state, x, dt, A, B, C, D=None, z=None, dt_bias=No
         D: (dim,) or (nheads, dim)
         z: (batch, dim) or (batch, nheads, dim)
         dt_bias: (dim,) or (nheads, dim)
+
     Return:
         out: (batch, dim) or (batch, nheads, dim)
+
     """
     has_heads = state.dim() > 3
     if state.dim() == 3:

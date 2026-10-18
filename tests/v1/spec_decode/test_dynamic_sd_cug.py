@@ -25,7 +25,7 @@ def _create_aphrodite_config_for_dsd(
     max_num_seqs: int,
     max_spec_tokens: int,
     *,
-    cudagraph_mode: str = "FULL_AND_PIECEWISE",
+    cudagraph_mode: CUDAGraphMode = CUDAGraphMode.FULL_AND_PIECEWISE,
     use_dynamic_sd: bool = True,
     num_spec_per_batch_size: list[tuple[int, int, int]] | None = None,
 ) -> MagicMock:
@@ -39,7 +39,6 @@ def _create_aphrodite_config_for_dsd(
     a schedule covering every query length in ``[1, max_decode_query_len]`` is
     generated.
     """
-
     max_decode_query_len = max_spec_tokens + 1
     max_capture_tokens = max_num_seqs * max_decode_query_len
 
@@ -87,7 +86,6 @@ def test_dynamic_sd_full_cudagraph_covers_all_uniform_decode_shapes(monkeypatch)
     shapes have been built, dispatch() should pick a FULL graph for every
     uniform decode batch shape produced by DSD up to max_num_seqs.
     """
-
     max_num_seqs = 512
     max_spec_tokens = 7
     max_decode_query_len = max_spec_tokens + 1
@@ -124,7 +122,7 @@ def test_dynamic_sd_full_cudagraph_covers_all_uniform_decode_shapes(monkeypatch)
                 num_reqs,
                 num_tokens,
                 max_query_len,
-                has_prefill=False,
+                decode_graph_eligible=True,
             )
 
             # The scheduler should mark every one of these shapes as a uniform
@@ -178,7 +176,6 @@ def test_dynamic_sd_cudagraphs_use_clamped_query_length(monkeypatch):
 
 def test_dynamic_sd_non_uniform_batch_falls_back_to_piecewise(monkeypatch):
     """DSD should use PIECEWISE when the batch is not a uniform decode batch."""
-
     max_spec_tokens = 4
 
     monkeypatch.setattr(
@@ -190,7 +187,7 @@ def test_dynamic_sd_non_uniform_batch_falls_back_to_piecewise(monkeypatch):
     aphrodite_config = _create_aphrodite_config_for_dsd(
         max_num_seqs=512,
         max_spec_tokens=max_spec_tokens,
-        cudagraph_mode="FULL_AND_PIECEWISE",
+        cudagraph_mode=CUDAGraphMode.FULL_AND_PIECEWISE,
         use_dynamic_sd=True,
     )
     manager = gpu_cudagraph_utils.CudaGraphManager(
@@ -224,7 +221,6 @@ def test_prompt_chunks_shaped_like_spec_decode_miss_the_full_graph(monkeypatch):
     by coincidence; replaying the FULL graph over them corrupts every request
     in the batch. See https://github.com/vllm-project/vllm/issues/49918.
     """
-
     max_spec_tokens = 7
     decode_query_len = max_spec_tokens + 1
 
@@ -252,10 +248,15 @@ def test_prompt_chunks_shaped_like_spec_decode_miss_the_full_graph(monkeypatch):
     num_tokens = num_reqs * decode_query_len
 
     # The batch shape is indistinguishable from a full batch of spec decodes.
-    assert get_uniform_decode_token_count(num_reqs, num_tokens, decode_query_len, has_prefill=False) == decode_query_len
+    assert (
+        get_uniform_decode_token_count(num_reqs, num_tokens, decode_query_len, decode_graph_eligible=True)
+        == decode_query_len
+    )
 
     # Two of the requests are decode_query_len tokens into a longer prompt.
-    uniform_tok_count = get_uniform_decode_token_count(num_reqs, num_tokens, decode_query_len, has_prefill=True)
+    uniform_tok_count = get_uniform_decode_token_count(
+        num_reqs, num_tokens, decode_query_len, decode_graph_eligible=False
+    )
     assert uniform_tok_count is None
     desc = manager.dispatch(
         num_reqs=num_reqs,
@@ -267,7 +268,9 @@ def test_prompt_chunks_shaped_like_spec_decode_miss_the_full_graph(monkeypatch):
     assert desc.uniform_token_count is None
 
     # The same shape with every request decoding still gets its FULL graph.
-    uniform_tok_count = get_uniform_decode_token_count(num_reqs, num_tokens, decode_query_len, has_prefill=False)
+    uniform_tok_count = get_uniform_decode_token_count(
+        num_reqs, num_tokens, decode_query_len, decode_graph_eligible=True
+    )
     assert uniform_tok_count == decode_query_len
     desc = manager.dispatch(
         num_reqs=num_reqs,
@@ -281,7 +284,6 @@ def test_prompt_chunks_shaped_like_spec_decode_miss_the_full_graph(monkeypatch):
 
 def test_basic_sd_does_not_capture_shorter_full_decode_shapes(monkeypatch):
     """Without DSD, only the max decode query length should get FULL graphs."""
-
     max_num_seqs = 512
     max_spec_tokens = 7
     max_decode_query_len = max_spec_tokens + 1
@@ -295,7 +297,7 @@ def test_basic_sd_does_not_capture_shorter_full_decode_shapes(monkeypatch):
     aphrodite_config = _create_aphrodite_config_for_dsd(
         max_num_seqs=max_num_seqs,
         max_spec_tokens=max_spec_tokens,
-        cudagraph_mode="FULL_AND_PIECEWISE",
+        cudagraph_mode=CUDAGraphMode.FULL_AND_PIECEWISE,
         use_dynamic_sd=False,
     )
     manager = gpu_cudagraph_utils.CudaGraphManager(
@@ -315,7 +317,7 @@ def test_basic_sd_does_not_capture_shorter_full_decode_shapes(monkeypatch):
                 num_reqs,
                 num_tokens,
                 max_query_len,
-                has_prefill=False,
+                decode_graph_eligible=True,
             )
             assert uniform_tok_count == max_query_len
 
@@ -342,7 +344,6 @@ def test_dynamic_sd_only_captures_scheduled_query_lengths(monkeypatch):
     FULL graphs, while every other query length (e.g. the lower values 1, 2, 3)
     must fall back to the mixed-batch PIECEWISE graph.
     """
-
     max_num_seqs = 128
     max_spec_tokens = 7
     max_decode_query_len = max_spec_tokens + 1
@@ -362,7 +363,7 @@ def test_dynamic_sd_only_captures_scheduled_query_lengths(monkeypatch):
     aphrodite_config = _create_aphrodite_config_for_dsd(
         max_num_seqs=max_num_seqs,
         max_spec_tokens=max_spec_tokens,
-        cudagraph_mode="FULL_AND_PIECEWISE",
+        cudagraph_mode=CUDAGraphMode.FULL_AND_PIECEWISE,
         use_dynamic_sd=True,
         num_spec_per_batch_size=num_spec_per_batch_size,
     )
@@ -381,7 +382,7 @@ def test_dynamic_sd_only_captures_scheduled_query_lengths(monkeypatch):
                 num_reqs,
                 num_tokens,
                 max_query_len,
-                has_prefill=False,
+                decode_graph_eligible=True,
             )
             assert uniform_tok_count == max_query_len
 

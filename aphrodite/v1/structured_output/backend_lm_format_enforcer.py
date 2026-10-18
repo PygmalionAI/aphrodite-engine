@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-import ast
 import json
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -9,7 +8,7 @@ from typing import TYPE_CHECKING
 import torch
 from transformers import PreTrainedTokenizerBase
 
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.sampling_params import SamplingParams
 from aphrodite.utils.import_utils import LazyLoader
 from aphrodite.utils.torch_utils import PIN_MEMORY
@@ -110,7 +109,7 @@ class LMFormatEnforcerBackend(StructuredOutputBackend):
                 grammar_spec,
             )
         elif request_type == StructuredOutputOptions.CHOICE:
-            choices = ast.literal_eval(grammar_spec)
+            choices = json.loads(grammar_spec)
             character_level_parser = lmformatenforcer.UnionParser(
                 [lmformatenforcer.StringParser(choice) for choice in choices]
             )
@@ -149,31 +148,39 @@ def validate_structured_output_request_lm_format_enforcer(params: SamplingParams
 
     so_params = params.structured_outputs
 
-    if so_params.regex:
+    if so_params.regex is not None:
         try:
             compile_regex_with_timeout(
                 lmformatenforcer.RegexParser,
                 so_params.regex,
             )
         except Exception as err:
-            raise APHRODITEValidationError(f"Failed to compile regex for lm-format-enforcer: {err}") from err
+            raise AphroditeValidationError(f"Failed to compile regex for lm-format-enforcer: {err}") from err
         return
-    elif so_params.json:
+    elif so_params.json is not None:
         if isinstance(so_params.json, str):
             try:
                 # make sure schema is valid json
                 json.loads(so_params.json)
             except json.JSONDecodeError as e:
-                raise APHRODITEValidationError("Invalid JSON grammar specification.") from e
+                raise AphroditeValidationError("Invalid JSON grammar specification.") from e
         else:
             try:
                 json.dumps(so_params.json)
             except Exception as e:
-                raise APHRODITEValidationError(f"Error serializing structured outputs jsonschema: {e}") from e
+                raise AphroditeValidationError(f"Error serializing structured outputs jsonschema: {e}") from e
         return
-    elif so_params.choice:
+    elif so_params.choice or so_params.json_object:
         return
     elif so_params.grammar:
-        raise APHRODITEValidationError(
+        raise AphroditeValidationError(
             "LM Format Enforcer structured outputs backend does not support grammar specifications"
+        )
+    elif so_params.structural_tag:
+        raise AphroditeValidationError(
+            "LM Format Enforcer structured outputs backend does not support structural_tag specifications"
+        )
+    else:
+        raise AphroditeValidationError(
+            "LM Format Enforcer structured outputs backend does not support this structured outputs specification"
         )

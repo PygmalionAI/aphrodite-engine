@@ -13,7 +13,7 @@ The output is a ``.gputrace`` bundle that opens directly in Xcode (the same
 artifact Xcode's "Capture GPU Frame" produces).
 
 The ``delay_iterations`` / ``max_iterations`` scheduling fields are
-**rejected** at construction time: they are advanced by
+**rejected** both at construction and per-session start: they are advanced by
 ``WorkerProfiler.step()``, which the metal worker never calls.
 
 Apple gates frame capture behind ``MTL_CAPTURE_ENABLED=1`` in the process
@@ -80,6 +80,22 @@ class MetalProfilerWrapper(WorkerProfiler):
             self._trace_path,
             scope="local",
         )
+
+    @override
+    def start(
+        self,
+        *,
+        delay_iterations: int | None = None,
+        max_iterations: int | None = None,
+    ) -> None:
+        if (delay_iterations is not None and delay_iterations > 0) or (
+            max_iterations is not None and max_iterations > 0
+        ):
+            raise ValueError(
+                "Metal frame capture does not support delay_iterations or max_iterations. "
+                "Use start_profile / stop_profile to bracket the work manually."
+            )
+        super().start(delay_iterations=delay_iterations, max_iterations=max_iterations)
 
     @override
     def _start(self) -> None:

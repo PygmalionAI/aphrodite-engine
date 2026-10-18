@@ -7,10 +7,12 @@ from typing import Any
 import torch
 from compressed_tensors.quantization import (
     QuantizationArgs,
+    QuantizationStrategy,
 )
 
 import aphrodite._custom_ops as ops
 import aphrodite.model_executor.layers.fused_moe.modular_kernel as mk
+from aphrodite import envs
 from aphrodite.config.kernel import MoEBackend
 from aphrodite.logger import init_logger
 from aphrodite.model_executor.layers.fused_moe.config import (
@@ -22,7 +24,6 @@ from aphrodite.model_executor.layers.fused_moe.config import (
 from aphrodite.model_executor.layers.fused_moe.experts.marlin_moe import (
     BatchedMarlinExperts,
     MarlinExperts,
-    MarlinExpertsBase,
 )
 from aphrodite.model_executor.layers.fused_moe.experts.swordfish_moe import (
     SwordfishExperts,
@@ -34,6 +35,7 @@ from aphrodite.model_executor.layers.fused_moe.experts.trtllm_mxint4_moe import 
     TrtLlmMxint4ExpertsMonolithic,
 )
 from aphrodite.model_executor.layers.quantization.base_config import QuantizationConfig
+from aphrodite.model_executor.layers.quantization.utils.humming import prioritize_humming
 from aphrodite.model_executor.layers.quantization.utils.marlin_utils import (
     check_moe_marlin_supports_config,
     marlin_act_int8_process_scales,
@@ -45,8 +47,10 @@ from aphrodite.model_executor.layers.quantization.utils.marlin_utils import (
 )
 from aphrodite.model_executor.layers.quantization.utils.quant_utils import (
     QuantKey,
+    pack_quantized_values_into_int32,
 )
 from aphrodite.platforms import current_platform
+from aphrodite.scalar_type import scalar_types
 
 logger = init_logger(__name__)
 
@@ -57,10 +61,12 @@ class WNA16MoEBackend(Enum):
     BATCHED_MARLIN = "BATCHED_MARLIN"
     HUMMING = "HUMMING"
     CPU = "CPU"
+    ZEN_CPU = "ZEN_CPU"
     FLASHINFER_TRTLLM = "FLASHINFER_TRTLLM"
     TRITON = "TRITON"
     XPU = "XPU"
     EMULATION = "EMULATION"
+    RDNA3 = "RDNA3"
 
 
 def backend_to_kernel_cls(
@@ -101,26 +107,38 @@ def backend_to_kernel_cls(
         )
 
         return [CPUExpertsInt4]
+    elif backend == WNA16MoEBackend.ZEN_CPU:
+        from aphrodite.model_executor.layers.fused_moe.experts.zentorch_moe import (
+            ZentorchExpertsInt4,
+        )
+
+        return [ZentorchExpertsInt4]
     elif backend == WNA16MoEBackend.EMULATION:
         from aphrodite.model_executor.layers.fused_moe.experts.int4_emulation_moe import (
             Int4EmulationTritonExperts,
         )
 
         return [Int4EmulationTritonExperts]
+    elif backend == WNA16MoEBackend.RDNA3:
+        from aphrodite.model_executor.layers.fused_moe.experts.rdna3_moe import (
+            Rdna3WNA16Experts,
+        )
+
+        return [Rdna3WNA16Experts]
     else:
         raise ValueError(f"Unknown WNA16 MoE backend: {backend.value}")
 
 
 def _get_priority_backends() -> list[WNA16MoEBackend]:
-    """
-    Get available backends in priority order based on platform and config.
-    """
+    """Get available backends in priority order based on platform and config."""
     if current_platform.is_cpu():
-        return [WNA16MoEBackend.CPU]
+        return [WNA16MoEBackend.ZEN_CPU, WNA16MoEBackend.CPU]
     if current_platform.is_xpu():
         return [WNA16MoEBackend.XPU]
 
-    return [
+    backends = [
+        # Native HIP kernel, gated on gfx1100 by _supports_current_device().
+        WNA16MoEBackend.RDNA3,
         WNA16MoEBackend.FLASHINFER_TRTLLM,
         WNA16MoEBackend.SWORDFISH,
         WNA16MoEBackend.MARLIN,
@@ -129,6 +147,7 @@ def _get_priority_backends() -> list[WNA16MoEBackend]:
         WNA16MoEBackend.HUMMING,
         WNA16MoEBackend.EMULATION,
     ]
+    return prioritize_humming(backends)
 
 
 def _backend_incompatibility_reason(
@@ -142,9 +161,54 @@ def _backend_incompatibility_reason(
     if backend == WNA16MoEBackend.FLASHINFER_TRTLLM and (may_have_zp or may_have_bias):
         return "zero points and bias are not supported"
 
+    if backend == WNA16MoEBackend.RDNA3:
+        if not isinstance(quant_config, QuantizationArgs):
+            return "only compressed-tensors checkpoints are supported"
+        if may_have_zp:
+            return "asymmetric checkpoints are not supported"
+        if may_have_bias:
+            return "expert bias is not supported"
+        if quant_config.actorder == "group":
+            return "group activation ordering is not supported"
+        if quant_config.strategy != QuantizationStrategy.GROUP:
+            return "only group-wise scales are supported"
+
     from aphrodite.model_executor.layers.quantization.auto_awq import AutoAWQConfig
     from aphrodite.model_executor.layers.quantization.auto_gptq import AutoGPTQConfig
     from aphrodite.model_executor.layers.quantization.moe_wna16 import MoeWNA16Config
+
+    if backend == WNA16MoEBackend.SWORDFISH:
+        if not isinstance(quant_config, (AutoGPTQConfig, QuantizationArgs)):
+            return "only GPTQ and compressed-tensors checkpoints are supported"
+        if may_have_zp or may_have_bias:
+            return "zero points and expert bias are not supported"
+        if isinstance(quant_config, AutoGPTQConfig) and quant_config.desc_act:
+            return "GPTQ activation ordering is not supported"
+        if isinstance(quant_config, QuantizationArgs) and quant_config.actorder == "group":
+            return "group activation ordering is not supported"
+        group_size = -1 if quant_config.group_size is None else quant_config.group_size
+        if group_size not in (-1, 64, 128):
+            return f"group size {group_size} is not supported"
+        if moe_config.intermediate_size_per_partition % 64 != 0:
+            return "the intermediate size must be a multiple of 64"
+
+    if backend == WNA16MoEBackend.ZEN_CPU:
+        if not envs.APHRODITE_CPU_INT4_W4A8:
+            return "APHRODITE_CPU_INT4_W4A8=0 disables the DA8W4 path"
+        if may_have_zp:
+            return "zero points are not supported"
+        if isinstance(quant_config, MoeWNA16Config):
+            return "the MoeWNA16 weight layout is not supported"
+        if isinstance(quant_config, AutoGPTQConfig) and quant_config.desc_act:
+            return "GPTQ activation ordering is not supported"
+        if isinstance(quant_config, QuantizationArgs) and quant_config.actorder == "group":
+            return "group activation ordering is not supported"
+        group_size = getattr(quant_config, "group_size", None)
+        if group_size is None or group_size <= 0:
+            return "DA8W4 requires group-quantized weights"
+        # AOCL sym_quant requires the group size to be a multiple of 4.
+        if group_size % 4 != 0:
+            return f"group size {group_size} is not a multiple of 4"
 
     if backend == WNA16MoEBackend.TRITON:
         if may_have_bias:
@@ -164,7 +228,9 @@ def _backend_incompatibility_reason(
         WNA16MoEBackend.BATCHED_MARLIN,
     ):
         if isinstance(quant_config, (AutoAWQConfig, AutoGPTQConfig, QuantizationArgs)):
-            group_size = quant_config.group_size
+            # QuantizationArgs leaves group_size unset for per-channel
+            # strategies; -1 is the in-tree encoding for that.
+            group_size = -1 if quant_config.group_size is None else quant_config.group_size
         else:
             return "Marlin not supported for this layer"
 
@@ -186,9 +252,11 @@ def map_wna16_backend(runner_backend: MoEBackend) -> WNA16MoEBackend:
     mapping = {
         "triton": WNA16MoEBackend.TRITON,
         "marlin": WNA16MoEBackend.MARLIN,
+        "swordfish": WNA16MoEBackend.SWORDFISH,
         "humming": WNA16MoEBackend.HUMMING,
         "flashinfer_trtllm": WNA16MoEBackend.FLASHINFER_TRTLLM,
         "emulation": WNA16MoEBackend.EMULATION,
+        "rdna3": WNA16MoEBackend.RDNA3,
     }
     if backend := mapping.get(runner_backend):
         return backend
@@ -214,11 +282,13 @@ def select_wna16_moe_backend(
         quant_config: Quantization structure and checkpoint format description.
         may_have_zp: Whether the integration can provide weight zero points.
         may_have_bias: Whether the integration can provide expert bias.
+        allow_tile_padding: Whether backends that require padding the weights
+            up to a tile boundary may be selected.
 
     Returns:
         A tuple of (``WNA16MoEBackend``, experts class or ``None``).
-    """
 
+    """
     activation_format = (
         mk.FusedMoEActivationFormat.BatchedExperts
         if config.moe_parallel_config.use_batched_activation_format
@@ -262,7 +332,6 @@ def select_wna16_moe_backend(
         )
         if reason is not None:
             raise ValueError(_make_log_unsupported(requested_backend, reason))
-        return _return_or_raise(requested_backend, config, weight_key, None, activation_format)
         return _return_or_raise(requested_backend, config, weight_key, None, activation_format)
 
     # Select kernels in order of backend.
@@ -346,11 +415,6 @@ def make_wna16_moe_kernel(
     moe_config: FusedMoEConfig,
     experts_cls: type[mk.FusedMoEExperts],
     backend: WNA16MoEBackend = WNA16MoEBackend.MARLIN,
-    is_k_full: bool = False,
-    w13_g_idx: torch.Tensor | None = None,
-    w2_g_idx: torch.Tensor | None = None,
-    w13_g_idx_sort_indices: torch.Tensor | None = None,
-    w2_g_idx_sort_indices: torch.Tensor | None = None,
     routing_tables: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
 ) -> mk.FusedMoEKernel:
     from aphrodite.model_executor.layers.fused_moe.all2all_utils import (
@@ -362,21 +426,28 @@ def make_wna16_moe_kernel(
     from aphrodite.model_executor.layers.fused_moe.experts.int4_emulation_moe import (
         Int4EmulationTritonExperts,
     )
+    from aphrodite.model_executor.layers.fused_moe.experts.rdna3_moe import (
+        Rdna3WNA16Experts,
+    )
     from aphrodite.model_executor.layers.fused_moe.experts.xpu_moe import (
         XPUExpertsWNA16,
     )
+    from aphrodite.model_executor.layers.fused_moe.experts.zentorch_moe import (
+        ZentorchExpertsInt4,
+    )
 
-    # Currently, we only support TrtLlmMxint4ExpertsMonolithic, MarlinExperts,
-    # BatchedMarlinExperts, SwordfishExperts, XPUExpertsWNA16, CPUExpertsInt4,
-    # the Humming grouped/indexed experts, and Int4EmulationTritonExperts.
+    # Include fork Swordfish experts alongside the upstream WNA16 backends.
     allowed_experts: tuple[type[mk.FusedMoEExperts], ...] = (
         MarlinExperts,
         BatchedMarlinExperts,
+        SwordfishExperts,
         TritonWNA16Experts,
         TrtLlmMxint4ExpertsMonolithic,
         XPUExpertsWNA16,
         CPUExpertsInt4,
+        ZentorchExpertsInt4,
         Int4EmulationTritonExperts,
+        Rdna3WNA16Experts,
     )
     if backend == WNA16MoEBackend.HUMMING:
         allowed_experts += tuple(backend_to_kernel_cls(WNA16MoEBackend.HUMMING))
@@ -397,15 +468,6 @@ def make_wna16_moe_kernel(
     logger.info_once("Using %s", experts_cls.__name__, scope="local")
 
     extra_args: dict[str, Any] = {}
-    if issubclass(experts_cls, MarlinExpertsBase):
-        extra_args = {
-            "w13_g_idx": w13_g_idx,
-            "w2_g_idx": w2_g_idx,
-            "w13_g_idx_sort_indices": w13_g_idx_sort_indices,
-            "w2_g_idx_sort_indices": w2_g_idx_sort_indices,
-            "is_k_full": is_k_full,
-        }
-
     if prepare_finalize.activation_format == mk.FusedMoEActivationFormat.BatchedExperts:
         max_num_tokens = prepare_finalize.max_num_tokens_per_rank()
         assert max_num_tokens is not None
@@ -434,8 +496,6 @@ def _process_weights_flashinfer(
     w2_qweight: torch.Tensor,
     w13_scales: torch.Tensor,
     w2_scales: torch.Tensor,
-    w13_g_idx: torch.Tensor,
-    w2_g_idx: torch.Tensor,
     w13_bias: torch.Tensor | None = None,
     w2_bias: torch.Tensor | None = None,
 ) -> tuple[
@@ -443,10 +503,6 @@ def _process_weights_flashinfer(
     torch.Tensor,  # w2_qweight
     torch.Tensor,  # w13_scales
     torch.Tensor,  # w2_scales
-    torch.Tensor,  # w13_g_idx
-    torch.Tensor,  # w2_g_idx
-    torch.Tensor | None,  # w13_g_idx_sort_indices
-    torch.Tensor | None,  # w2_g_idx_sort_indices
     torch.Tensor | None,  # w13_qzeros
     torch.Tensor | None,  # w2_qzeros
     torch.Tensor | None,  # w13_input_global_scale
@@ -459,7 +515,7 @@ def _process_weights_flashinfer(
     Steps
     -----
     1. Transform weights/scales via ``prepare_static_weights_for_trtllm_mxint4_moe``.
-    2. Return transformed tensors, passing through g_idx/bias unchanged.
+    2. Return transformed tensors and biases.
     """
     from aphrodite.model_executor.layers.quantization.utils.flashinfer_mxint4_moe import (
         prepare_static_weights_for_trtllm_mxint4_moe,
@@ -477,10 +533,6 @@ def _process_weights_flashinfer(
         dict_weights_mxint4["gemm2_weights"],
         dict_weights_mxint4["gemm1_scales"],
         dict_weights_mxint4["gemm2_scales"],
-        w13_g_idx,
-        w2_g_idx,
-        None,
-        None,
         None,
         None,
         None,
@@ -524,13 +576,10 @@ def _process_weights_marlin(
     num_bits: int,
     pack_factor: int,
     group_size: int,
-    actorder: str | None,
     w13_qweight: torch.Tensor,
     w2_qweight: torch.Tensor,
     w13_scales: torch.Tensor,
     w2_scales: torch.Tensor,
-    w13_g_idx: torch.Tensor,
-    w2_g_idx: torch.Tensor,
     w13_qzeros: torch.Tensor | None = None,
     w2_qzeros: torch.Tensor | None = None,
     w13_bias: torch.Tensor | None = None,
@@ -540,10 +589,6 @@ def _process_weights_marlin(
     torch.Tensor,  # w2_qweight
     torch.Tensor,  # w13_scales
     torch.Tensor,  # w2_scales
-    torch.Tensor,  # w13_g_idx
-    torch.Tensor,  # w2_g_idx
-    torch.Tensor,  # w13_g_idx_sort_indices
-    torch.Tensor,  # w2_g_idx_sort_indices
     torch.Tensor | None,  # w13_qzeros
     torch.Tensor | None,  # w2_qzeros
     torch.Tensor | None,  # w13_input_global_scale
@@ -554,22 +599,32 @@ def _process_weights_marlin(
     """Standard Marlin weight post-processing shared by MARLIN and
     BATCHED_MARLIN backends.
 
+    Inputs arrive in canonical N-first layout ``[E, N, K_packed]``.
+
     Steps
     -----
-    1. Optional FP8 preprocessing of packed weights / scales.
-    2. Sort / reset g_idx tensors for act-order handling.
+    1. Transpose canonical N-first to K-first for Marlin.
+    2. Optional FP8 preprocessing of packed weights / scales.
     3. Repack weights via ``gptq_marlin_moe_repack``.
     4. Permute scales (and optionally extract INT8 global scales).
     5. Permute bias tensors.
     """
+    # Canonical N-first → K-first for Marlin.
+    w13_qweight = w13_qweight.transpose(1, 2).contiguous()
+    w2_qweight = w2_qweight.transpose(1, 2).contiguous()
+    w13_scales = w13_scales.transpose(1, 2).contiguous()
+    w2_scales = w2_scales.transpose(1, 2).contiguous()
+    if w13_qzeros is not None:
+        w13_qzeros = w13_qzeros.transpose(1, 2).contiguous()
+    if w2_qzeros is not None:
+        w2_qzeros = w2_qzeros.transpose(1, 2).contiguous()
+
     is_a_8bit = input_dtype is not None and input_dtype.itemsize == 1
 
     marlin_w13_qweight: torch.Tensor
     marlin_w2_qweight: torch.Tensor
     marlin_w13_scales: torch.Tensor
     marlin_w2_scales: torch.Tensor
-    w13_g_idx_sort_indices: torch.Tensor | None = None
-    w2_g_idx_sort_indices: torch.Tensor | None = None
     w13_input_global_scale: torch.Tensor | None = None
     w2_input_global_scale: torch.Tensor | None = None
     w13_bias_out: torch.Tensor | None = None
@@ -590,11 +645,9 @@ def _process_weights_marlin(
 
     # --- Pad the intermediate size to a valid Marlin thread tile ---
     # GPTQ packs along K: w13's N is in the (shard) columns, w2's N in the rows.
-    # Act-order keeps the strict shape and is never padded.
     N = layer.intermediate_size_per_partition
     padded_N = marlin_moe_padded_intermediate(N, group_size)
     if padded_N != N:
-        assert actorder != "group", "Marlin MoE thread-tile padding is unsupported with act-order"
         marlin_w13_qweight = _pad_w13_shard_cols(marlin_w13_qweight, N, padded_N)
         marlin_w2_qweight = _pad_rows(marlin_w2_qweight, padded_N // pack_factor)
         marlin_w13_scales = _pad_w13_shard_cols(marlin_w13_scales, N, padded_N)
@@ -607,44 +660,9 @@ def _process_weights_marlin(
         if w13_bias is not None:
             w13_bias = _pad_w13_bias(w13_bias, N, padded_N)
 
-    # --- Process act_order (g_idx) ---
-    if actorder == "group":
-        num_experts = w13_g_idx.shape[0]
-        w13_g_idx_sort_indices = torch.empty_like(w13_g_idx)
-        w2_g_idx_sort_indices = torch.empty_like(w2_g_idx)
-        w13_sorted_g_idx = torch.empty_like(w13_g_idx)
-        w2_sorted_g_idx = torch.empty_like(w2_g_idx)
-        for e in range(num_experts):
-            w13_g_idx_sort_indices[e] = torch.argsort(w13_g_idx[e]).to(torch.int32)
-            w2_g_idx_sort_indices[e] = torch.argsort(w2_g_idx[e]).to(torch.int32)
-            w13_sorted_g_idx[e] = w13_g_idx[e][w13_g_idx_sort_indices[e]]
-            w2_sorted_g_idx[e] = w2_g_idx[e][w2_g_idx_sort_indices[e]]
-        w13_g_idx = w13_sorted_g_idx
-        w2_g_idx = w2_sorted_g_idx
-    else:
-        num_experts = w13_g_idx.shape[0]
-        device = w13_g_idx.device
-        w13_g_idx = torch.nn.Parameter(
-            torch.empty((num_experts, 0), dtype=torch.int32, device=device),
-            requires_grad=False,
-        )
-        w2_g_idx = torch.nn.Parameter(
-            torch.empty((num_experts, 0), dtype=torch.int32, device=device),
-            requires_grad=False,
-        )
-        w13_g_idx_sort_indices = torch.nn.Parameter(
-            torch.empty((num_experts, 0), dtype=torch.int32, device=device),
-            requires_grad=False,
-        )
-        w2_g_idx_sort_indices = torch.nn.Parameter(
-            torch.empty((num_experts, 0), dtype=torch.int32, device=device),
-            requires_grad=False,
-        )
-
     # --- Repack weights ---
     marlin_w13_qweight = ops.gptq_marlin_moe_repack(
         marlin_w13_qweight,
-        w13_g_idx_sort_indices,
         marlin_w13_qweight.shape[1] * pack_factor,
         marlin_w13_qweight.shape[2],
         num_bits,
@@ -652,7 +670,6 @@ def _process_weights_marlin(
     )
     marlin_w2_qweight = ops.gptq_marlin_moe_repack(
         marlin_w2_qweight,
-        w2_g_idx_sort_indices,
         marlin_w2_qweight.shape[1] * pack_factor,
         marlin_w2_qweight.shape[2],
         num_bits,
@@ -710,10 +727,6 @@ def _process_weights_marlin(
         marlin_w2_qweight,
         marlin_w13_scales,
         marlin_w2_scales,
-        w13_g_idx,
-        w2_g_idx,
-        w13_g_idx_sort_indices,
-        w2_g_idx_sort_indices,
         w13_qzeros,
         w2_qzeros,
         w13_input_global_scale,
@@ -743,10 +756,6 @@ def _process_weights_swordfish(
     torch.Tensor,  # w2_qweight
     torch.Tensor,  # w13_scales
     torch.Tensor,  # w2_scales
-    torch.Tensor,  # w13_g_idx
-    torch.Tensor,  # w2_g_idx
-    torch.Tensor,  # w13_g_idx_sort_indices
-    torch.Tensor,  # w2_g_idx_sort_indices
     torch.Tensor | None,  # w13_qzeros
     torch.Tensor | None,  # w2_qzeros
     torch.Tensor | None,  # w13_input_global_scale
@@ -756,9 +765,8 @@ def _process_weights_swordfish(
 ]:
     """Swordfish weight post-processing shared by the SWORDFISH backend.
 
-    Prepacks the GPTQ int32 [K / pack_factor, N] weights per expert into the
-    Swordfish block-linear layout. Scales stay in the plain checkpoint layout
-    [E, K / group_size, N], only made contiguous.
+    Converts canonical N-first packed weights and scales to K-first before
+    prepacking into the Swordfish block-linear layout.
     """
     # These limits are not visible to the oracle kernel predicates (the
     # weight QuantKey does not carry group_size or act_order), so they are
@@ -774,7 +782,10 @@ def _process_weights_swordfish(
     assert input_dtype is None or input_dtype.itemsize == 2, "Swordfish MoE runs on 16-bit activations"
 
     num_experts = w13_qweight.shape[0]
-    device = w13_qweight.device
+    w13_qweight = w13_qweight.transpose(1, 2).contiguous()
+    w2_qweight = w2_qweight.transpose(1, 2).contiguous()
+    w13_scales = w13_scales.transpose(1, 2)
+    w2_scales = w2_scales.transpose(1, 2)
 
     def prepack(qweight: torch.Tensor) -> torch.Tensor:
         size_k = qweight.shape[1] * pack_factor
@@ -789,21 +800,11 @@ def _process_weights_swordfish(
     swordfish_w13_scales = w13_scales.contiguous()
     swordfish_w2_scales = w2_scales.contiguous()
 
-    def empty_g_idx() -> torch.nn.Parameter:
-        return torch.nn.Parameter(
-            torch.empty((num_experts, 0), dtype=torch.int32, device=device),
-            requires_grad=False,
-        )
-
     return (
         swordfish_w13_qweight,
         swordfish_w2_qweight,
         swordfish_w13_scales,
         swordfish_w2_scales,
-        empty_g_idx(),
-        empty_g_idx(),
-        empty_g_idx(),
-        empty_g_idx(),
         None,  # w13_qzeros
         None,  # w2_qzeros
         None,  # w13_input_global_scale
@@ -832,10 +833,6 @@ def _process_awq_weights_marlin(
     torch.Tensor,  # w2_qweight
     torch.Tensor,  # w13_scales
     torch.Tensor,  # w2_scales
-    torch.Tensor | None,  # w13_g_idx
-    torch.Tensor | None,  # w2_g_idx
-    torch.Tensor | None,  # w13_g_idx_sort_indices
-    torch.Tensor | None,  # w2_g_idx_sort_indices
     torch.Tensor | None,  # w13_qzeros
     torch.Tensor | None,  # w2_qzeros
     torch.Tensor | None,  # w13_input_global_scale
@@ -848,8 +845,6 @@ def _process_awq_weights_marlin(
     AWQ checkpoints use a different packing order than GPTQ, so they need
     AWQ-specific weight repacking and zero-point conversion before Marlin runs.
     """
-    num_experts = w13_qweight.shape[0]
-    device = w13_qweight.device
     is_a_8bit = input_dtype is not None and input_dtype.itemsize == 1
     w13_input_global_scale: torch.Tensor | None = None
     w2_input_global_scale: torch.Tensor | None = None
@@ -885,18 +880,8 @@ def _process_awq_weights_marlin(
         if w13_bias is not None:
             w13_bias = _pad_w13_bias(w13_bias, N, padded_N)
 
-    w13_g_idx_sort_indices = torch.nn.Parameter(
-        torch.empty((num_experts, 0), dtype=torch.int32, device=device),
-        requires_grad=False,
-    )
-    w2_g_idx_sort_indices = torch.nn.Parameter(
-        torch.empty((num_experts, 0), dtype=torch.int32, device=device),
-        requires_grad=False,
-    )
-
     marlin_w13_qweight = ops.awq_marlin_moe_repack(
         w13_qweight,
-        w13_g_idx_sort_indices,
         size_k=w13_qweight.shape[1],
         size_n=w13_qweight.shape[2] * pack_factor,
         num_bits=weight_bits,
@@ -904,7 +889,6 @@ def _process_awq_weights_marlin(
     )
     marlin_w2_qweight = ops.awq_marlin_moe_repack(
         w2_qweight,
-        w2_g_idx_sort_indices,
         size_k=w2_qweight.shape[1],
         size_n=w2_qweight.shape[2] * pack_factor,
         num_bits=weight_bits,
@@ -956,10 +940,6 @@ def _process_awq_weights_marlin(
         marlin_w2_qweight,
         marlin_w13_scales,
         marlin_w2_scales,
-        None,
-        None,
-        w13_g_idx_sort_indices,
-        w2_g_idx_sort_indices,
         marlin_w13_qzeros,
         marlin_w2_qzeros,
         w13_input_global_scale,
@@ -969,14 +949,85 @@ def _process_awq_weights_marlin(
     )
 
 
+def _synthesize_rdna3_qzeros(groups: int, out_features: int, device: torch.device) -> torch.Tensor:
+    """Create the packed zero-point tensor for symmetric quantization.
+
+    GPTQv1 +1 quirk: the kernel adds 1 to the stored zeros, so encode
+    (bias - 1) = 7 for uint4b8 (bias=8).
+    """
+    zeros = torch.full(
+        (groups, out_features),
+        scalar_types.uint4b8.bias - 1,
+        dtype=torch.int32,
+        device=device,
+    )
+    return pack_quantized_values_into_int32(zeros, scalar_types.uint4b8, packed_dim=1)
+
+
+def _process_weights_rdna3(
+    w13: torch.Tensor,
+    w2: torch.Tensor,
+    w13_scale: torch.Tensor,
+    w2_scale: torch.Tensor,
+    group_size: int,
+) -> tuple[
+    torch.Tensor,  # w13_qweight
+    torch.Tensor,  # w2_qweight
+    torch.Tensor,  # w13_scales
+    torch.Tensor,  # w2_scales
+    torch.Tensor | None,  # w13_qzeros
+    torch.Tensor | None,  # w2_qzeros
+    torch.Tensor | None,  # w13_input_global_scale
+    torch.Tensor | None,  # w2_input_global_scale
+    torch.Tensor | None,  # w13_bias
+    torch.Tensor | None,  # w2_bias
+]:
+    """RDNA3 (gfx1100) W4A16 weight post-processing.
+
+    Transposes the canonical N-first inputs to the K-first layout of
+    ``moe_gptq_gemm_rdna3`` (weights ``[E, K // 8, N]``, scales
+    ``[E, groups, N]``), interleaves the packed nibbles per expert (the exllama
+    shuffle the dense RDNA3 kernel also uses) and synthesizes the symmetric
+    zero points the kernel dequantizes with.
+    """
+    device = w13.device
+    num_experts = w13.size(0)
+
+    w13 = w13.transpose(1, 2).contiguous()
+    w2 = w2.transpose(1, 2).contiguous()
+
+    for e in range(num_experts):
+        w13_e = w13[e].contiguous()
+        ops.gptq_shuffle(w13_e, 4)
+        w13[e] = w13_e
+        w2_e = w2[e].contiguous()
+        ops.gptq_shuffle(w2_e, 4)
+        w2[e] = w2_e
+
+    def _qzeros(w: torch.Tensor) -> torch.Tensor:
+        qz = _synthesize_rdna3_qzeros((w.size(1) * 8) // group_size, w.size(2), device)
+        return qz.unsqueeze(0).expand(num_experts, -1, -1).contiguous()
+
+    return (
+        w13,
+        w2,
+        w13_scale.transpose(1, 2).contiguous(),
+        w2_scale.transpose(1, 2).contiguous(),
+        _qzeros(w13),
+        _qzeros(w2),
+        None,  # w13_input_global_scale
+        None,  # w2_input_global_scale
+        None,  # w13_bias
+        None,  # w2_bias
+    )
+
+
 def _process_weights_cpu(
     quant_config: QuantizationConfig | QuantizationArgs | None,
     w13: torch.Tensor,
     w2: torch.Tensor,
     w13_scale: torch.Tensor,
     w2_scale: torch.Tensor,
-    w13_g_idx: torch.Tensor | None = None,
-    w2_g_idx: torch.Tensor | None = None,
     w13_qzeros: torch.Tensor | None = None,
     w2_qzeros: torch.Tensor | None = None,
     w13_bias: torch.Tensor | None = None,
@@ -986,10 +1037,6 @@ def _process_weights_cpu(
     torch.Tensor,  # w2_qweight
     torch.Tensor,  # w13_scales
     torch.Tensor,  # w2_scales
-    torch.Tensor | None,  # w13_g_idx
-    torch.Tensor | None,  # w2_g_idx
-    torch.Tensor | None,  # w13_g_idx_sort_indices
-    torch.Tensor | None,  # w2_g_idx_sort_indices
     torch.Tensor | None,  # w13_qzeros
     torch.Tensor | None,  # w2_qzeros
     torch.Tensor | None,  # w13_input_global_scale
@@ -997,7 +1044,12 @@ def _process_weights_cpu(
     torch.Tensor | None,  # w13_bias
     torch.Tensor | None,  # w2_bias
 ]:
-    """CPU INT4 W4A16 weight post-processing."""
+    """CPU INT4 W4A16 weight post-processing.
+
+    Non-AWQ inputs arrive in canonical N-first layout and are transposed
+    to K-first internally.  AWQ uses a different packing axis and arrives
+    in its native format.
+    """
     from aphrodite.model_executor.layers.fused_moe.experts.cpu_moe import (
         prepare_int4_moe_layer_for_cpu,
     )
@@ -1008,22 +1060,25 @@ def _process_weights_cpu(
         AutoGPTQConfig,
     )
 
-    # Detect packing format.
-    # AWQ: qweight is [E, K, 2*N//8] (packed along output/N dim).
-    # GPTQ: qweight is [E, K//8, 2*N] (packed along input/K dim).
-    # compressed-tensors: qweight is [E, K//8, 2*N] (packed along input/K dim).
     if isinstance(quant_config, AutoAWQConfig):
-        # AWQ: K is stored unpacked in dim 1.
         cpu_quant_algo = ops.CPUQuantAlgo.AWQ
     elif isinstance(quant_config, (AutoGPTQConfig, QuantizationArgs)):
-        # GPTQ / compressed-tensors: K//8 is stored packed in dim 1.
         if isinstance(quant_config, AutoGPTQConfig) and quant_config.desc_act:
             raise NotImplementedError(
                 "CPU WNA16 MoE backend does not support GPTQ with "
-                "desc_act=True. The fused MoE kernel has no g_idx "
+                "desc_act=True. The fused MoE kernel has no activation "
                 "reordering support."
             )
         cpu_quant_algo = ops.CPUQuantAlgo.GPTQ
+        # Canonical N-first → K-first for CPU kernel.
+        w13 = w13.transpose(1, 2).contiguous()
+        w2 = w2.transpose(1, 2).contiguous()
+        w13_scale = w13_scale.transpose(1, 2).contiguous()
+        w2_scale = w2_scale.transpose(1, 2).contiguous()
+        if w13_qzeros is not None:
+            w13_qzeros = w13_qzeros.transpose(1, 2).contiguous()
+        if w2_qzeros is not None:
+            w2_qzeros = w2_qzeros.transpose(1, 2).contiguous()
     else:
         raise TypeError(
             "CPU WNA16 MoE backend requires AutoAWQConfig, AutoGPTQConfig "
@@ -1059,16 +1114,70 @@ def _process_weights_cpu(
         blocked_w2,
         blocked_s13,
         blocked_s2,
-        w13_g_idx,
-        w2_g_idx,
-        None,  # w13_g_idx_sort_indices (unused on CPU)
-        None,  # w2_g_idx_sort_indices (unused on CPU)
         blocked_z13,
         blocked_z2,
         None,  # w13_input_global_scale
         None,  # w2_input_global_scale
         w13_bias.to(torch.float32) if w13_bias is not None else None,
         w2_bias.to(torch.float32) if w2_bias is not None else None,
+    )
+
+
+def _zen_repack_s4(packed: torch.Tensor, in_features: int) -> torch.Tensor:
+    """Repack CT int4 ``[E, N, K//8]`` into zentorch s4 ``[E, N, K//8]``."""
+    from aphrodite.model_executor.kernels.linear.mixed_precision.zentorch import (
+        _import_unpack_from_int32,
+    )
+
+    num_experts, out_features, _ = packed.shape
+    # packed_dim indexes the 2D expert slice, which is N-first, so K is dim 1.
+    unpacked = _import_unpack_from_int32()(
+        packed,
+        4,
+        torch.Size([num_experts, out_features, in_features]),
+        packed_dim=1,
+    )
+    # CT is already N-first, which is what the repack consumes.
+    repack_op = torch.ops.zentorch.zentorch_woq_repack_weight.default
+    return torch.stack([repack_op(w) for w in unpacked])
+
+
+def _process_weights_zen_cpu(
+    w13: torch.Tensor,
+    w2: torch.Tensor,
+    w13_scale: torch.Tensor,
+    w2_scale: torch.Tensor,
+    w13_bias: torch.Tensor | None = None,
+    w2_bias: torch.Tensor | None = None,
+) -> tuple[
+    torch.Tensor,  # w13_qweight
+    torch.Tensor,  # w2_qweight
+    torch.Tensor,  # w13_scales
+    torch.Tensor,  # w2_scales
+    torch.Tensor | None,  # w13_qzeros
+    torch.Tensor | None,  # w2_qzeros
+    torch.Tensor | None,  # w13_input_global_scale
+    torch.Tensor | None,  # w2_input_global_scale
+    torch.Tensor | None,  # w13_bias
+    torch.Tensor | None,  # w2_bias
+]:
+    """Zen CPU INT4 DA8W4 (W4A8) weight post-processing."""
+    # CT WNA16 buffers are N-first, so the scales are [E, N, G].
+    hidden_size = w2_scale.shape[1]
+    intermediate_size = w13_scale.shape[1] // 2
+
+    # The kernel reads per-group scales as [E, G, N], so N-first needs a swap.
+    return (
+        _zen_repack_s4(w13.data, hidden_size),
+        _zen_repack_s4(w2.data, intermediate_size),
+        w13_scale.data.transpose(1, 2).to(torch.bfloat16).contiguous(),
+        w2_scale.data.transpose(1, 2).to(torch.bfloat16).contiguous(),
+        None,  # w13_qzeros (symmetric)
+        None,  # w2_qzeros (symmetric)
+        None,  # w13_input_global_scale
+        None,  # w2_input_global_scale
+        w13_bias,
+        w2_bias,
     )
 
 
@@ -1089,41 +1198,23 @@ def _process_weights_xpu(
     torch.Tensor | None,  # w13_bias
     torch.Tensor | None,  # w2_bias
 ]:
-    """Repack GPTQ-format INT4 MoE weights into the layout
-    `aphrodite_xpu_kernels.fused_moe_interface.xpu_fused_moe(is_int4=True)` expects:
+    """Repack canonical N-first INT4 MoE weights into XPU's uint8 layout.
 
-        w13: [E, 2*N, K] int4 (uint8 storage [E, 2*N, K // 2])
-        w13_scales: [E, 2*N, K // group_size] params_dtype
-        w2:  [E, K, N]   int4 (uint8 storage [E, K, N // 2])
-        w2_scales:  [E, K, N // group_size]   params_dtype
-
-    Input GPTQ layout from FusedMoEFactory.weight_loader:
-        w13: [E, K // 8, 2*N] int32 (8 nibbles per int32 along the input dim)
-        w13_scales: [E, K // group_size, 2*N] params_dtype
-        w2:  [E, N // 8, K] int32
-        w2_scales:  [E, N // group_size, K] params_dtype
-
-    Transpose dim 1 ↔ dim 2 then view int32 → uint8 to recover sequential
-    int4-packed bytes along the input dim. Each packed int32 holds 8 nibbles
-    `(n7<<28)|(n6<<24)|...|(n1<<4)|n0` in ascending K order; on a
-    little-endian host the int32→uint8 view exposes them as bytes
-    `[n1<<4|n0, n3<<4|n2, n5<<4|n4, n7<<4|n6]`, i.e. two nibbles per byte
-    with the lower nibble = lower input-K index. xpu_fused_moe(is_int4=True)
-    expects this convention; on a big-endian host the byte order reverses
-    and the kernel would silently miscompute, so we hard-fail.
+    Viewing contiguous int32 weights as uint8 preserves the little-endian
+    low-nibble-first packing along K expected by the XPU fused MoE kernel.
     """
     del layer, quant_config  # unused — kept for parity with the marlin helper
 
     if sys.byteorder != "little":
         raise NotImplementedError(
-            "_process_weights_xpu requires a little-endian host: the GPTQ "
+            "_process_weights_xpu requires a little-endian host: the "
             "int32 → uint8 nibble repack relies on LE byte ordering."
         )
 
-    w13_xpu = w13_qweight.transpose(1, 2).contiguous().view(torch.uint8)
-    w2_xpu = w2_qweight.transpose(1, 2).contiguous().view(torch.uint8)
-    w13_scales_xpu = w13_scales.transpose(1, 2).contiguous()
-    w2_scales_xpu = w2_scales.transpose(1, 2).contiguous()
+    w13_xpu = w13_qweight.contiguous().view(torch.uint8)
+    w2_xpu = w2_qweight.contiguous().view(torch.uint8)
+    w13_scales_xpu = w13_scales.contiguous()
+    w2_scales_xpu = w2_scales.contiguous()
 
     return (
         w13_xpu,
@@ -1301,7 +1392,15 @@ def _process_weights_emulation_gptq(
     w13_qzeros: torch.Tensor | None,
     w2_qzeros: torch.Tensor | None,
 ) -> tuple:
-    """Dequantize GPTQ int4 weights to BF16 for the emulation backend."""
+    """Dequantize canonical N-first GPTQ weights for the emulation backend."""
+    w13 = w13.transpose(1, 2).contiguous()
+    w2 = w2.transpose(1, 2).contiguous()
+    w13_scale = w13_scale.transpose(1, 2).contiguous()
+    w2_scale = w2_scale.transpose(1, 2).contiguous()
+    if w13_qzeros is not None:
+        w13_qzeros = w13_qzeros.transpose(1, 2).contiguous()
+    if w2_qzeros is not None:
+        w2_qzeros = w2_qzeros.transpose(1, 2).contiguous()
     w13_bf16 = _unpack_and_dequant_int4_gptq(w13, w13_scale, w13_qzeros, transpose_output=True)
     w2_unpacked = _unpack_and_dequant_int4_gptq(w2, w2_scale, w2_qzeros, transpose_output=False)
     w2_bf16 = w2_unpacked.permute(0, 2, 1).contiguous()
@@ -1311,10 +1410,6 @@ def _process_weights_emulation_gptq(
         w2_bf16,
         dummy,
         dummy,
-        None,
-        None,
-        None,
-        None,
         None,
         None,
         None,
@@ -1348,10 +1443,6 @@ def _process_weights_emulation_awq(
         None,
         None,
         None,
-        None,
-        None,
-        None,
-        None,
     )
 
 
@@ -1364,8 +1455,6 @@ def convert_to_wna16_moe_kernel_format(
     w2: torch.Tensor,
     w13_scale: torch.Tensor,
     w2_scale: torch.Tensor,
-    w13_g_idx: torch.Tensor | None = None,
-    w2_g_idx: torch.Tensor | None = None,
     w13_qzeros: torch.Tensor | None = None,
     w2_qzeros: torch.Tensor | None = None,
     w13_bias: torch.Tensor | None = None,
@@ -1376,10 +1465,6 @@ def convert_to_wna16_moe_kernel_format(
         torch.Tensor,  # w2_qweight
         torch.Tensor,  # w13_scales
         torch.Tensor,  # w2_scales
-        torch.Tensor | None,  # w13_g_idx
-        torch.Tensor | None,  # w2_g_idx
-        torch.Tensor | None,  # w13_g_idx_sort_indices
-        torch.Tensor | None,  # w2_g_idx_sort_indices
         torch.Tensor | None,  # w13_qzeros
         torch.Tensor | None,  # w2_qzeros
         torch.Tensor | None,  # w13_input_global_scale
@@ -1391,6 +1476,10 @@ def convert_to_wna16_moe_kernel_format(
 ):
     """Dispatch weight post-processing to the appropriate per-backend handler.
 
+    All non-AWQ frontends must supply weights and scales in N-first
+    canonical layout ``[E, N_out, K_packed]``.  AWQ uses a different
+    packing axis and is handled by dedicated per-backend helpers.
+
     To add a new backend, implement a ``_process_weights_<name>`` helper and
     add a branch here. Backends that rewrite the layer's parameters in place
     (e.g. Humming) return ``None``; the caller then skips the param scatter.
@@ -1400,10 +1489,19 @@ def convert_to_wna16_moe_kernel_format(
         layer: the ``FusedMoEFactory`` layer whose parameters are being prepared.
         quant_config: the ``QuantizationConfig`` for this layer.
         input_dtype: optional activation dtype, usually should be 16 bit.
+        w13: fused gate/up expert weights.
+        w2: down-projection expert weights.
+        w13_scale: quantization scales for ``w13``.
+        w2_scale: quantization scales for ``w2``.
+        w13_qzeros: optional zero points for ``w13``.
+        w2_qzeros: optional zero points for ``w2``.
+        w13_bias: optional bias for ``w13``.
+        w2_bias: optional bias for ``w2``.
+
     """
     if backend == WNA16MoEBackend.HUMMING:
         from aphrodite.model_executor.layers.quantization.moe_wna16 import MoeWNA16Config
-        from aphrodite.model_executor.layers.quantization.utils.humming_utils import (
+        from aphrodite.model_executor.layers.quantization.utils.humming import (
             convert_to_humming_moe_kernel_format,
         )
 
@@ -1437,7 +1535,7 @@ def convert_to_wna16_moe_kernel_format(
         elif isinstance(quant_config, QuantizationArgs):
             num_bits = quant_config.num_bits
             pack_factor = 32 // quant_config.num_bits
-            group_size = quant_config.group_size
+            group_size = -1 if quant_config.group_size is None else quant_config.group_size
             actorder = quant_config.actorder
             is_sym = quant_config.symmetric
         else:
@@ -1481,12 +1579,10 @@ def convert_to_wna16_moe_kernel_format(
             num_bits = quant_config.quant_type.size_bits
             pack_factor = quant_config.pack_factor
             group_size = quant_config.group_size
-            actorder = "group" if quant_config.desc_act else None
         elif isinstance(quant_config, QuantizationArgs):
             num_bits = quant_config.num_bits
             pack_factor = 32 // quant_config.num_bits
-            group_size = quant_config.group_size
-            actorder = quant_config.actorder
+            group_size = -1 if quant_config.group_size is None else quant_config.group_size
         else:
             raise TypeError(
                 "Marlin WNA16 MoE backend requires AutoGPTQConfig, AutoAWQConfig or "
@@ -1513,27 +1609,30 @@ def convert_to_wna16_moe_kernel_format(
                 w2_bias,
             )
         else:
-            if w13_g_idx is None or w2_g_idx is None:
-                raise ValueError("GPTQ Marlin MoE requires g_idx tensors.")
-
             return _process_weights_marlin(
                 layer,
                 input_dtype,
                 num_bits,
                 pack_factor,
                 group_size,
-                actorder,
                 w13,
                 w2,
                 w13_scale,
                 w2_scale,
-                w13_g_idx,
-                w2_g_idx,
                 w13_qzeros,
                 w2_qzeros,
                 w13_bias,
                 w2_bias,
             )
+    elif backend == WNA16MoEBackend.RDNA3:
+        assert isinstance(quant_config, QuantizationArgs)
+        return _process_weights_rdna3(
+            w13,
+            w2,
+            w13_scale,
+            w2_scale,
+            quant_config.group_size,
+        )
     elif backend == WNA16MoEBackend.CPU:
         return _process_weights_cpu(
             quant_config,
@@ -1541,10 +1640,17 @@ def convert_to_wna16_moe_kernel_format(
             w2,
             w13_scale,
             w2_scale,
-            w13_g_idx,
-            w2_g_idx,
             w13_qzeros,
             w2_qzeros,
+            w13_bias,
+            w2_bias,
+        )
+    elif backend == WNA16MoEBackend.ZEN_CPU:
+        return _process_weights_zen_cpu(
+            w13,
+            w2,
+            w13_scale,
+            w2_scale,
             w13_bias,
             w2_bias,
         )
@@ -1554,8 +1660,6 @@ def convert_to_wna16_moe_kernel_format(
             w2,
             w13_scale,
             w2_scale,
-            w13_g_idx,
-            w2_g_idx,
             w13_bias,
             w2_bias,
         )
@@ -1578,16 +1682,11 @@ def convert_to_wna16_moe_kernel_format(
             w13_bias,
             w2_bias,
         )
-        empty = torch.empty((0,), dtype=torch.int32, device=w13.device)
         return (
             w13_xpu,
             w2_xpu,
             w13_scale_xpu,
             w2_scale_xpu,
-            empty,  # w13_g_idx
-            empty,  # w2_g_idx
-            empty,  # w13_g_idx_sort_indices
-            empty,  # w2_g_idx_sort_indices
             None,  # w13_qzeros — sym int4 on XPU has none; kernel does uint4b8→s4
             None,  # w2_qzeros
             None,  # w13_input_global_scale
@@ -1616,76 +1715,38 @@ def convert_to_wna16_moe_kernel_format(
             w2_qzeros,
         )
     elif backend == WNA16MoEBackend.TRITON:
-        # Two possible input layouts depending on the quantization source:
-        #
-        # MoeWNA16 (uint8):              (E, N_out, K // bit8_pack)  — N-first
-        #   → just view as uint8 (no-op)
-        #
-        # AutoGPTQ/compressed-tensors (int32, K-first):
-        #   (E, K // pack32, N_out)
-        #   → transpose to N-first, then view as uint8 to get
-        #     (E, N_out, K // bit8_pack)  [int32 = 4 bytes → 4 uint8s]
-        #   Scales: (E, K // gs, N_out) → transpose → (E, N_out, K // gs)
-        from aphrodite.model_executor.layers.quantization.auto_gptq import (
-            AutoGPTQConfig,
-        )
+        # All inputs arrive in canonical N-first format; view as uint8.
+        w13_uint8 = w13.contiguous().view(torch.uint8)
+        w2_uint8 = w2.contiguous().view(torch.uint8)
 
-        if isinstance(quant_config, (AutoGPTQConfig, QuantizationArgs)):
-            # These integrations build in K-first format even when the Triton
-            # backend is selected. Transpose to N-first first.
-            w13_uint8 = w13.transpose(1, 2).contiguous().view(torch.uint8)
-            w2_uint8 = w2.transpose(1, 2).contiguous().view(torch.uint8)
-            w13_scale = w13_scale.transpose(1, 2).contiguous()
-            w2_scale = w2_scale.transpose(1, 2).contiguous()
-            # Zero points from compressed-tensors checkpoints are K-first int32
-            # with 8 int4 ZPs packed per element: shape (E, K//gs, N//8).
-            # fused_moe_kernel_gptq_awq expects N-first uint8 with 2 int4 ZPs
-            # per byte: shape (E, N//2, K//gs), indexed as
-            # (offs_bn // 2) * stride_bzn + offs_k_group * stride_bzk.
-            # Conversion steps:
-            #   (E, K//gs, N//8) int32
-            #   → transpose(1,2) → (E, N//8, K//gs) int32
-            #   → view(uint8)    → (E, N//8, K//gs*4)  [each int32 → 4 bytes]
-            #   → reshape(…,4)   → (E, N//8, K//gs, 4) [isolate byte index]
-            #   → permute(0,1,3,2) → (E, N//8, 4, K//gs) [byte index before K]
-            #   → reshape         → (E, N//2, K//gs)   [kernel expected layout]
-            # After this, element [e, offs_bn//2, k_group] is the uint8 byte
-            # holding the two int4 ZPs for output channels offs_bn and offs_bn+1.
-            if w13_qzeros is not None:
-                E13, Kg13, Np13 = w13_qzeros.shape
-                w13_qzeros = (
-                    w13_qzeros.transpose(1, 2)
-                    .contiguous()
-                    .view(torch.uint8)
-                    .reshape(E13, Np13, Kg13, 4)
-                    .permute(0, 1, 3, 2)
-                    .reshape(E13, Np13 * 4, Kg13)
-                    .contiguous()
-                )
-            if w2_qzeros is not None:
-                E2, Kg2, Np2 = w2_qzeros.shape
-                w2_qzeros = (
-                    w2_qzeros.transpose(1, 2)
-                    .contiguous()
-                    .view(torch.uint8)
-                    .reshape(E2, Np2, Kg2, 4)
-                    .permute(0, 1, 3, 2)
-                    .reshape(E2, Np2 * 4, Kg2)
-                    .contiguous()
-                )
-        else:
-            # MoeWNA16 uses N-first uint8 weights and scales.
-            w13_uint8 = w13.view(torch.uint8)
-            w2_uint8 = w2.view(torch.uint8)
+        # Repack N-first int32 zero-points to uint8:
+        # [E, N//pf, K//gs] int32 → [E, N*4//pf, K//gs] uint8
+        if w13_qzeros is not None and w13_qzeros.dtype == torch.int32:
+            E13, Np13, Kg13 = w13_qzeros.shape
+            w13_qzeros = (
+                w13_qzeros.contiguous()
+                .view(torch.uint8)
+                .reshape(E13, Np13, Kg13, 4)
+                .permute(0, 1, 3, 2)
+                .reshape(E13, Np13 * 4, Kg13)
+                .contiguous()
+            )
+        if w2_qzeros is not None and w2_qzeros.dtype == torch.int32:
+            E2, Np2, Kg2 = w2_qzeros.shape
+            w2_qzeros = (
+                w2_qzeros.contiguous()
+                .view(torch.uint8)
+                .reshape(E2, Np2, Kg2, 4)
+                .permute(0, 1, 3, 2)
+                .reshape(E2, Np2 * 4, Kg2)
+                .contiguous()
+            )
+
         return (
             w13_uint8,
             w2_uint8,
             w13_scale,
             w2_scale,
-            None,
-            None,
-            None,
-            None,
             w13_qzeros,
             w2_qzeros,
             None,

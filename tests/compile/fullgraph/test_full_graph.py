@@ -9,12 +9,18 @@ import pytest
 import torch
 
 from aphrodite import LLM, SamplingParams
-from aphrodite.config import CompilationConfig, CompilationMode, CUDAGraphMode, PassConfig
+from aphrodite.config import (
+    CacheConfig,
+    CompilationConfig,
+    CompilationMode,
+    CUDAGraphMode,
+    PassConfig,
+)
 from aphrodite.platforms import current_platform
 from aphrodite.utils.torch_utils import is_torch_equal_or_newer
 from tests.quantization.utils import is_quant_method_supported
 
-from ...utils import create_new_process_for_each_test
+from ...utils import create_new_process_for_each_test, wait_for_memory_to_settle
 
 
 def models_list(*, all: bool = True, keywords: list[str] | None = None):
@@ -30,7 +36,7 @@ def models_list(*, all: bool = True, keywords: list[str] | None = None):
         if is_quant_method_supported("gptq_marlin"):
             TEST_MODELS.append(
                 (
-                    "TheBloke/TinyLlama-1.1B-Chat-v1.0-GPTQ",
+                    "LnL-AI/TinyLlama-1.1B-Chat-v1.0-GPTQ-4bit",
                     {"quantization": "gptq_marlin"},
                 )
             )
@@ -162,6 +168,13 @@ def run_model(compile_config: CompilationMode | CompilationConfig, model: str, *
     # No cudagraphs by default
     if compilation_config.cudagraph_mode is None:
         compilation_config.cudagraph_mode = CUDAGraphMode.NONE
+
+    # V1 startup requires free_memory >= total * gpu_memory_utilization, so a
+    # device that is not free yet fails engine init rather than waiting for it.
+    # AphroditeRunner guards this; building LLM directly does not. No-op off ROCm.
+    wait_for_memory_to_settle(
+        threshold_ratio=1.0 - model_kwargs.get("gpu_memory_utilization", CacheConfig.gpu_memory_utilization)
+    )
 
     llm = LLM(
         model=model,

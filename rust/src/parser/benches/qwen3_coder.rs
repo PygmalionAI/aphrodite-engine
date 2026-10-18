@@ -3,10 +3,10 @@
 
 use std::time::Duration;
 
-use criterion::{BatchSize, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use tool_parser::parsers::QwenCoderParser as ExternalQwenCoderParser;
 use aphrodite_parser::tool::test_utils::{split_by_chars, test_tools};
 use aphrodite_parser::tool::{Qwen3CoderToolParser, Tool, ToolParser};
+use criterion::{BatchSize, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use tool_parser::parsers::QwenCoderParser as ExternalQwenCoderParser;
 
 mod utils;
 use utils::{feed_external_parser, feed_parser, openai_tools};

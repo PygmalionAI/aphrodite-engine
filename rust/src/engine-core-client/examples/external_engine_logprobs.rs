@@ -4,16 +4,16 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use clap::Parser;
-use futures::StreamExt as _;
-use tokio::time::timeout;
-use tracing_subscriber::EnvFilter;
 use aphrodite_engine_core_client::protocol::output::EngineCoreFinishReason;
 use aphrodite_engine_core_client::protocol::request::EngineCoreRequest;
 use aphrodite_engine_core_client::protocol::sampling::EngineCoreSamplingParams;
 use aphrodite_engine_core_client::{
     EngineCoreClient, EngineCoreClientConfig, EngineCoreStreamOutput, TransportMode,
 };
+use clap::Parser;
+use futures::StreamExt as _;
+use tokio::time::timeout;
+use tracing_subscriber::EnvFilter;
 
 const BASE_PROMPT_TOKEN_IDS: &[u32] = &[20841, 448, 6896, 25, 23811];
 
@@ -87,8 +87,9 @@ fn build_request(
 }
 
 async fn wait_for_final_output(
-    mut stream: aphrodite_engine_core_client::EngineCoreOutputStream,
+    stream: aphrodite_engine_core_client::EngineCoreOutputStream,
 ) -> Result<EngineCoreStreamOutput> {
+    let mut stream = stream.into_outputs();
     while let Some(output) = stream.next().await {
         let output = output.context("failed to receive engine-core output")?;
         if output.finished() {
@@ -118,6 +119,7 @@ async fn main() -> Result<()> {
         coordinator_mode: None,
         model_name: args.model.clone(),
         client_index: args.client_index,
+        engine_stats_enabled: true,
     })
     .await
     .context("failed to connect to external Aphrodite engine")?;

@@ -63,6 +63,7 @@ class HfHubResolver(FilesystemResolver):
             lora_name: Path to LoRA in HF Hub, e.g., <org>/<repo>/<subpath>,
                 match on <org>/<repo> (if it contains an adapter directly) or
                 <org>/<repo>/ if it may have one in subdirs.
+
         """
         for potential_repo in self.repo_list:
             if lora_name.startswith(potential_repo) and (
@@ -79,6 +80,7 @@ class HfHubResolver(FilesystemResolver):
         Args:
             lora_name: Path to LoRA in HF Hub, e.g., <org>/<repo>/<subpath>
             maybe_repo: Path to the repo to match against if one exists.
+
         """
         if maybe_repo is None:
             return None
@@ -99,6 +101,7 @@ class HfHubResolver(FilesystemResolver):
 
         Args:
             repo_name: Name of the HF hub repo to inspect.
+
         """
         repo_files = await asyncio.to_thread(
             hf_api().list_repo_files,
@@ -111,8 +114,7 @@ class HfHubResolver(FilesystemResolver):
 
 
 def register_hf_hub_resolver():
-    """Register the Hf hub LoRA Resolver with Aphrodite"""
-
+    """Register the Hf hub LoRA Resolver with Aphrodite."""
     hf_repo_list = envs.APHRODITE_LORA_RESOLVER_HF_REPO_LIST
     is_enabled = envs.APHRODITE_PLUGINS is not None and "lora_hf_hub_resolver" in envs.APHRODITE_PLUGINS
     if hf_repo_list:

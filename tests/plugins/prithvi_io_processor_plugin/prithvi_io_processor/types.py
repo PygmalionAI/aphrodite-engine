@@ -39,13 +39,13 @@ class ImagePrompt(BaseModel):
 
 
 class ImageRequestOutput(BaseModel):
-    """
-    The output data of an image request to Aphrodite.
+    """The output data of an image request to Aphrodite.
 
     Args:
         type (str): The data content type [path, object]
         format (str): The image format (e.g., jpeg, png, etc.)
         data (Any): The resulting data.
+
     """
 
     type: Literal["path", "b64_json"]

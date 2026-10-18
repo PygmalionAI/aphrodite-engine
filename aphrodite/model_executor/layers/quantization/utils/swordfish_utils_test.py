@@ -65,7 +65,7 @@ def swordfish_quantize(
     assert quant_type in SWORDFISH_SUPPORTED_QUANT_TYPES
     size_k, size_n = w.shape
 
-    w_ref, q_w, s, _, _ = gptq_quantize_weights(w, quant_type, group_size, act_order=False)
+    w_ref, q_w, s = gptq_quantize_weights(w, quant_type, group_size)
     packed = swordfish_pack_weights_ref(q_w, size_k, size_n, quant_type.size_bits)
     return w_ref, packed, s
 
@@ -80,14 +80,23 @@ def swordfish_quantize_act_order(
     caller permutes activation columns by sort_indices before the GEMM."""
     from aphrodite.model_executor.layers.quantization.utils.quant_utils import (
         gptq_quantize_weights,
-        sort_weights,
     )
 
     assert quant_type in SWORDFISH_SUPPORTED_QUANT_TYPES
     size_k, size_n = w.shape
 
-    w_ref, q_w, s, g_idx, _ = gptq_quantize_weights(w, quant_type, group_size, act_order=True)
-    q_w, g_idx, sort_indices = sort_weights(q_w, g_idx)
+    w_ref, q_w, s = gptq_quantize_weights(w, quant_type, group_size)
+    assert 0 < group_size < size_k
+
+    # Exercise the native Swordfish permutation ABI independently of the
+    # checkpoint loader, which no longer accepts GPTQ activation ordering.
+    # Shuffle the reference's K rows, then restore group order for packing;
+    # the GEMM must apply the same group-order permutation to activations.
+    row_perm = torch.randperm(size_k, device=w.device)
+    w_ref = w_ref[row_perm].contiguous()
+    group_idx = torch.arange(size_k, device=w.device) // group_size
+    sort_indices = torch.argsort(group_idx[row_perm])
+    q_w = q_w[row_perm[sort_indices]].contiguous()
     packed = swordfish_pack_weights_ref(q_w, size_k, size_n, quant_type.size_bits)
     return w_ref, packed, s, sort_indices.to(torch.int)
 

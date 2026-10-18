@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import torch
-from transformers import PretrainedConfig
+from transformers import PreTrainedConfig
 
 from aphrodite.config import (
     AphroditeConfig,
@@ -23,7 +23,7 @@ from aphrodite.v1.attention.backends.registry import MambaAttentionBackendEnum
 class LinearAttention(PluggableLayer, MambaBase):
     """Base class for Linear attention layer."""
 
-    def __init__(self, config: PretrainedConfig, aphrodite_config: AphroditeConfig, prefix: str = ""):
+    def __init__(self, config: PreTrainedConfig, aphrodite_config: AphroditeConfig, prefix: str = ""):
         super().__init__()
         self.layer_idx = extract_layer_index(prefix)
         self.prefix = prefix
