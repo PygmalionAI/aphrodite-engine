@@ -209,7 +209,7 @@ class LoggingStatLogger(StatLoggerBase):
             self.log_queue.put(
                 "Request completed - "
                 f"E2E time: {finished_request.e2e_latency:.2f}s, "
-                f"TTFT: {finished_request.prefill_time:.2f}s, "
+                f"TTFT: {finished_request.first_token_latency:.2f}s, "
                 f"Prefill: {finished_request.num_prompt_tokens} tokens "
                 f"({prefill_throughput:.1f} tokens/s), "
                 f"Decode: {finished_request.num_generation_tokens} tokens "

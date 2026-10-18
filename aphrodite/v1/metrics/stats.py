@@ -297,6 +297,7 @@ class FinishedRequestStats:
     mean_time_per_output_token: float = 0.0
     is_corrupted: bool = False
     num_cached_tokens: int = 0
+    first_token_latency: float = 0.0
 
 
 @dataclass
@@ -607,6 +608,7 @@ class IterationStats:
             finish_reason=finish_reason,
             request_id=request_id,
             e2e_latency=e2e_latency,
+            first_token_latency=req_stats.first_token_latency,
             num_prompt_tokens=num_prompt_tokens,
             num_preemptions=req_stats.num_preemptions,
             num_generation_tokens=req_stats.num_generation_tokens,

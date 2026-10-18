@@ -52,6 +52,24 @@ can be large and can contain workload details.
 Request logging must follow the service privacy policy. Restrict access and
 define retention before you enable prompt logging.
 
+### Request completion timings
+
+Python and Rust use the same definitions for request completion logs:
+
+| Field | Definition |
+| --- | --- |
+| E2E time | Time from the frontend's recorded request arrival to completion. |
+| TTFT | Time from the frontend's recorded request arrival to its first received engine token. |
+| Prefill tokens/s | Prompt tokens divided by the engine interval from first scheduling to first output. This interval includes prefill preemptions. |
+| Decode tokens/s | Generated tokens divided by the engine interval from first output to last output. |
+
+Prefill throughput includes cached prompt tokens. It is an effective prompt
+rate, not a measure of GPU compute throughput. Check the cache-hit count when
+you compare requests.
+
+Server-side TTFT is not client-side TTFT. Network latency and output buffering
+can increase the time before a client receives its first text.
+
 ## OpenTelemetry traces
 
 Set `--otlp-traces-endpoint` to an OTLP collector. Keep the collector on a

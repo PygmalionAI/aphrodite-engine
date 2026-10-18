@@ -215,6 +215,7 @@ impl RequestMetricsTracker {
             self.prompt_len.saturating_sub(self.latest_num_cached_tokens);
         let e2e_latency_seconds = received_at - self.arrival_time;
         let decode_time_seconds = diff_or_zero(self.last_token_ts, self.first_token_ts);
+        let prefill_time_seconds = diff_or_zero(self.first_token_ts, self.scheduled_ts);
         let time_per_output_token_seconds = if self.num_generation_tokens > 1 {
             diff_or_zero(self.last_token_ts, self.first_token_ts)
                 / (self.num_generation_tokens - 1) as f64
@@ -249,7 +250,6 @@ impl RequestMetricsTracker {
 
         if let Some(events) = &self.handles.events {
             let queue_time_seconds = diff_or_zero(self.scheduled_ts, self.queued_ts);
-            let prefill_time_seconds = diff_or_zero(self.first_token_ts, self.scheduled_ts);
             let inference_time_seconds = diff_or_zero(self.last_token_ts, self.scheduled_ts);
 
             events.request_num_preemptions.observe(self.num_preemptions as f64);
@@ -262,7 +262,7 @@ impl RequestMetricsTracker {
         if self.log_request_level {
             self.log_finished_request(
                 e2e_latency_seconds,
-                self.first_token_latency,
+                prefill_time_seconds,
                 decode_time_seconds,
             );
         }
@@ -301,10 +301,10 @@ impl RequestMetricsTracker {
         };
         info!(
             "Request completed - E2E time: {e2e_latency_seconds:.2}s, \
-             TTFT: {prefill_time_seconds:.2}s, \
+             TTFT: {:.2}s, \
              Prefill: {} tokens ({prefill_throughput:.1} tokens/s), \
              Decode: {} tokens ({decode_throughput:.1} tokens/s){cache_hit_info}",
-            self.prompt_len, self.num_generation_tokens,
+            self.first_token_latency, self.prompt_len, self.num_generation_tokens,
         );
     }
 
